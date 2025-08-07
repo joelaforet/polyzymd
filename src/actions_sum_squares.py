@@ -2,6 +2,7 @@
 
 import argparse
 import os
+from pathlib import Path
 
 import signac
 
@@ -14,6 +15,8 @@ def square(*jobs):
 
     for job in jobs:
         # If the output file already exists, don't do anything
+        #Path(job.fn("data")).mkdir(exist_ok=True)
+
         if job.isfile('square.out'):
             continue
 
