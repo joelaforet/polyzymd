@@ -205,3 +205,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# All Signac project folders because the data needed to create them is stored in src/init.py
+project*
