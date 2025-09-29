@@ -1,0 +1,33 @@
+[workspace]
+value_file = "signac_statepoint.json"
+
+# Basic project exploration actions
+[[action]]
+name = "show_basic"
+command = 'echo "{directory}: {/protein} + {/ligand} at {/temperature}K, replicate {/replicate_num}"'
+
+[[action]]
+name = "show_system"
+command = 'test "{/SMILES_poly_1}" = "None" && echo "{directory}: CONTROL - {/protein} + {/ligand} only" || echo "{directory}: POLYMER - {/protein} + {/ligand} + polymers ({/polymer_ratio} ratio)"'
+
+[[action]]
+name = "show_simulation_params"
+command = 'echo "{directory}: Eq: {/eq_time}ns-{/eq_ensemble}, Prod: {/prod_time}ns-{/prod_ensemble}, Restraint: {/ligand_restraint_dist}Å"'
+
+[[action]]
+name = "show_full_summary"
+command = 'echo "=== Job {directory} Summary ==="; echo "System: {/protein} + {/ligand}"; if [ "{/SMILES_poly_1}" = "None" ]; then echo "Type: CONTROL (no polymer)"; else echo "Type: POLYMER SYSTEM"; echo "  Oligomers: {/num_oligomers}x {/olig_length}-mers"; echo "  Polymer ratio: {/polymer_ratio} (fraction polymer_2)"; fi; echo "Temperature: {/temperature}K"; echo "Restraint distance: {/ligand_restraint_dist}Å"; echo "Simulation: {/eq_time}ns {/eq_ensemble} → {/prod_time}ns {/prod_ensemble}"; echo "Replicate: {/replicate_num}"; echo "Log frequency: {/traj_log_freq}ns"; echo "=========================="'
+
+# File listing and status actions
+[[action]]
+name = "list_files"
+command = 'ls -la workspace/{directory}/'
+
+[[action]]
+name = "show_file_sizes"
+command = 'du -h workspace/{directory}/* 2>/dev/null || echo "No files found in {directory}"'
+
+[[action]]
+name = "count_files"
+command = 'echo "{directory}: $(ls -1 workspace/{directory}/ 2>/dev/null | wc -l) files"'
+
