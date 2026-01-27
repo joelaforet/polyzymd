@@ -69,12 +69,22 @@ def _parse_selection(selection: str, topology: OpenMMTopology) -> List[int]:
     """Parse an MDAnalysis-style selection string for OpenMM topology.
 
     Supports a subset of MDAnalysis selection syntax:
-    - resid N: Select atoms in residue with ID N (1-indexed in selection, 0-indexed internally)
+    - resid N: Select atoms in residue with ID N (1-indexed, like PDB)
     - resname XXX: Select atoms in residue with name XXX
     - name XXX: Select atoms with name XXX
-    - index N: Select atom with index N (0-indexed)
+    - index N: Select atom with OpenMM index N (0-indexed)
+    - pdbindex N: Select atom with PDB serial number N (1-indexed, auto-converts)
     - and: Intersection of selections
     - or: Union of selections
+
+    Index conventions:
+    - `resid` uses 1-indexed residue numbers (matches PDB/PyMOL display)
+    - `index` uses 0-indexed atom indices (matches OpenMM internal indexing)
+    - `pdbindex` uses 1-indexed atom serial (matches PDB ATOM column, PyMOL display)
+
+    Example: If PyMOL shows atom serial 2740 and residue 77:
+    - Use "pdbindex 2740" or "index 2739" to select that atom
+    - Use "resid 77" to select all atoms in that residue
 
     Args:
         selection: Selection string
@@ -94,7 +104,7 @@ def _parse_selection(selection: str, topology: OpenMMTopology) -> List[int]:
                 "index": atom.index,
                 "name": atom.name.lower() if atom.name else "",
                 "resname": atom.residue.name.lower() if atom.residue else "",
-                "resid": atom.residue.index,  # 0-indexed
+                "resid": atom.residue.index,  # 0-indexed internally
                 "chain": atom.residue.chain.id if atom.residue and atom.residue.chain else "",
             }
         )
@@ -121,7 +131,7 @@ def _parse_selection(selection: str, topology: OpenMMTopology) -> List[int]:
         matching = set()
 
         if keyword == "resid":
-            # resid is 1-indexed in selection, 0-indexed internally
+            # resid is 1-indexed in selection (matches PDB), 0-indexed internally
             target_resid = int(value) - 1
             for atom in atoms_data:
                 if atom["resid"] == target_resid:
@@ -138,7 +148,15 @@ def _parse_selection(selection: str, topology: OpenMMTopology) -> List[int]:
                     matching.add(atom["index"])
 
         elif keyword == "index":
+            # index is 0-indexed (matches OpenMM internal indexing)
             target_idx = int(value)
+            if 0 <= target_idx < len(atoms_data):
+                matching.add(target_idx)
+
+        elif keyword == "pdbindex":
+            # pdbindex is 1-indexed (matches PDB ATOM serial number / PyMOL display)
+            # Converts to 0-indexed for internal use
+            target_idx = int(value) - 1
             if 0 <= target_idx < len(atoms_data):
                 matching.add(target_idx)
 

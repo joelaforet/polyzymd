@@ -1,0 +1,13 @@
+# Documentation build dependencies
+sphinx>=6.0.0
+sphinx-rtd-theme>=1.0.0
+myst-parser>=1.0.0
+sphinx-copybutton>=0.5.0
+
+# Required for autodoc to import modules
+pydantic>=2.0.0
+click>=8.0.0
+pyyaml>=6.0
+
+# OpenMM is optional for autodoc - RTD may not have CUDA
+# openmm

@@ -55,6 +55,18 @@ solvent:
 # Restraints (Optional)
 # ============================================================================
 # Flat-bottom distance restraint to keep substrate near active site
+#
+# Selection syntax supports:
+#   resid N      - Residue number (1-indexed, matches PDB/PyMOL)
+#   resname XXX  - Residue name (e.g., RBY, SER, LIG)
+#   name XXX     - Atom name (e.g., OG, CA, C1)
+#   index N      - Atom index (0-indexed, OpenMM internal)
+#   pdbindex N   - PDB atom serial (1-indexed, matches PyMOL display)
+#   and/or       - Combine selections
+#
+# Example: To select the atom shown as serial 2740 in PyMOL:
+#   "pdbindex 2740"  OR  "index 2739"
+#
 restraints:
   - type: "flat_bottom"
     name: "substrate_active_site"
