@@ -1,0 +1,135 @@
+# ============================================================================
+# PolyzyMD Configuration: Enzyme-Only Simulation
+# ============================================================================
+# Simple enzyme + docked substrate simulation without polymers
+# Suitable for baseline/control studies
+# ============================================================================
+
+name: "LipA_ResorufinButyrate_control"
+description: "LipA enzyme with docked Resorufin-Butyrate substrate - no polymers"
+
+# ============================================================================
+# Enzyme Configuration
+# ============================================================================
+enzyme:
+  name: "LipA"
+  pdb_path: "structures/LipA_prepared.pdb"
+  description: "Bacillus subtilis Lipase A"
+
+# ============================================================================
+# Substrate Configuration (Docked Ligand)
+# ============================================================================
+substrate:
+  name: "Resorufin-Butyrate"
+  sdf_path: "structures/resorufin_butyrate_docked.sdf"
+  conformer_index: 0  # Use best-scoring conformer
+  charge_method: "nagl"  # Options: nagl, espaloma, am1bcc
+  residue_name: "RBY"
+
+# ============================================================================
+# Polymer Configuration (Disabled for enzyme-only)
+# ============================================================================
+polymers: null  # No polymers in this simulation
+
+# ============================================================================
+# Solvent Configuration
+# ============================================================================
+solvent:
+  primary:
+    type: "water"
+    model: "tip3p"  # Options: tip3p, spce, tip4pew, opc
+  
+  co_solvents: []  # No co-solvents
+  
+  ions:
+    neutralize: true  # Add counter-ions to neutralize charge
+    nacl_concentration: 0.1  # 100 mM NaCl
+  
+  box:
+    padding: 1.2  # nm from solute to box edge
+    shape: "rhombic_dodecahedron"
+    target_density: 1.0  # g/mL
+    tolerance: 2.0  # PACKMOL tolerance in Angstrom
+
+# ============================================================================
+# Restraints (Optional)
+# ============================================================================
+# Flat-bottom distance restraint to keep substrate near active site
+restraints:
+  - type: "flat_bottom"
+    name: "substrate_active_site"
+    atom1:
+      selection: "resid 77 and name OG"  # Ser77 nucleophile
+      description: "Catalytic serine"
+    atom2:
+      selection: "resname RBY and name C1"  # Substrate carbonyl carbon
+      description: "Substrate reactive carbon"
+    distance: 3.3  # Angstroms threshold
+    force_constant: 10000.0  # kJ/mol/nm^2
+    enabled: true
+
+# ============================================================================
+# Thermodynamics
+# ============================================================================
+thermodynamics:
+  temperature: 293.0  # Kelvin (20°C)
+  pressure: 1.0  # atmospheres
+
+# ============================================================================
+# Simulation Phases
+# ============================================================================
+simulation_phases:
+  equilibration:
+    ensemble: "NVT"
+    duration: 0.5  # nanoseconds
+    samples: 50  # frames to save
+    time_step: 2.0  # femtoseconds
+    thermostat: "LangevinMiddle"
+    thermostat_timescale: 1.0  # picoseconds
+  
+  production:
+    ensemble: "NPT"
+    duration: 100.0  # nanoseconds total
+    samples: 2500  # frames to save (total across all segments)
+    time_step: 2.0  # femtoseconds
+    thermostat: "LangevinMiddle"
+    thermostat_timescale: 1.0  # picoseconds
+    barostat: "MC"  # Monte Carlo barostat
+    barostat_frequency: 25  # steps between barostat updates
+  
+  # Daisy-chain configuration
+  segments: 10  # Split production into 10 segments for HPC
+
+# ============================================================================
+# Output Configuration
+# ============================================================================
+# HPC systems often separate long-term storage (projects) from high-performance
+# scratch storage. Configure both directories here, or use CLI overrides.
+output:
+  # Long-term storage: scripts, logs, configs (survives job completion)
+  # Example: /projects/$USER/polyzymd or just "." for local development
+  projects_directory: "."
+  
+  # High-performance scratch: trajectories, checkpoints (may be purged)
+  # Example: /scratch/alpine/$USER/simulations
+  # If not set, defaults to projects_directory (good for local testing)
+  scratch_directory: null
+  
+  # Subdirectory organization within projects_directory
+  job_scripts_subdir: "job_scripts"
+  slurm_logs_subdir: "slurm_logs"
+  
+  # Naming template for run directories
+  naming_template: "{enzyme}_{substrate}_{temperature}K_run{replicate}"
+  
+  # Output options
+  save_checkpoint: true
+  save_state_data: true
+  trajectory_format: "dcd"
+
+# ============================================================================
+# Force Field Selection
+# ============================================================================
+force_field:
+  protein: "ff14sb_off_impropers_0.0.4.offxml"
+  small_molecule: "openff-2.0.0.offxml"
