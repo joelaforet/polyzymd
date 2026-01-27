@@ -69,7 +69,8 @@ python sim_enz_only_DOCKED_RESTRAINT.py \\
     -pp {path_to_pro_pdb} \\
     -rep {replicate_num} \\
     --frames {segment_frames_to_save} \\
-    --num_segs {total_segments}
+    --num_segs {total_segments} \\
+    -conf {conformer}
 
 echo "Segment {segment_index} completed successfully"
 """
