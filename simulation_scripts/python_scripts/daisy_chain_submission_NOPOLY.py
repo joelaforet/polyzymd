@@ -48,6 +48,7 @@ INITIAL_NOPOLY_JOB_SCRIPT_TEMPLATE ="""#!/bin/bash \n
 #SBATCH --qos={qos} \n
 #SBATCH --nodes=1 \n
 #SBATCH --ntasks=1 \n
+#SBATCH --nodelist=bgpu-g4-u24,bgpu-g4-u20,bgpu-g4-18,bgpu-g4-u22,bgpu-g6-u20,bgpu-g6-u34,bgpu-ivc2,bgpu-chbe-rdi1,bgpu-chbe-rdi2,bgpu-curc1,bgpu-curc2,bgpu-curc3,bgpu-curc4,bgpu-shirts1,bgpu-shirts2,bgpu-shirts3 \n
 #SBATCH --mem=3G \n
 #SBATCH --time={time_limit} \n
 #SBATCH --gres=gpu:1 \n
