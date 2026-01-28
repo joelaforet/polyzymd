@@ -344,9 +344,9 @@ PolyzyMD expands environment variables in configuration paths:
 
 | Variable | Example | Description |
 |----------|---------|-------------|
-| `$USER` | jsmith | Current username |
-| `$HOME` | /home/jsmith | Home directory |
-| `~` | /home/jsmith | Home directory shortcut |
+| `$USER` | jola3134 | Current username |
+| `$HOME` | /home/jola3134 | Home directory |
+| `~` | /home/jola3134 | Home directory shortcut |
 | `${VAR}` | - | Any environment variable |
 
 ### Example
