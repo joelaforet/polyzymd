@@ -328,11 +328,6 @@ def run(
     help="Generate scripts without submitting",
 )
 @click.option(
-    "--main-script",
-    default=None,
-    help="Path to main simulation script",
-)
-@click.option(
     "--output-dir",
     default=None,
     help="Directory for job scripts (default: {projects_dir}/job_scripts)",
@@ -350,7 +345,6 @@ def submit(
     preset: str,
     email: str,
     dry_run: bool,
-    main_script: Optional[str],
     output_dir: Optional[str],
     time_limit: Optional[str],
 ) -> None:
@@ -384,7 +378,6 @@ def submit(
             replicates=replicates,
             email=email,
             dry_run=dry_run,
-            main_script=main_script,
             output_dir=output_dir,
             scratch_dir=scratch_dir,
             projects_dir=projects_dir,

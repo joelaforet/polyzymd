@@ -159,6 +159,9 @@ class SlurmScriptGenerator:
 #SBATCH --account={account}
 {exclude_line}
 
+# Exit immediately if any command fails
+set -e
+
 # =============================================================================
 # PolyzyMD Initial Simulation Job
 # Segment: {segment_index}
@@ -177,18 +180,23 @@ SCRATCH_DIR="{scratch_dir}"
 # Ensure scratch directory exists
 mkdir -p "$SCRATCH_DIR"
 
-# Change to projects directory where scripts live
+# Change to projects directory where config and scripts live
 cd "$PROJECTS_DIR"
 
 echo "Starting initial simulation segment {segment_index}"
 echo "Projects dir: $PROJECTS_DIR"
 echo "Scratch dir: $SCRATCH_DIR"
+echo "Config: {config_path}"
+echo "Replicate: {replicate}"
 echo "Timestamp: $(date)"
 
-# Run the initial simulation script
-# The script writes output to SCRATCH_DIR
-python {python_script} {python_args} \\
-    --output-dir "$SCRATCH_DIR"
+# Run the initial simulation using polyzymd CLI
+# This builds the system, runs equilibration, and runs the first production segment
+polyzymd run -c "{config_path}" \\
+    --replicate {replicate} \\
+    --scratch-dir "$SCRATCH_DIR" \\
+    --segment-time {segment_time} \\
+    --segment-frames {segment_frames}
 
 echo "Segment {segment_index} completed successfully at $(date)"
 """
@@ -208,6 +216,9 @@ echo "Segment {segment_index} completed successfully at $(date)"
 #SBATCH --mail-user={email}
 #SBATCH --account={account}
 {exclude_line}
+
+# Exit immediately if any command fails
+set -e
 
 # =============================================================================
 # PolyzyMD Continuation Job
@@ -232,12 +243,12 @@ echo "Projects dir: $PROJECTS_DIR"
 echo "Scratch dir: $SCRATCH_DIR"
 echo "Timestamp: $(date)"
 
-# Run the continuation script
-# Reads state from previous segment in SCRATCH_DIR
-# Writes new output to SCRATCH_DIR
-python -m polyzymd.simulation.continuation \\
-    -s {segment_index} \\
+# Continue simulation from previous segment using polyzymd CLI
+# Reads checkpoint from previous segment in SCRATCH_DIR
+# Writes new trajectory and checkpoint to SCRATCH_DIR
+polyzymd continue \\
     -w "$SCRATCH_DIR" \\
+    -s {segment_index} \\
     -t {segment_time} \\
     -n {num_samples}
 
@@ -266,31 +277,30 @@ echo "Segment {segment_index} completed successfully at $(date)"
     def generate_initial_job(
         self,
         context: JobContext,
-        python_script: str,
-        python_args: Dict,
-        script_dir: Optional[str] = None,
+        config_path: str,
+        replicate: int,
+        segment_time: float,
+        segment_frames: int,
     ) -> str:
         """Generate an initial simulation job script.
 
         Args:
             context: Job context information.
-            python_script: Python script to run.
-            python_args: Arguments for the Python script.
-            script_dir: Deprecated, use context.projects_dir instead.
+            config_path: Path to the YAML configuration file.
+            replicate: Replicate number.
+            segment_time: Duration of first segment in nanoseconds.
+            segment_frames: Number of frames to save in first segment.
 
         Returns:
             SLURM batch script content.
         """
-        # Format python arguments
-        args_str = self._format_python_args(python_args)
-
         # Format exclude line
         exclude_line = ""
         if self._config.exclude:
             exclude_line = f"#SBATCH --exclude={self._config.exclude}"
 
-        # Use context.projects_dir, fallback to script_dir for backwards compat
-        projects_dir = context.projects_dir if context.projects_dir != "." else (script_dir or ".")
+        # Use context.projects_dir
+        projects_dir = context.projects_dir if context.projects_dir != "." else "."
 
         return self.INITIAL_JOB_TEMPLATE.format(
             partition=self._config.partition,
@@ -308,8 +318,10 @@ echo "Segment {segment_index} completed successfully at $(date)"
             conda_env=self._conda_env,
             projects_dir=projects_dir,
             scratch_dir=context.scratch_dir,
-            python_script=python_script,
-            python_args=args_str,
+            config_path=config_path,
+            replicate=replicate,
+            segment_time=segment_time,
+            segment_frames=segment_frames,
             segment_index=context.segment_index,
         )
 
@@ -318,7 +330,6 @@ echo "Segment {segment_index} completed successfully at $(date)"
         context: JobContext,
         segment_time: float,
         num_samples: int,
-        script_dir: Optional[str] = None,
     ) -> str:
         """Generate a continuation job script.
 
@@ -326,7 +337,6 @@ echo "Segment {segment_index} completed successfully at $(date)"
             context: Job context information.
             segment_time: Duration of this segment in nanoseconds.
             num_samples: Number of frames to save.
-            script_dir: Deprecated, use context.projects_dir instead.
 
         Returns:
             SLURM batch script content.
@@ -335,8 +345,8 @@ echo "Segment {segment_index} completed successfully at $(date)"
         if self._config.exclude:
             exclude_line = f"#SBATCH --exclude={self._config.exclude}"
 
-        # Use context.projects_dir, fallback to script_dir for backwards compat
-        projects_dir = context.projects_dir if context.projects_dir != "." else (script_dir or ".")
+        # Use context.projects_dir
+        projects_dir = context.projects_dir if context.projects_dir != "." else "."
 
         return self.CONTINUATION_JOB_TEMPLATE.format(
             partition=self._config.partition,
@@ -358,26 +368,6 @@ echo "Segment {segment_index} completed successfully at $(date)"
             segment_time=segment_time,
             num_samples=num_samples,
         )
-
-    def _format_python_args(self, args: Dict) -> str:
-        """Format a dictionary of arguments as command-line arguments.
-
-        Args:
-            args: Dictionary of argument names to values.
-
-        Returns:
-            Formatted argument string.
-        """
-        parts = []
-        for key, value in args.items():
-            if isinstance(value, bool):
-                if value:
-                    parts.append(f"--{key}")
-            elif isinstance(value, list):
-                parts.append(f"--{key} {' '.join(map(str, value))}")
-            else:
-                parts.append(f"--{key} {value}")
-        return " \\\n    ".join(parts)
 
     def save_script(
         self,

@@ -59,8 +59,7 @@ class DaisyChainConfig:
         replicates: List of replicate numbers to run
         dry_run: If True, create scripts but don't submit
         output_script_dir: Directory for generated job scripts
-        main_script: Path to the main simulation script (for initial job)
-        main_script_args: Additional arguments for main script
+        config_path: Path to the YAML configuration file
     """
 
     slurm_config: SlurmConfig
@@ -71,8 +70,7 @@ class DaisyChainConfig:
     replicates: List[int] = field(default_factory=lambda: [1])
     dry_run: bool = False
     output_script_dir: Path = Path("daisy_chain_scripts")
-    main_script: Optional[str] = None
-    main_script_args: Dict[str, Any] = field(default_factory=dict)
+    config_path: str = "config.yaml"
 
     @property
     def segment_duration_ns(self) -> float:
@@ -117,8 +115,7 @@ class DaisyChainConfig:
         replicates: Union[str, List[int]] = "1",
         dry_run: bool = False,
         output_script_dir: Union[str, Path] = "daisy_chain_scripts",
-        main_script: Optional[str] = None,
-        main_script_args: Optional[Dict[str, Any]] = None,
+        config_path: str = "config.yaml",
     ) -> "DaisyChainConfig":
         """Create DaisyChainConfig from a SimulationConfig.
 
@@ -128,8 +125,7 @@ class DaisyChainConfig:
             replicates: Replicate range string (e.g., "1-5") or list of ints
             dry_run: If True, don't submit jobs
             output_script_dir: Directory for job scripts
-            main_script: Main simulation script path
-            main_script_args: Additional arguments for main script
+            config_path: Path to the YAML configuration file
 
         Returns:
             Configured DaisyChainConfig
@@ -150,8 +146,7 @@ class DaisyChainConfig:
             replicates=replicate_list,
             dry_run=dry_run,
             output_script_dir=Path(output_script_dir),
-            main_script=main_script,
-            main_script_args=main_script_args or {},
+            config_path=config_path,
         )
 
 
@@ -289,30 +284,6 @@ class DaisyChainSubmitter:
         projects_dir = self._sim_config.get_projects_directory()
         return str(projects_dir.resolve())
 
-    def _build_initial_script_args(self, replicate: int) -> Dict[str, Any]:
-        """Build arguments for the initial simulation script.
-
-        Args:
-            replicate: Replicate number
-
-        Returns:
-            Dictionary of arguments
-        """
-        args = {
-            "replicate": replicate,
-            "config": str(self._dc_config.main_script_args.get("config", "config.yaml")),
-            "segment_time": self._dc_config.segment_duration_ns,
-            "segment_frames": self._dc_config.samples_per_segment,
-            "num_segments": self._dc_config.total_segments,
-        }
-
-        # Add any extra args from config
-        for key, value in self._dc_config.main_script_args.items():
-            if key not in args:
-                args[key] = value
-
-        return args
-
     def generate_initial_script(self, replicate: int) -> str:
         """Generate the initial job script content.
 
@@ -331,13 +302,12 @@ class DaisyChainSubmitter:
             replicate_num=replicate,
         )
 
-        python_script = self._dc_config.main_script or "polyzymd_run.py"
-        python_args = self._build_initial_script_args(replicate)
-
         return self._generator.generate_initial_job(
             context=context,
-            python_script=python_script,
-            python_args=python_args,
+            config_path=self._dc_config.config_path,
+            replicate=replicate,
+            segment_time=self._dc_config.segment_duration_ns,
+            segment_frames=self._dc_config.samples_per_segment,
         )
 
     def generate_continuation_script(self, segment_index: int, replicate: int) -> str:
@@ -568,7 +538,6 @@ def submit_daisy_chain(
     replicates: str = "1",
     email: str = "",
     dry_run: bool = False,
-    main_script: Optional[str] = None,
     conda_env: str = "polymerist-env",
     output_dir: Optional[Union[str, Path]] = None,
     scratch_dir: Optional[Union[str, Path]] = None,
@@ -583,7 +552,6 @@ def submit_daisy_chain(
         replicates: Replicate range string (e.g., "1-5", "1,3,5")
         email: Email for job notifications
         dry_run: If True, don't submit jobs
-        main_script: Path to main simulation script
         conda_env: Conda environment name
         output_dir: Directory for job scripts (default: from config or "job_scripts")
         scratch_dir: Override scratch directory for simulation output
@@ -634,8 +602,7 @@ def submit_daisy_chain(
         replicates=replicates,
         dry_run=dry_run,
         output_script_dir=script_output_dir,
-        main_script=main_script,
-        main_script_args={"config": str(config_path)},
+        config_path=str(config_path),
     )
 
     # Create submitter and submit
@@ -687,12 +654,6 @@ def main() -> int:
         help="Generate scripts but don't submit them",
     )
     parser.add_argument(
-        "--main-script",
-        type=str,
-        default=None,
-        help="Path to main simulation script for initial job",
-    )
-    parser.add_argument(
         "--conda-env",
         type=str,
         default="polymerist-env",
@@ -727,7 +688,6 @@ def main() -> int:
             replicates=args.replicates,
             email=args.email,
             dry_run=args.dry_run,
-            main_script=args.main_script,
             conda_env=args.conda_env,
             output_dir=args.output_dir,
         )
