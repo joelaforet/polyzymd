@@ -385,7 +385,9 @@ class DaisyChainSubmitter:
             )
 
         # Build sbatch command
-        cmd = ["sbatch"]
+        # Use --export=NONE to start with clean environment, letting the script's
+        # module/conda initialization work properly regardless of submission context
+        cmd = ["sbatch", "--export=NONE"]
 
         if dependency_job_id:
             cmd.extend(["--dependency", f"afterok:{dependency_job_id}"])
