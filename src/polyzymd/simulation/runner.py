@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Uni
 
 import openmm
 from openmm import unit as omm_unit
+from openmm import XmlSerializer
 from openmm.app import DCDReporter, PDBFile, StateDataReporter, Simulation
 
 if TYPE_CHECKING:
@@ -368,7 +369,7 @@ class SimulationRunner:
         )
 
         # Create output directory
-        phase_name = f"{output_prefix}_{segment_index}" if segment_index > 0 else output_prefix
+        phase_name = f"{output_prefix}_{segment_index}"
         phase_dir = self._working_dir / phase_name
         phase_dir.mkdir(exist_ok=True)
 
@@ -427,13 +428,99 @@ class SimulationRunner:
 
         # Get final state
         state = self._simulation.context.getState(
-            getPositions=True, getVelocities=True, getEnergy=True
+            getPositions=True,
+            getVelocities=True,
+            getEnergy=True,
+            getForces=True,
+            getParameters=True,
+            enforcePeriodicBox=True,
         )
         self._current_positions = state.getPositions()
 
         # Save checkpoint
         checkpoint_path = phase_dir / f"{phase_name}_checkpoint.chk"
         self._simulation.saveCheckpoint(str(checkpoint_path))
+
+        # Save state XML (needed for continuation/daisy-chain)
+        state_xml_path = phase_dir / f"{phase_name}_state.xml"
+        with open(state_xml_path, "w") as f:
+            f.write(XmlSerializer.serialize(state))
+        LOGGER.info(f"Saved state to {state_xml_path}")
+
+        # Save system XML (needed for continuation/daisy-chain)
+        system_xml_path = phase_dir / f"{phase_name}_system.xml"
+        with open(system_xml_path, "w") as f:
+            f.write(XmlSerializer.serialize(self._system))
+        LOGGER.info(f"Saved system to {system_xml_path}")
+
+        # Save parameters JSON (needed for continuation/daisy-chain)
+        params_dict = {
+            "__class__": "SimulationParameters",
+            "__values__": {
+                "thermo_params": {
+                    "__class__": "ThermoParameters",
+                    "__values__": {
+                        "temperature": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": temperature, "unit": "kelvin"},
+                        },
+                        "thermostat_params": {
+                            "__class__": "ThermostatParameters",
+                            "__values__": {
+                                "temperature": {
+                                    "__class__": "Quantity",
+                                    "__values__": {"value": temperature, "unit": "kelvin"},
+                                },
+                                "timescale": {
+                                    "__class__": "Quantity",
+                                    "__values__": {"value": friction, "unit": "1/picosecond"},
+                                },
+                            },
+                        },
+                        "barostat_params": {
+                            "__class__": "BarostatParameters",
+                            "__values__": {
+                                "pressure": {
+                                    "__class__": "Quantity",
+                                    "__values__": {"value": pressure, "unit": "atmosphere"},
+                                },
+                                "temperature": {
+                                    "__class__": "Quantity",
+                                    "__values__": {"value": temperature, "unit": "kelvin"},
+                                },
+                                "frequency": barostat_frequency,
+                            },
+                        },
+                    },
+                },
+                "integ_params": {
+                    "__class__": "IntegratorParameters",
+                    "__values__": {
+                        "time_step": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": timestep_fs, "unit": "femtosecond"},
+                        },
+                        "total_time": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": duration_ns, "unit": "nanosecond"},
+                        },
+                        "num_samples": num_samples,
+                    },
+                },
+                "reporter_params": {
+                    "__class__": "ReporterParameters",
+                    "__values__": {
+                        "report_interval": report_interval,
+                        "report_trajectory": True,
+                        "report_state_data": True,
+                    },
+                },
+            },
+        }
+        params_path = phase_dir / f"{phase_name}_parameters.json"
+        with open(params_path, "w") as f:
+            json.dump(params_dict, f, indent=2)
+        LOGGER.info(f"Saved parameters to {params_path}")
 
         results = {
             "phase": "production",
