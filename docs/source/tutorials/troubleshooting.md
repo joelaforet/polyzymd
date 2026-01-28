@@ -81,6 +81,41 @@ yaml.scanner.ScannerError: mapping values are not allowed here
 - Colons followed by space
 - Quotes around special characters
 
+### "Multiple validation errors" / "Field required" for list items
+
+```
+Build failed: 3 validation errors for SimulationConfig
+solvent.co_solvents.0
+  Value error, Co-solvent 'dmso': Must specify either 'volume_fraction' or 'concentration'
+solvent.co_solvents.1.name
+  Field required [type=missing, input_value={'volume_fraction': 0.5}, input_type=dict]
+solvent.co_solvents.2.name
+  Field required [type=missing, input_value={'residue_name': 'DMS'}, input_type=dict]
+```
+
+**Cause:** Each field was written as a separate list item instead of grouping all fields under one item.
+
+**Incorrect** (creates 3 separate items):
+```yaml
+co_solvents:
+  - name: "dmso"
+  - volume_fraction: 0.5
+  - residue_name: "DMS"
+```
+
+**Correct** (one item with 3 fields):
+```yaml
+co_solvents:
+  - name: "dmso"
+    volume_fraction: 0.5
+    residue_name: "DMS"
+```
+
+**Solution:** The `-` character starts a **new list item**. All fields belonging to the same item must be indented to the same level *without* a leading `-`. This applies to all list-based configurations:
+- `co_solvents`
+- `monomers`
+- `restraints`
+
 ---
 
 ## System Building Errors

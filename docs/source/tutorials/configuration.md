@@ -285,6 +285,30 @@ co_solvents:
 
 **Warning:** When using multiple co-solvents with `volume_fraction`, ensure the total does not exceed 1.0 (100%). The remaining fraction is filled with water.
 
+```{warning}
+**YAML List Syntax**
+
+A common mistake is placing each field on a separate line with its own `-`, which creates multiple list items instead of one object with multiple fields.
+
+**Incorrect** (creates 3 separate incomplete items):
+~~~yaml
+co_solvents:
+  - name: "dmso"
+  - volume_fraction: 0.30
+  - residue_name: "DMS"
+~~~
+
+**Correct** (one item with 3 fields):
+~~~yaml
+co_solvents:
+  - name: "dmso"
+    volume_fraction: 0.30
+    residue_name: "DMS"
+~~~
+
+The `-` character starts a **new list item**. All fields belonging to the same item must be indented to the same level *without* a leading `-`.
+```
+
 #### Assumptions and Limitations
 
 - **Ideal mixing:** Volume fractions assume ideal mixing (volumes are additive). Real solutions may deviate.

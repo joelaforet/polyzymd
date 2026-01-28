@@ -183,6 +183,28 @@ polymers:
   cache_directory: ".polymer_cache"
 ```
 
+```{warning}
+**YAML List Syntax**
+
+When defining monomers (or any list), each `-` starts a **new list item**. All fields for one monomer must be grouped together:
+
+**Incorrect:**
+~~~yaml
+monomers:
+  - label: "A"
+  - probability: 0.98
+  - name: "SBMA"
+~~~
+
+**Correct:**
+~~~yaml
+monomers:
+  - label: "A"
+    probability: 0.98
+    name: "SBMA"
+~~~
+```
+
 See {doc}`polymers` for detailed polymer configuration.
 
 ### Adding Restraints
@@ -202,6 +224,28 @@ restraints:
     distance: 3.5
     force_constant: 10000.0
     enabled: true
+```
+
+```{warning}
+**YAML List Syntax**
+
+Each restraint is a list item starting with `-`. All fields for that restraint must be indented under it *without* another `-`:
+
+**Incorrect:**
+~~~yaml
+restraints:
+  - type: "flat_bottom"
+  - name: "my_restraint"
+  - distance: 3.5
+~~~
+
+**Correct:**
+~~~yaml
+restraints:
+  - type: "flat_bottom"
+    name: "my_restraint"
+    distance: 3.5
+~~~
 ```
 
 See {doc}`restraints` for detailed restraint configuration.
