@@ -473,7 +473,7 @@ class SimulationRunner:
                                 },
                                 "timescale": {
                                     "__class__": "Quantity",
-                                    "__values__": {"value": friction, "unit": "1/picosecond"},
+                                    "__values__": {"value": friction, "unit": "/picosecond"},
                                 },
                             },
                         },
