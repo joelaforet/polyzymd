@@ -234,7 +234,13 @@ def run(
         if projects_dir:
             sim_config.output.projects_directory = Path(projects_dir)
 
-        working_dir = sim_config.get_working_directory(replicate)
+        # Determine working directory
+        # If scratch_dir is explicitly provided, use it directly (user knows where they want output)
+        # Otherwise, let get_working_directory() construct the path
+        if scratch_dir:
+            working_dir = Path(scratch_dir)
+        else:
+            working_dir = sim_config.get_working_directory(replicate)
 
         if not skip_build:
             click.echo(f"Building system for replicate {replicate}...")
