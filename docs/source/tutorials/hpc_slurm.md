@@ -82,6 +82,28 @@ polyzymd submit -c config.yaml --preset aa100
 polyzymd submit -c config.yaml --preset testing
 ```
 
+### Overriding Time Limit
+
+You can override the preset's time limit using `--time-limit`:
+
+```bash
+# Use testing preset with a 2-minute time limit
+polyzymd submit -c config.yaml --preset testing --time-limit 0:02:00
+
+# Use A100 with a 12-hour limit instead of 24h
+polyzymd submit -c config.yaml --preset aa100 --time-limit 12:00:00
+```
+
+**Time format options:**
+- `MM:SS` - minutes and seconds (e.g., `2:00` for 2 minutes)
+- `HH:MM:SS` - hours, minutes, seconds (e.g., `0:02:00`)
+- `D-HH:MM:SS` - days, hours, minutes, seconds (e.g., `1-00:00:00` for 1 day)
+
+This is especially useful for:
+- Quick testing with short time limits
+- Adjusting for segment duration requirements
+- Working within specific QOS constraints
+
 ### Custom SLURM Settings
 
 For custom configurations, edit the generated scripts in `job_scripts/` before submitting.
@@ -293,11 +315,20 @@ polyzymd continue \
 ### 1. Always Test First
 
 ```bash
-# Use testing partition
+# Generate scripts without submitting (dry run)
 polyzymd submit -c config.yaml --preset testing --dry-run
 
-# Then short real test
-polyzymd submit -c config.yaml --preset testing --replicates 1
+# Quick test with 2-minute time limit
+polyzymd submit -c config.yaml \
+    --preset testing \
+    --time-limit 0:02:00 \
+    --replicates 1
+
+# Or a slightly longer test
+polyzymd submit -c config.yaml \
+    --preset testing \
+    --time-limit 0:05:00 \
+    --replicates 1
 ```
 
 ### 2. Monitor Early Segments

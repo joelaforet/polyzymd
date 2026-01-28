@@ -142,6 +142,13 @@ PolyzyMD supports separate directories for long-term storage (projects) and high
 | `blanca-shirts` | blanca-shirts | Shirts lab partition (7d limit) |
 | `testing` | atesting | Quick tests (1h limit) |
 
+Override time limits with `--time-limit`:
+
+```bash
+# Quick 2-minute test
+polyzymd submit -c config.yaml --preset testing --time-limit 0:02:00
+```
+
 ## License
 
 MIT License - see LICENSE file for details.

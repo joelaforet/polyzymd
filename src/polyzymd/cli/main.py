@@ -337,6 +337,11 @@ def run(
     default=None,
     help="Directory for job scripts (default: {projects_dir}/job_scripts)",
 )
+@click.option(
+    "--time-limit",
+    default=None,
+    help="Override SLURM time limit (format: HH:MM:SS or M:SS)",
+)
 def submit(
     config: str,
     replicates: str,
@@ -347,6 +352,7 @@ def submit(
     dry_run: bool,
     main_script: Optional[str],
     output_dir: Optional[str],
+    time_limit: Optional[str],
 ) -> None:
     """Submit daisy-chain simulation jobs to SLURM.
 
@@ -382,6 +388,7 @@ def submit(
             output_dir=output_dir,
             scratch_dir=scratch_dir,
             projects_dir=projects_dir,
+            time_limit=time_limit,
         )
 
         if not dry_run:

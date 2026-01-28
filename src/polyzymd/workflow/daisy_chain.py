@@ -573,6 +573,7 @@ def submit_daisy_chain(
     output_dir: Optional[Union[str, Path]] = None,
     scratch_dir: Optional[Union[str, Path]] = None,
     projects_dir: Optional[Union[str, Path]] = None,
+    time_limit: Optional[str] = None,
 ) -> Dict[int, List[SubmissionResult]]:
     """Convenience function to submit daisy-chain jobs from a YAML config.
 
@@ -587,6 +588,7 @@ def submit_daisy_chain(
         output_dir: Directory for job scripts (default: from config or "job_scripts")
         scratch_dir: Override scratch directory for simulation output
         projects_dir: Override projects directory for scripts/logs
+        time_limit: Override SLURM time limit (format: HH:MM:SS or M:SS)
 
     Returns:
         Dictionary mapping replicate numbers to submission results
@@ -620,6 +622,10 @@ def submit_daisy_chain(
     from polyzymd.workflow.slurm import PresetType
 
     slurm_config = SlurmConfig.from_preset(slurm_preset, email=email)  # type: ignore[arg-type]
+
+    # Override time limit if provided
+    if time_limit:
+        slurm_config.time_limit = time_limit
 
     # Create daisy-chain config
     dc_config = DaisyChainConfig.from_simulation_config(
