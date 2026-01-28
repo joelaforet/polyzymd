@@ -77,11 +77,13 @@ The command-line interface is built with [Click](https://click.palletsprojects.c
 
 | Command | Function | Primary Module Used |
 |---------|----------|---------------------|
+| `polyzymd init` | Initialize new project directory | Template files |
 | `polyzymd build` | Build system without running | `SystemBuilder` |
 | `polyzymd run` | Build and run initial simulation | `SystemBuilder` + `SimulationRunner` |
 | `polyzymd continue` | Continue from checkpoint | `ContinuationManager` |
 | `polyzymd submit` | Submit daisy-chain to SLURM | `DaisyChainSubmitter` |
 | `polyzymd validate` | Validate config file | `SimulationConfig` |
+| `polyzymd info` | Show installation info | Version + dependencies |
 
 **Where to modify:**
 - Add new CLI commands: `cli/main.py`

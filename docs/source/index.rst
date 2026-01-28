@@ -62,6 +62,7 @@ Getting Started
 
    tutorials/installation
    tutorials/quickstart
+   tutorials/cli_reference
    tutorials/configuration
    tutorials/restraints
    tutorials/hpc_slurm
