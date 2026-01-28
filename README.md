@@ -35,7 +35,35 @@ We recommend using a conda environment with these packages pre-installed.
 
 ## Quick Start
 
-### 1. Create a Configuration File
+### 1. Initialize a Project
+
+```bash
+polyzymd init --name my_simulation
+cd my_simulation
+```
+
+This creates a project directory with a template `config.yaml` and placeholder files.
+
+### 2. Add Your Structure Files
+
+```bash
+# Copy your prepared enzyme PDB
+cp /path/to/enzyme.pdb structures/
+
+# Copy your docked substrate SDF (optional)
+cp /path/to/substrate.sdf structures/
+
+# Remove placeholder files
+rm structures/*.placeholder.txt
+```
+
+### 3. Edit the Configuration
+
+Open `config.yaml` and uncomment/customize the sections you need. The template
+includes all options with example values - uncomment what you need and update
+the values for your system.
+
+Example minimal configuration:
 
 ```yaml
 name: "LipA_substrate_polymer"
@@ -89,13 +117,13 @@ output:
   naming_template: "{enzyme}_{polymer_type}_{temperature}K_run{replicate}"
 ```
 
-### 2. Validate Configuration
+### 4. Validate Configuration
 
 ```bash
 polyzymd validate -c config.yaml
 ```
 
-### 3. Submit to HPC Cluster
+### 5. Submit to HPC Cluster
 
 ```bash
 # Dry run (generate scripts without submitting)
@@ -109,6 +137,7 @@ polyzymd submit -c config.yaml --replicates 1-5 --preset aa100 --email you@unive
 
 | Command | Description |
 |---------|-------------|
+| `polyzymd init -n my_project` | Initialize a new project directory |
 | `polyzymd validate -c config.yaml` | Validate configuration file |
 | `polyzymd build -c config.yaml` | Build simulation system |
 | `polyzymd run -c config.yaml` | Run simulation locally |

@@ -634,6 +634,145 @@ def validate(config: str) -> None:
 
 
 # =============================================================================
+# Init Command
+# =============================================================================
+
+
+@cli.command()
+@click.option(
+    "-n",
+    "--name",
+    required=True,
+    help="Name of the project directory to create",
+)
+def init(name: str) -> None:
+    """Initialize a new PolyzyMD project directory.
+
+    Creates a scaffold with a template configuration file and placeholder
+    structure files to help new users get started.
+
+    \b
+    Example:
+        polyzymd init --name my_simulation
+
+    This creates:
+        my_simulation/
+        ├── config.yaml              <- Edit this file
+        ├── structures/              <- Add your PDB/SDF files
+        ├── job_scripts/
+        └── slurm_logs/
+    """
+    import shutil
+    from importlib import resources
+
+    project_dir = Path(name)
+
+    # Check if directory already exists
+    if project_dir.exists():
+        click.echo(
+            click.style(f"Error: Directory '{name}' already exists.", fg="red"),
+            err=True,
+        )
+        click.echo("Choose a different name or remove the existing directory.")
+        sys.exit(1)
+
+    try:
+        # Create directory structure
+        click.echo(f"Creating project directory: {name}/")
+        project_dir.mkdir(parents=True)
+        (project_dir / "structures").mkdir()
+        (project_dir / "job_scripts").mkdir()
+        (project_dir / "slurm_logs").mkdir()
+
+        # Copy template configuration
+        template_path = resources.files("polyzymd.configs.templates").joinpath(
+            "config_template.yaml"
+        )
+        config_dest = project_dir / "config.yaml"
+        with resources.as_file(template_path) as template_file:
+            shutil.copy(template_file, config_dest)
+
+        # Create placeholder files
+        protein_placeholder = project_dir / "structures" / "place_protein_here.placeholder.txt"
+        protein_placeholder.write_text(
+            """\
+# ============================================================================
+# PLACEHOLDER: Place your protein PDB file here
+# ============================================================================
+#
+# This directory should contain your input structure files.
+#
+# PROTEIN PDB FILE (required):
+#   - Properly protonated (use PDB2PQR, Reduce, or similar)
+#   - No missing residues in regions of interest
+#   - Standard amino acid residue names
+#   - Rename to match your config.yaml enzyme.pdb_path setting
+#
+# PREPARATION TIPS:
+#   1. Download structure from PDB or use your own model
+#   2. Remove waters, ligands, and alternate conformations
+#   3. Add hydrogens at your simulation pH
+#   4. Check for missing loops/residues
+#
+# Delete this placeholder file after adding your protein structure.
+# ============================================================================
+"""
+        )
+
+        ligand_placeholder = project_dir / "structures" / "place_ligand_here.placeholder.txt"
+        ligand_placeholder.write_text(
+            """\
+# ============================================================================
+# PLACEHOLDER: Place your ligand SDF file here (if using substrate)
+# ============================================================================
+#
+# If your simulation includes a docked substrate or small molecule,
+# place the SDF file in this directory.
+#
+# LIGAND SDF FILE (optional):
+#   - 3D coordinates (from docking, crystal structure, or conformer generation)
+#   - Correct protonation state for simulation pH
+#   - Single conformer recommended (or specify conformer_index in config)
+#   - Rename to match your config.yaml substrate.sdf_path setting
+#
+# SUPPORTED FORMATS:
+#   - SDF (recommended)
+#   - MOL2
+#
+# If you're not using a substrate, you can delete this placeholder
+# and comment out the 'substrate' section in config.yaml.
+# ============================================================================
+"""
+        )
+
+        # Success message
+        click.echo()
+        click.echo(click.style("Project created successfully!", fg="green"))
+        click.echo()
+        click.echo("Directory structure:")
+        click.echo(f"  {name}/")
+        click.echo(f"  ├── config.yaml              <- Edit this file")
+        click.echo(f"  ├── structures/              <- Add your PDB/SDF files")
+        click.echo(f"  ├── job_scripts/")
+        click.echo(f"  └── slurm_logs/")
+        click.echo()
+        click.echo("Next steps:")
+        click.echo(f"  1. Add structure files to {name}/structures/")
+        click.echo(f"  2. Edit {name}/config.yaml (uncomment and customize sections)")
+        click.echo(f"  3. Validate: polyzymd validate -c {name}/config.yaml")
+        click.echo(f"  4. Build:    polyzymd build -c {name}/config.yaml -r 1")
+        click.echo()
+        click.echo("Documentation: https://polyzymd.readthedocs.io/tutorials/getting_started")
+
+    except Exception as e:
+        # Clean up on failure
+        if project_dir.exists():
+            shutil.rmtree(project_dir)
+        click.echo(click.style(f"Error creating project: {e}", fg="red"), err=True)
+        sys.exit(1)
+
+
+# =============================================================================
 # Info Command
 # =============================================================================
 
