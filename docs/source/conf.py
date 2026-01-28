@@ -9,6 +9,25 @@ import sys
 # Add the source directory to the path so autodoc can find modules
 sys.path.insert(0, os.path.abspath("../../src"))
 
+# Mock imports for packages that may not be available during doc build
+# This allows autodoc to generate documentation without actually importing these
+# heavy dependencies (OpenMM, OpenFF, etc.) which require CUDA/GPU libraries
+autodoc_mock_imports = [
+    "openmm",
+    "openff",
+    "openff.toolkit",
+    "openff.units",
+    "openff.interchange",
+    "openmmtools",
+    "openmmforcefields",
+    "pdbfixer",
+    "mdtraj",
+    "parmed",
+    "rdkit",
+    "numpy",
+    "polymerist",
+]
+
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 

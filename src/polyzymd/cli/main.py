@@ -259,6 +259,55 @@ def run(
         click.echo("Extracting OpenMM components...")
         omm_topology, omm_system, omm_positions = builder.get_openmm_components()
 
+        # Apply restraints if configured
+        if sim_config.restraints:
+            from polyzymd.core.restraints import RestraintFactory, apply_restraints
+
+            click.echo(f"Applying {len(sim_config.restraints)} restraint(s)...")
+            restraint_defs = []
+            for r in sim_config.restraints:
+                if not r.enabled:
+                    click.echo(f"  - {r.name}: DISABLED (skipping)")
+                    continue
+
+                # Create restraint definition from config
+                restraint_def = RestraintFactory.from_config(r.model_dump())
+
+                # Validate the selection resolves to exactly one atom each
+                try:
+                    indices1 = restraint_def.atom1.resolve(omm_topology)
+                    indices2 = restraint_def.atom2.resolve(omm_topology)
+
+                    if len(indices1) != 1:
+                        click.echo(
+                            f"Error: Restraint '{r.name}' atom1 selection matched "
+                            f"{len(indices1)} atoms (need exactly 1)",
+                            err=True,
+                        )
+                        sys.exit(1)
+                    if len(indices2) != 1:
+                        click.echo(
+                            f"Error: Restraint '{r.name}' atom2 selection matched "
+                            f"{len(indices2)} atoms (need exactly 1)",
+                            err=True,
+                        )
+                        sys.exit(1)
+
+                    click.echo(
+                        f"  - {r.name}: atom {indices1[0]} <-> atom {indices2[0]} "
+                        f"(type={r.type.value}, d={r.distance} Å, k={r.force_constant} kJ/mol/nm²)"
+                    )
+                    restraint_defs.append(restraint_def)
+
+                except ValueError as e:
+                    click.echo(f"Error: Restraint '{r.name}' invalid: {e}", err=True)
+                    sys.exit(1)
+
+            # Apply all validated restraints to the system
+            if restraint_defs:
+                apply_restraints(restraint_defs, omm_topology, omm_system)
+                click.echo(f"Successfully applied {len(restraint_defs)} restraint(s)")
+
         # Create runner
         runner = SimulationRunner(
             topology=omm_topology,
