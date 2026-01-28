@@ -116,7 +116,7 @@ description: "Description of your simulation system"
 #   #
 #   # Built-in co-solvents (auto-populated smiles & density):
 #   #   dmso, dmf, acetonitrile, urea, ethanol, methanol, glycerol,
-#   #   tfe, isopropanol, acetone, thf, dioxane, guanidinium, ethylene_glycol
+#   #   isopropanol, acetone, thf, dioxane, ethylene_glycol
 #   
 #   # Example: 30% v/v DMSO (reduces water proportionally)
 #   # co_solvents:

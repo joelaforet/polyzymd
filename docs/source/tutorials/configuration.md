@@ -228,24 +228,22 @@ The water count is NOT reduced when using concentration. The co-solvent molecule
 
 #### Built-in Co-solvent Library
 
-PolyzyMD includes a library of common co-solvents with pre-defined SMILES and densities:
+PolyzyMD includes a library of common co-solvents with pre-defined SMILES and densities. Density values are sourced from [PubChem](https://pubchem.ncbi.nlm.nih.gov/), a public database of chemical compounds. Each compound has a unique Compound Identification Number (CID) that can be used to look up detailed information including density, structure, and safety data.
 
-| Name | Density (g/mL) | Common Uses |
-|------|----------------|-------------|
-| `dmso` | 1.10 | Cryoprotectant, membrane studies |
-| `dmf` | 0.95 | Organic co-solvent |
-| `acetonitrile` | 0.786 | Organic co-solvent |
-| `urea` | 1.32 | Protein denaturation |
-| `ethanol` | 0.789 | Membrane studies |
-| `methanol` | 0.792 | Organic co-solvent |
-| `glycerol` | 1.261 | Cryoprotectant, viscosity |
-| `tfe` | 1.393 | Helix stabilization |
-| `isopropanol` | 0.786 | Organic co-solvent |
-| `acetone` | 0.784 | Organic co-solvent |
-| `thf` | 0.889 | Organic co-solvent |
-| `dioxane` | 1.033 | Organic co-solvent |
-| `guanidinium` | 1.18 | Protein denaturation |
-| `ethylene_glycol` | 1.113 | Cryoprotectant |
+| Name | SMILES | Density (g/mL) | Reference |
+|------|--------|----------------|-----------|
+| `dmso` | `CS(=O)C` | 1.10 | [CID 679](https://pubchem.ncbi.nlm.nih.gov/compound/679) |
+| `dmf` | `CN(C)C=O` | 0.95 | [CID 6228](https://pubchem.ncbi.nlm.nih.gov/compound/6228) |
+| `acetonitrile` | `CC#N` | 0.786 | [CID 6342](https://pubchem.ncbi.nlm.nih.gov/compound/6342) |
+| `urea` | `C(=O)(N)N` | 1.32 | [CID 1176](https://pubchem.ncbi.nlm.nih.gov/compound/1176) |
+| `ethanol` | `CCO` | 0.789 | [CID 702](https://pubchem.ncbi.nlm.nih.gov/compound/702) |
+| `methanol` | `CO` | 0.792 | [CID 887](https://pubchem.ncbi.nlm.nih.gov/compound/887) |
+| `glycerol` | `C(C(CO)O)O` | 1.261 | [CID 753](https://pubchem.ncbi.nlm.nih.gov/compound/753) |
+| `isopropanol` | `CC(C)O` | 0.786 | [CID 3776](https://pubchem.ncbi.nlm.nih.gov/compound/3776) |
+| `acetone` | `CC(=O)C` | 0.784 | [CID 180](https://pubchem.ncbi.nlm.nih.gov/compound/180) |
+| `thf` | `C1CCOC1` | 0.883 | [CID 8028](https://pubchem.ncbi.nlm.nih.gov/compound/8028) |
+| `dioxane` | `C1COCCO1` | 1.033 | [CID 31275](https://pubchem.ncbi.nlm.nih.gov/compound/31275) |
+| `ethylene_glycol` | `C(CO)O` | 1.114 | [CID 174](https://pubchem.ncbi.nlm.nih.gov/compound/174) |
 
 For library co-solvents, you only need to specify the `name` and either `volume_fraction` or `concentration`:
 

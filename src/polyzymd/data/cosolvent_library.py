@@ -80,17 +80,10 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
     # Chaotropes / Denaturants
     "urea": CoSolventData(
         name="Urea",
-        smiles="NC(=O)N",
+        smiles="C(=O)(N)N",
         density=1.32,
         molar_mass=60.06,
         common_names=("carbamide",),
-    ),
-    "guanidinium": CoSolventData(
-        name="Guanidinium chloride",
-        smiles="NC(=[NH2+])N.[Cl-]",
-        density=1.18,
-        molar_mass=95.53,
-        common_names=("gdmcl", "guhcl", "guanidine hydrochloride"),
     ),
     # Alcohols
     "ethanol": CoSolventData(
@@ -114,25 +107,18 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
         molar_mass=60.10,
         common_names=("ipa", "2-propanol", "isopropyl alcohol"),
     ),
-    "tfe": CoSolventData(
-        name="TFE",
-        smiles="OCC(F)(F)F",
-        density=1.393,
-        molar_mass=100.04,
-        common_names=("trifluoroethanol", "2,2,2-trifluoroethanol"),
-    ),
     # Polyols
     "glycerol": CoSolventData(
         name="Glycerol",
-        smiles="OCC(O)CO",
+        smiles="C(C(CO)O)O",
         density=1.261,
         molar_mass=92.09,
         common_names=("glycerin", "glycerine"),
     ),
     "ethylene_glycol": CoSolventData(
         name="Ethylene glycol",
-        smiles="OCCO",
-        density=1.113,
+        smiles="C(CO)O",
+        density=1.114,
         molar_mass=62.07,
         common_names=("eg", "ethanediol"),
     ),
@@ -147,7 +133,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
     "thf": CoSolventData(
         name="THF",
         smiles="C1CCOC1",
-        density=0.889,
+        density=0.883,
         molar_mass=72.11,
         common_names=("tetrahydrofuran",),
     ),
