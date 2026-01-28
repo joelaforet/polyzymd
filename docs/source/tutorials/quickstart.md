@@ -226,28 +226,6 @@ restraints:
     enabled: true
 ```
 
-```{warning}
-**YAML List Syntax**
-
-Each restraint is a list item starting with `-`. All fields for that restraint must be indented under it *without* another `-`:
-
-**Incorrect:**
-~~~yaml
-restraints:
-  - type: "flat_bottom"
-  - name: "my_restraint"
-  - distance: 3.5
-~~~
-
-**Correct:**
-~~~yaml
-restraints:
-  - type: "flat_bottom"
-    name: "my_restraint"
-    distance: 3.5
-~~~
-```
-
 See {doc}`restraints` for detailed restraint configuration.
 
 ## Step 4: Validate Configuration

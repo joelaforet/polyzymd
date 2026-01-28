@@ -200,6 +200,8 @@ Where:
   M     = molar mass (g/mol)
 ```
 
+**Source:** [`src/polyzymd/builders/solvent.py:267-287`](https://github.com/joelaforet/polyzymd/blob/main/src/polyzymd/builders/solvent.py#L267-L287)
+
 The water count is reduced proportionally: if you specify 30% DMSO, water fills the remaining 70% of the box.
 
 #### Concentration Method
@@ -223,6 +225,8 @@ Where:
   V_box = simulation box volume (L)
   N_A   = Avogadro's number (implicit in OpenMM)
 ```
+
+**Source:** [`src/polyzymd/builders/solvent.py:295-312`](https://github.com/joelaforet/polyzymd/blob/main/src/polyzymd/builders/solvent.py#L295-L312)
 
 The water count is NOT reduced when using concentration. The co-solvent molecules are added to the existing water, which may slightly increase the effective density.
 
