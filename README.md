@@ -149,6 +149,39 @@ Override time limits with `--time-limit`:
 polyzymd submit -c config.yaml --preset testing --time-limit 0:02:00
 ```
 
+## Documentation
+
+Documentation is built with Sphinx and located in the `docs/` directory.
+
+### Building the Docs
+
+```bash
+cd docs
+make html
+```
+
+The built documentation will be in `docs/build/html/`. Open `docs/build/html/index.html` in a browser to view.
+
+### Live Rebuild (Development)
+
+For active documentation work, use auto-rebuild which watches for changes:
+
+```bash
+cd docs
+make livehtml
+```
+
+This starts a local server (typically at `http://127.0.0.1:8000`) that automatically rebuilds when you edit source files.
+
+### Clean Rebuild
+
+If you encounter stale content or build errors:
+
+```bash
+cd docs
+make clean && make html
+```
+
 ## License
 
 MIT License - see LICENSE file for details.
