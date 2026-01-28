@@ -66,6 +66,7 @@ Getting Started
    tutorials/restraints
    tutorials/hpc_slurm
    tutorials/polymers
+   tutorials/architecture
    tutorials/troubleshooting
 
 API Reference

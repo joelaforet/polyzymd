@@ -283,6 +283,7 @@ class SimulationRunner:
                 temperature=True,
                 volume=True,
                 density=True,
+                speed=True,
             )
         )
 
@@ -408,6 +409,7 @@ class SimulationRunner:
                 temperature=True,
                 volume=True,
                 density=True,
+                speed=True,
             )
         )
 

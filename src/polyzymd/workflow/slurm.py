@@ -159,20 +159,21 @@ class SlurmScriptGenerator:
 #SBATCH --account={account}
 {exclude_line}
 
-# Exit immediately if any command fails
-set -e
-
 # =============================================================================
 # PolyzyMD Initial Simulation Job
 # Segment: {segment_index}
 # =============================================================================
 
-module purge
-module load miniforge
+# Load conda environment (ignore module warnings on some HPC systems)
+module purge 2>/dev/null || true
+module load miniforge 2>/dev/null || true
 
 # Initialize conda/mamba for non-interactive shell
 eval "$(conda shell.bash hook)"
 mamba activate {conda_env}
+
+# Enable strict error handling after environment setup
+set -e
 
 # Projects directory (scripts, configs, logs)
 PROJECTS_DIR="{projects_dir}"
@@ -220,20 +221,21 @@ echo "Segment {segment_index} completed successfully at $(date)"
 #SBATCH --account={account}
 {exclude_line}
 
-# Exit immediately if any command fails
-set -e
-
 # =============================================================================
 # PolyzyMD Continuation Job
 # Segment: {segment_index}
 # =============================================================================
 
-module purge
-module load miniforge
+# Load conda environment (ignore module warnings on some HPC systems)
+module purge 2>/dev/null || true
+module load miniforge 2>/dev/null || true
 
 # Initialize conda/mamba for non-interactive shell
 eval "$(conda shell.bash hook)"
 mamba activate {conda_env}
+
+# Enable strict error handling after environment setup
+set -e
 
 # Projects directory (scripts, configs, logs)
 PROJECTS_DIR="{projects_dir}"
