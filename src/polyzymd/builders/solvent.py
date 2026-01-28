@@ -107,19 +107,6 @@ class SolventBuilder:
         ... )
     """
 
-    # Common atomic masses for center of mass calculation
-    ATOMIC_MASSES = {
-        1: 1.008,  # Hydrogen
-        6: 12.011,  # Carbon
-        7: 14.007,  # Nitrogen
-        8: 15.999,  # Oxygen
-        9: 18.998,  # Fluorine
-        11: 22.990,  # Sodium
-        15: 30.974,  # Phosphorus
-        16: 32.06,  # Sulfur
-        17: 35.45,  # Chlorine
-    }
-
     def __init__(self) -> None:
         """Initialize the SolventBuilder."""
         self._solvated_topology: Optional[Topology] = None
@@ -405,8 +392,7 @@ class SolventBuilder:
                 all_coords.append(coords)
 
                 for atom in molecule.atoms:
-                    mass = self.ATOMIC_MASSES.get(atom.atomic_number, 12.0)
-                    all_masses.append(mass)
+                    all_masses.append(atom.mass.magnitude)
 
         if not all_coords:
             return np.array([0.0, 0.0, 0.0]) * unit.angstrom
