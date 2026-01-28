@@ -169,6 +169,9 @@ set -e
 
 module purge
 module load miniforge
+
+# Initialize conda/mamba for non-interactive shell
+eval "$(conda shell.bash hook)"
 mamba activate {conda_env}
 
 # Projects directory (scripts, configs, logs)
@@ -227,6 +230,9 @@ set -e
 
 module purge
 module load miniforge
+
+# Initialize conda/mamba for non-interactive shell
+eval "$(conda shell.bash hook)"
 mamba activate {conda_env}
 
 # Projects directory (scripts, configs, logs)
