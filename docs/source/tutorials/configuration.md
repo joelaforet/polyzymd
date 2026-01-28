@@ -166,13 +166,132 @@ solvent:
 
 ### Co-solvents
 
+PolyzyMD supports adding co-solvents to your simulation system. You can specify co-solvents using either **volume fraction** (v/v) or **molar concentration**.
+
+#### Specification Methods
+
+| Method | Field | Description | Effect on Water |
+|--------|-------|-------------|-----------------|
+| Volume Fraction | `volume_fraction` | Fraction of box volume (0-1) | Reduces water proportionally |
+| Concentration | `concentration` | Molar concentration (mol/L) | Additive (water unchanged) |
+
+**Important:** Use exactly ONE method per co-solvent. Do not specify both `volume_fraction` and `concentration` for the same co-solvent.
+
+#### Volume Fraction Method
+
+Use this when you want a specific percentage of the solvent to be the co-solvent (e.g., "30% DMSO").
+
 ```yaml
 co_solvents:
   - name: "dmso"
-    smiles: "CS(=O)C"                    # SMILES string
-    volume_fraction: 0.10                # 10% v/v
-    residue_name: "DMS"                  # 3-letter code
+    volume_fraction: 0.30    # 30% v/v DMSO
 ```
+
+**Formula:**
+
+```
+n = (V_box × phi × rho) / M
+
+Where:
+  n     = number of co-solvent molecules
+  V_box = simulation box volume (L)
+  phi   = volume fraction (e.g., 0.30 for 30%)
+  rho   = co-solvent density (g/mL)
+  M     = molar mass (g/mol)
+```
+
+The water count is reduced proportionally: if you specify 30% DMSO, water fills the remaining 70% of the box.
+
+#### Concentration Method
+
+Use this when you want a specific molar concentration (e.g., "2 M urea for protein denaturation studies").
+
+```yaml
+co_solvents:
+  - name: "urea"
+    concentration: 2.0       # 2 M urea
+```
+
+**Formula:**
+
+```
+n = C × V_box × N_A
+
+Where:
+  n     = number of co-solvent molecules
+  C     = concentration (mol/L)
+  V_box = simulation box volume (L)
+  N_A   = Avogadro's number (implicit in OpenMM)
+```
+
+The water count is NOT reduced when using concentration. The co-solvent molecules are added to the existing water, which may slightly increase the effective density.
+
+#### Built-in Co-solvent Library
+
+PolyzyMD includes a library of common co-solvents with pre-defined SMILES and densities:
+
+| Name | Density (g/mL) | Common Uses |
+|------|----------------|-------------|
+| `dmso` | 1.10 | Cryoprotectant, membrane studies |
+| `dmf` | 0.95 | Organic co-solvent |
+| `acetonitrile` | 0.786 | Organic co-solvent |
+| `urea` | 1.32 | Protein denaturation |
+| `ethanol` | 0.789 | Membrane studies |
+| `methanol` | 0.792 | Organic co-solvent |
+| `glycerol` | 1.261 | Cryoprotectant, viscosity |
+| `tfe` | 1.393 | Helix stabilization |
+| `isopropanol` | 0.786 | Organic co-solvent |
+| `acetone` | 0.784 | Organic co-solvent |
+| `thf` | 0.889 | Organic co-solvent |
+| `dioxane` | 1.033 | Organic co-solvent |
+| `guanidinium` | 1.18 | Protein denaturation |
+| `ethylene_glycol` | 1.113 | Cryoprotectant |
+
+For library co-solvents, you only need to specify the `name` and either `volume_fraction` or `concentration`:
+
+```yaml
+co_solvents:
+  - name: "dmso"
+    volume_fraction: 0.10    # 10% v/v DMSO - smiles and density auto-populated
+```
+
+#### Custom Co-solvents
+
+For molecules not in the library, you must provide the SMILES string. Density is required only when using `volume_fraction`:
+
+```yaml
+co_solvents:
+  # Custom co-solvent with volume fraction (density required)
+  - name: "ethyl_acetate"
+    smiles: "CCOC(=O)C"
+    density: 0.902           # g/mL - required for volume_fraction
+    volume_fraction: 0.15
+
+  # Custom co-solvent with concentration (density not needed)
+  - name: "my_additive"
+    smiles: "CC(=O)NC"
+    concentration: 0.5       # 0.5 M
+```
+
+#### Multiple Co-solvents
+
+You can combine multiple co-solvents. Each can use either specification method independently:
+
+```yaml
+co_solvents:
+  - name: "dmso"
+    volume_fraction: 0.20    # 20% v/v DMSO
+  - name: "urea"
+    concentration: 1.0       # Plus 1 M urea
+```
+
+**Warning:** When using multiple co-solvents with `volume_fraction`, ensure the total does not exceed 1.0 (100%). The remaining fraction is filled with water.
+
+#### Assumptions and Limitations
+
+- **Ideal mixing:** Volume fractions assume ideal mixing (volumes are additive). Real solutions may deviate.
+- **Room temperature densities:** Library densities are approximate values at ~25C.
+- **PACKMOL placement:** Co-solvent molecules are placed randomly by PACKMOL and may require equilibration to achieve uniform distribution.
 
 ---
 

@@ -191,23 +191,104 @@ class PolymerConfig(BaseModel):
 class CoSolventSpec(BaseModel):
     """Specification for a co-solvent component.
 
+    You must specify EITHER volume_fraction OR concentration, not both.
+
+    For co-solvents in the built-in library (dmso, dmf, urea, ethanol, etc.),
+    you can omit the smiles and density fields - they will be looked up
+    automatically.
+
     Attributes:
         name: Identifier for the co-solvent (e.g., "dmso")
-        smiles: SMILES string for the molecule
-        volume_fraction: Volume fraction (0-1) of this co-solvent
+        smiles: SMILES string (optional if co-solvent is in library)
+        volume_fraction: Volume fraction (0-1), e.g., 0.30 for 30% v/v
+        concentration: Molar concentration (mol/L)
+        density: Density in g/mL (required for volume_fraction with custom molecules)
         residue_name: 3-letter residue name (default: first 3 chars of name)
+
+    Example (library co-solvent with volume fraction):
+        >>> CoSolventSpec(name="dmso", volume_fraction=0.30)
+
+    Example (library co-solvent with concentration):
+        >>> CoSolventSpec(name="urea", concentration=2.0)
+
+    Example (custom co-solvent):
+        >>> CoSolventSpec(
+        ...     name="my_solvent",
+        ...     smiles="CCOC(=O)C",
+        ...     density=0.902,
+        ...     volume_fraction=0.15
+        ... )
     """
 
     name: str = Field(..., description="Co-solvent identifier")
-    smiles: str = Field(..., description="SMILES string")
-    volume_fraction: float = Field(..., gt=0.0, lt=1.0, description="Volume fraction")
+    smiles: Optional[str] = Field(None, description="SMILES string (optional if in library)")
+
+    # Specification method 1: Volume fraction
+    volume_fraction: Optional[float] = Field(
+        None,
+        gt=0.0,
+        lt=1.0,
+        description="Volume fraction (0-1), e.g., 0.30 for 30% v/v",
+    )
+
+    # Specification method 2: Molar concentration
+    concentration: Optional[float] = Field(None, gt=0.0, description="Molar concentration (mol/L)")
+
+    # Physical property for volume fraction calculation
+    density: Optional[float] = Field(
+        None,
+        gt=0.0,
+        description="Density in g/mL (required for volume_fraction with custom molecules)",
+    )
+
     residue_name: Optional[str] = Field(None, max_length=3, description="Residue name")
 
     @model_validator(mode="after")
-    def set_default_residue_name(self) -> "CoSolventSpec":
-        """Set default residue name from co-solvent name if not provided."""
+    def validate_and_populate(self) -> "CoSolventSpec":
+        """Validate specification and populate missing fields from library."""
+        from polyzymd.data.cosolvent_library import get_cosolvent
+
+        # Check that exactly one of volume_fraction or concentration is specified
+        has_vf = self.volume_fraction is not None
+        has_conc = self.concentration is not None
+
+        if not has_vf and not has_conc:
+            raise ValueError(
+                f"Co-solvent '{self.name}': Must specify either 'volume_fraction' "
+                f"or 'concentration'"
+            )
+        if has_vf and has_conc:
+            raise ValueError(
+                f"Co-solvent '{self.name}': Cannot specify both 'volume_fraction' "
+                f"and 'concentration' - choose one"
+            )
+
+        # Look up from library
+        library_data = get_cosolvent(self.name)
+
+        # Populate SMILES if not provided
+        if self.smiles is None:
+            if library_data:
+                object.__setattr__(self, "smiles", library_data.smiles)
+            else:
+                raise ValueError(
+                    f"Co-solvent '{self.name}' not in library. Please provide 'smiles' field."
+                )
+
+        # For volume_fraction, we need density
+        if has_vf and self.density is None:
+            if library_data:
+                object.__setattr__(self, "density", library_data.density)
+            else:
+                raise ValueError(
+                    f"Co-solvent '{self.name}' not in library. "
+                    f"Please provide 'density' field (g/mL) for volume_fraction calculation."
+                )
+
+        # Set default residue name
         if self.residue_name is None:
-            self.residue_name = self.name[:3].upper()
+            object.__setattr__(self, "residue_name", self.name[:3].upper())
+
         return self
 
 

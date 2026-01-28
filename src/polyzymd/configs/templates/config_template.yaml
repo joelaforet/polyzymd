@@ -108,11 +108,32 @@ description: "Description of your simulation system"
 #   
 #   # Co-solvents (optional) - leave empty [] if not using
 #   co_solvents: []
-#   # Example co-solvent:
+#   
+#   # Co-solvent specification options:
+#   #   - volume_fraction: Specify as v/v fraction (e.g., 0.30 for 30%)
+#   #   - concentration:   Specify as molar (e.g., 2.0 for 2 M)
+#   #   NOTE: Use ONE method per co-solvent, not both.
+#   #
+#   # Built-in co-solvents (auto-populated smiles & density):
+#   #   dmso, dmf, acetonitrile, urea, ethanol, methanol, glycerol,
+#   #   tfe, isopropanol, acetone, thf, dioxane, guanidinium, ethylene_glycol
+#   
+#   # Example: 30% v/v DMSO (reduces water proportionally)
+#   # co_solvents:
+#   #   - name: "dmso"
+#   #     volume_fraction: 0.30             # 30% v/v
+#   
+#   # Example: 2 M urea (additive, doesn't reduce water)
 #   # co_solvents:
 #   #   - name: "urea"
-#   #     smiles: "NC(=O)N"
-#   #     concentration: 2.0              # Molar
+#   #     concentration: 2.0                # Molar
+#   
+#   # Example: Custom co-solvent (not in library)
+#   # co_solvents:
+#   #   - name: "my_solvent"
+#   #     smiles: "CCOC(=O)C"               # SMILES required for custom
+#   #     density: 0.902                    # g/mL, required for volume_fraction
+#   #     volume_fraction: 0.15
 #   
 #   ions:
 #     neutralize: true                    # Add counter-ions to neutralize
