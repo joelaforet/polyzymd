@@ -328,6 +328,71 @@ force_field:
 
 Add methods to `SimulationRunner` class, then call them from `cli/main.py`.
 
+## Common Workflows
+
+### Submitting Jobs to HPC
+
+PolyzyMD provides several SLURM presets for common HPC partitions. Each replicate's daisy chain runs in parallel, with segments within each chain running sequentially.
+
+#### Available Presets
+
+| Preset | Partition | QOS | Account | Default Time | Notes |
+|--------|-----------|-----|---------|--------------|-------|
+| `aa100` | aa100 | normal | ucb625_asc1 | 24h | NVIDIA A100 GPUs |
+| `al40` | al40 | normal | ucb625_asc1 | 24h | NVIDIA L40 GPUs |
+| `blanca-shirts` | blanca,blanca-shirts | preemptable | blanca-shirts | 24h | Blanca condo (preemptable) |
+| `testing` | atesting_a100 | testing | ucb625_asc1 | 6min | Quick tests only |
+
+> **Note:** Available partitions depend on your HPC account and permissions. For example, CU Boulder users with Blanca access may not have access to `blanca-shirts` specifically - that requires membership in the Shirts group condo. Check with your HPC administrators or use `sinfo` to see which partitions you can access.
+
+#### Example Commands
+
+**Quick test (single replicate, 10 minutes):**
+```bash
+polyzymd submit -c config.yaml --preset testing --replicates 1 --time-limit 0:10:00
+```
+
+**Production run on A100 GPUs (5 replicates):**
+```bash
+polyzymd submit -c config.yaml --preset aa100 --replicates 1-5
+```
+
+**Overnight run on Blanca preemptable (3 replicates):**
+```bash
+polyzymd submit -c config.yaml --preset blanca-shirts --replicates 1-3
+```
+
+**Dry run to inspect generated scripts without submitting:**
+```bash
+polyzymd submit -c config.yaml --preset aa100 --replicates 1-3 --dry-run
+```
+
+**Override time limit:**
+```bash
+polyzymd submit -c config.yaml --preset blanca-shirts --replicates 1-3 --time-limit 12:00:00
+```
+
+#### Replicate Specification
+
+Replicates can be specified in several formats:
+- Single: `--replicates 1`
+- Range: `--replicates 1-5` (runs replicates 1, 2, 3, 4, 5)
+- List: `--replicates 1,3,5` (runs replicates 1, 3, 5)
+
+#### Monitoring Jobs
+
+After submission:
+```bash
+# Check job status
+squeue -u $USER
+
+# View job details
+scontrol show job <job_id>
+
+# Check SLURM output logs
+cat slurm_logs/s0_r1_*.out
+```
+
 ## Testing Your Changes
 
 After modifying the code:
