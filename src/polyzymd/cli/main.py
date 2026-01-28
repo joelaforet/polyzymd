@@ -132,10 +132,14 @@ def build(
             return
 
         click.echo(f"Building system for replicate {replicate}...")
-        builder = SystemBuilder(sim_config)
-        interchange = builder.build(replicate=replicate)
-
         working_dir = sim_config.get_working_directory(replicate)
+        builder = SystemBuilder.from_config(sim_config)
+        interchange = builder.build_from_config(
+            config=sim_config,
+            working_dir=working_dir,
+            polymer_seed=replicate,
+        )
+
         click.echo(f"System built successfully!")
         click.echo(f"Output directory: {working_dir}")
 
@@ -234,23 +238,46 @@ def run(
 
         if not skip_build:
             click.echo(f"Building system for replicate {replicate}...")
-            builder = SystemBuilder(sim_config)
-            interchange = builder.build(replicate=replicate)
+            builder = SystemBuilder.from_config(sim_config)
+            interchange = builder.build_from_config(
+                config=sim_config,
+                working_dir=working_dir,
+                polymer_seed=replicate,
+            )
         else:
             click.echo("Skipping build, loading existing system...")
             # Load existing interchange would go here
             raise NotImplementedError("--skip-build requires pre-built system")
 
+        # Extract OpenMM components from Interchange
+        click.echo("Extracting OpenMM components...")
+        omm_topology, omm_system, omm_positions = builder.get_openmm_components()
+
         # Create runner
         runner = SimulationRunner(
-            interchange=interchange,
+            topology=omm_topology,
+            system=omm_system,
+            positions=omm_positions,
             working_dir=working_dir,
-            config=sim_config,
         )
 
+        # Run energy minimization first
+        click.echo("Running energy minimization...")
+        runner.minimize()
+
+        # Get thermodynamic parameters
+        temperature = sim_config.thermodynamics.temperature
+        pressure = sim_config.thermodynamics.pressure
+
         # Run equilibration
-        click.echo("Running equilibration...")
-        runner.run_equilibration()
+        eq_config = sim_config.simulation_phases.equilibration
+        click.echo(f"Running equilibration: {eq_config.duration} ns at {temperature} K (NVT)...")
+        runner.run_equilibration(
+            temperature=temperature,
+            duration_ns=eq_config.duration,
+            num_samples=eq_config.samples,
+            timestep_fs=eq_config.time_step,
+        )
 
         # Calculate segment parameters
         total_time = sim_config.simulation_phases.production.duration
@@ -261,11 +288,13 @@ def run(
         )
 
         # Run first production segment
-        click.echo(f"Running production segment 0: {seg_time} ns, {seg_frames} frames")
+        click.echo(f"Running production segment 0: {seg_time} ns, {seg_frames} frames (NPT)...")
         runner.run_production(
-            segment_index=0,
+            temperature=temperature,
             duration_ns=seg_time,
             num_samples=seg_frames,
+            pressure=pressure,
+            segment_index=0,
         )
 
         click.echo("Simulation completed successfully!")
