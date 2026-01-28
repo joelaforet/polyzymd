@@ -42,12 +42,21 @@ PolyzyMD supports separating:
 
 ### In YAML Configuration
 
+Environment variables (`$USER`, `$HOME`, etc.) and `~` are automatically expanded:
+
 ```yaml
 output:
   projects_directory: "/projects/$USER/polyzymd/my_simulation"
   scratch_directory: "/scratch/alpine/$USER/polyzymd_sims"
   job_scripts_subdir: "job_scripts"
   slurm_logs_subdir: "slurm_logs"
+```
+
+You can also use `~` for home directory:
+
+```yaml
+output:
+  projects_directory: "~/polyzymd/my_simulation"
 ```
 
 ### Via CLI Override

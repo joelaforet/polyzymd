@@ -397,6 +397,26 @@ class SimulationPhasesConfig(BaseModel):
 # =============================================================================
 
 
+def expand_path(path: Path) -> Path:
+    """Expand environment variables and user home in a path.
+
+    Supports:
+    - $VAR and ${VAR} syntax for environment variables
+    - ~ for user home directory
+
+    Args:
+        path: Path that may contain environment variables
+
+    Returns:
+        Path with variables expanded
+    """
+    import os
+
+    expanded = os.path.expandvars(str(path))
+    expanded = os.path.expanduser(expanded)
+    return Path(expanded)
+
+
 class OutputConfig(BaseModel):
     """Configuration for simulation output.
 
@@ -460,6 +480,17 @@ class OutputConfig(BaseModel):
         description="Deprecated: Use scratch_directory instead",
         exclude=True,
     )
+
+    @field_validator("projects_directory", "scratch_directory", "base_directory", mode="before")
+    @classmethod
+    def expand_env_vars_in_paths(cls, v: Optional[Union[str, Path]]) -> Optional[Path]:
+        """Expand environment variables and ~ in path fields.
+
+        Supports $USER, ${HOME}, ~/path, etc.
+        """
+        if v is None:
+            return None
+        return expand_path(Path(v))
 
     @model_validator(mode="after")
     def handle_legacy_base_directory(self) -> "OutputConfig":

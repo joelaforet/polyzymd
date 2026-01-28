@@ -269,11 +269,16 @@ simulation_phases:
 
 ## Output Configuration
 
+Environment variables (`$USER`, `$HOME`, `${VAR}`) and `~` are automatically expanded in path fields.
+
 ```yaml
 output:
-  # Directory structure
-  projects_directory: "/projects/user/polyzymd"   # Scripts, logs
-  scratch_directory: "/scratch/user/simulations"  # Trajectories
+  # Directory structure - environment variables are expanded automatically
+  projects_directory: "/projects/$USER/polyzymd"   # Scripts, logs
+  scratch_directory: "/scratch/alpine/$USER/simulations"  # Trajectories
+  
+  # You can also use ~ for home directory
+  # projects_directory: "~/polyzymd"
   
   # Subdirectories within projects_directory
   job_scripts_subdir: "job_scripts"
