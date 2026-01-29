@@ -69,6 +69,7 @@ Getting Started
    tutorials/polymers
    tutorials/architecture
    tutorials/troubleshooting
+   tutorials/contributing
 
 API Reference
 -------------
