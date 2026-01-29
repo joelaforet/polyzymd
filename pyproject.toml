@@ -9,7 +9,7 @@ description = "Molecular dynamics simulation toolkit for enzyme-polymer systems"
 readme = "README.md"
 license = "MIT"
 authors = [
-    { name = "Joe Laforet Jr.", email = "jola3134@colorado.edu" }
+    { name = "Joseph R. Laforet Jr.", email = "jola3134@colorado.edu" }
 ]
 keywords = [
     "molecular-dynamics",
