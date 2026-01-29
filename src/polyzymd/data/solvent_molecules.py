@@ -131,18 +131,18 @@ def get_solvent_molecule(
     # Check in-memory cache first
     if name_key in _loaded_molecules:
         LOGGER.debug(f"Returning {name_key} from in-memory cache")
-        return _loaded_molecules[name_key].copy()
+        return _loaded_molecules[name_key]
 
     # Handle water models specially (hardcoded literature charges)
     if name_key in ("tip3p", "water_tip3p", "water"):
         mol = _create_tip3p_water()
         _loaded_molecules[name_key] = mol
-        return mol.copy()
+        return mol
 
     if name_key in ("spce", "spc_e", "spc/e"):
         mol = _create_spce_water()
         _loaded_molecules[name_key] = mol
-        return mol.copy()
+        return mol
 
     # Set default residue name
     if residue_name is None:
@@ -154,7 +154,7 @@ def get_solvent_molecule(
         LOGGER.info(f"Loading {name_key} from library: {library_path}")
         mol = _load_molecule_from_sdf(library_path)
         _loaded_molecules[name_key] = mol
-        return mol.copy()
+        return mol
 
     # Try user cache
     _USER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -163,7 +163,7 @@ def get_solvent_molecule(
         LOGGER.info(f"Loading {name_key} from user cache: {cache_path}")
         mol = _load_molecule_from_sdf(cache_path)
         _loaded_molecules[name_key] = mol
-        return mol.copy()
+        return mol
 
     # Need to generate - requires SMILES
     if smiles is None:
@@ -190,7 +190,7 @@ def get_solvent_molecule(
         _save_molecule_to_sdf(mol, cache_path)
 
     _loaded_molecules[name_key] = mol
-    return mol.copy()
+    return mol
 
 
 def _create_tip3p_water() -> Molecule:
