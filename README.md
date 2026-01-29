@@ -221,7 +221,7 @@ If you use PolyzyMD in your research, please cite:
 
 ```
 @software{polyzymd,
-  author = {Laforet, Joe},
+  author = {Laforet Jr., Joseph R.},
   title = {PolyzyMD: MD Simulations for Enzyme-Polymer Systems},
   year = {2024},
   url = {https://github.com/joelaforet/polyzymd}
