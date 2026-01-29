@@ -363,8 +363,98 @@ class SystemBuilder:
 
         return self._interchange
 
+    def _build_molecule_name_mapping(self) -> Dict[str, str]:
+        """Build SMILES -> friendly name mapping for logging.
+
+        Creates a mapping from molecule SMILES to human-readable names
+        for use in log messages during Interchange creation.
+
+        Returns:
+            Dictionary mapping SMILES strings to display names.
+
+        Example output:
+            {
+                "[large-enzyme-smiles]": "LipA",
+                "[substrate-smiles]": "ResorufinButyrate",
+                "[polymer-smiles]": "EGPMA-SBMA_AAABA",
+                "CS(=O)C": "dmso",
+            }
+        """
+        name_map: Dict[str, str] = {}
+
+        # Add enzyme name from config or default
+        if self._enzyme_topology:
+            enzyme_smiles = self._enzyme_topology.molecule(0).to_smiles()
+            config = getattr(self, "_config", None)
+            if config and hasattr(config, "enzyme") and config.enzyme:
+                name_map[enzyme_smiles] = config.enzyme.name
+            else:
+                name_map[enzyme_smiles] = "Enzyme"
+
+        # Add substrate name from config or default
+        if self._substrate_molecule:
+            substrate_smiles = self._substrate_molecule.to_smiles()
+            config = getattr(self, "_config", None)
+            if config and hasattr(config, "substrate") and config.substrate:
+                name_map[substrate_smiles] = config.substrate.name
+            else:
+                name_map[substrate_smiles] = "Substrate"
+
+        # Add polymer names: type_prefix + sequence (e.g., "EGPMA-SBMA_AAABA")
+        if self._polymer_builder:
+            for sequence, mol in self._polymer_builder.loaded_molecules.items():
+                polymer_smiles = mol.to_smiles()
+                name_map[polymer_smiles] = f"{self._polymer_builder._type_prefix}_{sequence}"
+
+        # Add co-solvent names
+        if self._solvent_builder._composition:
+            for cosolvent in self._solvent_builder._composition.co_solvents:
+                if cosolvent.molecule:
+                    cosolvent_smiles = cosolvent.molecule.to_smiles()
+                    # Use name if available, otherwise use SMILES
+                    name_map[cosolvent_smiles] = cosolvent.name
+
+        return name_map
+
+    def _build_charge_template_mapping(self, water_mol: Molecule) -> Dict[str, Molecule]:
+        """Build SMILES -> charge template molecule mapping.
+
+        Creates a mapping from molecule SMILES to template molecules with
+        pre-computed charges for use with charge_from_molecules parameter.
+
+        Args:
+            water_mol: Water molecule with pre-computed charges.
+
+        Returns:
+            Dictionary mapping SMILES strings to charged template molecules.
+        """
+        smiles_to_template: Dict[str, Molecule] = {}
+
+        # Add water
+        smiles_to_template[water_mol.to_smiles()] = water_mol
+
+        # Add polymers (already have charges from SDF)
+        for mol in self._polymer_molecules:
+            smiles_to_template[mol.to_smiles()] = mol
+
+        # Add substrate (already has charges from NAGL/AM1BCC)
+        if self._substrate_molecule:
+            smiles_to_template[self._substrate_molecule.to_smiles()] = self._substrate_molecule
+
+        # Add co-solvents with pre-computed charges
+        if self._solvent_builder._composition:
+            for cosolvent in self._solvent_builder._composition.co_solvents:
+                if cosolvent.molecule is not None:
+                    smiles_to_template[cosolvent.molecule.to_smiles()] = cosolvent.molecule
+
+        return smiles_to_template
+
     def _create_interchange_simple(self, ff: ForceField, water_mol: Molecule) -> Interchange:
-        """Create Interchange using the simple method.
+        """Create Interchange using batched molecule processing.
+
+        Groups molecules by type (SMILES) and creates one Interchange per
+        unique molecule type, then combines them. This is much more efficient
+        than creating one Interchange per molecule instance.
 
         Args:
             ff: OpenFF ForceField.
@@ -373,28 +463,18 @@ class SystemBuilder:
         Returns:
             Interchange object.
         """
-        charge_from = []
-        if self._substrate_molecule:
-            charge_from.append(self._substrate_molecule)
-        charge_from.append(water_mol)
-
-        # Add co-solvents with pre-computed charges
-        if self._solvent_builder._composition:
-            for cosolvent in self._solvent_builder._composition.co_solvents:
-                if cosolvent.molecule is not None:
-                    charge_from.append(cosolvent.molecule)
-
-        return ff.create_interchange(
-            self._solvated_topology,
-            charge_from_molecules=charge_from,
-        )
+        # Use the same optimized batching logic
+        return self._create_interchange_batched(ff, water_mol)
 
     def _create_interchange_optimized(self, ff: ForceField, water_mol: Molecule) -> Interchange:
-        """Create Interchange using optimized combining.
+        """Create Interchange using optimized batched combining.
 
-        This method creates separate Interchanges for each unique molecule
-        type and then combines them, which is much faster for systems with
-        many polymers.
+        Groups molecules by type (SMILES) and creates one Interchange per
+        unique molecule type, then combines them. This dramatically reduces
+        the number of Interchange.combine() calls needed.
+
+        For a system with 1133 DMSO molecules, this creates ~7 Interchanges
+        instead of ~1140, providing ~160x fewer combine operations.
 
         Uses pre-computed charges for water and co-solvents to avoid running
         AM1BCC charge calculation for every solvent molecule.
@@ -406,64 +486,84 @@ class SystemBuilder:
         Returns:
             Combined Interchange object.
         """
-        LOGGER.info("Using optimized Interchange combining")
+        return self._create_interchange_batched(ff, water_mol)
 
-        # Build SMILES to molecule mapping for charge templates
-        smiles_to_mol: Dict[str, Molecule] = {}
+    def _create_interchange_batched(self, ff: ForceField, water_mol: Molecule) -> Interchange:
+        """Create Interchange using batched molecule processing.
 
-        # Add polymers
-        for mol in self._polymer_molecules:
-            smiles_to_mol[mol.to_smiles()] = mol
+        This is the core implementation that groups molecules by type and
+        creates one Interchange per unique molecule type.
 
-        # Add substrate
-        if self._substrate_molecule:
-            smiles_to_mol[self._substrate_molecule.to_smiles()] = self._substrate_molecule
+        Batching strategy:
+        1. Group all molecules by SMILES (molecule type)
+        2. Create ONE Interchange per unique molecule type (not per instance)
+        3. Process water + ions as a single batch
+        4. Combine the resulting small number of Interchanges
 
-        # Add co-solvents with pre-computed charges
-        # This ensures DMSO, ethanol, etc. use cached charges instead of AM1BCC
-        if self._solvent_builder._composition:
-            for cosolvent in self._solvent_builder._composition.co_solvents:
-                if cosolvent.molecule is not None:
-                    smiles_to_mol[cosolvent.molecule.to_smiles()] = cosolvent.molecule
-                    LOGGER.debug(f"Added co-solvent {cosolvent.name} to charge templates")
+        Args:
+            ff: OpenFF ForceField.
+            water_mol: Water molecule with pre-computed charges.
 
-        # Create interchanges for non-solvent molecules
-        all_interchanges: List[Interchange] = []
+        Returns:
+            Combined Interchange object.
+        """
+        from collections import defaultdict
+
+        LOGGER.info("Using batched Interchange creation (one per molecule type)")
+
+        # Build helper mappings
+        smiles_to_name = self._build_molecule_name_mapping()
+        smiles_to_template = self._build_charge_template_mapping(water_mol)
+
+        # Step 1: Group molecules by SMILES (molecule type)
+        # Skip water and ions - they're handled separately
+        smiles_groups: Dict[str, List[Molecule]] = defaultdict(list)
+        water_ion_smiles = {"[H][O][H]", "[Na+]", "[Cl-]"}
 
         for molecule in self._solvated_topology.molecules:
             mol_smiles = molecule.to_smiles()
+            if mol_smiles not in water_ion_smiles:
+                smiles_groups[mol_smiles].append(molecule)
 
-            # Skip water and ions (handle separately in batch)
-            if mol_smiles in ("[H][O][H]", "[Na+]", "[Cl-]"):
-                continue
+        # Step 2: Create ONE Interchange per molecule TYPE (batched)
+        all_interchanges: List[Interchange] = []
+
+        for mol_smiles, molecules in smiles_groups.items():
+            # Get display name for logging
+            display_name = smiles_to_name.get(mol_smiles, mol_smiles[:50] + "...")
+
+            LOGGER.info(f"Creating Interchange for {len(molecules)} {display_name} molecule(s)")
 
             # Get charge template if available
             charge_from = []
-            if mol_smiles in smiles_to_mol:
-                charge_from = [smiles_to_mol[mol_smiles]]
+            if mol_smiles in smiles_to_template:
+                charge_from = [smiles_to_template[mol_smiles]]
 
+            # Create Interchange for ALL molecules of this type at once
             inc = ff.create_interchange(
-                molecule.to_topology(),
+                topology=molecules,  # Pass list of all molecules with same SMILES
                 charge_from_molecules=charge_from,
             )
             all_interchanges.append(inc)
 
-        # Process water + ions together
-        LOGGER.info("Processing water + ions")
-        water_ion_mols = []
-        for mol in self._solvated_topology.molecules:
-            if mol.to_smiles() in ("[H][O][H]", "[Na+]", "[Cl-]"):
-                water_ion_mols.append(mol)
+        # Step 3: Process water + ions together as a single batch
+        water_ion_mols = [
+            mol for mol in self._solvated_topology.molecules if mol.to_smiles() in water_ion_smiles
+        ]
 
         if water_ion_mols:
+            LOGGER.info(f"Creating Interchange for {len(water_ion_mols)} water/ion molecule(s)")
             water_ion_inc = ff.create_interchange(
                 topology=water_ion_mols,
                 charge_from_molecules=[water_mol],
             )
             all_interchanges.append(water_ion_inc)
 
-        # Combine all interchanges
-        LOGGER.info(f"Combining {len(all_interchanges)} component Interchanges")
+        # Step 4: Combine all interchanges (now a small number!)
+        LOGGER.info(f"Combining {len(all_interchanges)} component Interchange(s)")
+
+        if not all_interchanges:
+            raise RuntimeError("No molecules found in solvated topology")
 
         combined = all_interchanges[0]
         for inc in all_interchanges[1:]:
