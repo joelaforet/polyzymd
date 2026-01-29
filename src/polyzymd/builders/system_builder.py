@@ -320,6 +320,10 @@ class SystemBuilder:
         uses the Interchange.combine() optimization which is significantly
         faster for systems with many unique molecules.
 
+        This method uses pre-computed charges from PolyzyMD's solvent cache
+        to ensure all copies of water and co-solvent molecules have identical
+        parameters, avoiding per-molecule AM1BCC calculations.
+
         Args:
             use_optimized_combining: Use optimized combining for polymers.
 
@@ -332,11 +336,18 @@ class SystemBuilder:
         if self._solvated_topology is None:
             raise RuntimeError("System must be solvated before creating Interchange")
 
-        from polymerist.mdtools.openfftools.solvation import solvents
+        from polyzymd.data.solvent_molecules import get_solvent_molecule
 
         LOGGER.info("Creating Interchange")
 
         ff = ForceField(self._protein_ff, self._sm_ff)
+
+        # Get water molecule with pre-computed charges for charge_from_molecules
+        # Use PolyzyMD's cached water instead of Polymerist's for consistency
+        water_model = "tip3p"
+        if self._solvent_builder._composition:
+            water_model = self._solvent_builder._composition.water_model
+        water_mol = get_solvent_molecule(water_model)
 
         # Decide whether to use optimized combining
         use_combining = (
@@ -344,20 +355,20 @@ class SystemBuilder:
         )
 
         if use_combining:
-            self._interchange = self._create_interchange_optimized(ff, solvents)
+            self._interchange = self._create_interchange_optimized(ff, water_mol)
         else:
-            self._interchange = self._create_interchange_simple(ff, solvents)
+            self._interchange = self._create_interchange_simple(ff, water_mol)
 
         LOGGER.info("Interchange created successfully")
 
         return self._interchange
 
-    def _create_interchange_simple(self, ff: ForceField, solvents: Any) -> Interchange:
+    def _create_interchange_simple(self, ff: ForceField, water_mol: Molecule) -> Interchange:
         """Create Interchange using the simple method.
 
         Args:
             ff: OpenFF ForceField.
-            solvents: Solvents module with water_TIP3P.
+            water_mol: Water molecule with pre-computed charges.
 
         Returns:
             Interchange object.
@@ -365,23 +376,32 @@ class SystemBuilder:
         charge_from = []
         if self._substrate_molecule:
             charge_from.append(self._substrate_molecule)
-        charge_from.append(solvents.water_TIP3P)
+        charge_from.append(water_mol)
+
+        # Add co-solvents with pre-computed charges
+        if self._solvent_builder._composition:
+            for cosolvent in self._solvent_builder._composition.co_solvents:
+                if cosolvent.molecule is not None:
+                    charge_from.append(cosolvent.molecule)
 
         return ff.create_interchange(
             self._solvated_topology,
             charge_from_molecules=charge_from,
         )
 
-    def _create_interchange_optimized(self, ff: ForceField, solvents: Any) -> Interchange:
+    def _create_interchange_optimized(self, ff: ForceField, water_mol: Molecule) -> Interchange:
         """Create Interchange using optimized combining.
 
         This method creates separate Interchanges for each unique molecule
         type and then combines them, which is much faster for systems with
         many polymers.
 
+        Uses pre-computed charges for water and co-solvents to avoid running
+        AM1BCC charge calculation for every solvent molecule.
+
         Args:
             ff: OpenFF ForceField.
-            solvents: Solvents module with water_TIP3P.
+            water_mol: Water molecule with pre-computed charges.
 
         Returns:
             Combined Interchange object.
@@ -399,13 +419,21 @@ class SystemBuilder:
         if self._substrate_molecule:
             smiles_to_mol[self._substrate_molecule.to_smiles()] = self._substrate_molecule
 
+        # Add co-solvents with pre-computed charges
+        # This ensures DMSO, ethanol, etc. use cached charges instead of AM1BCC
+        if self._solvent_builder._composition:
+            for cosolvent in self._solvent_builder._composition.co_solvents:
+                if cosolvent.molecule is not None:
+                    smiles_to_mol[cosolvent.molecule.to_smiles()] = cosolvent.molecule
+                    LOGGER.debug(f"Added co-solvent {cosolvent.name} to charge templates")
+
         # Create interchanges for non-solvent molecules
         all_interchanges: List[Interchange] = []
 
         for molecule in self._solvated_topology.molecules:
             mol_smiles = molecule.to_smiles()
 
-            # Skip solvent molecules (handle separately)
+            # Skip water and ions (handle separately in batch)
             if mol_smiles in ("[H][O][H]", "[Na+]", "[Cl-]"):
                 continue
 
@@ -421,7 +449,7 @@ class SystemBuilder:
             all_interchanges.append(inc)
 
         # Process water + ions together
-        LOGGER.info("Processing solvent + ions")
+        LOGGER.info("Processing water + ions")
         water_ion_mols = []
         for mol in self._solvated_topology.molecules:
             if mol.to_smiles() in ("[H][O][H]", "[Na+]", "[Cl-]"):
@@ -430,7 +458,7 @@ class SystemBuilder:
         if water_ion_mols:
             water_ion_inc = ff.create_interchange(
                 topology=water_ion_mols,
-                charge_from_molecules=[solvents.water_TIP3P],
+                charge_from_molecules=[water_mol],
             )
             all_interchanges.append(water_ion_inc)
 
