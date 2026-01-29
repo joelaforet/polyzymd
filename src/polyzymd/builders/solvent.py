@@ -3,6 +3,22 @@ Builder for solvent components.
 
 This module handles solvation with water, ions, and optional co-solvents
 using PACKMOL for molecular packing.
+
+Solvent Parameterization
+------------------------
+This module uses pre-computed partial charges for solvent molecules to ensure:
+
+1. **Consistency**: All copies of a solvent molecule have identical parameters
+2. **Speed**: Charges are computed once, not N times for N molecules
+3. **Reproducibility**: Same charges across different simulation runs
+
+For built-in solvents (water models, DMSO, ethanol, etc.), charges are loaded
+from pre-computed SDF files. For custom solvents, AM1BCC charges are computed
+once and cached in ~/.polyzymd/solvent_cache/ for future use.
+
+See Also
+--------
+polyzymd.data.solvent_molecules : Module providing pre-parameterized solvents
 """
 
 from __future__ import annotations
@@ -37,6 +53,11 @@ class CoSolvent:
     - volume_fraction: Specify as fraction (0-1), e.g., 0.30 for 30% v/v
     - concentration: Specify as molarity (mol/L)
 
+    Note: The molecule is NOT created in __post_init__ to avoid running
+    charge calculations prematurely. Instead, molecules are loaded via
+    get_solvent_molecule() in SolventBuilder.solvate() which uses cached
+    charges to ensure all copies have identical parameters.
+
     Attributes:
         name: Identifier for the co-solvent.
         smiles: SMILES string for the molecule.
@@ -44,7 +65,7 @@ class CoSolvent:
         concentration: Molar concentration (mol/L), mutually exclusive with volume_fraction.
         density: Density in g/mL (required for volume_fraction calculation).
         residue_name: 3-letter residue name.
-        molecule: OpenFF Molecule (created from SMILES).
+        molecule: OpenFF Molecule (assigned later with cached charges).
     """
 
     name: str
@@ -56,10 +77,12 @@ class CoSolvent:
     molecule: Optional[Molecule] = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        """Create the molecule from SMILES if not provided."""
-        if self.molecule is None:
-            self.molecule = Molecule.from_smiles(self.smiles)
+        """Validate co-solvent specification.
 
+        Note: We intentionally do NOT create the molecule here. This is done
+        later in SolventBuilder.solvate() using get_solvent_molecule() which
+        provides proper charge caching.
+        """
         # Set residue name if not already 3 chars
         if len(self.residue_name) > 3:
             self.residue_name = self.residue_name[:3].upper()
@@ -177,7 +200,7 @@ class SolventBuilder:
         """
         from openff.interchange.components import _packmol as packmol
         from polymerist.mdtools.openfftools import boxvectors
-        from polymerist.mdtools.openfftools.solvation import solvents
+        from polyzymd.data.solvent_molecules import get_solvent_molecule
 
         if composition is None:
             composition = SolventComposition()
@@ -255,10 +278,16 @@ class SolventBuilder:
         solvent_molecules = [water, na, cl]
         solvent_counts = [int(water_to_add), na_to_add, cl_to_add]
 
-        # Add co-solvents
+        # Add co-solvents (using cached charges for consistency)
         for cosolvent in composition.co_solvents:
             if cosolvent.molecule is None:
-                cosolvent.molecule = Molecule.from_smiles(cosolvent.smiles)
+                # Load molecule with pre-computed charges to ensure all copies
+                # of the same co-solvent have identical parameters
+                cosolvent.molecule = get_solvent_molecule(
+                    name=cosolvent.name,
+                    smiles=cosolvent.smiles,
+                    residue_name=cosolvent.residue_name,
+                )
 
             # Get molar mass of co-solvent
             cosolvent_molar_mass = sum(atom.mass for atom in cosolvent.molecule.atoms)
@@ -412,20 +441,19 @@ class SolventBuilder:
     def _get_water_molecule(self, model: WaterModelType) -> Molecule:
         """Get a water molecule with the appropriate charges.
 
+        Uses pre-computed charges from the solvent cache for consistency.
+
         Args:
             model: Water model identifier.
 
         Returns:
-            OpenFF Molecule for water.
+            OpenFF Molecule for water with correct partial charges.
         """
-        from polymerist.mdtools.openfftools.solvation import solvents
+        from polyzymd.data.solvent_molecules import get_solvent_molecule
 
-        if model == "tip3p":
-            return solvents.water_TIP3P
-        else:
-            # For other models, just use basic water
-            # The force field will apply the correct parameters
-            return Molecule.from_smiles("O")
+        # Map water model name to canonical form
+        # get_solvent_molecule handles: tip3p, spce, tip4pew, opc, etc.
+        return get_solvent_molecule(model)
 
     def _center_topology_in_box(self, topology: Topology, box_vecs: NDArray) -> None:
         """Center the topology at the center of the box.
