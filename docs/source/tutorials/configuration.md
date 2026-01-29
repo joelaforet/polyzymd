@@ -550,6 +550,65 @@ force_field:
 - `openff-2.0.0.offxml` - OpenFF Sage 2.0 (recommended)
 - `openff-2.1.0.offxml` - OpenFF Sage 2.1
 
+### Key Collision Warnings
+
+When building systems with both proteins and small molecules, you may see warnings like:
+
+```
+Key collision with different parameters, fixing. Key is [#6X4:1]-[#1:2]
+```
+
+**This is expected behavior and does not indicate a problem.**
+
+#### Why This Happens
+
+PolyzyMD uses different force fields for different molecule types:
+- **Proteins**: ff14SB (Amber force field ported to OpenFF format)
+- **Small molecules**: OpenFF Sage 2.0 (general small molecule force field)
+
+When these force fields are combined, the same SMIRKS pattern (e.g., `[#6X4:1]-[#1:2]` for sp³ carbon-hydrogen bonds) may appear in both, but with **different parameter values**. This is expected because:
+
+1. ff14SB was optimized for protein behavior
+2. OpenFF Sage was optimized for general organic molecules
+3. Both are valid parameterizations for their respective domains
+
+#### How OpenFF Handles This
+
+OpenFF Interchange detects these collisions and resolves them by appending `_DUPLICATE` to the key, allowing both parameter sets to coexist:
+
+```python
+# Simplified OpenFF behavior
+if key in existing_parameters:
+    if parameters_are_identical:
+        pass  # No action needed
+    else:
+        key.id += "_DUPLICATE"  # Keep both parameter sets
+```
+
+This ensures that:
+- Protein atoms use ff14SB parameters
+- Small molecule atoms use OpenFF Sage parameters
+- The simulation runs correctly with appropriate parameters for each molecule type
+
+#### What You'll See in Logs
+
+With PolyzyMD's logging, you can identify which molecule combinations trigger collisions:
+
+```
+Combining 7 component Interchange(s)
+  Components: LipA, ResorufinButyrate, EGPMA-SBMA_AAABA, ..., dmso, water/ions
+[DEBUG] Combining 'LipA' with 'ResorufinButyrate'...
+Key collision with different parameters, fixing. Key is [#6X4:1]-[#1:2]
+...
+```
+
+Collisions typically occur when combining protein Interchanges (using ff14SB) with small molecule Interchanges (using OpenFF Sage).
+
+#### Further Reading
+
+For more details on this behavior, see the OpenFF Interchange documentation:
+- [Sharp Edges: Combining Interchanges](https://docs.openforcefield.org/projects/interchange/en/stable/using/edges.html)
+
 ---
 
 ## Complete Example

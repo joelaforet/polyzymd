@@ -500,6 +500,16 @@ class SystemBuilder:
         3. Process water + ions as a single batch
         4. Combine the resulting small number of Interchanges
 
+        Note:
+            When combining Interchanges from molecules parameterized by different
+            force fields (e.g., ff14SB for proteins + OpenFF 2.0 for small molecules),
+            you may see "Key collision with different parameters" warnings. This is
+            expected behavior - the same SMIRKS pattern (e.g., [#6X4:1]-[#1:2] for
+            C-H bonds) can have different parameters in different force fields.
+            OpenFF handles this by appending "_DUPLICATE" to the key, allowing both
+            parameter sets to coexist. See OpenFF's "Sharp Edges" documentation:
+            https://docs.openforcefield.org/projects/interchange/en/stable/using/edges.html
+
         Args:
             ff: OpenFF ForceField.
             water_mol: Water molecule with pre-computed charges.
@@ -526,7 +536,9 @@ class SystemBuilder:
                 smiles_groups[mol_smiles].append(molecule)
 
         # Step 2: Create ONE Interchange per molecule TYPE (batched)
+        # Track both interchanges and their names for logging during combination
         all_interchanges: List[Interchange] = []
+        interchange_names: List[str] = []
 
         for mol_smiles, molecules in smiles_groups.items():
             # Get display name for logging
@@ -545,6 +557,7 @@ class SystemBuilder:
                 charge_from_molecules=charge_from,
             )
             all_interchanges.append(inc)
+            interchange_names.append(display_name)
 
         # Step 3: Process water + ions together as a single batch
         water_ion_mols = [
@@ -558,16 +571,26 @@ class SystemBuilder:
                 charge_from_molecules=[water_mol],
             )
             all_interchanges.append(water_ion_inc)
+            interchange_names.append("water/ions")
 
         # Step 4: Combine all interchanges (now a small number!)
+        # Log which interchanges are being combined to help diagnose key collisions
         LOGGER.info(f"Combining {len(all_interchanges)} component Interchange(s)")
+        LOGGER.info(f"  Components: {', '.join(interchange_names)}")
 
         if not all_interchanges:
             raise RuntimeError("No molecules found in solvated topology")
 
         combined = all_interchanges[0]
-        for inc in all_interchanges[1:]:
+        combined_name = interchange_names[0]
+
+        for i, inc in enumerate(all_interchanges[1:], start=1):
+            next_name = interchange_names[i]
+            LOGGER.debug(f"Combining '{combined_name}' with '{next_name}'...")
             combined = combined.combine(inc)
+            combined_name = f"{combined_name} + {next_name}"
+
+        LOGGER.info("Interchange combination complete")
 
         # Reset box vectors
         combined.box = self._solvated_topology.box_vectors
