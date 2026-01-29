@@ -319,6 +319,89 @@ The `-` character starts a **new list item**. All fields belonging to the same i
 - **Room temperature densities:** Library densities are approximate values at ~25C.
 - **PACKMOL placement:** Co-solvent molecules are placed randomly by PACKMOL and may require equilibration to achieve uniform distribution.
 
+### Solvent Parameterization
+
+PolyzyMD uses **pre-computed partial charges** for all solvent molecules to ensure consistency and performance.
+
+#### Why Pre-computed Charges?
+
+When adding many copies of the same solvent molecule (e.g., 1000 DMSO molecules), each molecule should have **identical partial charges**. However, charge calculation methods like AM1BCC have numerical variability - running the calculation twice on the same molecule can produce slightly different charges.
+
+If charges were computed independently for each solvent molecule:
+1. **Inconsistency**: Identical molecules would have different parameters (physically incorrect)
+2. **Performance**: AM1BCC is expensive; computing it 1000x is wasteful
+3. **Force field issues**: Parameter variability can cause OpenFF Interchange errors
+
+#### How It Works
+
+PolyzyMD solves this by computing charges **once** and reusing them:
+
+1. **Built-in solvents**: Pre-computed SDF files are bundled with the package (in `src/polyzymd/data/solvents/`)
+2. **User cache**: Custom solvents are cached in `~/.polyzymd/solvent_cache/` after first use
+3. **Lookup order**: Memory cache → Bundled SDFs → User cache → Generate and cache
+
+```
+# Lookup order for get_solvent_molecule("dmso")
+1. Check in-memory cache (fastest)
+2. Check bundled library: src/polyzymd/data/solvents/dmso.sdf
+3. Check user cache: ~/.polyzymd/solvent_cache/dmso.sdf
+4. Generate from SMILES + AM1BCC, save to user cache
+```
+
+#### Available Pre-computed Solvents
+
+All 12 library co-solvents plus water models have pre-computed charges:
+
+| Solvent | File | Charge Method |
+|---------|------|---------------|
+| TIP3P Water | `tip3p.sdf` | Literature values |
+| DMSO | `dmso.sdf` | AM1BCC |
+| DMF | `dmf.sdf` | AM1BCC |
+| Acetonitrile | `acetonitrile.sdf` | AM1BCC |
+| Urea | `urea.sdf` | AM1BCC |
+| Ethanol | `ethanol.sdf` | AM1BCC |
+| Methanol | `methanol.sdf` | AM1BCC |
+| Glycerol | `glycerol.sdf` | AM1BCC |
+| Isopropanol | `isopropanol.sdf` | AM1BCC |
+| Acetone | `acetone.sdf` | AM1BCC |
+| THF | `thf.sdf` | AM1BCC |
+| Dioxane | `dioxane.sdf` | AM1BCC |
+| Ethylene Glycol | `ethylene_glycol.sdf` | AM1BCC |
+
+#### Custom Solvents
+
+When you use a custom co-solvent (not in the library), PolyzyMD will:
+
+1. Generate the molecule from your SMILES string
+2. Compute AM1BCC partial charges (this may take a few seconds)
+3. Cache the parameterized molecule to `~/.polyzymd/solvent_cache/`
+4. Reuse the cached version for all future simulations
+
+```yaml
+co_solvents:
+  - name: "my_custom_solvent"
+    smiles: "CC(=O)OCC"        # First use: computes and caches charges
+    concentration: 0.5         # Future uses: loads from cache instantly
+```
+
+#### Managing the Cache
+
+You can inspect and manage the solvent cache programmatically:
+
+```python
+from polyzymd.data import list_available_solvents, clear_cache
+
+# List all available solvents (bundled + cached)
+solvents = list_available_solvents()
+print(solvents)
+# {'bundled': ['dmso', 'ethanol', ...], 'cached': ['my_custom_solvent']}
+
+# Clear the user cache (does not affect bundled solvents)
+clear_cache()
+```
+
+The user cache location is `~/.polyzymd/solvent_cache/`. You can safely delete this directory to force re-computation of custom solvents.
+
 ---
 
 ## Restraints Configuration
