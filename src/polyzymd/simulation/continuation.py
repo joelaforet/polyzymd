@@ -262,13 +262,9 @@ class ContinuationManager:
 
         report_interval = max(1, total_steps // num_samples)
 
-        # Trajectory reporter - write unwrapped coordinates for proper post-processing
-        # (enforcePeriodicBox=False prevents OpenMM from wrapping molecules,
-        # which would break them across periodic boundaries)
+        # Trajectory reporter
         traj_path = output_dir / f"production_{self._segment_index}_trajectory.dcd"
-        self._simulation.reporters.append(
-            DCDReporter(str(traj_path), report_interval, enforcePeriodicBox=False)
-        )
+        self._simulation.reporters.append(DCDReporter(str(traj_path), report_interval))
 
         # State data reporter
         state_path = output_dir / f"production_{self._segment_index}_state_data.csv"

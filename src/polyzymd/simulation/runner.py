@@ -271,12 +271,7 @@ class SimulationRunner:
         state_path = phase_dir / f"{output_prefix}_state_data.csv"
         pdb_path = phase_dir / f"{output_prefix}_topology.pdb"
 
-        # Write unwrapped coordinates for proper post-processing
-        # (enforcePeriodicBox=False prevents OpenMM from wrapping molecules,
-        # which would break them across periodic boundaries)
-        self._simulation.reporters.append(
-            DCDReporter(str(traj_path), report_interval, enforcePeriodicBox=False)
-        )
+        self._simulation.reporters.append(DCDReporter(str(traj_path), report_interval))
         self._simulation.reporters.append(
             StateDataReporter(
                 str(state_path),
@@ -402,12 +397,7 @@ class SimulationRunner:
         state_path = phase_dir / f"{phase_name}_state_data.csv"
         pdb_path = phase_dir / f"{phase_name}_topology.pdb"
 
-        # Write unwrapped coordinates for proper post-processing
-        # (enforcePeriodicBox=False prevents OpenMM from wrapping molecules,
-        # which would break them across periodic boundaries)
-        self._simulation.reporters.append(
-            DCDReporter(str(traj_path), report_interval, enforcePeriodicBox=False)
-        )
+        self._simulation.reporters.append(DCDReporter(str(traj_path), report_interval))
         self._simulation.reporters.append(
             StateDataReporter(
                 str(state_path),
