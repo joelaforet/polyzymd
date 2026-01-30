@@ -9,6 +9,7 @@ from polyzymd.analysis.unwrap import (
     box_dimensions_to_matrix,
     cluster_around_point,
     compute_residue_coms,
+    make_molecules_whole,
     minimum_image_shift,
 )
 
@@ -21,6 +22,7 @@ __all__ = [
     # unwrap.py - utility functions (for advanced users)
     "box_dimensions_to_matrix",
     "minimum_image_shift",
+    "make_molecules_whole",
     "compute_residue_coms",
     "cluster_around_point",
 ]

@@ -19,26 +19,23 @@ atoms belong to the same molecule. However, PDB CONECT records have a 5-digit
 atom index limit (99,999). For large solvated systems, atom indices overflow,
 corrupting the CONECT records and breaking bond-based methods.
 
-The Solution: Cluster Around Protein
-====================================
+The Solution: Three-Phase Transformation
+========================================
 
-PolyzyMD's approach leverages two key facts:
-1. **Residue membership is preserved**: Each molecule has a unique residue number
-2. **We want a "droplet" visualization**: Molecules should cluster around protein
+PolyzyMD's approach uses **residue membership** (each molecule has a unique
+residue number) combined with MDAnalysis's NoJump algorithm:
 
-Algorithm:
-1. Calculate reference center of mass (protein + ligand)
-2. Center the reference at the box center
-3. For each molecule (identified by residue):
-   a. Compute the molecule's center of mass
-   b. Find the periodic image that places the COM closest to the reference
-   c. Translate the entire molecule to that image
+**Phase 1: Make Molecules Whole (Frame 0)**
+    For each molecule (identified by residue), chain atoms together using
+    minimum image convention so the molecule is continuous.
 
-This creates a visualization where:
-- The protein is centered and whole
-- All solvent/polymer molecules are whole (not split across boundaries)
-- Everything clusters around the protein in a "droplet" shape
-- Box boundaries are effectively ignored for visualization purposes
+**Phase 2: NoJump (Frame 1+)**
+    Use MDAnalysis's NoJump algorithm to prevent atoms from jumping more than
+    half a box length between frames, maintaining molecular continuity.
+
+**Phase 3: Cluster Around Protein**
+    Translate each whole molecule to be at minimum image distance from the
+    protein center of mass, creating a "droplet" visualization.
 
 Mathematical Background
 =======================
@@ -54,31 +51,35 @@ For a displacement vector Δr between two points in a periodic box:
 
 Where H is the 3×3 box matrix with lattice vectors as columns.
 
-Box Matrix from Crystallographic Parameters
--------------------------------------------
+Making Molecules Whole
+----------------------
 
-For a box with edge lengths (a, b, c) and angles (α, β, γ)::
+For each residue, atoms are "chained" together:
 
-    H = | a    b·cos(γ)    c·cos(β)                        |
-        | 0    b·sin(γ)    c·[cos(α)-cos(β)cos(γ)]/sin(γ)  |
-        | 0    0           c·√(1 - cos²α - cos²β - cos²γ   |
-                               + 2·cos(α)cos(β)cos(γ)) / sin(γ) |
+1. First atom is the reference (unchanged)
+2. For each subsequent atom i:
+   - Compute displacement from previous: Δr = r[i] - r[i-1]
+   - Apply minimum image: Δr_mic = Δr - box * round(Δr / box)
+   - Place atom at: r[i]_new = r[i-1]_new + Δr_mic
 
-Vectorized Center of Mass Calculation
--------------------------------------
+This ensures all atoms in a molecule are within bond-length of each other.
 
-For N atoms with positions r_i, masses m_i, and residue indices k_i, the
-center of mass of residue K is::
+NoJump Algorithm (Kulke & Vermaas 2022)
+---------------------------------------
 
-    COM_K = Σ_{i: k_i = K} (m_i · r_i) / Σ_{i: k_i = K} m_i
+For each atom, compare current position to previous frame::
 
-This is computed efficiently using NumPy's bincount for the weighted sums.
+    f_current = positions @ box_inverse  # fractional coordinates
+    f_new = f_current - round(f_current - f_prev)  # remove jumps
+    positions = f_new @ box  # back to Cartesian
+
+This prevents atoms from moving more than half a box between frames.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -172,6 +173,98 @@ def minimum_image_shift(
         return image_shift @ box_matrix.T
 
 
+def make_molecules_whole(
+    positions: np.ndarray,
+    resindices: np.ndarray,
+    box_matrix: np.ndarray,
+    box_matrix_inv: np.ndarray,
+) -> None:
+    """
+    Make all molecules whole by chaining atoms within each residue.
+
+    For each residue (molecule), atoms are repositioned so each atom is at the
+    minimum image distance from the previous atom in the residue. This "chains"
+    atoms together, ensuring the molecule is continuous even if it spans
+    periodic boundaries.
+
+    Parameters
+    ----------
+    positions : np.ndarray
+        Atomic positions, shape (N_atoms, 3). **Modified in-place.**
+    resindices : np.ndarray
+        Residue index for each atom, shape (N_atoms,).
+    box_matrix : np.ndarray
+        3×3 box matrix (triclinic dimensions).
+    box_matrix_inv : np.ndarray
+        Inverse of box matrix (precomputed for efficiency).
+
+    Notes
+    -----
+    Performance is optimized by batching residues of the same size together.
+    Water molecules (3 atoms) are the most common and processed in a single
+    vectorized operation.
+
+    The algorithm for each residue:
+    1. Keep first atom at original position
+    2. For each subsequent atom:
+       - Compute displacement from previous atom
+       - Apply minimum image convention
+       - Place at previous + minimum_image_displacement
+    """
+    n_atoms = len(positions)
+    n_residues = resindices.max() + 1
+
+    # Build mapping: for each residue, list of atom indices in order
+    # We need atoms in their original order within each residue
+    residue_atom_lists: Dict[int, List[int]] = {i: [] for i in range(n_residues)}
+    for atom_idx in range(n_atoms):
+        residue_atom_lists[resindices[atom_idx]].append(atom_idx)
+
+    # Group residues by size for batched processing
+    size_to_residues: Dict[int, List[int]] = {}
+    for res_idx, atom_list in residue_atom_lists.items():
+        size = len(atom_list)
+        if size not in size_to_residues:
+            size_to_residues[size] = []
+        size_to_residues[size].append(res_idx)
+
+    # Process each size group
+    for size, residue_list in size_to_residues.items():
+        if size <= 1:
+            # Single-atom residues (ions) - nothing to chain
+            continue
+
+        n_res = len(residue_list)
+
+        # Gather atom indices for all residues of this size
+        # Shape: (n_residues_of_size, atoms_per_residue)
+        atom_indices = np.array(
+            [residue_atom_lists[res_idx] for res_idx in residue_list], dtype=np.int64
+        )
+
+        # Extract positions for these residues
+        # Shape: (n_res, size, 3)
+        res_positions = positions[atom_indices]
+
+        # Chain atoms: each atom placed at MIC distance from previous
+        for i in range(1, size):
+            # Displacement from atom i-1 to atom i
+            displacement = res_positions[:, i, :] - res_positions[:, i - 1, :]
+
+            # Convert to fractional, apply MIC, convert back
+            disp_frac = displacement @ box_matrix_inv.T
+            disp_mic_frac = disp_frac - np.round(disp_frac)
+            disp_mic = disp_mic_frac @ box_matrix.T
+
+            # Place atom i at (atom i-1) + minimum_image_displacement
+            res_positions[:, i, :] = res_positions[:, i - 1, :] + disp_mic
+
+        # Write back to positions array
+        positions[atom_indices.ravel()] = res_positions.reshape(-1, 3)
+
+    LOGGER.debug(f"Made {n_residues} molecules whole")
+
+
 def compute_residue_coms(
     positions: np.ndarray,
     resindices: np.ndarray,
@@ -198,35 +291,27 @@ def compute_residue_coms(
         Center of mass for each residue, shape (N_residues, 3).
     total_masses : np.ndarray
         Total mass of each residue, shape (N_residues,).
-        If masses not provided, this is the atom count per residue.
 
     Notes
     -----
-    Uses np.bincount for O(N_atoms) complexity instead of O(N_atoms × N_residues).
+    Uses np.bincount for O(N_atoms) complexity.
     """
     if n_residues is None:
         n_residues = resindices.max() + 1
 
     if masses is None:
-        # Geometric center - equal weights
         masses = np.ones(len(positions))
-        LOGGER.debug("No masses provided, using geometric center")
 
-    # Weighted position sums for each residue: Σ(m_i * r_i) for each residue
-    weighted_pos = positions * masses[:, np.newaxis]  # (N_atoms, 3)
+    # Weighted position sums
+    weighted_pos = positions * masses[:, np.newaxis]
 
-    # Sum weighted positions by residue index
     com_x = np.bincount(resindices, weights=weighted_pos[:, 0], minlength=n_residues)
     com_y = np.bincount(resindices, weights=weighted_pos[:, 1], minlength=n_residues)
     com_z = np.bincount(resindices, weights=weighted_pos[:, 2], minlength=n_residues)
 
-    # Total mass per residue
     total_masses = np.bincount(resindices, weights=masses, minlength=n_residues)
-
-    # Avoid division by zero for empty residues (shouldn't happen, but be safe)
     total_masses = np.where(total_masses == 0, 1.0, total_masses)
 
-    # COM = Σ(m_i * r_i) / Σ(m_i)
     coms = np.column_stack([com_x, com_y, com_z]) / total_masses[:, np.newaxis]
 
     return coms, total_masses
@@ -243,14 +328,13 @@ def cluster_around_point(
     """
     Translate each residue to its minimum image position relative to a reference point.
 
-    This is the core algorithm for creating "droplet" visualizations. Each residue
-    (molecule) is translated as a unit so its center of mass is at the minimum
-    image distance from the reference point.
+    Each residue (molecule) is translated as a unit so its center of mass is at
+    the minimum image distance from the reference point.
 
     Parameters
     ----------
     positions : np.ndarray
-        Atomic positions, shape (N_atoms, 3). Modified in-place.
+        Atomic positions, shape (N_atoms, 3). **Modified in-place.**
     resindices : np.ndarray
         Residue index for each atom, shape (N_atoms,).
     reference_point : np.ndarray
@@ -258,69 +342,69 @@ def cluster_around_point(
     box_matrix : np.ndarray
         3×3 box matrix.
     masses : np.ndarray, optional
-        Atomic masses for COM calculation. If None, uses geometric center.
+        Atomic masses for COM calculation.
     exclude_resindices : np.ndarray, optional
-        Residue indices to skip (e.g., protein residues already at reference).
+        Residue indices to skip (e.g., protein residues).
 
     Returns
     -------
     np.ndarray
-        Modified positions array (same object as input, modified in-place).
-
-    Notes
-    -----
-    Algorithm complexity: O(N_atoms) - single pass over all atoms.
-
-    The algorithm:
-    1. Compute COM of each residue: O(N_atoms)
-    2. Compute displacement from reference: O(N_residues)
-    3. Compute minimum image shift: O(N_residues)
-    4. Apply shifts to atoms via broadcasting: O(N_atoms)
+        Modified positions array (same object as input).
     """
     n_residues = resindices.max() + 1
     box_matrix_inv = np.linalg.inv(box_matrix)
 
-    # Step 1: Compute COM for each residue
+    # Compute COM for each residue
     residue_coms, _ = compute_residue_coms(positions, resindices, masses, n_residues)
 
-    # Step 2: Displacement of each residue COM from reference
-    displacements = residue_coms - reference_point  # (N_residues, 3)
+    # Displacement from reference
+    displacements = residue_coms - reference_point
 
-    # Step 3: Compute shift needed to bring each residue to minimum image
+    # Minimum image shift
     shifts = minimum_image_shift(displacements, box_matrix, box_matrix_inv)
 
-    # Step 4: Zero out shifts for excluded residues (protein/ligand)
+    # Zero out excluded residues
     if exclude_resindices is not None and len(exclude_resindices) > 0:
         shifts[exclude_resindices] = 0.0
 
-    # Step 5: Apply shifts to atoms (broadcast from residue to atoms)
-    atom_shifts = shifts[resindices]  # (N_atoms, 3)
-    positions += atom_shifts
+    # Apply to atoms
+    positions += shifts[resindices]
 
     return positions
 
 
 class ClusterAroundProtein:
     """
-    MDAnalysis transformation that clusters all molecules around protein+ligand.
+    MDAnalysis transformation that creates a "droplet" visualization.
 
-    Creates a "droplet" visualization where:
-    - Protein and ligand are centered at the box center
-    - All other molecules are whole and clustered around the protein
-    - Box boundaries are effectively ignored
+    This transformation applies three phases to create a visualization where
+    all molecules are whole and clustered around the protein:
 
-    This transformation is designed for **visualization only**, not for
-    quantitative analysis of diffusion or other PBC-sensitive properties.
+    1. **Make Whole (Frame 0)**: Chain atoms within each residue using minimum
+       image convention so molecules are continuous.
+
+    2. **NoJump (Frame 1+)**: Prevent atoms from jumping more than half a box
+       between frames, maintaining molecular continuity.
+
+    3. **Cluster**: Translate each molecule to be at minimum image distance
+       from the protein center of mass.
+
+    The result is a "droplet" visualization where:
+    - Protein and ligand are centered
+    - All molecules are whole (not split across boundaries)
+    - Solvent clusters around the protein
+    - Some atoms may be outside the primary unit cell (that's intentional!)
+
+    This transformation is for **visualization only**, not for diffusion analysis.
 
     Parameters
     ----------
     universe : MDAnalysis.Universe
         The Universe containing the trajectory.
     protein_selection : str
-        MDAnalysis selection string for protein atoms (e.g., "protein").
+        MDAnalysis selection string for protein atoms (default: "protein").
     ligand_selection : str, optional
         MDAnalysis selection string for ligand atoms (e.g., "resname LIG").
-        If provided, ligand is grouped with protein for centering.
 
     Examples
     --------
@@ -331,9 +415,8 @@ class ClusterAroundProtein:
     >>> transform = ClusterAroundProtein(u, "protein", "resname SUB")
     >>> u.trajectory.add_transformations(transform)
     >>>
-    >>> # Now iterate - positions are automatically transformed
     >>> for ts in u.trajectory:
-    ...     # Positions show protein-centered droplet
+    ...     # Positions show protein-centered droplet with whole molecules
     ...     pass
     """
 
@@ -362,7 +445,7 @@ class ClusterAroundProtein:
             self.ligand_ag = None
             self.reference_ag = self.protein_ag
 
-        # Get residue indices for the reference group (to exclude from clustering)
+        # Get residue indices for reference group
         self.reference_resindices = np.unique(self.reference_ag.resindices)
 
         # Check if masses are available
@@ -371,79 +454,118 @@ class ClusterAroundProtein:
             self._has_masses = True
         except Exception:
             self._has_masses = False
-            LOGGER.warning(
-                "Masses not available in topology. Using geometric centers instead of "
-                "center of mass. This may slightly affect clustering for asymmetric molecules."
-            )
+            LOGGER.warning("Masses not available in topology. Using geometric centers.")
 
-        # Cache for box matrix (recomputed if box changes)
+        # State for NoJump algorithm
+        self._prev_frac: Optional[np.ndarray] = None  # Previous frame fractional coords
+        self._is_first_frame = True
+
+        # Cache for box matrix
         self._cached_box_matrix: Optional[np.ndarray] = None
+        self._cached_box_matrix_inv: Optional[np.ndarray] = None
         self._cached_dimensions: Optional[np.ndarray] = None
 
         LOGGER.info(
             f"ClusterAroundProtein initialized: "
             f"{len(self.protein_ag)} protein atoms, "
             f"{len(self.ligand_ag) if self.ligand_ag else 0} ligand atoms, "
-            f"{len(self.reference_resindices)} reference residues"
+            f"{len(self.reference_resindices)} reference residues, "
+            f"{len(self.all_atoms)} total atoms"
         )
 
-    def _get_box_matrix(self, dimensions: np.ndarray) -> np.ndarray:
-        """Get box matrix, using cache if dimensions unchanged."""
+    def _get_box_matrices(self, dimensions: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Get box matrix and inverse, using cache if dimensions unchanged."""
         if self._cached_dimensions is None or not np.allclose(dimensions, self._cached_dimensions):
             self._cached_box_matrix = box_dimensions_to_matrix(dimensions)
+            self._cached_box_matrix_inv = np.linalg.inv(self._cached_box_matrix)
             self._cached_dimensions = dimensions.copy()
-        return self._cached_box_matrix
+        return self._cached_box_matrix, self._cached_box_matrix_inv
 
     def __call__(self, ts):
         """
-        Apply clustering transformation to the current timestep.
+        Apply the three-phase transformation to the current timestep.
+
+        Phase 1: Make molecules whole (frame 0) or NoJump (frame 1+)
+        Phase 2: Cluster around protein COM
 
         Parameters
         ----------
-        ts : MDAnalysis.coordinates.base.Timestep
+        ts : MDAnalysis.coordinates.timestep.Timestep
             The current timestep.
 
         Returns
         -------
-        ts : MDAnalysis.coordinates.base.Timestep
+        ts : MDAnalysis.coordinates.timestep.Timestep
             The modified timestep.
         """
         dimensions = ts.dimensions
         if dimensions is None:
-            raise ValueError("Trajectory has no box dimensions. Cannot apply PBC clustering.")
+            raise ValueError("Trajectory has no box dimensions.")
 
-        box_matrix = self._get_box_matrix(dimensions)
-        box_center = np.sum(box_matrix, axis=1) / 2  # Center of the box
+        box_matrix, box_matrix_inv = self._get_box_matrices(dimensions)
 
-        # Get current positions and residue indices
+        # Get positions and metadata
         positions = self.all_atoms.positions
         resindices = self.all_atoms.resindices
         masses = self.all_atoms.masses if self._has_masses else None
 
-        # Step 1: Compute reference (protein+ligand) center of mass
-        ref_positions = self.reference_ag.positions
+        # =====================================================================
+        # PHASE 1: Make molecules whole
+        # =====================================================================
+
+        if self._is_first_frame:
+            # Frame 0: Use residue-based unwrapping to make molecules whole
+            LOGGER.debug("Frame 0: Making molecules whole using residue chaining")
+            make_molecules_whole(positions, resindices, box_matrix, box_matrix_inv)
+
+            # Store fractional coordinates for NoJump on subsequent frames
+            self._prev_frac = positions @ box_matrix_inv.T
+            self._is_first_frame = False
+        else:
+            # Frame 1+: Use NoJump algorithm (from MDAnalysis/Kulke & Vermaas 2022)
+            # This prevents atoms from jumping more than half a box between frames
+            pos_frac = positions @ box_matrix_inv.T
+            pos_frac_unwrapped = pos_frac - np.round(pos_frac - self._prev_frac)
+            positions[:] = pos_frac_unwrapped @ box_matrix.T
+
+            # Update stored fractional coords for next frame
+            self._prev_frac = pos_frac_unwrapped
+
+        # =====================================================================
+        # PHASE 2: Cluster around protein
+        # =====================================================================
+
+        # Compute protein+ligand center of mass
+        ref_positions = positions[self.reference_ag.ix]
         if self._has_masses:
             ref_masses = self.reference_ag.masses
             ref_com = np.average(ref_positions, axis=0, weights=ref_masses)
         else:
             ref_com = np.mean(ref_positions, axis=0)
 
-        # Step 2: Center the entire system so reference COM is at box center
-        translation = box_center - ref_com
-        positions += translation
-
-        # Step 3: Cluster all molecules around the (now centered) reference
-        # The reference is now at box_center
+        # Cluster all molecules around the protein COM
+        # Molecules will be translated to their minimum image position relative to protein
         cluster_around_point(
             positions=positions,
             resindices=resindices,
-            reference_point=box_center,
+            reference_point=ref_com,
             box_matrix=box_matrix,
             masses=masses,
             exclude_resindices=self.reference_resindices,
         )
 
-        # Update positions in the AtomGroup
+        # Update positions in the Universe
         self.all_atoms.positions = positions
 
         return ts
+
+    def reset(self) -> None:
+        """
+        Reset the transformation state.
+
+        Call this if you need to reprocess the trajectory from the beginning,
+        or if you're jumping to a non-sequential frame.
+        """
+        self._prev_frac = None
+        self._is_first_frame = True
+        LOGGER.debug("ClusterAroundProtein state reset")
