@@ -609,6 +609,11 @@ def continue_sim(
     default="HOH SOL WAT TIP3",
     help="Space-separated water residue names for --strip-solvent (default: 'HOH SOL WAT TIP3')",
 )
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    help="Disable progress bar (for batch/scripted usage)",
+)
 def postprocess(
     config: str,
     replicate: int,
@@ -617,11 +622,15 @@ def postprocess(
     strip_solvent: bool,
     strip_cosolvent: bool,
     water_resnames: str,
+    no_progress: bool,
 ) -> None:
     """Post-process trajectory for visualization.
 
     Makes the trajectory visually whole by unwrapping molecules split across
     periodic boundaries and centering protein+substrate in the simulation box.
+
+    Uses residue-based unwrapping (not bond-based) to correctly handle large
+    systems where PDB CONECT records may be corrupted.
 
     The output is written to the scratch directory specified in config.yaml.
     Run this command from the projects directory where config.yaml lives.
@@ -639,6 +648,9 @@ def postprocess(
 
         # Custom output path
         polyzymd postprocess -c config.yaml -r 1 -o /path/to/output.dcd
+
+        # Disable progress bar for batch jobs
+        polyzymd postprocess -c config.yaml -r 1 --no-progress
     """
     from polyzymd.analysis.make_whole import make_whole_trajectory
 
@@ -667,6 +679,7 @@ def postprocess(
             strip_solvent=strip_solvent,
             strip_cosolvent=strip_cosolvent,
             water_resnames=water_resnames,
+            show_progress=not no_progress,
         )
 
         click.echo(click.style(f"Successfully wrote: {output_path}", fg="green"))

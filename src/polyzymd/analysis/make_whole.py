@@ -2,11 +2,29 @@
 Make trajectories visually whole for visualization.
 
 This module provides tools to post-process MD trajectories by:
-1. Unwrapping molecules split across periodic boundaries
+1. Unwrapping molecules split across periodic boundaries (using residue membership)
 2. Centering protein and substrate in the simulation box
 
 The output trajectories are suitable for visualization in PyMOL, VMD, etc.
 without visual artifacts from periodic boundary conditions.
+
+Why Residue-Based Unwrapping?
+-----------------------------
+
+MDAnalysis's built-in `unwrap()` transformation requires bond connectivity to
+determine which atoms belong to the same molecule. However, PDB CONECT records
+have a 5-digit atom index limit (99,999). For large solvated systems, atom
+indices overflow, corrupting the CONECT records::
+
+    CONECT 3232 3229 3233 3234 3235   <- Valid
+    CONECT2116421165211682116921170   <- Corrupted (no spaces)
+
+This causes MDAnalysis to see each atom as its own fragment, so `unwrap()` has
+no effect on water/solvent molecules.
+
+PolyzyMD's solution: Since `SystemBuilder._assign_pdb_identifiers()` ensures
+each molecule has a unique residue number, we unwrap based on **residue membership**
+instead of bond connectivity. See `polyzymd.analysis.unwrap` for details.
 """
 
 from __future__ import annotations
@@ -18,6 +36,9 @@ from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 import MDAnalysis as mda
 from MDAnalysis import transformations
+from tqdm import tqdm
+
+from polyzymd.analysis.unwrap import ResidueUnwrapTransform
 
 if TYPE_CHECKING:
     from polyzymd.config.schema import SimulationConfig
@@ -128,12 +149,13 @@ def make_whole_trajectory(
     strip_solvent: bool = False,
     strip_cosolvent: bool = False,
     water_resnames: str = "HOH SOL WAT TIP3",
+    show_progress: bool = True,
 ) -> Path:
     """
     Make trajectory visually whole by unwrapping PBC and centering protein+ligand.
 
-    Applies MDAnalysis transformations to:
-    1. Unwrap molecules split across periodic boundaries
+    Applies transformations to:
+    1. Unwrap molecules split across periodic boundaries (residue-based algorithm)
     2. Center protein and substrate in the simulation box
 
     The ligand residue name is extracted from config.substrate.residue_name
@@ -153,6 +175,8 @@ def make_whole_trajectory(
         strip_cosolvent: If True, exclude co-solvents from output
         water_resnames: Space-separated water residue names for stripping
                         (default: "HOH SOL WAT TIP3")
+        show_progress: If True, display tqdm progress bar during frame iteration.
+                       Set to False for batch/scripted usage.
 
     Returns:
         Path to output trajectory file
@@ -169,6 +193,18 @@ def make_whole_trajectory(
 
         >>> # Strip solvent for smaller visualization file
         >>> make_whole_trajectory("config.yaml", replicate=1, strip_solvent=True)
+
+        >>> # Disable progress bar for scripted usage
+        >>> make_whole_trajectory("config.yaml", replicate=1, show_progress=False)
+
+    Notes
+    -----
+    This function uses residue-based unwrapping instead of MDAnalysis's built-in
+    bond-based `unwrap()`. This is necessary because PDB CONECT records are often
+    corrupted for large systems (atom indices > 99,999 overflow 5-digit PDB format).
+
+    PolyzyMD's `SystemBuilder` assigns unique residue numbers to each molecule,
+    so residue membership reliably identifies molecular boundaries.
     """
     from polyzymd.config.schema import SimulationConfig
 
@@ -216,8 +252,9 @@ def make_whole_trajectory(
     LOGGER.info(f"Loaded universe: {u.atoms.n_atoms} atoms, {len(u.trajectory)} frames")
 
     # Build transformation pipeline
-    # 1. Unwrap - make molecules whole across PBC
-    unwrap_transform = transformations.unwrap(u.atoms)
+    # 1. Residue-based unwrap - make molecules whole across PBC
+    #    This replaces MDAnalysis's bond-based unwrap() which fails for large systems
+    unwrap_transform = ResidueUnwrapTransform(u.atoms)
 
     # 2. Center protein+ligand in box
     center_ag = u.select_atoms(center_selection)
@@ -231,7 +268,7 @@ def make_whole_trajectory(
     # Apply transformations in order
     u.trajectory.add_transformations(unwrap_transform, center_transform)
 
-    LOGGER.info("Applied transformations: unwrap, center_in_box")
+    LOGGER.info("Applied transformations: residue-based unwrap, center_in_box")
 
     # Determine which atoms to write
     if strip_solvent or strip_cosolvent:
@@ -260,12 +297,27 @@ def make_whole_trajectory(
     # Ensure output directory exists
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    # Write transformed trajectory
+    # Write transformed trajectory with optional progress bar
     LOGGER.info(f"Writing trajectory to {output}...")
+
+    n_frames = len(u.trajectory)
+
     with mda.Writer(str(output), output_atoms.n_atoms) as writer:
-        for ts in u.trajectory:
+        # Create iterator with optional progress bar
+        if show_progress:
+            frame_iterator = tqdm(
+                u.trajectory,
+                total=n_frames,
+                desc="Processing frames",
+                unit="frame",
+                ncols=80,
+            )
+        else:
+            frame_iterator = u.trajectory
+
+        for ts in frame_iterator:
             writer.write(output_atoms)
 
-    LOGGER.info(f"Successfully wrote {len(u.trajectory)} frames to {output}")
+    LOGGER.info(f"Successfully wrote {n_frames} frames to {output}")
 
     return output
