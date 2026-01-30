@@ -19,23 +19,32 @@ atoms belong to the same molecule. However, PDB CONECT records have a 5-digit
 atom index limit (99,999). For large solvated systems, atom indices overflow,
 corrupting the CONECT records and breaking bond-based methods.
 
-The Solution: Three-Phase Transformation
-========================================
+The Solution: Unwrapped Trajectories + NoJump + Cluster
+=======================================================
 
-PolyzyMD's approach uses **residue membership** (each molecule has a unique
-residue number) combined with MDAnalysis's NoJump algorithm:
+PolyzyMD writes trajectories with ``enforcePeriodicBox=False`` in OpenMM's
+DCDReporter. This means:
 
-**Phase 1: Make Molecules Whole (Frame 0)**
-    For each molecule (identified by residue), chain atoms together using
-    minimum image convention so the molecule is continuous.
+1. **Molecules start whole**: PACKMOL creates continuous molecules
+2. **No per-frame wrapping**: OpenMM writes raw coordinates without applying
+   PBC wrapping on each frame, so molecules stay whole
+3. **Atoms may drift**: Over long simulations, atoms can move far from origin
 
-**Phase 2: NoJump (Frame 1+)**
-    Use MDAnalysis's NoJump algorithm to prevent atoms from jumping more than
-    half a box length between frames, maintaining molecular continuity.
+The post-processing transformation then applies:
 
-**Phase 3: Cluster Around Protein**
+**Phase 1: NoJump (all frames)**
+    Prevent atoms from jumping more than half a box between frames due to
+    any residual discontinuities. This maintains molecular continuity.
+
+**Phase 2: Cluster Around Protein**
     Translate each whole molecule to be at minimum image distance from the
     protein center of mass, creating a "droplet" visualization.
+
+.. note::
+
+   This module requires trajectories written with ``enforcePeriodicBox=False``.
+   Trajectories written with the default OpenMM behavior (per-frame wrapping)
+   will NOT work correctly with this post-processor.
 
 Mathematical Background
 =======================
@@ -50,19 +59,6 @@ For a displacement vector Δr between two points in a periodic box:
 3. Convert back to Cartesian: Δr_mic = H · Δs_mic
 
 Where H is the 3×3 box matrix with lattice vectors as columns.
-
-Making Molecules Whole
-----------------------
-
-For each residue, atoms are "chained" together:
-
-1. First atom is the reference (unchanged)
-2. For each subsequent atom i:
-   - Compute displacement from previous: Δr = r[i] - r[i-1]
-   - Apply minimum image: Δr_mic = Δr - box * round(Δr / box)
-   - Place atom at: r[i]_new = r[i-1]_new + Δr_mic
-
-This ensures all atoms in a molecule are within bond-length of each other.
 
 NoJump Algorithm (Kulke & Vermaas 2022)
 ---------------------------------------
@@ -377,16 +373,13 @@ class ClusterAroundProtein:
     """
     MDAnalysis transformation that creates a "droplet" visualization.
 
-    This transformation applies three phases to create a visualization where
+    This transformation applies two phases to create a visualization where
     all molecules are whole and clustered around the protein:
 
-    1. **Make Whole (Frame 0)**: Chain atoms within each residue using minimum
-       image convention so molecules are continuous.
+    1. **NoJump (all frames)**: Prevent atoms from jumping more than half a box
+       between frames, maintaining molecular continuity from the initial state.
 
-    2. **NoJump (Frame 1+)**: Prevent atoms from jumping more than half a box
-       between frames, maintaining molecular continuity.
-
-    3. **Cluster**: Translate each molecule to be at minimum image distance
+    2. **Cluster**: Translate each molecule to be at minimum image distance
        from the protein center of mass.
 
     The result is a "droplet" visualization where:
@@ -394,6 +387,13 @@ class ClusterAroundProtein:
     - All molecules are whole (not split across boundaries)
     - Solvent clusters around the protein
     - Some atoms may be outside the primary unit cell (that's intentional!)
+
+    .. important::
+
+       This transformation requires trajectories written with OpenMM's
+       ``enforcePeriodicBox=False`` option. PolyzyMD's simulation runner
+       writes trajectories this way by default. Trajectories written with
+       per-frame PBC wrapping will NOT work correctly.
 
     This transformation is for **visualization only**, not for diffusion analysis.
 
@@ -483,9 +483,9 @@ class ClusterAroundProtein:
 
     def __call__(self, ts):
         """
-        Apply the three-phase transformation to the current timestep.
+        Apply the NoJump + Cluster transformation to the current timestep.
 
-        Phase 1: Make molecules whole (frame 0) or NoJump (frame 1+)
+        Phase 1: NoJump - prevent atoms from jumping >half box between frames
         Phase 2: Cluster around protein COM
 
         Parameters
@@ -497,6 +497,11 @@ class ClusterAroundProtein:
         -------
         ts : MDAnalysis.coordinates.timestep.Timestep
             The modified timestep.
+
+        Notes
+        -----
+        This transformation assumes trajectories were written with
+        ``enforcePeriodicBox=False``, so molecules are already whole.
         """
         dimensions = ts.dimensions
         if dimensions is None:
@@ -510,19 +515,20 @@ class ClusterAroundProtein:
         masses = self.all_atoms.masses if self._has_masses else None
 
         # =====================================================================
-        # PHASE 1: Make molecules whole
+        # PHASE 1: NoJump - maintain molecular continuity between frames
         # =====================================================================
+        # Trajectories are written with enforcePeriodicBox=False, so molecules
+        # start whole. NoJump ensures they stay whole by preventing any atom
+        # from jumping more than half a box length between frames.
 
         if self._is_first_frame:
-            # Frame 0: Use residue-based unwrapping to make molecules whole
-            LOGGER.debug("Frame 0: Making molecules whole using residue chaining")
-            make_molecules_whole(positions, resindices, box_matrix, box_matrix_inv)
-
-            # Store fractional coordinates for NoJump on subsequent frames
+            # Frame 0: Just store fractional coordinates for NoJump on next frame
+            # Molecules are already whole from PACKMOL/initial configuration
+            LOGGER.debug("Frame 0: Storing initial fractional coordinates")
             self._prev_frac = positions @ box_matrix_inv.T
             self._is_first_frame = False
         else:
-            # Frame 1+: Use NoJump algorithm (from MDAnalysis/Kulke & Vermaas 2022)
+            # Frame 1+: Apply NoJump algorithm (Kulke & Vermaas 2022)
             # This prevents atoms from jumping more than half a box between frames
             pos_frac = positions @ box_matrix_inv.T
             pos_frac_unwrapped = pos_frac - np.round(pos_frac - self._prev_frac)
