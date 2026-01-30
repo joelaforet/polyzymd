@@ -626,11 +626,16 @@ def postprocess(
 ) -> None:
     """Post-process trajectory for visualization.
 
-    Makes the trajectory visually whole by unwrapping molecules split across
-    periodic boundaries and centering protein+substrate in the simulation box.
+    Creates a "droplet" visualization where protein+ligand are centered and all
+    other molecules (polymers, water, co-solvents) cluster around them. This is
+    ideal for creating movies showing protein dynamics in a solvated environment.
 
-    Uses residue-based unwrapping (not bond-based) to correctly handle large
-    systems where PDB CONECT records may be corrupted.
+    The transformation:
+    1. Centers protein+ligand at the box center
+    2. Clusters all molecules around the protein (minimum image convention)
+    3. Results in a compact "droplet" with no bonds spanning the box
+
+    This output is for VISUALIZATION ONLY - not for diffusion or PBC-sensitive analysis.
 
     The output is written to the scratch directory specified in config.yaml.
     Run this command from the projects directory where config.yaml lives.

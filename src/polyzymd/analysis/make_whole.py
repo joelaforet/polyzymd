@@ -1,30 +1,34 @@
 """
 Make trajectories visually whole for visualization.
 
-This module provides tools to post-process MD trajectories by:
-1. Unwrapping molecules split across periodic boundaries (using residue membership)
-2. Centering protein and substrate in the simulation box
+This module provides tools to post-process MD trajectories by clustering all
+molecules around the protein, creating a "droplet" visualization suitable for
+PyMOL, VMD, etc.
 
-The output trajectories are suitable for visualization in PyMOL, VMD, etc.
-without visual artifacts from periodic boundary conditions.
+The Problem
+-----------
 
-Why Residue-Based Unwrapping?
------------------------------
+In periodic boundary condition (PBC) simulations:
+1. Molecules can be "split" across box boundaries
+2. Solvent scatters throughout periodic images
+3. Standard unwrapping fails when bond connectivity is unavailable
 
-MDAnalysis's built-in `unwrap()` transformation requires bond connectivity to
-determine which atoms belong to the same molecule. However, PDB CONECT records
-have a 5-digit atom index limit (99,999). For large solvated systems, atom
-indices overflow, corrupting the CONECT records::
+PolyzyMD's PDB files have corrupted CONECT records for large systems (atom
+indices >99,999 overflow the 5-digit PDB format), breaking bond-based methods.
 
-    CONECT 3232 3229 3233 3234 3235   <- Valid
-    CONECT2116421165211682116921170   <- Corrupted (no spaces)
+The Solution
+------------
 
-This causes MDAnalysis to see each atom as its own fragment, so `unwrap()` has
-no effect on water/solvent molecules.
+Since PolyzyMD assigns unique residue numbers to each molecule, we use
+**residue membership** instead of bonds. The `ClusterAroundProtein` transformation:
 
-PolyzyMD's solution: Since `SystemBuilder._assign_pdb_identifiers()` ensures
-each molecule has a unique residue number, we unwrap based on **residue membership**
-instead of bond connectivity. See `polyzymd.analysis.unwrap` for details.
+1. Centers the protein+ligand at the box center
+2. Translates each molecule (as a unit) to its minimum image position
+   relative to the protein
+3. Creates a "droplet" where solvent clusters around the protein
+
+This approach is for **visualization only** - the output trajectories should
+not be used for diffusion analysis or other PBC-sensitive calculations.
 """
 
 from __future__ import annotations
@@ -35,10 +39,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 import MDAnalysis as mda
-from MDAnalysis import transformations
 from tqdm import tqdm
 
-from polyzymd.analysis.unwrap import ResidueUnwrapTransform
+from polyzymd.analysis.unwrap import ClusterAroundProtein
 
 if TYPE_CHECKING:
     from polyzymd.config.schema import SimulationConfig
@@ -152,23 +155,23 @@ def make_whole_trajectory(
     show_progress: bool = True,
 ) -> Path:
     """
-    Make trajectory visually whole by unwrapping PBC and centering protein+ligand.
+    Create a visualization-ready trajectory with molecules clustered around protein.
 
-    Applies transformations to:
-    1. Unwrap molecules split across periodic boundaries (residue-based algorithm)
-    2. Center protein and substrate in the simulation box
+    Applies the ClusterAroundProtein transformation to create a "droplet"
+    visualization where:
+    - Protein and ligand are centered at the box center
+    - All other molecules (polymers, water, co-solvents) cluster around the protein
+    - No molecules are split across periodic boundaries
 
-    The ligand residue name is extracted from config.substrate.residue_name
-    (single source of truth from config.yaml).
-
-    Output is written to the scratch directory derived from config.output.
+    The output is suitable for visualization in PyMOL, VMD, etc. but should NOT
+    be used for diffusion analysis or other PBC-sensitive calculations.
 
     Args:
         config: Path to config.yaml or SimulationConfig object
         replicate: Replicate number (used to determine working directory)
         output: Output trajectory path. If None, uses default naming:
-                - Full trajectory: merged_madeWhole_production.dcd
-                - Partial: merged_madeWhole_production(start-end).dcd
+                - Full trajectory: merged_visualization.dcd
+                - Partial: merged_visualization(start-end).dcd
         segment_range: Optional (start, end) to process only certain segments (inclusive).
                        E.g., (3, 7) loads production_3 through production_7.
         strip_solvent: If True, exclude water from output (smaller file, no water analysis)
@@ -199,9 +202,9 @@ def make_whole_trajectory(
 
     Notes
     -----
-    This function uses residue-based unwrapping instead of MDAnalysis's built-in
-    bond-based `unwrap()`. This is necessary because PDB CONECT records are often
-    corrupted for large systems (atom indices > 99,999 overflow 5-digit PDB format).
+    This function uses residue-based clustering instead of bond-based unwrapping.
+    This is necessary because PDB CONECT records are often corrupted for large
+    systems (atom indices > 99,999 overflow 5-digit PDB format).
 
     PolyzyMD's `SystemBuilder` assigns unique residue numbers to each molecule,
     so residue membership reliably identifies molecular boundaries.
@@ -222,9 +225,9 @@ def make_whole_trajectory(
     # Determine output path
     if output is None:
         if segment_range:
-            filename = f"merged_madeWhole_production({segment_range[0]}-{segment_range[1]}).dcd"
+            filename = f"merged_visualization({segment_range[0]}-{segment_range[1]}).dcd"
         else:
-            filename = "merged_madeWhole_production.dcd"
+            filename = "merged_visualization.dcd"
         output = working_dir / filename
     else:
         output = Path(output)
@@ -234,15 +237,15 @@ def make_whole_trajectory(
     # Find topology and trajectory files
     topology_file, trajectory_files = find_production_trajectories(working_dir, segment_range)
 
-    # Build center selection from config
-    # Protein is always included; add ligand if present
+    # Build selection strings from config
+    protein_selection = "protein"
     ligand_resname = config.substrate.residue_name if config.substrate else None
     if ligand_resname:
-        center_selection = f"protein or resname {ligand_resname}"
-        LOGGER.info(f"Centering on: protein and {ligand_resname}")
+        ligand_selection = f"resname {ligand_resname}"
+        LOGGER.info(f"Reference group: protein + {ligand_resname}")
     else:
-        center_selection = "protein"
-        LOGGER.info("Centering on: protein only (no substrate)")
+        ligand_selection = None
+        LOGGER.info("Reference group: protein only (no substrate)")
 
     # Load universe with all trajectories
     LOGGER.info(f"Loading {len(trajectory_files)} trajectory files...")
@@ -251,24 +254,17 @@ def make_whole_trajectory(
 
     LOGGER.info(f"Loaded universe: {u.atoms.n_atoms} atoms, {len(u.trajectory)} frames")
 
-    # Build transformation pipeline
-    # 1. Residue-based unwrap - make molecules whole across PBC
-    #    This replaces MDAnalysis's bond-based unwrap() which fails for large systems
-    unwrap_transform = ResidueUnwrapTransform(u.atoms)
+    # Create the clustering transformation
+    cluster_transform = ClusterAroundProtein(
+        universe=u,
+        protein_selection=protein_selection,
+        ligand_selection=ligand_selection,
+    )
 
-    # 2. Center protein+ligand in box
-    center_ag = u.select_atoms(center_selection)
-    if len(center_ag) == 0:
-        raise ValueError(
-            f"Center selection '{center_selection}' matched no atoms. "
-            "Check that the topology contains protein atoms."
-        )
-    center_transform = transformations.center_in_box(center_ag, center="mass")
+    # Apply transformation
+    u.trajectory.add_transformations(cluster_transform)
 
-    # Apply transformations in order
-    u.trajectory.add_transformations(unwrap_transform, center_transform)
-
-    LOGGER.info("Applied transformations: residue-based unwrap, center_in_box")
+    LOGGER.info("Applied transformation: ClusterAroundProtein")
 
     # Determine which atoms to write
     if strip_solvent or strip_cosolvent:
@@ -276,7 +272,8 @@ def make_whole_trajectory(
 
         if strip_solvent:
             # Build exclusion for water
-            water_sel = " ".join(f"resname {r}" for r in water_resnames.split())
+            water_names = water_resnames.split()
+            water_sel = " or ".join(f"resname {r}" for r in water_names)
             exclude_parts.append(f"({water_sel})")
             LOGGER.info(f"Stripping solvent: {water_resnames}")
 

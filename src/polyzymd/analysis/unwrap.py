@@ -1,110 +1,88 @@
 """
-Residue-based periodic boundary condition (PBC) unwrapping.
+Cluster-based trajectory visualization for periodic boundary conditions.
 
-This module provides mathematically rigorous tools to "unwrap" molecules that have
-been split across periodic boundaries in molecular dynamics trajectories. Unlike
-bond-based approaches (which fail when connectivity information is unavailable or
-corrupted), this module uses **residue membership** to determine which atoms belong
-to the same molecule.
+This module provides tools to create "droplet" visualizations of solvated MD
+trajectories, where all molecules cluster around a central reference group
+(typically protein + ligand). This approach is designed for **visualization**,
+not for quantitative analysis of diffusion or other PBC-sensitive properties.
 
-Theory of Periodic Boundary Conditions
-======================================
+The Problem
+===========
 
-In MD simulations, the simulation box is replicated infinitely in all directions
-(periodic images). When a molecule moves across a box boundary, it reappears on
-the opposite side. This creates visual artifacts where molecules appear "split"
-across the box.
+In MD simulations with periodic boundary conditions (PBC), molecules can:
+1. Diffuse across box boundaries, appearing on the opposite side
+2. Become "split" across boundaries (part of molecule on each side)
+3. Scatter throughout periodic images, making visualization confusing
 
-The simulation box is defined by three lattice vectors **a**, **b**, **c** and
-angles α (between b and c), β (between a and c), γ (between a and b). These are
-stored in MDAnalysis as::
+Standard unwrapping approaches rely on **bond connectivity** to determine which
+atoms belong to the same molecule. However, PDB CONECT records have a 5-digit
+atom index limit (99,999). For large solvated systems, atom indices overflow,
+corrupting the CONECT records and breaking bond-based methods.
 
-    dimensions = [a, b, c, alpha, beta, gamma]  # lengths in Å, angles in degrees
+The Solution: Cluster Around Protein
+====================================
 
-Box Matrix Construction
------------------------
+PolyzyMD's approach leverages two key facts:
+1. **Residue membership is preserved**: Each molecule has a unique residue number
+2. **We want a "droplet" visualization**: Molecules should cluster around protein
 
-The box matrix **H** transforms fractional coordinates to Cartesian coordinates::
+Algorithm:
+1. Calculate reference center of mass (protein + ligand)
+2. Center the reference at the box center
+3. For each molecule (identified by residue):
+   a. Compute the molecule's center of mass
+   b. Find the periodic image that places the COM closest to the reference
+   c. Translate the entire molecule to that image
 
-    r = H · s
+This creates a visualization where:
+- The protein is centered and whole
+- All solvent/polymer molecules are whole (not split across boundaries)
+- Everything clusters around the protein in a "droplet" shape
+- Box boundaries are effectively ignored for visualization purposes
 
-where:
-- **r** is a position in Cartesian coordinates (Å)
-- **s** is a position in fractional coordinates (dimensionless, range [0, 1))
-- **H** is the 3×3 box matrix (columns are the lattice vectors)
-
-For a general triclinic box with crystallographic parameters (a, b, c, α, β, γ),
-the box matrix in the standard orientation (a along x-axis, b in xy-plane) is::
-
-    H = | a_x  b_x  c_x |   | a    b·cos(γ)    c·cos(β)                        |
-        | 0    b_y  c_y | = | 0    b·sin(γ)    c·[cos(α)-cos(β)cos(γ)]/sin(γ)  |
-        | 0    0    c_z |   | 0    0           c·√(1 - cos²α - cos²β - cos²γ   |
-                            |                      + 2·cos(α)cos(β)cos(γ)) / sin(γ) |
-
-For orthogonal boxes (α = β = γ = 90°), this simplifies to::
-
-    H = | a  0  0 |
-        | 0  b  0 |
-        | 0  0  c |
+Mathematical Background
+=======================
 
 Minimum Image Convention
 ------------------------
 
-To find the shortest vector between two atoms across periodic boundaries, we use
-the Minimum Image Convention (MIC). Given a displacement vector Δr:
+For a displacement vector Δr between two points in a periodic box:
 
 1. Convert to fractional coordinates: Δs = H⁻¹ · Δr
-2. Apply MIC: Δs_mic = Δs - round(Δs)    # wraps to [-0.5, 0.5)
-3. Convert back: Δr_mic = H · Δs_mic
+2. Apply minimum image: Δs_mic = Δs - round(Δs)
+3. Convert back to Cartesian: Δr_mic = H · Δs_mic
 
-The result Δr_mic is the shortest displacement vector considering all periodic
-images.
+Where H is the 3×3 box matrix with lattice vectors as columns.
 
-Residue-Based Unwrapping Algorithm
-----------------------------------
+Box Matrix from Crystallographic Parameters
+-------------------------------------------
 
-For each residue (which corresponds to one molecule in PolyzyMD's PDB output):
+For a box with edge lengths (a, b, c) and angles (α, β, γ)::
 
-1. Use the first atom as the reference position
-2. For each subsequent atom:
-   a. Calculate displacement from previous atom: Δr = r_i - r_{i-1}
-   b. Apply MIC to get shortest displacement: Δr_mic = MIC(Δr)
-   c. Place atom at: r_i_unwrapped = r_{i-1}_unwrapped + Δr_mic
+    H = | a    b·cos(γ)    c·cos(β)                        |
+        | 0    b·sin(γ)    c·[cos(α)-cos(β)cos(γ)]/sin(γ)  |
+        | 0    0           c·√(1 - cos²α - cos²β - cos²γ   |
+                               + 2·cos(α)cos(β)cos(γ)) / sin(γ) |
 
-This "chains" atoms together, ensuring the molecule is continuous even if it
-spans multiple periodic images.
+Vectorized Center of Mass Calculation
+-------------------------------------
 
-Why Residue-Based Works for PolyzyMD
-------------------------------------
+For N atoms with positions r_i, masses m_i, and residue indices k_i, the
+center of mass of residue K is::
 
-PolyzyMD's `SystemBuilder._assign_pdb_identifiers()` ensures that each molecule
-(protein, ligand, individual polymer, water, DMSO) gets its own unique residue
-number. This means:
+    COM_K = Σ_{i: k_i = K} (m_i · r_i) / Σ_{i: k_i = K} m_i
 
-- All atoms of a water molecule share the same resid
-- All atoms of a DMSO molecule share the same resid
-- All atoms of a polymer chain share the same resid
-
-Even when CONECT records are corrupted (atom indices > 99,999 overflow PDB format),
-the residue assignments remain valid, allowing correct unwrapping.
-
-References
-----------
-.. [1] Allen, M.P. & Tildesley, D.J. (2017). Computer Simulation of Liquids.
-       Oxford University Press. Chapter 1.5: Periodic Boundary Conditions.
-.. [2] Tuckerman, M.E. (2010). Statistical Mechanics: Theory and Molecular
-       Simulation. Oxford University Press. Section 3.3.
+This is computed efficiently using NumPy's bincount for the weighted sums.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Tuple
 
 import numpy as np
 
 if TYPE_CHECKING:
-    import MDAnalysis as mda
     from MDAnalysis.core.groups import AtomGroup
 
 LOGGER = logging.getLogger(__name__)
@@ -114,74 +92,29 @@ def box_dimensions_to_matrix(dimensions: np.ndarray) -> np.ndarray:
     """
     Convert MDAnalysis box dimensions to a 3×3 box matrix.
 
-    Transforms crystallographic parameters [a, b, c, α, β, γ] into the box matrix
-    **H** whose columns are the lattice vectors. This matrix converts fractional
-    coordinates to Cartesian coordinates: r = H · s.
-
     Parameters
     ----------
     dimensions : np.ndarray
-        Box dimensions as [a, b, c, alpha, beta, gamma] where:
-        - a, b, c are box edge lengths in Ångströms
-        - alpha, beta, gamma are box angles in degrees:
-          - α (alpha): angle between b and c
-          - β (beta): angle between a and c
-          - γ (gamma): angle between a and b
+        Box dimensions as [a, b, c, alpha, beta, gamma] where lengths are in
+        Ångströms and angles are in degrees.
 
     Returns
     -------
     np.ndarray
-        3×3 box matrix H with lattice vectors as columns::
-
-            H = | a_x  b_x  c_x |
-                | a_y  b_y  c_y |
-                | a_z  b_z  c_z |
+        3×3 box matrix H with lattice vectors as columns.
 
     Notes
     -----
-    The box matrix is constructed in the standard crystallographic orientation:
-
-    - Vector **a** lies along the positive x-axis
-    - Vector **b** lies in the xy-plane (positive y component)
-    - Vector **c** has components in all three directions
-
-    The explicit formulas are::
-
-        a_x = a
-        b_x = b · cos(γ)
-        b_y = b · sin(γ)
-        c_x = c · cos(β)
-        c_y = c · [cos(α) - cos(β)·cos(γ)] / sin(γ)
-        c_z = √(c² - c_x² - c_y²)
-
-    For orthogonal boxes (α = β = γ = 90°), this reduces to a diagonal matrix.
-
-    Examples
-    --------
-    >>> # Cubic box with 50 Å edges
-    >>> dims = np.array([50.0, 50.0, 50.0, 90.0, 90.0, 90.0])
-    >>> H = box_dimensions_to_matrix(dims)
-    >>> H
-    array([[50.,  0.,  0.],
-           [ 0., 50.,  0.],
-           [ 0.,  0., 50.]])
-
-    >>> # Triclinic box (truncated octahedron)
-    >>> dims = np.array([66.433, 76.808, 78.786, 60.83, 65.06, 90.0])
-    >>> H = box_dimensions_to_matrix(dims)
+    The box matrix transforms fractional coordinates to Cartesian: r = H · s
     """
     a, b, c = dimensions[:3]
-    # Convert angles from degrees to radians
     alpha, beta, gamma = np.radians(dimensions[3:6])
 
-    # Precompute trigonometric values
     cos_alpha = np.cos(alpha)
     cos_beta = np.cos(beta)
     cos_gamma = np.cos(gamma)
     sin_gamma = np.sin(gamma)
 
-    # Build box matrix (columns are lattice vectors a, b, c)
-    # Standard orientation: a along x, b in xy-plane
     ax = a
     bx = b * cos_gamma
     by = b * sin_gamma
@@ -189,8 +122,7 @@ def box_dimensions_to_matrix(dimensions: np.ndarray) -> np.ndarray:
     cy = c * (cos_alpha - cos_beta * cos_gamma) / sin_gamma
     cz = np.sqrt(c**2 - cx**2 - cy**2)
 
-    # Construct matrix with lattice vectors as columns
-    H = np.array(
+    return np.array(
         [
             [ax, bx, cx],
             [0.0, by, cy],
@@ -198,338 +130,320 @@ def box_dimensions_to_matrix(dimensions: np.ndarray) -> np.ndarray:
         ]
     )
 
-    return H
 
-
-def minimum_image_displacement(
-    dr: np.ndarray,
+def minimum_image_shift(
+    displacement: np.ndarray,
     box_matrix: np.ndarray,
-    box_matrix_inv: Optional[np.ndarray] = None,
+    box_matrix_inv: np.ndarray,
 ) -> np.ndarray:
     """
-    Apply the Minimum Image Convention to a displacement vector.
+    Compute the shift needed to place a point at its minimum image position.
 
-    Given a displacement vector Δr between two atoms, returns the shortest
-    equivalent displacement considering all periodic images. This is essential
-    for correctly handling atoms that may be on opposite sides of the box.
+    Given a displacement from a reference point, computes how much to translate
+    so the point is at the minimum image distance from the reference.
 
     Parameters
     ----------
-    dr : np.ndarray
-        Displacement vector(s) in Cartesian coordinates (Å).
-        Shape: (3,) for single vector, or (N, 3) for N vectors.
+    displacement : np.ndarray
+        Displacement vector(s) from reference. Shape (3,) or (N, 3).
     box_matrix : np.ndarray
-        3×3 box matrix from `box_dimensions_to_matrix()`.
-    box_matrix_inv : np.ndarray, optional
-        Pre-computed inverse of box_matrix for efficiency when processing
-        many displacements with the same box. If None, computed internally.
+        3×3 box matrix.
+    box_matrix_inv : np.ndarray
+        Inverse of box matrix (precomputed for efficiency).
 
     Returns
     -------
     np.ndarray
-        Minimum image displacement vector(s), same shape as input.
-        Each component is in the range [-L/2, L/2) where L is the box length
-        in that direction.
-
-    Notes
-    -----
-    The algorithm works in fractional coordinates where the MIC is trivial:
-
-    1. Convert to fractional: Δs = H⁻¹ · Δr
-    2. Apply MIC: Δs_mic = Δs - round(Δs)
-       - This maps each component to the range [-0.5, 0.5)
-    3. Convert back: Δr_mic = H · Δs_mic
-
-    The rounding operation `round(Δs)` finds the nearest integer, which
-    corresponds to the nearest periodic image. Subtracting it gives the
-    shortest path.
-
-    For a single component in an orthogonal box::
-
-        Δx_mic = Δx - L_x · round(Δx / L_x)
-
-    Examples
-    --------
-    >>> H = np.diag([50.0, 50.0, 50.0])  # 50 Å cubic box
-    >>> dr = np.array([48.0, 2.0, -3.0])  # atom nearly across box in x
-    >>> minimum_image_displacement(dr, H)
-    array([-2.,  2., -3.])  # shortest path wraps around
+        Shift vector(s) to add to positions. Same shape as input.
     """
-    if box_matrix_inv is None:
-        box_matrix_inv = np.linalg.inv(box_matrix)
+    # Convert to fractional coordinates
+    if displacement.ndim == 1:
+        ds = box_matrix_inv @ displacement
+    else:
+        ds = displacement @ box_matrix_inv.T
 
-    # Handle both single vectors and arrays of vectors
-    single_vector = dr.ndim == 1
-    if single_vector:
-        dr = dr.reshape(1, 3)
+    # Find which periodic image to use
+    image_shift = -np.round(ds)
 
-    # Transform to fractional coordinates: s = H^{-1} · r
-    # For array of vectors, use transpose: (N, 3) @ (3, 3).T = (N, 3)
-    ds = dr @ box_matrix_inv.T
-
-    # Apply minimum image convention in fractional space
-    # round() maps to nearest integer, subtracting wraps to [-0.5, 0.5)
-    ds_mic = ds - np.round(ds)
-
-    # Transform back to Cartesian: r = H · s
-    dr_mic = ds_mic @ box_matrix.T
-
-    if single_vector:
-        return dr_mic[0]
-    return dr_mic
+    # Convert back to Cartesian
+    if displacement.ndim == 1:
+        return box_matrix @ image_shift
+    else:
+        return image_shift @ box_matrix.T
 
 
-def unwrap_residue(
+def compute_residue_coms(
     positions: np.ndarray,
-    box_matrix: np.ndarray,
-    box_matrix_inv: Optional[np.ndarray] = None,
-) -> np.ndarray:
+    resindices: np.ndarray,
+    masses: Optional[np.ndarray] = None,
+    n_residues: Optional[int] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Make a single residue/molecule whole by unwrapping across periodic boundaries.
-
-    Takes the atomic positions of a single residue and adjusts them so the molecule
-    is continuous (not split across the box). The first atom is used as the reference
-    point; subsequent atoms are placed at the minimum image distance from the
-    previous atom.
+    Compute center of mass for each residue using vectorized operations.
 
     Parameters
     ----------
     positions : np.ndarray
-        Atomic positions of shape (N_atoms, 3) in Cartesian coordinates (Å).
-    box_matrix : np.ndarray
-        3×3 box matrix from `box_dimensions_to_matrix()`.
-    box_matrix_inv : np.ndarray, optional
-        Pre-computed inverse of box_matrix for efficiency.
+        Atomic positions, shape (N_atoms, 3).
+    resindices : np.ndarray
+        Residue index for each atom, shape (N_atoms,).
+    masses : np.ndarray, optional
+        Atomic masses, shape (N_atoms,). If None, uses geometric center.
+    n_residues : int, optional
+        Number of residues. If None, computed from max(resindices) + 1.
 
     Returns
     -------
-    np.ndarray
-        Unwrapped positions of shape (N_atoms, 3). The first atom position is
-        unchanged; subsequent atoms are shifted to be continuous with the molecule.
+    coms : np.ndarray
+        Center of mass for each residue, shape (N_residues, 3).
+    total_masses : np.ndarray
+        Total mass of each residue, shape (N_residues,).
+        If masses not provided, this is the atom count per residue.
 
     Notes
     -----
-    The algorithm "chains" atoms together:
-
-    1. Keep first atom at original position: r₀_unwrapped = r₀
-    2. For each subsequent atom i:
-       a. Calculate displacement from previous: Δr = rᵢ - rᵢ₋₁_unwrapped
-       b. Apply MIC: Δr_mic = MIC(Δr)
-       c. Place atom: rᵢ_unwrapped = rᵢ₋₁_unwrapped + Δr_mic
-
-    This ensures each atom is at the minimum image distance from its predecessor,
-    resulting in a continuous molecule.
-
-    **Why chain from previous atom?**
-
-    For small molecules (water, DMSO), chaining from the first atom would work.
-    But for polymers with many atoms, an atom far down the chain might be more
-    than half a box length from the first atom (legitimate, since the polymer
-    is large). Chaining from the previous atom handles arbitrarily long molecules.
-
-    Examples
-    --------
-    >>> # Water molecule split across periodic boundary
-    >>> H = np.diag([50.0, 50.0, 50.0])
-    >>> # Oxygen at x=1, hydrogens wrapped to x=49 (should be at x=-1)
-    >>> positions = np.array([
-    ...     [1.0, 25.0, 25.0],   # O
-    ...     [49.0, 25.5, 25.0],  # H1 (wrapped, should be ~-1)
-    ...     [49.0, 24.5, 25.0],  # H2 (wrapped, should be ~-1)
-    ... ])
-    >>> unwrapped = unwrap_residue(positions, H)
-    >>> unwrapped
-    array([[ 1.,  25.,  25.],
-           [-1.,  25.5, 25.],
-           [-1.,  24.5, 25.]])
+    Uses np.bincount for O(N_atoms) complexity instead of O(N_atoms × N_residues).
     """
-    if box_matrix_inv is None:
-        box_matrix_inv = np.linalg.inv(box_matrix)
+    if n_residues is None:
+        n_residues = resindices.max() + 1
 
-    n_atoms = positions.shape[0]
-    if n_atoms == 0:
-        return positions.copy()
+    if masses is None:
+        # Geometric center - equal weights
+        masses = np.ones(len(positions))
+        LOGGER.debug("No masses provided, using geometric center")
 
-    unwrapped = np.empty_like(positions)
-    unwrapped[0] = positions[0]  # First atom unchanged
+    # Weighted position sums for each residue: Σ(m_i * r_i) for each residue
+    weighted_pos = positions * masses[:, np.newaxis]  # (N_atoms, 3)
 
-    # Chain each atom to the previous one
-    for i in range(1, n_atoms):
-        dr = positions[i] - unwrapped[i - 1]
-        dr_mic = minimum_image_displacement(dr, box_matrix, box_matrix_inv)
-        unwrapped[i] = unwrapped[i - 1] + dr_mic
+    # Sum weighted positions by residue index
+    com_x = np.bincount(resindices, weights=weighted_pos[:, 0], minlength=n_residues)
+    com_y = np.bincount(resindices, weights=weighted_pos[:, 1], minlength=n_residues)
+    com_z = np.bincount(resindices, weights=weighted_pos[:, 2], minlength=n_residues)
 
-    return unwrapped
+    # Total mass per residue
+    total_masses = np.bincount(resindices, weights=masses, minlength=n_residues)
+
+    # Avoid division by zero for empty residues (shouldn't happen, but be safe)
+    total_masses = np.where(total_masses == 0, 1.0, total_masses)
+
+    # COM = Σ(m_i * r_i) / Σ(m_i)
+    coms = np.column_stack([com_x, com_y, com_z]) / total_masses[:, np.newaxis]
+
+    return coms, total_masses
 
 
-def unwrap_by_residue(
-    atom_group: "AtomGroup",
-    box_matrix: Optional[np.ndarray] = None,
+def cluster_around_point(
+    positions: np.ndarray,
+    resindices: np.ndarray,
+    reference_point: np.ndarray,
+    box_matrix: np.ndarray,
+    masses: Optional[np.ndarray] = None,
+    exclude_resindices: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """
-    Unwrap all molecules in an AtomGroup using residue membership.
+    Translate each residue to its minimum image position relative to a reference point.
 
-    Iterates over all residues in the AtomGroup and unwraps each one independently.
-    This is the main entry point for residue-based unwrapping.
+    This is the core algorithm for creating "droplet" visualizations. Each residue
+    (molecule) is translated as a unit so its center of mass is at the minimum
+    image distance from the reference point.
 
     Parameters
     ----------
-    atom_group : MDAnalysis.AtomGroup
-        The atoms to unwrap. Must have valid residue assignments (each molecule
-        should have a unique resid). The AtomGroup's Universe must have valid
-        box dimensions.
-    box_matrix : np.ndarray, optional
-        Pre-computed 3×3 box matrix. If None, computed from the Universe's
-        current box dimensions. Providing this is useful when processing
-        multiple frames with the same box.
+    positions : np.ndarray
+        Atomic positions, shape (N_atoms, 3). Modified in-place.
+    resindices : np.ndarray
+        Residue index for each atom, shape (N_atoms,).
+    reference_point : np.ndarray
+        The point to cluster around (e.g., protein COM), shape (3,).
+    box_matrix : np.ndarray
+        3×3 box matrix.
+    masses : np.ndarray, optional
+        Atomic masses for COM calculation. If None, uses geometric center.
+    exclude_resindices : np.ndarray, optional
+        Residue indices to skip (e.g., protein residues already at reference).
 
     Returns
     -------
     np.ndarray
-        Unwrapped positions of shape (N_atoms, 3), in the same atom order as
-        the input AtomGroup.
-
-    Warns
-    -----
-    Logs a warning and skips residues that contain NaN positions.
+        Modified positions array (same object as input, modified in-place).
 
     Notes
     -----
-    This function assumes that PolyzyMD's residue assignment convention is used:
+    Algorithm complexity: O(N_atoms) - single pass over all atoms.
 
-    - Each molecule (water, DMSO, polymer, etc.) has a unique residue number
-    - All atoms of a molecule share the same resid
-
-    This allows correct unwrapping even when bond connectivity information is
-    unavailable or corrupted (e.g., PDB CONECT records with atom indices > 99,999).
-
-    The function modifies positions in-place conceptually but returns a new array.
-    To apply to a trajectory, use with MDAnalysis transformations.
-
-    See Also
-    --------
-    ResidueUnwrapTransform : MDAnalysis transformation wrapper for trajectories.
-
-    Examples
-    --------
-    >>> import MDAnalysis as mda
-    >>> u = mda.Universe("topology.pdb", "trajectory.dcd")
-    >>> # Unwrap all atoms in current frame
-    >>> unwrapped_pos = unwrap_by_residue(u.atoms)
-    >>> u.atoms.positions = unwrapped_pos
+    The algorithm:
+    1. Compute COM of each residue: O(N_atoms)
+    2. Compute displacement from reference: O(N_residues)
+    3. Compute minimum image shift: O(N_residues)
+    4. Apply shifts to atoms via broadcasting: O(N_atoms)
     """
-    # Get box matrix from universe if not provided
-    if box_matrix is None:
-        dimensions = atom_group.universe.dimensions
-        if dimensions is None:
-            raise ValueError("Universe has no box dimensions. Cannot unwrap without periodic box.")
-        box_matrix = box_dimensions_to_matrix(dimensions)
-
+    n_residues = resindices.max() + 1
     box_matrix_inv = np.linalg.inv(box_matrix)
 
-    # Get current positions
-    positions = atom_group.positions.copy()
+    # Step 1: Compute COM for each residue
+    residue_coms, _ = compute_residue_coms(positions, resindices, masses, n_residues)
 
-    # Build index mapping: for each atom in atom_group, what's its index in positions?
-    # This handles the case where atom_group is a subset of the universe
-    atom_indices = {atom.ix: i for i, atom in enumerate(atom_group)}
+    # Step 2: Displacement of each residue COM from reference
+    displacements = residue_coms - reference_point  # (N_residues, 3)
 
-    # Process each residue
-    for residue in atom_group.residues:
-        # Get atoms of this residue that are in our atom_group
-        res_atoms = residue.atoms.intersection(atom_group)
-        if len(res_atoms) == 0:
-            continue
+    # Step 3: Compute shift needed to bring each residue to minimum image
+    shifts = minimum_image_shift(displacements, box_matrix, box_matrix_inv)
 
-        # Get indices into our positions array
-        indices = [atom_indices[atom.ix] for atom in res_atoms]
-        res_positions = positions[indices]
+    # Step 4: Zero out shifts for excluded residues (protein/ligand)
+    if exclude_resindices is not None and len(exclude_resindices) > 0:
+        shifts[exclude_resindices] = 0.0
 
-        # Check for NaN positions
-        if np.any(np.isnan(res_positions)):
-            LOGGER.warning(
-                f"Skipping residue {residue.resname}:{residue.resid} - contains NaN positions"
-            )
-            continue
-
-        # Unwrap this residue
-        unwrapped = unwrap_residue(res_positions, box_matrix, box_matrix_inv)
-
-        # Write back
-        positions[indices] = unwrapped
+    # Step 5: Apply shifts to atoms (broadcast from residue to atoms)
+    atom_shifts = shifts[resindices]  # (N_atoms, 3)
+    positions += atom_shifts
 
     return positions
 
 
-class ResidueUnwrapTransform:
+class ClusterAroundProtein:
     """
-    MDAnalysis transformation for residue-based PBC unwrapping.
+    MDAnalysis transformation that clusters all molecules around protein+ligand.
 
-    This class wraps `unwrap_by_residue()` as an MDAnalysis on-the-fly transformation,
-    allowing it to be added to a trajectory's transformation pipeline.
+    Creates a "droplet" visualization where:
+    - Protein and ligand are centered at the box center
+    - All other molecules are whole and clustered around the protein
+    - Box boundaries are effectively ignored
+
+    This transformation is designed for **visualization only**, not for
+    quantitative analysis of diffusion or other PBC-sensitive properties.
 
     Parameters
     ----------
-    atom_group : MDAnalysis.AtomGroup
-        The atoms to unwrap. Typically `universe.atoms` for all atoms.
-
-    Notes
-    -----
-    Unlike MDAnalysis's built-in `unwrap()` transformation which requires bond
-    information, this transformation uses residue membership to determine molecular
-    boundaries. This is essential for PolyzyMD trajectories where:
-
-    1. PDB CONECT records may be corrupted (atom indices > 99,999)
-    2. Each molecule is guaranteed to have a unique residue number
+    universe : MDAnalysis.Universe
+        The Universe containing the trajectory.
+    protein_selection : str
+        MDAnalysis selection string for protein atoms (e.g., "protein").
+    ligand_selection : str, optional
+        MDAnalysis selection string for ligand atoms (e.g., "resname LIG").
+        If provided, ligand is grouped with protein for centering.
 
     Examples
     --------
     >>> import MDAnalysis as mda
-    >>> from polyzymd.analysis.unwrap import ResidueUnwrapTransform
+    >>> from polyzymd.analysis.unwrap import ClusterAroundProtein
     >>>
     >>> u = mda.Universe("topology.pdb", "trajectory.dcd")
-    >>> transform = ResidueUnwrapTransform(u.atoms)
+    >>> transform = ClusterAroundProtein(u, "protein", "resname SUB")
     >>> u.trajectory.add_transformations(transform)
     >>>
-    >>> # Now iterating through frames automatically applies unwrapping
+    >>> # Now iterate - positions are automatically transformed
     >>> for ts in u.trajectory:
-    ...     # Positions are already unwrapped
-    ...     print(u.atoms.positions)
+    ...     # Positions show protein-centered droplet
+    ...     pass
     """
 
-    def __init__(self, atom_group: "AtomGroup") -> None:
-        self.atom_group = atom_group
-        self._box_matrix: Optional[np.ndarray] = None
-        self._last_dimensions: Optional[np.ndarray] = None
+    def __init__(
+        self,
+        universe,
+        protein_selection: str = "protein",
+        ligand_selection: Optional[str] = None,
+    ) -> None:
+        self.universe = universe
+        self.all_atoms = universe.atoms
+
+        # Select reference group (protein + optional ligand)
+        self.protein_ag = universe.select_atoms(protein_selection)
+        if len(self.protein_ag) == 0:
+            raise ValueError(f"Protein selection '{protein_selection}' matched no atoms")
+
+        if ligand_selection:
+            self.ligand_ag = universe.select_atoms(ligand_selection)
+            if len(self.ligand_ag) == 0:
+                LOGGER.warning(f"Ligand selection '{ligand_selection}' matched no atoms")
+                self.reference_ag = self.protein_ag
+            else:
+                self.reference_ag = self.protein_ag | self.ligand_ag
+        else:
+            self.ligand_ag = None
+            self.reference_ag = self.protein_ag
+
+        # Get residue indices for the reference group (to exclude from clustering)
+        self.reference_resindices = np.unique(self.reference_ag.resindices)
+
+        # Check if masses are available
+        try:
+            _ = self.all_atoms.masses
+            self._has_masses = True
+        except Exception:
+            self._has_masses = False
+            LOGGER.warning(
+                "Masses not available in topology. Using geometric centers instead of "
+                "center of mass. This may slightly affect clustering for asymmetric molecules."
+            )
+
+        # Cache for box matrix (recomputed if box changes)
+        self._cached_box_matrix: Optional[np.ndarray] = None
+        self._cached_dimensions: Optional[np.ndarray] = None
+
+        LOGGER.info(
+            f"ClusterAroundProtein initialized: "
+            f"{len(self.protein_ag)} protein atoms, "
+            f"{len(self.ligand_ag) if self.ligand_ag else 0} ligand atoms, "
+            f"{len(self.reference_resindices)} reference residues"
+        )
+
+    def _get_box_matrix(self, dimensions: np.ndarray) -> np.ndarray:
+        """Get box matrix, using cache if dimensions unchanged."""
+        if self._cached_dimensions is None or not np.allclose(dimensions, self._cached_dimensions):
+            self._cached_box_matrix = box_dimensions_to_matrix(dimensions)
+            self._cached_dimensions = dimensions.copy()
+        return self._cached_box_matrix
 
     def __call__(self, ts):
         """
-        Apply residue-based unwrapping to the current timestep.
+        Apply clustering transformation to the current timestep.
 
         Parameters
         ----------
         ts : MDAnalysis.coordinates.base.Timestep
-            The current timestep object.
+            The current timestep.
 
         Returns
         -------
         ts : MDAnalysis.coordinates.base.Timestep
-            The modified timestep with unwrapped positions.
+            The modified timestep.
         """
-        # Cache box matrix if dimensions haven't changed (common for NVT/NPT)
         dimensions = ts.dimensions
-        if (
-            self._box_matrix is None
-            or self._last_dimensions is None
-            or not np.allclose(dimensions, self._last_dimensions)
-        ):
-            self._box_matrix = box_dimensions_to_matrix(dimensions)
-            self._last_dimensions = dimensions.copy()
+        if dimensions is None:
+            raise ValueError("Trajectory has no box dimensions. Cannot apply PBC clustering.")
 
-        # Unwrap all atoms
-        unwrapped_positions = unwrap_by_residue(self.atom_group, self._box_matrix)
+        box_matrix = self._get_box_matrix(dimensions)
+        box_center = np.sum(box_matrix, axis=1) / 2  # Center of the box
 
-        # Update positions in-place
-        self.atom_group.positions = unwrapped_positions
+        # Get current positions and residue indices
+        positions = self.all_atoms.positions
+        resindices = self.all_atoms.resindices
+        masses = self.all_atoms.masses if self._has_masses else None
+
+        # Step 1: Compute reference (protein+ligand) center of mass
+        ref_positions = self.reference_ag.positions
+        if self._has_masses:
+            ref_masses = self.reference_ag.masses
+            ref_com = np.average(ref_positions, axis=0, weights=ref_masses)
+        else:
+            ref_com = np.mean(ref_positions, axis=0)
+
+        # Step 2: Center the entire system so reference COM is at box center
+        translation = box_center - ref_com
+        positions += translation
+
+        # Step 3: Cluster all molecules around the (now centered) reference
+        # The reference is now at box_center
+        cluster_around_point(
+            positions=positions,
+            resindices=resindices,
+            reference_point=box_center,
+            box_matrix=box_matrix,
+            masses=masses,
+            exclude_resindices=self.reference_resindices,
+        )
+
+        # Update positions in the AtomGroup
+        self.all_atoms.positions = positions
 
         return ts

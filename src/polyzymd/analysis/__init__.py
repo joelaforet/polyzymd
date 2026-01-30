@@ -5,21 +5,22 @@ from polyzymd.analysis.make_whole import (
     make_whole_trajectory,
 )
 from polyzymd.analysis.unwrap import (
-    ResidueUnwrapTransform,
+    ClusterAroundProtein,
     box_dimensions_to_matrix,
-    minimum_image_displacement,
-    unwrap_by_residue,
-    unwrap_residue,
+    cluster_around_point,
+    compute_residue_coms,
+    minimum_image_shift,
 )
 
 __all__ = [
-    # make_whole.py
+    # make_whole.py - high-level API
     "find_production_trajectories",
     "make_whole_trajectory",
-    # unwrap.py
+    # unwrap.py - transformation class
+    "ClusterAroundProtein",
+    # unwrap.py - utility functions (for advanced users)
     "box_dimensions_to_matrix",
-    "minimum_image_displacement",
-    "unwrap_residue",
-    "unwrap_by_residue",
-    "ResidueUnwrapTransform",
+    "minimum_image_shift",
+    "compute_residue_coms",
+    "cluster_around_point",
 ]
