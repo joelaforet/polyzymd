@@ -655,7 +655,10 @@ class SystemBuilder:
                 mol = self._solvated_topology.molecule(mol_idx)
                 for atom in mol.atoms:
                     atom.metadata["chain_id"] = chain_id
-                    # residue_number is preserved from PDB load - don't modify
+                    # Ensure residue_number is a string (PDB loader may store as int)
+                    # OpenMM's addResidue(id=...) expects a string
+                    if "residue_number" in atom.metadata:
+                        atom.metadata["residue_number"] = str(atom.metadata["residue_number"])
                 mol_idx += 1
             chain_idx += 1
 
