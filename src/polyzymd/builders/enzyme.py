@@ -24,8 +24,12 @@ class EnzymeBuilder:
 
     This class handles:
     - Loading PDB structures into OpenFF Topology
-    - Partitioning the protein for OpenFF compatibility
     - Basic validation of the loaded structure
+
+    The PDB file should be properly prepared with:
+    - Correct protonation states
+    - Standard amino acid residue names
+    - Sequential residue numbering
 
     Example:
         >>> builder = EnzymeBuilder()
@@ -49,17 +53,16 @@ class EnzymeBuilder:
         return self._pdb_path
 
     def build(self, pdb_path: Union[str, Path]) -> Topology:
-        """Load and partition an enzyme structure from a PDB file.
+        """Load an enzyme structure from a PDB file.
 
         Args:
             pdb_path: Path to the enzyme PDB file.
 
         Returns:
-            OpenFF Topology with the partitioned enzyme.
+            OpenFF Topology with the enzyme structure.
 
         Raises:
             FileNotFoundError: If the PDB file does not exist.
-            ValueError: If partitioning fails.
         """
         pdb_path = Path(pdb_path)
 
@@ -69,18 +72,10 @@ class EnzymeBuilder:
         LOGGER.info(f"Loading enzyme from {pdb_path}")
 
         # Load the PDB into an OpenFF Topology
+        # Note: Topology.from_pdb() correctly preserves residue names and numbers
+        # from the PDB file. We previously called partition() here, but that was
+        # overwriting residue numbers with internal IDs, breaking downstream analysis.
         topology = Topology.from_pdb(str(pdb_path))
-
-        # Partition the protein for OpenFF compatibility
-        # This assigns residue templates and ensures proper atom typing
-        from polymerist.mdtools.openfftools.partition import partition
-
-        was_partitioned = partition(topology)
-        if not was_partitioned:
-            raise ValueError(
-                f"Failed to partition enzyme topology from {pdb_path}. "
-                "Ensure the PDB contains a valid protein structure."
-            )
 
         LOGGER.info(
             f"Successfully loaded enzyme: {topology.n_molecules} molecule(s), "
