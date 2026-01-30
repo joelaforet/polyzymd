@@ -801,7 +801,7 @@ class SystemBuilder:
             self._assign_pdb_identifiers()
 
         path = Path(path)
-        topology.to_file(str(path))
+        topology.to_file(str(path), keep_ids=True)
         LOGGER.info(f"Saved topology to {path}")
 
     def build_from_config(
