@@ -105,6 +105,36 @@ class CoSolvent:
 
 
 @dataclass
+class SolvationCounts:
+    """Molecule counts from solvation for PDB chain/residue assignment.
+
+    This dataclass stores the number of each molecule type added during
+    solvation. It is used by SystemBuilder to assign PDB-compliant chain
+    IDs and residue numbers.
+
+    The molecule order in the solvated topology is:
+    [solute molecules] + [water] + [Na+] + [Cl-] + [co-solvent 1] + [co-solvent 2] + ...
+
+    Attributes:
+        water: Number of water molecules added.
+        na: Number of Na+ ions added.
+        cl: Number of Cl- ions added.
+        co_solvents: List of (name, count) tuples for each co-solvent type.
+    """
+
+    water: int
+    na: int
+    cl: int
+    co_solvents: List[Tuple[str, int]] = field(default_factory=list)
+
+    @property
+    def total_solvent_molecules(self) -> int:
+        """Total number of solvent molecules (water + ions + co-solvents)."""
+        cosolvent_total = sum(count for _, count in self.co_solvents)
+        return self.water + self.na + self.cl + cosolvent_total
+
+
+@dataclass
 class SolventComposition:
     """Complete specification of solvent composition.
 
@@ -165,6 +195,7 @@ class SolventBuilder:
         self._solvated_topology: Optional[Topology] = None
         self._box_vectors: Optional[NDArray] = None
         self._composition: Optional[SolventComposition] = None
+        self._solvation_counts: Optional[SolvationCounts] = None
 
     @property
     def solvated_topology(self) -> Optional[Topology]:
@@ -175,6 +206,16 @@ class SolventBuilder:
     def box_vectors(self) -> Optional[NDArray]:
         """Get the box vectors of the solvated system."""
         return self._box_vectors
+
+    @property
+    def solvation_counts(self) -> Optional[SolvationCounts]:
+        """Get the molecule counts from solvation.
+
+        Returns:
+            SolvationCounts with water, ion, and co-solvent molecule counts,
+            or None if solvate() has not been called.
+        """
+        return self._solvation_counts
 
     def solvate(
         self,
@@ -278,6 +319,9 @@ class SolventBuilder:
         solvent_molecules = [water, na, cl]
         solvent_counts = [int(water_to_add), na_to_add, cl_to_add]
 
+        # Track co-solvent counts for SolvationCounts
+        cosolvent_counts_list: List[Tuple[str, int]] = []
+
         # Add co-solvents (using cached charges for consistency)
         for cosolvent in composition.co_solvents:
             if cosolvent.molecule is None:
@@ -348,6 +392,7 @@ class SolventBuilder:
 
             solvent_molecules.append(cosolvent.molecule)
             solvent_counts.append(n_cosolvent)
+            cosolvent_counts_list.append((cosolvent.name, n_cosolvent))
 
         # Pack the box using PACKMOL
         tolerance_qty = Quantity(tolerance, "angstrom")
@@ -364,6 +409,14 @@ class SolventBuilder:
 
         self._solvated_topology = solvated_top
         self._box_vectors = box_vecs
+
+        # Store solvation counts for PDB chain/residue assignment
+        self._solvation_counts = SolvationCounts(
+            water=int(water_to_add),
+            na=na_to_add,
+            cl=cl_to_add,
+            co_solvents=cosolvent_counts_list,
+        )
 
         LOGGER.info(
             f"Solvation complete: {solvated_top.n_molecules} molecules, "

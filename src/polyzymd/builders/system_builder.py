@@ -81,6 +81,12 @@ class SystemBuilder:
         self._interchange: Optional[Interchange] = None
         self._working_dir: Optional[Path] = None
 
+        # Molecule count tracking for PDB chain/residue assignment
+        # These are set during build and used by _assign_pdb_identifiers()
+        self._n_enzyme_molecules: int = 0
+        self._n_substrate_molecules: int = 0
+        self._n_polymer_chains: int = 0
+
     @property
     def interchange(self) -> Optional[Interchange]:
         """Get the created Interchange object."""
@@ -118,6 +124,7 @@ class SystemBuilder:
             Enzyme topology.
         """
         self._enzyme_topology = self._enzyme_builder.build(pdb_path)
+        self._n_enzyme_molecules = 1
         return self._enzyme_topology
 
     def build_substrate(
@@ -144,6 +151,7 @@ class SystemBuilder:
             charge_method=charge_method,
             residue_name=residue_name,
         )
+        self._n_substrate_molecules = 1
         return self._substrate_molecule
 
     def build_polymers(
@@ -181,6 +189,7 @@ class SystemBuilder:
         molecules, counts = self._polymer_builder.build(count=count, seed=seed)
         self._polymer_molecules = molecules
         self._polymer_counts = counts
+        self._n_polymer_chains = sum(counts)
 
         return molecules, counts
 
@@ -600,6 +609,9 @@ class SystemBuilder:
     def _renumber_chains(self, topology: Topology) -> None:
         """Re-number chain IDs in the topology.
 
+        Note: This is the legacy method. For PDB-compliant output, use
+        _assign_pdb_identifiers() which is called by save_topology().
+
         Args:
             topology: Topology to modify.
         """
@@ -607,12 +619,171 @@ class SystemBuilder:
             for atom in mol.atoms:
                 atom.metadata["chain_id"] = str(i + 1)
 
+    def _assign_pdb_identifiers(self) -> None:
+        """Assign PDB-compliant chain IDs and residue numbers to the solvated topology.
+
+        This method assigns chain IDs and residue numbers based on molecule types
+        tracked during the build process. The config YAML serves as the single
+        source of truth for what each molecule represents.
+
+        Chain assignment:
+        - Protein: First chain (A), preserves original residue numbers from input PDB
+        - Substrate: Next chain (B if present), residue 1
+        - Polymers: Next chain (C if present), preserves per-monomer residue numbers
+        - Solvent: Remaining chains with overflow at 9999 residues per chain
+
+        This ensures every atom can be uniquely identified by the tuple
+        (chain_id, residue_number, residue_name, atom_name) for downstream
+        analysis tools like MDAnalysis and PyMOL.
+
+        Raises:
+            RuntimeError: If no solvated topology exists.
+        """
+        if self._solvated_topology is None:
+            raise RuntimeError("No solvated topology. Call solvate() first.")
+
+        CHAIN_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        chain_idx = 0
+        mol_idx = 0
+
+        # 1. Protein: Assign chain letter, preserve original residue numbers
+        if self._n_enzyme_molecules > 0:
+            chain_id = CHAIN_LETTERS[chain_idx]
+            LOGGER.debug(f"Assigning chain {chain_id} to protein")
+
+            for _ in range(self._n_enzyme_molecules):
+                mol = self._solvated_topology.molecule(mol_idx)
+                for atom in mol.atoms:
+                    atom.metadata["chain_id"] = chain_id
+                    # residue_number is preserved from PDB load - don't modify
+                mol_idx += 1
+            chain_idx += 1
+
+        # 2. Substrate: Assign next chain letter, residue 1
+        if self._n_substrate_molecules > 0:
+            chain_id = CHAIN_LETTERS[chain_idx]
+            LOGGER.debug(f"Assigning chain {chain_id} to substrate")
+
+            for _ in range(self._n_substrate_molecules):
+                mol = self._solvated_topology.molecule(mol_idx)
+                for atom in mol.atoms:
+                    atom.metadata["chain_id"] = chain_id
+                    atom.metadata["residue_number"] = "1"
+                mol_idx += 1
+            chain_idx += 1
+
+        # 3. Polymers: Assign next chain letter, continue residue numbering across chains
+        if self._n_polymer_chains > 0:
+            chain_id = CHAIN_LETTERS[chain_idx]
+            LOGGER.debug(f"Assigning chain {chain_id} to {self._n_polymer_chains} polymer chain(s)")
+
+            # Track residue number across all polymer chains (continue, don't restart)
+            polymer_residue_num = 1
+
+            for _ in range(self._n_polymer_chains):
+                mol = self._solvated_topology.molecule(mol_idx)
+
+                # Group atoms by their current residue_number to identify monomers
+                # Polymer molecules have per-monomer residue metadata from SDF
+                current_monomer_residue = None
+
+                for atom in mol.atoms:
+                    atom.metadata["chain_id"] = chain_id
+
+                    # Check if this atom belongs to a new monomer
+                    atom_residue = atom.metadata.get("residue_number", "0")
+                    if atom_residue != current_monomer_residue:
+                        # New monomer - increment our counter
+                        if current_monomer_residue is not None:
+                            polymer_residue_num += 1
+                        current_monomer_residue = atom_residue
+
+                    # Assign the sequential residue number
+                    atom.metadata["residue_number"] = str(polymer_residue_num)
+
+                # After processing this polymer chain, increment for next chain's first monomer
+                polymer_residue_num += 1
+                mol_idx += 1
+
+            chain_idx += 1
+
+        # 4. Solvent: Assign remaining chains with overflow at 9999
+        self._assign_solvent_identifiers(
+            start_mol_idx=mol_idx,
+            start_chain_idx=chain_idx,
+            chain_letters=CHAIN_LETTERS,
+        )
+
+        LOGGER.info(
+            f"PDB identifiers assigned: protein={self._n_enzyme_molecules}, "
+            f"substrate={self._n_substrate_molecules}, polymers={self._n_polymer_chains}, "
+            f"solvent molecules start at chain {CHAIN_LETTERS[chain_idx]}"
+        )
+
+    def _assign_solvent_identifiers(
+        self,
+        start_mol_idx: int,
+        start_chain_idx: int,
+        chain_letters: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        max_residue: int = 9999,
+    ) -> None:
+        """Assign chain IDs and residue numbers to solvent molecules.
+
+        Solvent molecules (water, ions, co-solvents) are numbered sequentially.
+        When residue number exceeds max_residue (9999), overflow to the next
+        chain letter and restart residue numbering at 1.
+
+        Args:
+            start_mol_idx: Index of first solvent molecule in topology.
+            start_chain_idx: Index into chain_letters for first solvent chain.
+            chain_letters: Available chain ID characters.
+            max_residue: Maximum residue number before overflow (default 9999).
+        """
+        chain_idx = start_chain_idx
+        residue_num = 1
+
+        n_solvent = self._solvated_topology.n_molecules - start_mol_idx
+        LOGGER.debug(f"Assigning identifiers to {n_solvent} solvent molecules")
+
+        for mol_idx in range(start_mol_idx, self._solvated_topology.n_molecules):
+            # Check for overflow before processing this molecule
+            if residue_num > max_residue:
+                chain_idx += 1
+                residue_num = 1
+
+                if chain_idx >= len(chain_letters):
+                    LOGGER.warning(
+                        f"Exceeded {len(chain_letters)} chain letters - cycling. "
+                        "Consider using a topology format with larger chain ID capacity."
+                    )
+                    chain_idx = chain_idx % len(chain_letters)
+
+            chain_id = chain_letters[chain_idx]
+            mol = self._solvated_topology.molecule(mol_idx)
+
+            for atom in mol.atoms:
+                atom.metadata["chain_id"] = chain_id
+                atom.metadata["residue_number"] = str(residue_num)
+
+            residue_num += 1
+
+        # Log summary
+        n_chains_used = chain_idx - start_chain_idx + 1
+        if n_chains_used > 1:
+            LOGGER.info(
+                f"Solvent required {n_chains_used} chains "
+                f"({chain_letters[start_chain_idx]}-{chain_letters[chain_idx]})"
+            )
+
     def save_topology(
         self,
         path: Union[str, Path],
         topology: Optional[Topology] = None,
     ) -> None:
         """Save a topology to PDB file.
+
+        Assigns PDB-compliant chain IDs and residue numbers before writing
+        to ensure downstream analysis tools can uniquely identify all atoms.
 
         Args:
             path: Output path.
@@ -623,6 +794,11 @@ class SystemBuilder:
 
         if topology is None:
             raise RuntimeError("No topology to save")
+
+        # Assign PDB-compliant identifiers before writing
+        # This ensures unique (chain_id, residue_number, atom_name) tuples
+        if topology is self._solvated_topology:
+            self._assign_pdb_identifiers()
 
         path = Path(path)
         topology.to_file(str(path))
@@ -657,6 +833,7 @@ class SystemBuilder:
             LOGGER.info(f"Building substrate: {config.substrate.name}")
             self._substrate_builder.build_from_config(config.substrate)
             self._substrate_molecule = self._substrate_builder.molecule
+            self._n_substrate_molecules = 1
 
         # 3. Combine enzyme + substrate
         self.combine_solutes()
