@@ -299,7 +299,7 @@ class ContinuationManager:
         if self._simulation is None:
             raise RuntimeError("Simulation not available")
 
-        # Save state
+        # Save state (no enforcePeriodicBox to preserve molecular continuity)
         state_path = output_dir / f"production_{self._segment_index}_state.xml"
         state = self._simulation.context.getState(
             getPositions=True,
@@ -307,7 +307,6 @@ class ContinuationManager:
             getForces=True,
             getEnergy=True,
             getParameters=True,
-            enforcePeriodicBox=True,
         )
 
         with open(state_path, "w") as f:

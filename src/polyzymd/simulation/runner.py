@@ -426,14 +426,13 @@ class SimulationRunner:
         LOGGER.info(f"Running {total_steps} steps...")
         self._simulation.step(total_steps)
 
-        # Get final state
+        # Get final state (no enforcePeriodicBox to preserve molecular continuity)
         state = self._simulation.context.getState(
             getPositions=True,
             getVelocities=True,
             getEnergy=True,
             getForces=True,
             getParameters=True,
-            enforcePeriodicBox=True,
         )
         self._current_positions = state.getPositions()
 
