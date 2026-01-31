@@ -67,6 +67,7 @@ Getting Started
    tutorials/restraints
    tutorials/hpc_slurm
    tutorials/polymers
+   tutorials/residue_assignment
    tutorials/architecture
    tutorials/troubleshooting
    tutorials/broken_molecules_debugging
