@@ -498,16 +498,17 @@ class SystemBuilder:
         return self._create_interchange_batched(ff, water_mol)
 
     def _create_interchange_batched(self, ff: ForceField, water_mol: Molecule) -> Interchange:
-        """Create Interchange using batched molecule processing.
+        """Create Interchange using batched molecule processing with preserved order.
 
-        This is the core implementation that groups molecules by type and
-        creates one Interchange per unique molecule type.
+        This implementation batches molecules by type for efficiency while preserving
+        the exact molecule order from self._solvated_topology. This is critical for
+        DCD trajectory compatibility - the atom order in the Interchange must match
+        the atom order in solvated_system.pdb.
 
         Batching strategy:
-        1. Group all molecules by SMILES (molecule type)
-        2. Create ONE Interchange per unique molecule type (not per instance)
-        3. Process water + ions as a single batch
-        4. Combine the resulting small number of Interchanges
+        1. Parameterize each unique molecule type ONCE (cache parameters)
+        2. Create individual Interchanges in original topology order
+        3. Combine Interchanges in the same order as the original topology
 
         Note:
             When combining Interchanges from molecules parameterized by different
@@ -526,78 +527,108 @@ class SystemBuilder:
         Returns:
             Combined Interchange object.
         """
-        from collections import defaultdict
-
-        LOGGER.info("Using batched Interchange creation (one per molecule type)")
+        LOGGER.info("Using batched Interchange creation (preserving molecule order)")
 
         # Build helper mappings
         smiles_to_name = self._build_molecule_name_mapping()
         smiles_to_template = self._build_charge_template_mapping(water_mol)
 
-        # Step 1: Group molecules by SMILES (molecule type)
-        # Skip water and ions - they're handled separately
-        smiles_groups: Dict[str, List[Molecule]] = defaultdict(list)
+        # Step 1: Create a cached Interchange for each unique molecule TYPE
+        # This avoids redundant parameterization (the expensive part)
+        smiles_to_interchange: Dict[str, Interchange] = {}
         water_ion_smiles = {"[H][O][H]", "[Na+]", "[Cl-]"}
 
+        # Count molecules by type for logging
+        smiles_counts: Dict[str, int] = {}
         for molecule in self._solvated_topology.molecules:
             mol_smiles = molecule.to_smiles()
-            if mol_smiles not in water_ion_smiles:
-                smiles_groups[mol_smiles].append(molecule)
+            smiles_counts[mol_smiles] = smiles_counts.get(mol_smiles, 0) + 1
 
-        # Step 2: Create ONE Interchange per molecule TYPE (batched)
-        # Track both interchanges and their names for logging during combination
-        all_interchanges: List[Interchange] = []
-        interchange_names: List[str] = []
-
-        for mol_smiles, molecules in smiles_groups.items():
-            # Get display name for logging
+        # Parameterize each unique molecule type once
+        for mol_smiles, count in smiles_counts.items():
             display_name = smiles_to_name.get(mol_smiles, mol_smiles[:50] + "...")
+            LOGGER.info(f"Parameterizing {display_name} ({count} instance(s))")
 
-            LOGGER.info(f"Creating Interchange for {len(molecules)} {display_name} molecule(s)")
+            # Find the first molecule of this type to use as template
+            template_mol = None
+            for molecule in self._solvated_topology.molecules:
+                if molecule.to_smiles() == mol_smiles:
+                    template_mol = molecule
+                    break
 
             # Get charge template if available
             charge_from = []
             if mol_smiles in smiles_to_template:
                 charge_from = [smiles_to_template[mol_smiles]]
 
-            # Create Interchange for ALL molecules of this type at once
+            # Create Interchange for ONE molecule of this type (parameterization)
+            # We'll create individual interchanges per molecule instance later
+            smiles_to_interchange[mol_smiles] = {
+                "template": template_mol,
+                "charge_from": charge_from,
+                "display_name": display_name,
+            }
+
+        # Step 2: Create Interchanges in ORIGINAL TOPOLOGY ORDER
+        # This preserves the exact molecule order from solvated_topology
+        all_interchanges: List[Interchange] = []
+        interchange_names: List[str] = []
+
+        # Group consecutive molecules of the same type for efficient batching
+        # while preserving the overall molecule order
+        current_smiles = None
+        current_batch: List[Molecule] = []
+
+        def flush_batch():
+            """Create interchange for current batch and add to list."""
+            nonlocal current_batch, current_smiles
+            if not current_batch:
+                return
+
+            info = smiles_to_interchange[current_smiles]
+            display_name = info["display_name"]
+            charge_from = info["charge_from"]
+
+            LOGGER.debug(f"Creating Interchange for {len(current_batch)} {display_name}")
+
             inc = ff.create_interchange(
-                topology=molecules,  # Pass list of all molecules with same SMILES
+                topology=current_batch,
                 charge_from_molecules=charge_from,
             )
             all_interchanges.append(inc)
-            interchange_names.append(display_name)
+            interchange_names.append(f"{len(current_batch)}x {display_name}")
 
-        # Step 3: Process water + ions together as a single batch
-        water_ion_mols = [
-            mol for mol in self._solvated_topology.molecules if mol.to_smiles() in water_ion_smiles
-        ]
+            current_batch = []
 
-        if water_ion_mols:
-            LOGGER.info(f"Creating Interchange for {len(water_ion_mols)} water/ion molecule(s)")
-            water_ion_inc = ff.create_interchange(
-                topology=water_ion_mols,
-                charge_from_molecules=[water_mol],
-            )
-            all_interchanges.append(water_ion_inc)
-            interchange_names.append("water/ions")
+        # Process molecules in original order, batching consecutive same-type molecules
+        for molecule in self._solvated_topology.molecules:
+            mol_smiles = molecule.to_smiles()
 
-        # Step 4: Combine all interchanges (now a small number!)
-        # Log which interchanges are being combined to help diagnose key collisions
-        LOGGER.info(f"Combining {len(all_interchanges)} component Interchange(s)")
-        LOGGER.info(f"  Components: {', '.join(interchange_names)}")
+            if mol_smiles != current_smiles:
+                # New molecule type - flush previous batch
+                flush_batch()
+                current_smiles = mol_smiles
+
+            current_batch.append(molecule)
+
+        # Don't forget the last batch
+        flush_batch()
+
+        # Step 3: Combine all interchanges (preserving order)
+        LOGGER.info(f"Combining {len(all_interchanges)} Interchange batch(es)")
+        if len(interchange_names) <= 10:
+            LOGGER.info(f"  Batches: {', '.join(interchange_names)}")
+        else:
+            LOGGER.info(f"  First 5: {', '.join(interchange_names[:5])}")
+            LOGGER.info(f"  Last 5: {', '.join(interchange_names[-5:])}")
 
         if not all_interchanges:
             raise RuntimeError("No molecules found in solvated topology")
 
         combined = all_interchanges[0]
-        combined_name = interchange_names[0]
 
-        for i, inc in enumerate(all_interchanges[1:], start=1):
-            next_name = interchange_names[i]
-            LOGGER.debug(f"Combining '{combined_name}' with '{next_name}'...")
+        for inc in all_interchanges[1:]:
             combined = combined.combine(inc)
-            combined_name = f"{combined_name} + {next_name}"
 
         LOGGER.info("Interchange combination complete")
 
