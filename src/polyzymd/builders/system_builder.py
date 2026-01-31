@@ -230,13 +230,23 @@ class SystemBuilder:
     def pack_polymers(
         self,
         padding: float = 1.5,
+        tolerance: float = 2.0,
         working_directory: Optional[Union[str, Path]] = None,
+        optimization_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Topology:
         """Pack polymers around the combined solute topology.
 
         Args:
             padding: Box padding in nm.
+            tolerance: PACKMOL tolerance in Angstrom.
             working_directory: Directory for PACKMOL files.
+            optimization_kwargs: PACKMOL optimization options, e.g.:
+                - movebadrandom (bool): Move stuck molecules randomly
+                - discale (float): Distance tolerance scale factor
+                - maxit (int): Max iterations per GENCAN loop
+                - nloop (int): Max optimization loops
+                - movefrac (float): Fraction of molecules to move
+                - seed (int): Random seed (-1 for auto)
 
         Returns:
             Topology with polymers packed.
@@ -254,6 +264,7 @@ class SystemBuilder:
         from openff.interchange.components import _packmol as packmol
         from openff.units import Quantity
         from polymerist.mdtools.openfftools import boxvectors
+        from polyzymd.builders._packmol_patch import pack_box_with_optimization
 
         LOGGER.info(
             f"Packing {sum(self._polymer_counts)} polymer chains "
@@ -265,16 +276,24 @@ class SystemBuilder:
         min_box_vecs = boxvectors.get_topology_bbox(self._combined_topology)
         box_vecs = boxvectors.pad_box_vectors_uniform(min_box_vecs, padding_qty)
 
-        # Pack polymers
-        packed_top = packmol.pack_box(
+        # Log optimization settings if provided
+        if optimization_kwargs:
+            opt_str = ", ".join(f"{k}={v}" for k, v in optimization_kwargs.items())
+            LOGGER.info(f"PACKMOL optimization: {opt_str}")
+
+        # Pack polymers using our patched wrapper with optimization support
+        tolerance_qty = Quantity(tolerance, "angstrom")
+        packed_top = pack_box_with_optimization(
             self._polymer_molecules,
             self._polymer_counts,
             self._combined_topology,
+            tolerance=tolerance_qty,
             box_vectors=box_vecs,
             box_shape=packmol.UNIT_CUBE,
             center_solute="BRICK",
             working_directory=str(working_directory) if working_directory else None,
             retain_working_files=True,
+            optimization_kwargs=optimization_kwargs,
         )
 
         # Re-number chains
@@ -889,9 +908,13 @@ class SystemBuilder:
                 seed=polymer_seed,
             )
 
+            # Get packing config (uses defaults if not specified)
+            packing = config.polymers.packing
             self.pack_polymers(
-                padding=config.solvent.box.padding,
+                padding=packing.padding,
+                tolerance=packing.tolerance,
                 working_directory=self._working_dir,
+                optimization_kwargs=packing.optimization.to_kwargs(),
             )
 
         # 5. Solvate
