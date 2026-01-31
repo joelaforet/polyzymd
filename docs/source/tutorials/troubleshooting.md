@@ -344,6 +344,35 @@ ValueError: System state doesn't match checkpoint
 
 ---
 
+## Visualization Issues
+
+### "Molecules appear broken/scrambled in PyMOL or VMD"
+
+**Symptoms:**
+- Bonds appear to span the entire simulation box (hundreds of angstroms)
+- Molecules look like a "ball of bonds" or spaghetti
+- Some molecules look correct while others are completely scrambled
+- Water and ions particularly affected, but protein looks fine
+
+**Quick Diagnosis:**
+- If **ALL molecules** are broken → likely a PBC (periodic boundary conditions) wrapping issue
+- If only **SOME molecules** are broken → likely an **atom order mismatch** between your trajectory and topology files
+
+**Solutions:**
+
+1. **For atom order mismatch:** This is a subtle but devastating bug where the atom order in your DCD trajectory doesn't match the atom order in your topology file. We encountered this exact issue during PolyzyMD development and wrote a detailed guide:
+   
+   See: {doc}`broken_molecules_debugging` - A complete debugging case study with diagnosis steps, root cause analysis, and solutions.
+
+2. **For PBC wrapping:** Use your visualization software's unwrap/make-whole tools:
+   - **PyMOL:** Use `intra_fit` command or external post-processing tools
+   - **VMD:** Use `pbc unwrap` or `pbc join` commands
+   - **MDAnalysis:** Use `transformations.unwrap()` 
+
+**Prevention:** Always verify that new simulation pipelines produce correct trajectories by running a short test and checking visualization BEFORE committing to long production runs.
+
+---
+
 ## Getting Help
 
 ### Collect Debug Information

@@ -69,6 +69,7 @@ Getting Started
    tutorials/polymers
    tutorials/architecture
    tutorials/troubleshooting
+   tutorials/broken_molecules_debugging
    tutorials/contributing
 
 API Reference
