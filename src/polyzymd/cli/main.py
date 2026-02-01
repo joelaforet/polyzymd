@@ -207,8 +207,73 @@ def build(
             polymer_seed=replicate,
         )
 
+        # Extract OpenMM components from Interchange
+        click.echo("Extracting OpenMM components...")
+        omm_topology, omm_system, omm_positions = builder.get_openmm_components()
+
+        # Apply restraints if configured
+        if sim_config.restraints:
+            from polyzymd.core.restraints import RestraintFactory, apply_restraints
+
+            click.echo(f"Applying {len(sim_config.restraints)} restraint(s)...")
+            restraint_defs = []
+            for r in sim_config.restraints:
+                if not r.enabled:
+                    click.echo(f"  - {r.name}: DISABLED (skipping)")
+                    continue
+
+                # Create restraint definition from config
+                restraint_def = RestraintFactory.from_config(r.model_dump())
+
+                # Validate the selection resolves to exactly one atom each
+                try:
+                    indices1 = restraint_def.atom1.resolve(omm_topology)
+                    indices2 = restraint_def.atom2.resolve(omm_topology)
+
+                    if len(indices1) != 1:
+                        click.echo(
+                            f"Error: Restraint '{r.name}' atom1 selection matched "
+                            f"{len(indices1)} atoms (need exactly 1)",
+                            err=True,
+                        )
+                        sys.exit(1)
+                    if len(indices2) != 1:
+                        click.echo(
+                            f"Error: Restraint '{r.name}' atom2 selection matched "
+                            f"{len(indices2)} atoms (need exactly 1)",
+                            err=True,
+                        )
+                        sys.exit(1)
+
+                    click.echo(
+                        f"  - {r.name}: atom {indices1[0]} <-> atom {indices2[0]} "
+                        f"(type={r.type.value}, d={r.distance} A, k={r.force_constant} kJ/mol/nm^2)"
+                    )
+                    restraint_defs.append(restraint_def)
+
+                except ValueError as e:
+                    click.echo(f"Error: Restraint '{r.name}' invalid: {e}", err=True)
+                    sys.exit(1)
+
+            # Apply all validated restraints to the system
+            if restraint_defs:
+                apply_restraints(restraint_defs, omm_topology, omm_system)
+                click.echo(f"Successfully applied {len(restraint_defs)} restraint(s)")
+
+        # Save OpenMM system to XML for --skip-build support
+        from openmm import XmlSerializer
+
+        system_xml_path = working_dir / "system.xml"
+        click.echo(f"Saving OpenMM system to {system_xml_path}...")
+        with open(system_xml_path, "w") as f:
+            f.write(XmlSerializer.serialize(omm_system))
+
         click.echo(f"System built successfully!")
         click.echo(f"Output directory: {working_dir}")
+        click.echo(f"Files saved:")
+        click.echo(f"  - solvated_system.pdb (topology + positions)")
+        click.echo(f"  - system.xml (OpenMM system with restraints)")
+        click.echo(f"Use 'polyzymd run --skip-build' to run without rebuilding.")
 
     except FileNotFoundError as e:
         click.echo(f"Error: {e}", err=True)
@@ -317,63 +382,89 @@ def run(
                 working_dir=working_dir,
                 polymer_seed=replicate,
             )
+
+            # Extract OpenMM components from Interchange
+            click.echo("Extracting OpenMM components...")
+            omm_topology, omm_system, omm_positions = builder.get_openmm_components()
+
+            # Apply restraints if configured
+            if sim_config.restraints:
+                from polyzymd.core.restraints import RestraintFactory, apply_restraints
+
+                click.echo(f"Applying {len(sim_config.restraints)} restraint(s)...")
+                restraint_defs = []
+                for r in sim_config.restraints:
+                    if not r.enabled:
+                        click.echo(f"  - {r.name}: DISABLED (skipping)")
+                        continue
+
+                    # Create restraint definition from config
+                    restraint_def = RestraintFactory.from_config(r.model_dump())
+
+                    # Validate the selection resolves to exactly one atom each
+                    try:
+                        indices1 = restraint_def.atom1.resolve(omm_topology)
+                        indices2 = restraint_def.atom2.resolve(omm_topology)
+
+                        if len(indices1) != 1:
+                            click.echo(
+                                f"Error: Restraint '{r.name}' atom1 selection matched "
+                                f"{len(indices1)} atoms (need exactly 1)",
+                                err=True,
+                            )
+                            sys.exit(1)
+                        if len(indices2) != 1:
+                            click.echo(
+                                f"Error: Restraint '{r.name}' atom2 selection matched "
+                                f"{len(indices2)} atoms (need exactly 1)",
+                                err=True,
+                            )
+                            sys.exit(1)
+
+                        click.echo(
+                            f"  - {r.name}: atom {indices1[0]} <-> atom {indices2[0]} "
+                            f"(type={r.type.value}, d={r.distance} A, k={r.force_constant} kJ/mol/nm^2)"
+                        )
+                        restraint_defs.append(restraint_def)
+
+                    except ValueError as e:
+                        click.echo(f"Error: Restraint '{r.name}' invalid: {e}", err=True)
+                        sys.exit(1)
+
+                # Apply all validated restraints to the system
+                if restraint_defs:
+                    apply_restraints(restraint_defs, omm_topology, omm_system)
+                    click.echo(f"Successfully applied {len(restraint_defs)} restraint(s)")
+
         else:
-            click.echo("Skipping build, loading existing system...")
-            # Load existing interchange would go here
-            raise NotImplementedError("--skip-build requires pre-built system")
+            # --skip-build: Load pre-built system from disk
+            click.echo("Skipping build, loading pre-built system...")
+            from openmm import XmlSerializer
+            from openmm.app import PDBFile
 
-        # Extract OpenMM components from Interchange
-        click.echo("Extracting OpenMM components...")
-        omm_topology, omm_system, omm_positions = builder.get_openmm_components()
+            # Check that required files exist
+            pdb_path = working_dir / "solvated_system.pdb"
+            system_path = working_dir / "system.xml"
 
-        # Apply restraints if configured
-        if sim_config.restraints:
-            from polyzymd.core.restraints import RestraintFactory, apply_restraints
+            if not pdb_path.exists():
+                click.echo(f"Error: {pdb_path} not found. Run 'polyzymd build' first.", err=True)
+                sys.exit(1)
+            if not system_path.exists():
+                click.echo(f"Error: {system_path} not found. Run 'polyzymd build' first.", err=True)
+                sys.exit(1)
 
-            click.echo(f"Applying {len(sim_config.restraints)} restraint(s)...")
-            restraint_defs = []
-            for r in sim_config.restraints:
-                if not r.enabled:
-                    click.echo(f"  - {r.name}: DISABLED (skipping)")
-                    continue
+            # Load topology and positions from PDB
+            click.echo(f"Loading topology and positions from {pdb_path}...")
+            pdb = PDBFile(str(pdb_path))
+            omm_topology = pdb.topology
+            omm_positions = pdb.positions
 
-                # Create restraint definition from config
-                restraint_def = RestraintFactory.from_config(r.model_dump())
+            # Load system from XML (already includes restraints from build)
+            click.echo(f"Loading OpenMM system from {system_path}...")
+            with open(system_path, "r") as f:
+                omm_system = XmlSerializer.deserialize(f.read())
 
-                # Validate the selection resolves to exactly one atom each
-                try:
-                    indices1 = restraint_def.atom1.resolve(omm_topology)
-                    indices2 = restraint_def.atom2.resolve(omm_topology)
-
-                    if len(indices1) != 1:
-                        click.echo(
-                            f"Error: Restraint '{r.name}' atom1 selection matched "
-                            f"{len(indices1)} atoms (need exactly 1)",
-                            err=True,
-                        )
-                        sys.exit(1)
-                    if len(indices2) != 1:
-                        click.echo(
-                            f"Error: Restraint '{r.name}' atom2 selection matched "
-                            f"{len(indices2)} atoms (need exactly 1)",
-                            err=True,
-                        )
-                        sys.exit(1)
-
-                    click.echo(
-                        f"  - {r.name}: atom {indices1[0]} <-> atom {indices2[0]} "
-                        f"(type={r.type.value}, d={r.distance} Å, k={r.force_constant} kJ/mol/nm²)"
-                    )
-                    restraint_defs.append(restraint_def)
-
-                except ValueError as e:
-                    click.echo(f"Error: Restraint '{r.name}' invalid: {e}", err=True)
-                    sys.exit(1)
-
-            # Apply all validated restraints to the system
-            if restraint_defs:
-                apply_restraints(restraint_defs, omm_topology, omm_system)
-                click.echo(f"Successfully applied {len(restraint_defs)} restraint(s)")
+            click.echo("Pre-built system loaded successfully")
 
         # Create runner
         runner = SimulationRunner(
@@ -499,6 +590,11 @@ def run(
     is_flag=True,
     help="Enable verbose OpenFF logs in generated job scripts (suppressed by default)",
 )
+@click.option(
+    "--skip-build",
+    is_flag=True,
+    help="Skip system building in generated jobs (use pre-built system from 'polyzymd build')",
+)
 def submit(
     config: str,
     replicates: str,
@@ -511,6 +607,7 @@ def submit(
     time_limit: Optional[str],
     memory: Optional[str],
     submit_openff_logs: bool,
+    skip_build: bool,
 ) -> None:
     """Submit daisy-chain simulation jobs to SLURM.
 
@@ -533,6 +630,8 @@ def submit(
         click.echo(f"Projects directory: {projects_dir}")
     if memory:
         click.echo(f"Memory allocation: {memory}")
+    if skip_build:
+        click.echo("Skip-build mode: using pre-built systems")
 
     if dry_run:
         click.echo("DRY RUN MODE - scripts will be created but not submitted")
@@ -550,6 +649,7 @@ def submit(
             time_limit=time_limit,
             memory=memory,
             openff_logs=submit_openff_logs,
+            skip_build=skip_build,
         )
 
         if not dry_run:

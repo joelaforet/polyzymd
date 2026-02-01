@@ -200,7 +200,7 @@ polyzymd{openff_logs_flag} run -c "{config_path}" \\
     --replicate {replicate} \\
     --scratch-dir "$SCRATCH_DIR" \\
     --segment-time {segment_time} \\
-    --segment-frames {segment_frames}
+    --segment-frames {segment_frames}{skip_build_flag}
 
 echo "Segment {segment_index} completed successfully at $(date)"
 """
@@ -268,6 +268,7 @@ echo "Segment {segment_index} completed successfully at $(date)"
         config: SlurmConfig,
         conda_env: str = "polymerist-env",
         openff_logs: bool = False,
+        skip_build: bool = False,
     ) -> None:
         """Initialize the generator.
 
@@ -275,10 +276,12 @@ echo "Segment {segment_index} completed successfully at $(date)"
             config: SLURM configuration.
             conda_env: Conda environment name.
             openff_logs: Enable verbose OpenFF logs in generated scripts.
+            skip_build: Skip system building in generated scripts (use pre-built system).
         """
         self._config = config
         self._conda_env = conda_env
         self._openff_logs = openff_logs
+        self._skip_build = skip_build
 
     @property
     def config(self) -> SlurmConfig:
@@ -316,6 +319,9 @@ echo "Segment {segment_index} completed successfully at $(date)"
         # Format openff_logs flag
         openff_logs_flag = " --openff-logs" if self._openff_logs else ""
 
+        # Format skip_build flag (only for initial job - continuation jobs don't build)
+        skip_build_flag = " \\\n    --skip-build" if self._skip_build else ""
+
         return self.INITIAL_JOB_TEMPLATE.format(
             partition=self._config.partition,
             job_name=context.job_name,
@@ -338,6 +344,7 @@ echo "Segment {segment_index} completed successfully at $(date)"
             segment_frames=segment_frames,
             segment_index=context.segment_index,
             openff_logs_flag=openff_logs_flag,
+            skip_build_flag=skip_build_flag,
         )
 
     def generate_continuation_job(

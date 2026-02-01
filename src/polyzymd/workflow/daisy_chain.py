@@ -191,6 +191,7 @@ class DaisyChainSubmitter:
         dc_config: DaisyChainConfig,
         conda_env: str = "polymerist-env",
         openff_logs: bool = False,
+        skip_build: bool = False,
     ) -> None:
         """Initialize the DaisyChainSubmitter.
 
@@ -199,12 +200,14 @@ class DaisyChainSubmitter:
             dc_config: Daisy-chain configuration
             conda_env: Conda environment name
             openff_logs: Enable verbose OpenFF logs in generated scripts
+            skip_build: Skip system building in generated scripts (use pre-built system)
         """
         self._sim_config = sim_config
         self._dc_config = dc_config
         self._openff_logs = openff_logs
+        self._skip_build = skip_build
         self._generator = SlurmScriptGenerator(
-            dc_config.slurm_config, conda_env, openff_logs=openff_logs
+            dc_config.slurm_config, conda_env, openff_logs=openff_logs, skip_build=skip_build
         )
 
         # Track submitted jobs per replicate
@@ -552,6 +555,7 @@ def submit_daisy_chain(
     time_limit: Optional[str] = None,
     memory: Optional[str] = None,
     openff_logs: bool = False,
+    skip_build: bool = False,
 ) -> Dict[int, List[SubmissionResult]]:
     """Convenience function to submit daisy-chain jobs from a YAML config.
 
@@ -568,6 +572,7 @@ def submit_daisy_chain(
         time_limit: Override SLURM time limit (format: HH:MM:SS or M:SS)
         memory: Override SLURM memory allocation (e.g., "4G", "8G")
         openff_logs: Enable verbose OpenFF logs in generated scripts
+        skip_build: Skip system building in generated scripts (use pre-built system)
 
     Returns:
         Dictionary mapping replicate numbers to submission results
@@ -622,7 +627,7 @@ def submit_daisy_chain(
 
     # Create submitter and submit
     submitter = DaisyChainSubmitter(
-        sim_config, dc_config, conda_env=conda_env, openff_logs=openff_logs
+        sim_config, dc_config, conda_env=conda_env, openff_logs=openff_logs, skip_build=skip_build
     )
     return submitter.submit_all()
 
