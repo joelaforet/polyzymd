@@ -510,6 +510,7 @@ polyzymd submit -c CONFIG [OPTIONS]
 - `--output-dir PATH` - Directory for job scripts. Default: {projects_dir}/job_scripts
 - `--email EMAIL` - Email for job notifications
 - `--time-limit TIME` - Override SLURM time limit (HH:MM:SS)
+- `--memory SIZE` - Override SLURM memory allocation (e.g., "4G", "8G"). Default: 3G
 - `--dry-run` - Generate scripts without submitting
 
 ### `polyzymd run`
@@ -590,10 +591,33 @@ conda activate polymerist-env
 
 ### "Out of memory"
 
+There are two types of out-of-memory errors:
+
+**GPU Memory (CUDA OOM):**
+```
+CUDA out of memory
+```
+
 Reduce system size:
 - Decrease `box.padding`
 - Use fewer polymers
 - Use smaller production `samples` (fewer frames saved)
+
+**System Memory (SLURM OOM):**
+```
+slurmstepd: error: Detected 1 oom_kill event in StepId=...
+```
+
+The job exceeded its RAM allocation. This often occurs during energy minimization when loading large systems onto the GPU.
+
+**Solution:** Increase memory with the `--memory` flag:
+```bash
+# Default is 3G, increase for larger systems
+polyzymd submit -c config.yaml --memory 4G
+
+# For very large systems
+polyzymd submit -c config.yaml --memory 8G
+```
 
 ### "GPU not detected"
 

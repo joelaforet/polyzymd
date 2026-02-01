@@ -211,11 +211,15 @@ OpenMMException: Particle coordinate is NaN
 
 ### "Out of memory"
 
+There are two types of out-of-memory errors you may encounter:
+
+#### GPU Memory (CUDA OOM)
+
 ```
 CUDA out of memory
 ```
 
-**Solutions:**
+This means the GPU ran out of VRAM. **Solutions:**
 
 1. Reduce system size:
    ```yaml
@@ -228,10 +232,34 @@ CUDA out of memory
 
 2. Use single precision (default in OpenMM)
 
-3. Request more GPU memory in SLURM:
+#### System Memory (SLURM OOM)
+
+```
+slurmstepd: error: Detected 1 oom_kill event in StepId=...
+```
+
+This means the job exceeded its allocated RAM. This often happens during energy minimization when loading large systems. **Solutions:**
+
+1. Increase memory allocation using the `--memory` flag:
    ```bash
-   #SBATCH --mem=128G
+   # Default is 3G, increase for larger systems
+   polyzymd submit -c config.yaml --memory 4G
+   
+   # For very large systems (many polymers, large proteins)
+   polyzymd submit -c config.yaml --memory 8G
    ```
+
+2. If using generated scripts directly, edit the `#SBATCH --mem` line:
+   ```bash
+   #SBATCH --mem=4G    # Increase from 3G
+   ```
+
+```{tip}
+**Memory guidelines:**
+- Small systems (1 polymer, small protein): 3G (default)
+- Medium systems (2-5 polymers): 4G
+- Large systems (5+ polymers, large proteins): 6-8G
+```
 
 ### "Simulation too slow"
 
