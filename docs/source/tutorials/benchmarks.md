@@ -19,7 +19,7 @@ Each GPU has a table mapping **system size (atoms)** to **simulation speed (ns/d
 
 | System Size (atoms) | ns/day | Notes |
 |--------------------:|-------:|:------|
-| | | |
+| ~18,000 | 442 | A100 GPUs available on both Alpine and Blanca; performance should be similar |
 
 ### NVIDIA L40 (al40 partition)
 
