@@ -186,6 +186,7 @@ class PolymerConfig(BaseModel):
         sdf_directory: Optional path to pre-built polymer SDF files
         cache_directory: Directory for caching generated polymers
         packing: Settings for packing polymers around the solute
+        random_seed: Random seed for polymer sequence generation (for reproducibility)
     """
 
     enabled: bool = Field(True, description="Include polymers in system")
@@ -200,6 +201,10 @@ class PolymerConfig(BaseModel):
     packing: PolymerPackingConfig = Field(
         default_factory=PolymerPackingConfig,
         description="Polymer packing settings (padding, tolerance)",
+    )
+    random_seed: Optional[int] = Field(
+        None,
+        description="Random seed for polymer sequence generation. If None, uses replicate number.",
     )
 
     @model_validator(mode="after")

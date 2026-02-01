@@ -93,6 +93,11 @@ description: "Description of your simulation system"
 #   # Cache directory for generated polymers
 #   cache_directory: ".polymer_cache"
 #   
+#   # Random seed for reproducible polymer sequences (OPTIONAL)
+#   # If not set, uses the replicate number as the seed.
+#   # Set this to get identical polymer sequences across different replicates.
+#   # random_seed: 42
+#   
 #   # Packing settings for polymers around the protein
 #   # These control how PACKMOL packs polymers around your solute
 #   packing:

@@ -52,6 +52,11 @@ polymers:
   # Cache for generated polymers
   cache_directory: ".polymer_cache"
   
+  # Random seed for polymer sequence generation (optional)
+  # If not set, uses the replicate number as the seed.
+  # Set this for reproducible polymer sequences across different replicates.
+  # random_seed: 42
+  
   # Packing settings for polymers around the protein
   # Larger padding helps PACKMOL converge when packing polymers
   packing:

@@ -857,7 +857,8 @@ class SystemBuilder:
         Args:
             config: SimulationConfig with all settings.
             working_dir: Working directory for output files.
-            polymer_seed: Random seed for polymer generation.
+            polymer_seed: Random seed for polymer generation. This is used as a
+                fallback if config.polymers.random_seed is not set.
 
         Returns:
             OpenFF Interchange ready for simulation.
@@ -885,6 +886,12 @@ class SystemBuilder:
             characters = [m.label for m in config.polymers.monomers]
             probabilities = [m.probability for m in config.polymers.monomers]
 
+            # Determine effective seed: config.random_seed takes precedence over polymer_seed
+            effective_seed = config.polymers.random_seed
+            if effective_seed is None:
+                effective_seed = polymer_seed
+            LOGGER.info(f"Using polymer random seed: {effective_seed}")
+
             self.build_polymers(
                 characters=characters,
                 probabilities=probabilities,
@@ -892,7 +899,7 @@ class SystemBuilder:
                 count=config.polymers.count,
                 type_prefix=config.polymers.type_prefix,
                 sdf_directory=config.polymers.sdf_directory,
-                seed=polymer_seed,
+                seed=effective_seed,
             )
 
             # Get packing config (uses defaults if not specified)
