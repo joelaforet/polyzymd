@@ -190,6 +190,7 @@ class DaisyChainSubmitter:
         sim_config: SimulationConfig,
         dc_config: DaisyChainConfig,
         conda_env: str = "polymerist-env",
+        openff_logs: bool = False,
     ) -> None:
         """Initialize the DaisyChainSubmitter.
 
@@ -197,10 +198,14 @@ class DaisyChainSubmitter:
             sim_config: Simulation configuration
             dc_config: Daisy-chain configuration
             conda_env: Conda environment name
+            openff_logs: Enable verbose OpenFF logs in generated scripts
         """
         self._sim_config = sim_config
         self._dc_config = dc_config
-        self._generator = SlurmScriptGenerator(dc_config.slurm_config, conda_env)
+        self._openff_logs = openff_logs
+        self._generator = SlurmScriptGenerator(
+            dc_config.slurm_config, conda_env, openff_logs=openff_logs
+        )
 
         # Track submitted jobs per replicate
         self._job_chains: Dict[int, List[SubmissionResult]] = {}
@@ -546,6 +551,7 @@ def submit_daisy_chain(
     projects_dir: Optional[Union[str, Path]] = None,
     time_limit: Optional[str] = None,
     memory: Optional[str] = None,
+    openff_logs: bool = False,
 ) -> Dict[int, List[SubmissionResult]]:
     """Convenience function to submit daisy-chain jobs from a YAML config.
 
@@ -561,6 +567,7 @@ def submit_daisy_chain(
         projects_dir: Override projects directory for scripts/logs
         time_limit: Override SLURM time limit (format: HH:MM:SS or M:SS)
         memory: Override SLURM memory allocation (e.g., "4G", "8G")
+        openff_logs: Enable verbose OpenFF logs in generated scripts
 
     Returns:
         Dictionary mapping replicate numbers to submission results
@@ -614,7 +621,9 @@ def submit_daisy_chain(
     )
 
     # Create submitter and submit
-    submitter = DaisyChainSubmitter(sim_config, dc_config, conda_env=conda_env)
+    submitter = DaisyChainSubmitter(
+        sim_config, dc_config, conda_env=conda_env, openff_logs=openff_logs
+    )
     return submitter.submit_all()
 
 

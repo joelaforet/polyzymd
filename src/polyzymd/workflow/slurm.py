@@ -196,7 +196,7 @@ echo "Timestamp: $(date)"
 
 # Run the initial simulation using polyzymd CLI
 # This builds the system, runs equilibration, and runs the first production segment
-polyzymd run -c "{config_path}" \\
+polyzymd{openff_logs_flag} run -c "{config_path}" \\
     --replicate {replicate} \\
     --scratch-dir "$SCRATCH_DIR" \\
     --segment-time {segment_time} \\
@@ -254,7 +254,7 @@ echo "Timestamp: $(date)"
 # Continue simulation from previous segment using polyzymd CLI
 # Reads checkpoint from previous segment in SCRATCH_DIR
 # Writes new trajectory and checkpoint to SCRATCH_DIR
-polyzymd continue \\
+polyzymd{openff_logs_flag} continue \\
     -w "$SCRATCH_DIR" \\
     -s {segment_index} \\
     -t {segment_time} \\
@@ -267,15 +267,18 @@ echo "Segment {segment_index} completed successfully at $(date)"
         self,
         config: SlurmConfig,
         conda_env: str = "polymerist-env",
+        openff_logs: bool = False,
     ) -> None:
         """Initialize the generator.
 
         Args:
             config: SLURM configuration.
             conda_env: Conda environment name.
+            openff_logs: Enable verbose OpenFF logs in generated scripts.
         """
         self._config = config
         self._conda_env = conda_env
+        self._openff_logs = openff_logs
 
     @property
     def config(self) -> SlurmConfig:
@@ -310,6 +313,9 @@ echo "Segment {segment_index} completed successfully at $(date)"
         # Use context.projects_dir
         projects_dir = context.projects_dir if context.projects_dir != "." else "."
 
+        # Format openff_logs flag
+        openff_logs_flag = " --openff-logs" if self._openff_logs else ""
+
         return self.INITIAL_JOB_TEMPLATE.format(
             partition=self._config.partition,
             job_name=context.job_name,
@@ -331,6 +337,7 @@ echo "Segment {segment_index} completed successfully at $(date)"
             segment_time=segment_time,
             segment_frames=segment_frames,
             segment_index=context.segment_index,
+            openff_logs_flag=openff_logs_flag,
         )
 
     def generate_continuation_job(
@@ -356,6 +363,9 @@ echo "Segment {segment_index} completed successfully at $(date)"
         # Use context.projects_dir
         projects_dir = context.projects_dir if context.projects_dir != "." else "."
 
+        # Format openff_logs flag
+        openff_logs_flag = " --openff-logs" if self._openff_logs else ""
+
         return self.CONTINUATION_JOB_TEMPLATE.format(
             partition=self._config.partition,
             job_name=context.job_name,
@@ -375,6 +385,7 @@ echo "Segment {segment_index} completed successfully at $(date)"
             segment_index=context.segment_index,
             segment_time=segment_time,
             num_samples=num_samples,
+            openff_logs_flag=openff_logs_flag,
         )
 
     def save_script(

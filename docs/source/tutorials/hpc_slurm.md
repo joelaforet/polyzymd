@@ -511,6 +511,7 @@ polyzymd submit -c CONFIG [OPTIONS]
 - `--email EMAIL` - Email for job notifications
 - `--time-limit TIME` - Override SLURM time limit (HH:MM:SS)
 - `--memory SIZE` - Override SLURM memory allocation (e.g., "4G", "8G"). Default: 3G
+- `--openff-logs` - Enable verbose OpenFF logs in generated job scripts (for debugging)
 - `--dry-run` - Generate scripts without submitting
 
 ### `polyzymd run`

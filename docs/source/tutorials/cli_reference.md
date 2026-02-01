@@ -250,6 +250,8 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--output-dir` | - | No | auto | Directory for job scripts |
 | `--time-limit` | - | No | from preset | Override SLURM time limit (HH:MM:SS) |
+| `--memory` | - | No | 3G | Override SLURM memory allocation |
+| `--openff-logs` | - | No | false | Enable verbose OpenFF logs in job scripts |
 | `--dry-run` | - | No | false | Generate scripts without submitting |
 
 ### SLURM Presets

@@ -493,6 +493,12 @@ def run(
     default=None,
     help="Override SLURM memory allocation (default: 3G). Increase to 4-8G for larger systems or if you encounter OOM errors.",
 )
+@click.option(
+    "--openff-logs",
+    "submit_openff_logs",
+    is_flag=True,
+    help="Enable verbose OpenFF logs in generated job scripts (suppressed by default)",
+)
 def submit(
     config: str,
     replicates: str,
@@ -504,6 +510,7 @@ def submit(
     output_dir: Optional[str],
     time_limit: Optional[str],
     memory: Optional[str],
+    submit_openff_logs: bool,
 ) -> None:
     """Submit daisy-chain simulation jobs to SLURM.
 
@@ -542,6 +549,7 @@ def submit(
             projects_dir=projects_dir,
             time_limit=time_limit,
             memory=memory,
+            openff_logs=submit_openff_logs,
         )
 
         if not dry_run:
