@@ -51,6 +51,12 @@ polymers:
   
   # Cache for generated polymers
   cache_directory: ".polymer_cache"
+  
+  # Packing settings for polymers around the protein
+  # Larger padding helps PACKMOL converge when packing polymers
+  packing:
+    padding: 2.0  # nm padding around solute for polymer box
+    tolerance: 2.0  # PACKMOL tolerance (Angstrom)
 
 # ============================================================================
 # Solvent Configuration
@@ -67,7 +73,7 @@ solvent:
     nacl_concentration: 0.1  # 100 mM NaCl
   
   box:
-    padding: 1.2
+    padding: 2.0  # nm padding (2.0 recommended for PACKMOL convergence)
     shape: "rhombic_dodecahedron"
     target_density: 1.0
     tolerance: 2.0
@@ -124,6 +130,12 @@ simulation_phases:
 # ============================================================================
 # HPC systems often separate long-term storage (projects) from high-performance
 # scratch storage. Configure both directories here, or use CLI overrides.
+#
+# Memory requirements for polymer systems:
+#   - Polymer systems require more memory due to larger system sizes
+#   - Default 3G may cause OOM errors during energy minimization
+#   - Recommended: polyzymd submit --memory 4G (or 6-8G for many polymers)
+#
 output:
   # Long-term storage: scripts, logs, configs (survives job completion)
   # Example: /projects/$USER/polyzymd or just "." for local development

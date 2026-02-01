@@ -51,7 +51,7 @@ solvent:
     nacl_concentration: 0.1
   
   box:
-    padding: 1.5  # Slightly larger padding for co-solvent
+    padding: 2.0  # nm padding (2.0 recommended for PACKMOL convergence)
     shape: "rhombic_dodecahedron"
     target_density: 1.05  # Adjusted for DMSO mixture
     tolerance: 2.0
@@ -108,6 +108,11 @@ simulation_phases:
 # ============================================================================
 # HPC systems often separate long-term storage (projects) from high-performance
 # scratch storage. Configure both directories here, or use CLI overrides.
+#
+# Memory requirements:
+#   - Co-solvent systems may need slightly more memory due to additional molecules
+#   - Default 3G is usually sufficient, increase with: polyzymd submit --memory 4G
+#
 output:
   # Long-term storage: scripts, logs, configs (survives job completion)
   # Example: /projects/$USER/polyzymd or just "." for local development

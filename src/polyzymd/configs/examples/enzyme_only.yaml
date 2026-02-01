@@ -46,7 +46,7 @@ solvent:
     nacl_concentration: 0.1  # 100 mM NaCl
   
   box:
-    padding: 1.2  # nm from solute to box edge
+    padding: 2.0  # nm from solute to box edge (2.0 recommended for PACKMOL convergence)
     shape: "rhombic_dodecahedron"
     target_density: 1.0  # g/mL
     tolerance: 2.0  # PACKMOL tolerance in Angstrom
@@ -117,6 +117,11 @@ simulation_phases:
 # ============================================================================
 # HPC systems often separate long-term storage (projects) from high-performance
 # scratch storage. Configure both directories here, or use CLI overrides.
+#
+# Memory requirements:
+#   - Small systems (enzyme only): 3G default is usually sufficient
+#   - If you encounter OOM errors, increase with: polyzymd submit --memory 4G
+#
 output:
   # Long-term storage: scripts, logs, configs (survives job completion)
   # Example: /projects/$USER/polyzymd or just "." for local development
