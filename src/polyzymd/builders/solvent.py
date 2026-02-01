@@ -225,7 +225,6 @@ class SolventBuilder:
         box_shape: BoxShapeType = "rhombic_dodecahedron",
         target_density: float = 1.0,
         tolerance: float = 2.0,
-        optimization_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Topology:
         """Solvate a topology with water, ions, and optional co-solvents.
 
@@ -236,13 +235,6 @@ class SolventBuilder:
             box_shape: Box geometry.
             target_density: Target density in g/mL.
             tolerance: Minimum molecular spacing for PACKMOL in Angstrom.
-            optimization_kwargs: PACKMOL optimization options, e.g.:
-                - movebadrandom (bool): Move stuck molecules randomly
-                - discale (float): Distance tolerance scale factor
-                - maxit (int): Max iterations per GENCAN loop
-                - nloop (int): Max optimization loops
-                - movefrac (float): Fraction of molecules to move
-                - seed (int): Random seed (-1 for auto)
 
         Returns:
             Solvated OpenFF Topology.
@@ -250,7 +242,6 @@ class SolventBuilder:
         from openff.interchange.components import _packmol as packmol
         from polymerist.mdtools.openfftools import boxvectors
         from polyzymd.data.solvent_molecules import get_solvent_molecule
-        from polyzymd.builders._packmol_patch import pack_box_with_optimization
 
         if composition is None:
             composition = SolventComposition()
@@ -403,20 +394,14 @@ class SolventBuilder:
             solvent_counts.append(n_cosolvent)
             cosolvent_counts_list.append((cosolvent.name, n_cosolvent))
 
-        # Log optimization settings if provided
-        if optimization_kwargs:
-            opt_str = ", ".join(f"{k}={v}" for k, v in optimization_kwargs.items())
-            LOGGER.info(f"PACKMOL optimization: {opt_str}")
-
-        # Pack the box using PACKMOL with optimization support
+        # Pack the box using PACKMOL
         tolerance_qty = Quantity(tolerance, "angstrom")
-        solvated_top = pack_box_with_optimization(
-            solvent_molecules,
-            solvent_counts,
+        solvated_top = packmol.pack_box(
+            molecules=solvent_molecules,
+            number_of_copies=solvent_counts,
             solute=topology,
             tolerance=tolerance_qty,
             box_vectors=box_vecs,
-            optimization_kwargs=optimization_kwargs,
         )
 
         # Set residue names
@@ -476,9 +461,6 @@ class SolventBuilder:
             neutralize=config.ions.neutralize,
         )
 
-        # Get optimization kwargs from box config
-        optimization_kwargs = config.box.optimization.to_kwargs()
-
         return self.solvate(
             topology=topology,
             composition=composition,
@@ -486,7 +468,6 @@ class SolventBuilder:
             box_shape=config.box.shape.value,
             target_density=config.box.target_density,
             tolerance=config.box.tolerance,
-            optimization_kwargs=optimization_kwargs,
         )
 
     def _get_box_shape_matrix(self, shape: BoxShapeType) -> NDArray:

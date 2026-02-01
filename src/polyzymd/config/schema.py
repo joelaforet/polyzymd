@@ -132,65 +132,8 @@ class SubstrateConfig(BaseModel):
 
 
 # =============================================================================
-# PACKMOL Optimization Configuration
+# Polymer Packing Configuration
 # =============================================================================
-
-
-class PackmolOptimizationConfig(BaseModel):
-    """PACKMOL optimization settings for faster convergence.
-
-    These options can significantly speed up packing for complex systems
-    with many molecules or tight constraints.
-
-    Attributes:
-        movebadrandom: Move badly-placed molecules to random positions instead
-            of placing them near well-packed molecules. Helps with complex restraints.
-        discale: Distance tolerance scale factor for local optimization.
-            Setting to 1.5 can help convergence in difficult cases.
-        maxit: Maximum iterations per GENCAN optimization loop (PACKMOL default: 20).
-        nloop: Maximum number of optimization loops before giving up.
-        movefrac: Fraction of molecules to move in the bad-molecule heuristic.
-            For large systems, smaller values (e.g., 0.01) may work better.
-            PACKMOL default is 0.05.
-        seed: Random seed for reproducibility. Use -1 for automatic seed from time.
-
-    Example:
-        >>> PackmolOptimizationConfig(
-        ...     movebadrandom=True,
-        ...     discale=1.5,
-        ...     nloop=200,
-        ... )
-    """
-
-    movebadrandom: bool = Field(False, description="Move stuck molecules to random positions")
-    discale: Optional[float] = Field(None, gt=0.0, description="Distance tolerance scale factor")
-    maxit: Optional[int] = Field(None, ge=1, description="Max iterations per GENCAN loop")
-    nloop: Optional[int] = Field(None, ge=1, description="Max optimization loops")
-    movefrac: Optional[float] = Field(
-        None, gt=0.0, le=1.0, description="Fraction of molecules to move"
-    )
-    seed: Optional[int] = Field(None, description="Random seed (-1 for auto from time)")
-
-    def to_kwargs(self) -> Dict[str, Any]:
-        """Convert to kwargs dict for pack_box_with_optimization().
-
-        Only includes non-None values (except movebadrandom which is always included).
-
-        Returns:
-            Dictionary of optimization kwargs.
-        """
-        kwargs: Dict[str, Any] = {"movebadrandom": self.movebadrandom}
-        if self.discale is not None:
-            kwargs["discale"] = self.discale
-        if self.maxit is not None:
-            kwargs["maxit"] = self.maxit
-        if self.nloop is not None:
-            kwargs["nloop"] = self.nloop
-        if self.movefrac is not None:
-            kwargs["movefrac"] = self.movefrac
-        if self.seed is not None:
-            kwargs["seed"] = self.seed
-        return kwargs
 
 
 class PolymerPackingConfig(BaseModel):
@@ -203,21 +146,13 @@ class PolymerPackingConfig(BaseModel):
         padding: Box padding around the solute in nanometers. Larger values
             give polymers more room and can speed up PACKMOL convergence.
         tolerance: Minimum molecular spacing for PACKMOL in Angstrom.
-        optimization: PACKMOL optimization settings for faster convergence.
 
     Example:
-        >>> PolymerPackingConfig(
-        ...     padding=2.0,  # Give polymers more room
-        ...     optimization=PackmolOptimizationConfig(movebadrandom=True)
-        ... )
+        >>> PolymerPackingConfig(padding=2.5)  # Give polymers more room
     """
 
-    padding: float = Field(1.5, gt=0.0, description="Box padding around solute (nm)")
+    padding: float = Field(2.0, gt=0.0, description="Box padding around solute (nm)")
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
-    optimization: PackmolOptimizationConfig = Field(
-        default_factory=PackmolOptimizationConfig,
-        description="PACKMOL optimization settings",
-    )
 
 
 # =============================================================================
@@ -264,7 +199,7 @@ class PolymerConfig(BaseModel):
     )
     packing: PolymerPackingConfig = Field(
         default_factory=PolymerPackingConfig,
-        description="Polymer packing settings (padding, tolerance, optimization)",
+        description="Polymer packing settings (padding, tolerance)",
     )
 
     @model_validator(mode="after")
@@ -422,17 +357,12 @@ class BoxConfig(BaseModel):
         shape: Box geometry
         target_density: Target density in g/mL
         tolerance: Minimum molecular spacing for PACKMOL in Angstrom
-        optimization: PACKMOL optimization settings for faster convergence
     """
 
     padding: float = Field(1.2, gt=0.0, description="Box padding (nm)")
     shape: BoxShape = Field(BoxShape.RHOMBIC_DODECAHEDRON, description="Box shape")
     target_density: float = Field(1.0, gt=0.0, description="Target density (g/mL)")
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
-    optimization: PackmolOptimizationConfig = Field(
-        default_factory=PackmolOptimizationConfig,
-        description="PACKMOL optimization settings",
-    )
 
 
 class SolventConfig(BaseModel):

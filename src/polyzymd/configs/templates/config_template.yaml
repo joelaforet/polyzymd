@@ -96,17 +96,8 @@ description: "Description of your simulation system"
 #   # Packing settings for polymers around the protein
 #   # These control how PACKMOL packs polymers around your solute
 #   packing:
-#     padding: 1.5                        # nm padding around solute for polymer box
+#     padding: 2.0                        # nm padding around solute for polymer box
 #     tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
-#     
-#     # PACKMOL optimization for faster convergence (optional)
-#     # Useful for systems with many polymers or tight packing
-#     optimization:
-#       movebadrandom: false              # Move stuck molecules to random positions
-#       # discale: 1.5                    # Distance tolerance scale (uncomment if needed)
-#       # maxit: 50                       # Max iterations per GENCAN loop
-#       # nloop: 200                      # Max optimization loops
-#       # movefrac: 0.05                  # Fraction of molecules to move
 
 # ============================================================================
 # Solvent Configuration (REQUIRED)
@@ -159,14 +150,6 @@ description: "Description of your simulation system"
 #     shape: "rhombic_dodecahedron"       # Efficient packing
 #     target_density: 1.0                 # g/mL
 #     tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
-#     
-#     # PACKMOL optimization for faster solvation convergence (optional)
-#     # Useful for large systems or tight packing
-#     optimization:
-#       movebadrandom: false              # Move stuck molecules to random positions
-#       # discale: 1.5                    # Distance tolerance scale (uncomment if needed)
-#       # maxit: 50                       # Max iterations per GENCAN loop
-#       # nloop: 200                      # Max optimization loops
 
 # ============================================================================
 # Restraints (OPTIONAL)
