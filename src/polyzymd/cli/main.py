@@ -421,6 +421,11 @@ def run(
     default=None,
     help="Override SLURM time limit (format: HH:MM:SS or M:SS)",
 )
+@click.option(
+    "--memory",
+    default=None,
+    help="Override SLURM memory allocation (default: 3G). Increase to 4-8G for larger systems or if you encounter OOM errors.",
+)
 def submit(
     config: str,
     replicates: str,
@@ -431,6 +436,7 @@ def submit(
     dry_run: bool,
     output_dir: Optional[str],
     time_limit: Optional[str],
+    memory: Optional[str],
 ) -> None:
     """Submit daisy-chain simulation jobs to SLURM.
 
@@ -451,6 +457,8 @@ def submit(
         click.echo(f"Scratch directory: {scratch_dir}")
     if projects_dir:
         click.echo(f"Projects directory: {projects_dir}")
+    if memory:
+        click.echo(f"Memory allocation: {memory}")
 
     if dry_run:
         click.echo("DRY RUN MODE - scripts will be created but not submitted")
@@ -466,6 +474,7 @@ def submit(
             scratch_dir=scratch_dir,
             projects_dir=projects_dir,
             time_limit=time_limit,
+            memory=memory,
         )
 
         if not dry_run:

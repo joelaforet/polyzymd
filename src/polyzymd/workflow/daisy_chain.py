@@ -545,6 +545,7 @@ def submit_daisy_chain(
     scratch_dir: Optional[Union[str, Path]] = None,
     projects_dir: Optional[Union[str, Path]] = None,
     time_limit: Optional[str] = None,
+    memory: Optional[str] = None,
 ) -> Dict[int, List[SubmissionResult]]:
     """Convenience function to submit daisy-chain jobs from a YAML config.
 
@@ -559,6 +560,7 @@ def submit_daisy_chain(
         scratch_dir: Override scratch directory for simulation output
         projects_dir: Override projects directory for scripts/logs
         time_limit: Override SLURM time limit (format: HH:MM:SS or M:SS)
+        memory: Override SLURM memory allocation (e.g., "4G", "8G")
 
     Returns:
         Dictionary mapping replicate numbers to submission results
@@ -596,6 +598,10 @@ def submit_daisy_chain(
     # Override time limit if provided
     if time_limit:
         slurm_config.time_limit = time_limit
+
+    # Override memory if provided
+    if memory:
+        slurm_config.memory = memory
 
     # Create daisy-chain config
     dc_config = DaisyChainConfig.from_simulation_config(
