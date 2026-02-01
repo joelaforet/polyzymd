@@ -66,6 +66,7 @@ Getting Started
    tutorials/configuration
    tutorials/restraints
    tutorials/hpc_slurm
+   tutorials/benchmarks
    tutorials/polymers
    tutorials/residue_assignment
    tutorials/architecture
