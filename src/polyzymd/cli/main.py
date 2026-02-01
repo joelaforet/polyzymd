@@ -29,10 +29,73 @@ logging.basicConfig(
 LOGGER = logging.getLogger("polyzymd")
 
 
+def suppress_openff_logs() -> None:
+    """Suppress verbose OpenFF Interchange and Toolkit log messages.
+
+    OpenFF libraries generate extensive INFO-level logs during system building,
+    including per-atom messages for charge assignment and parameter collisions.
+    For large systems (>10,000 atoms), this can produce millions of log lines.
+
+    This function sets OpenFF-related loggers to WARNING level to suppress
+    these messages while still showing important warnings and errors.
+    """
+    # Suppress OpenFF Interchange logs (e.g., "Preset charges applied to atom index X")
+    logging.getLogger("openff.interchange").setLevel(logging.WARNING)
+
+    # Suppress OpenFF Toolkit logs
+    logging.getLogger("openff.toolkit").setLevel(logging.WARNING)
+
+    # Suppress root logger INFO messages from OpenFF (e.g., "Key collision" messages)
+    # These come from OpenFF but are logged to root logger
+    # We set a filter to suppress INFO messages that look like OpenFF messages
+    root_logger = logging.getLogger()
+
+    class OpenFFFilter(logging.Filter):
+        """Filter out verbose OpenFF messages from the root logger."""
+
+        def filter(self, record: logging.LogRecord) -> bool:
+            # Allow all non-INFO messages
+            if record.levelno != logging.INFO:
+                return True
+            # Suppress known verbose OpenFF message patterns
+            msg = record.getMessage()
+            if "Key collision" in msg:
+                return False
+            if "associated_handler" in msg:
+                return False
+            return True
+
+    root_logger.addFilter(OpenFFFilter())
+
+
+def enable_openff_logs() -> None:
+    """Re-enable OpenFF log messages for debugging.
+
+    Sets OpenFF loggers back to INFO level and removes the root logger filter.
+    """
+    logging.getLogger("openff.interchange").setLevel(logging.INFO)
+    logging.getLogger("openff.toolkit").setLevel(logging.INFO)
+
+    # Remove OpenFF filter from root logger
+    root_logger = logging.getLogger()
+    for f in root_logger.filters[:]:
+        if f.__class__.__name__ == "OpenFFFilter":
+            root_logger.removeFilter(f)
+
+
+# Suppress OpenFF logs by default
+suppress_openff_logs()
+
+
 @click.group()
 @click.version_option(prog_name="polyzymd")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
-def cli(verbose: bool) -> None:
+@click.option(
+    "--openff-logs",
+    is_flag=True,
+    help="Enable verbose OpenFF Interchange/Toolkit logs (suppressed by default)",
+)
+def cli(verbose: bool, openff_logs: bool) -> None:
     """PolyzyMD: MD simulations for enzyme-polymer systems.
 
     A toolkit for building, running, and analyzing molecular dynamics
@@ -40,6 +103,10 @@ def cli(verbose: bool) -> None:
     """
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    if openff_logs:
+        enable_openff_logs()
+        LOGGER.info("OpenFF verbose logging enabled")
 
 
 # =============================================================================

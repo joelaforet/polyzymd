@@ -417,6 +417,15 @@ polyzymd validate -c config.yaml
 
 # Verbose mode
 polyzymd -v build -c config.yaml --dry-run
+
+# Enable OpenFF logs for debugging force field issues
+polyzymd --openff-logs build -c config.yaml
+```
+
+```{note}
+By default, verbose OpenFF Interchange/Toolkit logs are suppressed to keep log files readable. 
+These libraries generate per-atom INFO messages that can produce millions of lines for large systems.
+Use `--openff-logs` when debugging force field parameter or charge assignment issues.
 ```
 
 ### Report Issues
