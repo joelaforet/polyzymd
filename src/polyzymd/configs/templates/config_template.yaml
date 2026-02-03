@@ -249,8 +249,9 @@ description: "Description of your simulation system"
 #   slurm_logs_subdir: "slurm_logs"
 #   
 #   # Naming template for run directories
-#   # Available variables: {enzyme}, {substrate}, {polymer_type}, {temperature}, {replicate}
-#   naming_template: "{enzyme}_{temperature}K_run{replicate}"
+#   # Available variables: {enzyme}, {substrate}, {polymer_type}, {duration}, {temperature}, {replicate}
+#   # polymer_type format: {type_prefix}_{label1}{pct1}_{label2}{pct2} (e.g., SBMA-EGMA_A75_B25)
+#   naming_template: "{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}"
 #   
 #   # Output options
 #   save_checkpoint: true

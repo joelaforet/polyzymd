@@ -570,7 +570,7 @@ class OutputConfig(BaseModel):
         description="Base directory for simulation output (scratch storage). If None, uses projects_directory.",
     )
     naming_template: str = Field(
-        "{enzyme}_{substrate}_{polymer_type}_{temperature}K_run{replicate}",
+        "{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}",
         description="Directory naming template",
     )
 
@@ -626,6 +626,7 @@ class OutputConfig(BaseModel):
         polymer_type: str,
         temperature: float,
         replicate: int,
+        duration: float = 0.0,
         **kwargs: Any,
     ) -> str:
         """Format the directory name using the template.
@@ -636,6 +637,7 @@ class OutputConfig(BaseModel):
             polymer_type: Polymer type (or "none")
             temperature: Temperature in K
             replicate: Replicate number
+            duration: Production duration in ns
             **kwargs: Additional template variables
 
         Returns:
@@ -647,6 +649,7 @@ class OutputConfig(BaseModel):
             polymer_type=polymer_type,
             temperature=int(temperature),
             replicate=replicate,
+            duration=int(duration),
             **kwargs,
         )
 
@@ -798,11 +801,12 @@ class SimulationConfig(BaseModel):
         """
         polymer_type = "none"
         if self.polymers and self.polymers.enabled:
-            # Format polymer type with composition info
+            # Format polymer type with full composition info
+            # Sort by label (A, B, C...) alphabetically - user controls which is "A"
             probs = {m.label: m.probability for m in self.polymers.monomers}
-            # Find the minority component percentage
-            minority_pct = min(probs.values()) * 100
-            polymer_type = f"{self.polymers.type_prefix}_{minority_pct:.0f}pct"
+            sorted_labels = sorted(probs.keys())
+            composition = "_".join(f"{lbl}{probs[lbl] * 100:.0f}" for lbl in sorted_labels)
+            polymer_type = f"{self.polymers.type_prefix}_{composition}"
 
         substrate_name = self.substrate.name if self.substrate else "apo"
 
@@ -812,6 +816,7 @@ class SimulationConfig(BaseModel):
             polymer_type=polymer_type,
             temperature=self.thermodynamics.temperature,
             replicate=replicate,
+            duration=self.simulation_phases.production.duration,
         )
 
     def to_signac_statepoint(self, replicate: int = 1) -> Dict[str, Any]:
