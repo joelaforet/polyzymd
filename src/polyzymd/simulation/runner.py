@@ -80,6 +80,7 @@ class SimulationRunner:
 
         self._simulation: Optional[Simulation] = None
         self._current_positions = positions
+        self._current_box_vectors = None  # Updated during NPT stages
         self._history: Dict[str, Any] = {}
 
         # Ensure working directory exists
@@ -662,11 +663,12 @@ class SimulationRunner:
         # DEBUG: Log before getting final state
         LOGGER.info(f"[DEBUG] Stage {stage_index}: About to get final state")
 
-        # Get final state
+        # Get final state (including box vectors for NPT stages)
         state = self._simulation.context.getState(
             getPositions=True, getVelocities=True, getEnergy=True
         )
         self._current_positions = state.getPositions()
+        self._current_box_vectors = state.getPeriodicBoxVectors()
 
         # DEBUG: Log after getting final state
         _debug_energy = state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
@@ -864,15 +866,30 @@ class SimulationRunner:
             f"[DEBUG] Production: Number of forces in system: {self._system.getNumForces()}"
         )
 
-        # Capture velocities from equilibration before creating new Simulation
+        # Capture velocities and box vectors from equilibration before creating new Simulation
         # (creating new Simulation destroys the old context)
+        # Box vectors are critical for NPT stages where box dimensions change
         equilibration_velocities = None
+        equilibration_box_vectors = None
         if self._simulation is not None and segment_index == 0:
             state = self._simulation.context.getState(getVelocities=True)
             equilibration_velocities = state.getVelocities()
-            LOGGER.info(f"[DEBUG] Production: Captured velocities from equilibration simulation")
+            equilibration_box_vectors = state.getPeriodicBoxVectors()
+            LOGGER.info(
+                f"[DEBUG] Production: Captured velocities and box vectors from equilibration simulation"
+            )
 
         self._simulation = Simulation(self._topology, self._system, integrator, platform)
+
+        # Set box vectors BEFORE positions - critical for correct periodic boundary handling
+        # Use captured box vectors from equilibration, or fall back to stored ones from staged equilibration
+        if equilibration_box_vectors is not None:
+            self._simulation.context.setPeriodicBoxVectors(*equilibration_box_vectors)
+            LOGGER.info("[DEBUG] Production: Set box vectors from equilibration context")
+        elif self._current_box_vectors is not None:
+            self._simulation.context.setPeriodicBoxVectors(*self._current_box_vectors)
+            LOGGER.info("[DEBUG] Production: Set box vectors from stored _current_box_vectors")
+
         self._simulation.context.setPositions(self._current_positions)
 
         # DEBUG: Check energy after setting positions
