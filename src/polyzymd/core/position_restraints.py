@@ -40,8 +40,13 @@ class PositionalRestraintForce:
     This uses OpenMM's CustomExternalForce, which applies a force to particles
     based on their absolute coordinates (not relative to other particles).
 
+    The force constant k is stored as a per-particle parameter, allowing
+    different atoms to have different restraint strengths. This also avoids
+    OpenMM errors when multiple restraint forces are added to the same system
+    (which would occur with global parameters).
+
     Attributes:
-        force_constant: Force constant in kJ/mol/nm^2
+        default_force_constant: Default force constant in kJ/mol/nm^2
         particle_count: Number of particles added to the restraint
 
     Example:
@@ -50,25 +55,24 @@ class PositionalRestraintForce:
         >>> force_idx = system.addForce(restraint.force)
     """
 
-    def __init__(self, force_constant: float):
+    def __init__(self, default_force_constant: float = 4184.0):
         """Initialize positional restraint force.
 
         Args:
-            force_constant: Force constant in kJ/mol/nm^2.
-                           Common value: 4184.0 = 1.0 kcal/mol/A^2
+            default_force_constant: Default force constant in kJ/mol/nm^2.
+                                   Common value: 4184.0 = 1.0 kcal/mol/A^2
+                                   Can be overridden per-particle when adding atoms.
         """
-        self._force_constant = force_constant
+        self._default_force_constant = default_force_constant
         self._particle_count = 0
 
         # Create CustomExternalForce with harmonic potential
-        # Expression uses per-particle parameters for reference positions
+        # All parameters are per-particle to avoid global parameter conflicts
         expression = "0.5*k*((x-x0)^2+(y-y0)^2+(z-z0)^2)"
         self._force = CustomExternalForce(expression)
 
-        # Add global force constant parameter
-        self._force.addGlobalParameter("k", force_constant)
-
-        # Add per-particle reference position parameters
+        # Add per-particle parameters (k is per-particle, not global)
+        self._force.addPerParticleParameter("k")
         self._force.addPerParticleParameter("x0")
         self._force.addPerParticleParameter("y0")
         self._force.addPerParticleParameter("z0")
@@ -80,8 +84,8 @@ class PositionalRestraintForce:
 
     @property
     def force_constant(self) -> float:
-        """Get the force constant in kJ/mol/nm^2."""
-        return self._force_constant
+        """Get the default force constant in kJ/mol/nm^2."""
+        return self._default_force_constant
 
     @property
     def particle_count(self) -> int:
@@ -94,6 +98,7 @@ class PositionalRestraintForce:
         x0: float,
         y0: float,
         z0: float,
+        force_constant: Optional[float] = None,
     ) -> int:
         """Add a particle to restrain at a specific position.
 
@@ -102,11 +107,13 @@ class PositionalRestraintForce:
             x0: Reference x coordinate in nanometers
             y0: Reference y coordinate in nanometers
             z0: Reference z coordinate in nanometers
+            force_constant: Force constant in kJ/mol/nm^2 (uses default if None)
 
         Returns:
             Index of the particle in this force
         """
-        particle_idx = self._force.addParticle(atom_index, [x0, y0, z0])
+        k = force_constant if force_constant is not None else self._default_force_constant
+        particle_idx = self._force.addParticle(atom_index, [k, x0, y0, z0])
         self._particle_count += 1
         return particle_idx
 
@@ -114,6 +121,7 @@ class PositionalRestraintForce:
         self,
         atom_indices: List[int],
         positions: Quantity,
+        force_constant: Optional[float] = None,
     ) -> int:
         """Add multiple particles, restraining each to its current position.
 
@@ -121,10 +129,12 @@ class PositionalRestraintForce:
             atom_indices: List of OpenMM atom indices (0-indexed)
             positions: OpenMM Quantity with positions for all atoms in the system.
                       Must be indexable by atom index.
+            force_constant: Force constant in kJ/mol/nm^2 (uses default if None)
 
         Returns:
             Number of particles added
         """
+        k = force_constant if force_constant is not None else self._default_force_constant
         count = 0
         for idx in atom_indices:
             pos = positions[idx]
@@ -132,13 +142,10 @@ class PositionalRestraintForce:
             x0 = pos[0].value_in_unit(nanometer)
             y0 = pos[1].value_in_unit(nanometer)
             z0 = pos[2].value_in_unit(nanometer)
-            self.add_particle(idx, x0, y0, z0)
+            self.add_particle(idx, x0, y0, z0, force_constant=k)
             count += 1
 
-        logger.debug(
-            f"Added {count} particles to positional restraint "
-            f"(k={self._force_constant:.1f} kJ/mol/nm^2)"
-        )
+        logger.debug(f"Added {count} particles to positional restraint (k={k:.1f} kJ/mol/nm^2)")
         return count
 
 
