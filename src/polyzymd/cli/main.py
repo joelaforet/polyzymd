@@ -483,13 +483,13 @@ def run(
         pressure = sim_config.thermodynamics.pressure
 
         # Run equilibration
-        eq_config = sim_config.simulation_phases.equilibration
-        click.echo(f"Running equilibration: {eq_config.duration} ns at {temperature} K (NVT)...")
+        phases = sim_config.simulation_phases
+        eq_duration = phases.total_equilibration_duration
+        eq_mode = "multi-stage" if phases.uses_staged_equilibration else "simple"
+        click.echo(f"Running equilibration: {eq_duration:.3f} ns at {temperature} K ({eq_mode})...")
         runner.run_equilibration(
             temperature=temperature,
-            duration_ns=eq_config.duration,
-            num_samples=eq_config.samples,
-            timestep_fs=eq_config.time_step,
+            config=phases,
         )
 
         # Calculate segment parameters
