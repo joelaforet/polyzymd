@@ -188,6 +188,52 @@ class SimulationRunner:
             self._system.removeForce(i)
             LOGGER.debug("Removed barostat")
 
+    def _wrap_positions_to_box(
+        self,
+        positions: Any,
+        box_vectors: Any,
+    ) -> Any:
+        """Wrap positions into the primary periodic box.
+
+        When atoms move outside the primary periodic box (coordinates < 0 or
+        > box dimension), they can cause energy calculation issues when setting
+        up a new simulation context. This method wraps all positions into the
+        primary box using modular arithmetic.
+
+        This is critical for:
+        - Transitioning from minimization to equilibration
+        - Transitioning between equilibration stages (especially after NPT)
+        - Transitioning from equilibration to production
+
+        Args:
+            positions: OpenMM positions (list of Vec3 with units)
+            box_vectors: OpenMM periodic box vectors (3x Vec3 with units)
+
+        Returns:
+            New positions wrapped into primary box (list of Vec3 with units)
+        """
+        from openmm import Vec3
+
+        # Extract box dimensions (assuming orthorhombic box)
+        box_a = box_vectors[0][0].value_in_unit(omm_unit.nanometer)
+        box_b = box_vectors[1][1].value_in_unit(omm_unit.nanometer)
+        box_c = box_vectors[2][2].value_in_unit(omm_unit.nanometer)
+
+        wrapped = []
+        for pos in positions:
+            x = pos[0].value_in_unit(omm_unit.nanometer)
+            y = pos[1].value_in_unit(omm_unit.nanometer)
+            z = pos[2].value_in_unit(omm_unit.nanometer)
+
+            # Wrap into [0, box_dim) using modulo
+            x_wrapped = x % box_a
+            y_wrapped = y % box_b
+            z_wrapped = z % box_c
+
+            wrapped.append(Vec3(x_wrapped, y_wrapped, z_wrapped) * omm_unit.nanometer)
+
+        return wrapped
+
     def minimize(
         self,
         max_iterations: int = 1000,
@@ -520,7 +566,24 @@ class SimulationRunner:
             # NVT - ensure no barostat
             self._remove_barostat()
 
-        # Add position restraints
+        # Wrap positions into primary box before setting up restraints and context
+        # This is critical: atoms outside the primary box can cause catastrophic
+        # energy issues with both nonbonded forces and position restraints
+        if self._current_box_vectors is not None:
+            wrapped_positions = self._wrap_positions_to_box(
+                self._current_positions, self._current_box_vectors
+            )
+            # Also wrap reference positions for restraints to match
+            wrapped_reference = self._wrap_positions_to_box(
+                reference_positions, self._current_box_vectors
+            )
+            LOGGER.info(f"[DEBUG] Stage {stage_index}: Wrapped positions into primary box")
+        else:
+            wrapped_positions = self._current_positions
+            wrapped_reference = reference_positions
+            LOGGER.warning(f"[DEBUG] Stage {stage_index}: No box vectors - cannot wrap positions")
+
+        # Add position restraints (using wrapped reference positions)
         restraint_force_indices = []
         for restraint_config in stage.position_restraints:
             atom_indices = atom_group_resolver.resolve(restraint_config.group)
@@ -528,7 +591,7 @@ class SimulationRunner:
                 force_idx = add_position_restraints_to_system(
                     system=self._system,
                     atom_indices=atom_indices,
-                    positions=reference_positions,
+                    positions=wrapped_reference,
                     force_constant=restraint_config.force_constant,
                 )
                 if force_idx >= 0:
@@ -565,7 +628,8 @@ class SimulationRunner:
                 f"[DEBUG] Stage {stage_index}: WARNING - no box vectors available, using defaults"
             )
 
-        self._simulation.context.setPositions(self._current_positions)
+        # Set wrapped positions on context (matching the wrapped restraint references)
+        self._simulation.context.setPositions(wrapped_positions)
         self._simulation.context.setVelocitiesToTemperature(start_temp * omm_unit.kelvin)
 
         # Log initial energy for diagnostics
@@ -834,6 +898,10 @@ class SimulationRunner:
 
         self._simulation = Simulation(self._topology, self._system, integrator, platform)
 
+        # Determine which box vectors to use for wrapping and context setup
+        # Priority: equilibration context > stored box vectors
+        active_box_vectors = equilibration_box_vectors or self._current_box_vectors
+
         # Set box vectors BEFORE positions - critical for correct periodic boundary handling
         # Use captured box vectors from equilibration, or fall back to stored ones from staged equilibration
         if equilibration_box_vectors is not None:
@@ -845,7 +913,17 @@ class SimulationRunner:
         else:
             LOGGER.info(f"[DEBUG] Production: WARNING - no box vectors available, using defaults")
 
-        self._simulation.context.setPositions(self._current_positions)
+        # Wrap positions into primary box before setting on context
+        # This prevents energy explosion from atoms outside periodic boundaries
+        if active_box_vectors is not None:
+            wrapped_positions = self._wrap_positions_to_box(
+                self._current_positions, active_box_vectors
+            )
+            LOGGER.info(f"[DEBUG] Production: Wrapped positions into primary box")
+        else:
+            wrapped_positions = self._current_positions
+
+        self._simulation.context.setPositions(wrapped_positions)
 
         # Log initial energy for diagnostics
         _state = self._simulation.context.getState(getEnergy=True)
