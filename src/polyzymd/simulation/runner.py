@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         EquilibrationStageConfig,
         SimulationConfig,
         SimulationPhaseConfig,
+        SimulationPhasesConfig,
     )
     from polyzymd.core.atom_groups import AtomGroupResolver
     from polyzymd.core.parameters import SimulationParameters
@@ -227,13 +228,111 @@ class SimulationRunner:
     def run_equilibration(
         self,
         temperature: float,
+        duration_ns: Optional[float] = None,
+        num_samples: int = 10,
+        timestep_fs: float = 2.0,
+        friction: float = 1.0,
+        output_prefix: str = "equilibration",
+        config: Optional["SimulationPhasesConfig"] = None,
+    ) -> Dict[str, Any]:
+        """Run equilibration phase.
+
+        Supports two modes:
+        1. Parameter-based (legacy): Pass duration_ns, num_samples, etc.
+        2. Config-based: Pass config for automatic mode selection
+
+        When config is provided and uses staged equilibration, position
+        restraints and temperature ramping are handled automatically.
+        Component information is derived from the topology's chain IDs.
+
+        Args:
+            temperature: Temperature in Kelvin
+            duration_ns: Duration in nanoseconds (required for legacy mode)
+            num_samples: Number of trajectory frames to save
+            timestep_fs: Time step in femtoseconds
+            friction: Friction coefficient in 1/ps
+            output_prefix: Prefix for output files
+            config: SimulationPhasesConfig for config-based dispatch
+
+        Returns:
+            Dictionary with equilibration results
+
+        Raises:
+            ValueError: If neither config nor duration_ns is provided
+        """
+        # Config-based dispatch (preferred path)
+        if config is not None:
+            if config.uses_staged_equilibration:
+                # Multi-stage equilibration with position restraints
+                from polyzymd.core.atom_groups import AtomGroupResolver, SystemComponentInfo
+
+                # Log all stages upfront for reproducibility
+                LOGGER.info(
+                    f"Starting multi-stage equilibration with "
+                    f"{len(config.equilibration_stages)} stages:"
+                )
+                for i, stage in enumerate(config.equilibration_stages):
+                    restraint_info = (
+                        ", ".join(
+                            f"{r.group}@{r.force_constant:.0f}" for r in stage.position_restraints
+                        )
+                        or "none"
+                    )
+                    if stage.is_temperature_ramping:
+                        temp_info = f"{stage.temperature_start}K -> {stage.temperature_end}K"
+                    else:
+                        temp_info = f"{stage.temperature}K"
+                    LOGGER.info(
+                        f"  Stage {i}: {stage.name} - {stage.duration} ns, "
+                        f"{stage.ensemble.value}, {temp_info}, restraints: [{restraint_info}]"
+                    )
+
+                component_info = SystemComponentInfo.from_topology(self._topology)
+                resolver = AtomGroupResolver(self._topology, component_info)
+
+                return self.run_staged_equilibration(
+                    stages=config.equilibration_stages,
+                    atom_group_resolver=resolver,
+                    target_temperature=temperature,
+                )
+            else:
+                # Simple equilibration via config
+                eq_config = config.equilibration
+                return self._run_simple_equilibration(
+                    temperature=temperature,
+                    duration_ns=eq_config.duration,
+                    num_samples=eq_config.samples,
+                    timestep_fs=eq_config.time_step or timestep_fs,
+                    friction=friction,
+                    output_prefix=output_prefix,
+                )
+
+        # Legacy parameter-based mode
+        if duration_ns is None:
+            raise ValueError(
+                "duration_ns is required when config is not provided. "
+                "Either pass duration_ns or pass a SimulationPhasesConfig."
+            )
+
+        return self._run_simple_equilibration(
+            temperature=temperature,
+            duration_ns=duration_ns,
+            num_samples=num_samples,
+            timestep_fs=timestep_fs,
+            friction=friction,
+            output_prefix=output_prefix,
+        )
+
+    def _run_simple_equilibration(
+        self,
+        temperature: float,
         duration_ns: float,
         num_samples: int = 10,
         timestep_fs: float = 2.0,
         friction: float = 1.0,
         output_prefix: str = "equilibration",
     ) -> Dict[str, Any]:
-        """Run NVT equilibration.
+        """Run simple NVT equilibration (internal implementation).
 
         Args:
             temperature: Temperature in Kelvin.
@@ -807,70 +906,6 @@ class SimulationRunner:
 
         self._history[phase_name] = results
         LOGGER.info(f"Production segment {segment_index} complete")
-
-        return results
-
-    def run_from_config(
-        self,
-        config: "SimulationConfig",
-        segment_index: int = 0,
-        component_info: Optional[Any] = None,
-    ) -> Dict[str, Any]:
-        """Run simulation phases from a configuration.
-
-        Args:
-            config: SimulationConfig with phase settings.
-            segment_index: Segment index for daisy-chaining.
-            component_info: SystemComponentInfo for atom group resolution.
-                Required if using staged equilibration with position restraints.
-
-        Returns:
-            Combined results dictionary.
-        """
-        results = {}
-
-        # Only run equilibration on first segment
-        if segment_index == 0:
-            if config.simulation_phases.uses_staged_equilibration:
-                # Multi-stage equilibration with position restraints
-                from polyzymd.core.atom_groups import AtomGroupResolver
-
-                if component_info is None:
-                    raise ValueError(
-                        "component_info is required for staged equilibration. "
-                        "Pass SystemComponentInfo from SystemBuilder.get_component_info()."
-                    )
-
-                resolver = AtomGroupResolver(self._topology, component_info)
-                eq_result = self.run_staged_equilibration(
-                    stages=config.simulation_phases.equilibration_stages,
-                    atom_group_resolver=resolver,
-                    target_temperature=config.thermodynamics.temperature,
-                )
-                results["equilibration"] = eq_result
-            else:
-                # Legacy: Simple single-phase equilibration
-                eq_config = config.simulation_phases.equilibration
-                eq_result = self.run_equilibration(
-                    temperature=config.thermodynamics.temperature,
-                    duration_ns=eq_config.duration,
-                    num_samples=eq_config.samples,
-                    timestep_fs=eq_config.time_step,
-                )
-                results["equilibration"] = eq_result
-
-        # Run production
-        prod_config = config.simulation_phases.production
-        prod_result = self.run_production(
-            temperature=config.thermodynamics.temperature,
-            duration_ns=prod_config.duration,
-            num_samples=prod_config.samples,
-            timestep_fs=prod_config.time_step,
-            pressure=config.thermodynamics.pressure,
-            barostat_frequency=prod_config.barostat_frequency,
-            segment_index=segment_index,
-        )
-        results["production"] = prod_result
 
         return results
 
