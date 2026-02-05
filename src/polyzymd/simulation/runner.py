@@ -529,10 +529,28 @@ class SimulationRunner:
         )
         platform = self._get_platform()
 
+        # DEBUG: Log state before creating simulation
+        LOGGER.info(
+            f"[DEBUG] Stage {stage_index}: self._simulation is None: {self._simulation is None}"
+        )
+        LOGGER.info(
+            f"[DEBUG] Stage {stage_index}: self._current_positions is None: {self._current_positions is None}"
+        )
+        LOGGER.info(
+            f"[DEBUG] Stage {stage_index}: Number of forces in system: {self._system.getNumForces()}"
+        )
+
         # Create simulation
         self._simulation = Simulation(self._topology, self._system, integrator, platform)
         self._simulation.context.setPositions(self._current_positions)
         self._simulation.context.setVelocitiesToTemperature(start_temp * omm_unit.kelvin)
+
+        # DEBUG: Check initial energy after creating simulation
+        _debug_state = self._simulation.context.getState(getEnergy=True)
+        _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
+        LOGGER.info(
+            f"[DEBUG] Stage {stage_index}: Simulation created, initial PE: {_debug_energy:.2f} kJ/mol"
+        )
 
         # Set up reporters
         traj_path = phase_dir / f"{stage_name}_trajectory.dcd"
@@ -579,10 +597,26 @@ class SimulationRunner:
             steps_for_ramping = num_updates * steps_per_update
             remaining_steps = total_steps - steps_for_ramping
 
+            # DEBUG: Log before first step
+            LOGGER.info(
+                f"[DEBUG] Stage {stage_index}: About to start temperature ramping, steps_per_update={steps_per_update}"
+            )
+
             # Temperature ramping phase
+            _ramp_iteration = 0
             while current_temp < stage.temperature_end:
                 integrator.setTemperature(current_temp * omm_unit.kelvin)
                 self._simulation.step(steps_per_update)
+                _ramp_iteration += 1
+                # DEBUG: Log after first few iterations
+                if _ramp_iteration <= 3:
+                    _debug_state = self._simulation.context.getState(getEnergy=True)
+                    _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(
+                        omm_unit.kilojoule_per_mole
+                    )
+                    LOGGER.info(
+                        f"[DEBUG] Stage {stage_index}: Ramp iteration {_ramp_iteration}, T={current_temp} K, PE={_debug_energy:.2f} kJ/mol"
+                    )
                 current_temp += stage.temperature_increment
 
             # Final temperature - run remaining steps
@@ -753,15 +787,30 @@ class SimulationRunner:
         )
         platform = self._get_platform()
 
+        # DEBUG: Log state before capturing velocities
+        LOGGER.info(f"[DEBUG] Production: self._simulation is None: {self._simulation is None}")
+        LOGGER.info(
+            f"[DEBUG] Production: self._current_positions is None: {self._current_positions is None}"
+        )
+        LOGGER.info(
+            f"[DEBUG] Production: Number of forces in system: {self._system.getNumForces()}"
+        )
+
         # Capture velocities from equilibration before creating new Simulation
         # (creating new Simulation destroys the old context)
         equilibration_velocities = None
         if self._simulation is not None and segment_index == 0:
             state = self._simulation.context.getState(getVelocities=True)
             equilibration_velocities = state.getVelocities()
+            LOGGER.info(f"[DEBUG] Production: Captured velocities from equilibration simulation")
 
         self._simulation = Simulation(self._topology, self._system, integrator, platform)
         self._simulation.context.setPositions(self._current_positions)
+
+        # DEBUG: Check energy after setting positions
+        _debug_state = self._simulation.context.getState(getEnergy=True)
+        _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
+        LOGGER.info(f"[DEBUG] Production: After setPositions, PE={_debug_energy:.2f} kJ/mol")
 
         # Set velocities for production
         # - If we have velocities from equilibration, use them (physical continuity)
