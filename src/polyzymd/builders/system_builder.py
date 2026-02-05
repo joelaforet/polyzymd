@@ -946,3 +946,62 @@ class SystemBuilder:
         omm_positions = to_openmm_positions(self._interchange, include_virtual_sites=True)
 
         return omm_topology, omm_system, omm_positions
+
+    def get_component_info(self) -> "SystemComponentInfo":
+        """Get system component information for atom group resolution.
+
+        This method returns a SystemComponentInfo dataclass containing the
+        atom counts and chain assignments for each system component (protein,
+        substrate, polymers, solvent). This information is needed by the
+        AtomGroupResolver to resolve predefined atom group names to indices.
+
+        Returns:
+            SystemComponentInfo with atom counts and chain assignments
+
+        Raises:
+            RuntimeError: If solvated topology not created.
+        """
+        from polyzymd.core.atom_groups import SystemComponentInfo
+
+        if self._solvated_topology is None:
+            raise RuntimeError("No solvated topology. Call solvate() first.")
+
+        # Count atoms per component from topology
+        n_protein_atoms = 0
+        n_substrate_atoms = 0
+        n_polymer_atoms = 0
+
+        mol_idx = 0
+
+        # Protein atoms
+        for _ in range(self._n_enzyme_molecules):
+            mol = self._solvated_topology.molecule(mol_idx)
+            n_protein_atoms += mol.n_atoms
+            mol_idx += 1
+
+        # Substrate atoms
+        for _ in range(self._n_substrate_molecules):
+            mol = self._solvated_topology.molecule(mol_idx)
+            n_substrate_atoms += mol.n_atoms
+            mol_idx += 1
+
+        # Polymer atoms
+        for _ in range(self._n_polymer_chains):
+            mol = self._solvated_topology.molecule(mol_idx)
+            n_polymer_atoms += mol.n_atoms
+            mol_idx += 1
+
+        LOGGER.debug(
+            f"Component info: protein={n_protein_atoms} atoms, "
+            f"substrate={n_substrate_atoms} atoms, polymer={n_polymer_atoms} atoms"
+        )
+
+        return SystemComponentInfo(
+            n_protein_atoms=n_protein_atoms,
+            n_substrate_atoms=n_substrate_atoms,
+            n_polymer_atoms=n_polymer_atoms,
+            protein_chain_id="A",
+            substrate_chain_id="B",
+            polymer_chain_id="C",
+            solvent_start_chain_id="D",
+        )
