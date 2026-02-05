@@ -707,6 +707,28 @@ class SimulationPhasesConfig(BaseModel):
         """Check if using multi-stage equilibration."""
         return self.equilibration_stages is not None
 
+    @property
+    def total_equilibration_duration(self) -> float:
+        """Total equilibration duration in nanoseconds.
+
+        Works for both simple and staged equilibration modes.
+        For staged mode, returns the sum of all stage durations.
+        """
+        if self.uses_staged_equilibration:
+            return sum(stage.duration for stage in self.equilibration_stages)
+        return self.equilibration.duration
+
+    @property
+    def total_equilibration_samples(self) -> int:
+        """Total equilibration trajectory samples.
+
+        Works for both simple and staged equilibration modes.
+        For staged mode, returns the sum of all stage samples.
+        """
+        if self.uses_staged_equilibration:
+            return sum(stage.samples for stage in self.equilibration_stages)
+        return self.equilibration.samples
+
 
 # =============================================================================
 # Output Configuration
