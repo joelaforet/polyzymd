@@ -306,7 +306,7 @@ class PolymerBuilder:
         Returns:
             OpenFF Molecule loaded from the SDF.
         """
-        from polymerist.mdtools.openfftools.topology import (
+        from polyzymd.utils import (
             get_largest_offmol,
             topology_from_sdf,
         )

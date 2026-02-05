@@ -106,7 +106,7 @@ class SimulationRunner:
 
     def _impose_unique_force_groups(self) -> None:
         """Assign unique force groups to each force for energy decomposition."""
-        from polymerist.mdtools.openmmtools.forcegroups import impose_unique_force_groups
+        from polyzymd.utils import impose_unique_force_groups
 
         impose_unique_force_groups(self._system)
         LOGGER.debug("Assigned unique force groups")

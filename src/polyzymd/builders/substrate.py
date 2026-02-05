@@ -169,32 +169,16 @@ class SubstrateBuilder:
         """
         LOGGER.info(f"Assigning partial charges using {charge_method}")
 
-        if charge_method == "nagl":
-            from polymerist.mdtools.openfftools.partialcharge.molchargers import (
-                NAGLCharger,
-            )
+        from polyzymd.utils import get_charger
 
-            charger = NAGLCharger()
+        try:
+            charger = get_charger(charge_method)
             return charger.charge_molecule(molecule)
-
-        elif charge_method == "espaloma":
-            from polymerist.mdtools.openfftools.partialcharge.molchargers import (
-                EspalomaCharger,
-            )
-
-            charger = EspalomaCharger()
-            return charger.charge_molecule(molecule)
-
-        elif charge_method == "am1bcc":
-            # Use OpenFF toolkit's built-in AM1-BCC
-            molecule.assign_partial_charges("am1bcc")
-            return molecule
-
-        else:
+        except ValueError as e:
             raise ValueError(
                 f"Unsupported charge method: {charge_method}. "
                 f"Supported methods: nagl, espaloma, am1bcc"
-            )
+            ) from e
 
     def _set_residue_metadata(self, molecule: Molecule, residue_name: str) -> None:
         """Set residue metadata on all atoms of the molecule.

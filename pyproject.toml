@@ -38,9 +38,6 @@ dependencies = [
     "openff-interchange>=0.3.0",
     "openff-units>=0.2.0",
     
-    # Polymer building
-    "polymerist>=1.0.0",
-    
     # Analysis
     "mdanalysis>=2.4.0",
     "biopandas>=0.4.0",

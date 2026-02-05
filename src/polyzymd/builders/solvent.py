@@ -240,7 +240,7 @@ class SolventBuilder:
             Solvated OpenFF Topology.
         """
         from openff.interchange.components import _packmol as packmol
-        from polymerist.mdtools.openfftools import boxvectors
+        from polyzymd.utils import boxvectors
         from polyzymd.data.solvent_molecules import get_solvent_molecule
 
         if composition is None:
@@ -270,7 +270,7 @@ class SolventBuilder:
         self._center_topology_in_box(topology, box_vecs)
 
         # Calculate box volume and target masses
-        box_vol = boxvectors.get_box_volume(box_vecs, units_as_openm=False)
+        box_vol = boxvectors.get_box_volume(box_vecs, units_as_openmm=False)
         target_density_qty = Quantity(target_density, "gram / milliliter")
         target_mass = box_vol * target_density_qty
         solute_mass = self._calculate_topology_mass(topology)

@@ -256,7 +256,7 @@ class SystemBuilder:
 
         from openff.interchange.components import _packmol as packmol
         from openff.units import Quantity
-        from polymerist.mdtools.openfftools import boxvectors
+        from polyzymd.utils import boxvectors
 
         LOGGER.info(
             f"Packing {sum(self._polymer_counts)} polymer chains "
