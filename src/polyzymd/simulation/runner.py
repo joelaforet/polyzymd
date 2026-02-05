@@ -530,28 +530,21 @@ class SimulationRunner:
         )
         platform = self._get_platform()
 
-        # DEBUG: Log state before creating simulation
-        LOGGER.info(
-            f"[DEBUG] Stage {stage_index}: self._simulation is None: {self._simulation is None}"
-        )
-        LOGGER.info(
-            f"[DEBUG] Stage {stage_index}: self._current_positions is None: {self._current_positions is None}"
-        )
-        LOGGER.info(
-            f"[DEBUG] Stage {stage_index}: Number of forces in system: {self._system.getNumForces()}"
-        )
-
         # Create simulation
         self._simulation = Simulation(self._topology, self._system, integrator, platform)
+
+        # Set box vectors BEFORE positions - critical for NPT stage transitions
+        # where box dimensions may have changed from previous stage
+        if self._current_box_vectors is not None:
+            self._simulation.context.setPeriodicBoxVectors(*self._current_box_vectors)
+
         self._simulation.context.setPositions(self._current_positions)
         self._simulation.context.setVelocitiesToTemperature(start_temp * omm_unit.kelvin)
 
-        # DEBUG: Check initial energy after creating simulation
-        _debug_state = self._simulation.context.getState(getEnergy=True)
-        _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
-        LOGGER.info(
-            f"[DEBUG] Stage {stage_index}: Simulation created, initial PE: {_debug_energy:.2f} kJ/mol"
-        )
+        # Log initial energy for diagnostics
+        _state = self._simulation.context.getState(getEnergy=True)
+        _energy = _state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
+        LOGGER.info(f"Stage {stage_index} ({stage_name}): initial PE = {_energy:.2f} kJ/mol")
 
         # Set up reporters
         traj_path = phase_dir / f"{stage_name}_trajectory.dcd"
@@ -598,26 +591,10 @@ class SimulationRunner:
             steps_for_ramping = num_updates * steps_per_update
             remaining_steps = total_steps - steps_for_ramping
 
-            # DEBUG: Log before first step
-            LOGGER.info(
-                f"[DEBUG] Stage {stage_index}: About to start temperature ramping, steps_per_update={steps_per_update}"
-            )
-
             # Temperature ramping phase
-            _ramp_iteration = 0
             while current_temp < stage.temperature_end:
                 integrator.setTemperature(current_temp * omm_unit.kelvin)
                 self._simulation.step(steps_per_update)
-                _ramp_iteration += 1
-                # DEBUG: Log after first few iterations
-                if _ramp_iteration <= 3:
-                    _debug_state = self._simulation.context.getState(getEnergy=True)
-                    _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(
-                        omm_unit.kilojoule_per_mole
-                    )
-                    LOGGER.info(
-                        f"[DEBUG] Stage {stage_index}: Ramp iteration {_ramp_iteration}, T={current_temp} K, PE={_debug_energy:.2f} kJ/mol"
-                    )
                 current_temp += stage.temperature_increment
 
             # Final temperature - run remaining steps
@@ -626,42 +603,11 @@ class SimulationRunner:
                 LOGGER.info(
                     f"Running {remaining_steps} steps at final temperature {stage.temperature_end} K"
                 )
-                # DEBUG: Log energy before final steps
-                _debug_state = self._simulation.context.getState(getEnergy=True)
-                _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(
-                    omm_unit.kilojoule_per_mole
-                )
-                LOGGER.info(
-                    f"[DEBUG] Stage {stage_index}: Before final steps, PE={_debug_energy:.2f} kJ/mol"
-                )
                 self._simulation.step(remaining_steps)
-                # DEBUG: Log energy after final steps
-                _debug_state = self._simulation.context.getState(getEnergy=True)
-                _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(
-                    omm_unit.kilojoule_per_mole
-                )
-                LOGGER.info(
-                    f"[DEBUG] Stage {stage_index}: After final steps, PE={_debug_energy:.2f} kJ/mol"
-                )
         else:
             # Constant temperature - just run all steps
             LOGGER.info(f"Running {total_steps} steps at {stage.temperature} K")
-            # DEBUG: Log energy before steps
-            _debug_state = self._simulation.context.getState(getEnergy=True)
-            _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(
-                omm_unit.kilojoule_per_mole
-            )
-            LOGGER.info(f"[DEBUG] Stage {stage_index}: Before steps, PE={_debug_energy:.2f} kJ/mol")
             self._simulation.step(total_steps)
-            # DEBUG: Log energy after steps
-            _debug_state = self._simulation.context.getState(getEnergy=True)
-            _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(
-                omm_unit.kilojoule_per_mole
-            )
-            LOGGER.info(f"[DEBUG] Stage {stage_index}: After steps, PE={_debug_energy:.2f} kJ/mol")
-
-        # DEBUG: Log before getting final state
-        LOGGER.info(f"[DEBUG] Stage {stage_index}: About to get final state")
 
         # Get final state (including box vectors for NPT stages)
         state = self._simulation.context.getState(
@@ -670,12 +616,9 @@ class SimulationRunner:
         self._current_positions = state.getPositions()
         self._current_box_vectors = state.getPeriodicBoxVectors()
 
-        # DEBUG: Log after getting final state
-        _debug_energy = state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
-        LOGGER.info(f"[DEBUG] Stage {stage_index}: Got final state, PE={_debug_energy:.2f} kJ/mol")
-        LOGGER.info(
-            f"[DEBUG] Stage {stage_index}: self._current_positions updated, is None: {self._current_positions is None}"
-        )
+        # Log final energy for diagnostics
+        final_energy = state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
+        LOGGER.info(f"Stage {stage_index} ({stage_name}): final PE = {final_energy:.2f} kJ/mol")
 
         # Save checkpoint
         checkpoint_path = phase_dir / f"{stage_name}_checkpoint.chk"
@@ -684,12 +627,9 @@ class SimulationRunner:
         # Remove position restraints from system for next stage
         if restraint_force_indices:
             LOGGER.info(
-                f"[DEBUG] Stage {stage_index}: Removing {len(restraint_force_indices)} position restraint forces"
+                f"Removing {len(restraint_force_indices)} position restraint force(s) for next stage"
             )
             remove_position_restraints_from_system(self._system, restraint_force_indices)
-            LOGGER.info(
-                f"[DEBUG] Stage {stage_index}: After removal, system has {self._system.getNumForces()} forces"
-            )
 
         # Build results
         final_temp = stage.get_final_temperature()
@@ -754,18 +694,6 @@ class SimulationRunner:
         }
 
         for i, stage in enumerate(stages):
-            # DEBUG: Log state before each stage
-            LOGGER.info(f"[DEBUG] run_staged_equilibration: About to run stage {i} ({stage.name})")
-            LOGGER.info(
-                f"[DEBUG] run_staged_equilibration: self._simulation is None: {self._simulation is None}"
-            )
-            LOGGER.info(
-                f"[DEBUG] run_staged_equilibration: self._current_positions is None: {self._current_positions is None}"
-            )
-            LOGGER.info(
-                f"[DEBUG] run_staged_equilibration: Number of forces in system: {self._system.getNumForces()}"
-            )
-
             stage_result = self.run_equilibration_stage(
                 stage=stage,
                 reference_positions=reference_positions,
@@ -774,18 +702,6 @@ class SimulationRunner:
             )
             results["stages"].append(stage_result)
             results["total_duration_ns"] += stage.duration
-
-            # DEBUG: Log state after each stage
-            LOGGER.info(f"[DEBUG] run_staged_equilibration: Completed stage {i} ({stage.name})")
-            LOGGER.info(
-                f"[DEBUG] run_staged_equilibration: self._simulation is None: {self._simulation is None}"
-            )
-            LOGGER.info(
-                f"[DEBUG] run_staged_equilibration: self._current_positions is None: {self._current_positions is None}"
-            )
-            LOGGER.info(
-                f"[DEBUG] run_staged_equilibration: Number of forces in system: {self._system.getNumForces()}"
-            )
 
         # Get final energy
         if results["stages"]:
@@ -857,15 +773,6 @@ class SimulationRunner:
         )
         platform = self._get_platform()
 
-        # DEBUG: Log state before capturing velocities
-        LOGGER.info(f"[DEBUG] Production: self._simulation is None: {self._simulation is None}")
-        LOGGER.info(
-            f"[DEBUG] Production: self._current_positions is None: {self._current_positions is None}"
-        )
-        LOGGER.info(
-            f"[DEBUG] Production: Number of forces in system: {self._system.getNumForces()}"
-        )
-
         # Capture velocities and box vectors from equilibration before creating new Simulation
         # (creating new Simulation destroys the old context)
         # Box vectors are critical for NPT stages where box dimensions change
@@ -875,9 +782,6 @@ class SimulationRunner:
             state = self._simulation.context.getState(getVelocities=True)
             equilibration_velocities = state.getVelocities()
             equilibration_box_vectors = state.getPeriodicBoxVectors()
-            LOGGER.info(
-                f"[DEBUG] Production: Captured velocities and box vectors from equilibration simulation"
-            )
 
         self._simulation = Simulation(self._topology, self._system, integrator, platform)
 
@@ -885,17 +789,15 @@ class SimulationRunner:
         # Use captured box vectors from equilibration, or fall back to stored ones from staged equilibration
         if equilibration_box_vectors is not None:
             self._simulation.context.setPeriodicBoxVectors(*equilibration_box_vectors)
-            LOGGER.info("[DEBUG] Production: Set box vectors from equilibration context")
         elif self._current_box_vectors is not None:
             self._simulation.context.setPeriodicBoxVectors(*self._current_box_vectors)
-            LOGGER.info("[DEBUG] Production: Set box vectors from stored _current_box_vectors")
 
         self._simulation.context.setPositions(self._current_positions)
 
-        # DEBUG: Check energy after setting positions
-        _debug_state = self._simulation.context.getState(getEnergy=True)
-        _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
-        LOGGER.info(f"[DEBUG] Production: After setPositions, PE={_debug_energy:.2f} kJ/mol")
+        # Log initial energy for diagnostics
+        _state = self._simulation.context.getState(getEnergy=True)
+        _energy = _state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
+        LOGGER.info(f"Production segment {segment_index}: initial PE = {_energy:.2f} kJ/mol")
 
         # Set velocities for production
         # - If we have velocities from equilibration, use them (physical continuity)
