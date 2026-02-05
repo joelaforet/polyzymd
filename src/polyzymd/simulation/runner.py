@@ -753,12 +753,28 @@ class SimulationRunner:
         )
         platform = self._get_platform()
 
+        # Capture velocities from equilibration before creating new Simulation
+        # (creating new Simulation destroys the old context)
+        equilibration_velocities = None
+        if self._simulation is not None and segment_index == 0:
+            state = self._simulation.context.getState(getVelocities=True)
+            equilibration_velocities = state.getVelocities()
+
         self._simulation = Simulation(self._topology, self._system, integrator, platform)
         self._simulation.context.setPositions(self._current_positions)
 
-        # Set velocities if first segment, otherwise they'll be loaded from checkpoint
-        if segment_index == 0 and "equilibration" not in self._history:
-            self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)
+        # Set velocities for production
+        # - If we have velocities from equilibration, use them (physical continuity)
+        # - Otherwise generate new velocities at target temperature
+        # Note: For daisy-chain continuation (segment > 0), ContinuationManager uses
+        # loadState() which restores both positions and velocities from the XML state file
+        if segment_index == 0:
+            if equilibration_velocities is not None:
+                self._simulation.context.setVelocities(equilibration_velocities)
+                LOGGER.info("Using velocities preserved from equilibration")
+            else:
+                self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)
+                LOGGER.info("Initialized velocities from Maxwell-Boltzmann distribution")
 
         # Add reporters
         traj_path = phase_dir / f"{phase_name}_trajectory.dcd"
