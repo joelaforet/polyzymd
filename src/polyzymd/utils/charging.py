@@ -32,6 +32,16 @@ if TYPE_CHECKING:
     from openff.toolkit import Molecule
 
 
+# Default NAGL model - using rc.3 to match Polymerist
+# TODO: Update to production model "openff-gnn-am1bcc-1.0.0.pt" when ready
+#       (requires openff-nagl-models >= v2025.09.0)
+DEFAULT_NAGL_MODEL = "openff-gnn-am1bcc-0.1.0-rc.3.pt"
+
+# Default Espaloma charge method - this is currently the only method supported
+# by EspalomaChargeToolkitWrapper, but we keep it configurable for future flexibility
+DEFAULT_ESPALOMA_METHOD = "espaloma-am1bcc"
+
+
 class MoleculeCharger(ABC):
     """Abstract base class for molecular charging strategies.
 
@@ -84,10 +94,12 @@ class NAGLCharger(MoleculeCharger):
     from molecular graphs, making it very fast and suitable for large-scale
     screening applications.
 
-    The default model is trained on AM1-BCC charges but can be customized.
+    This implementation uses the NAGLToolkitWrapper from OpenFF Toolkit,
+    which handles model path resolution via the openff-nagl-models package.
 
     Attributes:
-        model_name: Name/path of the NAGL model to use.
+        model_name: Name of the NAGL model to use. Must be a model name
+            registered in openff-nagl-models (e.g., "openff-gnn-am1bcc-0.1.0-rc.3.pt").
 
     Example:
         >>> charger = NAGLCharger()
@@ -96,40 +108,22 @@ class NAGLCharger(MoleculeCharger):
 
     method_name: str = "nagl"
 
-    def __init__(self, model_name: str = "openff-gnn-am1bcc-0.1.0-rc.2.pt") -> None:
+    def __init__(self, model_name: str = DEFAULT_NAGL_MODEL) -> None:
         """Initialize the NAGL charger.
 
         Args:
-            model_name: Name of the NAGL model. Can be:
-                - A registered model name (e.g., "openff-gnn-am1bcc-0.1.0-rc.2.pt")
-                - A path to a custom model file
+            model_name: Name of the NAGL model. Should be a model name
+                registered in the openff-nagl-models package, such as:
+                - "openff-gnn-am1bcc-0.1.0-rc.3.pt" (default, pre-production)
+                - "openff-gnn-am1bcc-1.0.0.pt" (production, requires newer package)
         """
         self.model_name = model_name
-        self._model = None
-
-    def _load_model(self):
-        """Lazily load the NAGL model.
-
-        This defers the import and model loading until first use,
-        allowing the module to be imported even if NAGL is not installed.
-        """
-        if self._model is None:
-            try:
-                from openff.nagl import GNNModel
-
-                self._model = GNNModel.load(self.model_name)
-            except ImportError as e:
-                raise ImportError(
-                    "NAGL is not installed. Install with: "
-                    "mamba install -c conda-forge openff-nagl openff-nagl-models"
-                ) from e
-            except Exception as e:
-                raise RuntimeError(f"Failed to load NAGL model '{self.model_name}': {e}") from e
-
-        return self._model
 
     def charge_molecule(self, molecule: "Molecule") -> "Molecule":
         """Assign NAGL partial charges to a molecule.
+
+        Uses NAGLToolkitWrapper from OpenFF Toolkit, which handles
+        model path resolution automatically via openff-nagl-models.
 
         Args:
             molecule: OpenFF Molecule to charge.
@@ -138,18 +132,26 @@ class NAGLCharger(MoleculeCharger):
             The molecule with NAGL charges assigned.
 
         Raises:
-            ImportError: If NAGL is not installed.
+            ImportError: If NAGL or nagl-models is not installed.
             RuntimeError: If charging fails.
         """
-        model = self._load_model()
+        try:
+            from openff.toolkit.utils.nagl_wrapper import NAGLToolkitWrapper
+        except ImportError as e:
+            raise ImportError(
+                "NAGL is not installed. Install with: "
+                "mamba install -c conda-forge openff-nagl openff-nagl-models"
+            ) from e
 
-        # NAGL doesn't require conformers but we generate one anyway
+        # NAGL doesn't strictly require conformers but we generate one anyway
         # for consistency with other methods
         self._ensure_conformer(molecule)
 
         try:
-            # NAGL assigns charges in-place
-            model.compute_property(molecule, as_numpy=True)
+            molecule.assign_partial_charges(
+                partial_charge_method=self.model_name,
+                toolkit_registry=NAGLToolkitWrapper(),
+            )
         except Exception as e:
             raise RuntimeError(f"NAGL charge assignment failed: {e}") from e
 
@@ -163,8 +165,13 @@ class EspalomaCharger(MoleculeCharger):
     Architectures) uses graph neural networks trained on quantum chemical
     data to assign partial charges and force field parameters.
 
+    This implementation uses the EspalomaChargeToolkitWrapper from the
+    espaloma-charge package, which provides a clean interface to the
+    Espaloma charging functionality.
+
     Attributes:
-        model_name: Name/URL of the Espaloma model to use.
+        charge_method: The charge method to use with Espaloma.
+            Currently only "espaloma-am1bcc" is supported by the toolkit wrapper.
 
     Example:
         >>> charger = EspalomaCharger()
@@ -173,41 +180,21 @@ class EspalomaCharger(MoleculeCharger):
 
     method_name: str = "espaloma"
 
-    def __init__(self, model_name: str = "espaloma-0.3.2") -> None:
+    def __init__(self, charge_method: str = DEFAULT_ESPALOMA_METHOD) -> None:
         """Initialize the Espaloma charger.
 
         Args:
-            model_name: Name of the Espaloma model. Can be:
-                - A registered model version (e.g., "espaloma-0.3.2")
-                - A URL to a model file
-                - A local path to a model file
+            charge_method: The charge method to use. Currently only
+                "espaloma-am1bcc" is supported by EspalomaChargeToolkitWrapper,
+                but this parameter is kept for future flexibility.
         """
-        self.model_name = model_name
-        self._model = None
-
-    def _load_model(self):
-        """Lazily load the Espaloma model.
-
-        This defers the import and model loading until first use,
-        allowing the module to be imported even if Espaloma is not installed.
-        """
-        if self._model is None:
-            try:
-                import espaloma as esp
-
-                # Load model - espaloma handles URL/name resolution
-                self._model = esp.get_model(self.model_name)
-            except ImportError as e:
-                raise ImportError(
-                    "Espaloma is not installed. Install with: mamba install -c conda-forge espaloma"
-                ) from e
-            except Exception as e:
-                raise RuntimeError(f"Failed to load Espaloma model '{self.model_name}': {e}") from e
-
-        return self._model
+        self.charge_method = charge_method
 
     def charge_molecule(self, molecule: "Molecule") -> "Molecule":
         """Assign Espaloma partial charges to a molecule.
+
+        Uses EspalomaChargeToolkitWrapper from the espaloma-charge package,
+        which provides a clean interface matching the OpenFF Toolkit pattern.
 
         Args:
             molecule: OpenFF Molecule to charge.
@@ -216,36 +203,25 @@ class EspalomaCharger(MoleculeCharger):
             The molecule with Espaloma charges assigned.
 
         Raises:
-            ImportError: If Espaloma is not installed.
+            ImportError: If espaloma-charge is not installed.
             RuntimeError: If charging fails.
         """
         try:
-            import espaloma as esp
-            from openff.units import Quantity
+            from espaloma_charge.openff_wrapper import EspalomaChargeToolkitWrapper
         except ImportError as e:
             raise ImportError(
-                "Espaloma is not installed. Install with: mamba install -c conda-forge espaloma"
+                "espaloma-charge is not installed. Install with: "
+                "mamba install -c conda-forge espaloma-charge"
             ) from e
-
-        model = self._load_model()
 
         # Espaloma requires a conformer
         self._ensure_conformer(molecule)
 
         try:
-            # Create Espaloma graph from molecule
-            mol_graph = esp.Graph(molecule)
-
-            # Run model inference
-            model(mol_graph.heterograph)
-
-            # Extract charges from the graph
-            # Espaloma stores charges in the 'n1' node type under 'q' key
-            charges = mol_graph.heterograph.nodes["n1"].data["q"].flatten().numpy()
-
-            # Assign charges to molecule
-            molecule.partial_charges = Quantity(charges, "elementary_charge")
-
+            molecule.assign_partial_charges(
+                partial_charge_method=self.charge_method,
+                toolkit_registry=EspalomaChargeToolkitWrapper(),
+            )
         except Exception as e:
             raise RuntimeError(f"Espaloma charge assignment failed: {e}") from e
 
