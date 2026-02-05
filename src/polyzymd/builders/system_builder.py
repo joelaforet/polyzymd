@@ -947,6 +947,158 @@ class SystemBuilder:
 
         return omm_topology, omm_system, omm_positions
 
+    def export_to_gromacs(
+        self,
+        output_dir: Union[str, Path],
+        prefix: Optional[str] = None,
+    ) -> Tuple[Path, Path, Path]:
+        """Export the system to GROMACS format.
+
+        Generates .gro (coordinates), .top (topology), and .mdp (run parameters)
+        files for running simulations in GROMACS. The topology is split into
+        separate .itp files for each molecule type (monolithic=False), which is
+        cleaner for multi-component systems with proteins, polymers, and ligands.
+
+        Note:
+            The generated .mdp file is a stub configured for single-point energy
+            calculation. It must be modified to run actual MD simulations. Future
+            versions of PolyzyMD may support automatic MDP generation from the
+            config.yaml parameters.
+
+        Args:
+            output_dir: Directory to write GROMACS files. Will be created if it
+                doesn't exist.
+            prefix: Filename prefix for output files. If None, generates a
+                descriptive name from the config (e.g., "LipA_EGPMA-SBMA").
+
+        Returns:
+            Tuple of (gro_path, top_path, mdp_path) pointing to the generated files.
+
+        Raises:
+            RuntimeError: If Interchange has not been created.
+
+        Example:
+            >>> builder = SystemBuilder.from_config(config)
+            >>> builder.build_from_config(config, working_dir)
+            >>> gro, top, mdp = builder.export_to_gromacs(
+            ...     output_dir="gromacs/",
+            ...     prefix="my_system"
+            ... )
+        """
+        if self._interchange is None:
+            raise RuntimeError(
+                "Interchange not created. Call create_interchange() or build_from_config() first."
+            )
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate prefix from config if not provided
+        if prefix is None:
+            prefix = self._generate_gromacs_prefix()
+
+        LOGGER.info(f"Exporting to GROMACS format: {output_dir / prefix}.*")
+
+        # Fix 0-indexed residues (GROMACS requires 1-indexed)
+        self._fix_zero_indexed_residues()
+
+        # Export using OpenFF Interchange
+        # - monolithic=False: Split topology into separate .itp files
+        # - _merge_atom_types=True: Cleaner atom type handling
+        output_prefix = str(output_dir / prefix)
+        self._interchange.to_gromacs(
+            prefix=output_prefix,
+            monolithic=False,
+            _merge_atom_types=True,
+        )
+
+        gro_path = output_dir / f"{prefix}.gro"
+        top_path = output_dir / f"{prefix}.top"
+        mdp_path = output_dir / f"{prefix}.mdp"
+
+        LOGGER.info(f"Generated GROMACS files:")
+        LOGGER.info(f"  Coordinates: {gro_path}")
+        LOGGER.info(f"  Topology:    {top_path}")
+        LOGGER.info(f"  MDP stub:    {mdp_path}")
+
+        return gro_path, top_path, mdp_path
+
+    def _generate_gromacs_prefix(self) -> str:
+        """Generate a descriptive filename prefix from the config.
+
+        Creates a prefix in the format: {enzyme_name}_{polymer_prefix}
+        Falls back to "system" if config information is not available.
+
+        Returns:
+            Filename prefix string (without extension).
+        """
+        parts = []
+
+        # Get enzyme name from config
+        config = getattr(self, "_config", None)
+        if config and hasattr(config, "enzyme") and config.enzyme:
+            parts.append(config.enzyme.name)
+
+        # Get polymer type prefix from config
+        if config and hasattr(config, "polymers") and config.polymers:
+            if config.polymers.enabled and config.polymers.type_prefix:
+                parts.append(config.polymers.type_prefix)
+
+        if parts:
+            return "_".join(parts)
+        else:
+            return "system"
+
+    def _fix_zero_indexed_residues(self) -> None:
+        """Fix 0-indexed residues in the topology for GROMACS compatibility.
+
+        GROMACS requires residue numbers to be 1-indexed. This method checks
+        all atoms in the topology and increments any 0-indexed residue numbers.
+        """
+        if self._interchange is None:
+            return
+
+        found_zero_indexed = False
+
+        # First pass: check for 0-indexed residues
+        for molecule in self._interchange.topology.molecules:
+            for atom in molecule.atoms:
+                residue_num = atom.metadata.get("residue_number")
+                if residue_num is not None:
+                    # Handle both string and int representations
+                    if isinstance(residue_num, str):
+                        try:
+                            if int(residue_num) == 0:
+                                found_zero_indexed = True
+                                break
+                        except ValueError:
+                            pass
+                    elif residue_num == 0:
+                        found_zero_indexed = True
+                        break
+            if found_zero_indexed:
+                break
+
+        if not found_zero_indexed:
+            LOGGER.debug("No 0-indexed residues found")
+            return
+
+        # Second pass: fix 0-indexed residues
+        LOGGER.info("Fixing 0-indexed residues for GROMACS compatibility")
+        for molecule in self._interchange.topology.molecules:
+            for atom in molecule.atoms:
+                residue_num = atom.metadata.get("residue_number")
+                if residue_num is not None:
+                    if isinstance(residue_num, str):
+                        try:
+                            atom.metadata["residue_number"] = str(int(residue_num) + 1)
+                        except ValueError:
+                            pass
+                    else:
+                        atom.metadata["residue_number"] = residue_num + 1
+
+        LOGGER.info("Fixed all 0-indexed residues")
+
     def get_component_info(self) -> "SystemComponentInfo":
         """Get system component information for atom group resolution.
 

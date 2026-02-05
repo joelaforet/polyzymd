@@ -153,6 +153,11 @@ def cli(verbose: bool, openff_logs: bool) -> None:
     is_flag=True,
     help="Validate config without building",
 )
+@click.option(
+    "--gromacs",
+    is_flag=True,
+    help="Export to GROMACS format (.gro, .top, .mdp) instead of preparing for OpenMM",
+)
 def build(
     config: str,
     replicate: int,
@@ -160,11 +165,21 @@ def build(
     scratch_dir: Optional[str],
     projects_dir: Optional[str],
     dry_run: bool,
+    gromacs: bool,
 ) -> None:
     """Build a simulation system from configuration.
 
     Loads the YAML configuration, constructs the molecular system
     (enzyme, substrate, polymers, solvent), and prepares it for simulation.
+
+    By default, prepares the system for OpenMM simulation. Use --gromacs to
+    export GROMACS-compatible files instead (.gro, .top, .mdp).
+
+    GROMACS Export Notes:
+        - Output files are placed in {projects_dir}/{replicate}/gromacs/
+        - Filenames are derived from config: {enzyme_name}_{polymer_prefix}.*
+        - The .mdp file is a stub for single-point energy; modify for production
+        - Topology is split into .itp files for cleaner multi-component systems
     """
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.builders.system_builder import SystemBuilder
@@ -196,6 +211,10 @@ def build(
             click.echo("Directories:")
             click.echo(f"  Projects: {sim_config.output.projects_directory}")
             click.echo(f"  Scratch: {sim_config.output.effective_scratch_directory}")
+            if gromacs:
+                click.echo()
+                click.echo("GROMACS export enabled:")
+                click.echo(f"  Output: {{projects_dir}}/{{replicate}}/gromacs/")
             return
 
         click.echo(f"Building system for replicate {replicate}...")
@@ -207,73 +226,93 @@ def build(
             polymer_seed=replicate,
         )
 
-        # Extract OpenMM components from Interchange
-        click.echo("Extracting OpenMM components...")
-        omm_topology, omm_system, omm_positions = builder.get_openmm_components()
+        # Branch based on export format
+        if gromacs:
+            # Export to GROMACS format
+            click.echo("Exporting to GROMACS format...")
+            gromacs_dir = (
+                sim_config.output.projects_directory / f"replicate_{replicate}" / "gromacs"
+            )
+            gro_path, top_path, mdp_path = builder.export_to_gromacs(gromacs_dir)
 
-        # Apply restraints if configured
-        if sim_config.restraints:
-            from polyzymd.core.restraints import RestraintFactory, apply_restraints
+            click.echo(f"GROMACS export successful!")
+            click.echo(f"Output directory: {gromacs_dir}")
+            click.echo(f"Files generated:")
+            click.echo(f"  - {gro_path.name} (coordinates)")
+            click.echo(f"  - {top_path.name} (topology)")
+            click.echo(f"  - {mdp_path.name} (MDP stub - modify for production)")
+            click.echo()
+            click.echo("Note: The generated .mdp file is configured for single-point")
+            click.echo("energy calculation. Modify it for your simulation protocol.")
 
-            click.echo(f"Applying {len(sim_config.restraints)} restraint(s)...")
-            restraint_defs = []
-            for r in sim_config.restraints:
-                if not r.enabled:
-                    click.echo(f"  - {r.name}: DISABLED (skipping)")
-                    continue
+        else:
+            # Default: prepare for OpenMM simulation
+            click.echo("Extracting OpenMM components...")
+            omm_topology, omm_system, omm_positions = builder.get_openmm_components()
 
-                # Create restraint definition from config
-                restraint_def = RestraintFactory.from_config(r.model_dump())
+            # Apply restraints if configured
+            if sim_config.restraints:
+                from polyzymd.core.restraints import RestraintFactory, apply_restraints
 
-                # Validate the selection resolves to exactly one atom each
-                try:
-                    indices1 = restraint_def.atom1.resolve(omm_topology)
-                    indices2 = restraint_def.atom2.resolve(omm_topology)
+                click.echo(f"Applying {len(sim_config.restraints)} restraint(s)...")
+                restraint_defs = []
+                for r in sim_config.restraints:
+                    if not r.enabled:
+                        click.echo(f"  - {r.name}: DISABLED (skipping)")
+                        continue
 
-                    if len(indices1) != 1:
+                    # Create restraint definition from config
+                    restraint_def = RestraintFactory.from_config(r.model_dump())
+
+                    # Validate the selection resolves to exactly one atom each
+                    try:
+                        indices1 = restraint_def.atom1.resolve(omm_topology)
+                        indices2 = restraint_def.atom2.resolve(omm_topology)
+
+                        if len(indices1) != 1:
+                            click.echo(
+                                f"Error: Restraint '{r.name}' atom1 selection matched "
+                                f"{len(indices1)} atoms (need exactly 1)",
+                                err=True,
+                            )
+                            sys.exit(1)
+                        if len(indices2) != 1:
+                            click.echo(
+                                f"Error: Restraint '{r.name}' atom2 selection matched "
+                                f"{len(indices2)} atoms (need exactly 1)",
+                                err=True,
+                            )
+                            sys.exit(1)
+
                         click.echo(
-                            f"Error: Restraint '{r.name}' atom1 selection matched "
-                            f"{len(indices1)} atoms (need exactly 1)",
-                            err=True,
+                            f"  - {r.name}: atom {indices1[0]} <-> atom {indices2[0]} "
+                            f"(type={r.type.value}, d={r.distance} A, k={r.force_constant} kJ/mol/nm^2)"
                         )
-                        sys.exit(1)
-                    if len(indices2) != 1:
-                        click.echo(
-                            f"Error: Restraint '{r.name}' atom2 selection matched "
-                            f"{len(indices2)} atoms (need exactly 1)",
-                            err=True,
-                        )
+                        restraint_defs.append(restraint_def)
+
+                    except ValueError as e:
+                        click.echo(f"Error: Restraint '{r.name}' invalid: {e}", err=True)
                         sys.exit(1)
 
-                    click.echo(
-                        f"  - {r.name}: atom {indices1[0]} <-> atom {indices2[0]} "
-                        f"(type={r.type.value}, d={r.distance} A, k={r.force_constant} kJ/mol/nm^2)"
-                    )
-                    restraint_defs.append(restraint_def)
+                # Apply all validated restraints to the system
+                if restraint_defs:
+                    apply_restraints(restraint_defs, omm_topology, omm_system)
+                    click.echo(f"Successfully applied {len(restraint_defs)} restraint(s)")
 
-                except ValueError as e:
-                    click.echo(f"Error: Restraint '{r.name}' invalid: {e}", err=True)
-                    sys.exit(1)
+            # Save OpenMM system to XML for --skip-build support
+            from openmm import XmlSerializer
 
-            # Apply all validated restraints to the system
-            if restraint_defs:
-                apply_restraints(restraint_defs, omm_topology, omm_system)
-                click.echo(f"Successfully applied {len(restraint_defs)} restraint(s)")
+            system_xml_path = working_dir / "system.xml"
+            click.echo(f"Saving OpenMM system to {system_xml_path}...")
+            with open(system_xml_path, "w") as f:
+                f.write(XmlSerializer.serialize(omm_system))
 
-        # Save OpenMM system to XML for --skip-build support
-        from openmm import XmlSerializer
-
-        system_xml_path = working_dir / "system.xml"
-        click.echo(f"Saving OpenMM system to {system_xml_path}...")
-        with open(system_xml_path, "w") as f:
-            f.write(XmlSerializer.serialize(omm_system))
-
-        click.echo(f"System built successfully!")
-        click.echo(f"Output directory: {working_dir}")
-        click.echo(f"Files saved:")
-        click.echo(f"  - solvated_system.pdb (topology + positions)")
-        click.echo(f"  - system.xml (OpenMM system with restraints)")
-        click.echo(f"Use 'polyzymd run --skip-build' to run without rebuilding.")
+            click.echo(f"System built successfully!")
+            click.echo(f"Output directory: {working_dir}")
+            click.echo(f"Files saved:")
+            click.echo(f"  - solvated_system.pdb (topology + positions)")
+            click.echo(f"  - system.xml (OpenMM system with restraints)")
+            click.echo(f"Use 'polyzymd run --skip-build' to run without rebuilding.")
 
     except FileNotFoundError as e:
         click.echo(f"Error: {e}", err=True)
