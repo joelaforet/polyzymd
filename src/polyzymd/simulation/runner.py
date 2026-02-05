@@ -217,12 +217,14 @@ class SimulationRunner:
             maxIterations=max_iterations,
         )
 
-        # Get final state
+        # Get final state (including box vectors for proper handoff to equilibration)
         state = simulation.context.getState(getEnergy=True, getPositions=True)
         energy = state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
         self._current_positions = state.getPositions()
+        self._current_box_vectors = state.getPeriodicBoxVectors()
 
         LOGGER.info(f"Minimization complete: E = {energy:.2f} kJ/mol")
+        LOGGER.info(f"[DEBUG] Minimization: captured box vectors for equilibration handoff")
 
         return energy
 
@@ -405,11 +407,12 @@ class SimulationRunner:
         LOGGER.info(f"Running {total_steps} steps...")
         self._simulation.step(total_steps)
 
-        # Get final state
+        # Get final state (including box vectors for potential NPT follow-up)
         state = self._simulation.context.getState(
             getPositions=True, getVelocities=True, getEnergy=True
         )
         self._current_positions = state.getPositions()
+        self._current_box_vectors = state.getPeriodicBoxVectors()
 
         # Save checkpoint
         checkpoint_path = phase_dir / f"{output_prefix}_checkpoint.chk"
@@ -537,6 +540,11 @@ class SimulationRunner:
         # where box dimensions may have changed from previous stage
         if self._current_box_vectors is not None:
             self._simulation.context.setPeriodicBoxVectors(*self._current_box_vectors)
+            LOGGER.info(f"[DEBUG] Stage {stage_index}: Set box vectors from _current_box_vectors")
+        else:
+            LOGGER.info(
+                f"[DEBUG] Stage {stage_index}: WARNING - no box vectors available, using defaults"
+            )
 
         self._simulation.context.setPositions(self._current_positions)
         self._simulation.context.setVelocitiesToTemperature(start_temp * omm_unit.kelvin)
@@ -782,6 +790,9 @@ class SimulationRunner:
             state = self._simulation.context.getState(getVelocities=True)
             equilibration_velocities = state.getVelocities()
             equilibration_box_vectors = state.getPeriodicBoxVectors()
+            LOGGER.info(
+                f"[DEBUG] Production: captured velocities and box vectors from equilibration context"
+            )
 
         self._simulation = Simulation(self._topology, self._system, integrator, platform)
 
@@ -789,8 +800,12 @@ class SimulationRunner:
         # Use captured box vectors from equilibration, or fall back to stored ones from staged equilibration
         if equilibration_box_vectors is not None:
             self._simulation.context.setPeriodicBoxVectors(*equilibration_box_vectors)
+            LOGGER.info(f"[DEBUG] Production: set box vectors from equilibration context")
         elif self._current_box_vectors is not None:
             self._simulation.context.setPeriodicBoxVectors(*self._current_box_vectors)
+            LOGGER.info(f"[DEBUG] Production: set box vectors from _current_box_vectors")
+        else:
+            LOGGER.info(f"[DEBUG] Production: WARNING - no box vectors available, using defaults")
 
         self._simulation.context.setPositions(self._current_positions)
 
@@ -996,8 +1011,10 @@ class SimulationRunner:
 
         self._simulation.loadCheckpoint(str(checkpoint_path))
 
-        # Update current positions
+        # Update current positions and box vectors
         state = self._simulation.context.getState(getPositions=True)
         self._current_positions = state.getPositions()
+        self._current_box_vectors = state.getPeriodicBoxVectors()
 
         LOGGER.info(f"Loaded checkpoint from {checkpoint_path}")
+        LOGGER.info(f"[DEBUG] load_checkpoint: captured positions and box vectors")
