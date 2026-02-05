@@ -625,11 +625,42 @@ class SimulationRunner:
                 LOGGER.info(
                     f"Running {remaining_steps} steps at final temperature {stage.temperature_end} K"
                 )
+                # DEBUG: Log energy before final steps
+                _debug_state = self._simulation.context.getState(getEnergy=True)
+                _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(
+                    omm_unit.kilojoule_per_mole
+                )
+                LOGGER.info(
+                    f"[DEBUG] Stage {stage_index}: Before final steps, PE={_debug_energy:.2f} kJ/mol"
+                )
                 self._simulation.step(remaining_steps)
+                # DEBUG: Log energy after final steps
+                _debug_state = self._simulation.context.getState(getEnergy=True)
+                _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(
+                    omm_unit.kilojoule_per_mole
+                )
+                LOGGER.info(
+                    f"[DEBUG] Stage {stage_index}: After final steps, PE={_debug_energy:.2f} kJ/mol"
+                )
         else:
             # Constant temperature - just run all steps
             LOGGER.info(f"Running {total_steps} steps at {stage.temperature} K")
+            # DEBUG: Log energy before steps
+            _debug_state = self._simulation.context.getState(getEnergy=True)
+            _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(
+                omm_unit.kilojoule_per_mole
+            )
+            LOGGER.info(f"[DEBUG] Stage {stage_index}: Before steps, PE={_debug_energy:.2f} kJ/mol")
             self._simulation.step(total_steps)
+            # DEBUG: Log energy after steps
+            _debug_state = self._simulation.context.getState(getEnergy=True)
+            _debug_energy = _debug_state.getPotentialEnergy().value_in_unit(
+                omm_unit.kilojoule_per_mole
+            )
+            LOGGER.info(f"[DEBUG] Stage {stage_index}: After steps, PE={_debug_energy:.2f} kJ/mol")
+
+        # DEBUG: Log before getting final state
+        LOGGER.info(f"[DEBUG] Stage {stage_index}: About to get final state")
 
         # Get final state
         state = self._simulation.context.getState(
@@ -637,13 +668,26 @@ class SimulationRunner:
         )
         self._current_positions = state.getPositions()
 
+        # DEBUG: Log after getting final state
+        _debug_energy = state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
+        LOGGER.info(f"[DEBUG] Stage {stage_index}: Got final state, PE={_debug_energy:.2f} kJ/mol")
+        LOGGER.info(
+            f"[DEBUG] Stage {stage_index}: self._current_positions updated, is None: {self._current_positions is None}"
+        )
+
         # Save checkpoint
         checkpoint_path = phase_dir / f"{stage_name}_checkpoint.chk"
         self._simulation.saveCheckpoint(str(checkpoint_path))
 
         # Remove position restraints from system for next stage
         if restraint_force_indices:
+            LOGGER.info(
+                f"[DEBUG] Stage {stage_index}: Removing {len(restraint_force_indices)} position restraint forces"
+            )
             remove_position_restraints_from_system(self._system, restraint_force_indices)
+            LOGGER.info(
+                f"[DEBUG] Stage {stage_index}: After removal, system has {self._system.getNumForces()} forces"
+            )
 
         # Build results
         final_temp = stage.get_final_temperature()
@@ -708,6 +752,18 @@ class SimulationRunner:
         }
 
         for i, stage in enumerate(stages):
+            # DEBUG: Log state before each stage
+            LOGGER.info(f"[DEBUG] run_staged_equilibration: About to run stage {i} ({stage.name})")
+            LOGGER.info(
+                f"[DEBUG] run_staged_equilibration: self._simulation is None: {self._simulation is None}"
+            )
+            LOGGER.info(
+                f"[DEBUG] run_staged_equilibration: self._current_positions is None: {self._current_positions is None}"
+            )
+            LOGGER.info(
+                f"[DEBUG] run_staged_equilibration: Number of forces in system: {self._system.getNumForces()}"
+            )
+
             stage_result = self.run_equilibration_stage(
                 stage=stage,
                 reference_positions=reference_positions,
@@ -716,6 +772,18 @@ class SimulationRunner:
             )
             results["stages"].append(stage_result)
             results["total_duration_ns"] += stage.duration
+
+            # DEBUG: Log state after each stage
+            LOGGER.info(f"[DEBUG] run_staged_equilibration: Completed stage {i} ({stage.name})")
+            LOGGER.info(
+                f"[DEBUG] run_staged_equilibration: self._simulation is None: {self._simulation is None}"
+            )
+            LOGGER.info(
+                f"[DEBUG] run_staged_equilibration: self._current_positions is None: {self._current_positions is None}"
+            )
+            LOGGER.info(
+                f"[DEBUG] run_staged_equilibration: Number of forces in system: {self._system.getNumForces()}"
+            )
 
         # Get final energy
         if results["stages"]:
