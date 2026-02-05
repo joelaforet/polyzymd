@@ -245,6 +245,34 @@ class SimulationRunner:
             f"Y=[{min(y_coords):.2f}, {max(y_coords):.2f}], Z=[{min(z_coords):.2f}, {max(z_coords):.2f}] nm"
         )
 
+        # Debug: dump force configurations from minimization context
+        # This helps identify if forces are configured correctly
+        LOGGER.info("[DEBUG] Minimization: Force configurations in working context:")
+        for i in range(self._system.getNumForces()):
+            force = self._system.getForce(i)
+            force_name = force.__class__.__name__
+            if force_name == "CustomNonbondedForce":
+                try:
+                    uses_pbc = force.usesPeriodicBoundaryConditions()
+                    cutoff = force.getCutoffDistance().value_in_unit(omm_unit.nanometer)
+                    nb_method = force.getNonbondedMethod()
+                    LOGGER.info(
+                        f"[DEBUG]   Force {i} ({force_name}): "
+                        f"PBC={uses_pbc}, cutoff={cutoff:.3f} nm, method={nb_method}"
+                    )
+                except Exception as e:
+                    LOGGER.info(f"[DEBUG]   Force {i} ({force_name}): error getting config: {e}")
+            elif force_name == "NonbondedForce":
+                try:
+                    nb_method = force.getNonbondedMethod()
+                    cutoff = force.getCutoffDistance().value_in_unit(omm_unit.nanometer)
+                    LOGGER.info(
+                        f"[DEBUG]   Force {i} ({force_name}): "
+                        f"method={nb_method}, cutoff={cutoff:.3f} nm"
+                    )
+                except Exception as e:
+                    LOGGER.info(f"[DEBUG]   Force {i} ({force_name}): error getting config: {e}")
+
         return energy
 
     def run_equilibration(
@@ -520,6 +548,25 @@ class SimulationRunner:
             # NVT - ensure no barostat
             self._remove_barostat()
 
+        # DEBUG: Test energy with fresh context BEFORE adding position restraints
+        # This isolates whether the issue is: (1) creating a new context, or (2) restraints
+        LOGGER.info(
+            f"[DEBUG] Stage {stage_index}: Testing energy with fresh context BEFORE adding restraints..."
+        )
+        _test_integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
+        _test_platform = self._get_platform()
+        _test_sim = Simulation(self._topology, self._system, _test_integrator, _test_platform)
+        if self._current_box_vectors is not None:
+            _test_sim.context.setPeriodicBoxVectors(*self._current_box_vectors)
+        _test_sim.context.setPositions(self._current_positions)
+        _test_state = _test_sim.context.getState(getEnergy=True)
+        _test_energy = _test_state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
+        LOGGER.info(
+            f"[DEBUG] Stage {stage_index}: Energy BEFORE adding restraints = {_test_energy:.2f} kJ/mol"
+        )
+        # Clean up test context
+        del _test_sim, _test_integrator
+
         # Add position restraints
         restraint_force_indices = []
         for restraint_config in stage.position_restraints:
@@ -589,6 +636,47 @@ class SimulationRunner:
                 LOGGER.info(
                     f"[DEBUG]   Force {i} ({force_name}, group {force_group}): {group_energy:.2f} kJ/mol"
                 )
+
+                # Extra diagnostics for CustomNonbondedForce
+                if force_name == "CustomNonbondedForce":
+                    try:
+                        cnb_force = force
+                        uses_pbc = cnb_force.usesPeriodicBoundaryConditions()
+                        cutoff = cnb_force.getCutoffDistance().value_in_unit(omm_unit.nanometer)
+                        nb_method = cnb_force.getNonbondedMethod()
+                        num_particles = cnb_force.getNumParticles()
+                        num_exclusions = cnb_force.getNumExclusions()
+                        expression = cnb_force.getEnergyFunction()
+                        LOGGER.info(f"[DEBUG]     CustomNonbondedForce config:")
+                        LOGGER.info(f"[DEBUG]       usesPeriodicBoundaryConditions: {uses_pbc}")
+                        LOGGER.info(f"[DEBUG]       cutoffDistance: {cutoff:.3f} nm")
+                        LOGGER.info(f"[DEBUG]       nonbondedMethod: {nb_method}")
+                        LOGGER.info(f"[DEBUG]       numParticles: {num_particles}")
+                        LOGGER.info(f"[DEBUG]       numExclusions: {num_exclusions}")
+                        LOGGER.info(f"[DEBUG]       energyFunction: {expression[:100]}...")
+                    except Exception as cnb_e:
+                        LOGGER.info(
+                            f"[DEBUG]     Could not get CustomNonbondedForce details: {cnb_e}"
+                        )
+
+                # Extra diagnostics for NonbondedForce
+                if force_name == "NonbondedForce":
+                    try:
+                        nb_force = force
+                        nb_method = nb_force.getNonbondedMethod()
+                        cutoff = nb_force.getCutoffDistance().value_in_unit(omm_unit.nanometer)
+                        uses_switching = nb_force.getUseSwitchingFunction()
+                        num_particles = nb_force.getNumParticles()
+                        num_exceptions = nb_force.getNumExceptions()
+                        LOGGER.info(f"[DEBUG]     NonbondedForce config:")
+                        LOGGER.info(f"[DEBUG]       nonbondedMethod: {nb_method}")
+                        LOGGER.info(f"[DEBUG]       cutoffDistance: {cutoff:.3f} nm")
+                        LOGGER.info(f"[DEBUG]       useSwitchingFunction: {uses_switching}")
+                        LOGGER.info(f"[DEBUG]       numParticles: {num_particles}")
+                        LOGGER.info(f"[DEBUG]       numExceptions: {num_exceptions}")
+                    except Exception as nb_e:
+                        LOGGER.info(f"[DEBUG]     Could not get NonbondedForce details: {nb_e}")
+
             except Exception as e:
                 LOGGER.info(f"[DEBUG]   Force {i}: could not get energy ({e})")
 
