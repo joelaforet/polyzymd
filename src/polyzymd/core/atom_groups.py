@@ -132,6 +132,71 @@ class SystemComponentInfo:
         """Check if system has polymer atoms."""
         return self.n_polymer_atoms > 0
 
+    @classmethod
+    def from_topology(cls, topology: OpenMMTopology) -> "SystemComponentInfo":
+        """Reconstruct SystemComponentInfo from PDB topology chain assignments.
+
+        Uses the PolyzyMD chain ID convention:
+        - Chain A: Protein/Enzyme
+        - Chain B: Substrate/Ligand
+        - Chain C: Polymers
+        - Chain D+: Solvent (water, ions, co-solvents)
+
+        This method enables position restraints to work with pre-built systems
+        loaded from PDB files (--skip-build mode).
+
+        Args:
+            topology: OpenMM Topology object (e.g., from PDBFile)
+
+        Returns:
+            SystemComponentInfo with atom counts derived from chain IDs
+
+        Raises:
+            ValueError: If topology has no chain information or is missing
+                chain A (protein), indicating it was not built by PolyzyMD
+        """
+        n_protein = 0
+        n_substrate = 0
+        n_polymer = 0
+        found_chains: set = set()
+
+        for atom in topology.atoms():
+            chain_id = atom.residue.chain.id if atom.residue.chain else ""
+            found_chains.add(chain_id)
+
+            if chain_id == "A":
+                n_protein += 1
+            elif chain_id == "B":
+                n_substrate += 1
+            elif chain_id == "C":
+                n_polymer += 1
+            # D+ are solvent - we don't need to track counts
+
+        # Validate that we found expected chain structure
+        if not found_chains:
+            raise ValueError(
+                "Topology has no chain information. Ensure the PDB was built by PolyzyMD "
+                "with proper chain assignments (A=protein, B=substrate, C=polymers, D+=solvent)."
+            )
+
+        if "A" not in found_chains:
+            raise ValueError(
+                f"Topology missing chain A (protein). Found chains: {sorted(found_chains)}. "
+                "Ensure the PDB was built by PolyzyMD with proper chain assignments."
+            )
+
+        logger.info(
+            f"Parsed topology: {n_protein} protein atoms (chain A), "
+            f"{n_substrate} substrate atoms (chain B), "
+            f"{n_polymer} polymer atoms (chain C)"
+        )
+
+        return cls(
+            n_protein_atoms=n_protein,
+            n_substrate_atoms=n_substrate,
+            n_polymer_atoms=n_polymer,
+        )
+
 
 class AtomGroupResolver:
     """Resolves predefined atom group names to atom indices.
