@@ -33,9 +33,11 @@ class PositionalRestraintForce:
     """Creates and manages harmonic positional restraints.
 
     Restrains atoms to their reference positions using a harmonic potential:
-        U = 0.5 * k * ((x-x0)^2 + (y-y0)^2 + (z-z0)^2)
+        U = 0.5 * k * periodicdistance(x, y, z, x0, y0, z0)^2
 
     where (x0, y0, z0) is the reference position and k is the force constant.
+    The periodicdistance() function correctly handles periodic boundary conditions,
+    computing the minimum image distance even when atoms are outside the primary box.
 
     This uses OpenMM's CustomExternalForce, which applies a force to particles
     based on their absolute coordinates (not relative to other particles).
@@ -68,7 +70,9 @@ class PositionalRestraintForce:
 
         # Create CustomExternalForce with harmonic potential
         # All parameters are per-particle to avoid global parameter conflicts
-        expression = "0.5*k*((x-x0)^2+(y-y0)^2+(z-z0)^2)"
+        # Use periodicdistance() to correctly handle atoms that may be outside
+        # the primary periodic box (e.g., after minimization or NPT equilibration)
+        expression = "0.5*k*periodicdistance(x, y, z, x0, y0, z0)^2"
         self._force = CustomExternalForce(expression)
 
         # Add per-particle parameters (k is per-particle, not global)
