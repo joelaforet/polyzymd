@@ -224,7 +224,26 @@ class SimulationRunner:
         self._current_box_vectors = state.getPeriodicBoxVectors()
 
         LOGGER.info(f"Minimization complete: E = {energy:.2f} kJ/mol")
-        LOGGER.info(f"[DEBUG] Minimization: captured box vectors for equilibration handoff")
+
+        # Debug: log box vector dimensions
+        box_a = self._current_box_vectors[0][0].value_in_unit(omm_unit.nanometer)
+        box_b = self._current_box_vectors[1][1].value_in_unit(omm_unit.nanometer)
+        box_c = self._current_box_vectors[2][2].value_in_unit(omm_unit.nanometer)
+        LOGGER.info(
+            f"[DEBUG] Minimization: box vectors = ({box_a:.3f}, {box_b:.3f}, {box_c:.3f}) nm"
+        )
+
+        # Debug: check position range to detect if atoms are outside expected box
+        positions_nm = [
+            [p.value_in_unit(omm_unit.nanometer) for p in pos] for pos in self._current_positions
+        ]
+        x_coords = [p[0] for p in positions_nm]
+        y_coords = [p[1] for p in positions_nm]
+        z_coords = [p[2] for p in positions_nm]
+        LOGGER.info(
+            f"[DEBUG] Minimization: position ranges X=[{min(x_coords):.2f}, {max(x_coords):.2f}], "
+            f"Y=[{min(y_coords):.2f}, {max(y_coords):.2f}], Z=[{min(z_coords):.2f}, {max(z_coords):.2f}] nm"
+        )
 
         return energy
 
@@ -553,6 +572,25 @@ class SimulationRunner:
         _state = self._simulation.context.getState(getEnergy=True)
         _energy = _state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
         LOGGER.info(f"Stage {stage_index} ({stage_name}): initial PE = {_energy:.2f} kJ/mol")
+
+        # Debug: Energy breakdown by force group to identify which force is problematic
+        LOGGER.info(f"[DEBUG] Stage {stage_index}: Energy breakdown by force group:")
+        for i in range(self._system.getNumForces()):
+            force = self._system.getForce(i)
+            force_group = force.getForceGroup()
+            try:
+                group_state = self._simulation.context.getState(
+                    getEnergy=True, groups={force_group}
+                )
+                group_energy = group_state.getPotentialEnergy().value_in_unit(
+                    omm_unit.kilojoule_per_mole
+                )
+                force_name = force.__class__.__name__
+                LOGGER.info(
+                    f"[DEBUG]   Force {i} ({force_name}, group {force_group}): {group_energy:.2f} kJ/mol"
+                )
+            except Exception as e:
+                LOGGER.info(f"[DEBUG]   Force {i}: could not get energy ({e})")
 
         # Set up reporters
         traj_path = phase_dir / f"{stage_name}_trajectory.dcd"
