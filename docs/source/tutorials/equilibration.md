@@ -424,12 +424,3 @@ equilibration_stages:
 2. Add additional stages with gradually decreasing restraints
 3. Monitor state_data.csv files to check for energy/temperature convergence
 
----
-
-## References
-
-The multi-stage equilibration protocol implemented in PolyzyMD is based on common practices in the MD literature:
-
-> "The simulation protocol first involved 2000 steps of energy minimization, after which the system was heated from 60 to 300 K over the course of 288 ps MD simulation by incrementing the temperature by 1 K every 600 time steps (1200 fs). The system was then equilibrated at 300 K for 1 ns before production MD simulation. The heating of the system and equilibration were performed using 1.0 kcal/mol/A^2 harmonic positional restraints on all protein backbone atoms."
-
-This approach ensures stable equilibration of complex biomolecular systems while preventing artifacts from temperature shock or bad initial contacts.
