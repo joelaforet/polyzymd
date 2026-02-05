@@ -493,18 +493,241 @@ class SimulationPhaseConfig(BaseModel):
         return self
 
 
+# =============================================================================
+# Equilibration Stage Configuration (Multi-Stage Equilibration)
+# =============================================================================
+
+
+class PositionRestraintConfig(BaseModel):
+    """Configuration for positional restraints on an atom group.
+
+    Position restraints apply a harmonic potential to keep atoms near their
+    initial coordinates. This is commonly used during equilibration to
+    prevent large structural changes while the system relaxes.
+
+    Attributes:
+        group: Predefined atom group name
+        force_constant: Force constant in kJ/mol/nm^2 (4184.0 = 1.0 kcal/mol/A^2)
+    """
+
+    group: str = Field(
+        ...,
+        description=(
+            "Atom group: protein_heavy, protein_backbone, protein_calpha, "
+            "ligand_heavy, polymer_heavy, solvent, water_only, ions_only, cosolvents_only"
+        ),
+    )
+    force_constant: float = Field(
+        4184.0,  # 1.0 kcal/mol/A^2 in kJ/mol/nm^2
+        gt=0.0,
+        description="Force constant (kJ/mol/nm^2). Default 4184.0 = 1.0 kcal/mol/A^2",
+    )
+
+    @field_validator("group")
+    @classmethod
+    def validate_group_name(cls, v: str) -> str:
+        """Validate that the group name is a recognized predefined group."""
+        from polyzymd.core.atom_groups import PREDEFINED_GROUPS
+
+        if v not in PREDEFINED_GROUPS:
+            raise ValueError(
+                f"Unknown atom group: '{v}'. Valid groups: {sorted(PREDEFINED_GROUPS)}"
+            )
+        return v
+
+
+class EquilibrationStageConfig(BaseModel):
+    """Configuration for a single equilibration stage.
+
+    Supports two temperature modes:
+    1. Constant temperature: Set 'temperature' field
+    2. Temperature ramping (simulated annealing): Set 'temperature_start' and
+       'temperature_end' fields
+
+    Position restraints can be applied to hold specific atom groups in place
+    during the stage.
+
+    Attributes:
+        name: Stage identifier (used in output paths)
+        duration: Stage duration in nanoseconds
+        samples: Number of trajectory frames to save
+        ensemble: Thermodynamic ensemble (NVT or NPT)
+        temperature: Constant temperature in K (mutually exclusive with ramping)
+        temperature_start: Starting temperature for ramping in K
+        temperature_end: Ending temperature for ramping in K
+        temperature_increment: Temperature increment per update in K
+        temperature_interval: Time between temperature updates in fs
+        position_restraints: List of position restraints for this stage
+        time_step: Optional time step override in fs
+        thermostat: Optional thermostat type override
+        thermostat_timescale: Optional thermostat timescale override in ps
+        barostat: Optional barostat type (for NPT ensemble)
+        barostat_frequency: Optional barostat update frequency
+    """
+
+    name: str = Field(..., description="Stage identifier (used in output paths)")
+    duration: float = Field(..., gt=0.0, description="Duration (ns)")
+    samples: int = Field(100, ge=1, description="Trajectory frames to save")
+    ensemble: Ensemble = Field(Ensemble.NVT, description="Thermodynamic ensemble")
+
+    # Constant temperature mode
+    temperature: Optional[float] = Field(
+        None,
+        gt=0.0,
+        description="Constant temperature (K). Mutually exclusive with temperature ramping.",
+    )
+
+    # Temperature ramping mode (simulated annealing)
+    temperature_start: Optional[float] = Field(
+        None, gt=0.0, description="Starting temperature for ramping (K)"
+    )
+    temperature_end: Optional[float] = Field(
+        None, gt=0.0, description="Ending temperature for ramping (K)"
+    )
+    temperature_increment: float = Field(
+        1.0, gt=0.0, description="Temperature increment per update (K)"
+    )
+    temperature_interval: float = Field(
+        1200.0, gt=0.0, description="Time between temperature updates (fs)"
+    )
+
+    # Position restraints
+    position_restraints: List[PositionRestraintConfig] = Field(
+        default_factory=list, description="Position restraints for this stage"
+    )
+
+    # Optional overrides (inherit from parent/defaults if not specified)
+    time_step: Optional[float] = Field(None, gt=0.0, description="Time step (fs)")
+    thermostat: Optional[ThermostatType] = Field(None, description="Thermostat type")
+    thermostat_timescale: Optional[float] = Field(
+        None, gt=0.0, description="Thermostat timescale (ps)"
+    )
+    barostat: Optional[BarostatType] = Field(None, description="Barostat type (for NPT)")
+    barostat_frequency: Optional[int] = Field(None, ge=1, description="Barostat update frequency")
+
+    @model_validator(mode="after")
+    def validate_temperature_mode(self) -> "EquilibrationStageConfig":
+        """Ensure valid temperature specification."""
+        has_constant = self.temperature is not None
+        has_start = self.temperature_start is not None
+        has_end = self.temperature_end is not None
+
+        if has_constant and (has_start or has_end):
+            raise ValueError(
+                "Cannot specify both 'temperature' and temperature ramping "
+                "('temperature_start'/'temperature_end')"
+            )
+
+        if not has_constant and not (has_start and has_end):
+            raise ValueError(
+                "Must specify either 'temperature' for constant temperature, "
+                "or both 'temperature_start' and 'temperature_end' for ramping"
+            )
+
+        if has_start and has_end and self.temperature_start > self.temperature_end:
+            raise ValueError(
+                f"temperature_start ({self.temperature_start}) must be <= "
+                f"temperature_end ({self.temperature_end})"
+            )
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_npt_barostat(self) -> "EquilibrationStageConfig":
+        """Ensure NPT ensemble has a barostat configured."""
+        if self.ensemble == Ensemble.NPT and self.barostat is None:
+            self.barostat = BarostatType.MONTE_CARLO
+        return self
+
+    @property
+    def is_temperature_ramping(self) -> bool:
+        """Check if this stage uses temperature ramping."""
+        return self.temperature_start is not None
+
+    def get_start_temperature(self) -> float:
+        """Get the starting temperature of this stage."""
+        if self.is_temperature_ramping:
+            return self.temperature_start
+        return self.temperature
+
+    def get_final_temperature(self) -> float:
+        """Get the final temperature of this stage."""
+        if self.is_temperature_ramping:
+            return self.temperature_end
+        return self.temperature
+
+
 class SimulationPhasesConfig(BaseModel):
     """Configuration for all simulation phases.
 
+    Supports two equilibration modes (mutually exclusive):
+    1. Simple mode (legacy): Single equilibration phase via 'equilibration' field
+    2. Staged mode: Multi-stage protocol via 'equilibration_stages' field
+
     Attributes:
-        equilibration: Equilibration phase settings
+        equilibration_stages: Multi-stage equilibration protocol (new)
+        equilibration: Simple single-stage equilibration (legacy)
         production: Production phase settings
         segments: Number of segments for daisy-chaining
     """
 
-    equilibration: SimulationPhaseConfig = Field(..., description="Equilibration settings")
+    # Staged equilibration (new)
+    equilibration_stages: Optional[List[EquilibrationStageConfig]] = Field(
+        None, description="Multi-stage equilibration protocol with position restraints"
+    )
+
+    # Simple equilibration (legacy, for backwards compatibility)
+    equilibration: Optional[SimulationPhaseConfig] = Field(
+        None, description="Simple single-stage equilibration (legacy)"
+    )
+
     production: SimulationPhaseConfig = Field(..., description="Production settings")
     segments: int = Field(1, ge=1, description="Number of daisy-chain segments")
+
+    @model_validator(mode="after")
+    def validate_equilibration_mode(self) -> "SimulationPhasesConfig":
+        """Ensure exactly one equilibration mode is specified."""
+        has_stages = self.equilibration_stages is not None
+        has_simple = self.equilibration is not None
+
+        if has_stages and has_simple:
+            raise ValueError(
+                "Cannot specify both 'equilibration_stages' and 'equilibration'. "
+                "Use 'equilibration_stages' for multi-stage protocols, "
+                "or 'equilibration' for simple single-stage equilibration."
+            )
+
+        if not has_stages and not has_simple:
+            raise ValueError("Must specify either 'equilibration_stages' or 'equilibration'")
+
+        return self
+
+    @property
+    def uses_staged_equilibration(self) -> bool:
+        """Check if using multi-stage equilibration."""
+        return self.equilibration_stages is not None
+
+    @property
+    def total_equilibration_duration(self) -> float:
+        """Total equilibration duration in nanoseconds.
+
+        Works for both simple and staged equilibration modes.
+        For staged mode, returns the sum of all stage durations.
+        """
+        if self.uses_staged_equilibration:
+            return sum(stage.duration for stage in self.equilibration_stages)
+        return self.equilibration.duration
+
+    @property
+    def total_equilibration_samples(self) -> int:
+        """Total equilibration trajectory samples.
+
+        Works for both simple and staged equilibration modes.
+        For staged mode, returns the sum of all stage samples.
+        """
+        if self.uses_staged_equilibration:
+            return sum(stage.samples for stage in self.equilibration_stages)
+        return self.equilibration.samples
 
 
 # =============================================================================

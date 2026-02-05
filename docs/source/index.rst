@@ -64,6 +64,7 @@ Getting Started
    tutorials/quickstart
    tutorials/cli_reference
    tutorials/configuration
+   tutorials/equilibration
    tutorials/restraints
    tutorials/hpc_slurm
    tutorials/benchmarks

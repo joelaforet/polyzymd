@@ -142,7 +142,7 @@ class DaisyChainConfig:
             total_production_time_ns=sim_config.simulation_phases.production.duration,
             total_segments=sim_config.simulation_phases.segments,
             total_samples=sim_config.simulation_phases.production.samples,
-            equilibration_time_ns=sim_config.simulation_phases.equilibration.duration,
+            equilibration_time_ns=sim_config.simulation_phases.total_equilibration_duration,
             replicates=replicate_list,
             dry_run=dry_run,
             output_script_dir=Path(output_script_dir),

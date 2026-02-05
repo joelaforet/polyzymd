@@ -207,6 +207,9 @@ description: "Description of your simulation system"
 # thermostat options: LangevinMiddle (recommended), Langevin, Andersen
 # barostat options: MC (Monte Carlo), MCA (anisotropic)
 #
+# OPTION A: Simple equilibration (legacy)
+# Use this for straightforward equilibration without staged restraints.
+#
 # simulation_phases:
 #   equilibration:
 #     ensemble: "NVT"
@@ -228,6 +231,79 @@ description: "Description of your simulation system"
 #   
 #   # Daisy-chain: split production into segments for HPC job limits
 #   segments: 10                          # 10 segments = 10 ns each
+
+# ----------------------------------------------------------------------------
+# OPTION B: Multi-stage equilibration with position restraints (ADVANCED)
+# Use this for sophisticated equilibration protocols with:
+#   - Temperature ramping (simulated annealing style heating)
+#   - Position restraints on specific atom groups
+#   - Staged release of restraints
+#
+# NOTE: Use EITHER equilibration OR equilibration_stages, not both.
+#
+# Available atom groups for position restraints:
+#   protein_heavy     : All non-hydrogen protein atoms
+#   protein_backbone  : Protein backbone atoms (N, CA, C, O)
+#   protein_calpha    : Protein alpha carbons only
+#   ligand_heavy      : All non-hydrogen substrate/ligand atoms
+#   polymer_heavy     : All non-hydrogen polymer atoms
+#   solvent           : All solvent atoms (water + ions + cosolvents)
+#   water_only        : Only water molecules
+#   ions_only         : Only ions (Na+, Cl-, etc.)
+#   cosolvents_only   : Only cosolvent molecules (DMSO, etc.)
+#
+# Temperature settings:
+#   - Use "temperature" for constant temperature
+#   - Use "temperature_start" + "temperature_end" for ramping
+#   - temperature_increment: Temperature step size (K, default: 1.0)
+#   - temperature_interval: Time between increments (fs, default: 1200)
+#
+# simulation_phases:
+#   equilibration_stages:
+#     # Stage 1: Heat from 60K to 300K with everything restrained
+#     - name: "heating"
+#       duration: 0.288                   # nanoseconds
+#       samples: 50                       # trajectory frames
+#       ensemble: "NVT"
+#       temperature_start: 60.0           # Start temperature (K)
+#       temperature_end: 300.0            # End temperature (K)
+#       temperature_increment: 1.0        # Step size (K)
+#       temperature_interval: 1200.0      # Time between steps (fs)
+#       position_restraints:
+#         - group: "protein_heavy"
+#           force_constant: 4184.0        # kJ/mol/nm^2 (= 1 kcal/mol/A^2)
+#         - group: "polymer_heavy"
+#           force_constant: 4184.0
+#     
+#     # Stage 2: Relax polymers while keeping protein restrained
+#     - name: "polymer_relaxation"
+#       duration: 1.0                     # nanoseconds
+#       samples: 100
+#       ensemble: "NVT"
+#       temperature: 300.0                # Constant temperature
+#       position_restraints:
+#         - group: "protein_heavy"
+#           force_constant: 4184.0
+#     
+#     # Stage 3: Free equilibration (no restraints)
+#     - name: "free_equilibration"
+#       duration: 0.5                     # nanoseconds
+#       samples: 100
+#       ensemble: "NPT"
+#       temperature: 300.0
+#       # No position_restraints = unrestrained
+#   
+#   production:
+#     ensemble: "NPT"
+#     duration: 100.0
+#     samples: 2500
+#     time_step: 2.0
+#     thermostat: "LangevinMiddle"
+#     thermostat_timescale: 1.0
+#     barostat: "MC"
+#     barostat_frequency: 25
+#   
+#   segments: 10
 
 # ============================================================================
 # Output Configuration (REQUIRED)

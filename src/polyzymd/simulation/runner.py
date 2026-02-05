@@ -19,7 +19,13 @@ from openmm import XmlSerializer
 from openmm.app import DCDReporter, PDBFile, StateDataReporter, Simulation
 
 if TYPE_CHECKING:
-    from polyzymd.config.schema import SimulationConfig, SimulationPhaseConfig
+    from polyzymd.config.schema import (
+        EquilibrationStageConfig,
+        SimulationConfig,
+        SimulationPhaseConfig,
+        SimulationPhasesConfig,
+    )
+    from polyzymd.core.atom_groups import AtomGroupResolver
     from polyzymd.core.parameters import SimulationParameters
 
 LOGGER = logging.getLogger(__name__)
@@ -74,6 +80,7 @@ class SimulationRunner:
 
         self._simulation: Optional[Simulation] = None
         self._current_positions = positions
+        self._current_box_vectors = None  # Updated during NPT stages
         self._history: Dict[str, Any] = {}
 
         # Ensure working directory exists
@@ -210,10 +217,11 @@ class SimulationRunner:
             maxIterations=max_iterations,
         )
 
-        # Get final state
+        # Get final state (including box vectors for proper handoff to equilibration)
         state = simulation.context.getState(getEnergy=True, getPositions=True)
         energy = state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
         self._current_positions = state.getPositions()
+        self._current_box_vectors = state.getPeriodicBoxVectors()
 
         LOGGER.info(f"Minimization complete: E = {energy:.2f} kJ/mol")
 
@@ -222,13 +230,111 @@ class SimulationRunner:
     def run_equilibration(
         self,
         temperature: float,
+        duration_ns: Optional[float] = None,
+        num_samples: int = 10,
+        timestep_fs: float = 2.0,
+        friction: float = 1.0,
+        output_prefix: str = "equilibration",
+        config: Optional["SimulationPhasesConfig"] = None,
+    ) -> Dict[str, Any]:
+        """Run equilibration phase.
+
+        Supports two modes:
+        1. Parameter-based (legacy): Pass duration_ns, num_samples, etc.
+        2. Config-based: Pass config for automatic mode selection
+
+        When config is provided and uses staged equilibration, position
+        restraints and temperature ramping are handled automatically.
+        Component information is derived from the topology's chain IDs.
+
+        Args:
+            temperature: Temperature in Kelvin
+            duration_ns: Duration in nanoseconds (required for legacy mode)
+            num_samples: Number of trajectory frames to save
+            timestep_fs: Time step in femtoseconds
+            friction: Friction coefficient in 1/ps
+            output_prefix: Prefix for output files
+            config: SimulationPhasesConfig for config-based dispatch
+
+        Returns:
+            Dictionary with equilibration results
+
+        Raises:
+            ValueError: If neither config nor duration_ns is provided
+        """
+        # Config-based dispatch (preferred path)
+        if config is not None:
+            if config.uses_staged_equilibration:
+                # Multi-stage equilibration with position restraints
+                from polyzymd.core.atom_groups import AtomGroupResolver, SystemComponentInfo
+
+                # Log all stages upfront for reproducibility
+                LOGGER.info(
+                    f"Starting multi-stage equilibration with "
+                    f"{len(config.equilibration_stages)} stages:"
+                )
+                for i, stage in enumerate(config.equilibration_stages):
+                    restraint_info = (
+                        ", ".join(
+                            f"{r.group}@{r.force_constant:.0f}" for r in stage.position_restraints
+                        )
+                        or "none"
+                    )
+                    if stage.is_temperature_ramping:
+                        temp_info = f"{stage.temperature_start}K -> {stage.temperature_end}K"
+                    else:
+                        temp_info = f"{stage.temperature}K"
+                    LOGGER.info(
+                        f"  Stage {i}: {stage.name} - {stage.duration} ns, "
+                        f"{stage.ensemble.value}, {temp_info}, restraints: [{restraint_info}]"
+                    )
+
+                component_info = SystemComponentInfo.from_topology(self._topology)
+                resolver = AtomGroupResolver(self._topology, component_info)
+
+                return self.run_staged_equilibration(
+                    stages=config.equilibration_stages,
+                    atom_group_resolver=resolver,
+                    target_temperature=temperature,
+                )
+            else:
+                # Simple equilibration via config
+                eq_config = config.equilibration
+                return self._run_simple_equilibration(
+                    temperature=temperature,
+                    duration_ns=eq_config.duration,
+                    num_samples=eq_config.samples,
+                    timestep_fs=eq_config.time_step or timestep_fs,
+                    friction=friction,
+                    output_prefix=output_prefix,
+                )
+
+        # Legacy parameter-based mode
+        if duration_ns is None:
+            raise ValueError(
+                "duration_ns is required when config is not provided. "
+                "Either pass duration_ns or pass a SimulationPhasesConfig."
+            )
+
+        return self._run_simple_equilibration(
+            temperature=temperature,
+            duration_ns=duration_ns,
+            num_samples=num_samples,
+            timestep_fs=timestep_fs,
+            friction=friction,
+            output_prefix=output_prefix,
+        )
+
+    def _run_simple_equilibration(
+        self,
+        temperature: float,
         duration_ns: float,
         num_samples: int = 10,
         timestep_fs: float = 2.0,
         friction: float = 1.0,
         output_prefix: str = "equilibration",
     ) -> Dict[str, Any]:
-        """Run NVT equilibration.
+        """Run simple NVT equilibration (internal implementation).
 
         Args:
             temperature: Temperature in Kelvin.
@@ -300,11 +406,12 @@ class SimulationRunner:
         LOGGER.info(f"Running {total_steps} steps...")
         self._simulation.step(total_steps)
 
-        # Get final state
+        # Get final state (including box vectors for potential NPT follow-up)
         state = self._simulation.context.getState(
             getPositions=True, getVelocities=True, getEnergy=True
         )
         self._current_positions = state.getPositions()
+        self._current_box_vectors = state.getPeriodicBoxVectors()
 
         # Save checkpoint
         checkpoint_path = phase_dir / f"{output_prefix}_checkpoint.chk"
@@ -325,6 +432,289 @@ class SimulationRunner:
 
         self._history["equilibration"] = results
         LOGGER.info("Equilibration complete")
+
+        return results
+
+    def run_equilibration_stage(
+        self,
+        stage: "EquilibrationStageConfig",
+        reference_positions: Any,
+        atom_group_resolver: "AtomGroupResolver",
+        stage_index: int,
+        default_timestep: float = 2.0,
+        default_friction: float = 1.0,
+    ) -> Dict[str, Any]:
+        """Run a single equilibration stage with optional position restraints.
+
+        This method runs one stage of a multi-stage equilibration protocol.
+        It supports:
+        - Position restraints on predefined atom groups
+        - Temperature ramping (simulated annealing)
+        - NVT or NPT ensembles
+
+        Args:
+            stage: EquilibrationStageConfig with stage settings
+            reference_positions: Positions to restrain atoms to (typically post-minimization)
+            atom_group_resolver: Resolver for predefined atom group names
+            stage_index: Index of this stage (for output naming)
+            default_timestep: Default time step in fs if not specified in stage
+            default_friction: Default friction coefficient in 1/ps
+
+        Returns:
+            Dictionary with stage results
+        """
+        from polyzymd.core.position_restraints import (
+            add_position_restraints_to_system,
+            remove_position_restraints_from_system,
+        )
+        from polyzymd.config.schema import Ensemble
+
+        stage_name = f"equilibration_{stage_index}_{stage.name}"
+        LOGGER.info(f"Starting equilibration stage: {stage.name} ({stage.duration} ns)")
+
+        # Create output directory for this stage
+        phase_dir = self._working_dir / stage_name
+        phase_dir.mkdir(exist_ok=True)
+
+        # Get stage parameters (with defaults)
+        timestep_fs = stage.time_step if stage.time_step is not None else default_timestep
+        friction = default_friction
+        thermostat_timescale = stage.thermostat_timescale if stage.thermostat_timescale else 1.0
+
+        # Calculate steps and reporting interval
+        total_steps = int(stage.duration * 1e6 / timestep_fs)
+        report_interval = max(1, total_steps // stage.samples)
+
+        # Handle ensemble - add/remove barostat
+        if stage.ensemble == Ensemble.NPT:
+            self._remove_barostat()
+            pressure = 1.0  # Default pressure for NPT stages
+            barostat_freq = stage.barostat_frequency if stage.barostat_frequency else 25
+            start_temp = stage.get_start_temperature()
+            self._add_barostat(
+                pressure=pressure,
+                temperature=start_temp,
+                frequency=barostat_freq,
+            )
+        else:
+            # NVT - ensure no barostat
+            self._remove_barostat()
+
+        # Add position restraints
+        restraint_force_indices = []
+        for restraint_config in stage.position_restraints:
+            atom_indices = atom_group_resolver.resolve(restraint_config.group)
+            if atom_indices:
+                force_idx = add_position_restraints_to_system(
+                    system=self._system,
+                    atom_indices=atom_indices,
+                    positions=reference_positions,
+                    force_constant=restraint_config.force_constant,
+                )
+                if force_idx >= 0:
+                    restraint_force_indices.append(force_idx)
+                LOGGER.info(
+                    f"Added position restraints to {len(atom_indices)} atoms "
+                    f"in group '{restraint_config.group}' "
+                    f"(k={restraint_config.force_constant:.1f} kJ/mol/nm^2)"
+                )
+            else:
+                LOGGER.warning(
+                    f"No atoms found for group '{restraint_config.group}' - skipping restraint"
+                )
+
+        # Create integrator with starting temperature
+        start_temp = stage.get_start_temperature()
+        integrator = self._create_integrator(
+            temperature=start_temp,
+            friction=friction,
+            timestep=timestep_fs,
+        )
+        platform = self._get_platform()
+
+        # Create simulation
+        self._simulation = Simulation(self._topology, self._system, integrator, platform)
+
+        # Set box vectors BEFORE positions - critical for NPT stage transitions
+        # where box dimensions may have changed from previous stage
+        if self._current_box_vectors is not None:
+            self._simulation.context.setPeriodicBoxVectors(*self._current_box_vectors)
+
+        self._simulation.context.setPositions(self._current_positions)
+        self._simulation.context.setVelocitiesToTemperature(start_temp * omm_unit.kelvin)
+
+        # Log initial energy
+        _state = self._simulation.context.getState(getEnergy=True)
+        _energy = _state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
+        LOGGER.info(f"Stage {stage_index} ({stage_name}): initial PE = {_energy:.2f} kJ/mol")
+
+        # Set up reporters
+        traj_path = phase_dir / f"{stage_name}_trajectory.dcd"
+        state_path = phase_dir / f"{stage_name}_state_data.csv"
+        pdb_path = phase_dir / f"{stage_name}_topology.pdb"
+
+        self._simulation.reporters.append(DCDReporter(str(traj_path), report_interval))
+        self._simulation.reporters.append(
+            StateDataReporter(
+                str(state_path),
+                report_interval,
+                step=True,
+                time=True,
+                potentialEnergy=True,
+                kineticEnergy=True,
+                totalEnergy=True,
+                temperature=True,
+                volume=True,
+                density=True,
+                speed=True,
+            )
+        )
+
+        # Save initial topology
+        with open(pdb_path, "w") as f:
+            PDBFile.writeFile(
+                self._topology,
+                self._current_positions,
+                f,
+            )
+
+        # Run simulation with temperature ramping if needed
+        if stage.is_temperature_ramping:
+            LOGGER.info(
+                f"Temperature ramping: {stage.temperature_start} K -> {stage.temperature_end} K "
+                f"(increment={stage.temperature_increment} K every {stage.temperature_interval} fs)"
+            )
+            current_temp = stage.temperature_start
+            steps_per_update = int(stage.temperature_interval / timestep_fs)
+
+            # Calculate total temperature updates needed
+            temp_range = stage.temperature_end - stage.temperature_start
+            num_updates = int(temp_range / stage.temperature_increment)
+            steps_for_ramping = num_updates * steps_per_update
+            remaining_steps = total_steps - steps_for_ramping
+
+            # Temperature ramping phase
+            while current_temp < stage.temperature_end:
+                integrator.setTemperature(current_temp * omm_unit.kelvin)
+                self._simulation.step(steps_per_update)
+                current_temp += stage.temperature_increment
+
+            # Final temperature - run remaining steps
+            integrator.setTemperature(stage.temperature_end * omm_unit.kelvin)
+            if remaining_steps > 0:
+                LOGGER.info(
+                    f"Running {remaining_steps} steps at final temperature {stage.temperature_end} K"
+                )
+                self._simulation.step(remaining_steps)
+        else:
+            # Constant temperature - just run all steps
+            LOGGER.info(f"Running {total_steps} steps at {stage.temperature} K")
+            self._simulation.step(total_steps)
+
+        # Get final state (including box vectors for NPT stages)
+        state = self._simulation.context.getState(
+            getPositions=True, getVelocities=True, getEnergy=True
+        )
+        self._current_positions = state.getPositions()
+        self._current_box_vectors = state.getPeriodicBoxVectors()
+
+        # Log final energy for diagnostics
+        final_energy = state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
+        LOGGER.info(f"Stage {stage_index} ({stage_name}): final PE = {final_energy:.2f} kJ/mol")
+
+        # Save checkpoint
+        checkpoint_path = phase_dir / f"{stage_name}_checkpoint.chk"
+        self._simulation.saveCheckpoint(str(checkpoint_path))
+
+        # Remove position restraints from system for next stage
+        if restraint_force_indices:
+            LOGGER.info(
+                f"Removing {len(restraint_force_indices)} position restraint force(s) for next stage"
+            )
+            remove_position_restraints_from_system(self._system, restraint_force_indices)
+
+        # Build results
+        final_temp = stage.get_final_temperature()
+        results = {
+            "stage_index": stage_index,
+            "stage_name": stage.name,
+            "ensemble": stage.ensemble.value,
+            "duration_ns": stage.duration,
+            "total_steps": total_steps,
+            "temperature_start_K": stage.get_start_temperature(),
+            "temperature_end_K": final_temp,
+            "is_temperature_ramping": stage.is_temperature_ramping,
+            "position_restraints": [
+                {"group": r.group, "force_constant": r.force_constant}
+                for r in stage.position_restraints
+            ],
+            "final_energy_kJ_mol": state.getPotentialEnergy().value_in_unit(
+                omm_unit.kilojoule_per_mole
+            ),
+            "trajectory_path": str(traj_path),
+            "checkpoint_path": str(checkpoint_path),
+        }
+
+        LOGGER.info(f"Equilibration stage '{stage.name}' complete")
+        return results
+
+    def run_staged_equilibration(
+        self,
+        stages: List["EquilibrationStageConfig"],
+        atom_group_resolver: "AtomGroupResolver",
+        target_temperature: float,
+    ) -> Dict[str, Any]:
+        """Run complete multi-stage equilibration protocol.
+
+        This method executes a sequence of equilibration stages, each with
+        potentially different:
+        - Temperature (constant or ramping)
+        - Position restraints on different atom groups
+        - Thermodynamic ensemble (NVT/NPT)
+
+        Positions carry over between stages, and restraint forces are
+        added/removed as needed.
+
+        Args:
+            stages: List of EquilibrationStageConfig objects
+            atom_group_resolver: Resolver for predefined atom group names
+            target_temperature: Final target temperature (for logging)
+
+        Returns:
+            Dictionary with all stage results and summary
+        """
+        LOGGER.info(f"Starting multi-stage equilibration with {len(stages)} stages")
+
+        # Store reference positions for restraints (post-minimization)
+        reference_positions = self._current_positions
+
+        results = {
+            "type": "staged_equilibration",
+            "num_stages": len(stages),
+            "stages": [],
+            "total_duration_ns": 0.0,
+        }
+
+        for i, stage in enumerate(stages):
+            stage_result = self.run_equilibration_stage(
+                stage=stage,
+                reference_positions=reference_positions,
+                atom_group_resolver=atom_group_resolver,
+                stage_index=i,
+            )
+            results["stages"].append(stage_result)
+            results["total_duration_ns"] += stage.duration
+
+        # Get final energy
+        if results["stages"]:
+            results["final_energy_kJ_mol"] = results["stages"][-1]["final_energy_kJ_mol"]
+            results["final_temperature_K"] = results["stages"][-1]["temperature_end_K"]
+
+        self._history["equilibration"] = results
+        LOGGER.info(
+            f"Multi-stage equilibration complete: {len(stages)} stages, "
+            f"{results['total_duration_ns']:.3f} ns total"
+        )
 
         return results
 
@@ -385,12 +775,44 @@ class SimulationRunner:
         )
         platform = self._get_platform()
 
+        # Capture velocities and box vectors from equilibration before creating new Simulation
+        # (creating new Simulation destroys the old context)
+        # Box vectors are critical for NPT stages where box dimensions change
+        equilibration_velocities = None
+        equilibration_box_vectors = None
+        if self._simulation is not None and segment_index == 0:
+            state = self._simulation.context.getState(getVelocities=True)
+            equilibration_velocities = state.getVelocities()
+            equilibration_box_vectors = state.getPeriodicBoxVectors()
+
         self._simulation = Simulation(self._topology, self._system, integrator, platform)
+
+        # Set box vectors BEFORE positions - critical for correct periodic boundary handling
+        # Use captured box vectors from equilibration, or fall back to stored ones from staged equilibration
+        if equilibration_box_vectors is not None:
+            self._simulation.context.setPeriodicBoxVectors(*equilibration_box_vectors)
+        elif self._current_box_vectors is not None:
+            self._simulation.context.setPeriodicBoxVectors(*self._current_box_vectors)
+
         self._simulation.context.setPositions(self._current_positions)
 
-        # Set velocities if first segment, otherwise they'll be loaded from checkpoint
-        if segment_index == 0 and "equilibration" not in self._history:
-            self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)
+        # Log initial energy
+        _state = self._simulation.context.getState(getEnergy=True)
+        _energy = _state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
+        LOGGER.info(f"Production segment {segment_index}: initial PE = {_energy:.2f} kJ/mol")
+
+        # Set velocities for production
+        # - If we have velocities from equilibration, use them (physical continuity)
+        # - Otherwise generate new velocities at target temperature
+        # Note: For daisy-chain continuation (segment > 0), ContinuationManager uses
+        # loadState() which restores both positions and velocities from the XML state file
+        if segment_index == 0:
+            if equilibration_velocities is not None:
+                self._simulation.context.setVelocities(equilibration_velocities)
+                LOGGER.info("Using velocities preserved from equilibration")
+            else:
+                self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)
+                LOGGER.info("Initialized velocities from Maxwell-Boltzmann distribution")
 
         # Add reporters
         traj_path = phase_dir / f"{phase_name}_trajectory.dcd"
@@ -541,48 +963,6 @@ class SimulationRunner:
 
         return results
 
-    def run_from_config(
-        self,
-        config: "SimulationConfig",
-        segment_index: int = 0,
-    ) -> Dict[str, Any]:
-        """Run simulation phases from a configuration.
-
-        Args:
-            config: SimulationConfig with phase settings.
-            segment_index: Segment index for daisy-chaining.
-
-        Returns:
-            Combined results dictionary.
-        """
-        results = {}
-
-        # Only run equilibration on first segment
-        if segment_index == 0:
-            eq_config = config.simulation_phases.equilibration
-            eq_result = self.run_equilibration(
-                temperature=config.thermodynamics.temperature,
-                duration_ns=eq_config.duration,
-                num_samples=eq_config.samples,
-                timestep_fs=eq_config.time_step,
-            )
-            results["equilibration"] = eq_result
-
-        # Run production
-        prod_config = config.simulation_phases.production
-        prod_result = self.run_production(
-            temperature=config.thermodynamics.temperature,
-            duration_ns=prod_config.duration,
-            num_samples=prod_config.samples,
-            timestep_fs=prod_config.time_step,
-            pressure=config.thermodynamics.pressure,
-            barostat_frequency=prod_config.barostat_frequency,
-            segment_index=segment_index,
-        )
-        results["production"] = prod_result
-
-        return results
-
     def save_history(self, path: Optional[Union[str, Path]] = None) -> None:
         """Save simulation history to JSON.
 
@@ -618,8 +998,9 @@ class SimulationRunner:
 
         self._simulation.loadCheckpoint(str(checkpoint_path))
 
-        # Update current positions
+        # Update current positions and box vectors
         state = self._simulation.context.getState(getPositions=True)
         self._current_positions = state.getPositions()
+        self._current_box_vectors = state.getPeriodicBoxVectors()
 
         LOGGER.info(f"Loaded checkpoint from {checkpoint_path}")
