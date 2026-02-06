@@ -18,6 +18,7 @@ keywords = [
     "openmm",
     "openff",
     "simulation",
+    "gromacs",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -31,40 +32,90 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 requires-python = ">=3.10"
+
+# =============================================================================
+# Core Dependencies
+# =============================================================================
+# NOTE: Many of these packages are best installed via conda/mamba due to
+# complex compiled dependencies. The recommended installation is:
+#
+#   mamba create -n polyzymd-env python=3.11
+#   mamba activate polyzymd-env
+#   mamba install -c conda-forge openmm openff-toolkit openff-interchange \
+#       openff-nagl ambertools packmol rdkit mdanalysis
+#   pip install -e .
+#
+# The dependencies below are listed for pip but may fail without conda prereqs.
+# =============================================================================
 dependencies = [
-    # Core simulation
-    "openmm>=8.0",
-    "openff-toolkit>=0.14.0",
-    "openff-interchange>=0.3.0",
-    "openff-units>=0.2.0",
-    
-    # Analysis
-    "mdanalysis>=2.4.0",
-    "biopandas>=0.4.0",
-    "scikit-learn>=1.0.0",
-    
-    # Configuration and CLI
+    # Configuration and CLI (these install cleanly via pip)
     "pydantic>=2.0.0",
     "pyyaml>=6.0",
     "click>=8.0.0",
+    "click-option-group>=0.5.0",
     
-    # Utilities
-    "numpy>=1.21.0",
+    # Utilities (these install cleanly via pip)
+    "numpy>=1.21.0,<2.0.0",  # Pin to 1.x for OpenMM compatibility
     "tqdm>=4.60.0",
+    
+    # Analysis
+    "biopandas>=0.4.0",
+    "scipy>=1.9.0",
 ]
 
 [project.optional-dependencies]
+# Core simulation packages - install via conda, listed here for documentation
+# These are NOT pip-installable in most cases
+simulation = [
+    "openmm>=8.0",
+    "openff-toolkit>=0.16.0",
+    "openff-interchange>=0.4.0",
+    "openff-units>=0.2.0",
+    "openff-nagl>=0.3.0",
+    "openff-forcefields>=2024.0.0",
+    "ambertools>=23.0",
+    "rdkit>=2024.0.0",
+    "packmol>=20.0",
+]
+
+# Analysis packages
+analysis = [
+    "mdanalysis>=2.4.0",
+    "mdtraj>=1.9.0",
+    "scikit-learn>=1.0.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.5.0",
+    "seaborn>=0.12.0",
+]
+
+# Polymer building (polymerist integration)
+polymers = [
+    "polymerist>=1.0.0",
+    "networkx>=3.0",
+    "anytree>=2.8.0",
+]
+
+# Development tools
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
 ]
+
+# Documentation
 docs = [
     "sphinx>=6.0.0",
     "sphinx-rtd-theme>=1.0.0",
     "myst-parser>=1.0.0",
+    "sphinx-click>=4.0.0",
+]
+
+# Full installation (for development) - still needs conda prereqs
+full = [
+    "polyzymd[analysis,polymers,dev,docs]",
 ]
 
 [project.scripts]
