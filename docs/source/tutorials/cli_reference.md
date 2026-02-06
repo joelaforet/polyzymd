@@ -151,6 +151,7 @@ Build the simulation system (parameterize, solvate) without running.
 ```bash
 polyzymd build --config <path> [options]
 polyzymd build -c <path> -r <replicate>
+polyzymd build -c <path> --gromacs    # Export for GROMACS
 ```
 
 ### Options
@@ -163,11 +164,12 @@ polyzymd build -c <path> -r <replicate>
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--output-dir` | `-o` | No | from config | Alias for --scratch-dir |
 | `--dry-run` | - | No | false | Validate only, don't build |
+| `--gromacs` | - | No | false | Export to GROMACS format instead of OpenMM |
 
 ### Example
 
 ```bash
-# Build replicate 1
+# Build replicate 1 for OpenMM
 polyzymd build -c config.yaml -r 1
 
 # Build with custom output directory
@@ -175,9 +177,12 @@ polyzymd build -c config.yaml -r 1 --scratch-dir ./test_output
 
 # Dry run to check configuration
 polyzymd build -c config.yaml --dry-run
+
+# Export to GROMACS format
+polyzymd build -c config.yaml -r 1 --gromacs
 ```
 
-### Output Files
+### Output Files (OpenMM)
 
 The build command creates:
 - `solvated_system.pdb` - Complete system with water and ions
@@ -185,15 +190,34 @@ The build command creates:
 - `topology.json` - Topology information
 - `build.log` - Build process log
 
+### Output Files (GROMACS)
+
+With `--gromacs`, the build command creates in `{projects_dir}/replicate_{N}/gromacs/`:
+- `{system}.gro` - GROMACS coordinate file
+- `{system}.top` - GROMACS topology file
+- `em.mdp` - Energy minimization parameters
+- `eq_XX_name.mdp` - Equilibration stage parameters
+- `prod.mdp` - Production parameters
+- `posre_*.itp` - Position restraint files (if configured)
+- `run_{system}_gromacs.sh` - Shell script to run the workflow
+
 ---
 
 ## polyzymd run
 
-Build and run a complete simulation (equilibration + first production segment).
+Build and run a complete simulation.
+
+By default, runs using OpenMM. Use `--gromacs` to run using GROMACS instead.
 
 ```bash
+# OpenMM (default)
 polyzymd run --config <path> [options]
 polyzymd run -c <path> -r <replicate>
+
+# GROMACS
+polyzymd run -c <path> --gromacs
+polyzymd run -c <path> --gromacs --gmx-path /usr/local/gromacs/bin/gmx
+polyzymd run -c <path> --gromacs --dry-run
 ```
 
 ### Options
@@ -204,11 +228,14 @@ polyzymd run -c <path> -r <replicate>
 | `--replicate` | `-r` | No | 1 | Replicate number |
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
-| `--segment-time` | - | No | auto | Override production time per segment (ns) |
-| `--segment-frames` | - | No | auto | Override frames per segment |
-| `--skip-build` | - | No | false | Skip building (use existing system) |
+| `--segment-time` | - | No | auto | Override production time per segment (ns) [OpenMM only] |
+| `--segment-frames` | - | No | auto | Override frames per segment [OpenMM only] |
+| `--skip-build` | - | No | false | Skip building (use existing system) [OpenMM only] |
+| `--gromacs` | - | No | false | Run using GROMACS instead of OpenMM |
+| `--gmx-path` | - | No | "gmx" | Path to GROMACS executable [GROMACS only] |
+| `--dry-run` | - | No | false | Export files but don't run simulation [GROMACS only] |
 
-### Example
+### Example (OpenMM)
 
 ```bash
 # Run locally (useful for testing)
@@ -216,16 +243,76 @@ polyzymd run -c config.yaml -r 1
 
 # Run with shorter segment for testing
 polyzymd run -c config.yaml -r 1 --segment-time 0.1 --segment-frames 10
+
+# Skip building (use pre-built system)
+polyzymd run -c config.yaml -r 1 --skip-build
 ```
 
-### Workflow
+### Example (GROMACS)
+
+```bash
+# Run full GROMACS workflow locally
+polyzymd run -c config.yaml -r 1 --gromacs
+
+# Use custom GROMACS installation
+polyzymd run -c config.yaml --gromacs --gmx-path /usr/local/gromacs/bin/gmx
+
+# Export files only (for manual execution or HPC)
+polyzymd run -c config.yaml --gromacs --dry-run
+```
+
+### OpenMM Workflow
 
 1. Load and validate configuration
 2. Build system (enzyme + substrate + polymers + solvent)
 3. Apply restraints (if configured)
 4. Run energy minimization
-5. Run equilibration (NVT)
+5. Run equilibration (NVT/NPT stages)
 6. Run first production segment (NPT)
+
+### GROMACS Workflow
+
+1. Load and validate configuration
+2. Build system (same as OpenMM)
+3. Export to GROMACS format (.gro, .top, .mdp files)
+4. Run energy minimization (grompp + mdrun)
+5. Run equilibration stages (grompp + mdrun for each stage)
+6. Run production MD (grompp + mdrun)
+7. Post-process trajectory (trjconv for PBC handling)
+
+All GROMACS output is streamed in real-time for familiar user experience.
+On any failure, execution stops immediately and all intermediate files are
+preserved for debugging.
+
+### GROMACS Notes
+
+- Requires GROMACS to be installed and accessible via PATH
+- Use `--gmx-path` to specify a custom GROMACS executable location
+- MDP parameters are generated from your config.yaml to match OpenMM settings
+- OpenFF force field defaults are used (rcoulomb=0.9, rvdw=0.9, PME) for 1:1 parity with OpenMM
+- Position restraints are automatically generated for equilibration stages
+- Post-processing creates `prod_nojump.xtc` and `prod_centered.xtc` trajectories
+
+### GROMACS Output Files
+
+Files are created in `{projects_dir}/replicate_{N}/gromacs/`:
+
+```
+gromacs/
+├── {system}.gro              # Initial coordinates
+├── {system}.top              # Topology
+├── em.mdp                    # Energy minimization parameters
+├── eq_01_nvt.mdp             # Equilibration stage 1 (NVT)
+├── eq_02_npt.mdp             # Equilibration stage 2 (NPT)
+├── prod.mdp                  # Production parameters
+├── posre_*.itp               # Position restraint files
+├── run_{system}_gromacs.sh   # Generated run script
+├── em.tpr, em.gro, em.edr    # Energy minimization outputs
+├── eq_01.*, eq_02.*          # Equilibration outputs
+├── prod.tpr, prod.xtc, ...   # Production outputs
+├── prod_nojump.xtc           # Trajectory without PBC jumps
+└── prod_centered.xtc         # Centered trajectory for visualization
+```
 
 ---
 

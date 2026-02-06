@@ -951,28 +951,43 @@ class SystemBuilder:
         self,
         output_dir: Union[str, Path],
         prefix: Optional[str] = None,
-    ) -> Tuple[Path, Path, Path]:
-        """Export the system to GROMACS format.
+        gmx_command: str = "gmx",
+        generate_mdps: bool = True,
+    ) -> Dict[str, Any]:
+        """Export the system to GROMACS format with full simulation setup.
 
-        Generates .gro (coordinates), .top (topology), and .mdp (run parameters)
-        files for running simulations in GROMACS. The topology is split into
-        separate .itp files for each molecule type (monolithic=False), which is
-        cleaner for multi-component systems with proteins, polymers, and ligands.
+        Generates a complete GROMACS simulation setup including:
+        - .gro (coordinates) and .top (topology) files
+        - MDP files for energy minimization, equilibration, and production
+        - Position restraint files for equilibration stages
+        - Run script for executing the full workflow
 
-        Note:
-            The generated .mdp file is a stub configured for single-point energy
-            calculation. It must be modified to run actual MD simulations. Future
-            versions of PolyzyMD may support automatic MDP generation from the
-            config.yaml parameters.
+        The topology is split into separate .itp files for each molecule type
+        (monolithic=False), which is cleaner for multi-component systems.
+
+        MDP files are generated from config.yaml parameters to match OpenMM
+        simulation settings (temperature, pressure, duration, etc.). OpenFF
+        defaults are used for force field parameters (rcoulomb=0.9, rvdw=0.9,
+        PME, etc.) to ensure 1:1 parity with OpenMM.
 
         Args:
             output_dir: Directory to write GROMACS files. Will be created if it
                 doesn't exist.
             prefix: Filename prefix for output files. If None, generates a
                 descriptive name from the config (e.g., "LipA_EGPMA-SBMA").
+            gmx_command: GROMACS command/path for the run script (default "gmx").
+            generate_mdps: If True (default), generate MDP files from config.
+                If False, only export coordinates and topology.
 
         Returns:
-            Tuple of (gro_path, top_path, mdp_path) pointing to the generated files.
+            Dictionary with paths to generated files:
+            - "gro": Path to coordinate file
+            - "top": Path to topology file
+            - "em_mdp": Path to energy minimization MDP (if generate_mdps=True)
+            - "eq_mdps": List of equilibration MDP paths (if generate_mdps=True)
+            - "prod_mdp": Path to production MDP (if generate_mdps=True)
+            - "posres": Dict of position restraint files (if applicable)
+            - "run_script": Path to run script (if generate_mdps=True)
 
         Raises:
             RuntimeError: If Interchange has not been created.
@@ -980,10 +995,11 @@ class SystemBuilder:
         Example:
             >>> builder = SystemBuilder.from_config(config)
             >>> builder.build_from_config(config, working_dir)
-            >>> gro, top, mdp = builder.export_to_gromacs(
+            >>> result = builder.export_to_gromacs(
             ...     output_dir="gromacs/",
             ...     prefix="my_system"
             ... )
+            >>> print(f"Run: cd {result['gro'].parent} && ./{result['run_script'].name}")
         """
         if self._interchange is None:
             raise RuntimeError(
@@ -999,12 +1015,61 @@ class SystemBuilder:
 
         LOGGER.info(f"Exporting to GROMACS format: {output_dir / prefix}.*")
 
+        # Check if we have config for MDP generation
+        config = getattr(self, "_config", None)
+
+        if generate_mdps and config is not None:
+            # Use GromacsExporter for full export with MDP generation
+            from polyzymd.exporters.gromacs import GromacsExporter
+
+            # Get component info for position restraints
+            try:
+                component_info = self.get_component_info()
+            except RuntimeError:
+                component_info = None
+                LOGGER.warning(
+                    "Could not get component info for position restraints. "
+                    "Position restraint files will not be generated."
+                )
+
+            exporter = GromacsExporter(
+                interchange=self._interchange,
+                config=config,
+                component_info=component_info,
+            )
+
+            result = exporter.export(
+                output_dir=output_dir,
+                prefix=prefix,
+                gmx_command=gmx_command,
+            )
+
+            return result
+        else:
+            # Legacy mode: just export coordinates and topology
+            return self._export_gromacs_minimal(output_dir, prefix)
+
+    def _export_gromacs_minimal(
+        self,
+        output_dir: Path,
+        prefix: str,
+    ) -> Dict[str, Any]:
+        """Export minimal GROMACS files (coordinates and topology only).
+
+        This is the legacy export mode used when no config is available
+        or when generate_mdps=False.
+
+        Args:
+            output_dir: Output directory.
+            prefix: Filename prefix.
+
+        Returns:
+            Dictionary with gro and top paths.
+        """
         # Fix 0-indexed residues (GROMACS requires 1-indexed)
         self._fix_zero_indexed_residues()
 
         # Export using OpenFF Interchange
-        # - monolithic=False: Split topology into separate .itp files
-        # - _merge_atom_types=True: Cleaner atom type handling
         output_prefix = str(output_dir / prefix)
         self._interchange.to_gromacs(
             prefix=output_prefix,
@@ -1020,8 +1085,16 @@ class SystemBuilder:
         LOGGER.info(f"  Coordinates: {gro_path}")
         LOGGER.info(f"  Topology:    {top_path}")
         LOGGER.info(f"  MDP stub:    {mdp_path}")
+        LOGGER.info("")
+        LOGGER.info("Note: The .mdp file is a stub for single-point energy calculation.")
+        LOGGER.info("For MD simulations, use generate_mdps=True with a config file,")
+        LOGGER.info("or create custom MDP files.")
 
-        return gro_path, top_path, mdp_path
+        return {
+            "gro": gro_path,
+            "top": top_path,
+            "mdp_stub": mdp_path,
+        }
 
     def _generate_gromacs_prefix(self) -> str:
         """Generate a descriptive filename prefix from the config.
