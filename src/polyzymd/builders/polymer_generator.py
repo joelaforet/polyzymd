@@ -126,11 +126,11 @@ class PolymerGenerator:
             monomer_name: Base monomer name (e.g., "SBMA")
 
         Returns:
-            Fragment name for 1-site (e.g., "SBMA-1a")
+            Fragment name for 1-site (e.g., "SBMA_1-site")
         """
         # Look for matching 1-site fragment in monomer_group
         for frag_name in self.monomer_group.monomers.keys():
-            if frag_name.startswith(monomer_name) and "-1" in frag_name:
+            if frag_name.startswith(monomer_name) and "_1-site" in frag_name:
                 return frag_name
 
         raise ValueError(f"No 1-site terminal fragment found for monomer: {monomer_name}")
@@ -142,11 +142,11 @@ class PolymerGenerator:
             monomer_name: Base monomer name (e.g., "SBMA")
 
         Returns:
-            Fragment name for 2-site (e.g., "SBMA-2a")
+            Fragment name for 2-site (e.g., "SBMA_2-site")
         """
         # Look for matching 2-site fragment in monomer_group
         for frag_name in self.monomer_group.monomers.keys():
-            if frag_name.startswith(monomer_name) and "-2" in frag_name:
+            if frag_name.startswith(monomer_name) and "_2-site" in frag_name:
                 return frag_name
 
         raise ValueError(f"No 2-site middle fragment found for monomer: {monomer_name}")
@@ -159,6 +159,15 @@ class PolymerGenerator:
     ) -> Tuple[any, Path]:
         """Build a polymer 3D structure from sequence.
 
+        The sequence parameter should be a string of block identifiers (e.g., "ABCAB")
+        where each character maps to a monomer via the monomer_names dict.
+
+        Polymerist's build_linear_polymer expects:
+        - Terminal fragments set via monogrp.term_orient (head/tail)
+        - A middle sequence of block identifiers (omitting head/tail)
+        - The block identifiers are mapped to 2-site fragments by Polymerist
+          via zip ordering with MonomerGroup iteration
+
         Args:
             sequence: Polymer sequence string (e.g., "ABCAB")
             monomer_names: Mapping of sequence labels to monomer names
@@ -170,32 +179,32 @@ class PolymerGenerator:
         Raises:
             PolymerGenerationError: If building fails after max_retries
         """
-        # Parse sequence
+        # Parse sequence - head and tail are terminals, middle is for repeating
         head_label = sequence[0]
         tail_label = sequence[-1]
-        middle_labels = sequence[1:-1] if len(sequence) > 2 else ""
+        middle_sequence = sequence[1:-1] if len(sequence) > 2 else ""
 
         head_monomer = monomer_names[head_label]
         tail_monomer = monomer_names[tail_label]
 
-        # Set terminal orientations
+        # Set terminal orientations - these determine the 1-site end groups
         monogrp_local = MonomerGroup(monomers=self.monomer_group.monomers)
         monogrp_local.term_orient = {
             "head": self._get_terminal_fragment_name(head_monomer),
             "tail": self._get_terminal_fragment_name(tail_monomer),
         }
 
-        # Build middle sequence string
-        middle_sequence = (
-            "".join(self._get_middle_fragment_name(monomer_names[label]) for label in middle_labels)
-            if middle_labels
-            else ""
+        logger.debug(
+            f"Terminal orientations: head={monogrp_local.term_orient['head']}, tail={monogrp_local.term_orient['tail']}"
         )
+        logger.debug(f"Middle sequence (block identifiers): {middle_sequence}")
 
         # Attempt building with retries for ring-piercing
         for attempt in range(self.max_retries):
             logger.debug(f"Building polymer attempt {attempt + 1}/{self.max_retries}")
 
+            # Pass the raw middle sequence - Polymerist will map block identifiers
+            # to 2-site fragments based on zip ordering with MonomerGroup iteration
             chain = build_linear_polymer(
                 monomers=monogrp_local,
                 n_monomers=len(sequence),
@@ -255,9 +264,9 @@ class PolymerGenerator:
             # Map both 1-site and 2-site fragments
             for frag_name in self.monomer_group.monomers.keys():
                 if frag_name.startswith(monomer_name):
-                    if "-1" in frag_name:
+                    if "_1-site" in frag_name:
                         resname_map[frag_name] = f"{base_resname[:2]}1"
-                    elif "-2" in frag_name:
+                    elif "_2-site" in frag_name:
                         resname_map[frag_name] = f"{base_resname[:2]}2"
 
         return resname_map

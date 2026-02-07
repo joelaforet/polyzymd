@@ -257,9 +257,21 @@ class FragmentGenerator:
             if parent_name is None or parent_name == "Cl2":
                 continue
 
-            # Generate unique suffix for this (parent, functionality) pair
-            suffix = ascii_lowercase[fragment_name_modifiers[parent_name][functionality]]
-            fragment_name = f"{parent_name}-{functionality}{suffix}"
+            # Generate fragment name following Polymerist convention
+            # Use underscore separator and descriptive suffix like the notebook
+            if functionality == 1:
+                fragment_name = f"{parent_name}_1-site"
+            elif functionality == 2:
+                fragment_name = f"{parent_name}_2-site"
+            else:
+                # For higher functionality fragments, use numbered suffix
+                suffix = ascii_lowercase[fragment_name_modifiers[parent_name][functionality]]
+                fragment_name = f"{parent_name}_{functionality}-site-{suffix}"
+
+            # Skip if we already have this fragment (keep first occurrence)
+            if fragment_name in named_fragments:
+                continue
+
             named_fragments[fragment_name] = canon_smiles
             fragment_name_modifiers[parent_name][functionality] += 1
             logger.debug(f"Named fragment: {fragment_name}")
@@ -346,7 +358,7 @@ class FragmentGenerator:
 
         # Add 2-site fragments as-is
         for name, smiles in named_fragments.items():
-            if "-2" in name:  # 2-site fragment
+            if "_2-site" in name:  # 2-site fragment
                 final_fragments[name] = smiles
 
         # Add terminated 1-site fragments
@@ -358,7 +370,7 @@ class FragmentGenerator:
             query_mol = Chem.MolFromSmarts(canon_smiles)
             parent_name = self._find_parent_monomer(monomers, query_mol, threshold=match_threshold)
             if parent_name and parent_name != "Cl2":
-                fragment_name = f"{parent_name}-1a"  # Terminated 1-site
+                fragment_name = f"{parent_name}_1-site"  # Terminated 1-site
                 final_fragments[fragment_name] = canon_smiles
 
         return final_fragments
