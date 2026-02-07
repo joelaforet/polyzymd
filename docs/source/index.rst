@@ -69,6 +69,8 @@ Getting Started
    tutorials/hpc_slurm
    tutorials/benchmarks
    tutorials/polymers
+   tutorials/dynamic_polymers
+   tutorials/gromacs_export
    tutorials/residue_assignment
    tutorials/architecture
    tutorials/troubleshooting

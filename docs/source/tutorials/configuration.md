@@ -77,6 +77,14 @@ substrate: null
 
 ## Polymer Configuration
 
+PolyzyMD supports two modes for polymer generation: **cached** (load from pre-built SDF files) and **dynamic** (generate on-the-fly from SMILES).
+
+```{tip}
+For a complete guide on dynamic polymer generation, see {doc}`dynamic_polymers`.
+```
+
+### Basic Configuration (Cached Mode)
+
 ```yaml
 polymers:
   enabled: true                          # Enable/disable polymers
@@ -97,15 +105,56 @@ polymers:
   cache_directory: ".polymer_cache"      # Cache for generated polymers
 ```
 
+### Dynamic Generation Configuration
+
+To generate polymers on-the-fly from monomer SMILES (without pre-built SDF files):
+
+```yaml
+polymers:
+  enabled: true
+  generation_mode: "dynamic"             # Enable dynamic generation
+  type_prefix: "SBMA-EGPMA"
+  
+  # ATRP reaction templates (use bundled defaults or custom paths)
+  reactions:
+    initiation: "default"                # or "/path/to/custom.rxn"
+    polymerization: "default"
+    termination: "default"
+  
+  monomers:
+    - label: "A"
+      probability: 0.7
+      name: "SBMA"
+      smiles: "[H]C([H])=C(C(=O)OC...)..."  # Required for dynamic mode
+      residue_name: "SBM"                   # Optional 3-letter residue name
+    - label: "B"
+      probability: 0.3
+      name: "EGPMA"
+      smiles: "[H]C([H])=C(C(=O)OC...)..."
+      residue_name: "EGM"
+  
+  length: 5
+  count: 2
+  charger: "nagl"                        # Charge method: nagl, espaloma, am1bcc
+  max_retries: 10                        # Retries for ring-piercing detection
+  cache_directory: ".polymer_cache"
+```
+
+### All Polymer Options
+
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `enabled` | bool | No | true | Enable polymer addition |
+| `generation_mode` | string | No | "cached" | `cached` or `dynamic` |
 | `type_prefix` | string | Yes | - | Identifier for polymer type |
 | `monomers` | list | Yes | - | Monomer specifications |
 | `length` | int | Yes | - | Chain length (number of monomers) |
 | `count` | int | Yes | - | Number of chains to add |
 | `sdf_directory` | path | No | null | Directory with pre-built polymer SDFs |
 | `cache_directory` | path | No | ".polymer_cache" | Cache directory |
+| `reactions` | object | No | all "default" | ATRP reaction templates (dynamic mode) |
+| `charger` | string | No | "nagl" | Charge method for dynamic generation |
+| `max_retries` | int | No | 10 | Max attempts for ring-piercing avoidance |
 
 ### Monomer Specification
 
@@ -114,6 +163,16 @@ polymers:
 | `label` | string | Yes | Single character (A, B, C...) |
 | `probability` | float | Yes | Selection probability (must sum to 1.0) |
 | `name` | string | No | Full monomer name |
+| `smiles` | string | Dynamic only | Raw monomer SMILES (with C=C double bond) |
+| `residue_name` | string | No | 3-letter residue code for topology |
+
+### Charge Methods for Dynamic Generation
+
+| Method | Description | Speed | Accuracy |
+|--------|-------------|-------|----------|
+| `nagl` | Graph neural network charges | Fast | Good |
+| `espaloma` | Machine learning charges | Medium | Good |
+| `am1bcc` | Semi-empirical QM charges | Slow | Best |
 
 ### No Polymers
 
@@ -618,3 +677,13 @@ See the example configurations in `src/polyzymd/configs/examples/`:
 - `enzyme_only.yaml` - Enzyme + substrate, no polymers
 - `enzyme_polymer.yaml` - Full enzyme + polymer simulation
 - `enzyme_cosolvent.yaml` - Enzyme with DMSO co-solvent
+
+---
+
+## See Also
+
+- {doc}`dynamic_polymers` - Dynamic polymer generation from SMILES
+- {doc}`gromacs_export` - Running simulations with GROMACS
+- {doc}`polymers` - Polymer setup guide
+- {doc}`restraints` - Atom selection and restraints
+- {doc}`cli_reference` - CLI documentation

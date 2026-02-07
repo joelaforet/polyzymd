@@ -2,6 +2,10 @@
 
 This guide covers configuring polymer chains in PolyzyMD simulations.
 
+```{tip}
+**Looking for dynamic polymer generation?** If you want to generate polymers on-the-fly from SMILES strings (without pre-built SDF files), see the {doc}`dynamic_polymers` tutorial.
+```
+
 ## Overview
 
 PolyzyMD supports adding random co-polymer chains to your simulation box. Polymers are:
@@ -322,3 +326,11 @@ The polymer structure may have issues:
 ```{tip}
 Start with small polymer systems (2 × 5-mer) to test your setup before scaling up.
 ```
+
+---
+
+## See Also
+
+- {doc}`dynamic_polymers` - Generate polymers from SMILES without pre-built SDF files
+- {doc}`gromacs_export` - Running simulations with GROMACS
+- {doc}`configuration` - Complete configuration reference
