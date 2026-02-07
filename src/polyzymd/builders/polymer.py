@@ -4,12 +4,17 @@ Builder for polymer components.
 This module handles random co-polymer sequence generation, loading pre-built
 polymer structures from SDF files, and optionally generating new polymers
 using Polymerist when cached structures are not available.
+
+Supports two generation modes:
+- Cached: Load pre-built SDF files from disk
+- Dynamic: Generate polymers on-the-fly using Polymerist from raw monomer SMILES
+
+Made by PolyzyMD, by Joseph R. Laforet Jr.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import random
 from collections import Counter
 from pathlib import Path
@@ -18,7 +23,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 from openff.toolkit import Molecule
 
 if TYPE_CHECKING:
-    from polyzymd.config.schema import MonomerSpec, PolymerConfig
+    from polyzymd.config.schema import MonomerSpec, PolymerConfig, ReactionConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -70,11 +75,18 @@ def generate_random_sequence(
 class PolymerBuilder:
     """Builder for loading and generating polymer structures.
 
-    This class implements a cache-first, generate-fallback approach:
-    1. First checks for pre-built SDF files in the cache/SDF directory
-    2. If not found, can optionally generate using Polymerist
+    This class supports two generation modes:
 
-    Example:
+    1. Cached mode (legacy): Load pre-built SDF files from disk
+       - Requires sdf_directory with pre-built polymer files
+       - Filenames: {type_prefix}_{sequence}_{length}-mer_charged.sdf
+
+    2. Dynamic mode: Generate polymers on-the-fly using Polymerist
+       - Requires monomer SMILES and ATRP reaction templates
+       - Automatically generates fragments, builds chains, assigns charges
+       - Caches results for subsequent runs
+
+    Example (cached mode):
         >>> builder = PolymerBuilder(
         ...     characters=["A", "B"],
         ...     probabilities=[0.7, 0.3],
@@ -82,8 +94,20 @@ class PolymerBuilder:
         ...     sdf_directory="polymers/",
         ...     type_prefix="SBMA-EGPMA"
         ... )
-        >>> molecules, sequences = builder.build(count=10)
-        >>> print(f"Generated {len(molecules)} unique polymer types")
+        >>> molecules, counts = builder.build(count=10)
+
+    Example (dynamic mode):
+        >>> builder = PolymerBuilder(
+        ...     characters=["A", "B"],
+        ...     probabilities=[0.7, 0.3],
+        ...     length=5,
+        ...     type_prefix="SBMA-EGPMA",
+        ...     generation_mode="dynamic",
+        ...     monomer_smiles={"SBMA": "...", "EGPMA": "..."},
+        ...     monomer_names={"A": "SBMA", "B": "EGPMA"},
+        ...     reactions=reaction_config,
+        ... )
+        >>> molecules, counts = builder.build(count=10)
     """
 
     def __init__(
@@ -95,6 +119,14 @@ class PolymerBuilder:
         sdf_directory: Optional[Union[str, Path]] = None,
         cache_directory: Optional[Union[str, Path]] = None,
         allow_generation: bool = False,
+        # New parameters for dynamic generation
+        generation_mode: str = "cached",
+        monomer_smiles: Optional[Dict[str, str]] = None,
+        monomer_names: Optional[Dict[str, str]] = None,
+        residue_names: Optional[Dict[str, str]] = None,
+        reactions: Optional["ReactionConfig"] = None,
+        charger_type: str = "nagl",
+        max_retries: int = 10,
     ) -> None:
         """Initialize the PolymerBuilder.
 
@@ -103,12 +135,20 @@ class PolymerBuilder:
             probabilities: Selection probability for each monomer.
             length: Number of monomers per polymer chain.
             type_prefix: Prefix for filenames (e.g., "SBMA-EGPMA").
-            sdf_directory: Directory containing pre-built polymer SDFs.
+            sdf_directory: Directory containing pre-built polymer SDFs (cached mode).
             cache_directory: Directory for caching generated polymers.
-            allow_generation: If True, generate missing polymers with Polymerist.
+            allow_generation: If True, generate missing polymers (for cached mode fallback).
+            generation_mode: "cached" for pre-built SDFs, "dynamic" for on-the-fly generation.
+            monomer_smiles: Dictionary of monomer name -> raw SMILES (dynamic mode).
+            monomer_names: Dictionary of label -> monomer name (dynamic mode).
+            residue_names: Dictionary of monomer name -> 3-char PDB residue name.
+            reactions: ReactionConfig with paths to ATRP .rxn files (dynamic mode).
+            charger_type: Charge method ("nagl", "espaloma", "am1bcc") for dynamic mode.
+            max_retries: Maximum retries for polymer generation (ring-piercing failures).
 
         Raises:
             ValueError: If probabilities don't sum to 1.0 or lengths mismatch.
+            ValueError: If dynamic mode but missing required parameters.
         """
         if len(characters) != len(probabilities):
             raise ValueError("Characters and probabilities must have same length")
@@ -123,6 +163,29 @@ class PolymerBuilder:
         self._sdf_directory = Path(sdf_directory) if sdf_directory else None
         self._cache_directory = Path(cache_directory) if cache_directory else Path(".polymer_cache")
         self._allow_generation = allow_generation
+
+        # Dynamic generation parameters
+        self._generation_mode = generation_mode.lower()
+        self._monomer_smiles = monomer_smiles or {}
+        self._monomer_names = monomer_names or {}
+        self._residue_names = residue_names or {}
+        self._reactions = reactions
+        self._charger_type = charger_type.lower()
+        self._max_retries = max_retries
+
+        # Validate dynamic mode requirements
+        if self._generation_mode == "dynamic":
+            if not self._monomer_smiles:
+                raise ValueError("Dynamic generation mode requires monomer_smiles")
+            if not self._monomer_names:
+                raise ValueError("Dynamic generation mode requires monomer_names")
+            if not self._reactions:
+                raise ValueError("Dynamic generation mode requires reactions (ReactionConfig)")
+
+        # Lazy-initialized generators for dynamic mode
+        self._fragment_generator = None
+        self._polymer_generator = None
+        self._monomer_group = None
 
         # State
         self._loaded_molecules: Dict[str, Molecule] = {}
@@ -211,6 +274,9 @@ class PolymerBuilder:
     ) -> Tuple[List[Molecule], List[int]]:
         """Build polymers from a configuration object.
 
+        This method extracts all configuration values and updates the builder
+        state accordingly, then calls build() to generate the polymers.
+
         Args:
             config: PolymerConfig with polymer settings.
             seed: Random seed for reproducibility.
@@ -226,7 +292,7 @@ class PolymerBuilder:
         characters = [m.label for m in config.monomers]
         probabilities = [m.probability for m in config.monomers]
 
-        # Update builder state
+        # Update builder state - basic parameters
         self._characters = characters
         self._probabilities = probabilities
         self._length = config.length
@@ -237,7 +303,39 @@ class PolymerBuilder:
         if config.cache_directory:
             self._cache_directory = config.cache_directory
 
-        LOGGER.info(f"Building polymers: {config.type_prefix}")
+        # Update dynamic generation parameters
+        self._generation_mode = config.generation_mode.value
+        self._charger_type = config.charger.value
+        self._max_retries = config.max_retries
+
+        # Extract monomer-related mappings for dynamic mode
+        if config.generation_mode.value == "dynamic":
+            # Build monomer_smiles: name -> SMILES
+            self._monomer_smiles = {
+                m.name: m.smiles for m in config.monomers if m.smiles is not None
+            }
+
+            # Build monomer_names: label -> name
+            self._monomer_names = {m.label: m.name for m in config.monomers}
+
+            # Build residue_names: name -> 3-char residue name
+            self._residue_names = {
+                m.name: m.residue_name for m in config.monomers if m.residue_name is not None
+            }
+
+            # Store reaction config
+            self._reactions = config.reactions
+
+            # Reset generators to force re-initialization with new config
+            self._fragment_generator = None
+            self._polymer_generator = None
+            self._monomer_group = None
+
+            LOGGER.info(
+                f"Dynamic mode configured with monomers: {list(self._monomer_smiles.keys())}"
+            )
+
+        LOGGER.info(f"Building polymers: {config.type_prefix} (mode: {self._generation_mode})")
         return self.build(config.count, seed=seed)
 
     def _get_or_create_molecule(self, sequence: str) -> Molecule:
@@ -256,7 +354,11 @@ class PolymerBuilder:
         if sequence in self._loaded_molecules:
             return self._loaded_molecules[sequence]
 
-        # Try to load from SDF directory
+        # Dynamic mode: Generate polymers using FragmentGenerator and PolymerGenerator
+        if self._generation_mode == "dynamic":
+            return self._generate_polymer(sequence)
+
+        # Cached mode: Try to load from SDF directory
         if self._sdf_directory:
             sdf_path = self._get_sdf_path(sequence, self._sdf_directory)
             if sdf_path.exists():
@@ -267,7 +369,7 @@ class PolymerBuilder:
         if cache_path.exists():
             return self._load_from_sdf(cache_path)
 
-        # Generate if allowed
+        # Generate if allowed (cached mode fallback)
         if self._allow_generation:
             return self._generate_polymer(sequence)
 
@@ -321,8 +423,8 @@ class PolymerBuilder:
     def _generate_polymer(self, sequence: str) -> Molecule:
         """Generate a polymer molecule using Polymerist.
 
-        This is a placeholder - actual implementation would use
-        Polymerist's polymer building capabilities.
+        For dynamic mode, this uses FragmentGenerator and PolymerGenerator
+        to build polymer structures from raw monomer SMILES.
 
         Args:
             sequence: Canonical polymer sequence.
@@ -331,18 +433,74 @@ class PolymerBuilder:
             OpenFF Molecule for the polymer.
 
         Raises:
-            NotImplementedError: Generation not yet implemented.
+            RuntimeError: If not in dynamic mode and generation was attempted.
+            PolymerGenerationError: If generation fails after all retries.
         """
-        # TODO: Implement polymer generation using Polymerist
-        # This would involve:
-        # 1. Creating monomer Molecule objects
-        # 2. Building the polymer chain
-        # 3. Assigning partial charges
-        # 4. Saving to cache directory
-        raise NotImplementedError(
-            f"Polymer generation not yet implemented for sequence '{sequence}'. "
-            f"Please provide pre-built SDF files."
+        if self._generation_mode != "dynamic":
+            raise RuntimeError(
+                f"Polymer generation not available in cached mode for sequence '{sequence}'. "
+                f"Either provide pre-built SDF files or switch to dynamic generation mode."
+            )
+
+        # Ensure generators are initialized
+        self._ensure_generators_initialized()
+
+        # Generate the polymer using PolymerGenerator
+        LOGGER.info(f"Generating polymer for sequence: {sequence}")
+        mol = self._polymer_generator.generate_polymer(
+            sequence=sequence,
+            monomer_names=self._monomer_names,
+            residue_names=self._residue_names if self._residue_names else None,
         )
+
+        return mol
+
+    def _ensure_generators_initialized(self) -> None:
+        """Lazy-initialize FragmentGenerator and PolymerGenerator.
+
+        This method ensures that the fragment and polymer generators are
+        created only when first needed, avoiding overhead when loading
+        pre-built polymers.
+        """
+        if self._fragment_generator is not None and self._polymer_generator is not None:
+            return
+
+        from polyzymd.builders.fragment_generator import FragmentGenerator
+        from polyzymd.builders.polymer_generator import PolymerGenerator
+
+        LOGGER.info("Initializing dynamic polymer generation pipeline...")
+
+        # Create cache directory
+        self._cache_directory.mkdir(parents=True, exist_ok=True)
+
+        # Initialize fragment generator
+        self._fragment_generator = FragmentGenerator(
+            initiation_rxn_path=self._reactions.initiation,
+            polymerization_rxn_path=self._reactions.polymerization,
+            termination_rxn_path=self._reactions.termination,
+            cache_directory=self._cache_directory,
+        )
+
+        # Load or generate MonomerGroup
+        self._monomer_group = self._fragment_generator.load_or_generate(
+            monomer_smiles=self._monomer_smiles,
+            type_prefix=self._type_prefix,
+        )
+
+        LOGGER.info(
+            f"MonomerGroup ready with {len(self._monomer_group.monomers)} fragments: "
+            f"{list(self._monomer_group.monomers.keys())}"
+        )
+
+        # Initialize polymer generator
+        self._polymer_generator = PolymerGenerator(
+            monomer_group=self._monomer_group,
+            cache_directory=self._cache_directory,
+            max_retries=self._max_retries,
+            charger_type=self._charger_type,
+        )
+
+        LOGGER.info("Dynamic polymer generation pipeline initialized")
 
     def get_packing_info(self) -> Tuple[List[Molecule], List[int]]:
         """Get molecules and counts for PACKMOL packing.

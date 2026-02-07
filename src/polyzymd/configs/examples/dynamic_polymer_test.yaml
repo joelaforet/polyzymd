@@ -1,0 +1,146 @@
+# ============================================================================
+# PolyzyMD Configuration: Dynamic Polymer Generation Test
+# ============================================================================
+# Minimal test configuration for validating the dynamic polymer generation
+# feature. This config generates polymers on-the-fly from monomer SMILES
+# using ATRP chemistry, then runs a short OpenMM simulation.
+#
+# Required: You must provide an enzyme PDB file at structures/enzyme.pdb
+# Optional: Substrate can be omitted for minimal testing
+# ============================================================================
+
+name: "dynamic_polymer_test"
+description: "Minimal test of dynamic polymer generation with OpenMM"
+
+# ============================================================================
+# Enzyme Configuration
+# ============================================================================
+# You need to provide an enzyme PDB file. Replace with your actual path.
+enzyme:
+  name: "TestEnzyme"
+  pdb_path: "structures/enzyme.pdb"
+  description: "Test enzyme for dynamic polymer generation"
+
+# ============================================================================
+# Substrate Configuration (Optional - comment out to skip)
+# ============================================================================
+# substrate:
+#   name: "TestSubstrate"
+#   sdf_path: "structures/substrate_docked.sdf"
+#   conformer_index: 0
+#   charge_method: "nagl"
+#   residue_name: "LIG"
+
+# ============================================================================
+# Polymer Configuration - DYNAMIC MODE
+# ============================================================================
+polymers:
+  enabled: true
+  generation_mode: "dynamic"  # Key setting: generate polymers from SMILES
+  type_prefix: "SBMA-EGPMA"
+  
+  # Use bundled ATRP methacrylate reaction templates
+  # These ship with PolyzyMD - no need to provide custom .rxn files
+  reactions:
+    initiation: "default"
+    polymerization: "default"
+    termination: "default"
+  
+  # Monomer composition with SMILES strings
+  # These are methacrylate monomers compatible with the bundled ATRP reactions
+  monomers:
+    - label: "A"
+      probability: 0.7
+      name: "SBMA"
+      # Sulfobetaine methacrylate - zwitterionic monomer
+      smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
+    - label: "B"
+      probability: 0.3
+      name: "EGPMA"
+      # Ethylene glycol phenyl ether methacrylate
+      smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])Oc1c([H])c([H])c([H])c([H])c1[H])C([H])([H])[H]"
+  
+  # Charge assignment for generated polymers
+  charger: "nagl"  # Options: nagl, espaloma, am1bcc
+  max_retries: 10  # Retries if ring-piercing occurs during building
+  
+  # Short polymers for faster testing
+  length: 5   # 5-mer chains
+  count: 2    # Only 2 polymer chains
+  
+  # Cache directory for generated fragments and polymers
+  cache_directory: ".polymer_cache"
+  
+  # Packing settings
+  packing:
+    padding: 2.0  # nm padding around solute
+    tolerance: 2.0  # PACKMOL tolerance (Angstrom)
+
+# ============================================================================
+# Solvent Configuration
+# ============================================================================
+solvent:
+  primary:
+    type: "water"
+    model: "tip3p"
+  
+  co_solvents: []  # No co-solvents for minimal test
+  
+  ions:
+    neutralize: true
+    nacl_concentration: 0.1  # 100 mM NaCl
+  
+  box:
+    padding: 1.0  # Smaller padding for faster solvation
+    shape: "cube"  # Cube is faster than rhombic dodecahedron
+    target_density: 1.0
+    tolerance: 2.0
+
+# ============================================================================
+# Thermodynamics
+# ============================================================================
+thermodynamics:
+  temperature: 300.0  # K
+  pressure: 1.0  # bar
+
+# ============================================================================
+# Simulation Phases - SHORT DURATIONS FOR TESTING
+# ============================================================================
+simulation_phases:
+  equilibration:
+    ensemble: "NVT"
+    duration: 0.01  # 10 ps - very short for testing
+    samples: 10
+    time_step: 2.0
+    thermostat: "LangevinMiddle"
+    thermostat_timescale: 1.0
+  
+  production:
+    ensemble: "NPT"
+    duration: 0.1  # 100 ps - short for testing
+    samples: 10
+    time_step: 2.0
+    thermostat: "LangevinMiddle"
+    thermostat_timescale: 1.0
+    barostat: "MC"
+    barostat_frequency: 25
+  
+  segments: 1  # Single segment for testing
+
+# ============================================================================
+# Output Configuration
+# ============================================================================
+output:
+  projects_directory: "."
+  scratch_directory: null  # Use projects_directory
+  naming_template: "{enzyme}_{polymer_type}_dynamic_test"
+  save_checkpoint: true
+  save_state_data: true
+  trajectory_format: "dcd"
+
+# ============================================================================
+# Force Field Selection
+# ============================================================================
+force_field:
+  protein: "ff14sb_off_impropers_0.0.4.offxml"
+  small_molecule: "openff-2.0.0.offxml"

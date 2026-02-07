@@ -163,8 +163,21 @@ class SystemBuilder:
         type_prefix: str,
         sdf_directory: Optional[Union[str, Path]] = None,
         seed: Optional[int] = None,
+        # New parameters for dynamic generation
+        generation_mode: str = "cached",
+        monomer_smiles: Optional[Dict[str, str]] = None,
+        monomer_names: Optional[Dict[str, str]] = None,
+        residue_names: Optional[Dict[str, str]] = None,
+        reactions: Optional[Any] = None,
+        charger_type: str = "nagl",
+        max_retries: int = 10,
+        cache_directory: Optional[Union[str, Path]] = None,
     ) -> Tuple[List[Molecule], List[int]]:
         """Build polymer components.
+
+        Supports two generation modes:
+        - "cached": Load pre-built polymer SDFs from sdf_directory
+        - "dynamic": Generate polymers on-the-fly from monomer SMILES
 
         Args:
             characters: Monomer labels.
@@ -172,8 +185,16 @@ class SystemBuilder:
             length: Monomers per chain.
             count: Number of polymer chains.
             type_prefix: Filename prefix.
-            sdf_directory: Directory with pre-built polymer SDFs.
+            sdf_directory: Directory with pre-built polymer SDFs (cached mode).
             seed: Random seed for reproducibility.
+            generation_mode: "cached" or "dynamic".
+            monomer_smiles: Dict of monomer name -> SMILES (dynamic mode).
+            monomer_names: Dict of label -> monomer name (dynamic mode).
+            residue_names: Dict of monomer name -> 3-char residue name.
+            reactions: ReactionConfig with ATRP reaction paths (dynamic mode).
+            charger_type: Charge method ("nagl", "espaloma", "am1bcc").
+            max_retries: Max retries for polymer generation.
+            cache_directory: Directory for caching generated polymers.
 
         Returns:
             Tuple of (unique polymer molecules, counts).
@@ -184,6 +205,14 @@ class SystemBuilder:
             length=length,
             type_prefix=type_prefix,
             sdf_directory=sdf_directory,
+            cache_directory=cache_directory,
+            generation_mode=generation_mode,
+            monomer_smiles=monomer_smiles,
+            monomer_names=monomer_names,
+            residue_names=residue_names,
+            reactions=reactions,
+            charger_type=charger_type,
+            max_retries=max_retries,
         )
 
         molecules, counts = self._polymer_builder.build(count=count, seed=seed)
@@ -892,6 +921,34 @@ class SystemBuilder:
                 effective_seed = polymer_seed
             LOGGER.info(f"Using polymer random seed: {effective_seed}")
 
+            # Extract dynamic mode parameters if applicable
+            generation_mode = config.polymers.generation_mode.value
+            monomer_smiles = None
+            monomer_names = None
+            residue_names = None
+            reactions = None
+
+            if generation_mode == "dynamic":
+                # Build monomer_smiles: name -> SMILES
+                monomer_smiles = {
+                    m.name: m.smiles for m in config.polymers.monomers if m.smiles is not None
+                }
+                # Build monomer_names: label -> name
+                monomer_names = {m.label: m.name for m in config.polymers.monomers}
+                # Build residue_names: name -> 3-char residue name
+                residue_names = {
+                    m.name: m.residue_name
+                    for m in config.polymers.monomers
+                    if m.residue_name is not None
+                }
+                # Get reaction config
+                reactions = config.polymers.reactions
+
+                LOGGER.info(
+                    f"Dynamic mode: monomers={list(monomer_smiles.keys())}, "
+                    f"charger={config.polymers.charger.value}"
+                )
+
             self.build_polymers(
                 characters=characters,
                 probabilities=probabilities,
@@ -900,6 +957,14 @@ class SystemBuilder:
                 type_prefix=config.polymers.type_prefix,
                 sdf_directory=config.polymers.sdf_directory,
                 seed=effective_seed,
+                generation_mode=generation_mode,
+                monomer_smiles=monomer_smiles,
+                monomer_names=monomer_names,
+                residue_names=residue_names,
+                reactions=reactions,
+                charger_type=config.polymers.charger.value,
+                max_retries=config.polymers.max_retries,
+                cache_directory=config.polymers.cache_directory,
             )
 
             # Get packing config (uses defaults if not specified)
