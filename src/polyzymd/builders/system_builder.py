@@ -1012,6 +1012,231 @@ class SystemBuilder:
 
         return omm_topology, omm_system, omm_positions
 
+    def export_to_gromacs(
+        self,
+        output_dir: Union[str, Path],
+        prefix: Optional[str] = None,
+        gmx_command: str = "gmx",
+        generate_mdps: bool = True,
+    ) -> Dict[str, Any]:
+        """Export the system to GROMACS format with full simulation setup.
+
+        Generates a complete GROMACS simulation setup including:
+        - .gro (coordinates) and .top (topology) files
+        - MDP files for energy minimization, equilibration, and production
+        - Position restraint files for equilibration stages
+        - Run script for executing the full workflow
+
+        The topology is split into separate .itp files for each molecule type
+        (monolithic=False), which is cleaner for multi-component systems.
+
+        MDP files are generated from config.yaml parameters to match OpenMM
+        simulation settings (temperature, pressure, duration, etc.). OpenFF
+        defaults are used for force field parameters (rcoulomb=0.9, rvdw=0.9,
+        PME, etc.) to ensure 1:1 parity with OpenMM.
+
+        Args:
+            output_dir: Directory to write GROMACS files. Will be created if it
+                doesn't exist.
+            prefix: Filename prefix for output files. If None, generates a
+                descriptive name from the config (e.g., "LipA_EGPMA-SBMA").
+            gmx_command: GROMACS command/path for the run script (default "gmx").
+            generate_mdps: If True (default), generate MDP files from config.
+                If False, only export coordinates and topology.
+
+        Returns:
+            Dictionary with paths to generated files:
+            - "gro": Path to coordinate file
+            - "top": Path to topology file
+            - "em_mdp": Path to energy minimization MDP (if generate_mdps=True)
+            - "eq_mdps": List of equilibration MDP paths (if generate_mdps=True)
+            - "prod_mdp": Path to production MDP (if generate_mdps=True)
+            - "posres": Dict of position restraint files (if applicable)
+            - "run_script": Path to run script (if generate_mdps=True)
+
+        Raises:
+            RuntimeError: If Interchange has not been created.
+
+        Example:
+            >>> builder = SystemBuilder.from_config(config)
+            >>> builder.build_from_config(config, working_dir)
+            >>> result = builder.export_to_gromacs(
+            ...     output_dir="gromacs/",
+            ...     prefix="my_system"
+            ... )
+            >>> print(f"Run: cd {result['gro'].parent} && ./{result['run_script'].name}")
+        """
+        if self._interchange is None:
+            raise RuntimeError(
+                "Interchange not created. Call create_interchange() or build_from_config() first."
+            )
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate prefix from config if not provided
+        if prefix is None:
+            prefix = self._generate_gromacs_prefix()
+
+        LOGGER.info(f"Exporting to GROMACS format: {output_dir / prefix}.*")
+
+        # Check if we have config for MDP generation
+        config = getattr(self, "_config", None)
+
+        if generate_mdps and config is not None:
+            # Use GromacsExporter for full export with MDP generation
+            from polyzymd.exporters.gromacs import GromacsExporter
+
+            # Get component info for position restraints
+            try:
+                component_info = self.get_component_info()
+            except RuntimeError:
+                component_info = None
+                LOGGER.warning(
+                    "Could not get component info for position restraints. "
+                    "Position restraint files will not be generated."
+                )
+
+            exporter = GromacsExporter(
+                interchange=self._interchange,
+                config=config,
+                component_info=component_info,
+            )
+
+            result = exporter.export(
+                output_dir=output_dir,
+                prefix=prefix,
+                gmx_command=gmx_command,
+            )
+
+            return result
+        else:
+            # Legacy mode: just export coordinates and topology
+            return self._export_gromacs_minimal(output_dir, prefix)
+
+    def _export_gromacs_minimal(
+        self,
+        output_dir: Path,
+        prefix: str,
+    ) -> Dict[str, Any]:
+        """Export minimal GROMACS files (coordinates and topology only).
+
+        This is the legacy export mode used when no config is available
+        or when generate_mdps=False.
+
+        Args:
+            output_dir: Output directory.
+            prefix: Filename prefix.
+
+        Returns:
+            Dictionary with gro and top paths.
+        """
+        # Fix 0-indexed residues (GROMACS requires 1-indexed)
+        self._fix_zero_indexed_residues()
+
+        # Export using OpenFF Interchange
+        output_prefix = str(output_dir / prefix)
+        self._interchange.to_gromacs(
+            prefix=output_prefix,
+            monolithic=False,
+            _merge_atom_types=True,
+        )
+
+        gro_path = output_dir / f"{prefix}.gro"
+        top_path = output_dir / f"{prefix}.top"
+        mdp_path = output_dir / f"{prefix}.mdp"
+
+        LOGGER.info(f"Generated GROMACS files:")
+        LOGGER.info(f"  Coordinates: {gro_path}")
+        LOGGER.info(f"  Topology:    {top_path}")
+        LOGGER.info(f"  MDP stub:    {mdp_path}")
+        LOGGER.info("")
+        LOGGER.info("Note: The .mdp file is a stub for single-point energy calculation.")
+        LOGGER.info("For MD simulations, use generate_mdps=True with a config file,")
+        LOGGER.info("or create custom MDP files.")
+
+        return {
+            "gro": gro_path,
+            "top": top_path,
+            "mdp_stub": mdp_path,
+        }
+
+    def _generate_gromacs_prefix(self) -> str:
+        """Generate a descriptive filename prefix from the config.
+
+        Creates a prefix in the format: {enzyme_name}_{polymer_prefix}
+        Falls back to "system" if config information is not available.
+
+        Returns:
+            Filename prefix string (without extension).
+        """
+        parts = []
+
+        # Get enzyme name from config
+        config = getattr(self, "_config", None)
+        if config and hasattr(config, "enzyme") and config.enzyme:
+            parts.append(config.enzyme.name)
+
+        # Get polymer type prefix from config
+        if config and hasattr(config, "polymers") and config.polymers:
+            if config.polymers.enabled and config.polymers.type_prefix:
+                parts.append(config.polymers.type_prefix)
+
+        if parts:
+            return "_".join(parts)
+        else:
+            return "system"
+
+    def _fix_zero_indexed_residues(self) -> None:
+        """Fix 0-indexed residues in the topology for GROMACS compatibility.
+
+        GROMACS requires residue numbers to be 1-indexed. This method checks
+        all atoms in the topology and increments any 0-indexed residue numbers.
+        """
+        if self._interchange is None:
+            return
+
+        found_zero_indexed = False
+
+        # First pass: check for 0-indexed residues
+        for molecule in self._interchange.topology.molecules:
+            for atom in molecule.atoms:
+                residue_num = atom.metadata.get("residue_number")
+                if residue_num is not None:
+                    # Handle both string and int representations
+                    if isinstance(residue_num, str):
+                        try:
+                            if int(residue_num) == 0:
+                                found_zero_indexed = True
+                                break
+                        except ValueError:
+                            pass
+                    elif residue_num == 0:
+                        found_zero_indexed = True
+                        break
+            if found_zero_indexed:
+                break
+
+        if not found_zero_indexed:
+            LOGGER.debug("No 0-indexed residues found")
+            return
+
+        # Second pass: fix 0-indexed residues
+        LOGGER.info("Fixing 0-indexed residues for GROMACS compatibility")
+        for molecule in self._interchange.topology.molecules:
+            for atom in molecule.atoms:
+                residue_num = atom.metadata.get("residue_number")
+                if residue_num is not None:
+                    if isinstance(residue_num, str):
+                        try:
+                            atom.metadata["residue_number"] = str(int(residue_num) + 1)
+                        except ValueError:
+                            pass
+                    else:
+                        atom.metadata["residue_number"] = residue_num + 1
+
+        LOGGER.info("Fixed all 0-indexed residues")
+
     def get_component_info(self) -> "SystemComponentInfo":
         """Get system component information for atom group resolution.
 
