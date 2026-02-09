@@ -21,12 +21,16 @@ We recommend creating a dedicated conda environment with all dependencies:
 
 ```bash
 # Create environment with OpenMM and OpenFF
-conda create -n polyzymd-env python=3.11 \
+mamba create -n polyzymd-env python=3.11 \
     openmm openff-toolkit openff-interchange \
+    openff-nagl openff-nagl-models packmol mbuild openbabel \
     -c conda-forge
 
 # Activate the environment
 conda activate polyzymd-env
+
+# Install pip-only dependencies
+pip install polymerist rdkit
 
 # Clone and install PolyzyMD
 git clone https://github.com/joelaforet/polyzymd.git
@@ -83,6 +87,36 @@ On HPC systems, you typically need to:
    ```bash
    polyzymd info
    ```
+
+## Optional Dependencies
+
+### AmberTools (for AM1-BCC charging)
+
+PolyzyMD defaults to NAGL for partial charge assignment, which is fast and
+doesn't require additional dependencies. However, if you need AM1-BCC charges
+via the AmberTools backend:
+
+```bash
+mamba install -c conda-forge ambertools
+```
+
+Then use in your configuration or code:
+
+```python
+from polyzymd.utils.charging import get_charger
+
+# Use AmberTools for AM1-BCC charges
+charger = get_charger("am1bcc", toolkit="ambertools")
+charged_mol = charger.charge_molecule(molecule)
+```
+
+### MDAnalysis (for trajectory analysis)
+
+For advanced trajectory analysis features:
+
+```bash
+mamba install -c conda-forge mdanalysis
+```
 
 ## Verifying Installation
 

@@ -144,9 +144,9 @@ PolyzyMD depends on packages that are difficult or impossible to install via pip
 
 - **OpenMM**: GPU-accelerated MD engine (requires conda)
 - **OpenFF Toolkit**: Force field tools (requires conda)
-- **AmberTools**: Protein preparation (requires conda)
-- **RDKit**: Chemistry toolkit (conda strongly recommended)
+- **RDKit**: Chemistry toolkit (pip or conda)
 - **PACKMOL**: Molecular packing (requires conda)
+- **AmberTools**: Optional, for AM1-BCC charging backend (requires conda)
 
 If we list these in `dependencies`, `pip install polyzymd` will fail.
 
@@ -189,11 +189,45 @@ We recommend users install via conda first, then pip:
 ```bash
 # Install heavy dependencies via conda
 mamba install -c conda-forge openmm openff-toolkit openff-interchange \
-    openff-nagl packmol rdkit ambertools
+    openff-nagl openff-nagl-models packmol mbuild openbabel
 
 # Install polyzymd via pip
 pip install polyzymd
 ```
+
+### Optional Charging Backends
+
+PolyzyMD defaults to **NAGL** for partial charge assignment, which is fast and
+doesn't require additional dependencies beyond the OpenFF stack.
+
+For AM1-BCC charges, you can optionally install additional backends:
+
+#### AmberTools (sqm)
+
+```bash
+mamba install -c conda-forge ambertools
+```
+
+Then use in your code:
+
+```python
+from polyzymd.utils.charging import get_charger
+
+# Use AmberTools for AM1-BCC
+charger = get_charger("am1bcc", toolkit="ambertools")
+charged_mol = charger.charge_molecule(molecule)
+```
+
+#### OpenEye Toolkit (Commercial)
+
+If you have an OpenEye license:
+
+```python
+charger = get_charger("am1bcc", toolkit="openeye")
+```
+
+Note: NAGL is recommended for most use cases as it's faster and produces
+comparable results to AM1-BCC.
 
 ---
 
@@ -266,9 +300,14 @@ dependencies:
   - openff-toolkit>=0.16.0
   - openff-interchange>=0.4.0
   - openff-nagl>=0.3.0
-  - rdkit
+  - openff-nagl-models
   - packmol
-  - ambertools
+  - mbuild
+  - openbabel
+  # Pip-only packages
+  - pip:
+    - rdkit
+    - polymerist
   # etc.
 ```
 

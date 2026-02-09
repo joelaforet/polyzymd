@@ -2,55 +2,43 @@ name: test-env
 channels:
   - conda-forge
 dependencies:
-  # Basic Python dependencies
   - python=3.11
   - pip
 
-  # Unit testing
+  # Testing
   - pytest
   - pytest-cov
 
-  # Configuration and CLI (also in pip dependencies)
-  - pydantic>=2.0
-  - pyyaml>=6.0
-  - click>=8.0
-
-  # Numerical libraries
-  - numpy>=1.21,<2.0
-  - scipy>=1.9
-  - pandas>=2.0
-  - networkx>=3.0
-  - anytree>=2.8
-
-  # Molecule building
-  - rdkit>=2024
-  - packmol<=20.15.1  # Later versions may have PDB CONECT issues
-
-  # MD engines
+  # Core simulation stack (must be conda)
   - openmm>=8.0
-  - mdtraj>=1.9
-  - mdanalysis>=2.4
-
-  # OpenFF stack
   - openff-toolkit>=0.16
   - openff-interchange>=0.4
   - openff-nagl>=0.3
-  - openff-nagl-models>=0.3
-  - openff-forcefields>=2024
-  - openff-units>=0.2
+  - openff-nagl-models
+  - openff-forcefields
+  - openff-units
 
-  # AmberTools for tleap
-  - ambertools>=23
+  # Molecule building (must be conda)
+  - mbuild
+  - openbabel
+  - packmol
 
-  # Polymer building
-  - polymerist>=1.0
+  # MD trajectory analysis
+  - mdtraj
 
-  # BioPython for structure parsing
-  - biopandas>=0.4
+  # Numerical/utility (conda)
+  - numpy
+  - scipy
+  - pandas
+  - networkx
+  - pydantic>=2.0
+  - pyyaml
+  - click
+  - tqdm
+  - anytree
 
-  # Progress bars
-  - tqdm>=4.60
-
-  # pip installs (if any packages not on conda-forge)
-  # - pip:
-  #   - some-pip-only-package
+  # Pip-only packages
+  - pip:
+    - polymerist>=1.0.0
+    - rdkit
+    - biopandas
