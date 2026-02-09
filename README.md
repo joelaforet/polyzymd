@@ -1,5 +1,9 @@
 # PolyzyMD
 
+[![CI](https://github.com/joelaforet/polyzymd/actions/workflows/ci.yml/badge.svg)](https://github.com/joelaforet/polyzymd/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Molecular dynamics simulation toolkit for enzyme-polymer systems.
 
 ## Overview
@@ -14,24 +18,49 @@ PolyzyMD provides a streamlined workflow for setting up and running MD simulatio
 
 ## Installation
 
-### From Source (Development)
+### Recommended: Conda Environment
+
+PolyzyMD depends on packages that require conda (OpenMM, OpenFF stack, PACKMOL). We recommend creating a dedicated environment:
 
 ```bash
+# Clone the repository
 git clone https://github.com/joelaforet/polyzymd.git
 cd polyzymd
+
+# Create environment from our tested configuration
+conda env create -f devtools/conda-envs/test-env.yml
+conda activate test-env
+
+# Install polyzymd
 pip install -e .
 ```
 
-### Dependencies
+### Core Dependencies
 
-PolyzyMD requires:
-- Python >= 3.10
-- OpenMM >= 8.0
-- OpenFF Toolkit >= 0.14.0
-- OpenFF Interchange >= 0.3.0
-- Polymerist >= 1.0.0
+These are installed automatically via the conda environment:
 
-We recommend using a conda environment with these packages pre-installed.
+| Package | Source | Purpose |
+|---------|--------|---------|
+| OpenMM >= 8.0 | conda | MD engine |
+| OpenFF Toolkit >= 0.16 | conda | Force field parameterization |
+| OpenFF Interchange >= 0.4 | conda | System interchange |
+| OpenFF NAGL >= 0.3 | conda | ML-based partial charges |
+| Polymerist >= 1.0 | pip | Polymer generation |
+| PACKMOL | conda | System packing |
+| MDTraj | conda | Trajectory analysis |
+
+### Optional Dependencies
+
+For AM1-BCC charge assignment (alternative to NAGL):
+
+```bash
+# Option 1: AmberTools (free, open source)
+# Note: Only available for Linux; conflicts may require a separate environment
+conda install -c conda-forge ambertools
+
+# Option 2: OpenEye Toolkit (commercial, faster)
+conda install -c openeye openeye-toolkits
+```
 
 ## Quick Start
 
@@ -223,7 +252,7 @@ If you use PolyzyMD in your research, please cite:
 @software{polyzymd,
   author = {Laforet Jr., Joseph R.},
   title = {PolyzyMD: MD Simulations for Enzyme-Polymer Systems},
-  year = {2024},
+  year = {2026},
   url = {https://github.com/joelaforet/polyzymd}
 }
 ```
