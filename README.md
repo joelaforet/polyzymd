@@ -26,7 +26,7 @@ PolyzyMD provides a streamlined workflow for setting up and running MD simulatio
 - **HPC Integration**: Daisy-chain job submission for SLURM clusters
 - **Configuration**: YAML-based configuration with validation
 
-## Documentation
+## Documentation (web-hosted)
 
 You can find documentation for this package [here!](https://polyzymd.readthedocs.io/en/latest/)
 
@@ -221,7 +221,7 @@ Override time limits with `--time-limit`:
 polyzymd submit -c config.yaml --preset testing --time-limit 0:02:00
 ```
 
-## Documentation
+## Documentation (for developers)
 
 Documentation is built with Sphinx and located in the `docs/` directory.
 
