@@ -20,7 +20,7 @@ Key modules:
     - analysis: Trajectory analysis tools
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 __author__ = "Joe Laforet Jr."
 __email__ = "jola3134@colorado.edu"
 
