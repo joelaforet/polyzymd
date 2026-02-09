@@ -1,0 +1,143 @@
+# ============================================================================
+# PolyzyMD Configuration: Enzyme + Co-solvent Simulation
+# ============================================================================
+# Enzyme simulation with mixed solvent (water + DMSO)
+# Useful for studying solvent effects on enzyme activity
+# ============================================================================
+
+name: "LipA_ResorufinButyrate_DMSO10"
+description: "LipA enzyme with Resorufin-Butyrate in 10% DMSO co-solvent"
+
+# ============================================================================
+# Enzyme Configuration
+# ============================================================================
+enzyme:
+  name: "LipA"
+  pdb_path: "structures/LipA_prepared.pdb"
+  description: "Bacillus subtilis Lipase A"
+
+# ============================================================================
+# Substrate Configuration
+# ============================================================================
+substrate:
+  name: "Resorufin-Butyrate"
+  sdf_path: "structures/resorufin_butyrate_docked.sdf"
+  conformer_index: 0
+  charge_method: "nagl"
+  residue_name: "RBY"
+
+# ============================================================================
+# Polymer Configuration (Disabled)
+# ============================================================================
+polymers: null
+
+# ============================================================================
+# Solvent Configuration with Co-solvent
+# ============================================================================
+solvent:
+  primary:
+    type: "water"
+    model: "tip3p"
+  
+  # Co-solvent specification
+  co_solvents:
+    - name: "dmso"
+      smiles: "CS(=O)C"  # DMSO SMILES
+      volume_fraction: 0.10  # 10% v/v DMSO
+      residue_name: "DMS"
+  
+  ions:
+    neutralize: true
+    nacl_concentration: 0.1
+  
+  box:
+    padding: 2.0  # nm padding (2.0 recommended for PACKMOL convergence)
+    shape: "rhombic_dodecahedron"
+    target_density: 1.05  # Adjusted for DMSO mixture
+    tolerance: 2.0
+
+# ============================================================================
+# Restraints
+# ============================================================================
+restraints:
+  - type: "flat_bottom"
+    name: "substrate_active_site"
+    atom1:
+      selection: "resid 77 and name OG"
+      description: "Catalytic serine"
+    atom2:
+      selection: "resname RBY and name C1"
+      description: "Substrate reactive carbon"
+    distance: 3.3
+    force_constant: 10000.0
+    enabled: true
+
+# ============================================================================
+# Thermodynamics
+# ============================================================================
+thermodynamics:
+  temperature: 298.0  # 25°C (common for DMSO solutions)
+  pressure: 1.0
+
+# ============================================================================
+# Simulation Phases
+# ============================================================================
+simulation_phases:
+  equilibration:
+    ensemble: "NVT"
+    duration: 1.0  # Longer equilibration for co-solvent
+    samples: 100
+    time_step: 2.0
+    thermostat: "LangevinMiddle"
+    thermostat_timescale: 1.0
+  
+  production:
+    ensemble: "NPT"
+    duration: 50.0  # 50 ns production
+    samples: 1250
+    time_step: 2.0
+    thermostat: "LangevinMiddle"
+    thermostat_timescale: 1.0
+    barostat: "MC"
+    barostat_frequency: 25
+  
+  segments: 5  # 5 segments of 10 ns each
+
+# ============================================================================
+# Output Configuration
+# ============================================================================
+# HPC systems often separate long-term storage (projects) from high-performance
+# scratch storage. Configure both directories here, or use CLI overrides.
+#
+# Memory requirements:
+#   - Co-solvent systems may need slightly more memory due to additional molecules
+#   - Default 3G is usually sufficient, increase with: polyzymd submit --memory 4G
+#
+output:
+  # Long-term storage: scripts, logs, configs (survives job completion)
+  # Example: /projects/$USER/polyzymd or just "." for local development
+  projects_directory: "."
+  
+  # High-performance scratch: trajectories, checkpoints (may be purged)
+  # Example: /scratch/alpine/$USER/simulations
+  # If not set, defaults to projects_directory (good for local testing)
+  scratch_directory: null
+  
+  # Subdirectory organization within projects_directory
+  job_scripts_subdir: "job_scripts"
+  slurm_logs_subdir: "slurm_logs"
+  
+  # Naming template for run directories
+  naming_template: "{enzyme}_{substrate}_DMSO10_{temperature}K_run{replicate}"
+  
+  # Output options
+  save_checkpoint: true
+  save_state_data: true
+  trajectory_format: "dcd"
+
+# ============================================================================
+# Force Field Selection
+# ============================================================================
+force_field:
+  protein: "ff14sb_off_impropers_0.0.4.offxml"
+  small_molecule: "openff-2.0.0.offxml"

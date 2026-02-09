@@ -1,0 +1,44 @@
+name: test-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+
+  # Testing
+  - pytest
+  - pytest-cov
+
+  # Core simulation stack (must be conda)
+  - openmm>=8.0
+  - openff-toolkit>=0.16
+  - openff-interchange>=0.4
+  - openff-nagl>=0.3
+  - openff-nagl-models
+  - openff-forcefields
+  - openff-units
+
+  # Molecule building (must be conda)
+  - mbuild
+  - openbabel
+  - packmol
+
+  # MD trajectory analysis
+  - mdtraj
+
+  # Numerical/utility (conda)
+  - numpy
+  - scipy
+  - pandas
+  - networkx
+  - pydantic>=2.0
+  - pyyaml
+  - click
+  - tqdm
+  - anytree
+
+  # Pip-only packages
+  - pip:
+    - polymerist>=1.0.0
+    - rdkit
+    - biopandas

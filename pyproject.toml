@@ -1,0 +1,175 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "polyzymd"
+version = "1.0.0"
+description = "Molecular dynamics simulation toolkit for enzyme-polymer systems"
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "Joseph R. Laforet Jr.", email = "jola3134@colorado.edu" }
+]
+keywords = [
+    "molecular-dynamics",
+    "enzyme",
+    "polymer",
+    "openmm",
+    "openff",
+    "simulation",
+    "gromacs",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+requires-python = ">=3.10"
+
+# =============================================================================
+# Core Dependencies
+# =============================================================================
+# NOTE: Many of these packages are best installed via conda/mamba due to
+# complex compiled dependencies. The recommended installation is:
+#
+#   mamba create -n polyzymd-env python=3.11
+#   mamba activate polyzymd-env
+#   mamba install -c conda-forge openmm openff-toolkit openff-interchange \
+#       openff-nagl ambertools packmol rdkit mdanalysis
+#   pip install -e .
+#
+# The dependencies below are listed for pip but may fail without conda prereqs.
+# =============================================================================
+dependencies = [
+    # Configuration and CLI (these install cleanly via pip)
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0",
+    "click>=8.0.0",
+    "click-option-group>=0.5.0",
+    
+    # Utilities (these install cleanly via pip)
+    "numpy>=1.21.0,<2.0.0",  # Pin to 1.x for OpenMM compatibility
+    "tqdm>=4.60.0",
+    
+    # Analysis
+    "biopandas>=0.4.0",
+    "scipy>=1.9.0",
+]
+
+[project.optional-dependencies]
+# Core simulation packages - install via conda, listed here for documentation
+# These are NOT pip-installable in most cases
+simulation = [
+    "openmm>=8.0",
+    "openff-toolkit>=0.16.0",
+    "openff-interchange>=0.4.0",
+    "openff-units>=0.2.0",
+    "openff-nagl>=0.3.0",
+    "openff-forcefields>=2024.0.0",
+    "ambertools>=23.0",
+    "rdkit>=2024.0.0",
+    "packmol>=20.0",
+]
+
+# Analysis packages
+analysis = [
+    "mdanalysis>=2.4.0",
+    "mdtraj>=1.9.0",
+    "scikit-learn>=1.0.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.5.0",
+    "seaborn>=0.12.0",
+]
+
+# Polymer building (polymerist integration)
+polymers = [
+    "polymerist>=1.0.0",
+    "networkx>=3.0",
+    "anytree>=2.8.0",
+]
+
+# Development tools
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+]
+
+# Documentation
+docs = [
+    "sphinx>=6.0.0",
+    "sphinx-rtd-theme>=1.0.0",
+    "myst-parser>=1.0.0",
+    "sphinx-click>=4.0.0",
+]
+
+# Full installation (for development) - still needs conda prereqs
+full = [
+    "polyzymd[analysis,polymers,dev,docs]",
+]
+
+[project.scripts]
+polyzymd = "polyzymd.cli.main:main"
+polyzymd-continue = "polyzymd.simulation.continuation:main"
+polyzymd-submit = "polyzymd.workflow.daisy_chain:main"
+
+[project.urls]
+Homepage = "https://github.com/joelaforet/polyzymd"
+Documentation = "https://polyzymd.readthedocs.io"
+Repository = "https://github.com/joelaforet/polyzymd"
+Issues = "https://github.com/joelaforet/polyzymd/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/polyzymd"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/configs",
+    "/README.md",
+    "/LICENSE",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+    "B008",  # do not perform function calls in argument defaults
+    "F401",  # unused imports (many are for re-export or TYPE_CHECKING blocks)
+    "F841",  # unused variables (sometimes used for debugging/clarity)
+    "F821",  # undefined name (false positives from quoted type hints for forward refs)
+    "B007",  # unused loop control variable (often intentional for clarity)
+    "B904",  # raise without from (would require refactoring)
+    "B905",  # zip without strict (Python 3.10+ feature)
+    "C414",  # unnecessary list() in sorted() (harmless)
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true

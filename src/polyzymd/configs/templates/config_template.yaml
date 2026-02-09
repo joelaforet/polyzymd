@@ -1,0 +1,344 @@
+# ============================================================================
+# PolyzyMD Configuration Template
+# ============================================================================
+#
+# INSTRUCTIONS:
+# 1. Uncomment the sections you need by removing the leading "# " characters
+# 2. Replace placeholder values (protein_X, ligand_Y, etc.) with your data
+# 3. Validate your configuration: polyzymd validate -c config.yaml
+# 4. Build your system: polyzymd build -c config.yaml -r 1
+#
+# Documentation: https://polyzymd.readthedocs.io/tutorials/getting_started
+#
+# REQUIRED SECTIONS:
+#   - name (simulation identifier)
+#   - enzyme (protein structure)
+#   - solvent (solvation settings)
+#   - thermodynamics (temperature, pressure)
+#   - simulation_phases (equilibration, production)
+#   - output (directory settings)
+#
+# OPTIONAL SECTIONS:
+#   - substrate (docked ligand)
+#   - polymers (co-polymer chains)
+#   - restraints (distance restraints)
+#   - force_field (custom force fields)
+#
+# ============================================================================
+
+# Simulation identifier - used in output directory names
+name: "my_simulation"
+description: "Description of your simulation system"
+
+# ============================================================================
+# Enzyme Configuration (REQUIRED)
+# ============================================================================
+# Your protein structure file. Must be:
+#   - Properly protonated (use PDB2PQR, Reduce, or similar)
+#   - No missing heavy atoms in regions of interest
+#   - Standard amino acid residue names
+#
+# enzyme:
+#   name: "protein_X"
+#   pdb_path: "structures/protein_X.pdb"
+#   description: "My enzyme description"
+
+# ============================================================================
+# Substrate Configuration (OPTIONAL)
+# ============================================================================
+# Docked ligand or small molecule substrate.
+# Comment out this entire section if not using a substrate.
+#
+# charge_method options:
+#   - "nagl"     : Neural network charges (fast, recommended)
+#   - "espaloma" : Graph neural network charges
+#   - "am1bcc"   : AM1-BCC charges (slower, traditional)
+#
+# substrate:
+#   name: "ligand_Y"
+#   sdf_path: "structures/ligand_Y.sdf"
+#   conformer_index: 0                    # Which conformer to use (0 = first)
+#   charge_method: "nagl"
+#   residue_name: "LIG"                   # 3-letter residue name in output
+
+# ============================================================================
+# Polymer Configuration (OPTIONAL)
+# ============================================================================
+# Random co-polymer chains to add around the enzyme.
+# Set to null or comment out if not using polymers.
+#
+# polymers: null
+#
+# OR configure polymers:
+#
+# polymers:
+#   enabled: true
+#   type_prefix: "polymer_A"              # Identifier for polymer type
+#   
+#   # Monomer composition - probabilities must sum to 1.0
+#   monomers:
+#     - label: "A"
+#       probability: 0.80
+#       name: "monomer_1"
+#     - label: "B"
+#       probability: 0.20
+#       name: "monomer_2"
+#   
+#   length: 10                            # Number of monomers per chain
+#   count: 4                              # Number of polymer chains
+#   
+#   # Optional: directory containing pre-built polymer SDF files
+#   # sdf_directory: "polymer_sdfs/my_polymer"
+#   
+#   # Cache directory for generated polymers
+#   cache_directory: ".polymer_cache"
+#   
+#   # Random seed for reproducible polymer sequences (OPTIONAL)
+#   # If not set, uses the replicate number as the seed.
+#   # Set this to get identical polymer sequences across different replicates.
+#   # random_seed: 42
+#   
+#   # Packing settings for polymers around the protein
+#   # These control how PACKMOL packs polymers around your solute
+#   packing:
+#     padding: 2.0                        # nm padding around solute for polymer box
+#     tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
+
+# ============================================================================
+# Solvent Configuration (REQUIRED)
+# ============================================================================
+# Water model, ions, and box settings.
+#
+# water model options: tip3p, spce, tip4pew, opc
+# box shape options: cube, rhombic_dodecahedron, truncated_octahedron
+#
+# solvent:
+#   primary:
+#     type: "water"
+#     model: "tip3p"
+#   
+#   # Co-solvents (optional) - leave empty [] if not using
+#   co_solvents: []
+#   
+#   # Co-solvent specification options:
+#   #   - volume_fraction: Specify as v/v fraction (e.g., 0.30 for 30%)
+#   #   - concentration:   Specify as molar (e.g., 2.0 for 2 M)
+#   #   NOTE: Use ONE method per co-solvent, not both.
+#   #
+#   # Built-in co-solvents (auto-populated smiles & density):
+#   #   dmso, dmf, acetonitrile, urea, ethanol, methanol, glycerol,
+#   #   isopropanol, acetone, thf, dioxane, ethylene_glycol
+#   
+#   # Example: 30% v/v DMSO (reduces water proportionally)
+#   # co_solvents:
+#   #   - name: "dmso"
+#   #     volume_fraction: 0.30             # 30% v/v
+#   
+#   # Example: 2 M urea (additive, doesn't reduce water)
+#   # co_solvents:
+#   #   - name: "urea"
+#   #     concentration: 2.0                # Molar
+#   
+#   # Example: Custom co-solvent (not in library)
+#   # co_solvents:
+#   #   - name: "my_solvent"
+#   #     smiles: "CCOC(=O)C"               # SMILES required for custom
+#   #     density: 0.902                    # g/mL, required for volume_fraction
+#   #     volume_fraction: 0.15
+#   
+#   ions:
+#     neutralize: true                    # Add counter-ions to neutralize
+#     nacl_concentration: 0.15            # Molar (0.15 = 150 mM)
+#   
+#   box:
+#     padding: 1.2                        # nm from solute to box edge
+#     shape: "rhombic_dodecahedron"       # Efficient packing
+#     target_density: 1.0                 # g/mL
+#     tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
+
+# ============================================================================
+# Restraints (OPTIONAL)
+# ============================================================================
+# Distance restraints to maintain specific interactions during simulation.
+# Useful for keeping substrates in active sites.
+#
+# Restraint types:
+#   - flat_bottom  : No force within threshold, harmonic beyond
+#   - harmonic     : Standard harmonic restraint
+#   - upper_wall   : Only restrains if distance exceeds threshold
+#   - lower_wall   : Only restrains if distance below threshold
+#
+# Selection syntax:
+#   resid N        : Residue number (1-indexed, matches PDB)
+#   resname XXX    : Residue name (e.g., LIG, SER)
+#   name XXX       : Atom name (e.g., CA, OG, C1)
+#   pdbindex N     : PDB atom serial number (1-indexed, matches PyMOL)
+#   index N        : Internal atom index (0-indexed)
+#   and/or         : Combine selections
+#
+# restraints:
+#   - type: "flat_bottom"
+#     name: "substrate_restraint"
+#     atom1:
+#       selection: "resid 100 and name OG"   # Example: Serine OG
+#       description: "Catalytic residue"
+#     atom2:
+#       selection: "resname LIG and name C1"  # Example: Ligand carbon
+#       description: "Substrate reactive atom"
+#     distance: 3.5                           # Angstroms (flat-bottom threshold)
+#     force_constant: 10000.0                 # kJ/mol/nm^2
+#     enabled: true
+
+# ============================================================================
+# Thermodynamics (REQUIRED)
+# ============================================================================
+# Temperature and pressure settings for the simulation.
+#
+# thermodynamics:
+#   temperature: 300.0                    # Kelvin
+#   pressure: 1.0                         # atmospheres
+
+# ============================================================================
+# Simulation Phases (REQUIRED)
+# ============================================================================
+# Configure equilibration and production runs.
+#
+# ensemble options: NVT, NPT, NVE
+# thermostat options: LangevinMiddle (recommended), Langevin, Andersen
+# barostat options: MC (Monte Carlo), MCA (anisotropic)
+#
+# OPTION A: Simple equilibration (legacy)
+# Use this for straightforward equilibration without staged restraints.
+#
+# simulation_phases:
+#   equilibration:
+#     ensemble: "NVT"
+#     duration: 1.0                       # nanoseconds
+#     samples: 100                        # frames to save
+#     time_step: 2.0                      # femtoseconds
+#     thermostat: "LangevinMiddle"
+#     thermostat_timescale: 1.0           # picoseconds
+#   
+#   production:
+#     ensemble: "NPT"
+#     duration: 100.0                     # nanoseconds total
+#     samples: 2500                       # frames to save (total)
+#     time_step: 2.0                      # femtoseconds
+#     thermostat: "LangevinMiddle"
+#     thermostat_timescale: 1.0           # picoseconds
+#     barostat: "MC"
+#     barostat_frequency: 25              # steps between barostat moves
+#   
+#   # Daisy-chain: split production into segments for HPC job limits
+#   segments: 10                          # 10 segments = 10 ns each
+
+# ----------------------------------------------------------------------------
+# OPTION B: Multi-stage equilibration with position restraints (ADVANCED)
+# Use this for sophisticated equilibration protocols with:
+#   - Temperature ramping (simulated annealing style heating)
+#   - Position restraints on specific atom groups
+#   - Staged release of restraints
+#
+# NOTE: Use EITHER equilibration OR equilibration_stages, not both.
+#
+# Available atom groups for position restraints:
+#   protein_heavy     : All non-hydrogen protein atoms
+#   protein_backbone  : Protein backbone atoms (N, CA, C, O)
+#   protein_calpha    : Protein alpha carbons only
+#   ligand_heavy      : All non-hydrogen substrate/ligand atoms
+#   polymer_heavy     : All non-hydrogen polymer atoms
+#   solvent           : All solvent atoms (water + ions + cosolvents)
+#   water_only        : Only water molecules
+#   ions_only         : Only ions (Na+, Cl-, etc.)
+#   cosolvents_only   : Only cosolvent molecules (DMSO, etc.)
+#
+# Temperature settings:
+#   - Use "temperature" for constant temperature
+#   - Use "temperature_start" + "temperature_end" for ramping
+#   - temperature_increment: Temperature step size (K, default: 1.0)
+#   - temperature_interval: Time between increments (fs, default: 1200)
+#
+# simulation_phases:
+#   equilibration_stages:
+#     # Stage 1: Heat from 60K to 300K with everything restrained
+#     - name: "heating"
+#       duration: 0.288                   # nanoseconds
+#       samples: 50                       # trajectory frames
+#       ensemble: "NVT"
+#       temperature_start: 60.0           # Start temperature (K)
+#       temperature_end: 300.0            # End temperature (K)
+#       temperature_increment: 1.0        # Step size (K)
+#       temperature_interval: 1200.0      # Time between steps (fs)
+#       position_restraints:
+#         - group: "protein_heavy"
+#           force_constant: 4184.0        # kJ/mol/nm^2 (= 1 kcal/mol/A^2)
+#         - group: "polymer_heavy"
+#           force_constant: 4184.0
+#     
+#     # Stage 2: Relax polymers while keeping protein restrained
+#     - name: "polymer_relaxation"
+#       duration: 1.0                     # nanoseconds
+#       samples: 100
+#       ensemble: "NVT"
+#       temperature: 300.0                # Constant temperature
+#       position_restraints:
+#         - group: "protein_heavy"
+#           force_constant: 4184.0
+#     
+#     # Stage 3: Free equilibration (no restraints)
+#     - name: "free_equilibration"
+#       duration: 0.5                     # nanoseconds
+#       samples: 100
+#       ensemble: "NPT"
+#       temperature: 300.0
+#       # No position_restraints = unrestrained
+#   
+#   production:
+#     ensemble: "NPT"
+#     duration: 100.0
+#     samples: 2500
+#     time_step: 2.0
+#     thermostat: "LangevinMiddle"
+#     thermostat_timescale: 1.0
+#     barostat: "MC"
+#     barostat_frequency: 25
+#   
+#   segments: 10
+
+# ============================================================================
+# Output Configuration (REQUIRED)
+# ============================================================================
+# Directory structure and file naming.
+#
+# For HPC systems, you may want separate directories:
+#   - projects_directory: long-term storage (scripts, logs)
+#   - scratch_directory: high-performance storage (trajectories)
+#
+# For local development, set both to "." or just projects_directory.
+#
+# output:
+#   projects_directory: "."               # Where to put scripts and logs
+#   scratch_directory: null               # Where to put trajectories (null = same as projects)
+#   
+#   # Subdirectories within projects_directory
+#   job_scripts_subdir: "job_scripts"
+#   slurm_logs_subdir: "slurm_logs"
+#   
+#   # Naming template for run directories
+#   # Available variables: {enzyme}, {substrate}, {polymer_type}, {duration}, {temperature}, {replicate}
+#   # polymer_type format: {type_prefix}_{label1}{pct1}_{label2}{pct2} (e.g., SBMA-EGMA_A75_B25)
+#   naming_template: "{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}"
+#   
+#   # Output options
+#   save_checkpoint: true
+#   save_state_data: true
+#   trajectory_format: "dcd"              # Options: dcd, xtc
+
+# ============================================================================
+# Force Field Selection (OPTIONAL)
+# ============================================================================
+# Custom force field files. Defaults are usually fine.
+#
+# force_field:
+#   protein: "ff14sb_off_impropers_0.0.4.offxml"
+#   small_molecule: "openff-2.0.0.offxml"

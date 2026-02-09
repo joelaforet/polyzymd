@@ -1,0 +1,2 @@
+gmx trjconv -s prod.tpr -f prod.xtc -o prod_nojump.xtc -pbc nojump
+gmx trjconv -s prod.tpr -f prod_nojump.xtc -o prod_final.xtc -center -pbc mol -ur compact

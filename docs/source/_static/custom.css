@@ -1,0 +1,39 @@
+/* Custom CSS for PolyzyMD documentation */
+
+/* Make code blocks more readable */
+.highlight {
+    background: #f8f8f8;
+    border-radius: 4px;
+}
+
+/* Style admonitions */
+.admonition {
+    border-radius: 4px;
+}
+
+/* Style for YAML code blocks */
+.highlight-yaml .highlight {
+    background: #f5f5f0;
+}
+
+/* Make tables more readable */
+table.docutils {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+table.docutils td, table.docutils th {
+    padding: 8px 12px;
+    border: 1px solid #e1e4e5;
+}
+
+/* Style parameter lists */
+.field-list dt {
+    font-weight: bold;
+    color: #404040;
+}
+
+/* Improve sidebar navigation */
+.wy-nav-content {
+    max-width: 900px;
+}
