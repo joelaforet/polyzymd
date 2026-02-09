@@ -1,3 +1,8 @@
+.. image:: _static/logo.png
+   :alt: PolyzyMD Logo
+   :align: center
+   :width: 400px
+
 PolyzyMD Documentation
 ======================
 

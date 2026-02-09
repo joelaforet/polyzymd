@@ -32,9 +32,9 @@ autodoc_mock_imports = [
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = "PolyzyMD"
-copyright = "2024, Joe Laforet Jr."
+copyright = "2026, Joe Laforet Jr."
 author = "Joe Laforet Jr."
-release = "0.1.0"
+release = "1.0.0"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -113,9 +113,13 @@ source_suffix = {
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
 
+# Logo configuration
+html_logo = "_static/logo.png"
+html_favicon = "_static/logo.png"
+
 # Theme options
 html_theme_options = {
-    "logo_only": False,
+    "logo_only": True,
     "prev_next_buttons_location": "bottom",
     "style_external_links": True,
     "collapse_navigation": False,

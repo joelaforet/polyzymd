@@ -1,10 +1,20 @@
-# PolyzyMD
+<p align="center">
+  <img src="docs/source/_static/logo.png" alt="PolyzyMD Logo" width="400">
+</p>
 
-[![CI](https://github.com/joelaforet/polyzymd/actions/workflows/ci.yml/badge.svg)](https://github.com/joelaforet/polyzymd/actions/workflows/ci.yml)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+<h1 align="center">PolyzyMD</h1>
 
-Molecular dynamics simulation toolkit for enzyme-polymer systems.
+<p align="center">
+  <a href="https://github.com/joelaforet/polyzymd/actions/workflows/ci.yml"><img src="https://github.com/joelaforet/polyzymd/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
+
+<p align="center">
+  <strong>Molecular dynamics simulation toolkit for enzyme-polymer systems.</strong>
+</p>
+
+---
 
 ## Overview
 
