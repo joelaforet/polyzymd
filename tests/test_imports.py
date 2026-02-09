@@ -1,5 +1,7 @@
 """Test that all public modules can be imported."""
 
+from pathlib import Path
+
 import pytest
 
 
@@ -22,12 +24,12 @@ class TestImports:
         """Test schema imports."""
         from polyzymd.config.schema import (
             EnzymeConfig,
-            SubstrateConfig,
-            PolymerConfig,
-            SolventConfig,
-            ThermodynamicsConfig,
-            SimulationPhasesConfig,
             OutputConfig,
+            PolymerConfig,
+            SimulationPhasesConfig,
+            SolventConfig,
+            SubstrateConfig,
+            ThermodynamicsConfig,
         )
 
         assert EnzymeConfig is not None
@@ -55,8 +57,9 @@ class TestConfigValidation:
 
     def test_enzyme_config_required_fields(self):
         """Test EnzymeConfig requires name and pdb_path."""
-        from polyzymd.config.schema import EnzymeConfig
         from pydantic import ValidationError
+
+        from polyzymd.config.schema import EnzymeConfig
 
         # Should fail without required fields
         with pytest.raises(ValidationError):
@@ -65,41 +68,51 @@ class TestConfigValidation:
         # Should succeed with required fields
         config = EnzymeConfig(name="TestEnzyme", pdb_path="test.pdb")
         assert config.name == "TestEnzyme"
-        assert config.pdb_path == "test.pdb"
+        assert config.pdb_path == Path("test.pdb")
 
     def test_monomer_probabilities_sum(self):
         """Test that monomer probabilities must sum to 1.0."""
-        from polyzymd.config.schema import PolymerConfig, MonomerConfig
         from pydantic import ValidationError
+
+        from polyzymd.config.schema import MonomerSpec, PolymerConfig
 
         # Should fail if probabilities don't sum to 1.0
         with pytest.raises(ValidationError):
             PolymerConfig(
                 type_prefix="TEST",
                 monomers=[
-                    MonomerConfig(label="A", probability=0.5, name="MonA"),
-                    MonomerConfig(label="B", probability=0.3, name="MonB"),  # Sum = 0.8
+                    MonomerSpec(label="A", probability=0.5, name="MonA"),
+                    MonomerSpec(label="B", probability=0.3, name="MonB"),  # Sum = 0.8
                 ],
                 length=5,
                 count=2,
+                sdf_directory=Path("/tmp/test"),  # Required for cached mode
             )
 
         # Should succeed if probabilities sum to 1.0
         config = PolymerConfig(
             type_prefix="TEST",
             monomers=[
-                MonomerConfig(label="A", probability=0.7, name="MonA"),
-                MonomerConfig(label="B", probability=0.3, name="MonB"),
+                MonomerSpec(label="A", probability=0.7, name="MonA"),
+                MonomerSpec(label="B", probability=0.3, name="MonB"),
             ],
             length=5,
             count=2,
+            sdf_directory=Path("/tmp/test"),  # Required for cached mode
         )
         assert len(config.monomers) == 2
 
-    def test_thermodynamics_defaults(self):
-        """Test ThermodynamicsConfig has sensible defaults."""
+    def test_thermodynamics_config(self):
+        """Test ThermodynamicsConfig validation and defaults."""
+        from pydantic import ValidationError
+
         from polyzymd.config.schema import ThermodynamicsConfig
 
-        config = ThermodynamicsConfig()
+        # Temperature is required (no default)
+        with pytest.raises(ValidationError):
+            ThermodynamicsConfig()
+
+        # Should succeed with temperature provided
+        config = ThermodynamicsConfig(temperature=300.0)
         assert config.temperature == 300.0
-        assert config.pressure == 1.0
+        assert config.pressure == 1.0  # Default pressure
