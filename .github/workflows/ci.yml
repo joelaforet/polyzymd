@@ -24,10 +24,10 @@ jobs:
           pip install ruff
       
       - name: Run ruff check
-        run: ruff check src/
+        run: ruff check src/polyzymd/
       
       - name: Run ruff format check
-        run: ruff format --check src/
+        run: ruff format --check src/polyzymd/
 
   typecheck:
     name: Type Check

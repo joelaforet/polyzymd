@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional, Union
 
 import openmm
 from openmm import XmlSerializer
+from openmm import unit as u
 from openmm.app import (
     CheckpointReporter,
     DCDReporter,
@@ -23,7 +24,6 @@ from openmm.app import (
     StateDataReporter,
 )
 from openmm.unit import Quantity
-from openmm import unit as u
 
 LOGGER = logging.getLogger(__name__)
 

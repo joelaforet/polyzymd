@@ -20,15 +20,14 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from rdkit import Chem
-from rdkit.Chem import rdFMCS
-
-from polymerist.rdutils.reactions.reactions import AnnotatedReaction
-from polymerist.rdutils.reactions.reactors import PolymerizationReactor
-from polymerist.rdutils.sanitization import explicit_mol_from_SMILES, Smiles
+from polymerist.genutils.iteration import sort_dict_by_keys
 from polymerist.polymers.monomers import MonomerGroup
 from polymerist.rdutils.bonding.portlib import get_num_ports
-from polymerist.genutils.iteration import sort_dict_by_keys
+from polymerist.rdutils.reactions.reactions import AnnotatedReaction
+from polymerist.rdutils.reactions.reactors import PolymerizationReactor
+from polymerist.rdutils.sanitization import Smiles, explicit_mol_from_SMILES
+from rdkit import Chem
+from rdkit.Chem import rdFMCS
 
 logger = logging.getLogger(__name__)
 
@@ -241,8 +240,8 @@ class FragmentGenerator:
         logger.info(f"Generated {len(activated_fragments)} fragment types")
 
         # Step 5: Name fragments by parent and functionality
+        from collections import Counter, defaultdict
         from string import ascii_lowercase
-        from collections import defaultdict, Counter
 
         named_fragments: Dict[str, Smiles] = {}
         fragment_name_modifiers: Dict[str, Counter] = defaultdict(Counter)

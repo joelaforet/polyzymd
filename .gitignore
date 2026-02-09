@@ -208,3 +208,17 @@ __marimo__/
 
 # All Signac project folders because the data needed to create them is stored in src/init.py
 project*
+
+# =============================================================================
+# PolyzyMD-specific ignores
+# =============================================================================
+
+# Conda recipe (template for conda-forge, not needed in repo)
+conda-recipe/
+
+# Test artifacts from GROMACS exporter tests
+src/polyzymd/exporters/gmx_run_again/
+src/polyzymd/exporters/gmx_test_correct_outputs/
+
+# Legacy backup files
+*.bak

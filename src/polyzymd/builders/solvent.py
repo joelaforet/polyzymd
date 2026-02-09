@@ -240,8 +240,9 @@ class SolventBuilder:
             Solvated OpenFF Topology.
         """
         from openff.interchange.components import _packmol as packmol
-        from polyzymd.utils import boxvectors
+
         from polyzymd.data.solvent_molecules import get_solvent_molecule
+        from polyzymd.utils import boxvectors
 
         if composition is None:
             composition = SolventComposition()

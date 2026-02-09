@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Union
 
 import openmm
-from openmm import unit as omm_unit
 from openmm import XmlSerializer
-from openmm.app import DCDReporter, PDBFile, StateDataReporter, Simulation
+from openmm import unit as omm_unit
+from openmm.app import DCDReporter, PDBFile, Simulation, StateDataReporter
 
 if TYPE_CHECKING:
     from polyzymd.config.schema import (
@@ -463,11 +463,11 @@ class SimulationRunner:
         Returns:
             Dictionary with stage results
         """
+        from polyzymd.config.schema import Ensemble
         from polyzymd.core.position_restraints import (
             add_position_restraints_to_system,
             remove_position_restraints_from_system,
         )
-        from polyzymd.config.schema import Ensemble
 
         stage_name = f"equilibration_{stage_index}_{stage.name}"
         LOGGER.info(f"Starting equilibration stage: {stage.name} ({stage.duration} ns)")

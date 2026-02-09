@@ -181,8 +181,8 @@ def build(
         - The .mdp file is a stub for single-point energy; modify for production
         - Topology is split into .itp files for cleaner multi-component systems
     """
-    from polyzymd.config.schema import SimulationConfig
     from polyzymd.builders.system_builder import SystemBuilder
+    from polyzymd.config.schema import SimulationConfig
 
     click.echo(f"Loading configuration from: {config}")
 
@@ -214,7 +214,7 @@ def build(
             if gromacs:
                 click.echo()
                 click.echo("GROMACS export enabled:")
-                click.echo(f"  Output: {{projects_dir}}/{{replicate}}/gromacs/")
+                click.echo("  Output: {projects_dir}/{replicate}/gromacs/")
             return
 
         click.echo(f"Building system for replicate {replicate}...")
@@ -235,9 +235,9 @@ def build(
             )
             export_result = builder.export_to_gromacs(gromacs_dir)
 
-            click.echo(f"GROMACS export successful!")
+            click.echo("GROMACS export successful!")
             click.echo(f"Output directory: {gromacs_dir}")
-            click.echo(f"Files generated:")
+            click.echo("Files generated:")
             click.echo(f"  - {export_result['gro'].name} (coordinates)")
             click.echo(f"  - {export_result['top'].name} (topology)")
             click.echo(f"  - {export_result['em_mdp'].name} (energy minimization)")
@@ -314,12 +314,12 @@ def build(
             with open(system_xml_path, "w") as f:
                 f.write(XmlSerializer.serialize(omm_system))
 
-            click.echo(f"System built successfully!")
+            click.echo("System built successfully!")
             click.echo(f"Output directory: {working_dir}")
-            click.echo(f"Files saved:")
-            click.echo(f"  - solvated_system.pdb (topology + positions)")
-            click.echo(f"  - system.xml (OpenMM system with restraints)")
-            click.echo(f"Use 'polyzymd run --skip-build' to run without rebuilding.")
+            click.echo("Files saved:")
+            click.echo("  - solvated_system.pdb (topology + positions)")
+            click.echo("  - system.xml (OpenMM system with restraints)")
+            click.echo("Use 'polyzymd run --skip-build' to run without rebuilding.")
 
     except FileNotFoundError as e:
         click.echo(f"Error: {e}", err=True)
@@ -428,8 +428,8 @@ def run(
         - Use --dry-run to export files without running the simulation
         - --skip-build is not supported for GROMACS (always rebuilds)
     """
-    from polyzymd.config.schema import SimulationConfig
     from polyzymd.builders.system_builder import SystemBuilder
+    from polyzymd.config.schema import SimulationConfig
 
     click.echo(f"Loading configuration from: {config}")
 
@@ -488,7 +488,7 @@ def _run_gromacs(
         skip_build: If True, skip system building (not supported for GROMACS MVP).
     """
     from polyzymd.builders.system_builder import SystemBuilder
-    from polyzymd.exporters.gromacs import GromacsExporter, GromacsRunner, GromacsError
+    from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
 
     # Warn about unsupported options
     if skip_build:
@@ -1154,10 +1154,10 @@ def init(name: str) -> None:
         click.echo()
         click.echo("Directory structure:")
         click.echo(f"  {name}/")
-        click.echo(f"  ├── config.yaml              <- Edit this file")
-        click.echo(f"  ├── structures/              <- Add your PDB/SDF files")
-        click.echo(f"  ├── job_scripts/")
-        click.echo(f"  └── slurm_logs/")
+        click.echo("  ├── config.yaml              <- Edit this file")
+        click.echo("  ├── structures/              <- Add your PDB/SDF files")
+        click.echo("  ├── job_scripts/")
+        click.echo("  └── slurm_logs/")
         click.echo()
         click.echo("Next steps:")
         click.echo(f"  1. Add structure files to {name}/structures/")

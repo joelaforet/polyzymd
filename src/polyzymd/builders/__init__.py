@@ -1,9 +1,9 @@
 """Builders for constructing molecular systems."""
 
 from polyzymd.builders.enzyme import EnzymeBuilder
-from polyzymd.builders.substrate import SubstrateBuilder
 from polyzymd.builders.polymer import PolymerBuilder
-from polyzymd.builders.solvent import SolventBuilder, SolventComposition, CoSolvent
+from polyzymd.builders.solvent import CoSolvent, SolventBuilder, SolventComposition
+from polyzymd.builders.substrate import SubstrateBuilder
 from polyzymd.builders.system_builder import SystemBuilder
 
 __all__ = [

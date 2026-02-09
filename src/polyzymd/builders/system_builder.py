@@ -285,6 +285,7 @@ class SystemBuilder:
 
         from openff.interchange.components import _packmol as packmol
         from openff.units import Quantity
+
         from polyzymd.utils import boxvectors
 
         LOGGER.info(
@@ -1146,7 +1147,7 @@ class SystemBuilder:
         top_path = output_dir / f"{prefix}.top"
         mdp_path = output_dir / f"{prefix}.mdp"
 
-        LOGGER.info(f"Generated GROMACS files:")
+        LOGGER.info("Generated GROMACS files:")
         LOGGER.info(f"  Coordinates: {gro_path}")
         LOGGER.info(f"  Topology:    {top_path}")
         LOGGER.info(f"  MDP stub:    {mdp_path}")

@@ -16,7 +16,6 @@ from typing import Any, Dict, List, Literal, Optional, Union
 from openmm import unit as openmm_unit
 from openmm.unit import Quantity
 
-
 # =============================================================================
 # Unit Serialization Helpers
 # =============================================================================

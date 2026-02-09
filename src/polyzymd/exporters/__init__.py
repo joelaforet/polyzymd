@@ -10,9 +10,9 @@ Modules:
 """
 
 from polyzymd.exporters.gromacs import (
+    GromacsError,
     GromacsExporter,
     GromacsRunner,
-    GromacsError,
     MDPGenerator,
     PositionRestraintGenerator,
     RunScriptGenerator,

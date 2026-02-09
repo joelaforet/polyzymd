@@ -161,7 +161,6 @@ def _generate_charged_molecule(
 
 def _save_molecule(mol: "Molecule", path: Path) -> None:
     """Save molecule to SDF with metadata."""
-    import json
 
     # Package metadata
     metadata_dict = {}

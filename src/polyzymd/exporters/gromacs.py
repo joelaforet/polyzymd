@@ -716,7 +716,7 @@ class MDPGenerator:
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 
-        ref_p = self._pressure * 1.01325 # GROMACS uses bar internally, convert from atm
+        ref_p = self._pressure * 1.01325  # GROMACS uses bar internally, convert from atm
 
         return MDPParameters(
             title=f"Production MD ({prod.duration} ns)",
@@ -1166,8 +1166,6 @@ class PositionRestraintGenerator:
         )
         return {}
 
-        return generated
-
 
 # =============================================================================
 # Topology Modifier
@@ -1371,7 +1369,7 @@ class RunScriptGenerator:
         """Generate script header with configuration."""
         return [
             "#!/bin/bash",
-            f"# GROMACS Workflow Script",
+            "# GROMACS Workflow Script",
             f"# {POLYZYMD_BRANDING}",
             f"# Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "#",
@@ -1390,7 +1388,7 @@ class RunScriptGenerator:
             f'PREFIX="{self._prefix}"',
             "",
             'echo "========================================"',
-            f'echo "GROMACS Workflow for ${{PREFIX}}"',
+            'echo "GROMACS Workflow for ${PREFIX}"',
             'echo "========================================"',
             'echo "Using GROMACS: $GMX"',
             'echo ""',
@@ -2181,12 +2179,12 @@ class GromacsRunner:
         """Print workflow completion summary."""
         self._print_banner("Workflow Complete!", POLYZYMD_BRANDING)
         print("\nOutput files:")
-        print(f"  em.gro              - Minimized structure")
+        print("  em.gro              - Minimized structure")
         for i in range(len(self._eq_mdps)):
             print(f"  eq_{i + 1:02d}.gro           - Equilibrated structure (stage {i + 1})")
-        print(f"  prod.xtc            - Production trajectory")
-        print(f"  prod.edr            - Energy file")
-        print(f"  prod.log            - Log file")
-        print(f"  prod_nojump.xtc     - Trajectory without PBC jumps")
-        print(f"  prod_centered.xtc   - Centered trajectory for visualization")
+        print("  prod.xtc            - Production trajectory")
+        print("  prod.edr            - Energy file")
+        print("  prod.log            - Log file")
+        print("  prod_nojump.xtc     - Trajectory without PBC jumps")
+        print("  prod_centered.xtc   - Centered trajectory for visualization")
         print(f"\nAll files in: {self._working_dir}")

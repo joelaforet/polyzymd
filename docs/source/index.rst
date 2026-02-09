@@ -73,6 +73,7 @@ Getting Started
    tutorials/gromacs_export
    tutorials/residue_assignment
    tutorials/architecture
+   tutorials/packaging
    tutorials/troubleshooting
    tutorials/broken_molecules_debugging
    tutorials/contributing

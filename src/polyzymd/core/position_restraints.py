@@ -18,7 +18,7 @@ import logging
 from typing import List, Optional
 
 from openmm import CustomExternalForce, System
-from openmm.unit import Quantity, nanometer, kilojoule_per_mole
+from openmm.unit import Quantity, kilojoule_per_mole, nanometer
 
 logger = logging.getLogger(__name__)
 

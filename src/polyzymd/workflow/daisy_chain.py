@@ -510,7 +510,7 @@ class DaisyChainSubmitter:
         print(f"  Total jobs to submit: {total_jobs}")
         print(f"  Dependency chains: {num_replicates} independent chains")
         print()
-        print(f"SLURM Configuration:")
+        print("SLURM Configuration:")
         print(f"  Partition: {config.slurm_config.partition}")
         print(f"  QoS: {config.slurm_config.qos}")
         print(f"  Account: {config.slurm_config.account}")
@@ -538,8 +538,8 @@ class DaisyChainSubmitter:
                 job_ids = [r.job_id for r in results]
                 print(f"  Replicate {replicate}: {' -> '.join(job_ids)}")
 
-            print(f"\nMonitor progress with: squeue -u $USER")
-            print(f"Check job details with: scontrol show job <job_id>")
+            print("\nMonitor progress with: squeue -u $USER")
+            print("Check job details with: scontrol show job <job_id>")
 
 
 def submit_daisy_chain(

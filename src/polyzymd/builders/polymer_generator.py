@@ -20,22 +20,23 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
+from polymerist.genutils.fileutils.pathutils import assemble_path
+from polymerist.mdtools.openfftools.partition import partition
+from polymerist.mdtools.openfftools.topology import (
+    get_largest_offmol,
+    topology_from_sdf,
+    topology_to_sdf,
+)
+from polymerist.polymers.building import build_linear_polymer, mbmol_to_openmm_pdb, mbmol_to_rdmol
+from polymerist.polymers.monomers import MonomerGroup
+from polymerist.rdutils.rdcoords.piercing import summarize_ring_piercing
 from rdkit import Chem
 
-from polymerist.polymers.monomers import MonomerGroup
-from polymerist.polymers.building import build_linear_polymer, mbmol_to_openmm_pdb
-from polymerist.polymers.building import mbmol_to_rdmol
-from polymerist.rdutils.rdcoords.piercing import summarize_ring_piercing
-from polymerist.mdtools.openfftools.topology import topology_from_sdf, topology_to_sdf
-from polymerist.mdtools.openfftools.topology import get_largest_offmol
-from polymerist.mdtools.openfftools.partition import partition
-from polymerist.genutils.fileutils.pathutils import assemble_path
-
 if TYPE_CHECKING:
-    from openff.toolkit import Topology as OFFTopology
     from openff.toolkit import Molecule as OFFMolecule
+    from openff.toolkit import Topology as OFFTopology
 
 logger = logging.getLogger(__name__)
 
