@@ -590,16 +590,6 @@ Watch out for atom order issues when:
 4. **Combining systems from different sources** - verify consistent ordering
 5. **Using topology manipulation tools** - some tools sort or reorder atoms
 
----
-
-## Acknowledgments
-
-This debugging journey was a collaboration between human intuition and systematic investigation. We hope this document saves future scientists from the frustration of staring at a ball of bonds, wondering what went wrong.
-
-Remember: in computational science, the most frustrating bugs often have the simplest explanations - once you find them.
-
----
-
 *Last updated: January 2026*
 
 *Found this helpful? Found an error? Open an issue at https://github.com/joelaforet/polyzymd/issues*

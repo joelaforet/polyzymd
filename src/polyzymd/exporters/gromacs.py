@@ -716,7 +716,7 @@ class MDPGenerator:
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 
-        ref_p = self._pressure * 1.01325
+        ref_p = self._pressure * 1.01325 # GROMACS uses bar internally, convert from atm
 
         return MDPParameters(
             title=f"Production MD ({prod.duration} ns)",
