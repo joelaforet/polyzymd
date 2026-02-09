@@ -26,6 +26,10 @@ PolyzyMD provides a streamlined workflow for setting up and running MD simulatio
 - **HPC Integration**: Daisy-chain job submission for SLURM clusters
 - **Configuration**: YAML-based configuration with validation
 
+## Documentation
+
+You can find documentation for this package [here!](https://polyzymd.readthedocs.io/en/latest/)
+
 ## Installation
 
 ### Recommended: Conda Environment
