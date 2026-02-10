@@ -1226,6 +1226,17 @@ def info() -> None:
     click.echo("Example configs: polyzymd/configs/examples/")
 
 
+# =============================================================================
+# Analysis Commands (from analysis module)
+# =============================================================================
+
+# Register analysis command groups
+from polyzymd.analysis.cli import analyze, plot
+
+cli.add_command(analyze)
+cli.add_command(plot)
+
+
 def main() -> int:
     """Main entry point."""
     try:
