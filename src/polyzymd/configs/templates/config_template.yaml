@@ -8,7 +8,7 @@
 # 3. Validate your configuration: polyzymd validate -c config.yaml
 # 4. Build your system: polyzymd build -c config.yaml -r 1
 #
-# Documentation: https://polyzymd.readthedocs.io/tutorials/getting_started
+# Documentation: https://polyzymd.readthedocs.io/en/latest/tutorials/quickstart.html
 #
 # REQUIRED SECTIONS:
 #   - name (simulation identifier)

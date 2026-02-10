@@ -1165,7 +1165,9 @@ def init(name: str) -> None:
         click.echo(f"  3. Validate: polyzymd validate -c {name}/config.yaml")
         click.echo(f"  4. Build:    polyzymd build -c {name}/config.yaml -r 1")
         click.echo()
-        click.echo("Documentation: https://polyzymd.readthedocs.io/tutorials/getting_started")
+        click.echo(
+            "Documentation: https://polyzymd.readthedocs.io/en/latest/tutorials/quickstart.html"
+        )
 
     except Exception as e:
         # Clean up on failure
