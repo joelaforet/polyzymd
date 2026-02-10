@@ -40,8 +40,8 @@ jobs:
       - uses: mamba-org/setup-micromamba@v1
         with:
           generate-run-shell: false  # Fix for ENOENT error
-          environment-file: devtools/conda-envs/test-env.yml
-          environment-name: test
+          environment-file: devtools/conda-envs/polyzymd-env.yml
+          environment-name: polyzymd-env
           condarc: |
             channels:
               - conda-forge

@@ -4,123 +4,66 @@ This guide covers installing PolyzyMD and its dependencies.
 
 ## Prerequisites
 
-PolyzyMD requires:
-
 - **Python 3.10+**
-- **OpenMM 8.0+** (for MD simulations)
-- **OpenFF Toolkit 0.14+** (for force field assignment)
-- **OpenFF Interchange 0.3+** (for system building)
+- **conda or mamba** (required for OpenMM/OpenFF dependencies)
 
-These packages have complex dependencies and are best installed via conda.
+```{note}
+OpenMM, OpenFF Toolkit, and other core simulation dependencies are **only available via conda/mamba**, not PyPI. A conda-based environment is required.
+```
 
-## Installation Methods
+## User Installation
 
-### Method 1: Conda Environment (Recommended)
+### Step 1: Create Conda Environment
 
-We recommend creating a dedicated conda environment with all dependencies:
+#### Option A: Using mamba (Recommended)
+
+[Mamba](https://mamba.readthedocs.io/) is a faster drop-in replacement for conda:
 
 ```bash
-# Create environment with OpenMM and OpenFF
-mamba create -n polyzymd-env python=3.11 \
-    openmm openff-toolkit openff-interchange \
-    openff-nagl openff-nagl-models packmol mbuild openbabel \
-    -c conda-forge
+mamba create -n polyzymd-env python=3.11 openmm openff-toolkit openff-interchange \
+    openff-nagl openff-nagl-models openff-forcefields openff-units packmol \
+    mbuild mdtraj numpy scipy pandas pydantic pyyaml click tqdm -c conda-forge
+mamba activate polyzymd-env
+```
 
-# Activate the environment
+#### Option B: Using conda
+
+```bash
+conda create -n polyzymd-env python=3.11 openmm openff-toolkit openff-interchange \
+    openff-nagl openff-nagl-models openff-forcefields openff-units packmol \
+    mbuild mdtraj numpy scipy pandas pydantic pyyaml click tqdm -c conda-forge
 conda activate polyzymd-env
-
-# Install pip-only dependencies
-pip install polymerist rdkit
-
-# Clone and install PolyzyMD
-git clone https://github.com/joelaforet/polyzymd.git
-cd polyzymd
-pip install -e .
 ```
 
-### Method 2: Existing Environment
+#### Option C: Using our environment file
 
-If you already have a conda environment with OpenMM/OpenFF (e.g., `polymerist-env`):
+For a fully reproducible environment matching our CI:
 
 ```bash
-conda activate polymerist-env
-git clone https://github.com/joelaforet/polyzymd.git
-cd polyzymd
-pip install -e .
+# Using mamba (recommended)
+mamba env create -f https://raw.githubusercontent.com/joelaforet/polyzymd/main/devtools/conda-envs/polyzymd-env.yml
+mamba activate polyzymd-env
+
+# Or using conda
+conda env create -f https://raw.githubusercontent.com/joelaforet/polyzymd/main/devtools/conda-envs/polyzymd-env.yml
+conda activate polyzymd-env
 ```
 
-### Method 3: pip Only (Advanced)
+### Step 2: Install PolyzyMD
 
-```{warning}
-Installing OpenMM via pip can be problematic. Conda is strongly recommended.
-```
+With your environment activated:
 
 ```bash
-pip install openmm openff-toolkit openff-interchange
-pip install git+https://github.com/joelaforet/polyzymd.git
+pip install polyzymd
 ```
 
-## HPC Installation
-
-On HPC systems, you typically need to:
-
-1. **Load the anaconda module**:
-   ```bash
-   module load anaconda
-   # or: module load miniconda
-   ```
-
-2. **Clone to your projects directory** (long-term storage):
-   ```bash
-   cd /projects/$USER
-   git clone https://github.com/joelaforet/polyzymd.git
-   cd polyzymd
-   ```
-
-3. **Install in your environment**:
-   ```bash
-   conda activate polymerist-env
-   pip install -e .
-   ```
-
-4. **Verify installation**:
-   ```bash
-   polyzymd info
-   ```
-
-## Optional Dependencies
-
-### AmberTools (for AM1-BCC charging)
-
-PolyzyMD defaults to NAGL for partial charge assignment, which is fast and
-doesn't require additional dependencies. However, if you need AM1-BCC charges
-via the AmberTools backend:
+To install a specific version:
 
 ```bash
-mamba install -c conda-forge ambertools
+pip install polyzymd==1.0.0
 ```
 
-Then use in your configuration or code:
-
-```python
-from polyzymd.utils.charging import get_charger
-
-# Use AmberTools for AM1-BCC charges
-charger = get_charger("am1bcc", toolkit="ambertools")
-charged_mol = charger.charge_molecule(molecule)
-```
-
-### MDAnalysis (for trajectory analysis)
-
-For advanced trajectory analysis features:
-
-```bash
-mamba install -c conda-forge mdanalysis
-```
-
-## Verifying Installation
-
-After installation, verify everything is working:
+### Verify Installation
 
 ```bash
 # Check CLI is available
@@ -131,69 +74,212 @@ polyzymd info
 ```
 
 Expected output:
+
 ```
 PolyzyMD - Molecular Dynamics for Enzyme-Polymer Systems
-Version: 0.1.0
+Version: 1.0.0
 
 Dependencies:
   OpenMM: 8.1.1
-  OpenFF Toolkit: 0.14.4
-  OpenFF Interchange: 0.3.18
-  Pydantic: 2.5.0
+  OpenFF Toolkit: 0.16.x
+  OpenFF Interchange: 0.4.x
+  Pydantic: 2.x.x
 
 Example configs: polyzymd/configs/examples/
 ```
 
-## Common Installation Issues
+## Developer Installation
 
-### "README.md not found"
-
-If you see this error during `pip install -e .`:
-
-```
-OSError: Readme file does not exist: README.md
-```
-
-Make sure you have the latest version of the repository:
-
-```bash
-git pull origin main
-```
-
-### Missing OpenMM
-
-If `polyzymd info` shows "OpenMM: NOT INSTALLED":
-
-```bash
-conda install -c conda-forge openmm
-```
-
-### Module Import Errors
-
-If you get import errors when running `polyzymd`:
-
-```bash
-# Make sure you're in the right environment
-conda activate polyzymd-env
-
-# Reinstall in development mode
-pip install -e .
-```
-
-## Development Installation
-
-For contributing to PolyzyMD:
+For contributing to PolyzyMD or modifying the source code:
 
 ```bash
 # Clone the repository
 git clone https://github.com/joelaforet/polyzymd.git
 cd polyzymd
 
-# Install with development dependencies
+# Create environment from our environment file
+mamba env create -f devtools/conda-envs/polyzymd-env.yml
+mamba activate polyzymd-env
+
+# Install in editable mode with dev dependencies
 pip install -e ".[dev]"
 
-# Install pre-commit hooks (optional)
+# (Optional) Install pre-commit hooks
 pre-commit install
+```
+
+## HPC Installation
+
+```{warning}
+The HPC/SLURM functionality in PolyzyMD was designed with **CU Boulder's Alpine and Blanca** clusters in mind. The SLURM presets and job submission scripts **will not work out of the box** for other systems like Bridges2 or XSEDE resources. Support for additional HPC systems is planned for a future release.
+```
+
+On HPC systems, you typically need to:
+
+### 1. Load the anaconda/mamba module
+
+```bash
+module load anaconda
+# or: module load mambaforge
+# or: module load miniforge
+```
+
+### 2. Create the environment
+
+```bash
+# Navigate to your projects directory (long-term storage)
+cd /projects/$USER
+
+# Create the environment
+mamba env create -f https://raw.githubusercontent.com/joelaforet/polyzymd/main/devtools/conda-envs/polyzymd-env.yml
+```
+
+### 3. Install PolyzyMD
+
+```bash
+mamba activate polyzymd-env
+pip install polyzymd
+```
+
+### 4. Verify installation
+
+```bash
+polyzymd info
+```
+
+### CU Boulder Specific Notes
+
+On Alpine/Blanca, you may want to install to a shared project space:
+
+```bash
+# Load modules
+module load mambaforge
+
+# Create environment in project space
+mamba env create -f https://raw.githubusercontent.com/joelaforet/polyzymd/main/devtools/conda-envs/polyzymd-env.yml \
+    -p /projects/$USER/envs/polyzymd-env
+
+# Activate with full path
+mamba activate /projects/$USER/envs/polyzymd-env
+
+# Install polyzymd
+pip install polyzymd
+```
+
+## Note for uv Users
+
+[uv](https://github.com/astral-sh/uv) is a fast Python package manager, but it only works with packages available on PyPI. Unfortunately, **OpenMM, OpenFF Toolkit, and other core simulation dependencies are not available on PyPI** — they must be installed via conda or mamba.
+
+If you prefer uv for package management, you can:
+
+1. Create a conda/mamba environment with the simulation stack (OpenMM, OpenFF, etc.)
+2. Activate that conda environment
+3. Use uv for additional pure-Python packages within that environment
+
+However, `pip install polyzymd` within an activated conda environment is the simplest and recommended approach.
+
+## Optional Dependencies
+
+### AmberTools (for AM1-BCC charging)
+
+PolyzyMD defaults to NAGL for partial charge assignment, which is fast and doesn't require additional dependencies. If you need AM1-BCC charges via AmberTools:
+
+```bash
+mamba install -c conda-forge ambertools
+```
+
+```{note}
+AmberTools has limited availability on macOS and can cause dependency conflicts. We recommend using a separate environment if needed.
+```
+
+Then use in your configuration:
+
+```yaml
+substrate:
+  charge_method: "am1bcc"
+```
+
+Or in code:
+
+```python
+from polyzymd.utils.charging import get_charger
+
+charger = get_charger("am1bcc", toolkit="ambertools")
+charged_mol = charger.charge_molecule(molecule)
+```
+
+### OpenEye Toolkit (commercial, faster AM1-BCC)
+
+If you have an OpenEye license:
+
+```bash
+mamba install -c openeye openeye-toolkits
+```
+
+### MDAnalysis (for advanced trajectory analysis)
+
+```bash
+mamba install -c conda-forge mdanalysis
+```
+
+## Common Installation Issues
+
+### "Module not found: openmm"
+
+OpenMM must be installed via conda, not pip:
+
+```bash
+mamba install -c conda-forge openmm
+```
+
+### "polyzymd: command not found"
+
+Make sure you've activated the correct environment:
+
+```bash
+mamba activate polyzymd-env
+which polyzymd  # Should show path in your env
+```
+
+### Environment solver takes forever
+
+Use mamba instead of conda for faster environment solving:
+
+```bash
+# Install mamba if you don't have it
+conda install -n base -c conda-forge mamba
+
+# Then use mamba for environment creation
+mamba env create -f polyzymd-env.yml
+```
+
+### Conflicts with existing environment
+
+Create a fresh environment rather than installing into an existing one:
+
+```bash
+mamba create -n polyzymd-env --clone base  # Don't do this
+mamba env create -f polyzymd-env.yml       # Do this instead
+```
+
+## Updating PolyzyMD
+
+To update to the latest version:
+
+```bash
+mamba activate polyzymd-env
+pip install --upgrade polyzymd
+```
+
+## Uninstalling
+
+```bash
+# Remove the package
+pip uninstall polyzymd
+
+# Remove the entire environment (optional)
+mamba deactivate
+mamba env remove -n polyzymd-env
 ```
 
 ## Next Steps

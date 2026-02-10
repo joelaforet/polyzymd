@@ -1,4 +1,4 @@
-name: test-env
+name: polyzymd-env
 channels:
   - conda-forge
 dependencies:

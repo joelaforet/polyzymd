@@ -276,7 +276,7 @@ jobs:
     steps:
       - uses: mamba-org/setup-micromamba@v1
         with:
-          environment-file: devtools/conda-envs/test-env.yml
+          environment-file: devtools/conda-envs/polyzymd-env.yml
       
       - run: pip install . --no-deps
       - run: pytest tests/
@@ -284,7 +284,7 @@ jobs:
 
 ### The Conda Environment File
 
-Located at `devtools/conda-envs/test-env.yml`:
+Located at `devtools/conda-envs/polyzymd-env.yml`:
 
 ```yaml
 name: polyzymd-test
@@ -417,7 +417,7 @@ polyzymd/
 │
 ├── devtools/
 │   └── conda-envs/
-│       └── test-env.yml     # Conda environment for full testing
+│       └── polyzymd-env.yml  # Conda environment for installation/testing
 │
 ├── docs/
 │   ├── source/
