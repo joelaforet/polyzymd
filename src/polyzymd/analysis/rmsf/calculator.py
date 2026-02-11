@@ -6,17 +6,36 @@ Fluctuation (RMSF) from MD trajectories with proper statistical handling.
 Key Features
 ------------
 - Config-based trajectory loading
+- Trajectory alignment with multiple reference modes (centroid, average, frame)
 - Autocorrelation-based independent sampling
 - Per-residue and whole-protein statistics
 - Automatic caching with config validation
 - Multi-replicate aggregation
+
+Reference Mode Selection
+------------------------
+The choice of reference structure affects the interpretation of RMSF:
+
+- "centroid" (default): Aligns to the most populated conformational state,
+  found via K-Means clustering. Best for measuring flexibility around the
+  equilibrium conformation.
+
+- "average": Aligns to the mathematical average structure. Provides a pure
+  measure of thermal fluctuations but the average may have unphysical geometry.
+
+- "frame": Aligns to a specific user-specified frame. Useful for measuring
+  fluctuations relative to a known functional state (e.g., catalytically
+  competent conformation with proper hydrogen bonding).
+
+See the documentation at docs/analysis/reference_selection.md for detailed
+guidance on choosing the appropriate reference mode.
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Literal, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -25,6 +44,11 @@ from polyzymd.analysis.core.autocorrelation import (
     compute_acf,
     estimate_correlation_time,
     get_independent_indices,
+)
+from polyzymd.analysis.core.centroid import (
+    ReferenceMode,
+    find_centroid_frame,
+    get_reference_mode_description,
 )
 from polyzymd.analysis.core.config_hash import compute_config_hash, validate_config_hash
 from polyzymd.analysis.core.loader import (
@@ -48,6 +72,7 @@ if TYPE_CHECKING:
 # MDAnalysis is optional
 try:
     import MDAnalysis as mda
+    from MDAnalysis.analysis import align
     from MDAnalysis.analysis.rms import RMSF
 
     HAS_MDANALYSIS = True
@@ -67,53 +92,76 @@ def _require_mdanalysis() -> None:
 
 
 class RMSFCalculator:
-    """Calculator for RMSF analysis with proper statistics.
+    """Calculator for RMSF analysis with trajectory alignment.
 
     This class handles the complete RMSF analysis workflow:
     1. Load trajectories from config
     2. Apply equilibration offset
-    3. Compute autocorrelation and select independent frames
-    4. Calculate per-residue RMSF
-    5. Aggregate across replicates with SEM
+    3. Find reference frame and align trajectory
+    4. Compute autocorrelation and select independent frames
+    5. Calculate per-residue RMSF
+    6. Aggregate across replicates with SEM
 
     Parameters
     ----------
     config : SimulationConfig
         PolyzyMD simulation configuration
     selection : str, optional
-        MDAnalysis selection string. Default is "protein and name CA".
+        MDAnalysis selection string for RMSF calculation.
+        Default is "protein and name CA".
     equilibration : str, optional
         Equilibration time to skip (e.g., "100ns", "5000ps").
         Default is "0ns" (no equilibration skip).
+    reference_mode : {"centroid", "average", "frame"}, optional
+        Method for selecting the alignment reference. Default is "centroid".
+
+        - "centroid": Most populated state via K-Means clustering on all
+          protein atoms. Best for equilibrium flexibility analysis.
+        - "average": Mathematical average structure. Pure thermal fluctuations
+          but may have unphysical geometry.
+        - "frame": User-specified frame. Best for functional state analysis.
+
     reference_frame : int | None, optional
-        Frame to use as reference for alignment (1-indexed, PyMOL convention).
-        If None, uses the average structure as reference.
-    reference_file : str | Path | None, optional
-        External PDB file to use as reference. Takes precedence over
-        reference_frame if both are specified.
+        Frame to use as reference when reference_mode="frame" (1-indexed,
+        PyMOL convention). Ignored for other modes.
+    alignment_selection : str, optional
+        MDAnalysis selection for trajectory alignment.
+        Default is "protein and name CA" (backbone alignment).
+    centroid_selection : str, optional
+        MDAnalysis selection for centroid finding (K-Means clustering).
+        Default is "protein" (all protein atoms to capture side chains).
 
     Examples
     --------
     >>> from polyzymd.config import load_config
     >>> config = load_config("config.yaml")
+
+    >>> # Default: align to most populated state
     >>> calc = RMSFCalculator(
     ...     config,
     ...     selection="protein and name CA",
     ...     equilibration="100ns",
     ... )
-    >>>
-    >>> # Single replicate
     >>> result = calc.compute(replicate=1)
     >>> print(result.summary())
-    >>>
-    >>> # Multiple replicates with aggregation
-    >>> agg_result = calc.compute_aggregated(replicates=[1, 2, 3, 4, 5])
-    >>> print(f"RMSF: {agg_result.overall_mean_rmsf:.2f} ± {agg_result.overall_sem_rmsf:.2f} Å")
+
+    >>> # Align to a specific catalytically competent frame
+    >>> calc = RMSFCalculator(
+    ...     config,
+    ...     reference_mode="frame",
+    ...     reference_frame=500,  # Frame where catalytic triad is aligned
+    ...     equilibration="100ns",
+    ... )
+    >>> result = calc.compute(replicate=1)
 
     Notes
     -----
     Frame indices in user-facing methods are 1-indexed (PyMOL convention).
     Internally, 0-indexed frames are used for MDAnalysis compatibility.
+
+    The trajectory is aligned **in-memory** to the reference structure before
+    RMSF calculation. This ensures RMSF measures local flexibility rather than
+    global drift through the simulation box.
     """
 
     def __init__(
@@ -121,15 +169,23 @@ class RMSFCalculator:
         config: "SimulationConfig",
         selection: str = "protein and name CA",
         equilibration: str = "0ns",
+        reference_mode: ReferenceMode = "centroid",
         reference_frame: int | None = None,
-        reference_file: str | Path | None = None,
+        alignment_selection: str = "protein and name CA",
+        centroid_selection: str = "protein",
     ) -> None:
         _require_mdanalysis()
 
         self.config = config
         self.selection = selection
+        self.reference_mode = reference_mode
         self.reference_frame = reference_frame
-        self.reference_file = Path(reference_file) if reference_file else None
+        self.alignment_selection = alignment_selection
+        self.centroid_selection = centroid_selection
+
+        # Validate reference_mode and reference_frame combination
+        if reference_mode == "frame" and reference_frame is None:
+            raise ValueError("reference_frame is required when reference_mode='frame'")
 
         # Parse equilibration time
         eq_value, eq_unit = parse_time_string(equilibration)
@@ -191,7 +247,7 @@ class RMSFCalculator:
         u = self._loader.load_universe(replicate)
         traj_info = self._loader.get_trajectory_info(replicate)
 
-        # Get atom selection
+        # Get atom selection for RMSF
         atoms = u.select_atoms(self.selection)
         if len(atoms) == 0:
             raise ValueError(f"Selection '{self.selection}' matched no atoms")
@@ -212,14 +268,29 @@ class RMSFCalculator:
             f"Trajectory: {n_frames_total} frames, skipping first {start_frame} for equilibration"
         )
 
-        # Compute autocorrelation if requested
+        # ===== ALIGNMENT STEP =====
+        # Find reference frame and align trajectory
+        ref_frame_idx = self._find_and_align_trajectory(
+            u, start_frame=start_frame, stop_frame=n_frames_total
+        )
+
+        # Convert to 1-indexed for result (PyMOL convention)
+        ref_frame_1indexed = ref_frame_idx + 1 if ref_frame_idx is not None else None
+
+        LOGGER.info(
+            f"Alignment: mode='{self.reference_mode}', "
+            f"reference_frame={ref_frame_1indexed}, "
+            f"selection='{self.alignment_selection}'"
+        )
+
+        # ===== AUTOCORRELATION & FRAME SELECTION =====
         correlation_time: float | None = None
         correlation_time_unit: str | None = None
         n_independent: int | None = None
         frame_indices: NDArray[np.int64]
 
         if compute_acf_for_subsampling and n_frames_after_eq > 100:
-            # Compute RMSD timeseries for ACF
+            # Compute RMSD timeseries for ACF (on aligned trajectory)
             rmsd_timeseries = self._compute_rmsd_timeseries(u, atoms, start_frame)
 
             acf_result = compute_acf(rmsd_timeseries, timestep=timestep, timestep_unit="ps")
@@ -248,7 +319,8 @@ class RMSFCalculator:
         n_frames_used = len(frame_indices)
         LOGGER.info(f"Using {n_frames_used} frames for RMSF calculation")
 
-        # Compute RMSF using MDAnalysis
+        # ===== RMSF CALCULATION =====
+        # Compute RMSF on aligned trajectory using MDAnalysis
         rmsf_values = self._compute_rmsf(u, atoms, frame_indices)
 
         # Get residue information
@@ -272,7 +344,7 @@ class RMSFCalculator:
         min_rmsf = float(np.min(per_residue_rmsf))
         max_rmsf = float(np.max(per_residue_rmsf))
 
-        # Create result
+        # Create result with alignment metadata
         result = RMSFResult(
             config_hash=self._config_hash,
             polyzymd_version=get_polyzymd_version(),
@@ -290,8 +362,9 @@ class RMSFCalculator:
             std_rmsf=std_rmsf,
             min_rmsf=min_rmsf,
             max_rmsf=max_rmsf,
-            reference_frame=self.reference_frame,
-            reference_file=str(self.reference_file) if self.reference_file else None,
+            reference_mode=self.reference_mode,
+            reference_frame=ref_frame_1indexed,
+            alignment_selection=self.alignment_selection,
             n_frames_total=n_frames_total,
             n_frames_used=n_frames_used,
             trajectory_files=[str(f) for f in traj_info.trajectory_files],
@@ -302,6 +375,108 @@ class RMSFCalculator:
             LOGGER.info(f"Saved result to {result_file}")
 
         return result
+
+    def _find_and_align_trajectory(
+        self,
+        u: "Universe",
+        start_frame: int,
+        stop_frame: int,
+    ) -> int | None:
+        """Find reference frame and align trajectory in-memory.
+
+        Parameters
+        ----------
+        u : Universe
+            MDAnalysis universe (will be modified in-place via in_memory alignment)
+        start_frame : int
+            First frame to consider (0-indexed, after equilibration)
+        stop_frame : int
+            Last frame (exclusive)
+
+        Returns
+        -------
+        int or None
+            Reference frame index (0-indexed), or None if using average structure
+        """
+        LOGGER.info(f"Finding reference structure using mode='{self.reference_mode}'")
+
+        ref_frame_idx: int | None = None
+
+        if self.reference_mode == "centroid":
+            # Find most populated state via K-Means
+            ref_frame_idx = find_centroid_frame(
+                u,
+                selection=self.centroid_selection,
+                start_frame=start_frame,
+                stop_frame=stop_frame,
+                verbose=True,
+            )
+            LOGGER.info(f"Centroid frame: {ref_frame_idx} (0-indexed)")
+
+            # Align to centroid frame
+            LOGGER.info("Aligning trajectory to centroid frame...")
+            aligner = align.AlignTraj(
+                u,
+                u,
+                select=self.alignment_selection,
+                ref_frame=ref_frame_idx,
+                in_memory=True,
+            ).run()
+            del aligner
+
+        elif self.reference_mode == "average":
+            # Compute average structure and align to it
+            LOGGER.info("Computing average structure...")
+            average = align.AverageStructure(
+                u,
+                u,
+                select=self.alignment_selection,
+                ref_frame=start_frame,  # Need a reference for initial alignment
+            ).run()
+            ref_universe = average.results.universe
+
+            LOGGER.info("Aligning trajectory to average structure...")
+            aligner = align.AlignTraj(
+                u,
+                ref_universe,
+                select=self.alignment_selection,
+                in_memory=True,
+            ).run()
+            del aligner
+            del average
+
+            ref_frame_idx = None  # Average is not a real frame
+
+        elif self.reference_mode == "frame":
+            # Use user-specified frame (convert from 1-indexed to 0-indexed)
+            ref_frame_idx = self.reference_frame - 1
+
+            # Validate
+            n_frames = len(u.trajectory)
+            if ref_frame_idx < 0 or ref_frame_idx >= n_frames:
+                raise ValueError(
+                    f"reference_frame={self.reference_frame} (1-indexed) is out of range. "
+                    f"Valid range: 1 to {n_frames}"
+                )
+
+            LOGGER.info(
+                f"Using user-specified frame {self.reference_frame} (0-indexed: {ref_frame_idx})"
+            )
+
+            # Align to specified frame
+            aligner = align.AlignTraj(
+                u,
+                u,
+                select=self.alignment_selection,
+                ref_frame=ref_frame_idx,
+                in_memory=True,
+            ).run()
+            del aligner
+
+        else:
+            raise ValueError(f"Unknown reference_mode: {self.reference_mode}")
+
+        return ref_frame_idx
 
     def compute_aggregated(
         self,

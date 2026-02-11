@@ -10,7 +10,7 @@ for reproducibility and cache validation.
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from pydantic import Field
 
@@ -18,6 +18,10 @@ from polyzymd.analysis.results.base import (
     AggregatedResultMixin,
     BaseAnalysisResult,
 )
+
+
+# Type alias matching the centroid module
+ReferenceMode = Literal["centroid", "average", "frame"]
 
 
 class RMSFResult(BaseAnalysisResult):
@@ -68,9 +72,30 @@ class RMSFResult(BaseAnalysisResult):
     min_rmsf: float = Field(..., description="Minimum per-residue RMSF")
     max_rmsf: float = Field(..., description="Maximum per-residue RMSF")
 
-    # Reference information
+    # Alignment information
+    reference_mode: ReferenceMode | None = Field(
+        default=None,
+        description=(
+            "Method used to select reference frame: "
+            "'centroid' (most populated state), 'average' (mean structure), "
+            "or 'frame' (user-specified)"
+        ),
+    )
     reference_frame: int | None = Field(
-        default=None, description="Frame used as reference (1-indexed), None if external PDB"
+        default=None,
+        description=(
+            "Frame used as alignment reference (1-indexed, PyMOL convention). "
+            "For 'centroid' mode, this is the frame closest to the cluster center. "
+            "For 'frame' mode, this is the user-specified frame. "
+            "For 'average' mode, this is None."
+        ),
+    )
+    alignment_selection: str | None = Field(
+        default=None,
+        description=(
+            "MDAnalysis selection string used for trajectory alignment. "
+            "Typically 'protein and name CA' for backbone alignment."
+        ),
     )
     reference_file: str | None = Field(
         default=None, description="Path to external reference PDB, if used"
@@ -85,10 +110,21 @@ class RMSFResult(BaseAnalysisResult):
 
     def summary(self) -> str:
         """Return human-readable summary."""
+        # Format alignment info
+        if self.reference_mode:
+            align_info = f"Alignment: {self.reference_mode}"
+            if self.reference_frame is not None:
+                align_info += f" (frame {self.reference_frame})"
+            if self.alignment_selection:
+                align_info += f" on '{self.alignment_selection}'"
+        else:
+            align_info = "Alignment: None (legacy)"
+
         lines = [
             f"RMSF Analysis (replicate {self.replicate})",
             "=" * 40,
             f"Selection: {self.selection_string}",
+            align_info,
             f"Equilibration: {self._format_equilibration()}",
             f"Correlation time: {self._format_correlation_time()}",
             f"Residues: {len(self.residue_ids)}",

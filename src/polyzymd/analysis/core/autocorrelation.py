@@ -24,20 +24,36 @@ Methods for τ estimation
 - **Exponential fit**: Fit ACF = exp(-t/τ) and extract τ
 - **Integration**: τ = ∫ACF(t)dt from 0 to first zero (or cutoff)
 
+Statistical Validity
+--------------------
+The number of independent samples (N_ind) is computed as:
+    N_ind = N / (1 + 2*Σ C_j)
+
+This matches the LiveCoMS best practices for uncertainty quantification
+(Grossfield et al., 2018). When N_ind < 10, statistical estimates (mean, SEM)
+may be unreliable, and users should be warned.
+
 References
 ----------
 - Flyvbjerg & Petersen (1989) J. Chem. Phys. 91:461 (block averaging)
 - Chodera et al. (2007) J. Chem. Theory Comput. 3:26 (statistical inefficiency)
+- Grossfield et al. (2018) LiveCoMS 1:5067 (uncertainty quantification)
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+
+logger = logging.getLogger(__name__)
+
+# Minimum recommended independent samples for reliable statistics
+MIN_RECOMMENDED_N_INDEPENDENT = 10
 
 
 class CorrelationTimeMethod(str, Enum):
@@ -98,6 +114,8 @@ class CorrelationTimeResult:
         Estimated number of independent samples in trajectory
     statistical_inefficiency : float
         g = 1 + 2*tau/dt, factor by which variance is inflated
+    warning : str | None
+        Warning message if statistics may be unreliable (e.g., N_ind < 10)
     """
 
     tau: float
@@ -105,6 +123,12 @@ class CorrelationTimeResult:
     method: str
     n_independent: int
     statistical_inefficiency: float
+    warning: str | None = None
+
+    @property
+    def is_reliable(self) -> bool:
+        """Return True if statistics are likely reliable (N_ind >= 10)."""
+        return self.n_independent >= MIN_RECOMMENDED_N_INDEPENDENT
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -114,6 +138,8 @@ class CorrelationTimeResult:
             "method": self.method,
             "n_independent": self.n_independent,
             "statistical_inefficiency": self.statistical_inefficiency,
+            "warning": self.warning,
+            "is_reliable": self.is_reliable,
         }
 
 
@@ -285,12 +311,26 @@ def estimate_correlation_time(
     # Number of independent samples
     n_independent = max(1, int(n_frames / g))
 
+    # Generate warning if statistics may be unreliable
+    warning = None
+    if n_independent < MIN_RECOMMENDED_N_INDEPENDENT:
+        warning = (
+            f"Low statistical reliability: only {n_independent} independent samples "
+            f"(recommended >= {MIN_RECOMMENDED_N_INDEPENDENT}). "
+            f"Correlation time τ = {tau:.1f} {unit} is comparable to or longer than "
+            f"the trajectory sampling window. Consider: (1) extending simulation time, "
+            f"(2) using multiple independent trajectories, or (3) interpreting results "
+            f"with caution. See Grossfield et al. (2018) LiveCoMS 1:5067."
+        )
+        logger.warning(warning)
+
     return CorrelationTimeResult(
         tau=tau,
         tau_unit=unit,
         method=method,
         n_independent=n_independent,
         statistical_inefficiency=g,
+        warning=warning,
     )
 
 

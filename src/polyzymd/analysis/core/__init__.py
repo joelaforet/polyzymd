@@ -5,6 +5,7 @@ This module provides foundational utilities for trajectory analysis:
 - Statistical functions for replicate aggregation
 - Autocorrelation analysis for independent sampling
 - Trajectory loading from PolyzyMD outputs
+- Centroid/representative frame finding for trajectory alignment
 """
 
 from polyzymd.analysis.core.config_hash import (
@@ -22,6 +23,7 @@ from polyzymd.analysis.core.statistics import (
 from polyzymd.analysis.core.autocorrelation import (
     ACFResult,
     CorrelationTimeResult,
+    MIN_RECOMMENDED_N_INDEPENDENT,
     compute_acf,
     estimate_correlation_time,
     get_independent_indices,
@@ -32,6 +34,12 @@ from polyzymd.analysis.core.loader import (
     parse_time_string,
     convert_time,
     time_to_frame,
+)
+from polyzymd.analysis.core.centroid import (
+    ReferenceMode,
+    find_centroid_frame,
+    find_reference_frame,
+    get_reference_mode_description,
 )
 
 __all__ = [
@@ -48,6 +56,7 @@ __all__ = [
     # Autocorrelation
     "ACFResult",
     "CorrelationTimeResult",
+    "MIN_RECOMMENDED_N_INDEPENDENT",
     "compute_acf",
     "estimate_correlation_time",
     "get_independent_indices",
@@ -57,4 +66,9 @@ __all__ = [
     "parse_time_string",
     "convert_time",
     "time_to_frame",
+    # Centroid/reference frame finding
+    "ReferenceMode",
+    "find_centroid_frame",
+    "find_reference_frame",
+    "get_reference_mode_description",
 ]

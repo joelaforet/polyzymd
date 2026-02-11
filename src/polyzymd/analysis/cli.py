@@ -154,16 +154,31 @@ def analyze() -> None:
     help="MDAnalysis selection string [default: 'protein and name CA']",
 )
 @click.option(
+    "--reference-mode",
+    type=click.Choice(["centroid", "average", "frame"]),
+    default="centroid",
+    help=(
+        "Reference structure for alignment: "
+        "'centroid' (most populated state), "
+        "'average' (mean structure), "
+        "'frame' (user-specified) [default: centroid]"
+    ),
+)
+@click.option(
     "--reference-frame",
     type=int,
     default=None,
-    help="Reference frame for alignment (1-indexed). Default: average structure",
+    help="Reference frame when --reference-mode=frame (1-indexed)",
 )
 @click.option(
-    "--reference-file",
-    type=click.Path(exists=True),
-    default=None,
-    help="External PDB file for reference alignment",
+    "--alignment-selection",
+    default="protein and name CA",
+    help="Selection for trajectory alignment [default: 'protein and name CA']",
+)
+@click.option(
+    "--centroid-selection",
+    default="protein",
+    help="Selection for centroid finding [default: 'protein']",
 )
 @click.option(
     "--plot",
@@ -187,8 +202,10 @@ def rmsf(
     replicates: str,
     eq_time: str,
     selection: str,
+    reference_mode: str,
     reference_frame: Optional[int],
-    reference_file: Optional[str],
+    alignment_selection: str,
+    centroid_selection: str,
     plot: bool,
     recompute: bool,
     output_dir: Optional[str],
@@ -196,24 +213,44 @@ def rmsf(
     """Compute RMSF (Root Mean Square Fluctuation) analysis.
 
     Calculates per-residue flexibility from MD trajectories with proper
-    statistical handling, including autocorrelation-based subsampling
-    and SEM calculation across replicates.
+    trajectory alignment and statistical handling.
+
+    The trajectory is aligned to a reference structure before RMSF computation.
+    Choose the reference mode based on your scientific question:
+
+    \b
+    - centroid: Most populated conformational state (K-Means clustering).
+                Best for equilibrium flexibility analysis.
+    - average:  Mathematical mean structure. Pure thermal fluctuations.
+    - frame:    User-specified frame. Best for functional state analysis
+                (e.g., catalytically competent conformation).
 
     \b
     Examples:
-        # Single replicate
+        # Default: align to most populated state
         polyzymd analyze rmsf -c config.yaml -r 1 --eq-time 100ns
 
-        # Multiple replicates with aggregation
-        polyzymd analyze rmsf -c config.yaml -r 1-5 --eq-time 100ns --plot
+        # Use average structure as reference
+        polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode average
 
-        # Custom selection (all heavy atoms)
-        polyzymd analyze rmsf -c config.yaml -r 1 --selection "protein and not name H*"
+        # Align to a specific frame (e.g., catalytically competent)
+        polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode frame --reference-frame 500
     """
     require_analysis_deps()
 
     from polyzymd.analysis import RMSFCalculator
     from polyzymd.config.schema import SimulationConfig
+
+    # Validate reference-mode and reference-frame combination
+    if reference_mode == "frame" and reference_frame is None:
+        click.echo(
+            click.style(
+                "Error: --reference-frame is required when --reference-mode=frame",
+                fg="red",
+            ),
+            err=True,
+        )
+        sys.exit(1)
 
     # Parse inputs
     rep_list = parse_replicates(replicates)
@@ -230,6 +267,11 @@ def rmsf(
     click.echo(f"  Replicates: {replicates}")
     click.echo(f"  Equilibration: {eq_time}")
     click.echo(f"  Selection: {selection}")
+    click.echo(f"  Alignment: {reference_mode}", nl=False)
+    if reference_mode == "frame":
+        click.echo(f" (frame {reference_frame})")
+    else:
+        click.echo()
 
     try:
         # Create calculator
@@ -237,8 +279,10 @@ def rmsf(
             config=sim_config,
             selection=selection,
             equilibration=eq_time,
+            reference_mode=reference_mode,
             reference_frame=reference_frame,
-            reference_file=reference_file,
+            alignment_selection=alignment_selection,
+            centroid_selection=centroid_selection,
         )
 
         if len(rep_list) == 1:
