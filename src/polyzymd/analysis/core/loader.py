@@ -152,9 +152,12 @@ class TrajectoryLoader:
         working_dir = self.config.get_working_directory(replicate)
 
         if not working_dir.exists():
+            available = self._find_available_replicates()
+            available_str = ", ".join(str(r) for r in available) if available else "none found"
             raise FileNotFoundError(
                 f"Working directory not found: {working_dir}\n"
-                f"Has replicate {replicate} been simulated?"
+                f"Has replicate {replicate} been simulated?\n"
+                f"Available replicates: {available_str}"
             )
 
         # Find topology and trajectories
@@ -315,6 +318,29 @@ class TrajectoryLoader:
     def clear_cache(self) -> None:
         """Clear the Universe cache to free memory."""
         self._universe_cache.clear()
+
+    def _find_available_replicates(self) -> list[int]:
+        """Find available replicate numbers from existing run_* directories.
+
+        Returns
+        -------
+        list[int]
+            Sorted list of replicate numbers that have simulation directories
+        """
+        scratch_dir = self.config.output.effective_scratch_directory
+        if not scratch_dir.exists():
+            return []
+
+        replicates = []
+        for d in scratch_dir.iterdir():
+            if d.is_dir() and d.name.startswith("run_"):
+                try:
+                    # Extract replicate number from directory name (e.g., "run_1" -> 1)
+                    rep_num = int(d.name.split("_")[1])
+                    replicates.append(rep_num)
+                except (IndexError, ValueError):
+                    continue
+        return sorted(replicates)
 
     def _find_topology(self, working_dir: Path) -> Path:
         """Find topology file in working directory.

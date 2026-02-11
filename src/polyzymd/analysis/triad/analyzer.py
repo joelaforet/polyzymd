@@ -33,6 +33,10 @@ from polyzymd.analysis.core.loader import (
     parse_time_string,
     time_to_frame,
 )
+from polyzymd.analysis.core.diagnostics import (
+    get_selection_diagnostics,
+    validate_equilibration_time,
+)
 from polyzymd.analysis.core.statistics import compute_sem
 from polyzymd.analysis.distances.calculator import DistanceCalculator
 from polyzymd.analysis.results.base import get_polyzymd_version
@@ -129,6 +133,48 @@ class CatalyticTriadAnalyzer:
             threshold=triad_config.threshold,
         )
 
+    def validate_selections(self, replicate: int = 1) -> None:
+        """Validate all triad selections against a replicate's topology.
+
+        This performs an upfront check that all atom selections in the
+        triad configuration will match atoms in the structure. Call this
+        before compute() to fail fast with actionable error messages.
+
+        Parameters
+        ----------
+        replicate : int, optional
+            Replicate to use for validation (default 1)
+
+        Raises
+        ------
+        ValueError
+            If any selection matches no atoms, with diagnostic info
+        """
+        LOGGER.info(f"Validating triad selections against replicate {replicate}")
+
+        u = self._loader.load_universe(replicate)
+
+        for pair in self.triad_config.pairs:
+            for sel_name, selection in [
+                ("selection_a", pair.selection_a),
+                ("selection_b", pair.selection_b),
+            ]:
+                # Handle special syntax (midpoint, com)
+                from polyzymd.analysis.core.selections import parse_selection_string
+
+                parsed = parse_selection_string(selection)
+                atoms = u.select_atoms(parsed.selection)
+
+                if len(atoms) == 0:
+                    diag = get_selection_diagnostics(
+                        u,
+                        selection,
+                        context=f"For pair '{pair.label}' ({sel_name})",
+                    )
+                    raise ValueError(f"Selection '{selection}' matched no atoms.\n\n{diag}")
+
+        LOGGER.info("All triad selections validated successfully")
+
     def compute(
         self,
         replicate: int,
@@ -175,6 +221,9 @@ class CatalyticTriadAnalyzer:
         LOGGER.info(
             f"Computing triad analysis '{self.triad_config.name}' for replicate {replicate}"
         )
+
+        # Validate selections upfront to fail fast with actionable errors
+        self.validate_selections(replicate)
 
         # Compute per-pair distances using DistanceCalculator
         # Don't save individual pair results - we'll include them in the triad result

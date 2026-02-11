@@ -51,6 +51,13 @@ from polyzymd.analysis.core.selections import (
     validate_selection,
     format_selection_for_label,
 )
+from polyzymd.analysis.core.diagnostics import (
+    get_selection_diagnostics,
+    get_residue_info,
+    get_protein_residue_range,
+    format_diagnostic_message,
+    validate_equilibration_time,
+)
 
 __all__ = [
     # Config hashing
@@ -90,4 +97,10 @@ __all__ = [
     "get_position_from_selection",
     "validate_selection",
     "format_selection_for_label",
+    # Diagnostics
+    "get_selection_diagnostics",
+    "get_residue_info",
+    "get_protein_residue_range",
+    "format_diagnostic_message",
+    "validate_equilibration_time",
 ]

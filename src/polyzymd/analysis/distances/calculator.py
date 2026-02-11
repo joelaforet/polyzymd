@@ -35,6 +35,7 @@ from polyzymd.analysis.core.loader import (
     parse_time_string,
     time_to_frame,
 )
+from polyzymd.analysis.core.diagnostics import validate_equilibration_time
 from polyzymd.analysis.core.selections import (
     parse_selection_string,
     get_position,
@@ -259,6 +260,15 @@ class DistanceCalculator:
 
         n_frames_total = len(u.trajectory)
         n_frames_used = n_frames_total - start_frame
+
+        # Validate equilibration time against trajectory length
+        eq_time_ns = convert_time(self.equilibration_time, self.equilibration_unit, "ns")
+        traj_time_ns = (n_frames_total * timestep) / 1000.0  # ps to ns
+        is_valid, eq_message = validate_equilibration_time(eq_time_ns, traj_time_ns)
+        if not is_valid:
+            raise ValueError(eq_message)
+        if eq_message:  # Warning about > 50%
+            LOGGER.warning(eq_message)
 
         LOGGER.info(
             f"Trajectory: {n_frames_total} frames, using {n_frames_used} after equilibration"
@@ -523,9 +533,15 @@ class DistanceCalculator:
         atoms2 = u.select_atoms(parsed2.selection)
 
         if len(atoms1) == 0:
-            raise ValueError(f"Selection '{sel1}' matched no atoms")
+            from polyzymd.analysis.core.diagnostics import get_selection_diagnostics
+
+            diag = get_selection_diagnostics(u, sel1)
+            raise ValueError(f"Selection '{sel1}' matched no atoms.\n\n{diag}")
         if len(atoms2) == 0:
-            raise ValueError(f"Selection '{sel2}' matched no atoms")
+            from polyzymd.analysis.core.diagnostics import get_selection_diagnostics
+
+            diag = get_selection_diagnostics(u, sel2)
+            raise ValueError(f"Selection '{sel2}' matched no atoms.\n\n{diag}")
 
         # Compute distances over trajectory
         distances = []

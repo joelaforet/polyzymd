@@ -156,13 +156,16 @@ def select_atoms(universe: "Universe", selection: str) -> "AtomGroup":
     Raises
     ------
     ValueError
-        If selection matches no atoms
+        If selection matches no atoms, with diagnostic info
     """
+    from polyzymd.analysis.core.diagnostics import get_selection_diagnostics
+
     parsed = parse_selection_string(selection)
     atoms = universe.select_atoms(parsed.selection)
 
     if len(atoms) == 0:
-        raise ValueError(f"Selection '{selection}' matched no atoms")
+        diag = get_selection_diagnostics(universe, selection)
+        raise ValueError(f"Selection '{selection}' matched no atoms.\n\n{diag}")
 
     return atoms
 
@@ -239,11 +242,14 @@ def get_position_from_selection(
     >>> # Midpoint of Asp carboxyl
     >>> pos = get_position_from_selection(u, "midpoint(resid 133 and name OD1 OD2)")
     """
+    from polyzymd.analysis.core.diagnostics import get_selection_diagnostics
+
     parsed = parse_selection_string(selection)
     atoms = universe.select_atoms(parsed.selection)
 
     if len(atoms) == 0:
-        raise ValueError(f"Selection '{selection}' matched no atoms")
+        diag = get_selection_diagnostics(universe, selection)
+        raise ValueError(f"Selection '{selection}' matched no atoms.\n\n{diag}")
 
     return get_position(atoms, parsed.mode)
 
@@ -267,15 +273,20 @@ def validate_selection(universe: "Universe", selection: str) -> dict:
         - mode: str
         - atoms: list of atom info dicts
         - error: str (if invalid)
+        - diagnostics: str (detailed diagnostics if invalid)
     """
+    from polyzymd.analysis.core.diagnostics import get_selection_diagnostics
+
     try:
         parsed = parse_selection_string(selection)
         atoms = universe.select_atoms(parsed.selection)
 
         if len(atoms) == 0:
+            diag = get_selection_diagnostics(universe, selection)
             return {
                 "valid": False,
                 "error": f"Selection matched no atoms: {parsed.selection}",
+                "diagnostics": diag,
                 "mode": parsed.mode.value,
                 "n_atoms": 0,
             }

@@ -267,6 +267,15 @@ def rmsf(
     click.echo(f"RMSF Analysis: {sim_config.name}")
     click.echo(f"  Replicates: {replicates}")
     click.echo(f"  Equilibration: {eq_time}")
+    if eq_time in ("0ns", "0ps", "0us"):
+        click.echo(
+            click.style(
+                "  Warning: No equilibration time specified. RMSF will include "
+                "potentially non-equilibrated frames. Consider using --eq-time.",
+                fg="yellow",
+            ),
+            err=True,
+        )
     click.echo(f"  Selection: {selection}")
     click.echo(f"  Alignment: {reference_mode}", nl=False)
     if reference_mode == "frame":
@@ -462,6 +471,15 @@ def distances(
     click.echo(f"Distance Analysis: {sim_config.name}")
     click.echo(f"  Replicates: {replicates}")
     click.echo(f"  Equilibration: {eq_time}")
+    if eq_time in ("0ns", "0ps", "0us"):
+        click.echo(
+            click.style(
+                "  Warning: No equilibration time specified. Analysis will include "
+                "potentially non-equilibrated frames. Consider using --eq-time.",
+                fg="yellow",
+            ),
+            err=True,
+        )
     click.echo(f"  Distance pairs: {len(distance_pairs)}")
     for i, (sel1, sel2) in enumerate(distance_pairs, 1):
         click.echo(f"    {i}. {sel1} <-> {sel2}")
@@ -664,6 +682,15 @@ def triad(
     if eq_time is None:
         eq_time = comp_config.defaults.equilibration_time
     click.echo(f"  Equilibration: {eq_time}")
+    if eq_time in ("0ns", "0ps", "0us"):
+        click.echo(
+            click.style(
+                "  Warning: No equilibration time specified. Analysis will include "
+                "potentially non-equilibrated frames. Consider using --eq-time.",
+                fg="yellow",
+            ),
+            err=True,
+        )
 
     # Select conditions to analyze
     if condition:

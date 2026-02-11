@@ -126,7 +126,10 @@ def find_centroid_frame(
     # Select atoms for clustering
     atoms = universe.select_atoms(selection)
     if len(atoms) == 0:
-        raise ValueError(f"Selection '{selection}' matched no atoms")
+        from polyzymd.analysis.core.diagnostics import get_selection_diagnostics
+
+        diag = get_selection_diagnostics(universe, selection)
+        raise ValueError(f"Selection '{selection}' matched no atoms.\n\n{diag}")
 
     if verbose:
         LOGGER.info(f"Finding centroid frame using {len(atoms)} atoms from '{selection}'")

@@ -57,6 +57,7 @@ from polyzymd.analysis.core.loader import (
     parse_time_string,
     time_to_frame,
 )
+from polyzymd.analysis.core.diagnostics import validate_equilibration_time
 from polyzymd.analysis.core.statistics import (
     aggregate_per_residue_stats,
     aggregate_region_stats,
@@ -250,7 +251,10 @@ class RMSFCalculator:
         # Get atom selection for RMSF
         atoms = u.select_atoms(self.selection)
         if len(atoms) == 0:
-            raise ValueError(f"Selection '{self.selection}' matched no atoms")
+            from polyzymd.analysis.core.diagnostics import get_selection_diagnostics
+
+            diag = get_selection_diagnostics(u, self.selection)
+            raise ValueError(f"Selection '{self.selection}' matched no atoms.\n\n{diag}")
 
         LOGGER.info(f"Selected {len(atoms)} atoms with '{self.selection}'")
 
@@ -263,6 +267,15 @@ class RMSFCalculator:
 
         n_frames_total = len(u.trajectory)
         n_frames_after_eq = n_frames_total - start_frame
+
+        # Validate equilibration time against trajectory length
+        eq_time_ns = convert_time(self.equilibration_time, self.equilibration_unit, "ns")
+        traj_time_ns = (n_frames_total * timestep) / 1000.0  # ps to ns
+        is_valid, eq_message = validate_equilibration_time(eq_time_ns, traj_time_ns)
+        if not is_valid:
+            raise ValueError(eq_message)
+        if eq_message:  # Warning about > 50%
+            LOGGER.warning(eq_message)
 
         LOGGER.info(
             f"Trajectory: {n_frames_total} frames, skipping first {start_frame} for equilibration"
