@@ -280,6 +280,17 @@ uncertainties may be underestimated. See [Best Practices Guide](analysis_rmsf_be
 polyzymd -v analyze rmsf -c config.yaml -r 1 --eq-time 10ns
 ```
 
+### Missing Replicate Warning
+
+**Message**: `Skipping replicate N: trajectory data not found`
+
+**Cause**: The requested replicate hasn't been simulated yet or the path is incorrect
+
+**Fix**: This is informational - analysis continues with available replicates.
+If this is unexpected, check that the simulation completed and paths are correct.
+See [Handling Incomplete Data](analysis_rmsf_best_practices.md#handling-incomplete-data)
+for details.
+
 ## Next Steps
 
 - **Understand the statistics**: [Best Practices Guide](analysis_rmsf_best_practices.md)

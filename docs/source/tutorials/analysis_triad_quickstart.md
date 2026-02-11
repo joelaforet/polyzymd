@@ -334,6 +334,17 @@ polyzymd analyze triad -c comparison.yaml --eq-time 10ns
 **Fix**: This is informational. Use multiple replicates for robust statistics.
 See [Best Practices Guide](analysis_triad_best_practices.md#autocorrelation-analysis).
 
+### Missing Replicate Warning
+
+**Message**: `Skipping replicate N: trajectory data not found`
+
+**Cause**: The requested replicate hasn't been simulated yet or the path is incorrect
+
+**Fix**: This is informational - analysis continues with available replicates.
+If this is unexpected, check that the simulation completed and paths are correct.
+See [Handling Incomplete Data](analysis_triad_best_practices.md#handling-incomplete-data)
+for details.
+
 ## Next Steps
 
 - **Understand the statistics**: [Best Practices Guide](analysis_triad_best_practices.md)

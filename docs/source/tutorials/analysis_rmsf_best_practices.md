@@ -260,6 +260,112 @@ correlation** because the replicates started from different initial velocities.
 For most enzyme-polymer studies, **3-5 replicates per condition** is a
 reasonable balance between statistical power and computational cost.
 
+## Handling Incomplete Data
+
+During active research, simulations are often in progress. You may want to analyze
+available data without waiting for all replicates to complete. PolyzyMD handles
+this gracefully by skipping missing or failed replicates with informative warnings.
+
+### Missing Replicates
+
+When a requested replicate's data cannot be found, PolyzyMD logs a warning and
+continues with the remaining replicates:
+
+```
+WARNING: Skipping replicate 2: trajectory data not found.
+Working directory not found: /scratch/user/project/run_2
+Has replicate 2 been simulated?
+```
+
+### Failed Replicates
+
+If a replicate exists but analysis fails (e.g., corrupted trajectory, missing
+atoms), PolyzyMD logs the error and continues:
+
+```
+WARNING: Skipping replicate 3: analysis failed with error: 
+Could not read DCD file: unexpected end of file
+```
+
+### Aggregation Summary
+
+When aggregating with incomplete data, PolyzyMD reports which replicates
+were successfully analyzed:
+
+```
+WARNING: Aggregating 2 of 3 requested replicates. Skipped: [2]
+```
+
+### Minimum Requirements
+
+**At least 2 successful replicates are required for aggregation.** This is
+because SEM calculation requires n ≥ 2. If fewer than 2 replicates succeed,
+PolyzyMD raises an error:
+
+```
+ValueError: Aggregation requires at least 2 successful replicates, but only
+1 succeeded. Failed replicates: [2, 3]
+```
+
+### Output File Naming
+
+Output filenames reflect the actual replicates used, not the requested range:
+
+| Requested | Successful | Filename |
+|-----------|------------|----------|
+| 1-3 | 1, 2, 3 | `rmsf_reps1-3_eq100ns.json` |
+| 1-3 | 1, 3 | `rmsf_reps1_3_eq100ns.json` |
+| 1-5 | 1, 2, 4 | `rmsf_reps1_2_4_eq100ns.json` |
+
+Note: Contiguous ranges use a hyphen (`1-3`), non-contiguous use underscores (`1_3`).
+
+### Best Practices for Incomplete Data
+
+1. **Investigate missing data**: If replicates consistently fail, check:
+   - Did the simulation complete? Check SLURM logs for timeouts or errors.
+   - Are trajectory files in the expected location? Verify paths in config.yaml.
+   - Is the trajectory corrupted? Try loading it manually with MDAnalysis.
+
+2. **Document which replicates were used**: When publishing results from
+   incomplete data, clearly state which replicates contributed to aggregated
+   statistics. The JSON output includes a `replicates` field for this purpose.
+
+3. **Re-run with complete data**: Once all simulations finish, re-run
+   analysis with `--recompute` to include all replicates:
+   ```bash
+   polyzymd analyze rmsf -c config.yaml -r 1-5 --recompute
+   ```
+
+4. **Consider statistical implications**: Results from 2 replicates have
+   larger uncertainty than 3+. Be appropriately cautious when interpreting
+   results with fewer replicates than planned.
+
+### Example: Analyzing During Active Simulations
+
+A common workflow when simulations are still running:
+
+```bash
+# Request all 5 planned replicates, but only 3 have completed
+polyzymd analyze rmsf -c config.yaml -r 1-5 --eq-time 100ns
+
+# Output shows:
+# Skipping replicate 4: trajectory data not found...
+# Skipping replicate 5: trajectory data not found...
+# Aggregating 3 of 5 requested replicates. Skipped: [4, 5]
+#
+# Results saved to: rmsf_reps1-3_eq100ns.json
+```
+
+Later, when all simulations complete:
+
+```bash
+# Re-run to include all replicates
+polyzymd analyze rmsf -c config.yaml -r 1-5 --eq-time 100ns --recompute
+
+# Now all 5 are included:
+# Results saved to: rmsf_reps1-5_eq100ns.json
+```
+
 ## Comparing Conditions
 
 ### Experimental Design
