@@ -41,6 +41,16 @@ from polyzymd.analysis.core.centroid import (
     find_reference_frame,
     get_reference_mode_description,
 )
+from polyzymd.analysis.core.selections import (
+    SelectionMode,
+    ParsedSelection,
+    parse_selection_string,
+    select_atoms,
+    get_position,
+    get_position_from_selection,
+    validate_selection,
+    format_selection_for_label,
+)
 
 __all__ = [
     # Config hashing
@@ -71,4 +81,13 @@ __all__ = [
     "find_centroid_frame",
     "find_reference_frame",
     "get_reference_mode_description",
+    # Selection parsing
+    "SelectionMode",
+    "ParsedSelection",
+    "parse_selection_string",
+    "select_atoms",
+    "get_position",
+    "get_position_from_selection",
+    "validate_selection",
+    "format_selection_for_label",
 ]

@@ -7,6 +7,9 @@ Key Features
 ------------
 - Config-based trajectory loading
 - Multiple distance pair analysis
+- Special selection syntax: midpoint(), com()
+- KDE-based distribution analysis with mode estimation
+- Autocorrelation-corrected uncertainty (LiveCoMS best practices)
 - Threshold-based contact analysis
 - Multi-replicate aggregation with SEM
 """
@@ -21,12 +24,20 @@ from typing import TYPE_CHECKING, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+from polyzymd.analysis.core.autocorrelation import (
+    compute_acf,
+    estimate_correlation_time,
+)
 from polyzymd.analysis.core.config_hash import compute_config_hash, validate_config_hash
 from polyzymd.analysis.core.loader import (
     TrajectoryLoader,
     convert_time,
     parse_time_string,
     time_to_frame,
+)
+from polyzymd.analysis.core.selections import (
+    parse_selection_string,
+    get_position,
 )
 from polyzymd.analysis.core.statistics import compute_sem
 from polyzymd.analysis.results.base import get_polyzymd_version
@@ -50,6 +61,14 @@ try:
 except ImportError:
     HAS_MDANALYSIS = False
 
+# scipy for KDE
+try:
+    from scipy.stats import gaussian_kde
+
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -65,15 +84,23 @@ def _require_mdanalysis() -> None:
 def _selection_to_label(selection: str) -> str:
     """Convert MDAnalysis selection to filename-safe label.
 
+    Handles special syntax like midpoint() and com().
+
     Examples
     --------
     >>> _selection_to_label("resid 77 and name OG")
     "resid77_OG"
     >>> _selection_to_label("protein and resid 133 and name NE2")
     "resid133_NE2"
+    >>> _selection_to_label("midpoint(resid 133 and name OD1 OD2)")
+    "resid133_mid"
     """
+    # Parse to handle special syntax
+    parsed = parse_selection_string(selection)
+    inner_selection = parsed.selection
+
     # Remove common keywords
-    label = selection.lower()
+    label = inner_selection.lower()
     label = re.sub(r"\b(and|or|not|protein)\b", "", label)
     # Extract resid and name
     resid_match = re.search(r"resid\s*(\d+)", label)
@@ -82,7 +109,13 @@ def _selection_to_label(selection: str) -> str:
     parts = []
     if resid_match:
         parts.append(f"resid{resid_match.group(1)}")
-    if name_match:
+
+    # Use mode-specific suffix for special syntax
+    if parsed.mode.value == "midpoint":
+        parts.append("mid")
+    elif parsed.mode.value == "com":
+        parts.append("com")
+    elif name_match:
         parts.append(name_match.group(1).upper())
 
     if parts:
@@ -239,10 +272,18 @@ class DistanceCalculator:
                 sel1,
                 sel2,
                 start_frame,
+                timestep=timestep,
                 store_distribution=store_distributions,
             )
             pair_results.append(pr)
-            LOGGER.info(f"  {pr.pair_label}: {pr.mean_distance:.2f} ± {pr.std_distance:.2f} Å")
+
+            # Log with SEM if available, else std
+            if pr.sem_distance is not None:
+                LOGGER.info(
+                    f"  {pr.pair_label}: {pr.mean_distance:.2f} ± {pr.sem_distance:.2f} Å (SEM, n_ind={pr.n_independent_frames})"
+                )
+            else:
+                LOGGER.info(f"  {pr.pair_label}: {pr.mean_distance:.2f} ± {pr.std_distance:.2f} Å")
 
         # Create result
         # Generate a combined selection string for the result
@@ -324,6 +365,7 @@ class DistanceCalculator:
             per_rep_stds = []
             per_rep_medians = []
             per_rep_fractions = []
+            per_rep_kde_peaks = []
 
             for result in individual_results:
                 pr = result.pair_results[pair_idx]
@@ -332,6 +374,8 @@ class DistanceCalculator:
                 per_rep_medians.append(pr.median_distance)
                 if pr.fraction_below_threshold is not None:
                     per_rep_fractions.append(pr.fraction_below_threshold)
+                if pr.kde_peak is not None:
+                    per_rep_kde_peaks.append(pr.kde_peak)
 
             # Compute aggregated statistics
             mean_stats = compute_sem(per_rep_means)
@@ -340,6 +384,10 @@ class DistanceCalculator:
             fraction_stats = None
             if per_rep_fractions:
                 fraction_stats = compute_sem(per_rep_fractions)
+
+            kde_peak_stats = None
+            if per_rep_kde_peaks:
+                kde_peak_stats = compute_sem(per_rep_kde_peaks)
 
             agg_pair = DistancePairAggregatedResult(
                 config_hash=self._config_hash,
@@ -363,6 +411,10 @@ class DistanceCalculator:
                 overall_fraction_below=(fraction_stats.mean if fraction_stats else None),
                 sem_fraction_below=(fraction_stats.sem if fraction_stats else None),
                 per_replicate_fractions_below=(per_rep_fractions if per_rep_fractions else None),
+                # KDE aggregation
+                overall_kde_peak=(kde_peak_stats.mean if kde_peak_stats else None),
+                sem_kde_peak=(kde_peak_stats.sem if kde_peak_stats else None),
+                per_replicate_kde_peaks=(per_rep_kde_peaks if per_rep_kde_peaks else None),
             )
             aggregated_pairs.append(agg_pair)
 
@@ -405,11 +457,37 @@ class DistanceCalculator:
         sel1: str,
         sel2: str,
         start_frame: int,
+        timestep: float = 1.0,
         store_distribution: bool = True,
     ) -> DistancePairResult:
-        """Compute distances for a single pair."""
-        atoms1 = u.select_atoms(sel1)
-        atoms2 = u.select_atoms(sel2)
+        """Compute distances for a single pair with KDE and autocorrelation analysis.
+
+        Parameters
+        ----------
+        u : Universe
+            MDAnalysis Universe
+        sel1 : str
+            First selection (supports midpoint() and com() syntax)
+        sel2 : str
+            Second selection (supports midpoint() and com() syntax)
+        start_frame : int
+            First frame to use (after equilibration)
+        timestep : float
+            Time between frames in ps
+        store_distribution : bool
+            Whether to store full distance array
+
+        Returns
+        -------
+        DistancePairResult
+            Distance analysis results with KDE and autocorrelation statistics
+        """
+        # Parse selections (handle midpoint/com syntax)
+        parsed1 = parse_selection_string(sel1)
+        parsed2 = parse_selection_string(sel2)
+
+        atoms1 = u.select_atoms(parsed1.selection)
+        atoms2 = u.select_atoms(parsed2.selection)
 
         if len(atoms1) == 0:
             raise ValueError(f"Selection '{sel1}' matched no atoms")
@@ -424,16 +502,9 @@ class DistanceCalculator:
             if i < start_frame:
                 continue
 
-            # Get positions (use center of geometry if multiple atoms)
-            if len(atoms1) == 1:
-                pos1 = atoms1.positions[0]
-            else:
-                pos1 = atoms1.center_of_geometry()
-
-            if len(atoms2) == 1:
-                pos2 = atoms2.positions[0]
-            else:
-                pos2 = atoms2.center_of_geometry()
+            # Get positions using the parsed mode
+            pos1 = get_position(atoms1, parsed1.mode)
+            pos2 = get_position(atoms2, parsed2.mode)
 
             dist = np.linalg.norm(pos2 - pos1)
             distances.append(float(dist))
@@ -441,7 +512,7 @@ class DistanceCalculator:
         distances_arr = np.array(distances, dtype=np.float64)
         n_frames_used = len(distances_arr)
 
-        # Compute statistics
+        # Compute basic statistics
         mean_dist = float(np.mean(distances_arr))
         std_dist = float(np.std(distances_arr))
         median_dist = float(np.median(distances_arr))
@@ -455,6 +526,79 @@ class DistanceCalculator:
 
         # Compute histogram
         hist_counts, hist_edges = np.histogram(distances_arr, bins=50)
+
+        # ========================================
+        # KDE analysis for mode estimation
+        # ========================================
+        kde_x = None
+        kde_y = None
+        kde_peak = None
+        kde_bandwidth = None
+
+        if HAS_SCIPY and len(distances_arr) > 10:
+            try:
+                kde = gaussian_kde(distances_arr)  # type: ignore[possibly-unbound]
+                # kde.factor is the bandwidth scaling factor (Scott's rule)
+                std_val = float(np.std(distances_arr))
+                kde_bandwidth = float(kde.factor) * std_val  # type: ignore[arg-type]
+
+                # Evaluate KDE on a fine grid
+                x_min = max(0, min_dist - 0.5)  # Distances are positive
+                x_max = max_dist + 0.5
+                kde_x_arr = np.linspace(x_min, x_max, 200)
+                kde_y_arr = kde(kde_x_arr)
+
+                kde_x = kde_x_arr.tolist()
+                kde_y = kde_y_arr.tolist()
+
+                # Find mode (peak of KDE)
+                peak_idx = int(np.argmax(kde_y_arr))
+                kde_peak = float(kde_x_arr[peak_idx])
+
+                LOGGER.debug(f"KDE peak (mode): {kde_peak:.2f} Å")
+            except Exception as e:
+                LOGGER.warning(f"KDE computation failed: {e}")
+
+        # ========================================
+        # Autocorrelation analysis
+        # ========================================
+        sem_distance = None
+        correlation_time = None
+        correlation_time_unit = None
+        n_independent_frames = None
+        statistical_inefficiency = None
+        autocorrelation_warning = None
+
+        if len(distances_arr) >= 20:
+            try:
+                # Compute autocorrelation and estimate correlation time
+                tau_result = estimate_correlation_time(
+                    distances_arr,
+                    timestep=timestep,
+                    timestep_unit="ps",
+                    method="integration",
+                    n_frames=n_frames_used,
+                )
+
+                correlation_time = tau_result.tau
+                correlation_time_unit = tau_result.tau_unit
+                n_independent_frames = tau_result.n_independent
+                statistical_inefficiency = tau_result.statistical_inefficiency
+                autocorrelation_warning = tau_result.warning
+
+                # Compute autocorrelation-corrected SEM
+                # SEM = std / sqrt(n_independent)
+                if n_independent_frames > 0:
+                    sem_distance = float(std_dist / np.sqrt(n_independent_frames))
+
+                LOGGER.debug(
+                    f"Autocorrelation: τ={correlation_time:.1f} {correlation_time_unit}, "
+                    f"n_ind={n_independent_frames}, SEM={sem_distance:.3f} Å"
+                )
+            except Exception as e:
+                LOGGER.warning(f"Autocorrelation analysis failed: {e}")
+                # Fall back to naive SEM
+                sem_distance = float(std_dist / np.sqrt(n_frames_used))
 
         return DistancePairResult(
             config_hash=self._config_hash,
@@ -472,10 +616,25 @@ class DistanceCalculator:
             median_distance=median_dist,
             min_distance=min_dist,
             max_distance=max_dist,
+            # Autocorrelation statistics
+            sem_distance=sem_distance,
+            correlation_time=correlation_time,
+            correlation_time_unit=correlation_time_unit,
+            n_independent_frames=n_independent_frames,
+            statistical_inefficiency=statistical_inefficiency,
+            autocorrelation_warning=autocorrelation_warning,
+            # Threshold analysis
             threshold=self.threshold,
             fraction_below_threshold=fraction_below,
+            # Histogram
             histogram_edges=hist_edges.tolist(),
             histogram_counts=hist_counts.tolist(),
+            # KDE
+            kde_x=kde_x,
+            kde_y=kde_y,
+            kde_peak=kde_peak,
+            kde_bandwidth=kde_bandwidth,
+            # Frame counts
             n_frames_total=n_frames_total,
             n_frames_used=n_frames_used,
         )

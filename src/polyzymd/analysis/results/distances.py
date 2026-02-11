@@ -23,6 +23,8 @@ class DistancePairResult(BaseAnalysisResult):
     """Distance analysis result for a single atom pair in one replicate.
 
     Stores the full distribution of distances as well as summary statistics.
+    Includes KDE-based distribution analysis and autocorrelation-corrected
+    uncertainty quantification following LiveCoMS best practices.
 
     Attributes
     ----------
@@ -48,6 +50,14 @@ class DistancePairResult(BaseAnalysisResult):
         Fraction of frames below threshold (if threshold specified)
     threshold : float | None
         Distance threshold used (if any)
+    kde_peak : float | None
+        Mode (most probable distance) from KDE
+    correlation_time : float | None
+        Estimated correlation time from ACF
+    n_independent_frames : int | None
+        Effective number of independent samples
+    sem_distance : float | None
+        Standard error of the mean (autocorrelation-corrected)
     """
 
     analysis_type: ClassVar[str] = "distance_pair"
@@ -69,6 +79,27 @@ class DistancePairResult(BaseAnalysisResult):
     min_distance: float = Field(..., description="Minimum distance")
     max_distance: float = Field(..., description="Maximum distance")
 
+    # Autocorrelation-corrected uncertainty (LiveCoMS best practices)
+    sem_distance: float | None = Field(
+        default=None,
+        description="Standard error of the mean (autocorrelation-corrected)",
+    )
+    correlation_time: float | None = Field(
+        default=None, description="Correlation time from ACF (same unit as timestep)"
+    )
+    correlation_time_unit: str | None = Field(
+        default=None, description="Unit of correlation time (e.g., 'ps', 'ns')"
+    )
+    n_independent_frames: int | None = Field(
+        default=None, description="Effective number of independent samples"
+    )
+    statistical_inefficiency: float | None = Field(
+        default=None, description="Factor by which variance is inflated due to correlation"
+    )
+    autocorrelation_warning: str | None = Field(
+        default=None, description="Warning if statistics may be unreliable"
+    )
+
     # Threshold analysis
     threshold: float | None = Field(default=None, description="Distance threshold (if specified)")
     fraction_below_threshold: float | None = Field(
@@ -78,6 +109,18 @@ class DistancePairResult(BaseAnalysisResult):
     # Histogram data (pre-computed for plotting)
     histogram_edges: list[float] | None = Field(default=None, description="Histogram bin edges")
     histogram_counts: list[int] | None = Field(default=None, description="Histogram bin counts")
+
+    # KDE data (for smooth distribution and mode estimation)
+    kde_x: list[float] | None = Field(
+        default=None, description="KDE evaluation points (distance values)"
+    )
+    kde_y: list[float] | None = Field(default=None, description="KDE density values")
+    kde_peak: float | None = Field(
+        default=None, description="Mode (most probable distance) from KDE"
+    )
+    kde_bandwidth: float | None = Field(
+        default=None, description="KDE bandwidth used (Scott's rule)"
+    )
 
     # Trajectory info
     n_frames_total: int = Field(..., description="Total frames in trajectory")
@@ -94,14 +137,38 @@ class DistancePairResult(BaseAnalysisResult):
             f"Equilibration: {self._format_equilibration()}",
             f"Frames used: {self.n_frames_used}/{self.n_frames_total}",
             "",
-            f"Mean: {self.mean_distance:.2f} ± {self.std_distance:.2f} Å",
-            f"Median: {self.median_distance:.2f} Å",
-            f"Range: {self.min_distance:.2f} - {self.max_distance:.2f} Å",
         ]
 
+        # Mean with proper uncertainty
+        if self.sem_distance is not None:
+            lines.append(f"Mean: {self.mean_distance:.2f} ± {self.sem_distance:.2f} Å (SEM)")
+            if self.n_independent_frames is not None:
+                lines.append(f"  (n_independent = {self.n_independent_frames})")
+        else:
+            lines.append(f"Mean: {self.mean_distance:.2f} ± {self.std_distance:.2f} Å (std)")
+
+        lines.append(f"Median: {self.median_distance:.2f} Å")
+
+        # KDE peak (mode)
+        if self.kde_peak is not None:
+            lines.append(f"Mode (KDE peak): {self.kde_peak:.2f} Å")
+
+        lines.append(f"Range: {self.min_distance:.2f} - {self.max_distance:.2f} Å")
+
+        # Threshold analysis
         if self.threshold is not None and self.fraction_below_threshold is not None:
             pct = self.fraction_below_threshold * 100
             lines.append(f"Below {self.threshold:.1f} Å: {pct:.1f}%")
+
+        # Correlation time info
+        if self.correlation_time is not None:
+            unit = self.correlation_time_unit or "frames"
+            lines.append(f"Correlation time: {self.correlation_time:.1f} {unit}")
+
+        # Warning if unreliable
+        if self.autocorrelation_warning:
+            lines.append("")
+            lines.append(f"WARNING: {self.autocorrelation_warning}")
 
         return "\n".join(lines)
 
@@ -198,6 +265,17 @@ class DistancePairAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
         default=None, description="Fraction below threshold from each replicate"
     )
 
+    # KDE statistics (aggregated from per-replicate KDE peaks)
+    overall_kde_peak: float | None = Field(
+        default=None, description="Mean of per-replicate KDE peaks (mode)"
+    )
+    sem_kde_peak: float | None = Field(
+        default=None, description="SEM of KDE peaks across replicates"
+    )
+    per_replicate_kde_peaks: list[float] | None = Field(
+        default=None, description="KDE peak (mode) from each replicate"
+    )
+
     def summary(self) -> str:
         """Return human-readable summary."""
         rep_range = self._format_replicate_range()
@@ -210,6 +288,11 @@ class DistancePairAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
             f"Mean: {self.overall_mean:.2f} ± {self.overall_sem:.2f} Å",
             f"Median: {self.overall_median:.2f} Å",
         ]
+
+        # KDE peak (mode)
+        if self.overall_kde_peak is not None:
+            sem_str = f" ± {self.sem_kde_peak:.2f}" if self.sem_kde_peak else ""
+            lines.append(f"Mode (KDE peak): {self.overall_kde_peak:.2f}{sem_str} Å")
 
         if self.threshold is not None and self.overall_fraction_below is not None:
             pct = self.overall_fraction_below * 100
