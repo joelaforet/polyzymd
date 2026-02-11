@@ -93,6 +93,7 @@ Trajectory Analysis
    tutorials/analysis_rmsf_quickstart
    tutorials/analysis_rmsf_best_practices
    tutorials/analysis_reference_selection
+   tutorials/analysis_compare_conditions
 
 API Reference
 -------------

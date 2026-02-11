@@ -1236,6 +1236,11 @@ from polyzymd.analysis.cli import analyze, plot
 cli.add_command(analyze)
 cli.add_command(plot)
 
+# Register compare command group
+from polyzymd.compare.cli import compare
+
+cli.add_command(compare)
+
 
 def main() -> int:
     """Main entry point."""

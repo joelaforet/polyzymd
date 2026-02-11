@@ -1,0 +1,290 @@
+"""Configuration schema for comparison projects.
+
+This module defines the YAML schema for comparison.yaml files that
+specify which simulation conditions to compare.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+import yaml
+from pydantic import BaseModel, field_validator
+
+
+class ConditionConfig(BaseModel):
+    """Configuration for one condition in a comparison.
+
+    Attributes
+    ----------
+    label : str
+        Display name for this condition (e.g., "No Polymer", "100% SBMA")
+    config : Path
+        Path to the simulation's config.yaml file
+    replicates : list[int]
+        List of replicate numbers to include in the analysis
+    """
+
+    label: str
+    config: Path
+    replicates: list[int]
+
+    @field_validator("config", mode="before")
+    @classmethod
+    def resolve_path(cls, v: str | Path) -> Path:
+        """Convert string paths to Path objects."""
+        return Path(v)
+
+    @field_validator("replicates", mode="before")
+    @classmethod
+    def ensure_list(cls, v: list[int] | int) -> list[int]:
+        """Ensure replicates is a list."""
+        if isinstance(v, int):
+            return [v]
+        return list(v)
+
+
+class AnalysisDefaults(BaseModel):
+    """Default parameters for comparison analyses.
+
+    These can be overridden on the command line.
+
+    Attributes
+    ----------
+    equilibration_time : str
+        Time to skip for equilibration (e.g., "10ns", "5000ps")
+    selection : str
+        MDAnalysis selection string for RMSF calculation
+    reference_mode : str
+        Reference structure mode for alignment
+    """
+
+    equilibration_time: str = "10ns"
+    selection: str = "protein and name CA"
+    reference_mode: str = "centroid"
+
+
+class ComparisonConfig(BaseModel):
+    """Schema for comparison.yaml configuration files.
+
+    A comparison config defines multiple simulation conditions to compare,
+    along with default analysis parameters.
+
+    Attributes
+    ----------
+    name : str
+        Name of the comparison project
+    description : str, optional
+        Description of what is being compared
+    control : str, optional
+        Label of the control condition for relative comparisons
+    conditions : list[ConditionConfig]
+        List of conditions to compare
+    defaults : AnalysisDefaults
+        Default analysis parameters
+
+    Examples
+    --------
+    >>> config = ComparisonConfig.from_yaml("comparison.yaml")
+    >>> print(config.name)
+    "Polymer Stabilization Study"
+    >>> for cond in config.conditions:
+    ...     print(f"{cond.label}: {cond.config}")
+    """
+
+    name: str
+    description: Optional[str] = None
+    control: Optional[str] = None
+    conditions: list[ConditionConfig]
+    defaults: AnalysisDefaults = AnalysisDefaults()
+
+    @classmethod
+    def from_yaml(cls, path: Path | str) -> "ComparisonConfig":
+        """Load comparison config from YAML file.
+
+        Parameters
+        ----------
+        path : Path or str
+            Path to comparison.yaml file
+
+        Returns
+        -------
+        ComparisonConfig
+            Loaded and validated configuration
+
+        Raises
+        ------
+        FileNotFoundError
+            If the config file doesn't exist
+        ValidationError
+            If the config is invalid
+        """
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Comparison config not found: {path}")
+
+        with open(path) as f:
+            data = yaml.safe_load(f)
+
+        # Resolve relative paths relative to the config file location
+        config_dir = path.parent.resolve()
+        if "conditions" in data:
+            for cond in data["conditions"]:
+                if "config" in cond:
+                    cond_path = Path(cond["config"])
+                    if not cond_path.is_absolute():
+                        cond["config"] = str(config_dir / cond_path)
+
+        return cls(**data)
+
+    def to_yaml(self, path: Path | str) -> None:
+        """Save comparison config to YAML file.
+
+        Parameters
+        ----------
+        path : Path or str
+            Output path for comparison.yaml
+        """
+        path = Path(path)
+
+        # Convert to dict, handling Path objects
+        data = self.model_dump()
+        for cond in data["conditions"]:
+            cond["config"] = str(cond["config"])
+
+        with open(path, "w") as f:
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+    def get_condition(self, label: str) -> ConditionConfig:
+        """Get a condition by its label.
+
+        Parameters
+        ----------
+        label : str
+            The condition label to find
+
+        Returns
+        -------
+        ConditionConfig
+            The matching condition
+
+        Raises
+        ------
+        KeyError
+            If no condition with that label exists
+        """
+        for cond in self.conditions:
+            if cond.label == label:
+                return cond
+        raise KeyError(f"Condition '{label}' not found in: {[c.label for c in self.conditions]}")
+
+    def validate_config(self) -> list[str]:
+        """Validate the comparison configuration.
+
+        Returns
+        -------
+        list[str]
+            List of error messages (empty if valid)
+        """
+        errors = []
+
+        # Check minimum conditions
+        if len(self.conditions) < 2:
+            errors.append("Need at least 2 conditions to compare")
+
+        # Check for duplicate labels
+        labels = [c.label for c in self.conditions]
+        if len(labels) != len(set(labels)):
+            errors.append("Duplicate condition labels found")
+
+        # Check control label exists
+        if self.control and self.control not in labels:
+            errors.append(f"Control '{self.control}' not in conditions: {labels}")
+
+        # Check config files exist
+        for cond in self.conditions:
+            if not cond.config.exists():
+                errors.append(f"Config not found for '{cond.label}': {cond.config}")
+
+        return errors
+
+
+def generate_comparison_template(name: str, eq_time: str = "10ns") -> str:
+    """Generate a template comparison.yaml file.
+
+    Parameters
+    ----------
+    name : str
+        Project name
+    eq_time : str
+        Default equilibration time
+
+    Returns
+    -------
+    str
+        YAML template content
+    """
+    return f'''\
+# ============================================================================
+# PolyzyMD Comparison Configuration
+# ============================================================================
+#
+# This file defines conditions to compare in your analysis.
+#
+# INSTRUCTIONS:
+# 1. Add your simulation conditions below
+# 2. Each condition needs:
+#    - label: A short name for display (e.g., "No Polymer", "100% SBMA")
+#    - config: Path to the simulation's config.yaml (relative or absolute)
+#    - replicates: List of replicate numbers to include
+# 3. Set 'control' to the label of your control condition (optional)
+# 4. Run: polyzymd compare rmsf
+#
+# ============================================================================
+
+# Project name (used in output filenames)
+name: "{name}"
+
+# Description of what you're comparing
+description: "Comparison of simulation conditions"
+
+# Which condition is the control? (for relative comparisons)
+# Set to null or remove if no control
+control: null
+
+# ============================================================================
+# Conditions to Compare
+# ============================================================================
+# Add one entry per treatment/condition. Paths can be relative to this file.
+#
+# Example:
+#   - label: "No Polymer"
+#     config: "../projects/noPoly_LipA_DMSO/config.yaml"
+#     replicates: [1, 2, 3]
+#
+conditions:
+  - label: "Condition A"
+    config: "../path/to/condition_a/config.yaml"
+    replicates: [1, 2, 3]
+    
+  - label: "Condition B"
+    config: "../path/to/condition_b/config.yaml"
+    replicates: [1, 2, 3]
+    
+  # Add more conditions as needed:
+  # - label: "Condition C"
+  #   config: "../path/to/condition_c/config.yaml"
+  #   replicates: [1, 2]
+
+# ============================================================================
+# Default Analysis Parameters
+# ============================================================================
+# These can be overridden on the command line (e.g., --eq-time 20ns)
+#
+defaults:
+  equilibration_time: "{eq_time}"
+  selection: "protein and name CA"
+  reference_mode: "centroid"
+'''
