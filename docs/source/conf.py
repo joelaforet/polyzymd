@@ -46,6 +46,7 @@ extensions = [
     "sphinx.ext.viewcode",  # Add links to source code
     "sphinx.ext.intersphinx",  # Link to other projects' documentation
     "sphinx.ext.todo",  # Support TODO directives
+    "sphinx.ext.mathjax",  # Render LaTeX math with MathJax
     "sphinx_copybutton",  # Add copy button to code blocks
     "myst_parser",  # Support Markdown files
 ]
@@ -92,6 +93,7 @@ myst_enable_extensions = [
     "deflist",  # Definition lists
     "fieldlist",  # Field lists
     "tasklist",  # Task lists with checkboxes
+    "dollarmath",  # Enable $...$ and $$...$$ math syntax
 ]
 myst_heading_anchors = 3
 
