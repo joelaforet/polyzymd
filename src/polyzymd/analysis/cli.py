@@ -3,6 +3,7 @@
 This module provides CLI commands for trajectory analysis:
 - `polyzymd analyze rmsf` - RMSF analysis
 - `polyzymd analyze distances` - Distance analysis
+- `polyzymd analyze triad` - Catalytic triad/active site analysis
 - `polyzymd plot rmsf` - Plot RMSF results
 - `polyzymd plot distances` - Plot distance results
 """
@@ -552,6 +553,216 @@ def distances(
 
             traceback.print_exc()
         sys.exit(1)
+
+
+# -----------------------------------------------------------------------------
+# Catalytic Triad Analysis
+# -----------------------------------------------------------------------------
+
+
+@analyze.command()
+@click.option(
+    "-c",
+    "--comparison",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to comparison.yaml file with catalytic_triad configuration",
+)
+@click.option(
+    "--condition",
+    default=None,
+    help="Condition label to analyze (default: analyze all conditions)",
+)
+@click.option(
+    "-r",
+    "--replicates",
+    default=None,
+    help="Replicate specification: '1-5', '1,3,5', or '1'. Overrides condition replicates.",
+)
+@click.option(
+    "--eq-time",
+    default=None,
+    help="Equilibration time to skip (overrides comparison.yaml defaults)",
+)
+@click.option(
+    "--recompute",
+    is_flag=True,
+    help="Force recompute even if cached results exist",
+)
+@click.option(
+    "-o",
+    "--output-dir",
+    type=click.Path(),
+    default=None,
+    help="Custom output directory for results",
+)
+def triad(
+    comparison: str,
+    condition: Optional[str],
+    replicates: Optional[str],
+    eq_time: Optional[str],
+    recompute: bool,
+    output_dir: Optional[str],
+) -> None:
+    """Analyze catalytic triad/active site geometry.
+
+    Computes per-pair distances and simultaneous contact fraction for the
+    catalytic triad defined in the comparison.yaml file.
+
+    The key metric is "simultaneous contact fraction" - the percentage of
+    frames where ALL pairs are below the contact threshold at the same time.
+
+    \b
+    Examples:
+        # Analyze all conditions in comparison.yaml
+        polyzymd analyze triad -c comparison.yaml
+
+        # Analyze specific condition
+        polyzymd analyze triad -c comparison.yaml --condition "No Polymer"
+
+        # Override replicates and equilibration time
+        polyzymd analyze triad -c comparison.yaml --condition "No Polymer" \\
+            -r 1-3 --eq-time 100ns
+    """
+    require_analysis_deps()
+
+    from polyzymd.analysis.triad import CatalyticTriadAnalyzer
+    from polyzymd.compare.config import ComparisonConfig
+    from polyzymd.config.loader import load_config
+
+    # Load comparison config
+    click.echo(f"Loading comparison config from: {comparison}")
+    try:
+        comp_config = ComparisonConfig.from_yaml(comparison)
+    except Exception as e:
+        click.echo(click.style(f"Error loading comparison config: {e}", fg="red"), err=True)
+        sys.exit(1)
+
+    # Check catalytic triad is defined
+    if comp_config.catalytic_triad is None:
+        click.echo(
+            click.style(
+                "Error: No catalytic_triad section found in comparison.yaml.\n"
+                "Add a catalytic_triad section with pairs to analyze.\n"
+                "See: polyzymd compare init --help",
+                fg="red",
+            ),
+            err=True,
+        )
+        sys.exit(1)
+
+    triad_config = comp_config.catalytic_triad
+    click.echo(f"Triad: {triad_config.name}")
+    if triad_config.description:
+        click.echo(f"  Description: {triad_config.description}")
+    click.echo(f"  Pairs: {triad_config.n_pairs}")
+    for pair in triad_config.pairs:
+        click.echo(f"    - {pair.label}")
+    click.echo(f"  Threshold: {triad_config.threshold} Å")
+
+    # Determine equilibration time
+    if eq_time is None:
+        eq_time = comp_config.defaults.equilibration_time
+    click.echo(f"  Equilibration: {eq_time}")
+
+    # Select conditions to analyze
+    if condition:
+        try:
+            conditions = [comp_config.get_condition(condition)]
+        except KeyError as e:
+            click.echo(click.style(str(e), fg="red"), err=True)
+            sys.exit(1)
+    else:
+        conditions = comp_config.conditions
+
+    output_path = Path(output_dir) if output_dir else None
+
+    # Analyze each condition
+    for cond in conditions:
+        click.echo()
+        click.echo(click.style(f"=== {cond.label} ===", fg="cyan", bold=True))
+
+        # Load simulation config
+        try:
+            sim_config = load_config(cond.config)
+        except Exception as e:
+            click.echo(click.style(f"Error loading {cond.config}: {e}", fg="red"), err=True)
+            continue
+
+        # Determine replicates
+        if replicates:
+            rep_list = parse_replicates(replicates)
+        else:
+            rep_list = cond.replicates
+
+        click.echo(f"  Replicates: {rep_list}")
+
+        try:
+            # Create analyzer
+            analyzer = CatalyticTriadAnalyzer(
+                config=sim_config,
+                triad_config=triad_config,
+                equilibration=eq_time,
+            )
+
+            if len(rep_list) == 1:
+                # Single replicate
+                result = analyzer.compute(
+                    replicate=rep_list[0],
+                    save=True,
+                    output_dir=output_path,
+                    recompute=recompute,
+                )
+                click.echo()
+                click.echo(click.style("Triad Analysis Complete", fg="green"))
+                for pr in result.pair_results:
+                    frac_str = ""
+                    if pr.fraction_below_threshold is not None:
+                        frac_str = f" ({pr.fraction_below_threshold * 100:.1f}% below threshold)"
+                    click.echo(f"  {pr.pair_label}: {pr.mean_distance:.2f} Å{frac_str}")
+                click.echo()
+                click.echo(
+                    f"  Simultaneous contact: {result.simultaneous_contact_fraction * 100:.1f}%"
+                )
+                if result.sim_contact_sem is not None:
+                    click.echo(f"    (SEM: ±{result.sim_contact_sem * 100:.1f}%)")
+
+            else:
+                # Multiple replicates - compute aggregated
+                result = analyzer.compute_aggregated(
+                    replicates=rep_list,
+                    save=True,
+                    output_dir=output_path,
+                    recompute=recompute,
+                )
+                click.echo()
+                click.echo(click.style("Triad Analysis Complete (Aggregated)", fg="green"))
+                for pr in result.pair_results:
+                    frac_str = ""
+                    if pr.overall_fraction_below is not None:
+                        sem_f = pr.sem_fraction_below or 0
+                        frac_str = (
+                            f" ({pr.overall_fraction_below * 100:.1f} ± {sem_f * 100:.1f}% below)"
+                        )
+                    click.echo(
+                        f"  {pr.pair_label}: {pr.overall_mean:.2f} ± {pr.overall_sem:.2f} Å{frac_str}"
+                    )
+                click.echo()
+                click.echo(
+                    f"  Simultaneous contact: {result.overall_simultaneous_contact * 100:.1f} "
+                    f"± {result.sem_simultaneous_contact * 100:.1f}%"
+                )
+                click.echo(f"  Per-replicate:")
+                for rep, frac in zip(result.replicates, result.per_replicate_simultaneous):
+                    click.echo(f"    Rep {rep}: {frac * 100:.1f}%")
+
+        except Exception as e:
+            click.echo(click.style(f"Analysis failed: {e}", fg="red"), err=True)
+            if LOGGER.level == logging.DEBUG:
+                import traceback
+
+                traceback.print_exc()
+            continue
 
 
 # =============================================================================

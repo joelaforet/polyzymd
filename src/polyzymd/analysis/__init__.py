@@ -14,11 +14,13 @@ rmsf
     RMSF (Root Mean Square Fluctuation) analysis
 distances
     Inter-atomic distance analysis
+triad
+    Catalytic triad/active site geometry analysis
 
 Quick Start
 -----------
 >>> from polyzymd.config import load_config
->>> from polyzymd.analysis import RMSFCalculator, DistanceCalculator
+>>> from polyzymd.analysis import RMSFCalculator, DistanceCalculator, CatalyticTriadAnalyzer
 >>>
 >>> config = load_config("config.yaml")
 >>>
@@ -31,6 +33,12 @@ Quick Start
 >>> pairs = [("resid 77 and name OG", "resid 133 and name NE2")]
 >>> dist_calc = DistanceCalculator(config, pairs=pairs, equilibration="100ns")
 >>> result = dist_calc.compute(replicate=1)
+>>>
+>>> # Catalytic triad analysis (with CatalyticTriadConfig from compare.config)
+>>> from polyzymd.compare.config import CatalyticTriadConfig, TriadPairConfig
+>>> triad_config = CatalyticTriadConfig(name="LipA_triad", threshold=3.5, pairs=[...])
+>>> triad_analyzer = CatalyticTriadAnalyzer(config, triad_config, equilibration="100ns")
+>>> result = triad_analyzer.compute(replicate=1)
 
 Installation
 ------------
@@ -53,6 +61,10 @@ def __getattr__(name):
         from polyzymd.analysis.distances import DistanceCalculator
 
         return DistanceCalculator
+    elif name == "CatalyticTriadAnalyzer":
+        from polyzymd.analysis.triad import CatalyticTriadAnalyzer
+
+        return CatalyticTriadAnalyzer
     elif name == "TrajectoryLoader":
         from polyzymd.analysis.core.loader import TrajectoryLoader
 
@@ -80,6 +92,7 @@ __all__ = [
     # Calculators
     "RMSFCalculator",
     "DistanceCalculator",
+    "CatalyticTriadAnalyzer",
     # Loading
     "TrajectoryLoader",
     # Config validation
