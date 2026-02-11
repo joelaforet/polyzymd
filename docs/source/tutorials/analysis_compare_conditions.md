@@ -60,7 +60,7 @@ This creates:
 polymer_stability_study/
 ├── comparison.yaml    # Configuration template to edit
 ├── results/           # Output JSON files (auto-populated)
-└── figures/           # Comparison plots (future feature)
+└── figures/           # Comparison plots (from polyzymd compare plot)
 ```
 
 ### Step 2: Edit comparison.yaml
@@ -480,6 +480,86 @@ Options:
   --format [table|markdown|json]  Output format [default: table]
 ```
 
+### polyzymd compare plot
+
+Generate publication-ready plots from saved results:
+
+```bash
+polyzymd compare plot RESULT_FILE [OPTIONS]
+
+Arguments:
+  RESULT_FILE                     Path to saved comparison JSON
+
+Options:
+  -o, --output-dir PATH           Output directory [default: figures/]
+  --format [png|pdf|svg]          Image format [default: png]
+  --dpi INTEGER                   Resolution for PNG [default: 150]
+  --summary / --no-summary        Generate summary panel [default: yes]
+  --show / --no-show              Display interactively [default: no]
+```
+
+## Generating Plots
+
+The `polyzymd compare plot` command creates publication-ready figures from
+comparison results.
+
+### Quick Start
+
+```bash
+# Generate all plots
+polyzymd compare plot results/rmsf_comparison_my_study.json
+
+# High resolution for publication
+polyzymd compare plot results/rmsf_comparison_my_study.json --dpi 300
+
+# PDF format (vector graphics)
+polyzymd compare plot results/rmsf_comparison_my_study.json --format pdf
+
+# Preview interactively
+polyzymd compare plot results/rmsf_comparison_my_study.json --show
+```
+
+### Generated Plots
+
+| File | Description |
+|------|-------------|
+| `rmsf_comparison.png` | Bar chart of mean RMSF by condition, sorted by stability |
+| `percent_change.png` | Bar chart of % change vs control |
+| `effect_sizes.png` | Forest plot of Cohen's d effect sizes |
+| `summary_panel.png` | Combined 3-panel figure for presentations |
+
+### Color Coding
+
+Plots use consistent color coding to indicate statistical significance:
+
+| Color | Meaning |
+|-------|---------|
+| **Green** | Significant improvement (p < 0.05, RMSF decreased) |
+| **Blue** | Large effect (Cohen's d > 0.8) but not statistically significant |
+| **Gray** | Control condition, or no meaningful effect |
+| **Red** | Worse than control (RMSF increased) |
+
+### Example Output
+
+After running:
+
+```bash
+polyzymd compare plot results/rmsf_comparison_polymer_study.json -o figures/
+```
+
+You get:
+
+```
+Generated plots:
+  - figures/rmsf_comparison.png
+  - figures/percent_change.png
+  - figures/effect_sizes.png
+  - figures/summary_panel.png
+```
+
+The **summary panel** is ideal for PowerPoint presentations, combining all
+three visualizations in a single figure with labeled panels (A, B, C).
+
 ## Python API
 
 ### Programmatic Comparison
@@ -535,6 +615,58 @@ print(f"Control RMSF: {control.mean_rmsf:.3f} A")
 # Get specific comparison
 comp = result.get_comparison("100% SBMA")
 print(f"SBMA vs control: {comp.percent_change:+.1f}%, p={comp.p_value:.4f}")
+```
+
+### Plotting with Python
+
+```python
+from polyzymd.compare import (
+    ComparisonResult,
+    plot_rmsf_comparison,
+    plot_percent_change,
+    plot_effect_sizes,
+    plot_summary_panel,
+)
+import matplotlib.pyplot as plt
+
+# Load result
+result = ComparisonResult.load("results/rmsf_comparison_my_study.json")
+
+# Generate individual plots
+fig1 = plot_rmsf_comparison(result, save_path="figures/rmsf.png", dpi=200)
+fig2 = plot_percent_change(result, save_path="figures/pct_change.png")
+fig3 = plot_effect_sizes(result, save_path="figures/effects.png")
+
+# Generate combined summary panel
+fig_summary = plot_summary_panel(
+    result,
+    title="Polymer Stabilization Study",
+    save_path="figures/summary.png",
+    dpi=300,
+)
+
+# Show interactively
+plt.show()
+```
+
+### Plot Customization
+
+Each plotting function accepts customization parameters:
+
+```python
+# Custom figure size and title
+fig = plot_rmsf_comparison(
+    result,
+    figsize=(12, 8),
+    title="Effect of Polymer Coating on Enzyme Flexibility",
+    horizontal=True,      # Horizontal bars (default)
+    sort_by_rmsf=True,    # Sort by RMSF (default)
+    color_by_effect=True, # Color by statistical effect (default)
+    show_significance=True,  # Show * for p<0.05 (default)
+)
+
+# Vertical bars for fewer conditions
+fig = plot_rmsf_comparison(result, horizontal=False)
 ```
 
 ## Troubleshooting

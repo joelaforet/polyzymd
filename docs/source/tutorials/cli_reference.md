@@ -446,6 +446,262 @@ Example configs: polyzymd/configs/examples/
 
 ---
 
+## polyzymd analyze
+
+Analyze MD trajectories with various metrics.
+
+```bash
+polyzymd analyze COMMAND [OPTIONS]
+
+Commands:
+  rmsf       Compute RMSF (Root Mean Square Fluctuation) analysis
+  distances  Compute inter-atomic distance analysis
+```
+
+### polyzymd analyze rmsf
+
+Compute per-residue flexibility from MD trajectories.
+
+```bash
+polyzymd analyze rmsf --config <path> --replicates <range> [OPTIONS]
+polyzymd analyze rmsf -c <path> -r 1-5 --eq-time 100ns
+```
+
+#### Options
+
+| Option | Short | Required | Default | Description |
+|--------|-------|----------|---------|-------------|
+| `--config` | `-c` | Yes | - | Path to YAML configuration file |
+| `--replicates` | `-r` | No | "1" | Replicate specification: "1-5", "1,3,5", or "1" |
+| `--eq-time` | - | No | "0ns" | Equilibration time to skip: "100ns", "5000ps" |
+| `--selection` | - | No | "protein and name CA" | MDAnalysis selection for RMSF atoms |
+| `--reference-mode` | - | No | "centroid" | Reference structure: "centroid", "average", or "frame" |
+| `--reference-frame` | - | No | - | Frame index when --reference-mode=frame (1-indexed) |
+| `--alignment-selection` | - | No | "protein and name CA" | Selection for trajectory alignment |
+| `--centroid-selection` | - | No | "protein" | Selection for centroid finding |
+| `--plot` | - | No | false | Generate plot after analysis |
+| `--recompute` | - | No | false | Force recompute even if cached |
+| `--output-dir` | `-o` | No | auto | Custom output directory |
+
+#### Reference Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `centroid` | Most populated conformational state (K-Means) | Equilibrium flexibility analysis |
+| `average` | Mathematical mean structure | Pure thermal fluctuations |
+| `frame` | User-specified frame number | Functional state analysis |
+
+#### Example
+
+```bash
+# Basic RMSF analysis
+polyzymd analyze rmsf -c config.yaml -r 1 --eq-time 10ns
+
+# Multiple replicates with plot
+polyzymd analyze rmsf -c config.yaml -r 1-3 --eq-time 10ns --plot
+
+# Custom reference structure
+polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode average
+
+# Specific frame as reference (e.g., catalytically competent)
+polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode frame --reference-frame 500
+```
+
+#### Output
+
+Results are saved in JSON format:
+
+```
+<projects_directory>/
+└── analysis/
+    └── rmsf/
+        ├── run_1/rmsf_eq10ns.json
+        ├── run_2/rmsf_eq10ns.json
+        └── aggregated/rmsf_reps1-3_eq10ns.json
+```
+
+---
+
+## polyzymd compare
+
+Compare analysis results across multiple simulation conditions with statistical testing.
+
+```bash
+polyzymd compare COMMAND [OPTIONS]
+
+Commands:
+  init      Initialize a new comparison project
+  rmsf      Compare RMSF across conditions
+  validate  Validate comparison configuration
+  show      Display saved comparison results
+  plot      Generate comparison plots
+```
+
+### polyzymd compare init
+
+Create a new comparison project with template configuration.
+
+```bash
+polyzymd compare init NAME [OPTIONS]
+
+Arguments:
+  NAME                   Project name (creates directory)
+
+Options:
+  --eq-time TEXT         Default equilibration time [default: 10ns]
+  -o, --output-dir PATH  Parent directory [default: current]
+```
+
+#### Example
+
+```bash
+polyzymd compare init polymer_study
+cd polymer_study
+# Edit comparison.yaml to add your conditions
+```
+
+### polyzymd compare rmsf
+
+Run statistical comparison of RMSF across conditions.
+
+```bash
+polyzymd compare rmsf [OPTIONS]
+```
+
+#### Options
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--file` | `-f` | comparison.yaml | Path to comparison config file |
+| `--eq-time` | - | from config | Override equilibration time |
+| `--selection` | - | from config | Override atom selection |
+| `--recompute` | - | false | Force recompute RMSF |
+| `--format` | - | table | Output format: table, markdown, json |
+| `--output` | `-o` | - | Save formatted output to file |
+| `--verbose` | `-v` | false | Show detailed logging |
+
+#### Example
+
+```bash
+# Run comparison with default settings
+polyzymd compare rmsf
+
+# Override equilibration time
+polyzymd compare rmsf --eq-time 20ns
+
+# Output as markdown
+polyzymd compare rmsf --format markdown -o report.md
+```
+
+### polyzymd compare validate
+
+Check that a comparison.yaml configuration is valid.
+
+```bash
+polyzymd compare validate [OPTIONS]
+
+Options:
+  -f, --file PATH    Config file [default: comparison.yaml]
+```
+
+### polyzymd compare show
+
+Display a previously saved comparison result.
+
+```bash
+polyzymd compare show RESULT_FILE [OPTIONS]
+
+Arguments:
+  RESULT_FILE                     Path to saved JSON result
+
+Options:
+  --format [table|markdown|json]  Output format [default: table]
+```
+
+### polyzymd compare plot
+
+Generate publication-ready plots from comparison results.
+
+```bash
+polyzymd compare plot RESULT_FILE [OPTIONS]
+
+Arguments:
+  RESULT_FILE                     Path to saved comparison JSON
+
+Options:
+  -o, --output-dir PATH           Output directory [default: figures/]
+  --format [png|pdf|svg]          Image format [default: png]
+  --dpi INTEGER                   Resolution for PNG [default: 150]
+  --summary / --no-summary        Generate summary panel [default: yes]
+  --show / --no-show              Display interactively [default: no]
+```
+
+#### Generated Plots
+
+| File | Description |
+|------|-------------|
+| `rmsf_comparison.png` | Bar chart of mean RMSF by condition |
+| `percent_change.png` | Bar chart of % change vs control |
+| `effect_sizes.png` | Forest plot of Cohen's d values |
+| `summary_panel.png` | Combined 3-panel summary figure |
+
+#### Example
+
+```bash
+# Generate all plots
+polyzymd compare plot results/rmsf_comparison_my_study.json
+
+# High resolution for publication
+polyzymd compare plot results/rmsf_comparison_my_study.json --dpi 300
+
+# PDF format with interactive preview
+polyzymd compare plot results/rmsf_comparison_my_study.json --format pdf --show
+```
+
+---
+
+## polyzymd plot
+
+Standalone plotting for analysis results (separate from `compare plot`).
+
+```bash
+polyzymd plot COMMAND [OPTIONS]
+
+Commands:
+  rmsf       Plot and compare RMSF results
+  distances  Plot and compare distance analysis results
+```
+
+### polyzymd plot rmsf
+
+Plot RMSF analysis results, optionally comparing multiple conditions.
+
+```bash
+polyzymd plot rmsf --inputs <files> [OPTIONS]
+
+Options:
+  --inputs PATH...    One or more RMSF result JSON files [required]
+  --labels TEXT...    Labels for each input (same order as inputs)
+  -o, --output PATH   Output file path
+  --format TEXT       Output format: png, pdf, svg [default: png]
+```
+
+#### Example
+
+```bash
+# Single condition
+polyzymd plot rmsf --inputs analysis/rmsf/run_1/rmsf_eq10ns.json
+
+# Compare two conditions
+polyzymd plot rmsf \
+    --inputs no_polymer/analysis/rmsf/aggregated/rmsf_reps1-3_eq10ns.json \
+             with_polymer/analysis/rmsf/aggregated/rmsf_reps1-3_eq10ns.json \
+    --labels "No Polymer" "With Polymer" \
+    -o comparison.png
+```
+
+---
+
 ## Environment Variables
 
 PolyzyMD expands environment variables in configuration paths:
@@ -481,3 +737,5 @@ output:
 - {doc}`quickstart` - Getting started tutorial
 - {doc}`configuration` - Configuration file reference
 - {doc}`hpc_slurm` - HPC and SLURM guide
+- {doc}`analysis_rmsf_quickstart` - RMSF analysis tutorial
+- {doc}`analysis_compare_conditions` - Comparing simulation conditions
