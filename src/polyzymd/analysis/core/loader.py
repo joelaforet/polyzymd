@@ -13,6 +13,7 @@ Key Features
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +24,8 @@ from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from polyzymd.config.schema import SimulationConfig
+
+LOGGER = logging.getLogger(__name__)
 
 # MDAnalysis is optional - only import when needed
 try:
@@ -154,19 +157,10 @@ class TrajectoryLoader:
                 f"Has replicate {replicate} been simulated?"
             )
 
-        # Look for production directory
-        production_dir = working_dir / "production"
-        if not production_dir.exists():
-            raise FileNotFoundError(
-                f"Production directory not found: {production_dir}\n"
-                f"Has production simulation been run for replicate {replicate}?"
-            )
-
-        # Find topology file
-        topology_file = self._find_topology(production_dir)
-
-        # Find trajectory files (may be daisy-chained)
-        trajectory_files = self._find_trajectories(production_dir)
+        # Find topology and trajectories
+        # Methods handle both new (production_N/) and legacy (production/) structures
+        topology_file = self._find_topology(working_dir)
+        trajectory_files = self._find_trajectories(working_dir)
 
         return TrajectoryInfo(
             topology_file=topology_file,
@@ -322,56 +316,81 @@ class TrajectoryLoader:
         """Clear the Universe cache to free memory."""
         self._universe_cache.clear()
 
-    def _find_topology(self, production_dir: Path) -> Path:
-        """Find topology file in production directory."""
-        # Try production_0_topology.pdb first (daisy-chain)
-        topology = production_dir / "production_0_topology.pdb"
+    def _find_topology(self, working_dir: Path) -> Path:
+        """Find topology file in working directory.
+
+        Search order:
+        1. solvated_system.pdb (primary - always exists after build)
+        2. production_0/production_0_topology.pdb (daisy-chain structure)
+        3. production/production_topology.pdb (legacy pre-daisy-chain)
+        4. Glob fallback for any topology PDB
+        """
+        # Primary: solvated_system.pdb in working_dir root
+        topology = working_dir / "solvated_system.pdb"
         if topology.exists():
             return topology
 
-        # Try production_topology.pdb (single segment)
-        topology = production_dir / "production_topology.pdb"
+        # Daisy-chain structure: production_0/production_0_topology.pdb
+        topology = working_dir / "production_0" / "production_0_topology.pdb"
         if topology.exists():
             return topology
 
-        # Search for any PDB file
-        pdbs = list(production_dir.glob("*_topology.pdb"))
-        if pdbs:
-            return sorted(pdbs)[0]
+        # Legacy structure: production/production_topology.pdb
+        topology = working_dir / "production" / "production_topology.pdb"
+        if topology.exists():
+            return topology
 
-        pdbs = list(production_dir.glob("*.pdb"))
-        if pdbs:
-            return sorted(pdbs)[0]
+        # Glob fallback: search for any topology PDB
+        for pattern in [
+            "production_*/*_topology.pdb",  # daisy-chain
+            "production/*_topology.pdb",  # legacy with segments (unlikely)
+            "*.pdb",  # any PDB in root
+        ]:
+            pdbs = sorted(working_dir.glob(pattern))
+            if pdbs:
+                return pdbs[0]
 
-        raise FileNotFoundError(f"No topology file found in {production_dir}")
+        raise FileNotFoundError(f"No topology file found in {working_dir}")
 
-    def _find_trajectories(self, production_dir: Path) -> list[Path]:
-        """Find trajectory files, handling daisy-chain segments."""
-        # Pattern for daisy-chain: production_N_trajectory.dcd
-        pattern = re.compile(r"production_(\d+)_trajectory\.dcd$")
+    def _find_trajectories(self, working_dir: Path) -> list[Path]:
+        """Find trajectory files, handling daisy-chain segments.
+
+        Search order:
+        1. production_N/production_N_trajectory.dcd (daisy-chain, multiple segments)
+        2. production/production_trajectory.dcd (legacy single file, deprecated)
+        3. Glob fallback for any production DCD files
+        """
+        # New daisy-chain structure: production_N/production_N_trajectory.dcd
+        # Use OS-agnostic pattern matching
+        pattern = re.compile(r"production_(\d+)[/\\]production_\d+_trajectory\.dcd$")
 
         segments: dict[int, Path] = {}
-        for f in production_dir.glob("production_*_trajectory.dcd"):
-            match = pattern.search(f.name)
+        for f in working_dir.glob("production_*/production_*_trajectory.dcd"):
+            match = pattern.search(str(f))
             if match:
                 idx = int(match.group(1))
                 segments[idx] = f
 
         if segments:
-            # Return in order
+            # Return in segment order
             return [segments[i] for i in sorted(segments.keys())]
 
-        # Try single production trajectory
-        single = production_dir / "production_trajectory.dcd"
-        if single.exists():
-            return [single]
+        # Legacy structure: production/production_trajectory.dcd (single file, no segments)
+        legacy_traj = working_dir / "production" / "production_trajectory.dcd"
+        if legacy_traj.exists():
+            LOGGER.warning(
+                f"Using deprecated trajectory structure: {legacy_traj}. "
+                "This format (production/production_trajectory.dcd) is deprecated. "
+                "Re-run simulation with current PolyzyMD to use production_N/ structure."
+            )
+            return [legacy_traj]
 
-        # Search for any DCD file
-        dcds = sorted(production_dir.glob("*.dcd"))
+        # Last resort: any production DCD files (excluding equilibration)
+        dcds = sorted(working_dir.glob("**/production*trajectory.dcd"))
         if dcds:
-            return list(dcds)
+            return dcds
 
-        raise FileNotFoundError(f"No trajectory files found in {production_dir}")
+        raise FileNotFoundError(f"No production trajectory files found in {working_dir}")
 
 
 def parse_time_string(time_str: str) -> tuple[float, str]:

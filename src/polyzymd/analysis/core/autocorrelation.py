@@ -412,7 +412,8 @@ def _integrate_acf(
         else:
             int_end = len(acf)
 
-    # Trapezoidal integration
-    tau = float(np.trapezoid(acf[:int_end], lags[:int_end]))
+    # Trapezoidal integration (trapezoid in numpy 2.0+, trapz in older versions)
+    trapz_func = getattr(np, "trapezoid", np.trapz)
+    tau = float(trapz_func(acf[:int_end], lags[:int_end]))
 
     return max(tau, dt)  # At least one timestep

@@ -264,11 +264,13 @@ def rmsf(
             # Generate plot if requested
             if plot:
                 require_matplotlib()
-                from polyzymd.analysis.rmsf import plot_rmsf, save_rmsf_plot
+                from polyzymd.analysis.rmsf import plot_rmsf
 
                 fig, ax = plot_rmsf(result)
                 plot_dir = sim_config.output.projects_directory / "plots" / "rmsf"
-                plot_path = save_rmsf_plot(fig, plot_dir / f"rmsf_run{rep_list[0]}.png")
+                plot_dir.mkdir(parents=True, exist_ok=True)
+                plot_path = plot_dir / f"rmsf_run{rep_list[0]}.png"
+                fig.savefig(plot_path, dpi=150, bbox_inches="tight")
                 click.echo(f"  Plot saved: {plot_path}")
 
         else:
@@ -291,14 +293,13 @@ def rmsf(
             # Generate plot if requested
             if plot:
                 require_matplotlib()
-                from polyzymd.analysis.rmsf import plot_rmsf, save_rmsf_plot
+                from polyzymd.analysis.rmsf import plot_rmsf
 
                 fig, ax = plot_rmsf(result, show_error=True)
                 plot_dir = sim_config.output.projects_directory / "plots" / "rmsf"
-                plot_path = save_rmsf_plot(
-                    fig,
-                    plot_dir / f"rmsf_aggregated_reps{rep_list[0]}-{rep_list[-1]}.png",
-                )
+                plot_dir.mkdir(parents=True, exist_ok=True)
+                plot_path = plot_dir / f"rmsf_aggregated_reps{rep_list[0]}-{rep_list[-1]}.png"
+                fig.savefig(plot_path, dpi=150, bbox_inches="tight")
                 click.echo(f"  Plot saved: {plot_path}")
 
     except Exception as e:
@@ -446,24 +447,22 @@ def distances(
                 click.echo(f"    Mean: {pr.mean_distance:.2f} ± {pr.std_distance:.2f} Å")
                 click.echo(f"    Min:  {pr.min_distance:.2f} Å")
                 click.echo(f"    Max:  {pr.max_distance:.2f} Å")
-                if pr.contact_fraction is not None:
-                    click.echo(f"    Contact fraction (<{threshold}Å): {pr.contact_fraction:.1%}")
+                if pr.fraction_below_threshold is not None:
+                    click.echo(
+                        f"    Contact fraction (<{threshold}Å): {pr.fraction_below_threshold:.1%}"
+                    )
 
             # Generate plot if requested
             if plot:
                 require_matplotlib()
-                from polyzymd.analysis.distances import (
-                    plot_distance_histogram,
-                    save_distance_plot,
-                )
+                from polyzymd.analysis.distances import plot_distance_histogram
 
                 plot_dir = sim_config.output.projects_directory / "plots" / "distances"
+                plot_dir.mkdir(parents=True, exist_ok=True)
                 for pr in result.pair_results:
-                    fig, ax = plot_distance_histogram(pr, threshold=threshold)
-                    plot_path = save_distance_plot(
-                        fig,
-                        plot_dir / f"dist_{pr.pair_label}_run{rep_list[0]}.png",
-                    )
+                    fig, ax = plot_distance_histogram(pr)
+                    plot_path = plot_dir / f"dist_{pr.pair_label}_run{rep_list[0]}.png"
+                    fig.savefig(plot_path, dpi=150, bbox_inches="tight")
                     click.echo(f"  Plot saved: {plot_path}")
 
         else:
@@ -479,28 +478,27 @@ def distances(
             click.echo(f"  Replicates: {result.replicate_range}")
             for pr in result.pair_results:
                 click.echo(f"  {pr.pair_label}:")
-                click.echo(f"    Mean: {pr.mean_distance:.2f} ± {pr.sem_distance:.2f} Å")
-                if pr.mean_contact_fraction is not None:
+                click.echo(f"    Mean: {pr.overall_mean:.2f} ± {pr.overall_sem:.2f} Å")
+                if pr.overall_fraction_below is not None:
                     click.echo(
-                        f"    Contact fraction: {pr.mean_contact_fraction:.1%} ± {pr.sem_contact_fraction:.1%}"
+                        f"    Contact fraction: {pr.overall_fraction_below:.1%} ± {pr.sem_fraction_below:.1%}"
                     )
 
             # Generate plot if requested
             if plot:
                 require_matplotlib()
-                from polyzymd.analysis.distances import (
-                    plot_contact_fraction_bar,
-                    save_distance_plot,
-                )
+                from polyzymd.analysis.distances import plot_contact_fraction_bar
 
                 plot_dir = sim_config.output.projects_directory / "plots" / "distances"
+                plot_dir.mkdir(parents=True, exist_ok=True)
                 if threshold:
-                    fig, ax = plot_contact_fraction_bar(result, threshold=threshold)
-                    plot_path = save_distance_plot(
-                        fig,
+                    # Plot contact fraction bar chart for all pairs
+                    fig, ax = plot_contact_fraction_bar(result.pair_results)
+                    plot_path = (
                         plot_dir
-                        / f"contact_fraction_aggregated_reps{rep_list[0]}-{rep_list[-1]}.png",
+                        / f"contact_fraction_aggregated_reps{rep_list[0]}-{rep_list[-1]}.png"
                     )
+                    fig.savefig(plot_path, dpi=150, bbox_inches="tight")
                     click.echo(f"  Plot saved: {plot_path}")
 
     except Exception as e:
