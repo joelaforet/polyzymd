@@ -94,6 +94,8 @@ Trajectory Analysis
    tutorials/analysis_rmsf_best_practices
    tutorials/analysis_reference_selection
    tutorials/analysis_compare_conditions
+   tutorials/analysis_triad_quickstart
+   tutorials/analysis_triad_best_practices
 
 API Reference
 -------------
