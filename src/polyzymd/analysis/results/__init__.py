@@ -32,6 +32,10 @@ from polyzymd.analysis.results.rmsf import (
     RMSFAggregatedResult,
     RMSFResult,
 )
+from polyzymd.analysis.results.triad import (
+    TriadAggregatedResult,
+    TriadResult,
+)
 
 __all__ = [
     # Base
@@ -46,4 +50,7 @@ __all__ = [
     "DistanceResult",
     "DistancePairAggregatedResult",
     "DistanceAggregatedResult",
+    # Triad
+    "TriadResult",
+    "TriadAggregatedResult",
 ]
