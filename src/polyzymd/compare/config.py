@@ -2,6 +2,9 @@
 
 This module defines the YAML schema for comparison.yaml files that
 specify which simulation conditions to compare.
+
+Also includes catalytic triad/active site configuration for distance
+and H-bond analysis.
 """
 
 from __future__ import annotations
@@ -11,7 +14,116 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
+
+
+# =============================================================================
+# Catalytic Triad / Active Site Configuration
+# =============================================================================
+
+
+class TriadPairConfig(BaseModel):
+    """Configuration for one distance pair in a catalytic triad/active site.
+
+    Each pair defines two atom selections between which distances will be
+    measured. Selections support special syntax:
+    - Standard MDAnalysis: "resid 77 and name OG"
+    - Midpoint: "midpoint(resid 133 and name OD1 OD2)"
+    - Center of mass: "com(resid 50-75)"
+
+    Attributes
+    ----------
+    label : str
+        Human-readable label for this pair (e.g., "Asp133-His156")
+    selection_a : str
+        First atom/point selection
+    selection_b : str
+        Second atom/point selection
+
+    Examples
+    --------
+    >>> pair = TriadPairConfig(
+    ...     label="Asp133-His156",
+    ...     selection_a="midpoint(resid 133 and name OD1 OD2)",
+    ...     selection_b="resid 156 and name ND1",
+    ... )
+    """
+
+    label: str = Field(..., description="Human-readable label for this pair")
+    selection_a: str = Field(..., description="First atom/point selection")
+    selection_b: str = Field(..., description="Second atom/point selection")
+
+
+class CatalyticTriadConfig(BaseModel):
+    """Configuration for catalytic triad/active site distance analysis.
+
+    Defines multiple distance pairs that together comprise an active site
+    or catalytic machinery. Computes:
+    - Per-pair distance distributions and statistics
+    - Simultaneous contact fraction (all pairs below threshold at same time)
+
+    Attributes
+    ----------
+    name : str
+        Name of the triad/active site (e.g., "LipA_catalytic_triad")
+    pairs : list[TriadPairConfig]
+        Distance pairs to monitor
+    threshold : float
+        Distance threshold for contact/H-bond analysis (Angstroms)
+    description : str, optional
+        Description of the active site
+
+    Examples
+    --------
+    In comparison.yaml:
+
+    ```yaml
+    catalytic_triad:
+      name: "LipA_catalytic_triad"
+      description: "Ser-His-Asp catalytic triad of Lipase A"
+      threshold: 3.5
+      pairs:
+        - label: "Asp133-His156"
+          selection_a: "midpoint(resid 133 and name OD1 OD2)"
+          selection_b: "resid 156 and name ND1"
+        - label: "His156-Ser77"
+          selection_a: "resid 156 and name NE2"
+          selection_b: "resid 77 and name OG"
+    ```
+    """
+
+    name: str = Field(..., description="Name of the catalytic triad/active site")
+    pairs: list[TriadPairConfig] = Field(..., description="Distance pairs to monitor")
+    threshold: float = Field(
+        default=3.5, description="Distance threshold for contact analysis (Angstroms)"
+    )
+    description: Optional[str] = Field(default=None, description="Description of the active site")
+
+    @field_validator("pairs", mode="after")
+    @classmethod
+    def validate_pairs(cls, v: list[TriadPairConfig]) -> list[TriadPairConfig]:
+        """Ensure at least one pair is defined."""
+        if len(v) == 0:
+            raise ValueError("At least one distance pair must be defined")
+        return v
+
+    @property
+    def n_pairs(self) -> int:
+        """Number of distance pairs."""
+        return len(self.pairs)
+
+    def get_pair_selections(self) -> list[tuple[str, str]]:
+        """Get list of (selection_a, selection_b) tuples for DistanceCalculator."""
+        return [(p.selection_a, p.selection_b) for p in self.pairs]
+
+    def get_pair_labels(self) -> list[str]:
+        """Get list of pair labels."""
+        return [p.label for p in self.pairs]
+
+
+# =============================================================================
+# Comparison Configuration
+# =============================================================================
 
 
 class ConditionConfig(BaseModel):
@@ -70,7 +182,8 @@ class ComparisonConfig(BaseModel):
     """Schema for comparison.yaml configuration files.
 
     A comparison config defines multiple simulation conditions to compare,
-    along with default analysis parameters.
+    along with default analysis parameters and optional catalytic triad
+    configuration.
 
     Attributes
     ----------
@@ -84,6 +197,8 @@ class ComparisonConfig(BaseModel):
         List of conditions to compare
     defaults : AnalysisDefaults
         Default analysis parameters
+    catalytic_triad : CatalyticTriadConfig, optional
+        Configuration for catalytic triad/active site analysis
 
     Examples
     --------
@@ -92,6 +207,8 @@ class ComparisonConfig(BaseModel):
     "Polymer Stabilization Study"
     >>> for cond in config.conditions:
     ...     print(f"{cond.label}: {cond.config}")
+    >>> if config.catalytic_triad:
+    ...     print(f"Triad: {config.catalytic_triad.name}")
     """
 
     name: str
@@ -99,6 +216,7 @@ class ComparisonConfig(BaseModel):
     control: Optional[str] = None
     conditions: list[ConditionConfig]
     defaults: AnalysisDefaults = AnalysisDefaults()
+    catalytic_triad: Optional[CatalyticTriadConfig] = None
 
     @classmethod
     def from_yaml(cls, path: Path | str) -> "ComparisonConfig":
@@ -287,4 +405,26 @@ defaults:
   equilibration_time: "{eq_time}"
   selection: "protein and name CA"
   reference_mode: "centroid"
+
+# ============================================================================
+# Catalytic Triad / Active Site Analysis (OPTIONAL)
+# ============================================================================
+# Define distance pairs for catalytic machinery analysis.
+# Supports special syntax:
+#   - midpoint(selection): center of geometry of selected atoms
+#   - com(selection): center of mass of selected atoms
+#
+# Uncomment and modify for your enzyme:
+#
+# catalytic_triad:
+#   name: "enzyme_catalytic_triad"
+#   description: "Ser-His-Asp catalytic triad"
+#   threshold: 3.5  # Angstroms, for contact/H-bond analysis
+#   pairs:
+#     - label: "Asp-His"
+#       selection_a: "midpoint(resid 133 and name OD1 OD2)"
+#       selection_b: "resid 156 and name ND1"
+#     - label: "His-Ser"
+#       selection_a: "resid 156 and name NE2"
+#       selection_b: "resid 77 and name OG"
 '''
