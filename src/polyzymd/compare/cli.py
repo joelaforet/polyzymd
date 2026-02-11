@@ -238,78 +238,6 @@ def rmsf(
     formatted = format_result(result, format=output_format)
     click.echo(formatted)
 
-    # Save results
-    results_dir = config_file.parent / "results"
-    if results_dir.exists():
-        # Always save JSON result
-        json_path = results_dir / f"rmsf_comparison_{result.name}.json"
-        result.save(json_path)
-        click.echo(f"Results saved: {json_path}")
-
-    # Save formatted output if requested
-    if output_path:
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(formatted)
-        click.echo(f"Output saved: {output_path}")
-
-
-@compare.command()
-@click.option(
-    "-f",
-    "--file",
-    "config_file",
-    type=click.Path(exists=True, path_type=Path),
-    default="comparison.yaml",
-    help="Path to comparison.yaml config file.",
-)
-def validate(config_file: Path):
-    """Validate a comparison.yaml configuration file.
-
-    Checks that:
-      - At least 2 conditions are defined
-      - No duplicate labels
-      - Control condition exists (if specified)
-      - Config paths exist for each condition
-
-    \b
-    Example:
-        polyzymd compare validate
-        polyzymd compare validate -f my_comparison.yaml
-    """
-    config_file = Path(config_file).resolve()
-
-    try:
-        config = ComparisonConfig.from_yaml(config_file)
-    except FileNotFoundError:
-        click.echo(f"Error: Config file not found: {config_file}", err=True)
-        sys.exit(1)
-    except Exception as e:
-        click.echo(f"Error parsing config: {e}", err=True)
-        sys.exit(1)
-
-    click.echo(f"Validating: {config_file}")
-    click.echo()
-
-    errors = config.validate_config()
-
-    if errors:
-        click.echo("Validation FAILED:", err=True)
-        for error in errors:
-            click.echo(f"  - {error}", err=True)
-        sys.exit(1)
-    else:
-        click.echo("Validation PASSED")
-        click.echo()
-        click.echo(f"  Name: {config.name}")
-        click.echo(f"  Conditions: {len(config.conditions)}")
-        for cond in config.conditions:
-            marker = " (control)" if cond.label == config.control else ""
-            click.echo(f"    - {cond.label}{marker}: {len(cond.replicates)} replicates")
-        click.echo(f"  Equilibration: {config.defaults.equilibration_time}")
-        click.echo(f"  Selection: {config.defaults.selection}")
-        click.echo()
-
 
 @compare.command()
 @click.argument(
@@ -317,27 +245,125 @@ def validate(config_file: Path):
     type=click.Path(exists=True, path_type=Path),
 )
 @click.option(
-    "--format",
-    "output_format",
-    type=click.Choice(["table", "markdown", "json"]),
-    default="table",
-    help="Output format.",
+    "-o",
+    "--output-dir",
+    type=click.Path(path_type=Path),
+    default="figures",
+    help="Output directory for plots. Default: figures/",
 )
-def show(result_file: Path, output_format: str):
-    """Display a saved comparison result.
+@click.option(
+    "--format",
+    "img_format",
+    type=click.Choice(["png", "pdf", "svg"]),
+    default="png",
+    help="Image format for saved plots.",
+)
+@click.option(
+    "--dpi",
+    default=150,
+    help="Resolution for PNG output (default: 150).",
+)
+@click.option(
+    "--summary/--no-summary",
+    default=True,
+    help="Generate combined summary panel (default: yes).",
+)
+@click.option(
+    "--show/--no-show",
+    default=False,
+    help="Display plots interactively after saving.",
+)
+def plot(
+    result_file: Path,
+    output_dir: Path,
+    img_format: str,
+    dpi: int,
+    summary: bool,
+    show: bool,
+):
+    """Generate comparison plots from saved results.
+
+    Creates publication-ready figures from a comparison result JSON file.
+
+    \b
+    Generated plots:
+      - rmsf_comparison: Bar chart of RMSF by condition
+      - percent_change: Bar chart of % change vs control
+      - effect_sizes: Forest plot of Cohen's d values
+      - summary_panel: Combined multi-panel figure (if --summary)
+
+    \b
+    Color coding:
+      - Green: Significant improvement (p<0.05)
+      - Blue: Large effect (d>0.8) but not significant
+      - Gray: Control or no effect
+      - Red: Worse than control
 
     \b
     Example:
-        polyzymd compare show results/rmsf_comparison_my_study.json
-        polyzymd compare show results/rmsf_comparison_my_study.json --format markdown
+        polyzymd compare plot results/rmsf_comparison_my_study.json
+        polyzymd compare plot results/rmsf_comparison_my_study.json -o figures/ --dpi 300
+        polyzymd compare plot results/rmsf_comparison_my_study.json --format pdf --show
     """
     from polyzymd.compare.results import ComparisonResult
+    from polyzymd.compare.plotting import (
+        plot_rmsf_comparison,
+        plot_percent_change,
+        plot_effect_sizes,
+        plot_summary_panel,
+    )
 
+    # Load result
     try:
         result = ComparisonResult.load(result_file)
     except Exception as e:
         click.echo(f"Error loading result: {e}", err=True)
         sys.exit(1)
 
-    formatted = format_result(result, format=output_format)
-    click.echo(formatted)
+    click.echo(f"Loaded comparison: {result.name}")
+    click.echo(f"Conditions: {len(result.conditions)}")
+    click.echo()
+
+    # Create output directory
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    generated = []
+
+    # Plot 1: RMSF comparison
+    rmsf_path = output_dir / f"rmsf_comparison.{img_format}"
+    click.echo(f"Generating RMSF comparison plot...")
+    plot_rmsf_comparison(result, save_path=rmsf_path, dpi=dpi)
+    generated.append(rmsf_path)
+
+    # Plot 2: Percent change (requires control)
+    if result.control_label and result.pairwise_comparisons:
+        pct_path = output_dir / f"percent_change.{img_format}"
+        click.echo(f"Generating percent change plot...")
+        plot_percent_change(result, save_path=pct_path, dpi=dpi)
+        generated.append(pct_path)
+
+        # Plot 3: Effect sizes
+        effect_path = output_dir / f"effect_sizes.{img_format}"
+        click.echo(f"Generating effect sizes plot...")
+        plot_effect_sizes(result, save_path=effect_path, dpi=dpi)
+        generated.append(effect_path)
+    else:
+        click.echo("Skipping percent change and effect size plots (no control condition)")
+
+    # Plot 4: Summary panel
+    if summary and result.control_label and result.pairwise_comparisons:
+        summary_path = output_dir / f"summary_panel.{img_format}"
+        click.echo(f"Generating summary panel...")
+        plot_summary_panel(result, save_path=summary_path, dpi=dpi)
+        generated.append(summary_path)
+
+    click.echo()
+    click.echo("Generated plots:")
+    for path in generated:
+        click.echo(f"  - {path}")
+
+    if show:
+        import matplotlib.pyplot as plt
+
+        plt.show()

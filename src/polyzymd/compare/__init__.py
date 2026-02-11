@@ -28,6 +28,12 @@ from polyzymd.compare.formatters import (
     format_result,
     to_json,
 )
+from polyzymd.compare.plotting import (
+    plot_rmsf_comparison,
+    plot_percent_change,
+    plot_effect_sizes,
+    plot_summary_panel,
+)
 
 __all__ = [
     "ComparisonConfig",
@@ -38,4 +44,9 @@ __all__ = [
     "format_markdown",
     "format_result",
     "to_json",
+    # Plotting functions
+    "plot_rmsf_comparison",
+    "plot_percent_change",
+    "plot_effect_sizes",
+    "plot_summary_panel",
 ]
