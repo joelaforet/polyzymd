@@ -83,6 +83,17 @@ Getting Started
    tutorials/broken_molecules_debugging
    tutorials/contributing
 
+Trajectory Analysis
+-------------------
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Analysis Guide
+
+   tutorials/analysis_rmsf_quickstart
+   tutorials/analysis_rmsf_best_practices
+   tutorials/analysis_reference_selection
+
 API Reference
 -------------
 
