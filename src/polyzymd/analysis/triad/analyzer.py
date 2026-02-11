@@ -327,22 +327,55 @@ class CatalyticTriadAnalyzer:
         -------
         TriadAggregatedResult
             Aggregated results with SEM across replicates
+
+        Notes
+        -----
+        Missing or problematic replicates are skipped with a warning.
+        At least 2 successful replicates are required for aggregation.
         """
-        replicates = list(replicates)
+        requested_replicates = list(replicates)
 
         if output_dir is None:
             output_dir = self.config.output.projects_directory / "analysis" / "triad" / "aggregated"
 
-        # Compute individual replicates
+        # Compute individual replicates with error handling
         individual_results = []
-        for rep in replicates:
-            result = self.compute(
-                replicate=rep,
-                save=save,
-                recompute=recompute,
-                store_timeseries=False,
+        successful_replicates = []
+        failed_replicates = []
+
+        for rep in requested_replicates:
+            try:
+                result = self.compute(
+                    replicate=rep,
+                    save=save,
+                    recompute=recompute,
+                    store_timeseries=False,
+                )
+                individual_results.append(result)
+                successful_replicates.append(rep)
+            except FileNotFoundError as e:
+                LOGGER.warning(f"Skipping replicate {rep}: trajectory data not found. {e}")
+                failed_replicates.append(rep)
+            except Exception as e:
+                LOGGER.warning(f"Skipping replicate {rep}: analysis failed with error: {e}")
+                failed_replicates.append(rep)
+
+        # Check we have enough replicates
+        if len(individual_results) < 2:
+            raise ValueError(
+                f"Aggregation requires at least 2 successful replicates, but only "
+                f"{len(individual_results)} succeeded. Failed replicates: {failed_replicates}"
             )
-            individual_results.append(result)
+
+        # Warn if some replicates were skipped
+        if failed_replicates:
+            LOGGER.warning(
+                f"Aggregating {len(successful_replicates)} of {len(requested_replicates)} "
+                f"requested replicates. Skipped: {failed_replicates}"
+            )
+
+        # Use successful_replicates for the rest of the method
+        replicates = successful_replicates
 
         # Aggregate per-pair statistics
         n_pairs = len(self.triad_config.pairs)
