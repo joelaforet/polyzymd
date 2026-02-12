@@ -348,78 +348,49 @@ def generate_comparison_template(name: str, eq_time: str = "10ns") -> str:
 # ============================================================================
 # PolyzyMD Comparison Configuration
 # ============================================================================
-#
-# This file defines conditions to compare in your analysis.
-#
-# INSTRUCTIONS:
-# 1. Add your simulation conditions below
-# 2. Each condition needs:
-#    - label: A short name for display (e.g., "No Polymer", "100% SBMA")
-#    - config: Path to the simulation's config.yaml (relative or absolute)
-#    - replicates: List of replicate numbers to include
-# 3. Set 'control' to the label of your control condition (optional)
-# 4. Run: polyzymd compare rmsf
-#
+# Compare analyses across simulation conditions (e.g., polymer, temperature).
+# Docs: https://polyzymd.readthedocs.io/en/latest/
 # ============================================================================
 
-# Project name (used in output filenames)
 name: "{name}"
-
-# Description of what you're comparing
 description: "Comparison of simulation conditions"
 
-# Which condition is the control? (for relative comparisons)
-# Set to null or remove if no control
+# Control condition for relative comparisons (null if none)
 control: null
 
 # ============================================================================
-# Conditions to Compare
+# Conditions
 # ============================================================================
-# Add one entry per treatment/condition. Paths can be relative to this file.
-#
-# Example:
-#   - label: "No Polymer"
-#     config: "../projects/noPoly_LipA_DMSO/config.yaml"
-#     replicates: [1, 2, 3]
-#
+# Each condition points to a simulation's config.yaml file.
 conditions:
   - label: "Condition A"
     config: "../path/to/condition_a/config.yaml"
     replicates: [1, 2, 3]
-    
+
   - label: "Condition B"
     config: "../path/to/condition_b/config.yaml"
     replicates: [1, 2, 3]
-    
-  # Add more conditions as needed:
-  # - label: "Condition C"
-  #   config: "../path/to/condition_c/config.yaml"
-  #   replicates: [1, 2]
 
 # ============================================================================
-# Default Analysis Parameters
+# Defaults
 # ============================================================================
-# These can be overridden on the command line (e.g., --eq-time 20ns)
-#
+# Note: If equilibration_time is 0ns, you'll get a warning - set appropriately!
 defaults:
   equilibration_time: "{eq_time}"
   selection: "protein and name CA"
   reference_mode: "centroid"
 
 # ============================================================================
-# Catalytic Triad / Active Site Analysis (OPTIONAL)
+# Catalytic Triad (for polyzymd compare triad)
 # ============================================================================
-# Define distance pairs for catalytic machinery analysis.
-# Supports special syntax:
-#   - midpoint(selection): center of geometry of selected atoms
-#   - com(selection): center of mass of selected atoms
+# Define your enzyme's catalytic machinery ONCE here - it's shared across
+# all conditions since the enzyme is the same.
 #
-# Uncomment and modify for your enzyme:
+# Run: polyzymd compare triad -c comparison.yaml
 #
 # catalytic_triad:
 #   name: "enzyme_catalytic_triad"
-#   description: "Ser-His-Asp catalytic triad"
-#   threshold: 3.5  # Angstroms, for contact/H-bond analysis
+#   threshold: 3.5  # Angstroms (H-bond cutoff)
 #   pairs:
 #     - label: "Asp-His"
 #       selection_a: "midpoint(resid 133 and name OD1 OD2)"

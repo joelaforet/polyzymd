@@ -100,12 +100,13 @@ def init(name: str, eq_time: str, output_dir: Optional[Path]):
         click.echo()
         click.echo("Next steps:")
         click.echo(f"  1. Edit {config_path.relative_to(Path.cwd())}")
-        click.echo("     - Add your simulation conditions")
-        click.echo("     - Set paths to config.yaml files")
-        click.echo("     - Specify replicate numbers")
+        click.echo("     - Add your simulation conditions (paths to config.yaml files)")
+        click.echo("     - Define catalytic_triad for active site analysis")
         click.echo()
         click.echo(f"  2. cd {project_dir.relative_to(Path.cwd())}")
-        click.echo("  3. polyzymd compare rmsf")
+        click.echo("  3. Run comparisons:")
+        click.echo("     polyzymd compare rmsf    # Compare flexibility")
+        click.echo("     polyzymd compare triad   # Compare triad geometry")
         click.echo()
 
     except Exception as e:

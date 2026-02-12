@@ -77,6 +77,14 @@ def __getattr__(name):
         from polyzymd.analysis.core.config_hash import validate_config_hash
 
         return validate_config_hash
+    elif name == "AnalysisConfig":
+        from polyzymd.analysis.config import AnalysisConfig
+
+        return AnalysisConfig
+    elif name == "generate_analysis_template":
+        from polyzymd.analysis.config import generate_analysis_template
+
+        return generate_analysis_template
     elif name in ("plot_rmsf", "plot_rmsf_comparison", "save_rmsf_plot"):
         from polyzymd.analysis import rmsf
 
@@ -98,6 +106,9 @@ __all__ = [
     # Config validation
     "compute_config_hash",
     "validate_config_hash",
+    # Analysis configuration
+    "AnalysisConfig",
+    "generate_analysis_template",
     # Plotting (RMSF)
     "plot_rmsf",
     "plot_rmsf_comparison",

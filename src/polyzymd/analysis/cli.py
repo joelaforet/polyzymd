@@ -118,16 +118,329 @@ def analyze() -> None:
     Analysis results are saved as JSON files for later plotting and comparison.
 
     \b
-    Examples:
+    Workflow:
+    1. cd your_project/        # Directory with config.yaml
+    2. polyzymd analyze init   # Create analysis.yaml template
+    3. Edit analysis.yaml      # Configure analyses
+    4. polyzymd analyze run    # Run all enabled analyses
+
+    \b
+    Or run individual analyses:
         polyzymd analyze rmsf -c config.yaml -r 1-5 --eq-time 100ns
-        polyzymd analyze distances -c config.yaml -r 1 --pair "resid 77 and name OG : resid 133 and name NE2"
+        polyzymd analyze distances -c config.yaml -r 1 --pair "sel1 : sel2"
     """
     pass
 
 
 # -----------------------------------------------------------------------------
-# RMSF Analysis
+# Init Command - Create analysis.yaml scaffold
 # -----------------------------------------------------------------------------
+
+
+@analyze.command()
+@click.option(
+    "--eq-time",
+    default="10ns",
+    help="Default equilibration time (e.g., '10ns', '5000ps').",
+)
+def init(eq_time: str) -> None:
+    """Initialize analysis configuration for this simulation.
+
+    Must be run from a directory containing config.yaml.
+
+    \b
+    Creates:
+      - analysis.yaml: Configuration for which analyses to run
+      - analysis/: Directory structure for results
+        ├── rmsf/
+        ├── distances/
+        └── triad/
+
+    \b
+    Example:
+        cd my_project
+        polyzymd analyze init
+        polyzymd analyze init --eq-time 20ns
+    """
+    from polyzymd.analysis.config import generate_analysis_template
+
+    cwd = Path.cwd()
+    config_yaml = cwd / "config.yaml"
+
+    # Validate we're in the right place
+    if not config_yaml.exists():
+        click.echo(
+            click.style(
+                "Error: config.yaml not found in current directory.",
+                fg="red",
+            ),
+            err=True,
+        )
+        click.echo("Run this command from your simulation project directory.", err=True)
+        sys.exit(1)
+
+    analysis_yaml = cwd / "analysis.yaml"
+    if analysis_yaml.exists():
+        click.echo(
+            click.style(
+                f"Error: analysis.yaml already exists at {analysis_yaml}",
+                fg="red",
+            ),
+            err=True,
+        )
+        click.echo("Delete it first if you want to regenerate.", err=True)
+        sys.exit(1)
+
+    # Create directory structure
+    analysis_dir = cwd / "analysis"
+    analysis_dir.mkdir(exist_ok=True)
+    (analysis_dir / "rmsf").mkdir(exist_ok=True)
+    (analysis_dir / "distances").mkdir(exist_ok=True)
+    (analysis_dir / "triad").mkdir(exist_ok=True)
+
+    # Generate template
+    template = generate_analysis_template(eq_time)
+    analysis_yaml.write_text(template)
+
+    click.echo(f"Created: {analysis_yaml.name}")
+    click.echo(f"Created: {analysis_dir.name}/")
+    click.echo()
+    click.echo("Next steps:")
+    click.echo("  1. Edit analysis.yaml to configure your analyses")
+    click.echo("  2. Run: polyzymd analyze run")
+
+
+# -----------------------------------------------------------------------------
+# Run Command - Execute all enabled analyses
+# -----------------------------------------------------------------------------
+
+
+@analyze.command("run")
+@click.option(
+    "-c",
+    "--config",
+    "analysis_config",
+    type=click.Path(exists=True, path_type=Path),
+    default="analysis.yaml",
+    help="Path to analysis.yaml file.",
+)
+@click.option(
+    "--recompute",
+    is_flag=True,
+    help="Force recompute even if cached results exist.",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    help="Verbose output.",
+)
+def run_analyses(analysis_config: Path, recompute: bool, verbose: bool) -> None:
+    """Run all enabled analyses defined in analysis.yaml.
+
+    Reads analysis.yaml and runs each enabled analysis type
+    (RMSF, distances, catalytic_triad) for all specified replicates.
+
+    \b
+    Example:
+        polyzymd analyze run
+        polyzymd analyze run -c analysis.yaml --recompute
+        polyzymd analyze run -v
+    """
+    require_analysis_deps()
+
+    from polyzymd.analysis.config import AnalysisConfig
+    from polyzymd.analysis import RMSFCalculator, DistanceCalculator, CatalyticTriadAnalyzer
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.compare.config import CatalyticTriadConfig as CompareTriadConfig
+    from polyzymd.compare.config import TriadPairConfig as CompareTriadPairConfig
+
+    # Set up logging
+    if verbose:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+    else:
+        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+
+    analysis_config = Path(analysis_config).resolve()
+
+    # Load analysis config
+    click.echo(f"Loading: {analysis_config.name}")
+    try:
+        config = AnalysisConfig.from_yaml(analysis_config)
+    except FileNotFoundError:
+        click.echo(
+            click.style(
+                f"Error: {analysis_config} not found.",
+                fg="red",
+            ),
+            err=True,
+        )
+        click.echo("Run 'polyzymd analyze init' first.", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(
+            click.style(f"Error loading config: {e}", fg="red"),
+            err=True,
+        )
+        sys.exit(1)
+
+    # Find simulation config.yaml (same directory)
+    sim_config_path = analysis_config.parent / "config.yaml"
+    if not sim_config_path.exists():
+        click.echo(
+            click.style(
+                "Error: config.yaml not found alongside analysis.yaml",
+                fg="red",
+            ),
+            err=True,
+        )
+        click.echo("analysis.yaml must be in the same directory as config.yaml.", err=True)
+        sys.exit(1)
+
+    # Load simulation config
+    sim_config = SimulationConfig.from_yaml(sim_config_path)
+
+    # Validate analysis config
+    issues = config.validate_config()
+    if issues:
+        click.echo(click.style("Configuration issues:", fg="yellow"))
+        for issue in issues:
+            click.echo(f"  - {issue}")
+        click.echo()
+
+    # Get enabled analyses
+    enabled = config.get_enabled_analyses()
+    if not enabled:
+        click.echo(click.style("No analyses enabled in analysis.yaml", fg="yellow"))
+        sys.exit(0)
+
+    click.echo(f"Replicates: {config.replicates}")
+    click.echo(f"Equilibration: {config.defaults.equilibration_time}")
+    click.echo(f"Enabled analyses: {', '.join(enabled)}")
+    click.echo()
+
+    # Track results for summary
+    completed = []
+    failed = []
+
+    # Run RMSF analysis
+    if config.rmsf.enabled:
+        click.echo(click.style("=" * 60, fg="blue"))
+        click.echo(click.style("Running RMSF analysis...", fg="blue"))
+        click.echo(click.style("=" * 60, fg="blue"))
+        try:
+            calculator = RMSFCalculator(
+                config=sim_config,
+                selection=config.rmsf.selection,
+                equilibration=config.defaults.equilibration_time,
+                reference_mode=config.rmsf.reference_mode,
+                reference_frame=config.rmsf.reference_frame,
+            )
+            for rep in config.replicates:
+                click.echo(f"  Replicate {rep}...", nl=False)
+                try:
+                    result = calculator.compute(replicate=rep, recompute=recompute)
+                    click.echo(
+                        click.style(f" done (mean RMSF: {result.mean_rmsf:.2f} Å)", fg="green")
+                    )
+                except Exception as e:
+                    click.echo(click.style(f" FAILED: {e}", fg="red"))
+                    failed.append(f"RMSF rep {rep}")
+            completed.append(f"RMSF ({len(config.replicates)} replicates)")
+        except Exception as e:
+            click.echo(click.style(f"RMSF analysis failed: {e}", fg="red"))
+            failed.append("RMSF")
+
+    # Run distance analysis
+    if config.distances.enabled:
+        click.echo()
+        click.echo(click.style("=" * 60, fg="blue"))
+        click.echo(click.style("Running distance analysis...", fg="blue"))
+        click.echo(click.style("=" * 60, fg="blue"))
+        try:
+            pairs = [(p.selection_a, p.selection_b) for p in config.distances.pairs]
+            calculator = DistanceCalculator(
+                config=sim_config,
+                pairs=pairs,
+                equilibration=config.defaults.equilibration_time,
+            )
+            for rep in config.replicates:
+                click.echo(f"  Replicate {rep}...", nl=False)
+                try:
+                    result = calculator.compute(replicate=rep, recompute=recompute)
+                    click.echo(click.style(f" done ({len(pairs)} pairs)", fg="green"))
+                except Exception as e:
+                    click.echo(click.style(f" FAILED: {e}", fg="red"))
+                    failed.append(f"Distances rep {rep}")
+            completed.append(f"Distances ({len(config.replicates)} replicates)")
+        except Exception as e:
+            click.echo(click.style(f"Distance analysis failed: {e}", fg="red"))
+            failed.append("Distances")
+
+    # Run catalytic triad analysis
+    if config.catalytic_triad.enabled:
+        click.echo()
+        click.echo(click.style("=" * 60, fg="blue"))
+        click.echo(click.style("Running catalytic triad analysis...", fg="blue"))
+        click.echo(click.style("=" * 60, fg="blue"))
+        try:
+            # Convert to compare module's TriadConfig format
+            triad_pairs = [
+                CompareTriadPairConfig(
+                    label=p.label,
+                    selection_a=p.selection_a,
+                    selection_b=p.selection_b,
+                )
+                for p in config.catalytic_triad.pairs
+            ]
+            triad_config = CompareTriadConfig(
+                name=config.catalytic_triad.name,
+                threshold=config.catalytic_triad.threshold,
+                pairs=triad_pairs,
+            )
+            analyzer = CatalyticTriadAnalyzer(
+                config=sim_config,
+                triad_config=triad_config,
+                equilibration=config.defaults.equilibration_time,
+            )
+            for rep in config.replicates:
+                click.echo(f"  Replicate {rep}...", nl=False)
+                try:
+                    result = analyzer.compute(replicate=rep, recompute=recompute)
+                    contact_pct = result.simultaneous_contact_fraction * 100
+                    click.echo(
+                        click.style(
+                            f" done (simultaneous contact: {contact_pct:.1f}%)",
+                            fg="green",
+                        )
+                    )
+                except Exception as e:
+                    click.echo(click.style(f" FAILED: {e}", fg="red"))
+                    failed.append(f"Triad rep {rep}")
+            completed.append(f"Catalytic triad ({len(config.replicates)} replicates)")
+        except Exception as e:
+            click.echo(click.style(f"Catalytic triad analysis failed: {e}", fg="red"))
+            failed.append("Catalytic triad")
+
+    # Print summary
+    click.echo()
+    click.echo(click.style("=" * 60, fg="green" if not failed else "yellow"))
+    click.echo(click.style("Summary", fg="green" if not failed else "yellow"))
+    click.echo(click.style("=" * 60, fg="green" if not failed else "yellow"))
+    if completed:
+        click.echo("Completed:")
+        for item in completed:
+            click.echo(f"  - {item}")
+    if failed:
+        click.echo(click.style("Failed:", fg="red"))
+        for item in failed:
+            click.echo(click.style(f"  - {item}", fg="red"))
+
+    if not failed:
+        click.echo()
+        click.echo(click.style("All analyses completed successfully!", fg="green"))
+    else:
+        sys.exit(1)
 
 
 @analyze.command()
