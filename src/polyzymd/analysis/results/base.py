@@ -142,12 +142,16 @@ class BaseAnalysisResult(BaseModel, ABC):
 class AggregatedResultMixin:
     """Mixin for aggregated (multi-replicate) results.
 
-    Provides common fields and methods for results that combine
-    data from multiple replicates.
+    Provides common methods for results that combine data from multiple replicates.
+
+    Note: Child classes must define `replicates: list[int]` and `n_replicates: int`
+    fields themselves. This mixin only provides utility methods.
     """
 
-    replicates: list[int] = Field(..., description="List of replicate numbers included (1-indexed)")
-    n_replicates: int = Field(..., description="Number of replicates aggregated")
+    # These are expected to be defined by child classes as Pydantic fields.
+    # We declare them here only for type checking purposes (not as Fields).
+    replicates: list[int]
+    n_replicates: int
 
     @property
     def replicate_range(self) -> str:
