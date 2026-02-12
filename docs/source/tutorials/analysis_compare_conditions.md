@@ -17,9 +17,10 @@ polyzymd compare init my_polymer_study
 # 2. Edit the template (add your conditions)
 vim my_polymer_study/comparison.yaml
 
-# 3. Run comparison
+# 3. Run comparisons
 cd my_polymer_study
-polyzymd compare rmsf --eq-time 10ns
+polyzymd compare rmsf --eq-time 10ns   # Compare flexibility
+polyzymd compare triad --eq-time 10ns  # Compare triad geometry (if defined)
 
 # Output formats
 polyzymd compare rmsf --format table     # Console table (default)
@@ -702,8 +703,197 @@ replicates to achieve statistical significance.
 **Fix:** Ensure `--eq-time` and `--selection` match what you used for
 individual RMSF calculations. Check `defaults:` in comparison.yaml.
 
+## Comparing Catalytic Triad Geometry
+
+In addition to RMSF (global flexibility), you can compare **catalytic triad integrity**
+across conditions. This is useful for enzymes where active site geometry is crucial
+for catalytic function.
+
+### What is Simultaneous Contact Fraction?
+
+The catalytic triad comparison analyzes the **simultaneous contact fraction** -- the
+percentage of simulation frames where ALL distance pairs in your triad are below
+the contact threshold at the same time. Higher values indicate better triad integrity.
+
+For example, a Ser-His-Asp catalytic triad:
+- 95% simultaneous contact = triad is intact most of the time
+- 50% simultaneous contact = triad frequently disrupted
+- 10% simultaneous contact = triad rarely intact
+
+### Adding Catalytic Triad to comparison.yaml
+
+Add a `catalytic_triad` section to your comparison.yaml:
+
+```yaml
+name: "polymer_stability_study"
+control: "No Polymer"
+
+conditions:
+  - label: "No Polymer"
+    config: "../noPoly_LipA_DMSO/config.yaml"
+    replicates: [1, 2, 3]
+
+  - label: "100% SBMA"
+    config: "../SBMA_100_DMSO/config.yaml"
+    replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "10ns"
+
+# Define your enzyme's catalytic triad
+catalytic_triad:
+  name: "LipA_Ser-His-Asp"
+  description: "Lipase A catalytic triad"
+  threshold: 3.5  # Angstroms (H-bond cutoff)
+  pairs:
+    - label: "Asp133-His156"
+      selection_a: "midpoint(resid 133 and name OD1 OD2)"
+      selection_b: "resid 156 and name ND1"
+    - label: "His156-Ser77"
+      selection_a: "resid 156 and name NE2"
+      selection_b: "resid 77 and name OG"
+```
+
+### Running Triad Comparison
+
+```bash
+# From your comparison project directory
+polyzymd compare triad
+
+# With options
+polyzymd compare triad --eq-time 10ns --format markdown
+polyzymd compare triad -o triad_report.md
+```
+
+### Example Output
+
+```
+Catalytic Triad Comparison: polymer_stability_study
+======================================================================
+Triad: LipA_Ser-His-Asp
+Description: Lipase A catalytic triad
+Pairs: Asp133-His156, His156-Ser77
+Contact threshold: 3.5 A
+Equilibration: 10ns
+Control: No Polymer
+
+Condition Summary (ranked by simultaneous contact, highest first)
+----------------------------------------------------------------------
+Rank  Condition            Contact %    SEM        N
+----------------------------------------------------------------------
+1     100% SBMA               87.3%      2.15%  3
+2     No Polymer              72.1%      3.42%  3   *
+3     50/50 Mix               68.5%      4.21%  3
+----------------------------------------------------------------------
+* = control condition
+
+Pairwise Comparisons
+-------------------------------------------------------------------------------------
+Comparison                     % Change   p-value      Cohen's d  Effect
+-------------------------------------------------------------------------------------
+100% SBMA vs No Polymer        +21.1%     0.0156*      2.89       large
+50/50 Mix vs No Polymer        -5.0%      0.5234       -0.52      medium
+-------------------------------------------------------------------------------------
+* p < 0.05
+Positive % change = improved triad contact
+
+Interpretation
+----------------------------------------------------------------------
+Best triad integrity: 100% SBMA (87.3% simultaneous contact)
+  -> 21.1% higher than control (No Polymer)
+  -> Statistically significant (p=0.0156, d=2.89 [large])
+```
+
+### Per-Pair Distance Table
+
+The output also includes a per-pair distance summary showing how each
+individual H-bond distance compares across conditions:
+
+```
+Per-Pair Distances (Mean ± SEM across replicates)
+------------------------------------------------------------------------------------------
+Condition            Asp133-His156    His156-Ser77
+------------------------------------------------------------------------------------------
+100% SBMA            2.81±0.08        2.74±0.05
+No Polymer           3.12±0.11        2.89±0.09
+50/50 Mix            3.28±0.15        2.95±0.12
+------------------------------------------------------------------------------------------
+```
+
+### Interpreting Results
+
+| Contact % | Interpretation |
+|-----------|---------------|
+| > 90% | Excellent triad integrity |
+| 70-90% | Good triad integrity |
+| 50-70% | Moderate disruption |
+| < 50% | Significant triad disruption |
+
+**Key metrics:**
+- **% Change**: Positive = more triad contact = better
+- **p-value**: < 0.05 indicates statistically significant difference
+- **Cohen's d**: Effect size magnitude
+
+### CLI Reference for Triad
+
+```bash
+polyzymd compare triad [OPTIONS]
+
+Options:
+  -f, --file PATH                 Config file [default: comparison.yaml]
+  --eq-time TEXT                  Override equilibration time
+  --recompute                     Force recompute triad analysis
+  --format [table|markdown|json]  Output format [default: table]
+  -o, --output PATH               Save formatted output to file
+  -v, --verbose                   Show detailed logging
+```
+
+### Python API for Triad Comparison
+
+```python
+from polyzymd.compare import ComparisonConfig, TriadComparator, format_triad_result
+
+# Load configuration
+config = ComparisonConfig.from_yaml("comparison.yaml")
+
+# Run triad comparison
+comparator = TriadComparator(config, equilibration="10ns")
+result = comparator.compare()
+
+# Access results
+print(f"Best triad integrity: {result.ranking[0]}")
+for cond in result.conditions:
+    contact_pct = cond.mean_simultaneous_contact * 100
+    print(f"{cond.label}: {contact_pct:.1f}% ± {cond.sem_simultaneous_contact*100:.1f}%")
+
+# Format output
+print(format_triad_result(result, format="markdown"))
+
+# Save result
+result.save("results/triad_comparison.json")
+```
+
+### Loading Saved Triad Results
+
+```python
+from polyzymd.compare import TriadComparisonResult
+
+# Load from JSON
+result = TriadComparisonResult.load("results/triad_comparison_my_study.json")
+
+# Access condition data
+control = result.get_condition("No Polymer")
+print(f"Control contact: {control.mean_simultaneous_contact * 100:.1f}%")
+
+# Get pairwise comparison
+comp = result.get_comparison("100% SBMA")
+if comp and comp.significant:
+    print(f"SBMA significantly improves triad contact (p={comp.p_value:.4f})")
+```
+
 ## See Also
 
 - [RMSF Quick Start](analysis_rmsf_quickstart.md) -- Run individual RMSF analysis
+- [Catalytic Triad Analysis](analysis_triad_quickstart.md) -- Run individual triad analysis
 - [Statistical Best Practices](analysis_rmsf_best_practices.md) -- Understanding statistics
 - [Reference Selection](analysis_reference_selection.md) -- Alignment options

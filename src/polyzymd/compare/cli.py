@@ -368,3 +368,161 @@ def plot(
         import matplotlib.pyplot as plt
 
         plt.show()
+
+
+@compare.command()
+@click.option(
+    "-f",
+    "--file",
+    "config_file",
+    type=click.Path(exists=True, path_type=Path),
+    default="comparison.yaml",
+    help="Path to comparison.yaml config file.",
+)
+@click.option(
+    "--eq-time",
+    default=None,
+    help="Override equilibration time (e.g., '10ns', '5000ps').",
+)
+@click.option(
+    "--recompute",
+    is_flag=True,
+    help="Force recompute triad analysis even if cached results exist.",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "markdown", "json"]),
+    default="table",
+    help="Output format: table (default), markdown, or json.",
+)
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Save output to file. Also saves JSON result to results/ directory.",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Show verbose logging output.",
+)
+def triad(
+    config_file: Path,
+    eq_time: Optional[str],
+    recompute: bool,
+    output_format: str,
+    output_path: Optional[Path],
+    verbose: bool,
+):
+    """Compare catalytic triad geometry across conditions.
+
+    Analyzes the catalytic triad/active site defined in comparison.yaml,
+    comparing the simultaneous contact fraction across all conditions.
+    Higher contact fraction indicates better triad integrity.
+
+    Requires a catalytic_triad section in comparison.yaml defining:
+    - name: Name of the triad
+    - threshold: Contact distance threshold (Angstroms)
+    - pairs: List of distance pairs with selections
+
+    \b
+    Example:
+        polyzymd compare triad
+        polyzymd compare triad --eq-time 10ns --format markdown
+        polyzymd compare triad -f my_comparison.yaml -o report.md
+    """
+    from polyzymd.compare.triad_comparator import TriadComparator
+    from polyzymd.compare.triad_formatters import format_triad_result
+
+    # Set up logging
+    if verbose:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+    else:
+        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+
+    config_file = Path(config_file).resolve()
+
+    # Load and validate config
+    click.echo(f"Loading config: {config_file}")
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        click.echo("Run 'polyzymd compare init <name>' to create a comparison project.", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error loading config: {e}", err=True)
+        sys.exit(1)
+
+    # Check for catalytic_triad section
+    if config.catalytic_triad is None:
+        click.echo("Error: No catalytic_triad section in comparison.yaml", err=True)
+        click.echo("", err=True)
+        click.echo("Add a catalytic_triad section to your comparison.yaml:", err=True)
+        click.echo("", err=True)
+        click.echo("  catalytic_triad:", err=True)
+        click.echo('    name: "enzyme_triad"', err=True)
+        click.echo("    threshold: 3.5", err=True)
+        click.echo("    pairs:", err=True)
+        click.echo('      - label: "Asp-His"', err=True)
+        click.echo('        selection_a: "resid 133 and name OD1"', err=True)
+        click.echo('        selection_b: "resid 156 and name ND1"', err=True)
+        sys.exit(1)
+
+    # Validate config
+    errors = config.validate_config()
+    if errors:
+        click.echo("Configuration errors:", err=True)
+        for error in errors:
+            click.echo(f"  - {error}", err=True)
+        sys.exit(1)
+
+    click.echo(f"Comparison: {config.name}")
+    click.echo(f"Triad: {config.catalytic_triad.name}")
+    click.echo(f"Pairs: {', '.join(config.catalytic_triad.get_pair_labels())}")
+    click.echo(f"Conditions: {len(config.conditions)}")
+
+    # Apply overrides
+    equilibration = eq_time or config.defaults.equilibration_time
+
+    click.echo(f"Equilibration: {equilibration}")
+    click.echo(f"Threshold: {config.catalytic_triad.threshold} A")
+    click.echo()
+
+    # Run comparison
+    try:
+        comparator = TriadComparator(
+            config=config,
+            equilibration=equilibration,
+        )
+        result = comparator.compare(recompute=recompute)
+    except Exception as e:
+        click.echo(f"Error during comparison: {e}", err=True)
+        if verbose:
+            import traceback
+
+            traceback.print_exc()
+        sys.exit(1)
+
+    # Save JSON result
+    if output_path or True:  # Always save JSON to results/
+        results_dir = config_file.parent / "results"
+        results_dir.mkdir(exist_ok=True)
+        json_path = results_dir / f"triad_comparison_{config.name.replace(' ', '_')}.json"
+        result.save(json_path)
+        click.echo(f"Saved result: {json_path}")
+        click.echo()
+
+    # Format and display output
+    formatted = format_triad_result(result, format=output_format)
+    click.echo(formatted)
+
+    # Save formatted output if requested
+    if output_path:
+        output_path = Path(output_path)
+        output_path.write_text(formatted)
+        click.echo(f"Saved output: {output_path}")
