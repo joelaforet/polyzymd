@@ -17,9 +17,9 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 
 
-# =============================================================================
+# ============================================================================
 # Catalytic Triad / Active Site Configuration
-# =============================================================================
+# ============================================================================
 
 
 class TriadPairConfig(BaseModel):
@@ -121,9 +121,110 @@ class CatalyticTriadConfig(BaseModel):
         return [p.label for p in self.pairs]
 
 
-# =============================================================================
+# ============================================================================
+# Polymer-Protein Contacts Configuration
+# ============================================================================
+
+
+class ContactsComparisonConfig(BaseModel):
+    """Configuration for polymer-protein contacts comparison analysis.
+
+    Defines parameters for comparing contact statistics across conditions,
+    including polymer selection, contact criteria, and statistical thresholds.
+
+    Attributes
+    ----------
+    name : str
+        Name of the contacts analysis (e.g., "polymer_protein_contacts")
+    polymer_selection : str
+        MDAnalysis selection string for polymer atoms.
+        Default: "resname SBM EGM" (3-character PDB standard for SBMA/EGMA)
+    protein_selection : str
+        MDAnalysis selection string for protein atoms.
+        Default: "protein"
+    cutoff : float
+        Distance cutoff for contacts in Angstroms.
+        Default: 4.5
+    contact_criteria : str
+        Contact criteria: "distance", "heavy_atom", or "any_atom".
+        Default: "heavy_atom"
+    fdr_alpha : float
+        False discovery rate alpha for Benjamini-Hochberg correction.
+        Default: 0.05
+    min_effect_size : float
+        Minimum Cohen's d effect size to highlight in reports.
+        Default: 0.5 (medium effect)
+    top_residues : int
+        Number of top residues (by effect size) to display in console.
+        Default: 10
+    description : str, optional
+        Description of the contacts analysis
+
+    Examples
+    --------
+    In comparison.yaml:
+
+    ```yaml
+    contacts:
+      name: "polymer_contacts"
+      description: "Polymer-protein contact analysis"
+      polymer_selection: "resname SBM EGM"
+      protein_selection: "protein"
+      cutoff: 4.5
+      contact_criteria: "heavy_atom"
+      fdr_alpha: 0.05
+      min_effect_size: 0.5
+      top_residues: 10
+    ```
+    """
+
+    name: str = Field(
+        default="polymer_protein_contacts", description="Name of the contacts analysis"
+    )
+    polymer_selection: str = Field(
+        default="resname SBM EGM", description="MDAnalysis selection for polymer atoms"
+    )
+    protein_selection: str = Field(
+        default="protein", description="MDAnalysis selection for protein atoms"
+    )
+    cutoff: float = Field(default=4.5, description="Contact distance cutoff in Angstroms")
+    contact_criteria: str = Field(
+        default="heavy_atom", description="Contact criteria: distance, heavy_atom, or any_atom"
+    )
+    fdr_alpha: float = Field(
+        default=0.05, description="FDR alpha for Benjamini-Hochberg correction"
+    )
+    min_effect_size: float = Field(
+        default=0.5, description="Minimum Cohen's d to highlight (0.2=small, 0.5=medium, 0.8=large)"
+    )
+    top_residues: int = Field(
+        default=10, description="Number of top residues to display in console"
+    )
+    description: Optional[str] = Field(
+        default=None, description="Description of the contacts analysis"
+    )
+
+    @field_validator("contact_criteria", mode="after")
+    @classmethod
+    def validate_criteria(cls, v: str) -> str:
+        """Validate contact criteria."""
+        valid = {"distance", "heavy_atom", "any_atom"}
+        if v not in valid:
+            raise ValueError(f"contact_criteria must be one of {valid}, got '{v}'")
+        return v
+
+    @field_validator("fdr_alpha", mode="after")
+    @classmethod
+    def validate_fdr_alpha(cls, v: float) -> float:
+        """Validate FDR alpha is in valid range."""
+        if not 0 < v < 1:
+            raise ValueError(f"fdr_alpha must be between 0 and 1, got {v}")
+        return v
+
+
+# ============================================================================
 # Comparison Configuration
-# =============================================================================
+# ============================================================================
 
 
 class ConditionConfig(BaseModel):
@@ -183,7 +284,7 @@ class ComparisonConfig(BaseModel):
 
     A comparison config defines multiple simulation conditions to compare,
     along with default analysis parameters and optional catalytic triad
-    configuration.
+    and contacts configuration.
 
     Attributes
     ----------
@@ -199,6 +300,8 @@ class ComparisonConfig(BaseModel):
         Default analysis parameters
     catalytic_triad : CatalyticTriadConfig, optional
         Configuration for catalytic triad/active site analysis
+    contacts : ContactsComparisonConfig, optional
+        Configuration for polymer-protein contacts analysis
 
     Examples
     --------
@@ -209,6 +312,8 @@ class ComparisonConfig(BaseModel):
     ...     print(f"{cond.label}: {cond.config}")
     >>> if config.catalytic_triad:
     ...     print(f"Triad: {config.catalytic_triad.name}")
+    >>> if config.contacts:
+    ...     print(f"Contacts: {config.contacts.name}")
     """
 
     name: str
@@ -217,6 +322,7 @@ class ComparisonConfig(BaseModel):
     conditions: list[ConditionConfig]
     defaults: AnalysisDefaults = AnalysisDefaults()
     catalytic_triad: Optional[CatalyticTriadConfig] = None
+    contacts: Optional[ContactsComparisonConfig] = None
 
     @classmethod
     def from_yaml(cls, path: Path | str) -> "ComparisonConfig":
@@ -398,4 +504,22 @@ defaults:
 #     - label: "His-Ser"
 #       selection_a: "resid 156 and name NE2"
 #       selection_b: "resid 77 and name OG"
+
+# ============================================================================
+# Polymer-Protein Contacts (for polyzymd compare contacts)
+# ============================================================================
+# Configure polymer-protein contact analysis with per-residue statistics.
+#
+# Run: polyzymd compare contacts -c comparison.yaml
+#
+# contacts:
+#   name: "polymer_protein_contacts"
+#   description: "Polymer-protein contact analysis"
+#   polymer_selection: "resname SBM EGM"  # 3-char PDB names for SBMA/EGMA
+#   protein_selection: "protein"
+#   cutoff: 4.5                            # Contact distance (Angstroms)
+#   contact_criteria: "heavy_atom"         # distance, heavy_atom, or any_atom
+#   fdr_alpha: 0.05                         # FDR for per-residue tests
+#   min_effect_size: 0.5                    # Cohen's d threshold (0.5 = medium)
+#   top_residues: 10                        # Top residues to show in console
 '''

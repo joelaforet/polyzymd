@@ -105,8 +105,9 @@ def init(name: str, eq_time: str, output_dir: Optional[Path]):
         click.echo()
         click.echo(f"  2. cd {project_dir.relative_to(Path.cwd())}")
         click.echo("  3. Run comparisons:")
-        click.echo("     polyzymd compare rmsf    # Compare flexibility")
-        click.echo("     polyzymd compare triad   # Compare triad geometry")
+        click.echo("     polyzymd compare rmsf      # Compare flexibility")
+        click.echo("     polyzymd compare triad     # Compare triad geometry")
+        click.echo("     polyzymd compare contacts  # Compare polymer-protein contacts")
         click.echo()
 
     except Exception as e:
@@ -519,6 +520,207 @@ def triad(
 
     # Format and display output
     formatted = format_triad_result(result, format=output_format)
+    click.echo(formatted)
+
+    # Save formatted output if requested
+    if output_path:
+        output_path = Path(output_path)
+        output_path.write_text(formatted)
+        click.echo(f"Saved output: {output_path}")
+
+
+@compare.command()
+@click.option(
+    "-f",
+    "--file",
+    "config_file",
+    type=click.Path(exists=True, path_type=Path),
+    default="comparison.yaml",
+    help="Path to comparison.yaml config file.",
+)
+@click.option(
+    "--eq-time",
+    default=None,
+    help="Override equilibration time (e.g., '10ns', '5000ps').",
+)
+@click.option(
+    "--polymer-selection",
+    default=None,
+    help="Override polymer selection (e.g., 'resname SBM EGM').",
+)
+@click.option(
+    "--cutoff",
+    default=None,
+    type=float,
+    help="Override contact cutoff distance (Angstroms).",
+)
+@click.option(
+    "--fdr-alpha",
+    default=None,
+    type=float,
+    help="Override FDR alpha for Benjamini-Hochberg correction (default: 0.05).",
+)
+@click.option(
+    "--recompute",
+    is_flag=True,
+    help="Force recompute contacts analysis even if cached results exist.",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "markdown", "json"]),
+    default="table",
+    help="Output format: table (default), markdown, or json.",
+)
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Save output to file. Also saves JSON result to results/ directory.",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Show verbose logging output.",
+)
+def contacts(
+    config_file: Path,
+    eq_time: Optional[str],
+    polymer_selection: Optional[str],
+    cutoff: Optional[float],
+    fdr_alpha: Optional[float],
+    recompute: bool,
+    output_format: str,
+    output_path: Optional[Path],
+    verbose: bool,
+):
+    """Compare polymer-protein contacts across conditions.
+
+    Analyzes polymer-protein contact statistics across all conditions,
+    comparing aggregate metrics (coverage, mean contact fraction) between
+    conditions with statistical tests and effect sizes (Cohen's d).
+
+    Optionally define a contacts section in comparison.yaml for custom settings:
+    - polymer_selection: MDAnalysis selection for polymer (default: "resname SBM EGM")
+    - cutoff: Contact distance threshold (default: 4.5 A)
+
+    Note: For per-residue contact-RMSF correlations (mechanistic insights),
+    use 'polyzymd compare report' after running both RMSF and contacts analyses.
+
+    \b
+    Example:
+        polyzymd compare contacts
+        polyzymd compare contacts --eq-time 10ns --format markdown
+        polyzymd compare contacts --polymer-selection "resname SBM" --cutoff 5.0
+        polyzymd compare contacts -f my_comparison.yaml -o report.md
+    """
+    from polyzymd.compare.contacts_comparator import ContactsComparator
+    from polyzymd.compare.contacts_formatters import format_contacts_result
+    from polyzymd.compare.config import ContactsComparisonConfig
+
+    # Set up logging
+    if verbose:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+    else:
+        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+
+    config_file = Path(config_file).resolve()
+
+    # Load and validate config
+    click.echo(f"Loading config: {config_file}")
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        click.echo("Run 'polyzymd compare init <name>' to create a comparison project.", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error loading config: {e}", err=True)
+        sys.exit(1)
+
+    # Validate config
+    errors = config.validate_config()
+    if errors:
+        click.echo("Configuration errors:", err=True)
+        for error in errors:
+            click.echo(f"  - {error}", err=True)
+        sys.exit(1)
+
+    # Build contacts config with overrides
+    if config.contacts is not None:
+        contacts_config = config.contacts
+    else:
+        contacts_config = ContactsComparisonConfig()
+
+    # Apply CLI overrides
+    if polymer_selection:
+        contacts_config = ContactsComparisonConfig(
+            **{**contacts_config.model_dump(), "polymer_selection": polymer_selection}
+        )
+    if cutoff is not None:
+        contacts_config = ContactsComparisonConfig(
+            **{**contacts_config.model_dump(), "cutoff": cutoff}
+        )
+    if fdr_alpha is not None:
+        contacts_config = ContactsComparisonConfig(
+            **{**contacts_config.model_dump(), "fdr_alpha": fdr_alpha}
+        )
+
+    click.echo(f"Comparison: {config.name}")
+    click.echo(f"Conditions: {len(config.conditions)}")
+
+    # Apply overrides
+    equilibration = eq_time or config.defaults.equilibration_time
+
+    click.echo(f"Equilibration: {equilibration}")
+    click.echo(f"Polymer selection: {contacts_config.polymer_selection}")
+    click.echo(f"Contact cutoff: {contacts_config.cutoff} A")
+    click.echo(f"FDR alpha: {contacts_config.fdr_alpha}")
+    if config.control:
+        click.echo(f"Control: {config.control}")
+    click.echo()
+
+    # Run comparison
+    try:
+        comparator = ContactsComparator(
+            config=config,
+            contacts_config=contacts_config,
+            equilibration=equilibration,
+        )
+        result = comparator.compare(recompute=recompute)
+    except Exception as e:
+        click.echo(f"Error during comparison: {e}", err=True)
+        if verbose:
+            import traceback
+
+            traceback.print_exc()
+        sys.exit(1)
+
+    # Show auto-excluded conditions warning
+    if result.excluded_conditions:
+        click.secho(
+            f"Note: {len(result.excluded_conditions)} condition(s) auto-excluded (no polymer atoms): "
+            f"{', '.join(result.excluded_conditions)}",
+            fg="yellow",
+        )
+        click.echo()
+
+    # Save JSON result
+    results_dir = config_file.parent / "results"
+    results_dir.mkdir(exist_ok=True)
+    json_path = results_dir / f"contacts_comparison_{config.name.replace(' ', '_')}.json"
+    result.save(json_path)
+    click.echo(f"Saved result: {json_path}")
+    click.echo()
+
+    # Format and display output
+    formatted = format_contacts_result(
+        result,
+        format=output_format,
+    )
     click.echo(formatted)
 
     # Save formatted output if requested
