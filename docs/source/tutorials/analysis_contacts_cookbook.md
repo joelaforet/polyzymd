@@ -685,29 +685,69 @@ result = analyzer.run()
 
 Select all protein residues EXCEPT those near the active site:
 
+`````{tab-set}
+````{tab-item} YAML (Recommended)
+For exclusion-based selections, use MDAnalysis `not` syntax directly:
+
+```yaml
+# analysis.yaml
+replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "10ns"
+
+contacts:
+  enabled: true
+  polymer_selection: "chainID C"
+  # Select surface residues by excluding active site vicinity
+  protein_selection: "protein and not (byres (resid 77 133 156) around 8.0)"
+  cutoff: 4.5
+```
+
+```bash
+polyzymd analyze run
+```
+
+```{note}
+The `byres ... around X` syntax selects complete residues within X Å of the 
+reference atoms. The `not` inverts this to get surface-only residues.
+```
+````
+
+````{tab-item} CLI
+```bash
+# Surface residues only (exclude active site vicinity)
+polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
+    --protein-selection "protein and not (byres (resid 77 133 156) around 8.0)"
+```
+````
+
+````{tab-item} Python
 ```python
-from polyzymd.analysis.common.selectors import (
-    ProteinResidues,
-    ProteinResiduesNearReference,
-    CompositeSelector,
-)
+from polyzymd.analysis.common.selectors import ProteinResiduesNearReference
 
-# All protein residues
-all_protein = ProteinResidues()
-
-# Residues near active site (to exclude)
-near_active = ProteinResiduesNearReference(
+# Select residues NOT near the active site (surface only)
+surface_residues = ProteinResiduesNearReference(
     reference_selection="resid 77 133 156",
     cutoff=8.0,
-    exclude=True,  # Invert selection
+    exclude=True,  # Invert: select residues OUTSIDE the cutoff
 )
 
-# Combine: all protein AND (not near active site)
-surface_only = CompositeSelector(
-    selectors=[all_protein, near_active],
-    mode="intersection",
+# Use in analysis
+from polyzymd.analysis.contacts import ContactAnalyzer
+
+analyzer = ContactAnalyzer(
+    universe=universe,
+    protein_selector=surface_residues,
+    cutoff=4.5,
 )
+result = analyzer.run()
 ```
+
+The `exclude=True` parameter inverts the selection, giving you residues 
+that are **outside** the cutoff distance from the reference atoms.
+````
+`````
 
 ---
 
