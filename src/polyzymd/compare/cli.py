@@ -13,8 +13,12 @@ from typing import Optional
 
 import click
 
-from polyzymd.compare.config import ComparisonConfig, generate_comparison_template
 from polyzymd.compare.comparator import RMSFComparator
+from polyzymd.compare.config import (
+    ComparisonConfig,
+    RMSFComparisonConfig,
+    generate_comparison_template,
+)
 from polyzymd.compare.formatters import format_result
 
 LOGGER = logging.getLogger("polyzymd.compare.cli")
@@ -130,9 +134,26 @@ def init(name: str, eq_time: str, output_dir: Optional[Path]):
     help="Override equilibration time (e.g., '10ns', '5000ps').",
 )
 @click.option(
+    "--override",
+    is_flag=True,
+    help="Enable CLI overrides for RMSF settings. Without this flag, YAML is the single source of truth.",
+)
+@click.option(
     "--selection",
     default=None,
-    help="Override atom selection (e.g., 'protein and name CA').",
+    help="Override atom selection (requires --override flag).",
+)
+@click.option(
+    "--reference-mode",
+    default=None,
+    type=click.Choice(["centroid", "average", "frame"]),
+    help="Override reference mode (requires --override flag).",
+)
+@click.option(
+    "--reference-frame",
+    default=None,
+    type=int,
+    help="Override reference frame (requires --override flag, used with --reference-mode frame).",
 )
 @click.option(
     "--recompute",
@@ -163,7 +184,10 @@ def init(name: str, eq_time: str, output_dir: Optional[Path]):
 def rmsf(
     config_file: Path,
     eq_time: Optional[str],
+    override: bool,
     selection: Optional[str],
+    reference_mode: Optional[str],
+    reference_frame: Optional[int],
     recompute: bool,
     output_format: str,
     output_path: Optional[Path],
@@ -171,14 +195,15 @@ def rmsf(
 ):
     """Compare RMSF across conditions defined in comparison.yaml.
 
-    Loads RMSF results for each condition (computing them if necessary),
-    then performs statistical comparisons including t-tests, effect sizes,
-    and ANOVA.
+    Requires an `rmsf:` section in comparison.yaml. This is the single source
+    of truth for RMSF settings. Use --override to allow CLI options to take
+    precedence.
 
     \b
     Example:
         polyzymd compare rmsf
         polyzymd compare rmsf --eq-time 10ns --format markdown
+        polyzymd compare rmsf --override --selection "protein and name CA"
         polyzymd compare rmsf -f my_comparison.yaml -o report.md
     """
     # Set up logging
@@ -186,6 +211,15 @@ def rmsf(
         logging.basicConfig(level=logging.INFO, format="%(message)s")
     else:
         logging.basicConfig(level=logging.WARNING, format="%(message)s")
+
+    # Check if override options used without --override flag
+    if not override and any([selection, reference_mode, reference_frame]):
+        click.echo("Error: CLI overrides require the --override flag.", err=True)
+        click.echo("", err=True)
+        click.echo("Either:", err=True)
+        click.echo("  1. Add --override to use CLI options", err=True)
+        click.echo("  2. Set values in comparison.yaml (recommended)", err=True)
+        sys.exit(1)
 
     config_file = Path(config_file).resolve()
 
@@ -201,6 +235,26 @@ def rmsf(
         click.echo(f"Error loading config: {e}", err=True)
         sys.exit(1)
 
+    # Check for rmsf: section (required)
+    if config.rmsf is None:
+        click.echo("Error: No 'rmsf:' section in comparison.yaml", err=True)
+        click.echo("", err=True)
+        click.echo(
+            "RMSF comparison requires an 'rmsf:' section. Add to your comparison.yaml:", err=True
+        )
+        click.echo("", err=True)
+        click.echo("  rmsf:", err=True)
+        click.echo('    selection: "protein and name CA"', err=True)
+        click.echo('    reference_mode: "centroid"', err=True)
+        click.echo("", err=True)
+        click.echo("For frame-based alignment:", err=True)
+        click.echo("", err=True)
+        click.echo("  rmsf:", err=True)
+        click.echo('    selection: "protein and name CA"', err=True)
+        click.echo('    reference_mode: "frame"', err=True)
+        click.echo("    reference_frame: 500", err=True)
+        sys.exit(1)
+
     # Validate config
     errors = config.validate_config()
     if errors:
@@ -212,20 +266,32 @@ def rmsf(
     click.echo(f"Comparison: {config.name}")
     click.echo(f"Conditions: {len(config.conditions)}")
 
-    # Apply overrides
+    # Build effective settings (YAML + optional overrides)
     equilibration = eq_time or config.defaults.equilibration_time
-    atom_selection = selection or config.defaults.selection
+    effective_selection = selection if override and selection else config.rmsf.selection
+    effective_ref_mode = (
+        reference_mode if override and reference_mode else config.rmsf.reference_mode
+    )
+    effective_ref_frame = (
+        reference_frame if override and reference_frame else config.rmsf.reference_frame
+    )
 
     click.echo(f"Equilibration: {equilibration}")
-    click.echo(f"Selection: {atom_selection}")
+    click.echo(f"Selection: {effective_selection}")
+    click.echo(f"Reference mode: {effective_ref_mode}")
+    if effective_ref_frame:
+        click.echo(f"Reference frame: {effective_ref_frame}")
     click.echo()
 
     # Run comparison
     try:
         comparator = RMSFComparator(
             config=config,
+            rmsf_config=config.rmsf,
             equilibration=equilibration,
-            selection=atom_selection,
+            selection_override=selection if override else None,
+            reference_mode_override=reference_mode if override else None,
+            reference_frame_override=reference_frame if override else None,
         )
         result = comparator.compare(recompute=recompute)
     except Exception as e:
@@ -307,13 +373,13 @@ def plot(
         polyzymd compare plot results/rmsf_comparison_my_study.json -o figures/ --dpi 300
         polyzymd compare plot results/rmsf_comparison_my_study.json --format pdf --show
     """
-    from polyzymd.compare.results import ComparisonResult
     from polyzymd.compare.plotting import (
-        plot_rmsf_comparison,
-        plot_percent_change,
         plot_effect_sizes,
+        plot_percent_change,
+        plot_rmsf_comparison,
         plot_summary_panel,
     )
+    from polyzymd.compare.results import ComparisonResult
 
     # Load result
     try:
@@ -334,20 +400,20 @@ def plot(
 
     # Plot 1: RMSF comparison
     rmsf_path = output_dir / f"rmsf_comparison.{img_format}"
-    click.echo(f"Generating RMSF comparison plot...")
+    click.echo("Generating RMSF comparison plot...")
     plot_rmsf_comparison(result, save_path=rmsf_path, dpi=dpi)
     generated.append(rmsf_path)
 
     # Plot 2: Percent change (requires control)
     if result.control_label and result.pairwise_comparisons:
         pct_path = output_dir / f"percent_change.{img_format}"
-        click.echo(f"Generating percent change plot...")
+        click.echo("Generating percent change plot...")
         plot_percent_change(result, save_path=pct_path, dpi=dpi)
         generated.append(pct_path)
 
         # Plot 3: Effect sizes
         effect_path = output_dir / f"effect_sizes.{img_format}"
-        click.echo(f"Generating effect sizes plot...")
+        click.echo("Generating effect sizes plot...")
         plot_effect_sizes(result, save_path=effect_path, dpi=dpi)
         generated.append(effect_path)
     else:
@@ -356,7 +422,7 @@ def plot(
     # Plot 4: Summary panel
     if summary and result.control_label and result.pairwise_comparisons:
         summary_path = output_dir / f"summary_panel.{img_format}"
-        click.echo(f"Generating summary panel...")
+        click.echo("Generating summary panel...")
         plot_summary_panel(result, save_path=summary_path, dpi=dpi)
         generated.append(summary_path)
 
@@ -617,9 +683,9 @@ def contacts(
         polyzymd compare contacts --polymer-selection "resname SBM" --cutoff 5.0
         polyzymd compare contacts -f my_comparison.yaml -o report.md
     """
+    from polyzymd.compare.config import ContactsComparisonConfig
     from polyzymd.compare.contacts_comparator import ContactsComparator
     from polyzymd.compare.contacts_formatters import format_contacts_result
-    from polyzymd.compare.config import ContactsComparisonConfig
 
     # Set up logging
     if verbose:

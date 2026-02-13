@@ -29,22 +29,26 @@ Usage:
     polyzymd compare contacts --eq-time 10ns
 """
 
+from polyzymd.compare.comparator import RMSFComparator
 from polyzymd.compare.config import (
+    CatalyticTriadConfig,
     ComparisonConfig,
     ConditionConfig,
-    CatalyticTriadConfig,
     ContactsComparisonConfig,
+    RMSFComparisonConfig,
 )
-from polyzymd.compare.comparator import RMSFComparator
-from polyzymd.compare.triad_comparator import TriadComparator
 from polyzymd.compare.contacts_comparator import ContactsComparator
-from polyzymd.compare.results import ComparisonResult
-from polyzymd.compare.triad_results import TriadComparisonResult, TriadConditionSummary
+from polyzymd.compare.contacts_formatters import (
+    contacts_to_json,
+    format_contacts_console_table,
+    format_contacts_markdown,
+    format_contacts_result,
+)
 from polyzymd.compare.contacts_results import (
+    AggregateComparisonResult,
     ContactsComparisonResult,
     ContactsConditionSummary,
     ContactsPairwiseComparison,
-    AggregateComparisonResult,
 )
 from polyzymd.compare.formatters import (
     format_console_table,
@@ -52,24 +56,21 @@ from polyzymd.compare.formatters import (
     format_result,
     to_json,
 )
+from polyzymd.compare.plotting import (
+    plot_effect_sizes,
+    plot_percent_change,
+    plot_rmsf_comparison,
+    plot_summary_panel,
+)
+from polyzymd.compare.results import ComparisonResult
+from polyzymd.compare.triad_comparator import TriadComparator
 from polyzymd.compare.triad_formatters import (
     format_triad_console_table,
     format_triad_markdown,
     format_triad_result,
     triad_to_json,
 )
-from polyzymd.compare.contacts_formatters import (
-    format_contacts_console_table,
-    format_contacts_markdown,
-    format_contacts_result,
-    contacts_to_json,
-)
-from polyzymd.compare.plotting import (
-    plot_rmsf_comparison,
-    plot_percent_change,
-    plot_effect_sizes,
-    plot_summary_panel,
-)
+from polyzymd.compare.triad_results import TriadComparisonResult, TriadConditionSummary
 
 __all__ = [
     # Config
@@ -77,6 +78,7 @@ __all__ = [
     "ConditionConfig",
     "CatalyticTriadConfig",
     "ContactsComparisonConfig",
+    "RMSFComparisonConfig",
     # RMSF comparison
     "RMSFComparator",
     "ComparisonResult",
