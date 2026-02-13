@@ -123,6 +123,8 @@ Validation PASSED
 
 ### Step 4: Run Comparison
 
+`````{tab-set}
+````{tab-item} CLI (Recommended)
 ```bash
 polyzymd compare rmsf
 ```
@@ -131,6 +133,33 @@ The module will:
 1. Load (or compute) RMSF for each condition
 2. Run statistical comparisons
 3. Display results and save to `results/`
+````
+
+````{tab-item} Python
+```python
+from polyzymd.compare import ComparisonConfig, RMSFComparator
+
+# Load configuration
+config = ComparisonConfig.from_yaml("comparison.yaml")
+
+# Run RMSF comparison
+comparator = RMSFComparator(
+    config=config,
+    rmsf_config=config.rmsf,
+    equilibration="10ns",
+)
+result = comparator.compare()
+
+# Display results
+print(f"Most stable: {result.ranking[0]}")
+for cond in result.conditions:
+    print(f"{cond.label}: {cond.mean_rmsf:.3f} ± {cond.sem_rmsf:.3f} Å")
+
+# Save to JSON
+result.save("results/rmsf_comparison.json")
+```
+````
+`````
 
 ## The comparison.yaml Configuration
 
@@ -346,6 +375,8 @@ polyzymd compare rmsf --format json -o results.json
 
 Setup for a study comparing enzyme stability with different polymer coatings:
 
+`````{tab-set}
+````{tab-item} YAML + CLI (Recommended)
 **comparison.yaml:**
 
 ```yaml
@@ -374,11 +405,54 @@ defaults:
   equilibration_time: "10ns"
 ```
 
-**Run and interpret:**
+**Run:**
 
 ```bash
 polyzymd compare rmsf
 ```
+````
+
+````{tab-item} Python
+```python
+from polyzymd.compare import ComparisonConfig, RMSFComparator
+
+# Load comparison configuration
+config = ComparisonConfig.from_yaml("comparison.yaml")
+
+# Run RMSF comparison
+comparator = RMSFComparator(
+    config=config,
+    rmsf_config=config.rmsf,
+    equilibration="10ns",
+)
+result = comparator.compare()
+
+# Print summary table
+print(f"RMSF Comparison: {result.name}")
+print(f"Control: {result.control_label}")
+print()
+
+# Ranked conditions
+print("Conditions (ranked by RMSF, lowest first):")
+for i, label in enumerate(result.ranking, 1):
+    cond = result.get_condition(label)
+    marker = " *" if label == result.control_label else ""
+    print(f"  {i}. {label}: {cond.mean_rmsf:.3f} ± {cond.sem_rmsf:.3f} Å{marker}")
+
+print()
+
+# Pairwise comparisons
+print("Pairwise comparisons vs control:")
+for comp in result.pairwise_comparisons:
+    sig = "*" if comp.significant else ""
+    print(f"  {comp.condition_b} vs {comp.condition_a}: "
+          f"{comp.percent_change:+.1f}%, p={comp.p_value:.3f}{sig}, d={comp.cohens_d:.2f}")
+
+# Save results
+result.save("results/rmsf_comparison.json")
+```
+````
+`````
 
 **Key findings from output:**
 
@@ -532,6 +606,8 @@ comparison results.
 
 ### Quick Start
 
+`````{tab-set}
+````{tab-item} CLI (Recommended)
 ```bash
 # Generate all plots
 polyzymd compare plot results/rmsf_comparison_my_study.json
@@ -545,6 +621,40 @@ polyzymd compare plot results/rmsf_comparison_my_study.json --format pdf
 # Preview interactively
 polyzymd compare plot results/rmsf_comparison_my_study.json --show
 ```
+````
+
+````{tab-item} Python
+```python
+from polyzymd.compare import (
+    ComparisonResult,
+    plot_rmsf_comparison,
+    plot_percent_change,
+    plot_effect_sizes,
+    plot_summary_panel,
+)
+import matplotlib.pyplot as plt
+
+# Load result
+result = ComparisonResult.load("results/rmsf_comparison_my_study.json")
+
+# Generate individual plots
+fig1 = plot_rmsf_comparison(result, save_path="figures/rmsf.png", dpi=300)
+fig2 = plot_percent_change(result, save_path="figures/pct_change.png", dpi=300)
+fig3 = plot_effect_sizes(result, save_path="figures/effects.png", dpi=300)
+
+# Generate combined summary panel
+fig_summary = plot_summary_panel(
+    result,
+    title="Polymer Stabilization Study",
+    save_path="figures/summary.png",
+    dpi=300,
+)
+
+# Preview interactively
+plt.show()
+```
+````
+`````
 
 ### Generated Plots
 
@@ -786,6 +896,8 @@ catalytic_triad:
 
 ### Running Triad Comparison
 
+`````{tab-set}
+````{tab-item} CLI (Recommended)
 ```bash
 # From your comparison project directory
 polyzymd compare triad
@@ -794,6 +906,31 @@ polyzymd compare triad
 polyzymd compare triad --eq-time 10ns --format markdown
 polyzymd compare triad -o triad_report.md
 ```
+````
+
+````{tab-item} Python
+```python
+from polyzymd.compare import ComparisonConfig, TriadComparator
+
+# Load configuration (must have catalytic_triad section)
+config = ComparisonConfig.from_yaml("comparison.yaml")
+
+# Run triad comparison
+comparator = TriadComparator(config, equilibration="10ns")
+result = comparator.compare()
+
+# Print results
+print(f"Best triad integrity: {result.ranking[0]}")
+for cond in result.conditions:
+    contact_pct = cond.mean_simultaneous_contact * 100
+    sem_pct = cond.sem_simultaneous_contact * 100
+    print(f"{cond.label}: {contact_pct:.1f}% ± {sem_pct:.1f}%")
+
+# Save to JSON
+result.save("results/triad_comparison.json")
+```
+````
+`````
 
 ### Example Output
 
@@ -945,6 +1082,8 @@ Additionally, **residence times by polymer type** show how long each polymer typ
 
 ### Running Contacts Comparison
 
+`````{tab-set}
+````{tab-item} CLI (Recommended)
 ```bash
 # Basic comparison
 polyzymd compare contacts
@@ -959,6 +1098,47 @@ polyzymd compare contacts --polymer-selection "resname SBM"
 polyzymd compare contacts --format markdown -o contacts_report.md
 polyzymd compare contacts --format json
 ```
+````
+
+````{tab-item} Python
+```python
+from polyzymd.compare import (
+    ComparisonConfig,
+    ContactsComparator,
+    ContactsComparisonConfig,
+)
+
+# Load configuration
+config = ComparisonConfig.from_yaml("comparison.yaml")
+
+# Optionally customize contacts settings
+contacts_config = ContactsComparisonConfig(
+    polymer_selection="resname SBM EGM",
+    cutoff=4.5,
+    fdr_alpha=0.05,
+)
+
+# Run comparison
+comparator = ContactsComparator(
+    config=config,
+    contacts_config=contacts_config,
+    equilibration="10ns",
+)
+result = comparator.compare()
+
+# Access results
+print(f"Highest coverage: {result.ranking_by_coverage[0]}")
+print(f"Highest contact: {result.ranking_by_contact_fraction[0]}")
+
+for cond in result.conditions:
+    print(f"{cond.label}: {cond.coverage_mean*100:.1f}% coverage, "
+          f"{cond.contact_fraction_mean*100:.1f}% contact")
+
+# Save result
+result.save("results/contacts_comparison.json")
+```
+````
+`````
 
 ### Optional: Contacts Configuration in comparison.yaml
 
