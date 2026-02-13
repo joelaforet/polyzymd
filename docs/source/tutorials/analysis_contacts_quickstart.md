@@ -435,6 +435,34 @@ The JSON file contains per-residue contact data including:
 
 ### Analyze specific polymer types
 
+`````{tab-set}
+````{tab-item} YAML (Recommended)
+```yaml
+# analysis.yaml - Only SBMA monomers
+replicates: [1]
+
+defaults:
+  equilibration_time: "10ns"
+
+contacts:
+  enabled: true
+  polymer_selection: "segid C and resname SBM"  # Only SBMA
+  protein_selection: "protein"
+```
+
+```bash
+polyzymd analyze run
+```
+
+To analyze EGMA instead, change the selection:
+
+```yaml
+contacts:
+  polymer_selection: "segid C and resname EGM"  # Only EGMA
+```
+````
+
+````{tab-item} CLI
 ```bash
 # Only SBMA monomers
 polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns \
@@ -444,9 +472,69 @@ polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns \
 polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns \
     --polymer-selection "segid C and resname EGM"
 ```
+````
+
+````{tab-item} Python
+```python
+from polyzymd.config import SimulationConfig
+from polyzymd.analysis.contacts import ContactAnalyzer
+
+config = SimulationConfig.from_yaml("config.yaml")
+
+# Analyze only SBMA monomers
+sbma_analyzer = ContactAnalyzer(
+    config=config,
+    replicate=1,
+    equilibration_time="10ns",
+    polymer_selection="segid C and resname SBM",
+)
+sbma_result = sbma_analyzer.analyze()
+
+# Analyze only EGMA monomers
+egma_analyzer = ContactAnalyzer(
+    config=config,
+    replicate=1,
+    equilibration_time="10ns",
+    polymer_selection="segid C and resname EGM",
+)
+egma_result = egma_analyzer.analyze()
+
+print(f"SBMA coverage: {sbma_result.coverage:.1%}")
+print(f"EGMA coverage: {egma_result.coverage:.1%}")
+```
+````
+`````
 
 ### Analyze specific protein regions
 
+`````{tab-set}
+````{tab-item} YAML (Recommended)
+```yaml
+# analysis.yaml - Only aromatic residues
+replicates: [1]
+
+defaults:
+  equilibration_time: "10ns"
+
+contacts:
+  enabled: true
+  polymer_selection: "segid C"
+  protein_selection: "protein and (resname TRP PHE TYR)"  # Aromatics only
+```
+
+```bash
+polyzymd analyze run
+```
+
+For active site analysis:
+
+```yaml
+contacts:
+  protein_selection: "protein and (resid 75-80 or resid 130-140)"  # Active site
+```
+````
+
+````{tab-item} CLI
 ```bash
 # Only aromatic residues
 polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns \
@@ -456,6 +544,38 @@ polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns \
 polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns \
     --protein-selection "protein and (resid 75-80 or resid 130-140)"
 ```
+````
+
+````{tab-item} Python
+```python
+from polyzymd.config import SimulationConfig
+from polyzymd.analysis.contacts import ContactAnalyzer
+
+config = SimulationConfig.from_yaml("config.yaml")
+
+# Analyze contacts with aromatic residues only
+aromatic_analyzer = ContactAnalyzer(
+    config=config,
+    replicate=1,
+    equilibration_time="10ns",
+    protein_selection="protein and (resname TRP PHE TYR)",
+)
+aromatic_result = aromatic_analyzer.analyze()
+
+# Analyze contacts with active site region
+active_site_analyzer = ContactAnalyzer(
+    config=config,
+    replicate=1,
+    equilibration_time="10ns",
+    protein_selection="protein and (resid 75-80 or resid 130-140)",
+)
+active_site_result = active_site_analyzer.analyze()
+
+print(f"Aromatic contact fraction: {aromatic_result.mean_contact_fraction:.1%}")
+print(f"Active site contact fraction: {active_site_result.mean_contact_fraction:.1%}")
+```
+````
+`````
 
 ## Answering Scientific Questions
 
