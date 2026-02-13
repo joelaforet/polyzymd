@@ -80,6 +80,61 @@ Contact Analysis Complete
   in contact with polymer (averaged across all residues)
 - **Contacted residues**: Count of residues with any polymer contact
 
+## Using analysis.yaml
+
+For reproducible, version-controlled analysis configuration, use `analysis.yaml` 
+instead of CLI flags. Place this file alongside your `config.yaml`.
+
+### Create analysis.yaml
+
+```yaml
+# analysis.yaml
+replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "10ns"
+
+contacts:
+  enabled: true
+  polymer_selection: "chainID C"      # MDAnalysis selection for polymer
+  protein_selection: "protein"        # MDAnalysis selection for protein
+  cutoff: 4.5                         # Contact distance in Angstroms
+  polymer_types: ["SBM", "EGM"]       # Optional: filter by monomer type
+  grouping: "aa_class"                # aa_class | secondary_structure | none
+  compute_residence_times: true       # Enable residence time statistics
+```
+
+### Run All Enabled Analyses
+
+```bash
+# Initialize a template (if starting fresh)
+polyzymd analyze init
+
+# Run all analyses defined in analysis.yaml
+polyzymd analyze run
+
+# Force recompute
+polyzymd analyze run --recompute
+```
+
+### Configuration Options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Whether to run contact analysis |
+| `polymer_selection` | str | `"chainID C"` | MDAnalysis selection for polymer atoms |
+| `protein_selection` | str | `"protein"` | MDAnalysis selection for protein atoms |
+| `cutoff` | float | `4.5` | Distance cutoff in Angstroms |
+| `polymer_types` | list | `null` | Filter by polymer residue names |
+| `grouping` | str | `"aa_class"` | How to group protein residues |
+| `compute_residence_times` | bool | `true` | Compute residence time statistics |
+
+```{tip}
+**When to use analysis.yaml vs CLI:** Use `analysis.yaml` for standard, 
+reproducible workflows. Use CLI flags (`polyzymd analyze contacts ...`) for 
+one-off analyses or when exploring different parameters.
+```
+
 ## Residence Time Analysis
 
 Residence time measures how long polymer segments remain in contact with protein 

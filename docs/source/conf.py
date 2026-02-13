@@ -49,6 +49,7 @@ extensions = [
     "sphinx.ext.mathjax",  # Render LaTeX math with MathJax
     "sphinx_copybutton",  # Add copy button to code blocks
     "myst_parser",  # Support Markdown files
+    "sphinx_design",  # Tabs, cards, grids for better UX
 ]
 
 # Napoleon settings for docstring parsing

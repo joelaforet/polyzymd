@@ -23,6 +23,90 @@ This cookbook answers questions like:
 
 ---
 
+## YAML Configuration Reference
+
+PolyzyMD supports contacts analysis via YAML configuration files. Choose the 
+approach that fits your workflow:
+
+`````{tab-set}
+
+````{tab-item} analysis.yaml (per-simulation)
+Configure contacts as part of a simulation's analysis suite. Place `analysis.yaml` 
+in the same directory as your `config.yaml`.
+
+```yaml
+# analysis.yaml
+replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "10ns"
+
+contacts:
+  enabled: true
+  polymer_selection: "chainID C"      # MDAnalysis selection for polymer
+  protein_selection: "protein"        # MDAnalysis selection for protein
+  cutoff: 4.5                         # Contact distance in Angstroms
+  polymer_types: ["SBM", "EGM"]       # Optional: filter by monomer type
+  grouping: "aa_class"                # aa_class | secondary_structure | none
+  compute_residence_times: true       # Enable residence time statistics
+```
+
+**Run with:**
+```bash
+polyzymd analyze init      # Create template (if needed)
+polyzymd analyze run       # Run all enabled analyses
+```
+
+**Best for:** Single-condition analysis, reproducible configuration, CI/CD pipelines.
+````
+
+````{tab-item} comparison.yaml (multi-condition)
+Configure contacts analysis for statistical comparison across multiple simulation 
+conditions (e.g., different polymer ratios).
+
+```yaml
+# comparison.yaml
+name: "Polymer Stabilization Study"
+control: "No Polymer"
+
+conditions:
+  - label: "No Polymer"
+    config: "../no_polymer/config.yaml"
+    replicates: [1, 2, 3]
+
+  - label: "100% SBMA"
+    config: "../sbma_100/config.yaml"
+    replicates: [1, 2, 3]
+
+contacts:
+  name: "polymer_contacts"
+  polymer_selection: "resname SBM EGM"  # 3-char residue names
+  protein_selection: "protein"
+  cutoff: 4.5
+  contact_criteria: "heavy_atom"        # distance | heavy_atom | any_atom
+  fdr_alpha: 0.05                       # For statistical corrections
+  min_effect_size: 0.5                  # Cohen's d threshold
+  top_residues: 10                      # Top residues in output table
+```
+
+**Run with:**
+```bash
+polyzymd compare contacts -f comparison.yaml
+```
+
+**Best for:** Multi-condition experiments, statistical comparisons, publication figures.
+````
+
+`````
+
+```{tip}
+**YAML vs Python:** Use YAML for reproducible, shareable configurations. Use 
+Python when you need advanced features like `CompositeSelector`, custom contact 
+criteria classes, or programmatic post-processing.
+```
+
+---
+
 ## Recipe 1: Do zwitterionic polymers preferentially contact charged residues?
 
 ### Scientific Question
@@ -31,9 +115,50 @@ You've synthesized copolymers with zwitterionic (SBMA) and PEG-like (EGMA)
 monomers. You want to know if the zwitterionic component shows preferential 
 binding to charged protein residues compared to nonpolar residues.
 
-### CLI Approach: Separate Analyses
+### Approach
 
-Run two separate contact analyses with different polymer selections:
+`````{tab-set}
+
+````{tab-item} YAML
+Use `comparison.yaml` to compare polymer types across conditions:
+
+```yaml
+# comparison.yaml
+name: "Polymer Type Preference Study"
+control: "EGMA Only"
+
+conditions:
+  - label: "SBMA Only"
+    config: "../sbma_100/config.yaml"
+    replicates: [1, 2, 3]
+
+  - label: "EGMA Only"
+    config: "../egma_100/config.yaml"
+    replicates: [1, 2, 3]
+
+contacts:
+  name: "polymer_aa_preferences"
+  polymer_selection: "resname SBM EGM"
+  protein_selection: "protein"
+  cutoff: 4.5
+  contact_criteria: "heavy_atom"
+  fdr_alpha: 0.05
+  top_residues: 15
+```
+
+```bash
+polyzymd compare contacts -f comparison.yaml --format markdown
+```
+
+The output shows per-residue contact fractions with statistical significance 
+markers. Look for charged residues (ASP, GLU, LYS, ARG) in the top contacts.
+
+**Limitation:** YAML comparison gives per-residue stats but doesn't directly 
+produce the polymer×AA-class interaction matrix. For that breakdown, use Python.
+````
+
+````{tab-item} CLI
+Run separate contact analyses for each polymer type:
 
 ```bash
 # Analyze SBMA contacts only
@@ -47,12 +172,11 @@ polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
     -o analysis/contacts_egma/
 ```
 
-Then compare the outputs manually or load both in Python.
+Then compare the JSON outputs manually or load both in Python for analysis.
+````
 
-### Python Approach: Interaction Matrix
-
-The more powerful approach uses `interaction_matrix()` to get a complete 
-breakdown in one analysis:
+````{tab-item} Python
+Use `interaction_matrix()` to get a complete polymer×AA-class breakdown:
 
 ```python
 from polyzymd.analysis.contacts.results import ContactResult
@@ -101,6 +225,9 @@ peg_like:
   aromatic: 37.0%
   nonpolar: 33.0%
 ```
+````
+
+`````
 
 ### Interpreting Results
 
@@ -125,7 +252,50 @@ For statistical comparison across multiple replicates/conditions, use
 You want a breakdown of polymer contacts by amino acid type to understand 
 the binding surface characteristics.
 
-### Python Approach: Coverage by Group
+### Approach
+
+`````{tab-set}
+
+````{tab-item} YAML
+Configure `analysis.yaml` with AA class grouping:
+
+```yaml
+# analysis.yaml
+replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "10ns"
+
+contacts:
+  enabled: true
+  polymer_selection: "chainID C"
+  protein_selection: "protein"
+  cutoff: 4.5
+  grouping: "aa_class"              # Groups results by amino acid class
+  compute_residence_times: true
+```
+
+```bash
+polyzymd analyze run
+```
+
+The JSON output includes per-residue data with AA classifications. To get 
+the coverage breakdown, load the result in Python or use CLI post-processing.
+````
+
+````{tab-item} CLI
+Run contacts analysis with default grouping:
+
+```bash
+polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns
+```
+
+The console output shows overall coverage. For AA-class breakdown, load the 
+JSON result in Python.
+````
+
+````{tab-item} Python
+Use `coverage_by_group()` for a complete breakdown:
 
 ```python
 from polyzymd.analysis.contacts.results import ContactResult
@@ -153,6 +323,9 @@ charged_positive     100.0% ####################
 polar                 93.5% ##################
 nonpolar              86.2% #################
 ```
+````
+
+`````
 
 ### Understanding the Default AA Classification
 
@@ -168,7 +341,7 @@ PolyzyMD uses `ProteinAAClassification` which groups amino acids as:
 
 ### Using Custom Classifications
 
-Define your own residue groupings:
+Define your own residue groupings (Python only):
 
 ```python
 from polyzymd.analysis.common.groupings import CustomGrouping
@@ -196,7 +369,57 @@ matrix = result.interaction_matrix(
 Do zwitterionic polymers form more persistent (longer-lasting) contacts with 
 the protein compared to PEG-like polymers?
 
-### Python Approach: Residence Time Summary
+### Approach
+
+`````{tab-set}
+
+````{tab-item} YAML
+Enable residence time computation in `analysis.yaml`:
+
+```yaml
+# analysis.yaml
+replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "10ns"
+
+contacts:
+  enabled: true
+  polymer_selection: "chainID C"
+  protein_selection: "protein"
+  cutoff: 4.5
+  compute_residence_times: true     # Enable residence time statistics
+```
+
+```bash
+polyzymd analyze run
+```
+
+The JSON output includes residence time data per polymer type. Load in Python 
+to compare across polymer types.
+````
+
+````{tab-item} CLI
+Use the `--residence-times` flag:
+
+```bash
+polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns --residence-times
+```
+
+**Output:**
+```
+Contact Analysis Complete
+  Contacted residues: 138/181
+  Coverage: 76.2%
+  Mean contact fraction: 18.3%
+  Residence time by polymer type:
+    EGM: mean=9.12 frames, max=1406 frames (6066 events)
+    SBM: mean=8.93 frames, max=842 frames (5401 events)
+```
+````
+
+````{tab-item} Python
+Use `residence_time_summary()` for detailed statistics:
 
 ```python
 from polyzymd.analysis.contacts.results import ContactResult
@@ -231,6 +454,9 @@ EGM:
   Max:  272 frames
   Events: 3102
 ```
+````
+
+`````
 
 ### Converting to Physical Time
 
@@ -270,7 +496,56 @@ Does your polymer bind preferentially near the enzyme's active site, or only
 on the exposed surface? This is important for understanding whether polymer 
 conjugation might affect catalytic function.
 
-### CLI Approach: Region-Specific Analysis
+### Approach
+
+`````{tab-set}
+
+````{tab-item} YAML
+Run two analyses with different `protein_selection` values. Create two 
+`analysis.yaml` files or use CLI overrides:
+
+**Option 1: Separate analysis.yaml files**
+
+```yaml
+# analysis_active_site.yaml
+replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "10ns"
+
+contacts:
+  enabled: true
+  polymer_selection: "chainID C"
+  protein_selection: "protein and (resid 75-80 or resid 130-140 or resid 153-160)"
+  cutoff: 4.5
+```
+
+```yaml
+# analysis_surface.yaml
+replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "10ns"
+
+contacts:
+  enabled: true
+  polymer_selection: "chainID C"
+  protein_selection: "protein and not (resid 75-80 or resid 130-140 or resid 153-160)"
+  cutoff: 4.5
+```
+
+```bash
+polyzymd analyze run -c analysis_active_site.yaml -o analysis/contacts_active_site/
+polyzymd analyze run -c analysis_surface.yaml -o analysis/contacts_surface/
+```
+
+**Option 2: Use CLI overrides (no extra YAML files)**
+
+See the CLI tab for this approach.
+````
+
+````{tab-item} CLI
+Run region-specific analyses using `--protein-selection`:
 
 ```bash
 # Active site region (example: LipA catalytic triad vicinity)
@@ -284,10 +559,11 @@ polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
     -o analysis/contacts_surface/
 ```
 
-### Python Approach: Proximity-Based Selection
+Then compare JSON outputs in Python or manually.
+````
 
-Use `ProteinResiduesNearReference` to select residues within a cutoff of 
-reference atoms (e.g., catalytic residues):
+````{tab-item} Python
+Use `ProteinResiduesNearReference` for proximity-based selection:
 
 ```python
 from polyzymd.analysis.common.selectors import ProteinResiduesNearReference
@@ -307,6 +583,9 @@ analyzer = ContactAnalyzer(
     # ... other parameters
 )
 ```
+````
+
+`````
 
 ### Comparing Active Site vs Surface Contact Fractions
 
@@ -334,6 +613,12 @@ else:
 ---
 
 ## Recipe 5: Complex queries with CompositeSelector
+
+```{note}
+**Python-only feature.** `CompositeSelector` enables programmatic AND/OR 
+combination of selectors, which is not available via YAML configuration. 
+YAML supports MDAnalysis selection strings but not selector composition.
+```
 
 ### Scientific Question
 
