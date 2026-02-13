@@ -104,6 +104,57 @@ accept an H-bond. This gives a single representative point for the acceptor.
 
 ## Basic Usage
 
+`````{tab-set}
+
+````{tab-item} YAML (Recommended)
+For reproducible, version-controlled analysis, define triad analysis settings
+in a `comparison.yaml` file (see [Setting Up comparison.yaml](#setting-up-comparisonyaml)):
+
+```yaml
+# comparison.yaml
+name: "my_enzyme_study"
+
+conditions:
+  - label: "No Polymer"
+    config: "../projects/noPoly/config.yaml"
+    replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "100ns"
+
+catalytic_triad:
+  name: "LipA_catalytic_triad"
+  description: "Ser-His-Asp catalytic triad"
+  threshold: 3.5
+  pairs:
+    - label: "Asp133-His156"
+      selection_a: "midpoint(resid 133 and name OD1 OD2)"
+      selection_b: "resid 156 and name ND1"
+    - label: "His156-Ser77"
+      selection_a: "resid 156 and name NE2"
+      selection_b: "resid 77 and name OG"
+```
+
+Then run with minimal CLI arguments:
+
+```bash
+# Analyze all conditions using settings from comparison.yaml
+polyzymd analyze triad -c comparison.yaml
+
+# Analyze specific condition
+polyzymd analyze triad -c comparison.yaml --condition "No Polymer"
+
+# Force recompute (ignore cache)
+polyzymd analyze triad -c comparison.yaml --recompute
+```
+
+**Benefits of YAML configuration:**
+- All analysis parameters are version-controlled
+- Reproducible across team members and machines
+- Self-documenting experiment setup
+````
+
+````{tab-item} CLI
 ### Single Replicate
 
 ```bash
@@ -133,19 +184,6 @@ Triad Analysis Complete
     (SEM: +/-8.2%)
 ```
 
-### Understanding the Output
-
-| Field | Meaning |
-|-------|---------|
-| Per-pair distance | Mean distance between the two selections |
-| % below threshold | Fraction of frames where that pair is in contact |
-| Simultaneous contact | Fraction where **ALL** pairs are in contact at once |
-| SEM | Standard error (autocorrelation-corrected) |
-
-The **simultaneous contact fraction** is the key metric - it tells you what
-percentage of simulation time the catalytic triad maintains proper geometry
-for catalysis.
-
 ### Multiple Replicates (Recommended)
 
 Omit the `-r` flag to analyze all replicates defined for that condition:
@@ -154,7 +192,84 @@ Omit the `-r` flag to analyze all replicates defined for that condition:
 polyzymd analyze triad -c comparison.yaml --condition "No Polymer" --eq-time 100ns
 ```
 
-**Aggregated output:**
+### Analyzing All Conditions
+
+To analyze every condition in your comparison.yaml:
+
+```bash
+polyzymd analyze triad -c comparison.yaml --eq-time 100ns
+```
+
+This loops through all conditions and reports results for each.
+````
+
+````{tab-item} Python
+Use the Python API for programmatic analysis and integration with custom
+workflows:
+
+```python
+from polyzymd.compare.config import ComparisonConfig
+from polyzymd.analysis.triad import CatalyticTriadAnalyzer
+from polyzymd.config.loader import load_config
+
+# Load comparison configuration
+comp_config = ComparisonConfig.from_yaml("comparison.yaml")
+
+# Get the first condition's simulation config
+condition = comp_config.conditions[0]  # "No Polymer"
+sim_config = load_config(condition.config)
+
+# Create analyzer
+analyzer = CatalyticTriadAnalyzer(
+    config=sim_config,
+    triad_config=comp_config.catalytic_triad,
+    equilibration="100ns",
+)
+
+# Single replicate analysis
+result = analyzer.compute(replicate=1)
+print(f"Simultaneous contact: {result.simultaneous_contact_fraction * 100:.1f}%")
+
+# Per-pair results
+for pair in result.pair_results:
+    print(f"  {pair.pair_label}: {pair.mean_distance:.2f} A "
+          f"({pair.fraction_below_threshold * 100:.1f}% below threshold)")
+
+# Multi-replicate aggregation
+agg_result = analyzer.compute_aggregated(replicates=[1, 2, 3])
+print(f"\nAggregated: {agg_result.overall_simultaneous_contact * 100:.1f} "
+      f"+/- {agg_result.sem_simultaneous_contact * 100:.1f}%")
+
+# Save results
+result.save("triad_rep1.json")
+agg_result.save("triad_aggregated.json")
+```
+
+**When to use Python:**
+- Integrating triad analysis into larger pipelines
+- Custom post-processing or visualization
+- Programmatic iteration over many conditions
+- Combining with other analysis modules
+````
+
+`````
+
+### Understanding the Output
+
+| Field | Meaning |
+|-------|---------|
+| Per-pair distance | Mean distance between the two selections |
+| \% below threshold | Fraction of frames where that pair is in contact |
+| Simultaneous contact | Fraction where **ALL** pairs are in contact at once |
+| SEM | Standard error (autocorrelation-corrected) |
+
+The **simultaneous contact fraction** is the key metric - it tells you what
+percentage of simulation time the catalytic triad maintains proper geometry
+for catalysis.
+
+### Aggregated Output
+
+When analyzing multiple replicates, you get aggregated statistics:
 
 ```
 Triad Analysis Complete (Aggregated)
@@ -173,15 +288,130 @@ The aggregated result shows:
 - Overall simultaneous contact with SEM
 - Per-replicate breakdown to assess variability
 
-### Analyzing All Conditions
+## Comparing Conditions
 
-To analyze every condition in your comparison.yaml:
+To compare triad geometry across conditions (e.g., with vs. without polymer)
+with proper statistical analysis, use one of these approaches:
 
-```bash
-polyzymd analyze triad -c comparison.yaml --eq-time 100ns
+`````{tab-set}
+
+````{tab-item} YAML (Recommended)
+Create a `comparison.yaml` file with your conditions, then run the comparison
+with a single command:
+
+```yaml
+# comparison.yaml
+name: "polymer_triad_study"
+description: "Effect of polymer on catalytic triad integrity"
+control: "No Polymer"
+
+conditions:
+  - label: "No Polymer"
+    config: "../no_polymer/config.yaml"
+    replicates: [1, 2, 3]
+
+  - label: "With Polymer"
+    config: "../with_polymer/config.yaml"
+    replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "100ns"
+
+catalytic_triad:
+  name: "LipA_catalytic_triad"
+  threshold: 3.5
+  pairs:
+    - label: "Asp133-His156"
+      selection_a: "midpoint(resid 133 and name OD1 OD2)"
+      selection_b: "resid 156 and name ND1"
+    - label: "His156-Ser77"
+      selection_a: "resid 156 and name NE2"
+      selection_b: "resid 77 and name OG"
 ```
 
-This loops through all conditions and reports results for each.
+```bash
+# Run comparison with automatic t-tests, effect sizes, and ranking
+polyzymd compare triad -f comparison.yaml
+
+# Output formats
+polyzymd compare triad -f comparison.yaml --format markdown  # For docs
+polyzymd compare triad -f comparison.yaml --format json      # Machine-readable
+```
+
+**Output includes:**
+- Simultaneous contact \% ± SEM for each condition
+- \% change relative to control
+- p-value (two-sample t-test)
+- Cohen's d effect size
+- Ranking (highest contact = best triad integrity)
+
+See [Comparing Conditions](analysis_compare_conditions.md) for the full guide.
+````
+
+````{tab-item} CLI
+Run analysis on each condition separately, then use `polyzymd compare show`:
+
+```bash
+# Step 1: Analyze each condition
+polyzymd analyze triad -c comparison.yaml --condition "No Polymer"
+polyzymd analyze triad -c comparison.yaml --condition "With Polymer"
+
+# Step 2: Run comparison (uses cached triad results)
+polyzymd compare triad -f comparison.yaml
+```
+
+The comparison command automatically loads cached results if available,
+so you don't recompute triad analysis.
+````
+
+````{tab-item} Python
+Use `TriadComparator` for programmatic comparison with full statistical output:
+
+```python
+from polyzymd.compare import ComparisonConfig, TriadComparator
+
+# Load comparison configuration (must have catalytic_triad: section)
+config = ComparisonConfig.from_yaml("comparison.yaml")
+
+# Run comparison (computes triad analysis if not cached)
+comparator = TriadComparator(config, equilibration="100ns")
+result = comparator.compare()
+
+# Access results
+print(f"Ranking (best triad first): {result.ranking}")
+
+for cond in result.conditions:
+    contact_pct = cond.mean_simultaneous_contact * 100
+    sem_pct = cond.sem_simultaneous_contact * 100
+    print(f"{cond.label}: {contact_pct:.1f} ± {sem_pct:.1f}%")
+
+# Statistical comparisons
+for comp in result.pairwise_comparisons:
+    sig = "*" if comp.significant else ""
+    print(f"{comp.condition_b} vs {comp.condition_a}: "
+          f"{comp.percent_change:+.1f}%, p={comp.p_value:.4f}{sig}, "
+          f"d={comp.cohens_d:.2f}")
+
+# Save result for later
+result.save("results/triad_comparison.json")
+```
+
+**Example output:**
+```
+Ranking (best triad first): ['With Polymer', 'No Polymer']
+No Polymer: 49.9 ± 27.3%
+With Polymer: 87.3 ± 2.2%
+With Polymer vs No Polymer: +74.9%, p=0.0892, d=1.93
+```
+````
+
+`````
+
+```{tip}
+For proper statistical interpretation (understanding p-values with small N,
+effect sizes, ANOVA for 3+ conditions), see the
+[Best Practices Guide](analysis_triad_best_practices.md#comparing-across-conditions).
+```
 
 ## Output Files
 
