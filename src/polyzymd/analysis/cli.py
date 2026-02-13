@@ -887,6 +887,311 @@ def distances(
 
 
 # -----------------------------------------------------------------------------
+# Contact Analysis
+# -----------------------------------------------------------------------------
+
+
+@analyze.command()
+@click.option(
+    "-c",
+    "--config",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to YAML configuration file (config.yaml or analysis.yaml)",
+)
+@click.option(
+    "-r",
+    "--replicates",
+    default="1",
+    help="Replicate specification: '1-5', '1,3,5', or '1'",
+)
+@click.option(
+    "--eq-time",
+    default="0ns",
+    help="Equilibration time to skip: '100ns', '5000ps' [default: 0ns]",
+)
+@click.option(
+    "--cutoff",
+    type=float,
+    default=4.0,
+    help="Contact distance cutoff in Angstroms [default: 4.0]",
+)
+@click.option(
+    "--polymer-selection",
+    default="segid C",
+    help="MDAnalysis selection for polymer atoms [default: 'segid C']",
+)
+@click.option(
+    "--protein-selection",
+    default="protein",
+    help="MDAnalysis selection for protein atoms [default: 'protein']",
+)
+@click.option(
+    "--grouping",
+    type=click.Choice(["residue", "segment", "atom"]),
+    default="residue",
+    help="How to group contacts [default: residue]",
+)
+@click.option(
+    "--residence-times",
+    is_flag=True,
+    help="Compute residence time statistics",
+)
+@click.option(
+    "--plot",
+    is_flag=True,
+    help="Generate contact map plot after analysis",
+)
+@click.option(
+    "--recompute",
+    is_flag=True,
+    help="Force recompute even if cached results exist",
+)
+@click.option(
+    "-o",
+    "--output-dir",
+    type=click.Path(),
+    default=None,
+    help="Custom output directory for results",
+)
+def contacts(
+    config: str,
+    replicates: str,
+    eq_time: str,
+    cutoff: float,
+    polymer_selection: str,
+    protein_selection: str,
+    grouping: str,
+    residence_times: bool,
+    plot: bool,
+    recompute: bool,
+    output_dir: Optional[str],
+) -> None:
+    """Analyze polymer-protein contacts.
+
+    Computes contact frequencies between polymer and protein residues,
+    with statistical analysis following LiveCoMS best practices.
+
+    \b
+    PolyzyMD Chain Convention:
+      Chain A: Protein/Enzyme
+      Chain B: Substrate/Ligand
+      Chain C: Polymers
+      Chain D+: Solvent (water, ions, co-solvents)
+
+    IMPORTANT: This command uses solvated_system.pdb as the topology
+    to ensure correct chain assignments (NOT production_N_topology.pdb).
+
+    \b
+    Examples:
+        # Basic contact analysis
+        polyzymd analyze contacts -c config.yaml -r 1 --eq-time 100ns
+
+        # Multi-replicate analysis
+        polyzymd analyze contacts -c config.yaml -r 1-5 --eq-time 100ns
+
+        # Custom selections with residence time analysis
+        polyzymd analyze contacts -c config.yaml -r 1-3 \\
+            --polymer-selection "segid C and resname SBM" \\
+            --protein-selection "protein and (resname TRP PHE TYR)" \\
+            --residence-times --plot
+    """
+    require_analysis_deps()
+
+    from polyzymd.analysis.contacts import ParallelContactAnalyzer
+    from polyzymd.analysis.contacts.aggregator import aggregate_contact_results
+    from polyzymd.analysis.common.selectors import MDAnalysisSelector
+    from polyzymd.analysis.core.loader import TrajectoryLoader, parse_time_string, time_to_frame
+    from polyzymd.config.schema import SimulationConfig
+
+    # Parse inputs
+    rep_list = parse_replicates(replicates)
+    output_path = Path(output_dir) if output_dir else None
+
+    click.echo(f"Loading configuration from: {config}")
+    try:
+        sim_config = SimulationConfig.from_yaml(config)
+    except Exception as e:
+        click.echo(click.style(f"Error loading config: {e}", fg="red"), err=True)
+        sys.exit(1)
+
+    click.echo(f"Contact Analysis: {sim_config.name}")
+    click.echo(f"  Replicates: {replicates}")
+    click.echo(f"  Equilibration: {eq_time}")
+    if eq_time in ("0ns", "0ps", "0us"):
+        click.echo(
+            click.style(
+                "  Warning: No equilibration time specified. Analysis will include "
+                "potentially non-equilibrated frames. Consider using --eq-time.",
+                fg="yellow",
+            ),
+            err=True,
+        )
+    click.echo(f"  Cutoff: {cutoff} Å")
+    click.echo(f"  Polymer selection: {polymer_selection}")
+    click.echo(f"  Protein selection: {protein_selection}")
+    click.echo(f"  Grouping: {grouping}")
+
+    # Parse equilibration time
+    eq_value, eq_unit = parse_time_string(eq_time)
+
+    try:
+        # Create selectors
+        target_selector = MDAnalysisSelector(protein_selection)
+        query_selector = MDAnalysisSelector(polymer_selection)
+
+        # Use TrajectoryLoader for consistent path resolution
+        loader = TrajectoryLoader(sim_config)
+
+        # Process each replicate
+        results = []
+        for rep in rep_list:
+            click.echo(f"  Processing replicate {rep}...", nl=False)
+
+            try:
+                # Use TrajectoryLoader for consistent path resolution
+                # This correctly uses scratch_directory for trajectories
+                universe = loader.load_universe(rep)
+            except FileNotFoundError as e:
+                click.echo(click.style(f" FAILED: {e}", fg="red"))
+                continue
+
+            # Convert equilibration time to start frame
+            timestep = loader.get_timestep(rep)
+            # Convert eq_time to ps for consistent units
+            if eq_unit == "ns":
+                eq_time_ps = eq_value * 1000
+            elif eq_unit == "us":
+                eq_time_ps = eq_value * 1e6
+            else:
+                eq_time_ps = eq_value  # already ps
+            start_frame = time_to_frame(eq_time_ps, "ps", timestep, "ps")
+
+            # Create analyzer
+            analyzer = ParallelContactAnalyzer(
+                target_selector=target_selector,
+                query_selector=query_selector,
+                cutoff=cutoff,
+            )
+
+            # Run analysis
+            result = analyzer.run(
+                universe,
+                start=start_frame,
+            )
+
+            results.append(result)
+
+            # Report basic stats
+            n_contacted = result.n_contacted_residues
+            coverage = result.coverage_fraction()
+            mean_frac = result.mean_contact_fraction()
+            click.echo(
+                click.style(
+                    f" done ({n_contacted}/{result.n_protein_residues} residues contacted, "
+                    f"{coverage:.1%} coverage, {mean_frac:.1%} mean contact)",
+                    fg="green",
+                )
+            )
+
+        if not results:
+            click.echo(click.style("No results generated!", fg="red"), err=True)
+            sys.exit(1)
+
+        # Aggregate if multiple replicates
+        if len(results) > 1:
+            click.echo()
+            click.echo("Aggregating results across replicates...")
+            agg_result = aggregate_contact_results(results)
+
+            click.echo(click.style("Aggregated Contact Analysis Complete", fg="green"))
+            click.echo(
+                f"  Contact fraction: {agg_result.mean_contact_fraction:.1%} "
+                f"± {agg_result.mean_contact_fraction_sem:.1%}"
+            )
+
+            if residence_times and agg_result.residence_time_by_polymer_type:
+                click.echo("  Residence time by polymer type:")
+                for ptype, (rt_mean, rt_sem) in sorted(
+                    agg_result.residence_time_by_polymer_type.items()
+                ):
+                    click.echo(f"    {ptype}: {rt_mean:.2f} ± {rt_sem:.2f} frames")
+
+            # Save aggregated result
+            if output_path:
+                output_file = output_path / "contacts_aggregated.json"
+            else:
+                analysis_dir = sim_config.output.projects_directory / "analysis" / "contacts"
+                analysis_dir.mkdir(parents=True, exist_ok=True)
+                output_file = (
+                    analysis_dir / f"contacts_aggregated_reps{rep_list[0]}-{rep_list[-1]}.json"
+                )
+
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            import json
+
+            with open(output_file, "w") as f:
+                json.dump(agg_result.to_dict(), f, indent=2)
+            click.echo(f"  Results saved: {output_file}")
+
+        else:
+            # Single replicate
+            result = results[0]
+            click.echo()
+            click.echo(click.style("Contact Analysis Complete", fg="green"))
+            click.echo(
+                f"  Contacted residues: {result.n_contacted_residues}/{result.n_protein_residues}"
+            )
+            click.echo(f"  Coverage: {result.coverage_fraction():.1%}")
+            click.echo(f"  Mean contact fraction: {result.mean_contact_fraction():.1%}")
+
+            if residence_times:
+                residence_summary = result.residence_time_summary()
+                if residence_summary:
+                    click.echo("  Residence time by polymer type:")
+                    for ptype, stats in sorted(residence_summary.items()):
+                        if stats["total_events"] > 0:
+                            click.echo(
+                                f"    {ptype}: mean={stats['mean_frames']:.2f} frames, "
+                                f"max={stats['max_frames']:.0f} frames "
+                                f"({stats['total_events']} events)"
+                            )
+
+            # Save result
+            if output_path:
+                output_file = output_path / f"contacts_rep{rep_list[0]}.json"
+            else:
+                analysis_dir = sim_config.output.projects_directory / "analysis" / "contacts"
+                analysis_dir.mkdir(parents=True, exist_ok=True)
+                output_file = analysis_dir / f"contacts_rep{rep_list[0]}.json"
+
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            result.save(output_file)
+            click.echo(f"  Results saved: {output_file}")
+
+        # Generate plot if requested
+        if plot:
+            require_matplotlib()
+            click.echo()
+            click.echo("Generating contact map plot...")
+            # TODO: Implement contact map plotting
+            click.echo(
+                click.style(
+                    "  Note: Contact map plotting not yet implemented",
+                    fg="yellow",
+                )
+            )
+
+    except Exception as e:
+        click.echo(click.style(f"Analysis failed: {e}", fg="red"), err=True)
+        if LOGGER.level == logging.DEBUG:
+            import traceback
+
+            traceback.print_exc()
+        sys.exit(1)
+
+
+# -----------------------------------------------------------------------------
 # Catalytic Triad Analysis
 # -----------------------------------------------------------------------------
 

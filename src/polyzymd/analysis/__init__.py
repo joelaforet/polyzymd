@@ -16,6 +16,10 @@ distances
     Inter-atomic distance analysis
 triad
     Catalytic triad/active site geometry analysis
+contacts
+    Polymer-protein contact analysis with extensible criteria
+common
+    Shared infrastructure: molecular selectors, residue groupings
 
 Quick Start
 -----------
@@ -39,6 +43,16 @@ Quick Start
 >>> triad_config = CatalyticTriadConfig(name="LipA_triad", threshold=3.5, pairs=[...])
 >>> triad_analyzer = CatalyticTriadAnalyzer(config, triad_config, equilibration="100ns")
 >>> result = triad_analyzer.compute(replicate=1)
+>>>
+>>> # Contact analysis
+>>> from polyzymd.analysis import ContactAnalyzer, AnyAtomWithinCutoff
+>>> from polyzymd.analysis.common import ProteinResidues, PolymerChains
+>>> analyzer = ContactAnalyzer(
+...     target_selector=ProteinResidues(),
+...     query_selector=PolymerChains(),
+...     criteria=AnyAtomWithinCutoff(cutoff=4.0),
+... )
+>>> result = analyzer.run(universe)
 
 Installation
 ------------
@@ -93,6 +107,33 @@ def __getattr__(name):
         from polyzymd.analysis import distances
 
         return getattr(distances, name)
+    # Contact analysis module
+    elif name == "ContactAnalyzer":
+        from polyzymd.analysis.contacts import ContactAnalyzer
+
+        return ContactAnalyzer
+    elif name == "ParallelContactAnalyzer":
+        from polyzymd.analysis.contacts import ParallelContactAnalyzer
+
+        return ParallelContactAnalyzer
+    elif name in (
+        "ContactCriteria",
+        "AnyAtomWithinCutoff",
+        "AnyAtomToCOM",
+        "COMToCOM",
+        "MinimumDistance",
+    ):
+        from polyzymd.analysis import contacts
+
+        return getattr(contacts, name)
+    elif name in ("ContactEvent", "ResidueContactData", "ContactResult"):
+        from polyzymd.analysis import contacts
+
+        return getattr(contacts, name)
+    elif name == "aggregate_contact_results":
+        from polyzymd.analysis.contacts.aggregator import aggregate_contact_results
+
+        return aggregate_contact_results
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -101,6 +142,18 @@ __all__ = [
     "RMSFCalculator",
     "DistanceCalculator",
     "CatalyticTriadAnalyzer",
+    # Contact analysis
+    "ContactAnalyzer",
+    "ParallelContactAnalyzer",
+    "ContactCriteria",
+    "AnyAtomWithinCutoff",
+    "AnyAtomToCOM",
+    "COMToCOM",
+    "MinimumDistance",
+    "ContactEvent",
+    "ResidueContactData",
+    "ContactResult",
+    "aggregate_contact_results",
     # Loading
     "TrajectoryLoader",
     # Config validation

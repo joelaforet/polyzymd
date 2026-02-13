@@ -5,7 +5,8 @@ independent samples. This module provides tools to:
 
 1. Compute the autocorrelation function (ACF) of an observable
 2. Estimate the correlation time (τ) from the ACF
-3. Select independent frames based on τ for proper statistics
+3. Compute statistical inefficiency (g) for proper uncertainty quantification
+4. Select independent frames based on τ for proper statistics
 
 Key Concepts
 ------------
@@ -14,6 +15,9 @@ Key Concepts
 
 - **Correlation time (τ)**: Characteristic time for decorrelation. Frames
   separated by > 2τ are approximately independent.
+
+- **Statistical inefficiency (g)**: Factor by which variance is inflated due
+  to correlation. g = 1 + 2*Σ C(t)*(1-t/N). N_eff = N/g.
 
 - **Independent samples**: For proper SEM calculation, we need N_eff independent
   samples, not N_frames correlated observations.
@@ -26,12 +30,16 @@ Methods for τ estimation
 
 Statistical Validity
 --------------------
-The number of independent samples (N_ind) is computed as:
-    N_ind = N / (1 + 2*Σ C_j)
+The number of effective independent samples (N_eff) is computed as:
+    N_eff = N / g = N / (1 + 2*Σ C(t)*(1-t/N))
 
-This matches the LiveCoMS best practices for uncertainty quantification
-(Grossfield et al., 2018). When N_ind < 10, statistical estimates (mean, SEM)
-may be unreliable, and users should be warned.
+This matches the algorithm from Chodera et al. (2007) with the finite-size
+correction factor (1-t/N). When N_eff < 10, statistical estimates (mean, SEM)
+may be unreliable, and users should be warned per LiveCoMS best practices
+(Grossfield et al., 2018).
+
+For multiple timeseries of different lengths (e.g., replicates), use
+`statistical_inefficiency_multiple()` which correctly handles the averaging.
 
 References
 ----------
@@ -299,7 +307,7 @@ def estimate_correlation_time(
         tau = _fit_exponential_acf(lags, acf, zero_crossing_idx)
 
     elif method == "integration":
-        tau = _integrate_acf(lags, acf, zero_crossing_idx, dt)
+        tau = _integrate_acf(lags, acf, zero_crossing_idx, dt, n_frames=n_frames)
 
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -439,8 +447,31 @@ def _integrate_acf(
     acf: NDArray[np.float64],
     zero_crossing_idx: int | None,
     dt: float,
+    n_frames: int | None = None,
+    use_finite_size_correction: bool = True,
 ) -> float:
-    """Estimate τ by integrating ACF."""
+    """Estimate τ by integrating ACF.
+
+    Parameters
+    ----------
+    lags : NDArray[np.float64]
+        Time lags
+    acf : NDArray[np.float64]
+        Autocorrelation values
+    zero_crossing_idx : int | None
+        Index of first zero crossing
+    dt : float
+        Timestep
+    n_frames : int | None
+        Total number of frames (for finite-size correction)
+    use_finite_size_correction : bool
+        If True, apply (1-t/N) weighting per Chodera et al. 2007
+
+    Returns
+    -------
+    float
+        Estimated correlation time τ
+    """
     # Integrate up to first zero crossing
     if zero_crossing_idx is not None:
         int_end = zero_crossing_idx + 1
@@ -452,8 +483,314 @@ def _integrate_acf(
         else:
             int_end = len(acf)
 
+    # Apply finite-size correction if requested
+    if use_finite_size_correction and n_frames is not None and n_frames > 0:
+        # Weight ACF by (1 - t/N) per Chodera et al. 2007
+        # This accounts for reduced sample size at longer lags
+        lag_indices = np.arange(int_end)
+        weights = 1.0 - lag_indices / n_frames
+        weighted_acf = acf[:int_end] * weights
+    else:
+        weighted_acf = acf[:int_end]
+
     # Trapezoidal integration (trapezoid in numpy 2.0+, trapz in older versions)
     trapz_func = getattr(np, "trapezoid", np.trapz)
-    tau = float(trapz_func(acf[:int_end], lags[:int_end]))
+    tau = float(trapz_func(weighted_acf, lags[:int_end]))
 
     return max(tau, dt)  # At least one timestep
+
+
+# =============================================================================
+# Statistical Inefficiency Functions
+# =============================================================================
+
+
+def statistical_inefficiency(
+    timeseries: ArrayLike,
+    mintime: int = 3,
+    fft: bool = True,
+) -> float:
+    """Compute statistical inefficiency g directly from a timeseries.
+
+    The statistical inefficiency g is the factor by which the variance of
+    the sample mean is increased due to correlation:
+
+        Var(mean) = Var(x) * g / N
+
+    This is computed as: g = 1 + 2 * Σ C(t) * (1 - t/N)
+
+    where C(t) is the normalized autocorrelation function and the sum
+    includes the finite-size correction factor (1 - t/N) per Chodera et al.
+    (2007).
+
+    Parameters
+    ----------
+    timeseries : array_like
+        1D array of values (e.g., contact binary array, RMSD over time)
+    mintime : int
+        Minimum number of lags to compute before checking for zero crossing.
+        Prevents early termination from noise. Default is 3.
+    fft : bool
+        If True, use FFT-based ACF computation (faster). Default is True.
+
+    Returns
+    -------
+    float
+        Statistical inefficiency g (>= 1.0). The number of effective
+        independent samples is N_eff = N / g.
+
+    Examples
+    --------
+    >>> # Binary contact timeseries
+    >>> contacts = np.array([0, 1, 1, 1, 0, 0, 1, 1, ...])
+    >>> g = statistical_inefficiency(contacts)
+    >>> n_eff = len(contacts) / g
+    >>> print(f"Effective samples: {n_eff:.1f}")
+
+    >>> # Continuous observable
+    >>> rmsd = np.array([1.2, 1.3, 1.25, 1.4, ...])
+    >>> g = statistical_inefficiency(rmsd)
+
+    Notes
+    -----
+    This implementation follows the algorithm from Chodera et al. (2007)
+    J. Chem. Theory Comput. 3:26, with the finite-size correction.
+
+    For binary (0/1) data, the algorithm works correctly as the variance
+    of a Bernoulli random variable is p(1-p).
+
+    References
+    ----------
+    Chodera et al. (2007) J. Chem. Theory Comput. 3:26
+    """
+    x = np.asarray(timeseries, dtype=np.float64)
+    n = len(x)
+
+    if n < 3:
+        logger.warning(f"Timeseries too short ({n} points). Returning g=1.0")
+        return 1.0
+
+    # Compute variance
+    mu = np.mean(x)
+    var = np.var(x)
+
+    if var < 1e-10:
+        # Constant timeseries - no correlation
+        return 1.0
+
+    # Compute normalized fluctuations
+    delta_x = x - mu
+
+    # Compute ACF using FFT for efficiency
+    if fft:
+        n_fft = 2 ** int(np.ceil(np.log2(2 * n - 1)))
+        fft_x = np.fft.fft(delta_x, n_fft)
+        acf_unnorm = np.fft.ifft(fft_x * np.conj(fft_x)).real[:n]
+        # Normalize by decreasing sample size
+        acf = acf_unnorm / (np.arange(n, 0, -1) * var)
+    else:
+        # Direct computation (slower but clearer)
+        acf = np.zeros(n)
+        for t in range(n):
+            acf[t] = np.mean(delta_x[: n - t] * delta_x[t:]) / var
+
+    # Compute g = 1 + 2 * sum(C(t) * (1 - t/N))
+    # Start with g = 1 (for lag 0, C(0) = 1, but we don't count it in the sum)
+    g = 1.0
+
+    # Sum over positive lags with finite-size correction
+    for t in range(1, n):
+        # Finite-size correction factor
+        weight = 1.0 - float(t) / n
+
+        # Check for zero crossing (after mintime)
+        if t >= mintime and acf[t] <= 0:
+            break
+
+        g += 2.0 * acf[t] * weight
+
+    # Ensure g >= 1
+    g = max(1.0, g)
+
+    return float(g)
+
+
+def statistical_inefficiency_multiple(
+    timeseries_list: list[ArrayLike],
+    mintime: int = 3,
+) -> float:
+    """Compute statistical inefficiency from multiple timeseries of different lengths.
+
+    This is critical for aggregating replicates with different frame counts.
+    The algorithm computes a global mean μ across all timeseries, then
+    averages the ACF numerator and denominator separately before computing g.
+
+    Parameters
+    ----------
+    timeseries_list : list[ArrayLike]
+        List of 1D timeseries arrays (can have different lengths)
+    mintime : int
+        Minimum number of lags before checking for zero crossing. Default is 3.
+
+    Returns
+    -------
+    float
+        Statistical inefficiency g (>= 1.0)
+
+    Examples
+    --------
+    >>> # Three replicates with different lengths
+    >>> ts1 = np.array([0, 1, 1, 0, 0, 1])  # 6 frames
+    >>> ts2 = np.array([1, 1, 0, 0, 0])      # 5 frames
+    >>> ts3 = np.array([0, 0, 1, 1, 1, 0, 1])  # 7 frames
+    >>> g = statistical_inefficiency_multiple([ts1, ts2, ts3])
+
+    Notes
+    -----
+    This implementation follows the algorithm from PyMBAR's
+    `statistical_inefficiency_multiple()`, adapted without the PyMBAR dependency.
+
+    The algorithm:
+    1. Compute global mean μ across all timeseries
+    2. For each lag t:
+       - Compute sum of (x - μ) products across all timeseries where t < N_k
+       - Compute sum of sample counts across all timeseries where t < N_k
+       - Average to get C(t)
+    3. Sum with finite-size correction
+
+    References
+    ----------
+    Chodera et al. (2007) J. Chem. Theory Comput. 3:26
+    """
+    if not timeseries_list:
+        return 1.0
+
+    # Convert to numpy arrays
+    arrays = [np.asarray(ts, dtype=np.float64) for ts in timeseries_list]
+    lengths = np.array([len(a) for a in arrays])
+    n_total = int(np.sum(lengths))
+    max_length = int(np.max(lengths))
+
+    if n_total < 3:
+        logger.warning(f"Total samples too few ({n_total}). Returning g=1.0")
+        return 1.0
+
+    # Compute global mean
+    total_sum = sum(np.sum(a) for a in arrays)
+    mu = total_sum / n_total
+
+    # Compute global variance
+    total_var_sum = sum(np.sum((a - mu) ** 2) for a in arrays)
+    var = total_var_sum / n_total
+
+    if var < 1e-10:
+        return 1.0
+
+    # Compute fluctuations
+    deltas = [a - mu for a in arrays]
+
+    # Compute g using averaged ACF
+    g = 1.0
+
+    for t in range(1, max_length):
+        # Sum ACF contributions from all timeseries where t < N_k
+        acf_numerator = 0.0
+        acf_denominator = 0.0
+
+        for k, (delta, n_k) in enumerate(zip(deltas, lengths)):
+            if t < n_k:
+                # This timeseries contributes at lag t
+                # Number of pairs at lag t
+                n_pairs = n_k - t
+                # Sum of products
+                product_sum = np.sum(delta[: n_k - t] * delta[t:])
+                acf_numerator += product_sum
+                acf_denominator += n_pairs
+
+        if acf_denominator < 1:
+            # No timeseries has this lag
+            break
+
+        # Normalized ACF at lag t
+        c_t = acf_numerator / (acf_denominator * var)
+
+        # Check for zero crossing (after mintime)
+        if t >= mintime and c_t <= 0:
+            break
+
+        # Finite-size correction: use average N across contributing timeseries
+        # For simplicity, use the mean length of timeseries that contribute
+        contributing = lengths[lengths > t]
+        if len(contributing) == 0:
+            break
+        mean_n = np.mean(contributing)
+        weight = 1.0 - float(t) / mean_n
+
+        g += 2.0 * c_t * weight
+
+    # Ensure g >= 1
+    g = max(1.0, g)
+
+    return float(g)
+
+
+def n_effective(n_samples: int, g: float) -> float:
+    """Compute number of effective independent samples.
+
+    Parameters
+    ----------
+    n_samples : int
+        Total number of samples
+    g : float
+        Statistical inefficiency
+
+    Returns
+    -------
+    float
+        Effective number of independent samples (N_eff = N / g)
+    """
+    if g <= 0:
+        return float(n_samples)
+    return n_samples / g
+
+
+def check_statistical_reliability(
+    n_eff: float,
+    threshold: int = MIN_RECOMMENDED_N_INDEPENDENT,
+) -> tuple[bool, str | None]:
+    """Check if statistics are reliable based on effective sample count.
+
+    Parameters
+    ----------
+    n_eff : float
+        Number of effective independent samples
+    threshold : int
+        Minimum recommended independent samples. Default is 10.
+
+    Returns
+    -------
+    is_reliable : bool
+        True if n_eff >= threshold
+    warning : str | None
+        Warning message if not reliable, None otherwise
+
+    Examples
+    --------
+    >>> g = statistical_inefficiency(contacts)
+    >>> n_eff = n_effective(len(contacts), g)
+    >>> is_ok, warning = check_statistical_reliability(n_eff)
+    >>> if not is_ok:
+    ...     print(warning)
+    """
+    if n_eff >= threshold:
+        return True, None
+
+    warning = (
+        f"Low statistical reliability: only {n_eff:.1f} effective independent samples "
+        f"(recommended >= {threshold}). Consider: (1) extending simulation time, "
+        f"(2) using more independent replicates, or (3) interpreting results "
+        f"with caution. See Grossfield et al. (2018) LiveCoMS 1:5067."
+    )
+    logger.warning(warning)
+
+    return False, warning

@@ -27,6 +27,10 @@ from polyzymd.analysis.core.autocorrelation import (
     compute_acf,
     estimate_correlation_time,
     get_independent_indices,
+    statistical_inefficiency,
+    statistical_inefficiency_multiple,
+    n_effective,
+    check_statistical_reliability,
 )
 from polyzymd.analysis.core.loader import (
     TrajectoryInfo,
@@ -77,6 +81,10 @@ __all__ = [
     "compute_acf",
     "estimate_correlation_time",
     "get_independent_indices",
+    "statistical_inefficiency",
+    "statistical_inefficiency_multiple",
+    "n_effective",
+    "check_statistical_reliability",
     # Trajectory loading
     "TrajectoryInfo",
     "TrajectoryLoader",
