@@ -14,7 +14,7 @@ from typing import Optional
 import numpy as np
 
 from polyzymd import __version__
-from polyzymd.compare.config import ComparisonConfig, ConditionConfig
+from polyzymd.compare.config import ComparisonConfig, ConditionConfig, RMSFComparisonConfig
 from polyzymd.compare.results import (
     ANOVASummary,
     ComparisonResult,
@@ -41,16 +41,23 @@ class RMSFComparator:
     Parameters
     ----------
     config : ComparisonConfig
-        Comparison configuration defining conditions
+        Comparison configuration defining conditions. Must have `rmsf` section.
+    rmsf_config : RMSFComparisonConfig
+        RMSF-specific configuration (from config.rmsf or constructed by CLI)
     equilibration : str, optional
-        Equilibration time override (e.g., "10ns")
-    selection : str, optional
-        Atom selection override
+        Equilibration time override (e.g., "10ns"). If None, uses
+        config.defaults.equilibration_time.
+    selection_override : str, optional
+        Override for atom selection (requires --override flag on CLI)
+    reference_mode_override : str, optional
+        Override for reference mode (requires --override flag on CLI)
+    reference_frame_override : int, optional
+        Override for reference frame (requires --override flag on CLI)
 
     Examples
     --------
     >>> config = ComparisonConfig.from_yaml("comparison.yaml")
-    >>> comparator = RMSFComparator(config, equilibration="10ns")
+    >>> comparator = RMSFComparator(config, config.rmsf, equilibration="10ns")
     >>> result = comparator.compare()
     >>> print(result.ranking)
     ["100% SBMA", "100% EGMA", "No Polymer", "50/50 Mix"]
@@ -59,12 +66,20 @@ class RMSFComparator:
     def __init__(
         self,
         config: ComparisonConfig,
+        rmsf_config: RMSFComparisonConfig,
         equilibration: Optional[str] = None,
-        selection: Optional[str] = None,
+        selection_override: Optional[str] = None,
+        reference_mode_override: Optional[str] = None,
+        reference_frame_override: Optional[int] = None,
     ):
         self.config = config
+        self.rmsf_config = rmsf_config
         self.equilibration = equilibration or config.defaults.equilibration_time
-        self.selection = selection or config.defaults.selection
+
+        # Apply overrides (CLI --override flag)
+        self.selection = selection_override or rmsf_config.selection
+        self.reference_mode = reference_mode_override or rmsf_config.reference_mode
+        self.reference_frame = reference_frame_override or rmsf_config.reference_frame
 
     def compare(self, recompute: bool = False) -> ComparisonResult:
         """Run comparison across all conditions.
@@ -148,8 +163,8 @@ class RMSFComparator:
         dict
             Dictionary with mean_rmsf, sem_rmsf, n_replicates, replicate_values
         """
-        from polyzymd.analysis.rmsf import RMSFCalculator
         from polyzymd.analysis.results import RMSFAggregatedResult
+        from polyzymd.analysis.rmsf import RMSFCalculator
         from polyzymd.config.schema import SimulationConfig
 
         LOGGER.info(f"Processing condition: {cond.label}")
@@ -164,12 +179,14 @@ class RMSFComparator:
             LOGGER.info(f"  Loading cached result: {result_path}")
             agg_result = RMSFAggregatedResult.load(result_path)
         else:
-            # Compute RMSF
+            # Compute RMSF with full settings from rmsf_config
             LOGGER.info(f"  Computing RMSF for replicates {cond.replicates}...")
             calc = RMSFCalculator(
                 config=sim_config,
                 selection=self.selection,
                 equilibration=self.equilibration,
+                reference_mode=self.reference_mode,
+                reference_frame=self.reference_frame,
             )
             agg_result = calc.compute_aggregated(
                 replicates=cond.replicates,
