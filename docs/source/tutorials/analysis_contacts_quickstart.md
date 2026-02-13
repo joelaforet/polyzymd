@@ -48,10 +48,65 @@ By default, the command analyzes contacts between `segid C` (polymers) and
 
 ### Single Replicate Analysis
 
+`````{tab-set}
+````{tab-item} YAML (Recommended)
+Create an `analysis.yaml` file alongside your `config.yaml`:
+
+```yaml
+# analysis.yaml
+replicates: [1]
+
+defaults:
+  equilibration_time: "10ns"
+
+contacts:
+  enabled: true
+  cutoff: 4.0
+```
+
+Then run all enabled analyses:
+
+```bash
+polyzymd analyze run
+```
+````
+
+````{tab-item} CLI
 ```bash
 cd /path/to/your/project
 polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns
 ```
+````
+
+````{tab-item} Python
+```python
+from pathlib import Path
+from polyzymd.config import SimulationConfig
+from polyzymd.analysis.contacts import ContactAnalyzer
+
+# Load simulation config
+config = SimulationConfig.from_yaml("config.yaml")
+
+# Create analyzer with parameters
+analyzer = ContactAnalyzer(
+    config=config,
+    replicate=1,
+    equilibration_time="10ns",
+    cutoff=4.0,
+    polymer_selection="segid C",
+    protein_selection="protein",
+)
+
+# Run analysis
+result = analyzer.analyze()
+
+# Access results
+print(f"Coverage: {result.coverage:.1%}")
+print(f"Mean contact fraction: {result.mean_contact_fraction:.1%}")
+print(f"Contacted residues: {result.n_contacted}/{result.n_residues}")
+```
+````
+`````
 
 **Output:**
 ```
@@ -85,7 +140,11 @@ Contact Analysis Complete
 For reproducible, version-controlled analysis configuration, use `analysis.yaml` 
 instead of CLI flags. Place this file alongside your `config.yaml`.
 
-### Create analysis.yaml
+### Multi-Replicate Analysis with Full Options
+
+`````{tab-set}
+````{tab-item} YAML (Recommended)
+Create an `analysis.yaml` file with all configuration options:
 
 ```yaml
 # analysis.yaml
@@ -104,7 +163,7 @@ contacts:
   compute_residence_times: true       # Enable residence time statistics
 ```
 
-### Run All Enabled Analyses
+Then run all enabled analyses:
 
 ```bash
 # Initialize a template (if starting fresh)
@@ -116,6 +175,53 @@ polyzymd analyze run
 # Force recompute
 polyzymd analyze run --recompute
 ```
+````
+
+````{tab-item} CLI
+```bash
+# Run contacts analysis across multiple replicates with all options
+polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
+    --cutoff 4.5 \
+    --polymer-selection "chainID C" \
+    --protein-selection "protein" \
+    --residence-times
+
+# Force recompute
+polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
+    --cutoff 4.5 --residence-times --recompute
+```
+````
+
+````{tab-item} Python
+```python
+from pathlib import Path
+from polyzymd.config import SimulationConfig
+from polyzymd.analysis.contacts import ContactAnalyzer
+from polyzymd.analysis.contacts.aggregation import aggregate_contact_results
+
+config = SimulationConfig.from_yaml("config.yaml")
+
+# Analyze multiple replicates
+results = []
+for rep in [1, 2, 3]:
+    analyzer = ContactAnalyzer(
+        config=config,
+        replicate=rep,
+        equilibration_time="10ns",
+        cutoff=4.5,
+        polymer_selection="chainID C",
+        protein_selection="protein",
+        compute_residence_times=True,
+    )
+    results.append(analyzer.analyze())
+
+# Aggregate results across replicates
+aggregated = aggregate_contact_results(results)
+
+print(f"Contact fraction: {aggregated.mean_contact_fraction:.1%} ± {aggregated.std_contact_fraction:.1%}")
+```
+````
+`````
 
 ### Configuration Options
 
@@ -143,9 +249,53 @@ different polymer types.
 
 ### Enable Residence Time Statistics
 
+`````{tab-set}
+````{tab-item} YAML (Recommended)
+```yaml
+# analysis.yaml
+replicates: [1]
+
+defaults:
+  equilibration_time: "10ns"
+
+contacts:
+  enabled: true
+  compute_residence_times: true  # Enable residence time statistics
+```
+
+```bash
+polyzymd analyze run
+```
+````
+
+````{tab-item} CLI
 ```bash
 polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns --residence-times
 ```
+````
+
+````{tab-item} Python
+```python
+from polyzymd.config import SimulationConfig
+from polyzymd.analysis.contacts import ContactAnalyzer
+
+config = SimulationConfig.from_yaml("config.yaml")
+
+analyzer = ContactAnalyzer(
+    config=config,
+    replicate=1,
+    equilibration_time="10ns",
+    compute_residence_times=True,  # Enable residence time statistics
+)
+
+result = analyzer.analyze()
+
+# Access residence time data
+for polymer_type, stats in result.residence_times.items():
+    print(f"{polymer_type}: mean={stats.mean:.2f} frames, max={stats.max} frames ({stats.n_events} events)")
+```
+````
+`````
 
 **Output:**
 ```
@@ -163,9 +313,58 @@ Contact Analysis Complete
 When analyzing multiple replicates, residence times are aggregated with proper 
 statistical uncertainty:
 
+`````{tab-set}
+````{tab-item} YAML (Recommended)
+```yaml
+# analysis.yaml
+replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "10ns"
+
+contacts:
+  enabled: true
+  compute_residence_times: true
+```
+
+```bash
+polyzymd analyze run
+```
+````
+
+````{tab-item} CLI
 ```bash
 polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns --residence-times
 ```
+````
+
+````{tab-item} Python
+```python
+from polyzymd.config import SimulationConfig
+from polyzymd.analysis.contacts import ContactAnalyzer
+from polyzymd.analysis.contacts.aggregation import aggregate_contact_results
+
+config = SimulationConfig.from_yaml("config.yaml")
+
+results = []
+for rep in [1, 2, 3]:
+    analyzer = ContactAnalyzer(
+        config=config,
+        replicate=rep,
+        equilibration_time="10ns",
+        compute_residence_times=True,
+    )
+    results.append(analyzer.analyze())
+
+# Aggregate with proper uncertainty quantification
+aggregated = aggregate_contact_results(results)
+
+print(f"Contact fraction: {aggregated.mean_contact_fraction:.1%} ± {aggregated.std_contact_fraction:.1%}")
+for polymer_type, stats in aggregated.residence_times.items():
+    print(f"{polymer_type}: {stats.mean:.2f} ± {stats.std:.2f} frames")
+```
+````
+`````
 
 **Output:**
 ```
