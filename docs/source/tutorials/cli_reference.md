@@ -568,13 +568,19 @@ Run statistical comparison of RMSF across conditions.
 polyzymd compare rmsf [OPTIONS]
 ```
 
+**Requires** an `rmsf:` section in comparison.yaml. This is the single source
+of truth for RMSF settings.
+
 #### Options
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--file` | `-f` | comparison.yaml | Path to comparison config file |
 | `--eq-time` | - | from config | Override equilibration time |
-| `--selection` | - | from config | Override atom selection |
+| `--override` | - | false | Enable CLI overrides for RMSF settings |
+| `--selection` | - | from rmsf config | Override atom selection (requires --override) |
+| `--reference-mode` | - | from rmsf config | Override reference mode (requires --override) |
+| `--reference-frame` | - | from rmsf config | Override reference frame (requires --override) |
 | `--recompute` | - | false | Force recompute RMSF |
 | `--format` | - | table | Output format: table, markdown, json |
 | `--output` | `-o` | - | Save formatted output to file |
@@ -583,11 +589,14 @@ polyzymd compare rmsf [OPTIONS]
 #### Example
 
 ```bash
-# Run comparison with default settings
+# Run comparison with default settings (uses rmsf: section from YAML)
 polyzymd compare rmsf
 
 # Override equilibration time
 polyzymd compare rmsf --eq-time 20ns
+
+# Override RMSF settings (requires --override flag)
+polyzymd compare rmsf --override --selection "protein and name CA CB"
 
 # Output as markdown
 polyzymd compare rmsf --format markdown -o report.md

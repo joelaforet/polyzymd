@@ -178,7 +178,11 @@ conditions:
 
 defaults:
   equilibration_time: "10ns"
+
+# RMSF-specific settings (required for polyzymd compare rmsf)
+rmsf:
   selection: "protein and name CA"
+  reference_mode: "centroid"
 ```
 
 ```bash
@@ -227,11 +231,15 @@ Use `RMSFComparator` for programmatic comparison with full statistical output:
 ```python
 from polyzymd.compare import ComparisonConfig, RMSFComparator
 
-# Load comparison configuration
+# Load comparison configuration (must have rmsf: section)
 config = ComparisonConfig.from_yaml("comparison.yaml")
 
 # Run comparison (computes RMSF if not cached)
-comparator = RMSFComparator(config, equilibration="10ns")
+comparator = RMSFComparator(
+    config=config,
+    rmsf_config=config.rmsf,
+    equilibration="10ns",
+)
 result = comparator.compare()
 
 # Access results

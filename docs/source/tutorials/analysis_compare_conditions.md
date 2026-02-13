@@ -166,11 +166,33 @@ description: "What you're comparing"
 # - If null: all pairwise comparisons
 control: "Condition A"  # or null
 
-# Default analysis parameters (can be overridden on CLI)
+# Default analysis parameters (shared across all analyses)
 defaults:
-  equilibration_time: "10ns"        # Time to skip
-  selection: "protein and name CA"  # Atoms for RMSF
-  reference_mode: "centroid"        # Alignment reference
+  equilibration_time: "10ns"        # Time to skip (used by all analyses)
+
+# ============================================================================
+# Analysis-Specific Sections (uncomment to enable)
+# ============================================================================
+
+# RMSF comparison (required for `polyzymd compare rmsf`)
+rmsf:
+  selection: "protein and name CA"  # Atoms for RMSF calculation
+  reference_mode: "centroid"        # centroid, average, or frame
+  # reference_frame: 500            # Required if reference_mode is "frame"
+
+# Catalytic triad comparison (required for `polyzymd compare triad`)
+# catalytic_triad:
+#   name: "enzyme_catalytic_triad"
+#   threshold: 3.5
+#   pairs:
+#     - label: "Asp-His"
+#       selection_a: "midpoint(resid 133 and name OD1 OD2)"
+#       selection_b: "resid 156 and name ND1"
+
+# Contacts comparison (required for `polyzymd compare contacts`)
+# contacts:
+#   polymer_selection: "resname SBM EGM"
+#   cutoff: 4.5
 ```
 
 ### Path Resolution
@@ -572,11 +594,15 @@ three visualizations in a single figure with labeled panels (A, B, C).
 ```python
 from polyzymd.compare import ComparisonConfig, RMSFComparator
 
-# Load configuration
+# Load configuration (must have rmsf: section)
 config = ComparisonConfig.from_yaml("comparison.yaml")
 
 # Run comparison
-comparator = RMSFComparator(config, equilibration="10ns")
+comparator = RMSFComparator(
+    config=config,
+    rmsf_config=config.rmsf,
+    equilibration="10ns",
+)
 result = comparator.compare()
 
 # Access results
