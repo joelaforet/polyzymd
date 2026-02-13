@@ -196,7 +196,7 @@ polyzymd compare rmsf -f comparison.yaml --format json      # Machine-readable
 
 **Output includes:**
 - Mean RMSF ± SEM for each condition
-- % change relative to control
+- \% change relative to control
 - p-value (two-sample t-test)
 - Cohen's d effect size
 - Ranking (lowest RMSF = most stable)
