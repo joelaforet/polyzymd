@@ -1,11 +1,14 @@
 # Comparing Conditions Across Simulations
 
-Statistically compare RMSF (and other metrics) across multiple simulation conditions
+Statistically compare RMSF, contacts, and other metrics across multiple simulation conditions
 with automated t-tests, effect size calculations, and ranking.
 
 ```{note}
-**New to RMSF analysis?** Start with the [Quick Start Guide](analysis_rmsf_quickstart.md)
-to run individual analyses, then return here to compare conditions.
+**New to analysis?** Start with the individual quick start guides:
+- [RMSF Quick Start](analysis_rmsf_quickstart.md) for flexibility analysis
+- [Contacts Quick Start](analysis_contacts_quickstart.md) for polymer-protein contacts
+
+Then return here to compare conditions.
 ```
 
 ## TL;DR
@@ -19,8 +22,9 @@ vim my_polymer_study/comparison.yaml
 
 # 3. Run comparisons
 cd my_polymer_study
-polyzymd compare rmsf --eq-time 10ns   # Compare flexibility
-polyzymd compare triad --eq-time 10ns  # Compare triad geometry (if defined)
+polyzymd compare rmsf --eq-time 10ns      # Compare flexibility
+polyzymd compare triad --eq-time 10ns     # Compare triad geometry (if defined)
+polyzymd compare contacts --eq-time 10ns  # Compare polymer-protein contacts
 
 # Output formats
 polyzymd compare rmsf --format table     # Console table (default)
@@ -891,9 +895,275 @@ if comp and comp.significant:
     print(f"SBMA significantly improves triad contact (p={comp.p_value:.4f})")
 ```
 
+## Comparing Polymer-Protein Contacts
+
+Compare **polymer-protein contact statistics** across conditions to understand how
+different polymer compositions affect protein-polymer interactions.
+
+```{note}
+**New to contacts analysis?** Start with the [Contacts Quick Start](analysis_contacts_quickstart.md)
+to run individual analyses, then return here to compare conditions.
+```
+
+### Key Metrics
+
+The contacts comparison analyzes two aggregate metrics:
+
+| Metric | Description | Higher means... |
+|--------|-------------|-----------------|
+| **Coverage** | % of protein residues contacted by polymer | More extensive binding |
+| **Mean Contact Fraction** | Average % of frames each residue is in contact | Stronger/more persistent binding |
+
+Additionally, **residence times by polymer type** show how long each polymer type
+(e.g., SBMA vs EGMA) maintains contacts, revealing selectivity differences.
+
+### Running Contacts Comparison
+
+```bash
+# Basic comparison
+polyzymd compare contacts
+
+# With custom equilibration time
+polyzymd compare contacts --eq-time 10ns
+
+# Override polymer selection (only SBMA monomers)
+polyzymd compare contacts --polymer-selection "resname SBM"
+
+# Different output formats
+polyzymd compare contacts --format markdown -o contacts_report.md
+polyzymd compare contacts --format json
+```
+
+### Optional: Contacts Configuration in comparison.yaml
+
+Add a `contacts` section to customize the comparison:
+
+```yaml
+name: "polymer_stability_study"
+control: "No Polymer"
+
+conditions:
+  - label: "No Polymer"
+    config: "../noPoly_LipA_DMSO/config.yaml"
+    replicates: [1, 2, 3]
+
+  - label: "100% SBMA"
+    config: "../SBMA_100_DMSO/config.yaml"
+    replicates: [1, 2, 3]
+
+  - label: "100% EGMA"
+    config: "../EGMA_100_DMSO/config.yaml"
+    replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "10ns"
+
+# Optional: Configure contacts analysis
+contacts:
+  polymer_selection: "resname SBM EGM"  # MDAnalysis selection
+  protein_selection: "protein"
+  cutoff: 4.5                            # Angstroms
+  contact_criteria: "heavy_atom"
+  fdr_alpha: 0.05                        # Benjamini-Hochberg FDR
+```
+
+If no `contacts` section is provided, defaults are used.
+
+### Handling Conditions Without Polymer
+
+Conditions without polymer atoms (e.g., "No Polymer" controls) are **automatically
+excluded** from contacts analysis since there's nothing to measure. The command
+will warn you:
+
+```
+Note: 1 condition(s) auto-excluded (no polymer atoms): No Polymer
+```
+
+This is expected behavior. Comparisons will be made between polymer-containing
+conditions only.
+
+### Example Output
+
+```
+Polymer-Protein Contacts Comparison: polymer_ratio_study
+================================================================================
+Analysis: polymer_protein_contacts
+Polymer selection: resname SBM EGM
+Contact cutoff: 4.5 A
+Contact criteria: heavy_atom
+Equilibration: 10ns
+Auto-excluded (no polymer): No Polymer
+
+Condition Summary - Coverage (ranked, highest first)
+--------------------------------------------------------------------------------
+Rank  Condition                 Coverage     SEM        N   
+--------------------------------------------------------------------------------
+1     100% EGMA                     88.4%       0.55%  3    
+2     25% SBMA / 75% EGMA           86.9%       1.44%  3    
+3     50% SBMA / 50% EGMA           82.7%       0.66%  3    
+4     75% SBMA / 25% EGMA           82.7%       1.57%  3    
+5     100% SBMA                     74.9%       0.28%  2    
+--------------------------------------------------------------------------------
+
+Condition Summary - Mean Contact Fraction (ranked, highest first)
+--------------------------------------------------------------------------------
+Rank  Condition                 Contact %    SEM        N   
+--------------------------------------------------------------------------------
+1     75% SBMA / 25% EGMA           30.2%       0.50%  3    
+2     25% SBMA / 75% EGMA           29.1%       5.35%  3    
+3     100% EGMA                     25.3%       2.64%  3    
+4     100% SBMA                     22.9%       1.47%  2    
+5     50% SBMA / 50% EGMA           22.9%       2.18%  3    
+--------------------------------------------------------------------------------
+
+Residence Time by Polymer Type (frames)
+--------------------------------------------------------------------------------
+Condition                          EGM          SBM
+--------------------------------------------------------------------------------
+100% SBMA                           --  10.0±0.2 
+75% SBMA / 25% EGMA         7.8±0.2    9.3±0.0 
+50% SBMA / 50% EGMA         7.3±0.3    8.6±0.5 
+25% SBMA / 75% EGMA         7.1±0.7   10.5±0.4 
+100% EGMA                   7.1±0.4            --
+--------------------------------------------------------------------------------
+
+Aggregate Comparisons
+-----------------------------------------------------------------------------------------------
+Comparison                     Metric          % Change   p-value      Cohen d    Effect      
+-----------------------------------------------------------------------------------------------
+100% EGMA vs 100% SBMA         coverage        +18.1%     0.0004*      -16.64     large       
+100% EGMA vs 100% SBMA         mean contact f  +10.7%     0.5445       -0.62      medium      
+...
+-----------------------------------------------------------------------------------------------
+* p < 0.05; positive % change = more contact in treatment
+
+One-way ANOVA
+------------------------------------------------------------
+Metric                    F-stat       p-value      Significant 
+------------------------------------------------------------
+coverage                  18.323       0.0002       Yes*        
+mean contact fraction     1.200        0.3748       No          
+------------------------------------------------------------
+```
+
+### Interpreting Results
+
+**Coverage rankings:**
+- Higher coverage = polymer interacts with more of the protein surface
+- 100% EGMA shows highest coverage (88.4%) - broader but possibly weaker binding
+
+**Contact fraction rankings:**
+- Higher mean contact = more persistent interactions per residue
+- 75% SBMA / 25% EGMA shows highest contact fraction (30.2%) - more stable binding
+
+**Residence time by polymer type:**
+- SBMA (SBM) tends to have longer residence times than EGMA (EGM)
+- This suggests SBMA forms more persistent interactions
+- Useful for understanding polymer selectivity
+
+**Statistical tests:**
+- ANOVA tests whether any condition differs overall
+- Pairwise comparisons with Benjamini-Hochberg FDR correction
+- Cohen's d quantifies effect magnitude independent of sample size
+
+### CLI Reference for Contacts
+
+```bash
+polyzymd compare contacts [OPTIONS]
+
+Options:
+  -f, --file PATH                 Config file [default: comparison.yaml]
+  --eq-time TEXT                  Override equilibration time
+  --polymer-selection TEXT        Override polymer selection (MDAnalysis syntax)
+  --cutoff FLOAT                  Override contact cutoff (Angstroms)
+  --fdr-alpha FLOAT               FDR alpha for multiple testing correction
+  --recompute                     Force recompute contacts analysis
+  --format [table|markdown|json]  Output format [default: table]
+  -o, --output PATH               Save formatted output to file
+  -v, --verbose                   Show detailed logging
+```
+
+### Python API for Contacts Comparison
+
+```python
+from polyzymd.compare import (
+    ComparisonConfig,
+    ContactsComparator,
+    ContactsComparisonConfig,
+    format_contacts_result,
+)
+
+# Load configuration
+config = ComparisonConfig.from_yaml("comparison.yaml")
+
+# Optionally customize contacts settings
+contacts_config = ContactsComparisonConfig(
+    polymer_selection="resname SBM EGM",
+    cutoff=4.5,
+    fdr_alpha=0.05,
+)
+
+# Run comparison
+comparator = ContactsComparator(
+    config=config,
+    contacts_config=contacts_config,
+    equilibration="10ns",
+)
+result = comparator.compare()
+
+# Access results
+print(f"Highest coverage: {result.ranking_by_coverage[0]}")
+print(f"Highest contact: {result.ranking_by_contact_fraction[0]}")
+
+for cond in result.conditions:
+    print(f"{cond.label}: {cond.coverage_mean*100:.1f}% coverage, "
+          f"{cond.contact_fraction_mean*100:.1f}% contact")
+    
+    # Residence time by polymer type
+    for poly_type, (mean, sem) in cond.residence_time_by_polymer_type.items():
+        print(f"  {poly_type}: {mean:.1f} ± {sem:.1f} frames")
+
+# Format output
+print(format_contacts_result(result, format="markdown"))
+
+# Save result
+result.save("results/contacts_comparison.json")
+```
+
+### Loading Saved Contacts Results
+
+```python
+from polyzymd.compare import ContactsComparisonResult
+
+# Load from JSON
+result = ContactsComparisonResult.load("results/contacts_comparison_my_study.json")
+
+# Access condition data
+for cond in result.conditions:
+    print(f"{cond.label}: coverage={cond.coverage_mean*100:.1f}%")
+
+# Get aggregate comparisons
+for comp in result.aggregate_comparisons:
+    if comp.significant:
+        print(f"{comp.condition_a} vs {comp.condition_b} ({comp.metric}): "
+              f"p={comp.p_value:.4f}")
+```
+
+### Contacts vs RMSF: Complementary Analyses
+
+| Analysis | Question Answered |
+|----------|-------------------|
+| **RMSF** | Does polymer stabilize the enzyme (reduce flexibility)? |
+| **Contacts** | Where and how strongly does polymer bind? |
+| **Combined** | Do contact hotspots correlate with stabilization? |
+
+For mechanistic insights correlating contacts with flexibility changes, see
+`polyzymd compare report` (coming soon).
+
 ## See Also
 
 - [RMSF Quick Start](analysis_rmsf_quickstart.md) -- Run individual RMSF analysis
+- [Contacts Quick Start](analysis_contacts_quickstart.md) -- Run individual contacts analysis
 - [Catalytic Triad Analysis](analysis_triad_quickstart.md) -- Run individual triad analysis
 - [Statistical Best Practices](analysis_rmsf_best_practices.md) -- Understanding statistics
 - [Reference Selection](analysis_reference_selection.md) -- Alignment options
