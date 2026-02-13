@@ -35,6 +35,7 @@ from polyzymd.analysis.common.selectors.base import (
     MolecularSelector,
     MDAnalysisSelector,
     SelectionResult,
+    CompositeSelector,
 )
 from polyzymd.analysis.common.selectors.protein import (
     ProteinResidues,
@@ -56,6 +57,7 @@ __all__ = [
     "MolecularSelector",
     "MDAnalysisSelector",
     "SelectionResult",
+    "CompositeSelector",
     # Protein
     "ProteinResidues",
     "ProteinResiduesByGroup",
