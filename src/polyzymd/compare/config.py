@@ -14,7 +14,79 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# ============================================================================
+# RMSF Comparison Configuration
+# ============================================================================
+
+
+class RMSFComparisonConfig(BaseModel):
+    """Configuration for RMSF comparison analysis.
+
+    Required to run `polyzymd compare rmsf`. If this section is not
+    present in comparison.yaml, RMSF comparison will fail with an
+    informative error message.
+
+    Attributes
+    ----------
+    selection : str
+        MDAnalysis selection string for RMSF calculation.
+        Default: "protein and name CA"
+    reference_mode : str
+        Reference structure mode: centroid, average, or frame.
+        Default: "centroid"
+    reference_frame : int, optional
+        Frame number if reference_mode is 'frame' (1-indexed, PyMOL convention)
+
+    Examples
+    --------
+    In comparison.yaml:
+
+    ```yaml
+    rmsf:
+      selection: "protein and name CA"
+      reference_mode: "centroid"
+    ```
+
+    For aligning to a specific frame:
+
+    ```yaml
+    rmsf:
+      selection: "protein and name CA"
+      reference_mode: "frame"
+      reference_frame: 500
+    ```
+    """
+
+    selection: str = Field(
+        default="protein and name CA",
+        description="MDAnalysis selection string for RMSF calculation",
+    )
+    reference_mode: str = Field(
+        default="centroid",
+        description="Reference structure mode: centroid, average, or frame",
+    )
+    reference_frame: Optional[int] = Field(
+        default=None,
+        description="Frame number if reference_mode is 'frame' (1-indexed)",
+    )
+
+    @field_validator("reference_mode", mode="after")
+    @classmethod
+    def validate_reference_mode(cls, v: str) -> str:
+        """Validate reference mode is one of the allowed values."""
+        valid = {"centroid", "average", "frame"}
+        if v not in valid:
+            raise ValueError(f"reference_mode must be one of {valid}, got '{v}'")
+        return v
+
+    @model_validator(mode="after")
+    def validate_reference_frame_required(self) -> "RMSFComparisonConfig":
+        """Ensure reference_frame is provided when reference_mode is 'frame'."""
+        if self.reference_mode == "frame" and self.reference_frame is None:
+            raise ValueError("reference_frame is required when reference_mode is 'frame'")
+        return self
 
 
 # ============================================================================
@@ -267,24 +339,19 @@ class AnalysisDefaults(BaseModel):
     Attributes
     ----------
     equilibration_time : str
-        Time to skip for equilibration (e.g., "10ns", "5000ps")
-    selection : str
-        MDAnalysis selection string for RMSF calculation
-    reference_mode : str
-        Reference structure mode for alignment
+        Time to skip for equilibration (e.g., "10ns", "5000ps").
+        Shared across all analyses (RMSF, contacts, triad).
     """
 
     equilibration_time: str = "10ns"
-    selection: str = "protein and name CA"
-    reference_mode: str = "centroid"
 
 
 class ComparisonConfig(BaseModel):
     """Schema for comparison.yaml configuration files.
 
     A comparison config defines multiple simulation conditions to compare,
-    along with default analysis parameters and optional catalytic triad
-    and contacts configuration.
+    along with default analysis parameters and optional analysis-specific
+    configuration sections.
 
     Attributes
     ----------
@@ -297,11 +364,16 @@ class ComparisonConfig(BaseModel):
     conditions : list[ConditionConfig]
         List of conditions to compare
     defaults : AnalysisDefaults
-        Default analysis parameters
+        Default analysis parameters (equilibration_time)
+    rmsf : RMSFComparisonConfig, optional
+        Configuration for RMSF comparison analysis.
+        Required to run `polyzymd compare rmsf`.
     catalytic_triad : CatalyticTriadConfig, optional
-        Configuration for catalytic triad/active site analysis
+        Configuration for catalytic triad/active site analysis.
+        Required to run `polyzymd compare triad`.
     contacts : ContactsComparisonConfig, optional
-        Configuration for polymer-protein contacts analysis
+        Configuration for polymer-protein contacts analysis.
+        Required to run `polyzymd compare contacts`.
 
     Examples
     --------
@@ -310,6 +382,8 @@ class ComparisonConfig(BaseModel):
     "Polymer Stabilization Study"
     >>> for cond in config.conditions:
     ...     print(f"{cond.label}: {cond.config}")
+    >>> if config.rmsf:
+    ...     print(f"RMSF selection: {config.rmsf.selection}")
     >>> if config.catalytic_triad:
     ...     print(f"Triad: {config.catalytic_triad.name}")
     >>> if config.contacts:
@@ -321,6 +395,7 @@ class ComparisonConfig(BaseModel):
     control: Optional[str] = None
     conditions: list[ConditionConfig]
     defaults: AnalysisDefaults = AnalysisDefaults()
+    rmsf: Optional[RMSFComparisonConfig] = None
     catalytic_triad: Optional[CatalyticTriadConfig] = None
     contacts: Optional[ContactsComparisonConfig] = None
 
@@ -450,7 +525,7 @@ def generate_comparison_template(name: str, eq_time: str = "10ns") -> str:
     str
         YAML template content
     """
-    return f'''\
+    return f"""\
 # ============================================================================
 # PolyzyMD Comparison Configuration
 # ============================================================================
@@ -480,11 +555,22 @@ conditions:
 # ============================================================================
 # Defaults
 # ============================================================================
+# Shared parameters across all analyses.
 # Note: If equilibration_time is 0ns, you'll get a warning - set appropriately!
 defaults:
   equilibration_time: "{eq_time}"
-  selection: "protein and name CA"
-  reference_mode: "centroid"
+
+# ============================================================================
+# RMSF (for polyzymd compare rmsf)
+# ============================================================================
+# Compare protein flexibility across conditions. Uncomment to enable.
+#
+# Run: polyzymd compare rmsf -c comparison.yaml
+#
+# rmsf:
+#   selection: "protein and name CA"    # MDAnalysis selection string
+#   reference_mode: "centroid"          # centroid, average, or frame
+#   # reference_frame: 500              # Required if reference_mode is "frame"
 
 # ============================================================================
 # Catalytic Triad (for polyzymd compare triad)
@@ -522,4 +608,4 @@ defaults:
 #   fdr_alpha: 0.05                         # FDR for per-residue tests
 #   min_effect_size: 0.5                    # Cohen's d threshold (0.5 = medium)
 #   top_residues: 10                        # Top residues to show in console
-'''
+"""
