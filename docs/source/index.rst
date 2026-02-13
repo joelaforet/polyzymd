@@ -90,9 +90,11 @@ Trajectory Analysis
    :maxdepth: 2
    :caption: Analysis Guide
 
+   tutorials/analysis_complete_workflow
    tutorials/analysis_rmsf_quickstart
    tutorials/analysis_rmsf_best_practices
    tutorials/analysis_reference_selection
+   tutorials/analysis_distances_quickstart
    tutorials/analysis_contacts_quickstart
    tutorials/analysis_contacts_cookbook
    tutorials/analysis_compare_conditions
