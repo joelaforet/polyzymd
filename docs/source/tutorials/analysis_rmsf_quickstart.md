@@ -101,46 +101,171 @@ RMSF Analysis Complete (Aggregated)
 The aggregated result combines per-residue RMSF values across replicates,
 reporting the mean and standard error.
 
-## Comparing Two Conditions
+## Using analysis.yaml
 
-To compare conditions (e.g., with vs. without polymer):
+For reproducible, version-controlled analysis configuration, use `analysis.yaml` 
+instead of CLI flags. Place this file alongside your `config.yaml`.
 
-### Step 1: Run analysis on both conditions
+### Create analysis.yaml
+
+```yaml
+# analysis.yaml
+replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "10ns"
+
+rmsf:
+  enabled: true
+  selection: "protein and name CA"    # MDAnalysis selection
+  reference_mode: "centroid"          # centroid | average | frame
+  reference_frame: null               # Required if reference_mode: frame
+```
+
+### Run All Enabled Analyses
 
 ```bash
-# Condition A: No polymer
-polyzymd analyze rmsf -c no_polymer/config.yaml -r 1-3 --eq-time 10ns
+# Initialize a template (if starting fresh)
+polyzymd analyze init
 
-# Condition B: With polymer
-polyzymd analyze rmsf -c with_polymer/config.yaml -r 1-3 --eq-time 10ns
+# Run all analyses defined in analysis.yaml
+polyzymd analyze run
+
+# Force recompute
+polyzymd analyze run --recompute
 ```
 
-### Step 2: Load and compare results
+### Configuration Options
 
-```python
-import json
-import numpy as np
-
-# Load aggregated results
-with open("no_polymer/analysis/rmsf/aggregated/rmsf_reps1-3_eq10ns.json") as f:
-    no_poly = json.load(f)
-
-with open("with_polymer/analysis/rmsf/aggregated/rmsf_reps1-3_eq10ns.json") as f:
-    with_poly = json.load(f)
-
-# Compare
-print(f"No Polymer:   {no_poly['overall_mean_rmsf']:.3f} ± {no_poly['overall_sem_rmsf']:.3f} Å")
-print(f"With Polymer: {with_poly['overall_mean_rmsf']:.3f} ± {with_poly['overall_sem_rmsf']:.3f} Å")
-
-# Difference
-diff = no_poly['overall_mean_rmsf'] - with_poly['overall_mean_rmsf']
-print(f"Difference:   {diff:.3f} Å ({100*diff/no_poly['overall_mean_rmsf']:.1f}%)")
-```
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `true` | Whether to run RMSF analysis |
+| `selection` | str | `"protein and name CA"` | MDAnalysis selection for RMSF calculation |
+| `reference_mode` | str | `"centroid"` | Alignment reference: `centroid`, `average`, or `frame` |
+| `reference_frame` | int | `null` | Frame number when `reference_mode: frame` (1-indexed) |
 
 ```{tip}
-For proper statistical testing (t-tests, effect sizes), see the
-[Comparing Conditions](analysis_rmsf_best_practices.md#comparing-conditions)
-section in the Best Practices Guide.
+**When to use analysis.yaml vs CLI:** Use `analysis.yaml` for standard, 
+reproducible workflows. Use CLI flags (`polyzymd analyze rmsf ...`) for 
+one-off analyses or when exploring different parameters.
+```
+
+## Comparing Two Conditions
+
+To compare conditions (e.g., with vs. without polymer) with proper statistical 
+analysis, use one of these approaches:
+
+`````{tab-set}
+
+````{tab-item} YAML (Recommended)
+Create a `comparison.yaml` file to define your conditions, then run the 
+comparison with a single command:
+
+```yaml
+# comparison.yaml
+name: "polymer_stabilization"
+description: "Effect of polymer on enzyme stability"
+control: "No Polymer"
+
+conditions:
+  - label: "No Polymer"
+    config: "../no_polymer/config.yaml"
+    replicates: [1, 2, 3]
+
+  - label: "With Polymer"
+    config: "../with_polymer/config.yaml"
+    replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "10ns"
+  selection: "protein and name CA"
+```
+
+```bash
+# Run comparison with automatic t-tests, effect sizes, and ranking
+polyzymd compare rmsf -f comparison.yaml
+
+# Output formats
+polyzymd compare rmsf -f comparison.yaml --format markdown  # For docs
+polyzymd compare rmsf -f comparison.yaml --format json      # Machine-readable
+```
+
+**Output includes:**
+- Mean RMSF ± SEM for each condition
+- % change relative to control
+- p-value (two-sample t-test)
+- Cohen's d effect size
+- Ranking (lowest RMSF = most stable)
+
+See [Comparing Conditions](analysis_compare_conditions.md) for the full guide.
+````
+
+````{tab-item} CLI
+Run analysis on each condition separately, then use `polyzymd compare show`:
+
+```bash
+# Step 1: Analyze each condition
+polyzymd analyze rmsf -c no_polymer/config.yaml -r 1-3 --eq-time 10ns
+polyzymd analyze rmsf -c with_polymer/config.yaml -r 1-3 --eq-time 10ns
+
+# Step 2: Create comparison.yaml (or use polyzymd compare init)
+polyzymd compare init my_comparison
+# Edit my_comparison/comparison.yaml to point to your configs
+
+# Step 3: Run comparison (uses cached RMSF results)
+cd my_comparison
+polyzymd compare rmsf
+```
+
+The comparison command automatically loads cached results if available, 
+so you don't recompute RMSF.
+````
+
+````{tab-item} Python
+Use `RMSFComparator` for programmatic comparison with full statistical output:
+
+```python
+from polyzymd.compare import ComparisonConfig, RMSFComparator
+
+# Load comparison configuration
+config = ComparisonConfig.from_yaml("comparison.yaml")
+
+# Run comparison (computes RMSF if not cached)
+comparator = RMSFComparator(config, equilibration="10ns")
+result = comparator.compare()
+
+# Access results
+print(f"Ranking (most stable first): {result.ranking}")
+
+for cond in result.conditions:
+    print(f"{cond.label}: {cond.mean_rmsf:.3f} ± {cond.sem_rmsf:.3f} Å")
+
+# Statistical comparisons
+for comp in result.pairwise_comparisons:
+    sig = "*" if comp.significant else ""
+    print(f"{comp.condition_b} vs {comp.condition_a}: "
+          f"{comp.percent_change:+.1f}%, p={comp.p_value:.4f}{sig}, "
+          f"d={comp.cohens_d:.2f}")
+
+# Save result for later
+result.save("results/rmsf_comparison.json")
+```
+
+**Example output:**
+```
+Ranking (most stable first): ['With Polymer', 'No Polymer']
+No Polymer: 0.715 ± 0.020 Å
+With Polymer: 0.551 ± 0.034 Å
+With Polymer vs No Polymer: -22.9%, p=0.0211*, d=4.06
+```
+````
+
+`````
+
+```{tip}
+For proper statistical interpretation (understanding p-values with small N, 
+effect sizes, ANOVA for 3+ conditions), see the 
+[Best Practices Guide](analysis_rmsf_best_practices.md#comparing-conditions).
 ```
 
 ## Output Files
