@@ -203,6 +203,64 @@ polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns \
     --protein-selection "protein and (resid 75-80 or resid 130-140)"
 ```
 
+## Answering Scientific Questions
+
+The contacts analysis module is designed to answer questions like:
+
+| Question | Approach |
+|----------|----------|
+| Do zwitterionic polymers preferentially contact aromatic residues? | `interaction_matrix()` with custom polymer grouping |
+| Which protein surface regions does my polymer bind? | `coverage_by_group()` |
+| Does SBMA have longer residence times than EGMA? | `residence_time_summary()` |
+
+### Quick Example: Interaction Matrix
+
+The `interaction_matrix()` method computes contact metrics for each combination
+of polymer type and protein amino acid class:
+
+```python
+from polyzymd.analysis.contacts.results import ContactResult
+
+result = ContactResult.load("analysis/contacts/contacts_rep1.json")
+
+# Get contact fraction by (polymer_type, protein_AA_class)
+matrix = result.interaction_matrix(metric="contact_fraction")
+
+# Compare polymer types contacting aromatic residues
+print(f"SBMA-aromatic: {matrix['SBM']['aromatic']:.1%}")
+print(f"EGMA-aromatic: {matrix['EGM']['aromatic']:.1%}")
+```
+
+**Example output:**
+```
+SBMA-aromatic: 45.4%
+EGMA-aromatic: 37.0%
+```
+
+### Quick Example: Coverage by AA Group
+
+See what fraction of each amino acid class your polymer contacts:
+
+```python
+coverage = result.coverage_by_group()
+for group, frac in sorted(coverage.items(), key=lambda x: -x[1]):
+    print(f"{group}: {frac:.1%}")
+```
+
+**Example output:**
+```
+charged_negative: 100.0%
+aromatic: 100.0%
+charged_positive: 100.0%
+polar: 93.5%
+nonpolar: 86.2%
+```
+
+```{tip}
+For complete worked examples including custom polymer groupings, residence time
+comparisons, and complex queries, see the [Contacts Analysis Cookbook](analysis_contacts_cookbook.md).
+```
+
 ## Technical Details
 
 ### Contact Definition
@@ -250,6 +308,7 @@ For very large systems or long trajectories:
 
 ## See Also
 
+- [Contacts Analysis Cookbook](analysis_contacts_cookbook.md) - worked examples for scientific questions
 - [RMSF Analysis Quick Start](analysis_rmsf_quickstart.md) - complementary stability analysis
 - [Catalytic Triad Analysis](analysis_triad_quickstart.md) - active site geometry
 - [Comparing Conditions](analysis_compare_conditions.md) - statistical comparison across polymers
