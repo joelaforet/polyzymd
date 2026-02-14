@@ -5,7 +5,7 @@ Compute inter-atomic distances with proper statistical handling in under 5 minut
 ```{note}
 **Want to understand the statistics?** This guide focuses on getting results quickly.
 For proper uncertainty quantification (autocorrelation correction, SEM vs. SD),
-see the [Statistical Best Practices Guide](analysis_rmsf_best_practices.md).
+see the [Statistical Best Practices Guide](analysis_statistics_best_practices.md).
 ```
 
 ## TL;DR
@@ -503,6 +503,6 @@ Use **catalytic triad** when comparing enzyme integrity across conditions.
 ## Next Steps
 
 - **Catalytic triad analysis**: [Triad Quick Start](analysis_triad_quickstart.md)
-- **Understand statistics**: [Statistical Best Practices](analysis_rmsf_best_practices.md)
+- **Understand statistics**: [Statistical Best Practices](analysis_statistics_best_practices.md)
 - **Compare conditions**: [Comparing Conditions Guide](analysis_compare_conditions.md)
 - **Contact analysis**: [Contacts Quick Start](analysis_contacts_quickstart.md)

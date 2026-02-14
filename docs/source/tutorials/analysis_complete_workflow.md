@@ -913,6 +913,7 @@ Now that you've completed the analysis workflow:
    - [Contacts Cookbook](analysis_contacts_cookbook.md) — Advanced queries
 
 2. **Understand the statistics:**
+   - [Statistics Best Practices](analysis_statistics_best_practices.md) — Autocorrelation, SEM correction
    - [Comparing Conditions Guide](analysis_compare_conditions.md) — Full statistical details
 
 3. **Customize selections:**
@@ -926,5 +927,6 @@ Now that you've completed the analysis workflow:
 - [Catalytic Triad Quick Start](analysis_triad_quickstart.md)
 - [Distance Analysis Quick Start](analysis_distances_quickstart.md)
 - [Contacts Quick Start](analysis_contacts_quickstart.md)
+- [Statistics Best Practices](analysis_statistics_best_practices.md)
 - [Comparing Conditions](analysis_compare_conditions.md)
 - [CLI Reference](cli_reference.md)

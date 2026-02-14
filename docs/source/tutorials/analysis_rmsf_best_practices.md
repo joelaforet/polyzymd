@@ -9,20 +9,37 @@ simulations.
 for copy-paste commands and minimal setup.
 ```
 
+```{seealso}
+**For foundational statistical concepts** (autocorrelation, correlation time,
+the difference between means vs. variances), see the
+[Statistics Best Practices Guide](analysis_statistics_best_practices.md).
+
+This page focuses on **RMSF-specific** guidance: what the warning messages mean,
+how to interpret RMSF values, and how to compare conditions.
+```
+
 ## Introduction
 
-Molecular dynamics trajectories are **temporally correlated**. This means
-consecutive frames are not independent samples, and naive statistical analysis
-will dramatically underestimate uncertainties. This guide explains:
+RMSF (Root Mean Square Fluctuation) measures how much each residue fluctuates
+around its average position. Because RMSF is a **variance-based** quantity
+(a second moment), it requires special statistical treatment—correlated samples
+don't just reduce precision, they introduce **systematic bias**.
 
-- Why correlation matters for RMSF analysis
-- How PolyzyMD quantifies correlation (autocorrelation analysis)
+This guide explains:
+
+- What RMSF measures and how to interpret values
 - What the warning messages mean and what to do about them
 - How to properly compare conditions with statistical rigor
+- Common pitfalls and how to avoid them
 
-The recommendations in this guide follow the LiveCoMS best practices article
-by Grossfield et al. (2018), which provides the definitive treatment of
-uncertainty quantification in MD simulations.
+```{tip}
+**Why does RMSF need subsampling?** Unlike mean distances (which can use all
+frames with corrected SEM), variance estimates from correlated samples are
+systematically biased—they underestimate true fluctuations. PolyzyMD
+automatically subsamples to independent frames when computing RMSF. See the
+[Statistics Best Practices](analysis_statistics_best_practices.md#the-critical-distinction-means-vs-variances)
+for the full explanation.
+```
 
 ## What is RMSF?
 
@@ -58,90 +75,24 @@ $$
 This allows comparison between simulation and experimental data, though
 crystal packing effects mean the correspondence is imperfect.
 
-## The Correlation Problem
+## How PolyzyMD Handles Correlation for RMSF
 
-### Why Consecutive Frames Aren't Independent
+PolyzyMD automatically performs autocorrelation analysis and **subsamples to
+independent frames** before computing RMSF. This is essential because RMSF
+measures variance, which is systematically biased by correlated samples.
 
-Consider a 200 ns simulation saved every 100 ps, giving 2000 frames. You might
-expect 2000 independent measurements of protein flexibility. **This is wrong.**
-
-The protein doesn't "forget" its conformation between frames. If frame 500
-shows a loop in position A, frame 501 will almost certainly show the same loop
-in nearly the same position. The frames are **correlated**.
-
-### Visualizing Correlation
-
-Imagine measuring RMSD over time. The autocorrelation function (ACF) shows
-how correlated the RMSD is with itself at different time lags:
-
-```
-ACF
-1.0 |*
-    | *
-    |  *
-    |   **
-    |     ***
-    |        ****
-    |            *****
-0.0 |________________***********
-    0         τ              Time lag
+```{seealso}
+For the mathematical details of autocorrelation functions, correlation time
+estimation, and the LiveCoMS formula, see the
+[Statistics Best Practices Guide](analysis_statistics_best_practices.md).
 ```
 
-The **correlation time (τ)** is the characteristic decay time. Frames
-separated by less than τ are substantially correlated; frames separated by
-more than 2τ are approximately independent.
+### What PolyzyMD Does
 
-### Consequences of Ignoring Correlation
-
-If you ignore correlation and treat all N frames as independent:
-
-| Quantity | Naive Estimate | True Value |
-|----------|----------------|------------|
-| Sample size | N = 2000 | N_ind ≈ 5-10 |
-| Standard error | σ/√2000 ≈ 0.02σ | σ/√5 ≈ 0.45σ |
-| Uncertainty | Underestimated by ~20× | Correct |
-
-**This leads to false confidence in small differences that may not be real.**
-
-## Autocorrelation Analysis in PolyzyMD
-
-PolyzyMD automatically performs autocorrelation analysis to quantify the
-effective number of independent samples.
-
-### The Calculation
-
-1. **Compute RMSD timeseries** after alignment to reference structure
-2. **Calculate autocorrelation function (ACF)** using FFT
-3. **Integrate ACF** to get correlation time τ
-4. **Compute statistical inefficiency**: $g = 1 + 2\tau/\Delta t$
-5. **Estimate independent samples**: $N_{\text{ind}} = N / g$
-
-### The LiveCoMS Formula
-
-The number of independent samples is computed as:
-
-$$
-N_{\text{ind}} = \frac{N}{1 + 2\sum_{j=1}^{N_{\max}} C_j}
-$$
-
-Where $C_j$ is the normalized autocorrelation at lag $j$. This is equivalent
-to:
-
-$$
-N_{\text{ind}} = \frac{N}{g} \quad \text{where} \quad g = 1 + 2\tau/\Delta t
-$$
-
-And τ is obtained by integrating the ACF:
-
-$$
-\tau = \int_0^{t_{\max}} C(t) \, dt \approx \sum_j C_j \cdot \Delta t
-$$
-
-### Integration Cutoff
-
-The ACF integration stops at the first zero crossing (or when ACF < 0.05).
-This prevents integrating noise at long lag times, which would artificially
-inflate τ.
+1. **Computes RMSD timeseries** after alignment to reference structure
+2. **Estimates correlation time (τ)** via ACF integration
+3. **Selects independent frames** spaced by ≥2τ
+4. **Computes RMSF** using only these independent frames
 
 ### Example Output
 
@@ -728,5 +679,6 @@ Discussion of RMSD-based convergence assessment.
 ## See Also
 
 - [Quick Start Guide](analysis_rmsf_quickstart.md) — Get results fast
+- [Statistics Best Practices](analysis_statistics_best_practices.md) — Foundational statistics for MD
 - [Reference Structure Selection](analysis_reference_selection.md) — Choose alignment reference
 - [LiveCoMS Best Practices](https://livecomsjournal.org/index.php/livecoms/article/view/v1i1e5067) — Full methodology paper

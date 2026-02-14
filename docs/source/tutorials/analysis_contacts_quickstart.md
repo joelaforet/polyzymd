@@ -657,6 +657,12 @@ Per-residue contact fractions include proper uncertainty quantification:
 - Effective sample sizes account for temporal autocorrelation
 - When aggregating across replicates, uncertainties are propagated correctly
 
+```{seealso}
+For a detailed explanation of autocorrelation, statistical inefficiency, and
+the LiveCoMS methodology, see the
+[Statistics Best Practices Guide](analysis_statistics_best_practices.md).
+```
+
 ## Troubleshooting
 
 ### "solvated_system.pdb not found"
