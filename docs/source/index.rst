@@ -91,6 +91,7 @@ Trajectory Analysis
    :caption: Analysis Guide
 
    tutorials/analysis_complete_workflow
+   tutorials/analysis_statistics_best_practices
    tutorials/analysis_rmsf_quickstart
    tutorials/analysis_rmsf_best_practices
    tutorials/analysis_reference_selection
