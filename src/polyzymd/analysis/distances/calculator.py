@@ -245,6 +245,9 @@ class DistanceCalculator:
             LOGGER.info(f"Loading cached result from {result_file}")
             result = DistanceResult.load(result_file)
             validate_config_hash(result.config_hash, self.config)
+
+            # Check if threshold changed - if so, recompute contact fractions
+            result = self._update_threshold_if_needed(result)
             return result
 
         LOGGER.info(f"Computing distances for replicate {replicate}")
@@ -367,7 +370,7 @@ class DistanceCalculator:
                     replicate=rep,
                     save=save,
                     recompute=recompute,
-                    store_distributions=False,  # Don't store for aggregation
+                    store_distributions=True,  # Store for threshold recomputation
                 )
                 individual_results.append(result)
                 successful_replicates.append(rep)
@@ -493,6 +496,64 @@ class DistanceCalculator:
             LOGGER.info(f"Saved aggregated result to {result_file}")
 
         return agg_result
+
+    def _update_threshold_if_needed(self, result: DistanceResult) -> DistanceResult:
+        """Update contact fractions if threshold changed since caching.
+
+        If the cached result used a different threshold than currently requested,
+        and the distances array is available, recompute fraction_below_threshold
+        from the stored distances. This avoids expensive trajectory reprocessing
+        when only the threshold parameter changes.
+
+        Parameters
+        ----------
+        result : DistanceResult
+            Cached result to potentially update.
+
+        Returns
+        -------
+        DistanceResult
+            Updated result with recomputed contact fractions if needed.
+        """
+        if self.threshold is None:
+            return result  # No threshold requested, nothing to update
+
+        updated_pairs = []
+        any_updated = False
+
+        for pr in result.pair_results:
+            cached_threshold = pr.threshold
+            needs_update = cached_threshold != self.threshold
+
+            if needs_update:
+                if pr.distances is not None and len(pr.distances) > 0:
+                    # Recompute from stored distances
+                    distances_arr = np.array(pr.distances)
+                    new_fraction = float(np.mean(distances_arr < self.threshold))
+                    LOGGER.info(
+                        f"Recomputing contact fraction for {pr.pair_label} "
+                        f"(threshold: {cached_threshold} → {self.threshold})"
+                    )
+                    # Create updated result with new threshold/fraction
+                    pr = pr.model_copy(
+                        update={
+                            "threshold": self.threshold,
+                            "fraction_below_threshold": new_fraction,
+                        }
+                    )
+                    any_updated = True
+                else:
+                    LOGGER.warning(
+                        f"Cannot update threshold for {pr.pair_label}: "
+                        f"distances not stored. Use --recompute to recalculate."
+                    )
+
+            updated_pairs.append(pr)
+
+        if any_updated:
+            return result.model_copy(update={"pair_results": updated_pairs})
+
+        return result
 
     def _compute_pair(
         self,
