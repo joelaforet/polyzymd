@@ -402,12 +402,23 @@ fig.savefig("distance_comparison.png")
 
 ### Available Plot Types
 
-| Function | Description |
-|----------|-------------|
-| `plot_distance_histogram` | Distribution with optional threshold line |
-| `plot_distance_timeseries` | Distance over frame number |
-| `plot_distance_comparison` | Overlay multiple conditions |
-| `plot_contact_fraction_bar` | Bar chart of contact fractions |
+The CLI `--plot` flag generates histograms automatically. For other plot types,
+use the Python API:
+
+| Function | Description | CLI | Python |
+|----------|-------------|:---:|:------:|
+| `plot_distance_histogram` | Distribution with optional threshold line | ✓ | ✓ |
+| `plot_distance_timeseries` | Distance over frame number | | ✓ |
+| `plot_distance_comparison` | Overlay multiple conditions | | ✓ |
+| `plot_contact_fraction_bar` | Bar chart of contact fractions | ✓* | ✓ |
+
+*\*Only generated when `--threshold` is specified with multiple replicates.*
+
+```{note}
+**Want more CLI plot options?** See [Issue #27](https://github.com/joelaforet/polyzymd/issues/27) 
+and [Issue #28](https://github.com/joelaforet/polyzymd/issues/28) for planned enhancements
+to automatic plot generation.
+```
 
 ## Common Options
 
