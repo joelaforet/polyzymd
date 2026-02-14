@@ -36,7 +36,7 @@ class RMSFConfig(BaseModel):
         Frame number if reference_mode is 'frame'
     """
 
-    enabled: bool = True
+    enabled: bool = False
     selection: str = "protein and name CA"
     reference_mode: str = "centroid"
     reference_frame: Optional[int] = None
@@ -122,6 +122,48 @@ class CatalyticTriadConfig(BaseModel):
         return v
 
 
+class ContactsConfig(BaseModel):
+    """Configuration for polymer-protein contact analysis.
+
+    IMPORTANT: PolyzyMD Chain Convention
+    ------------------------------------
+    - Chain A: Protein/Enzyme
+    - Chain B: Substrate/Ligand
+    - Chain C: Polymers
+    - Chain D+: Solvent (water, ions, co-solvents)
+
+    You MUST use `solvated_system.pdb` as the topology file (NOT
+    `production_N_topology.pdb`) to get correct chain assignments.
+
+    Attributes
+    ----------
+    enabled : bool
+        Whether to run contact analysis
+    polymer_selection : str
+        MDAnalysis selection for polymer atoms. Default uses chain C.
+    protein_selection : str
+        MDAnalysis selection for protein atoms.
+    cutoff : float
+        Distance cutoff for contacts in Angstroms
+    polymer_types : list[str], optional
+        Filter contacts by polymer residue names (e.g., ["SBM", "EGP"]).
+        If None, all polymer types are included.
+    grouping : str
+        How to group protein residues: "aa_class" (aromatic, charged, etc.),
+        "secondary_structure", or "none".
+    compute_residence_times : bool
+        If True, compute residence time statistics for contacts.
+    """
+
+    enabled: bool = False
+    polymer_selection: str = "chainID C"
+    protein_selection: str = "protein"
+    cutoff: float = 4.5
+    polymer_types: Optional[list[str]] = None
+    grouping: str = "aa_class"
+    compute_residence_times: bool = True
+
+
 # =============================================================================
 # Main Analysis Configuration
 # =============================================================================
@@ -157,6 +199,8 @@ class AnalysisConfig(BaseModel):
         Distance analysis configuration
     catalytic_triad : CatalyticTriadConfig
         Catalytic triad analysis configuration
+    contacts : ContactsConfig
+        Polymer-protein contact analysis configuration
 
     Examples
     --------
@@ -170,6 +214,7 @@ class AnalysisConfig(BaseModel):
     rmsf: RMSFConfig = Field(default_factory=RMSFConfig)
     distances: DistancesConfig = Field(default_factory=DistancesConfig)
     catalytic_triad: CatalyticTriadConfig = Field(default_factory=CatalyticTriadConfig)
+    contacts: ContactsConfig = Field(default_factory=ContactsConfig)
 
     @field_validator("replicates", mode="before")
     @classmethod
@@ -233,7 +278,7 @@ class AnalysisConfig(BaseModel):
         Returns
         -------
         list[str]
-            Names of enabled analyses (e.g., ['rmsf', 'catalytic_triad'])
+            Names of enabled analyses (e.g., ['rmsf', 'catalytic_triad', 'contacts'])
         """
         enabled = []
         if self.rmsf.enabled:
@@ -242,6 +287,8 @@ class AnalysisConfig(BaseModel):
             enabled.append("distances")
         if self.catalytic_triad.enabled:
             enabled.append("catalytic_triad")
+        if self.contacts.enabled:
+            enabled.append("contacts")
         return enabled
 
     def validate_config(self) -> list[str]:
@@ -265,6 +312,13 @@ class AnalysisConfig(BaseModel):
         # Check triad pairs if enabled
         if self.catalytic_triad.enabled and not self.catalytic_triad.pairs:
             issues.append("Catalytic triad analysis enabled but no pairs defined")
+
+        # Check contacts config if enabled
+        if self.contacts.enabled:
+            if not self.contacts.polymer_selection:
+                issues.append("Contact analysis enabled but no polymer_selection defined")
+            if not self.contacts.protein_selection:
+                issues.append("Contact analysis enabled but no protein_selection defined")
 
         return issues
 
@@ -335,4 +389,25 @@ rmsf:
 #     - label: "His156-Ser77"
 #       selection_a: "resid 156 and name NE2"
 #       selection_b: "resid 77 and name OG"
+
+# ============================================================================
+# Polymer-Protein Contact Analysis
+# ============================================================================
+# Analyzes contacts between polymer chains and protein residues.
+#
+# IMPORTANT: PolyzyMD Chain Convention
+#   - Chain A: Protein/Enzyme
+#   - Chain B: Substrate/Ligand
+#   - Chain C: Polymers
+#   - Chain D+: Solvent
+# Use solvated_system.pdb as topology (NOT production_N_topology.pdb).
+#
+# contacts:
+#   enabled: true
+#   polymer_selection: "chainID C"  # Default: all polymers
+#   protein_selection: "protein"
+#   cutoff: 4.5                     # Distance cutoff in Angstroms
+#   polymer_types: ["SBM", "EGP"]   # Optional: filter by polymer type
+#   grouping: "aa_class"            # Group by: aa_class, secondary_structure, none
+#   compute_residence_times: true
 '''
