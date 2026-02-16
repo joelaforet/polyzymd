@@ -199,11 +199,6 @@ class TrajectoryLoader:
         """
         _require_mdanalysis()
 
-        # Suppress verbose MDAnalysis INFO messages during Universe creation
-        from polyzymd.analysis.core.logging_utils import suppress_mdanalysis_info
-
-        suppress_mdanalysis_info()
-
         if cache and replicate in self._universe_cache:
             return self._universe_cache[replicate]
 

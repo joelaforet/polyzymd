@@ -9,6 +9,10 @@ from __future__ import annotations
 import logging
 import sys
 
+# Format strings for different verbosity modes
+FULL_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+QUIET_FORMAT = "%(asctime)s - %(message)s"
+
 
 class ColoredFormatter(logging.Formatter):
     """Formatter that adds ANSI color codes for WARNING and ERROR levels.
@@ -27,7 +31,7 @@ class ColoredFormatter(logging.Formatter):
     COLORS = {
         logging.WARNING: "\033[93m",  # Yellow
         logging.ERROR: "\033[91m",  # Red
-        logging.CRITICAL: "\033[91m",  # Red (bold could be added)
+        logging.CRITICAL: "\033[91m",  # Red
     }
     RESET = "\033[0m"
 
@@ -51,46 +55,46 @@ class ColoredFormatter(logging.Formatter):
         return message
 
 
-def setup_logging(verbose: bool = False) -> None:
+def setup_logging(quiet: bool = False, debug: bool = False) -> None:
     """Set up logging with colored output for warnings and errors.
 
     This function configures the root logger with a ColoredFormatter
     that highlights WARNING and ERROR messages in yellow and red
     respectively when outputting to a terminal.
 
+    By default, INFO-level messages are shown with full formatting
+    (timestamp, logger name, level, message). Use --quiet to reduce
+    output or --debug for maximum verbosity.
+
     Parameters
     ----------
-    verbose : bool, optional
-        If True, set log level to INFO. If False (default), set to WARNING.
+    quiet : bool, optional
+        If True, show only WARNING and above with minimal format
+        (timestamp and message only). If False (default), show INFO
+        and above with full format.
+    debug : bool, optional
+        If True, show DEBUG and above with full format. Overrides quiet.
 
     Examples
     --------
     >>> from polyzymd.analysis.core.logging_utils import setup_logging
-    >>> setup_logging(verbose=True)  # Show INFO and above with colors
-    >>> setup_logging(verbose=False)  # Show WARNING and above with colors
+    >>> setup_logging()                # INFO+, full format (default)
+    >>> setup_logging(quiet=True)      # WARNING+, minimal format
+    >>> setup_logging(debug=True)      # DEBUG+, full format
     """
-    level = logging.INFO if verbose else logging.WARNING
+    if debug:
+        level = logging.DEBUG
+        fmt = FULL_FORMAT
+    elif quiet:
+        level = logging.WARNING
+        fmt = QUIET_FORMAT
+    else:
+        level = logging.INFO
+        fmt = FULL_FORMAT
 
-    # Create handler with colored formatter
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(ColoredFormatter("%(message)s"))
+    handler.setFormatter(ColoredFormatter(fmt))
 
-    # Configure root logger
     logging.root.handlers = []
     logging.root.addHandler(handler)
     logging.root.setLevel(level)
-
-
-def suppress_mdanalysis_info() -> None:
-    """Suppress verbose MDAnalysis INFO-level log messages.
-
-    MDAnalysis emits many INFO messages during Universe creation that
-    clutter terminal output without providing actionable information:
-    - "Setting segids from chainIDs..."
-    - "The attribute(s) types have already been read..."
-    - "attribute masses has been guessed successfully"
-
-    This function sets the MDAnalysis logger to WARNING level to
-    suppress these messages while preserving important warnings.
-    """
-    logging.getLogger("MDAnalysis").setLevel(logging.WARNING)

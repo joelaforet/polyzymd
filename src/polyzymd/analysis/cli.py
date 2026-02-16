@@ -230,12 +230,17 @@ def init(eq_time: str) -> None:
     help="Force recompute even if cached results exist.",
 )
 @click.option(
-    "-v",
-    "--verbose",
+    "-q",
+    "--quiet",
     is_flag=True,
-    help="Verbose output.",
+    help="Suppress INFO messages, show warnings/errors only.",
 )
-def run_analyses(analysis_config: Path, recompute: bool, verbose: bool) -> None:
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable DEBUG logging for troubleshooting.",
+)
+def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: bool) -> None:
     """Run all enabled analyses defined in analysis.yaml.
 
     Reads analysis.yaml and runs each enabled analysis type
@@ -245,7 +250,7 @@ def run_analyses(analysis_config: Path, recompute: bool, verbose: bool) -> None:
     Example:
         polyzymd analyze run
         polyzymd analyze run -c analysis.yaml --recompute
-        polyzymd analyze run -v
+        polyzymd analyze run -q
     """
     require_analysis_deps()
 
@@ -256,8 +261,8 @@ def run_analyses(analysis_config: Path, recompute: bool, verbose: bool) -> None:
     from polyzymd.compare.config import CatalyticTriadConfig as CompareTriadConfig
     from polyzymd.compare.config import TriadPairConfig as CompareTriadPairConfig
 
-    # Set up logging with colored warnings
-    setup_logging(verbose=verbose)
+    # Set up logging with colored output
+    setup_logging(quiet=quiet, debug=debug)
 
     analysis_config = Path(analysis_config).resolve()
 

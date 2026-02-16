@@ -176,10 +176,15 @@ def init(name: str, eq_time: str, output_dir: Optional[Path]):
     help="Save output to file. Also saves JSON result to results/ directory.",
 )
 @click.option(
-    "--verbose",
-    "-v",
+    "-q",
+    "--quiet",
     is_flag=True,
-    help="Show verbose logging output.",
+    help="Suppress INFO messages, show warnings/errors only.",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable DEBUG logging for troubleshooting.",
 )
 def rmsf(
     config_file: Path,
@@ -191,7 +196,8 @@ def rmsf(
     recompute: bool,
     output_format: str,
     output_path: Optional[Path],
-    verbose: bool,
+    quiet: bool,
+    debug: bool,
 ):
     """Compare RMSF across conditions defined in comparison.yaml.
 
@@ -206,10 +212,10 @@ def rmsf(
         polyzymd compare rmsf --override --selection "protein and name CA"
         polyzymd compare rmsf -f my_comparison.yaml -o report.md
     """
-    # Set up logging with colored warnings
+    # Set up logging with colored output
     from polyzymd.analysis.core.logging_utils import setup_logging
 
-    setup_logging(verbose=verbose)
+    setup_logging(quiet=quiet, debug=debug)
 
     # Check if override options used without --override flag
     if not override and any([selection, reference_mode, reference_frame]):
@@ -295,7 +301,7 @@ def rmsf(
         result = comparator.compare(recompute=recompute)
     except Exception as e:
         click.echo(f"Error during comparison: {e}", err=True)
-        if verbose:
+        if debug:
             import traceback
 
             traceback.print_exc()
@@ -471,10 +477,15 @@ def plot(
     help="Save output to file. Also saves JSON result to results/ directory.",
 )
 @click.option(
-    "--verbose",
-    "-v",
+    "-q",
+    "--quiet",
     is_flag=True,
-    help="Show verbose logging output.",
+    help="Suppress INFO messages, show warnings/errors only.",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable DEBUG logging for troubleshooting.",
 )
 def triad(
     config_file: Path,
@@ -482,7 +493,8 @@ def triad(
     recompute: bool,
     output_format: str,
     output_path: Optional[Path],
-    verbose: bool,
+    quiet: bool,
+    debug: bool,
 ):
     """Compare catalytic triad geometry across conditions.
 
@@ -505,8 +517,8 @@ def triad(
     from polyzymd.compare.triad_comparator import TriadComparator
     from polyzymd.compare.triad_formatters import format_triad_result
 
-    # Set up logging with colored warnings
-    setup_logging(verbose=verbose)
+    # Set up logging with colored output
+    setup_logging(quiet=quiet, debug=debug)
 
     config_file = Path(config_file).resolve()
 
@@ -566,7 +578,7 @@ def triad(
         result = comparator.compare(recompute=recompute)
     except Exception as e:
         click.echo(f"Error during comparison: {e}", err=True)
-        if verbose:
+        if debug:
             import traceback
 
             traceback.print_exc()
@@ -644,10 +656,15 @@ def triad(
     help="Save output to file. Also saves JSON result to results/ directory.",
 )
 @click.option(
-    "--verbose",
-    "-v",
+    "-q",
+    "--quiet",
     is_flag=True,
-    help="Show verbose logging output.",
+    help="Suppress INFO messages, show warnings/errors only.",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable DEBUG logging for troubleshooting.",
 )
 def contacts(
     config_file: Path,
@@ -658,7 +675,8 @@ def contacts(
     recompute: bool,
     output_format: str,
     output_path: Optional[Path],
-    verbose: bool,
+    quiet: bool,
+    debug: bool,
 ):
     """Compare polymer-protein contacts across conditions.
 
@@ -685,8 +703,8 @@ def contacts(
     from polyzymd.compare.contacts_comparator import ContactsComparator
     from polyzymd.compare.contacts_formatters import format_contacts_result
 
-    # Set up logging with colored warnings
-    setup_logging(verbose=verbose)
+    # Set up logging with colored output
+    setup_logging(quiet=quiet, debug=debug)
 
     config_file = Path(config_file).resolve()
 
@@ -754,7 +772,7 @@ def contacts(
         result = comparator.compare(recompute=recompute)
     except Exception as e:
         click.echo(f"Error during comparison: {e}", err=True)
-        if verbose:
+        if debug:
             import traceback
 
             traceback.print_exc()

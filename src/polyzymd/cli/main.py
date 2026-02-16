@@ -21,11 +21,6 @@ from typing import Optional
 
 import click
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 LOGGER = logging.getLogger("polyzymd")
 
 
@@ -89,20 +84,24 @@ suppress_openff_logs()
 
 @click.group()
 @click.version_option(prog_name="polyzymd")
-@click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
+@click.option(
+    "-q", "--quiet", is_flag=True, help="Suppress INFO messages, show warnings/errors only"
+)
+@click.option("--debug", is_flag=True, help="Enable DEBUG logging for troubleshooting")
 @click.option(
     "--openff-logs",
     is_flag=True,
     help="Enable verbose OpenFF Interchange/Toolkit logs (suppressed by default)",
 )
-def cli(verbose: bool, openff_logs: bool) -> None:
+def cli(quiet: bool, debug: bool, openff_logs: bool) -> None:
     """PolyzyMD: MD simulations for enzyme-polymer systems.
 
     A toolkit for building, running, and analyzing molecular dynamics
     simulations of enzymes with co-polymers.
     """
-    if verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    from polyzymd.analysis.core.logging_utils import setup_logging
+
+    setup_logging(quiet=quiet, debug=debug)
 
     if openff_logs:
         enable_openff_logs()
@@ -1097,8 +1096,7 @@ def init(name: str) -> None:
 
         # Create placeholder files
         protein_placeholder = project_dir / "structures" / "place_protein_here.placeholder.txt"
-        protein_placeholder.write_text(
-            """\
+        protein_placeholder.write_text("""\
 # ============================================================================
 # PLACEHOLDER: Place your protein PDB file here
 # ============================================================================
@@ -1119,12 +1117,10 @@ def init(name: str) -> None:
 #
 # Delete this placeholder file after adding your protein structure.
 # ============================================================================
-"""
-        )
+""")
 
         ligand_placeholder = project_dir / "structures" / "place_ligand_here.placeholder.txt"
-        ligand_placeholder.write_text(
-            """\
+        ligand_placeholder.write_text("""\
 # ============================================================================
 # PLACEHOLDER: Place your ligand SDF file here (if using substrate)
 # ============================================================================
@@ -1145,8 +1141,7 @@ def init(name: str) -> None:
 # If you're not using a substrate, you can delete this placeholder
 # and comment out the 'substrate' section in config.yaml.
 # ============================================================================
-"""
-        )
+""")
 
         # Success message
         click.echo()
