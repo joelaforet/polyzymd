@@ -206,11 +206,10 @@ def rmsf(
         polyzymd compare rmsf --override --selection "protein and name CA"
         polyzymd compare rmsf -f my_comparison.yaml -o report.md
     """
-    # Set up logging
-    if verbose:
-        logging.basicConfig(level=logging.INFO, format="%(message)s")
-    else:
-        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    # Set up logging with colored warnings
+    from polyzymd.analysis.core.logging_utils import setup_logging
+
+    setup_logging(verbose=verbose)
 
     # Check if override options used without --override flag
     if not override and any([selection, reference_mode, reference_frame]):
@@ -502,14 +501,12 @@ def triad(
         polyzymd compare triad --eq-time 10ns --format markdown
         polyzymd compare triad -f my_comparison.yaml -o report.md
     """
+    from polyzymd.analysis.core.logging_utils import setup_logging
     from polyzymd.compare.triad_comparator import TriadComparator
     from polyzymd.compare.triad_formatters import format_triad_result
 
-    # Set up logging
-    if verbose:
-        logging.basicConfig(level=logging.INFO, format="%(message)s")
-    else:
-        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    # Set up logging with colored warnings
+    setup_logging(verbose=verbose)
 
     config_file = Path(config_file).resolve()
 
@@ -683,15 +680,13 @@ def contacts(
         polyzymd compare contacts --polymer-selection "resname SBM" --cutoff 5.0
         polyzymd compare contacts -f my_comparison.yaml -o report.md
     """
+    from polyzymd.analysis.core.logging_utils import setup_logging
     from polyzymd.compare.config import ContactsComparisonConfig
     from polyzymd.compare.contacts_comparator import ContactsComparator
     from polyzymd.compare.contacts_formatters import format_contacts_result
 
-    # Set up logging
-    if verbose:
-        logging.basicConfig(level=logging.INFO, format="%(message)s")
-    else:
-        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    # Set up logging with colored warnings
+    setup_logging(verbose=verbose)
 
     config_file = Path(config_file).resolve()
 

@@ -251,15 +251,13 @@ def run_analyses(analysis_config: Path, recompute: bool, verbose: bool) -> None:
 
     from polyzymd.analysis.config import AnalysisConfig
     from polyzymd.analysis import RMSFCalculator, DistanceCalculator, CatalyticTriadAnalyzer
+    from polyzymd.analysis.core.logging_utils import setup_logging
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.compare.config import CatalyticTriadConfig as CompareTriadConfig
     from polyzymd.compare.config import TriadPairConfig as CompareTriadPairConfig
 
-    # Set up logging
-    if verbose:
-        logging.basicConfig(level=logging.INFO, format="%(message)s")
-    else:
-        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    # Set up logging with colored warnings
+    setup_logging(verbose=verbose)
 
     analysis_config = Path(analysis_config).resolve()
 
