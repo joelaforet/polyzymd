@@ -64,11 +64,11 @@ contacts across all your simulation conditions.
 
 A typical PolyzyMD simulation campaign looks like this:
 
-```
+```text
 my_enzyme_study/
 ├── noPoly_enzyme_DMSO/           # Control: no polymer
 │   ├── config.yaml
-│   └── scratch/
+│   └── scratch/ → /scratch/user/project/noPoly/  # Symlink*
 │       ├── solvated_system.pdb
 │       ├── rep_1/production_1.dcd
 │       ├── rep_2/production_1.dcd
@@ -76,15 +76,20 @@ my_enzyme_study/
 │
 ├── SBMA_100_enzyme_DMSO/         # Condition: 100% SBMA polymer
 │   ├── config.yaml
-│   └── scratch/...
+│   └── scratch/ → ...            # Symlink*
 │
 ├── EGMA_100_enzyme_DMSO/         # Condition: 100% EGMA polymer
 │   ├── config.yaml
-│   └── scratch/...
+│   └── scratch/ → ...            # Symlink*
 │
 └── analysis/                      # We'll create this
     └── comparison.yaml
 ```
+
+> **\*Note:** The `scratch/` directories are typically **symlinks** to a separate
+> HPC scratch partition where large trajectory files are stored. The `config.yaml`
+> file contains the actual path to the scratch directory, so PolyzyMD resolves
+> these paths automatically during analysis.
 
 ### 1.2 Create analysis.yaml for Each Condition
 
