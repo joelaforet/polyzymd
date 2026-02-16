@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 import click
+import yaml
 
 from polyzymd.compare.comparator import RMSFComparator
 from polyzymd.compare.config import (
@@ -122,6 +123,142 @@ def init(name: str, eq_time: str, output_dir: Optional[Path]):
     except Exception as e:
         click.echo(f"Error creating project: {e}", err=True)
         sys.exit(1)
+
+
+@compare.command()
+@click.option(
+    "-f",
+    "--file",
+    "config_file",
+    type=click.Path(path_type=Path),
+    default="comparison.yaml",
+    help="Path to comparison.yaml config file.",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    help="Output format: table (default) or json.",
+)
+def validate(config_file: Path, output_format: str):
+    """Validate a comparison.yaml configuration file.
+
+    Checks the configuration for errors without running any analyses.
+    Useful for catching configuration problems before running expensive
+    computations.
+
+    \b
+    Validates:
+      - YAML syntax and structure
+      - Required fields present
+      - At least 2 conditions defined
+      - Condition labels are unique
+      - Control label matches a condition (if specified)
+      - Config files exist for each condition
+
+    \b
+    Example:
+        polyzymd compare validate
+        polyzymd compare validate -f my_comparison.yaml
+        polyzymd compare validate --format json
+    """
+    import json as json_module
+
+    config_file = Path(config_file).resolve()
+
+    # Prepare result structure
+    result = {
+        "file": str(config_file),
+        "valid": False,
+        "errors": [],
+        "summary": {},
+    }
+
+    # Check file exists
+    if not config_file.exists():
+        result["errors"].append(f"File not found: {config_file}")
+        _output_validation_result(result, output_format)
+        sys.exit(1)
+
+    # Try to load and validate
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+
+        # Run validation
+        errors = config.validate_config()
+        result["errors"] = errors
+        result["valid"] = len(errors) == 0
+
+        # Build summary
+        result["summary"] = {
+            "name": config.name,
+            "conditions_count": len(config.conditions),
+            "condition_labels": [c.label for c in config.conditions],
+            "control": config.control,
+            "sections_configured": [],
+        }
+
+        if config.rmsf:
+            result["summary"]["sections_configured"].append("rmsf")
+        if config.catalytic_triad:
+            result["summary"]["sections_configured"].append("catalytic_triad")
+        if config.contacts:
+            result["summary"]["sections_configured"].append("contacts")
+
+    except yaml.YAMLError as e:
+        result["errors"].append(f"YAML syntax error: {e}")
+    except Exception as e:
+        result["errors"].append(f"Validation error: {e}")
+
+    _output_validation_result(result, output_format)
+
+    if not result["valid"]:
+        sys.exit(1)
+
+
+def _output_validation_result(result: dict, output_format: str) -> None:
+    """Output validation result in the specified format.
+
+    Parameters
+    ----------
+    result : dict
+        Validation result dictionary
+    output_format : str
+        Output format: 'table' or 'json'
+    """
+    import json as json_module
+
+    if output_format == "json":
+        click.echo(json_module.dumps(result, indent=2))
+        return
+
+    # Human-readable table format
+    click.echo(f"Validating: {result['file']}")
+    click.echo()
+
+    if result["valid"]:
+        click.secho("✓ Configuration is valid", fg="green")
+        click.echo()
+
+        summary = result.get("summary", {})
+        if summary:
+            click.echo(f"  Name: {summary.get('name', 'N/A')}")
+            click.echo(f"  Conditions: {summary.get('conditions_count', 0)}")
+            labels = summary.get("condition_labels", [])
+            if labels:
+                click.echo(f"    - {', '.join(labels)}")
+            control = summary.get("control")
+            if control:
+                click.echo(f"  Control: {control}")
+            sections = summary.get("sections_configured", [])
+            if sections:
+                click.echo(f"  Analysis sections: {', '.join(sections)}")
+    else:
+        click.secho("✗ Configuration has errors", fg="red")
+        click.echo()
+        for error in result["errors"]:
+            click.echo(f"  • {error}", err=True)
 
 
 @compare.command()
