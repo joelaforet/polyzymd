@@ -34,13 +34,13 @@ def compare():
 
     \b
     Workflow:
-    1. polyzymd compare init <name>    # Create project with template
-    2. Edit comparison.yaml            # Add your conditions
-    3. polyzymd compare rmsf           # Run comparison
+    1. polyzymd compare init -n <name>   # Create project with template
+    2. Edit comparison.yaml              # Add your conditions
+    3. polyzymd compare rmsf             # Run comparison
 
     \b
     Example:
-        polyzymd compare init polymer_study
+        polyzymd compare init -n polymer_study
         cd polymer_study
         vim comparison.yaml  # Add your conditions
         polyzymd compare rmsf --eq-time 10ns
@@ -49,7 +49,12 @@ def compare():
 
 
 @compare.command()
-@click.argument("name")
+@click.option(
+    "-n",
+    "--name",
+    required=True,
+    help="Name for the comparison project (will create a directory with this name).",
+)
 @click.option(
     "--eq-time",
     default="10ns",
@@ -72,9 +77,9 @@ def init(name: str, eq_time: str, output_dir: Optional[Path]):
 
     \b
     Example:
-        polyzymd compare init polymer_stability_study
-        polyzymd compare init my_study --eq-time 20ns
-        polyzymd compare init my_study -o /path/to/projects
+        polyzymd compare init -n polymer_stability_study
+        polyzymd compare init -n my_study --eq-time 20ns
+        polyzymd compare init -n my_study -o /path/to/projects
     """
     # Determine output location
     if output_dir is None:
@@ -234,7 +239,9 @@ def rmsf(
         config = ComparisonConfig.from_yaml(config_file)
     except FileNotFoundError as e:
         click.echo(f"Error: {e}", err=True)
-        click.echo("Run 'polyzymd compare init <name>' to create a comparison project.", err=True)
+        click.echo(
+            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
+        )
         sys.exit(1)
     except Exception as e:
         click.echo(f"Error loading config: {e}", err=True)
@@ -528,7 +535,9 @@ def triad(
         config = ComparisonConfig.from_yaml(config_file)
     except FileNotFoundError as e:
         click.echo(f"Error: {e}", err=True)
-        click.echo("Run 'polyzymd compare init <name>' to create a comparison project.", err=True)
+        click.echo(
+            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
+        )
         sys.exit(1)
     except Exception as e:
         click.echo(f"Error loading config: {e}", err=True)
@@ -714,7 +723,9 @@ def contacts(
         config = ComparisonConfig.from_yaml(config_file)
     except FileNotFoundError as e:
         click.echo(f"Error: {e}", err=True)
-        click.echo("Run 'polyzymd compare init <name>' to create a comparison project.", err=True)
+        click.echo(
+            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
+        )
         sys.exit(1)
     except Exception as e:
         click.echo(f"Error loading config: {e}", err=True)
