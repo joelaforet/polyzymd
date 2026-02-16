@@ -536,7 +536,9 @@ def generate_comparison_template(name: str, eq_time: str = "10ns") -> str:
 name: "{name}"
 description: "Comparison of simulation conditions"
 
-# Control condition for relative comparisons (null if none)
+# Control condition for relative comparisons.
+# Must match one of the 'label' values in 'conditions' below, or null if none.
+# Example: control: "noPoly" (if you have a condition labeled "noPoly")
 control: null
 
 # ============================================================================
@@ -590,6 +592,24 @@ defaults:
 #     - label: "His-Ser"
 #       selection_a: "resid 156 and name NE2"
 #       selection_b: "resid 77 and name OG"
+
+# ============================================================================
+# Distance Analysis (for polyzymd compare distances)
+# ============================================================================
+# Compare specific inter-atomic distances across conditions.
+# Useful for monitoring substrate positioning, active site geometry, etc.
+#
+# Run: polyzymd compare distances -c comparison.yaml
+#
+# distances:
+#   threshold: 3.5                          # Optional: contact threshold (Angstroms)
+#   pairs:
+#     - label: "Ser77-Substrate"
+#       selection_a: "resid 77 and name OG"
+#       selection_b: "resname RBY and name C1"
+#     - label: "His156-Substrate"
+#       selection_a: "resid 156 and name NE2"
+#       selection_b: "resname RBY and name C1"
 
 # ============================================================================
 # Polymer-Protein Contacts (for polyzymd compare contacts)
