@@ -5,7 +5,9 @@ Each comparator is automatically registered with ComparatorRegistry.
 """
 
 from polyzymd.compare.comparators.rmsf import RMSFComparator
+from polyzymd.compare.comparators.triad import TriadComparator
 
 __all__ = [
     "RMSFComparator",
+    "TriadComparator",
 ]

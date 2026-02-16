@@ -21,25 +21,31 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-# Import settings to trigger registration
-from polyzymd.compare.settings import (  # noqa: F401
-    RMSFAnalysisSettings,
-    RMSFComparisonSettings,
-    DistancesAnalysisSettings,
-    DistancesComparisonSettings,
-    DistancePairSettings,
-    CatalyticTriadAnalysisSettings,
-    CatalyticTriadComparisonSettings,
-    TriadPairSettings,
-    ContactsAnalysisSettings,
-    ContactsComparisonSettings,
-)
 from polyzymd.analysis.core.registry import (
     AnalysisSettingsRegistry,
     BaseAnalysisSettings,
     BaseComparisonSettings,
     ComparisonSettingsRegistry,
 )
+
+# Import settings to trigger registration
+from polyzymd.compare.settings import (  # noqa: F401
+    CatalyticTriadAnalysisSettings,
+    CatalyticTriadComparisonSettings,
+    ContactsAnalysisSettings,
+    ContactsComparisonSettings,
+    DistancePairSettings,
+    DistancesAnalysisSettings,
+    DistancesComparisonSettings,
+    RMSFAnalysisSettings,
+    RMSFComparisonSettings,
+    TriadPairSettings,
+)
+
+# Backward-compatible aliases for analysis module
+# The analysis/triad module still imports these old names
+CatalyticTriadConfig = CatalyticTriadAnalysisSettings
+TriadPairConfig = TriadPairSettings
 
 logger = logging.getLogger(__name__)
 

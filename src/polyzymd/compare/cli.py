@@ -657,7 +657,7 @@ def triad(
         polyzymd compare triad -f my_comparison.yaml -o report.md
     """
     from polyzymd.analysis.core.logging_utils import setup_logging
-    from polyzymd.compare.triad_comparator import TriadComparator
+    from polyzymd.compare.comparators.triad import TriadComparator
     from polyzymd.compare.triad_formatters import format_triad_result
 
     # Set up logging with colored output
@@ -728,7 +728,7 @@ def triad(
     try:
         comparator = TriadComparator(
             config=config,
-            triad_settings=triad_settings,
+            analysis_settings=triad_settings,
             equilibration=equilibration,
         )
         result = comparator.compare(recompute=recompute)
