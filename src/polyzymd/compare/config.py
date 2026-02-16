@@ -3,299 +3,56 @@
 This module defines the YAML schema for comparison.yaml files that
 specify which simulation conditions to compare.
 
-Also includes catalytic triad/active site configuration for distance
-and H-bond analysis.
+The schema has two main sections:
+- analysis_settings: Defines WHAT analyses to run (shared across conditions)
+- comparison_settings: Defines HOW to compare (statistical parameters)
+
+Both sections use a registry-based approach for extensibility. New analysis
+types can be added by registering with AnalysisSettingsRegistry and
+ComparisonSettingsRegistry (see polyzymd.compare.settings).
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-# ============================================================================
-# RMSF Comparison Configuration
-# ============================================================================
+# Import settings to trigger registration and provide backward-compatible aliases
+from polyzymd.compare.settings import (
+    RMSFAnalysisSettings,
+    RMSFComparisonSettings,
+    DistancesAnalysisSettings,
+    DistancesComparisonSettings,
+    DistancePairSettings,
+    CatalyticTriadAnalysisSettings,
+    CatalyticTriadComparisonSettings,
+    TriadPairSettings,
+    ContactsAnalysisSettings,
+    ContactsComparisonSettings,
+)
+from polyzymd.analysis.core.registry import (
+    AnalysisSettingsRegistry,
+    BaseAnalysisSettings,
+    BaseComparisonSettings,
+    ComparisonSettingsRegistry,
+)
 
+# Backward-compatible aliases for old class names
+# These allow existing code to import the old names
+RMSFComparisonConfig = RMSFAnalysisSettings
+CatalyticTriadConfig = CatalyticTriadAnalysisSettings
+TriadPairConfig = TriadPairSettings
+ContactsComparisonConfig = ContactsAnalysisSettings
 
-class RMSFComparisonConfig(BaseModel):
-    """Configuration for RMSF comparison analysis.
-
-    Required to run `polyzymd compare rmsf`. If this section is not
-    present in comparison.yaml, RMSF comparison will fail with an
-    informative error message.
-
-    Attributes
-    ----------
-    selection : str
-        MDAnalysis selection string for RMSF calculation.
-        Default: "protein and name CA"
-    reference_mode : str
-        Reference structure mode: centroid, average, or frame.
-        Default: "centroid"
-    reference_frame : int, optional
-        Frame number if reference_mode is 'frame' (1-indexed, PyMOL convention)
-
-    Examples
-    --------
-    In comparison.yaml:
-
-    ```yaml
-    rmsf:
-      selection: "protein and name CA"
-      reference_mode: "centroid"
-    ```
-
-    For aligning to a specific frame:
-
-    ```yaml
-    rmsf:
-      selection: "protein and name CA"
-      reference_mode: "frame"
-      reference_frame: 500
-    ```
-    """
-
-    selection: str = Field(
-        default="protein and name CA",
-        description="MDAnalysis selection string for RMSF calculation",
-    )
-    reference_mode: str = Field(
-        default="centroid",
-        description="Reference structure mode: centroid, average, or frame",
-    )
-    reference_frame: Optional[int] = Field(
-        default=None,
-        description="Frame number if reference_mode is 'frame' (1-indexed)",
-    )
-
-    @field_validator("reference_mode", mode="after")
-    @classmethod
-    def validate_reference_mode(cls, v: str) -> str:
-        """Validate reference mode is one of the allowed values."""
-        valid = {"centroid", "average", "frame"}
-        if v not in valid:
-            raise ValueError(f"reference_mode must be one of {valid}, got '{v}'")
-        return v
-
-    @model_validator(mode="after")
-    def validate_reference_frame_required(self) -> "RMSFComparisonConfig":
-        """Ensure reference_frame is provided when reference_mode is 'frame'."""
-        if self.reference_mode == "frame" and self.reference_frame is None:
-            raise ValueError("reference_frame is required when reference_mode is 'frame'")
-        return self
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# Catalytic Triad / Active Site Configuration
-# ============================================================================
-
-
-class TriadPairConfig(BaseModel):
-    """Configuration for one distance pair in a catalytic triad/active site.
-
-    Each pair defines two atom selections between which distances will be
-    measured. Selections support special syntax:
-    - Standard MDAnalysis: "resid 77 and name OG"
-    - Midpoint: "midpoint(resid 133 and name OD1 OD2)"
-    - Center of mass: "com(resid 50-75)"
-
-    Attributes
-    ----------
-    label : str
-        Human-readable label for this pair (e.g., "Asp133-His156")
-    selection_a : str
-        First atom/point selection
-    selection_b : str
-        Second atom/point selection
-
-    Examples
-    --------
-    >>> pair = TriadPairConfig(
-    ...     label="Asp133-His156",
-    ...     selection_a="midpoint(resid 133 and name OD1 OD2)",
-    ...     selection_b="resid 156 and name ND1",
-    ... )
-    """
-
-    label: str = Field(..., description="Human-readable label for this pair")
-    selection_a: str = Field(..., description="First atom/point selection")
-    selection_b: str = Field(..., description="Second atom/point selection")
-
-
-class CatalyticTriadConfig(BaseModel):
-    """Configuration for catalytic triad/active site distance analysis.
-
-    Defines multiple distance pairs that together comprise an active site
-    or catalytic machinery. Computes:
-    - Per-pair distance distributions and statistics
-    - Simultaneous contact fraction (all pairs below threshold at same time)
-
-    Attributes
-    ----------
-    name : str
-        Name of the triad/active site (e.g., "LipA_catalytic_triad")
-    pairs : list[TriadPairConfig]
-        Distance pairs to monitor
-    threshold : float
-        Distance threshold for contact/H-bond analysis (Angstroms)
-    description : str, optional
-        Description of the active site
-
-    Examples
-    --------
-    In comparison.yaml:
-
-    ```yaml
-    catalytic_triad:
-      name: "LipA_catalytic_triad"
-      description: "Ser-His-Asp catalytic triad of Lipase A"
-      threshold: 3.5
-      pairs:
-        - label: "Asp133-His156"
-          selection_a: "midpoint(resid 133 and name OD1 OD2)"
-          selection_b: "resid 156 and name ND1"
-        - label: "His156-Ser77"
-          selection_a: "resid 156 and name NE2"
-          selection_b: "resid 77 and name OG"
-    ```
-    """
-
-    name: str = Field(..., description="Name of the catalytic triad/active site")
-    pairs: list[TriadPairConfig] = Field(..., description="Distance pairs to monitor")
-    threshold: float = Field(
-        default=3.5, description="Distance threshold for contact analysis (Angstroms)"
-    )
-    description: Optional[str] = Field(default=None, description="Description of the active site")
-
-    @field_validator("pairs", mode="after")
-    @classmethod
-    def validate_pairs(cls, v: list[TriadPairConfig]) -> list[TriadPairConfig]:
-        """Ensure at least one pair is defined."""
-        if len(v) == 0:
-            raise ValueError("At least one distance pair must be defined")
-        return v
-
-    @property
-    def n_pairs(self) -> int:
-        """Number of distance pairs."""
-        return len(self.pairs)
-
-    def get_pair_selections(self) -> list[tuple[str, str]]:
-        """Get list of (selection_a, selection_b) tuples for DistanceCalculator."""
-        return [(p.selection_a, p.selection_b) for p in self.pairs]
-
-    def get_pair_labels(self) -> list[str]:
-        """Get list of pair labels."""
-        return [p.label for p in self.pairs]
-
-
-# ============================================================================
-# Polymer-Protein Contacts Configuration
-# ============================================================================
-
-
-class ContactsComparisonConfig(BaseModel):
-    """Configuration for polymer-protein contacts comparison analysis.
-
-    Defines parameters for comparing contact statistics across conditions,
-    including polymer selection, contact criteria, and statistical thresholds.
-
-    Attributes
-    ----------
-    name : str
-        Name of the contacts analysis (e.g., "polymer_protein_contacts")
-    polymer_selection : str
-        MDAnalysis selection string for polymer atoms.
-        Default: "resname SBM EGM" (3-character PDB standard for SBMA/EGMA)
-    protein_selection : str
-        MDAnalysis selection string for protein atoms.
-        Default: "protein"
-    cutoff : float
-        Distance cutoff for contacts in Angstroms.
-        Default: 4.5
-    contact_criteria : str
-        Contact criteria: "distance", "heavy_atom", or "any_atom".
-        Default: "heavy_atom"
-    fdr_alpha : float
-        False discovery rate alpha for Benjamini-Hochberg correction.
-        Default: 0.05
-    min_effect_size : float
-        Minimum Cohen's d effect size to highlight in reports.
-        Default: 0.5 (medium effect)
-    top_residues : int
-        Number of top residues (by effect size) to display in console.
-        Default: 10
-    description : str, optional
-        Description of the contacts analysis
-
-    Examples
-    --------
-    In comparison.yaml:
-
-    ```yaml
-    contacts:
-      name: "polymer_contacts"
-      description: "Polymer-protein contact analysis"
-      polymer_selection: "resname SBM EGM"
-      protein_selection: "protein"
-      cutoff: 4.5
-      contact_criteria: "heavy_atom"
-      fdr_alpha: 0.05
-      min_effect_size: 0.5
-      top_residues: 10
-    ```
-    """
-
-    name: str = Field(
-        default="polymer_protein_contacts", description="Name of the contacts analysis"
-    )
-    polymer_selection: str = Field(
-        default="resname SBM EGM", description="MDAnalysis selection for polymer atoms"
-    )
-    protein_selection: str = Field(
-        default="protein", description="MDAnalysis selection for protein atoms"
-    )
-    cutoff: float = Field(default=4.5, description="Contact distance cutoff in Angstroms")
-    contact_criteria: str = Field(
-        default="heavy_atom", description="Contact criteria: distance, heavy_atom, or any_atom"
-    )
-    fdr_alpha: float = Field(
-        default=0.05, description="FDR alpha for Benjamini-Hochberg correction"
-    )
-    min_effect_size: float = Field(
-        default=0.5, description="Minimum Cohen's d to highlight (0.2=small, 0.5=medium, 0.8=large)"
-    )
-    top_residues: int = Field(
-        default=10, description="Number of top residues to display in console"
-    )
-    description: Optional[str] = Field(
-        default=None, description="Description of the contacts analysis"
-    )
-
-    @field_validator("contact_criteria", mode="after")
-    @classmethod
-    def validate_criteria(cls, v: str) -> str:
-        """Validate contact criteria."""
-        valid = {"distance", "heavy_atom", "any_atom"}
-        if v not in valid:
-            raise ValueError(f"contact_criteria must be one of {valid}, got '{v}'")
-        return v
-
-    @field_validator("fdr_alpha", mode="after")
-    @classmethod
-    def validate_fdr_alpha(cls, v: float) -> float:
-        """Validate FDR alpha is in valid range."""
-        if not 0 < v < 1:
-            raise ValueError(f"fdr_alpha must be between 0 and 1, got {v}")
-        return v
-
-
-# ============================================================================
-# Comparison Configuration
+# Condition Configuration
 # ============================================================================
 
 
@@ -346,12 +103,189 @@ class AnalysisDefaults(BaseModel):
     equilibration_time: str = "10ns"
 
 
+# ============================================================================
+# Dynamic Settings Containers
+# ============================================================================
+
+
+class AnalysisSettingsContainer(BaseModel):
+    """Container for analysis settings (WHAT to analyze).
+
+    Uses dynamic attribute access via __getattr__ to support any registered
+    analysis type without hardcoding field names.
+
+    Attributes are stored in _settings dict and accessed dynamically.
+    """
+
+    model_config = {"extra": "allow"}
+
+    def __init__(self, **data: Any):
+        """Initialize with dynamic analysis settings.
+
+        Parameters
+        ----------
+        **data : Any
+            Analysis settings keyed by analysis type name.
+        """
+        # Parse each setting using the registry
+        parsed_settings: dict[str, BaseAnalysisSettings] = {}
+        for key, value in data.items():
+            if value is None:
+                continue
+            key_lower = key.lower()
+            if AnalysisSettingsRegistry.is_registered(key_lower):
+                settings_class = AnalysisSettingsRegistry.get(key_lower)
+                if isinstance(value, dict):
+                    parsed_settings[key_lower] = settings_class(**value)
+                elif isinstance(value, BaseAnalysisSettings):
+                    parsed_settings[key_lower] = value
+                else:
+                    raise ValueError(
+                        f"Invalid value for {key}: expected dict or {settings_class.__name__}"
+                    )
+            else:
+                logger.warning(f"Unknown analysis type '{key}' - skipping")
+
+        super().__init__(**parsed_settings)
+
+    def get(self, analysis_type: str) -> BaseAnalysisSettings | None:
+        """Get settings for a specific analysis type.
+
+        Parameters
+        ----------
+        analysis_type : str
+            Analysis type identifier (e.g., "rmsf", "contacts").
+
+        Returns
+        -------
+        BaseAnalysisSettings or None
+            Settings for the analysis type, or None if not configured.
+        """
+        return getattr(self, analysis_type.lower(), None)
+
+    def get_enabled_analyses(self) -> list[str]:
+        """Get list of enabled analysis types.
+
+        Returns
+        -------
+        list[str]
+            Names of configured analyses (presence implies enabled).
+        """
+        enabled = []
+        for analysis_type in AnalysisSettingsRegistry.list_available():
+            if self.get(analysis_type) is not None:
+                enabled.append(analysis_type)
+        return enabled
+
+    def to_analysis_yaml_dict(self, replicates: list[int], eq_time: str) -> dict[str, Any]:
+        """Convert to analysis.yaml-compatible dictionary.
+
+        Parameters
+        ----------
+        replicates : list[int]
+            Replicate numbers for the analysis.yaml.
+        eq_time : str
+            Equilibration time for the analysis.yaml.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary suitable for writing to analysis.yaml.
+        """
+        result: dict[str, Any] = {
+            "replicates": replicates,
+            "defaults": {"equilibration_time": eq_time},
+        }
+        for analysis_type in self.get_enabled_analyses():
+            settings = self.get(analysis_type)
+            if settings is not None:
+                result[analysis_type] = settings.to_analysis_yaml_dict()
+        return result
+
+
+class ComparisonSettingsContainer(BaseModel):
+    """Container for comparison settings (HOW to compare).
+
+    Uses dynamic attribute access to support any registered comparison type.
+    Each analysis type in analysis_settings must have a corresponding entry
+    here (can be empty dict) to enable comparison.
+    """
+
+    model_config = {"extra": "allow"}
+
+    def __init__(self, **data: Any):
+        """Initialize with dynamic comparison settings.
+
+        Parameters
+        ----------
+        **data : Any
+            Comparison settings keyed by analysis type name.
+        """
+        # Parse each setting using the registry
+        parsed_settings: dict[str, BaseComparisonSettings] = {}
+        for key, value in data.items():
+            if value is None:
+                continue
+            key_lower = key.lower()
+            if ComparisonSettingsRegistry.is_registered(key_lower):
+                settings_class = ComparisonSettingsRegistry.get(key_lower)
+                if isinstance(value, dict):
+                    parsed_settings[key_lower] = settings_class(**value)
+                elif isinstance(value, BaseComparisonSettings):
+                    parsed_settings[key_lower] = value
+                else:
+                    raise ValueError(
+                        f"Invalid value for {key}: expected dict or {settings_class.__name__}"
+                    )
+            else:
+                logger.warning(f"Unknown comparison type '{key}' - skipping")
+
+        super().__init__(**parsed_settings)
+
+    def get(self, analysis_type: str) -> BaseComparisonSettings | None:
+        """Get settings for a specific comparison type.
+
+        Parameters
+        ----------
+        analysis_type : str
+            Analysis type identifier (e.g., "rmsf", "contacts").
+
+        Returns
+        -------
+        BaseComparisonSettings or None
+            Comparison settings, or None if not configured.
+        """
+        return getattr(self, analysis_type.lower(), None)
+
+    def get_enabled_comparisons(self) -> list[str]:
+        """Get list of enabled comparison types.
+
+        Returns
+        -------
+        list[str]
+            Names of configured comparisons.
+        """
+        enabled = []
+        for analysis_type in ComparisonSettingsRegistry.list_available():
+            if self.get(analysis_type) is not None:
+                enabled.append(analysis_type)
+        return enabled
+
+
+# ============================================================================
+# Main Comparison Configuration
+# ============================================================================
+
+
 class ComparisonConfig(BaseModel):
     """Schema for comparison.yaml configuration files.
 
     A comparison config defines multiple simulation conditions to compare,
-    along with default analysis parameters and optional analysis-specific
-    configuration sections.
+    along with analysis settings and comparison-specific parameters.
+
+    The schema follows a two-section pattern:
+    - analysis_settings: WHAT to analyze (shared across conditions)
+    - comparison_settings: HOW to compare (statistical parameters)
 
     Attributes
     ----------
@@ -365,15 +299,10 @@ class ComparisonConfig(BaseModel):
         List of conditions to compare
     defaults : AnalysisDefaults
         Default analysis parameters (equilibration_time)
-    rmsf : RMSFComparisonConfig, optional
-        Configuration for RMSF comparison analysis.
-        Required to run `polyzymd compare rmsf`.
-    catalytic_triad : CatalyticTriadConfig, optional
-        Configuration for catalytic triad/active site analysis.
-        Required to run `polyzymd compare triad`.
-    contacts : ContactsComparisonConfig, optional
-        Configuration for polymer-protein contacts analysis.
-        Required to run `polyzymd compare contacts`.
+    analysis_settings : AnalysisSettingsContainer
+        Analysis parameters (WHAT to analyze)
+    comparison_settings : ComparisonSettingsContainer
+        Comparison parameters (HOW to compare)
 
     Examples
     --------
@@ -382,22 +311,59 @@ class ComparisonConfig(BaseModel):
     "Polymer Stabilization Study"
     >>> for cond in config.conditions:
     ...     print(f"{cond.label}: {cond.config}")
-    >>> if config.rmsf:
-    ...     print(f"RMSF selection: {config.rmsf.selection}")
-    >>> if config.catalytic_triad:
-    ...     print(f"Triad: {config.catalytic_triad.name}")
-    >>> if config.contacts:
-    ...     print(f"Contacts: {config.contacts.name}")
+    >>> print("Enabled analyses:", config.analysis_settings.get_enabled_analyses())
+    >>> rmsf_settings = config.analysis_settings.get("rmsf")
+    >>> if rmsf_settings:
+    ...     print(f"RMSF selection: {rmsf_settings.selection}")
     """
 
     name: str
     description: Optional[str] = None
     control: Optional[str] = None
     conditions: list[ConditionConfig]
-    defaults: AnalysisDefaults = AnalysisDefaults()
-    rmsf: Optional[RMSFComparisonConfig] = None
-    catalytic_triad: Optional[CatalyticTriadConfig] = None
-    contacts: Optional[ContactsComparisonConfig] = None
+    defaults: AnalysisDefaults = Field(default_factory=AnalysisDefaults)
+    analysis_settings: AnalysisSettingsContainer = Field(default_factory=AnalysisSettingsContainer)
+    comparison_settings: ComparisonSettingsContainer = Field(
+        default_factory=ComparisonSettingsContainer
+    )
+
+    @field_validator("analysis_settings", mode="before")
+    @classmethod
+    def parse_analysis_settings(cls, v: Any) -> AnalysisSettingsContainer:
+        """Parse analysis_settings from dict or container."""
+        if v is None:
+            return AnalysisSettingsContainer()
+        if isinstance(v, dict):
+            return AnalysisSettingsContainer(**v)
+        return v
+
+    @field_validator("comparison_settings", mode="before")
+    @classmethod
+    def parse_comparison_settings(cls, v: Any) -> ComparisonSettingsContainer:
+        """Parse comparison_settings from dict or container."""
+        if v is None:
+            return ComparisonSettingsContainer()
+        if isinstance(v, dict):
+            return ComparisonSettingsContainer(**v)
+        return v
+
+    @model_validator(mode="after")
+    def validate_comparison_coverage(self) -> "ComparisonConfig":
+        """Validate that comparison_settings covers all analysis_settings.
+
+        Each analysis type in analysis_settings must have a corresponding
+        entry in comparison_settings (can be empty {}).
+        """
+        enabled_analyses = self.analysis_settings.get_enabled_analyses()
+        enabled_comparisons = self.comparison_settings.get_enabled_comparisons()
+
+        missing = set(enabled_analyses) - set(enabled_comparisons)
+        if missing:
+            raise ValueError(
+                f"Missing comparison_settings for: {sorted(missing)}. "
+                f"Add 'comparison_settings.{list(missing)[0]}: {{}}' to enable comparison."
+            )
+        return self
 
     @classmethod
     def from_yaml(cls, path: Path | str) -> "ComparisonConfig":
@@ -448,8 +414,8 @@ class ComparisonConfig(BaseModel):
         """
         path = Path(path)
 
-        # Convert to dict, handling Path objects
-        data = self.model_dump()
+        # Convert to dict, handling Path objects and nested containers
+        data = self.model_dump(mode="json")
         for cond in data["conditions"]:
             cond["config"] = str(cond["config"])
 
@@ -507,7 +473,46 @@ class ComparisonConfig(BaseModel):
             if not cond.config.exists():
                 errors.append(f"Config not found for '{cond.label}': {cond.config}")
 
+        # Check analysis/comparison coverage
+        enabled_analyses = self.analysis_settings.get_enabled_analyses()
+        enabled_comparisons = self.comparison_settings.get_enabled_comparisons()
+        missing = set(enabled_analyses) - set(enabled_comparisons)
+        if missing:
+            errors.append(
+                f"Missing comparison_settings for: {sorted(missing)}. "
+                f"Add comparison_settings entries for these analyses."
+            )
+
         return errors
+
+    def generate_analysis_yaml(self, condition: ConditionConfig) -> str:
+        """Generate analysis.yaml content for a specific condition.
+
+        Parameters
+        ----------
+        condition : ConditionConfig
+            The condition to generate analysis.yaml for.
+
+        Returns
+        -------
+        str
+            YAML content for the analysis.yaml file.
+        """
+        data = self.analysis_settings.to_analysis_yaml_dict(
+            replicates=condition.replicates,
+            eq_time=self.defaults.equilibration_time,
+        )
+        return yaml.dump(data, default_flow_style=False, sort_keys=False)
+
+    def generate_analysis_yaml_for_all(self) -> dict[str, str]:
+        """Generate analysis.yaml content for all conditions.
+
+        Returns
+        -------
+        dict[str, str]
+            Dictionary mapping condition labels to analysis.yaml content.
+        """
+        return {cond.label: self.generate_analysis_yaml(cond) for cond in self.conditions}
 
 
 def generate_comparison_template(name: str, eq_time: str = "10ns") -> str:
@@ -538,7 +543,6 @@ description: "Comparison of simulation conditions"
 
 # Control condition for relative comparisons.
 # Must match one of the 'label' values in 'conditions' below, or null if none.
-# Example: control: "noPoly" (if you have a condition labeled "noPoly")
 control: null
 
 # ============================================================================
@@ -557,75 +561,65 @@ conditions:
 # ============================================================================
 # Defaults
 # ============================================================================
-# Shared parameters across all analyses.
-# Note: If equilibration_time is 0ns, you'll get a warning - set appropriately!
 defaults:
   equilibration_time: "{eq_time}"
 
 # ============================================================================
-# RMSF (for polyzymd compare rmsf)
+# Analysis Settings (WHAT to analyze - applied to all conditions)
 # ============================================================================
-# Compare protein flexibility across conditions. Uncomment to enable.
-#
-# Run: polyzymd compare rmsf -c comparison.yaml
-#
-# rmsf:
-#   selection: "protein and name CA"    # MDAnalysis selection string
-#   reference_mode: "centroid"          # centroid, average, or frame
-#   # reference_frame: 500              # Required if reference_mode is "frame"
+# Define which analyses to run. Presence of a section enables that analysis.
+# Running `polyzymd compare analyze` will run these for each condition.
+
+analysis_settings:
+  # RMSF Analysis
+  rmsf:
+    selection: "protein and name CA"
+    reference_mode: "centroid"  # centroid, average, or frame
+    # reference_frame: 500      # Required if reference_mode is "frame"
+
+  # Catalytic Triad / Active Site Distances
+  # catalytic_triad:
+  #   name: "enzyme_catalytic_triad"
+  #   threshold: 3.5  # Angstroms (H-bond cutoff)
+  #   pairs:
+  #     - label: "Asp-His"
+  #       selection_a: "midpoint(resid 133 and name OD1 OD2)"
+  #       selection_b: "resid 156 and name ND1"
+  #     - label: "His-Ser"
+  #       selection_a: "resid 156 and name NE2"
+  #       selection_b: "resid 77 and name OG"
+
+  # Distance Analysis (general inter-atomic distances)
+  # distances:
+  #   threshold: 3.5
+  #   pairs:
+  #     - label: "Ser77-Substrate"
+  #       selection_a: "resid 77 and name OG"
+  #       selection_b: "resname RBY and name C1"
+
+  # Polymer-Protein Contact Analysis
+  # contacts:
+  #   polymer_selection: "chainID C"
+  #   protein_selection: "protein"
+  #   cutoff: 4.5
+  #   grouping: "aa_class"  # aa_class, secondary_structure, or none
+  #   compute_residence_times: true
 
 # ============================================================================
-# Catalytic Triad (for polyzymd compare triad)
+# Comparison Settings (HOW to compare - statistical parameters)
 # ============================================================================
-# Define your enzyme's catalytic machinery ONCE here - it's shared across
-# all conditions since the enzyme is the same.
-#
-# Run: polyzymd compare triad -c comparison.yaml
-#
-# catalytic_triad:
-#   name: "enzyme_catalytic_triad"
-#   threshold: 3.5  # Angstroms (H-bond cutoff)
-#   pairs:
-#     - label: "Asp-His"
-#       selection_a: "midpoint(resid 133 and name OD1 OD2)"
-#       selection_b: "resid 156 and name ND1"
-#     - label: "His-Ser"
-#       selection_a: "resid 156 and name NE2"
-#       selection_b: "resid 77 and name OG"
+# Each analysis in analysis_settings MUST have a corresponding entry here.
+# Use empty {{}} for analyses with no comparison-specific parameters.
 
-# ============================================================================
-# Distance Analysis (for polyzymd compare distances)
-# ============================================================================
-# Compare specific inter-atomic distances across conditions.
-# Useful for monitoring substrate positioning, active site geometry, etc.
-#
-# Run: polyzymd compare distances -c comparison.yaml
-#
-# distances:
-#   threshold: 3.5                          # Optional: contact threshold (Angstroms)
-#   pairs:
-#     - label: "Ser77-Substrate"
-#       selection_a: "resid 77 and name OG"
-#       selection_b: "resname RBY and name C1"
-#     - label: "His156-Substrate"
-#       selection_a: "resid 156 and name NE2"
-#       selection_b: "resname RBY and name C1"
+comparison_settings:
+  rmsf: {{}}  # No comparison-specific parameters
 
-# ============================================================================
-# Polymer-Protein Contacts (for polyzymd compare contacts)
-# ============================================================================
-# Configure polymer-protein contact analysis with per-residue statistics.
-#
-# Run: polyzymd compare contacts -c comparison.yaml
-#
-# contacts:
-#   name: "polymer_protein_contacts"
-#   description: "Polymer-protein contact analysis"
-#   polymer_selection: "resname SBM EGM"  # 3-char PDB names for SBMA/EGMA
-#   protein_selection: "protein"
-#   cutoff: 4.5                            # Contact distance (Angstroms)
-#   contact_criteria: "heavy_atom"         # distance, heavy_atom, or any_atom
-#   fdr_alpha: 0.05                         # FDR for per-residue tests
-#   min_effect_size: 0.5                    # Cohen's d threshold (0.5 = medium)
-#   top_residues: 10                        # Top residues to show in console
+  # catalytic_triad: {{}}
+
+  # distances: {{}}
+
+  # contacts:
+  #   fdr_alpha: 0.05           # FDR for Benjamini-Hochberg correction
+  #   min_effect_size: 0.5      # Cohen's d threshold (0.2=small, 0.5=medium, 0.8=large)
+  #   top_residues: 10          # Number of top residues to show in console
 """

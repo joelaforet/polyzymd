@@ -6,6 +6,7 @@ This module provides foundational utilities for trajectory analysis:
 - Autocorrelation analysis for independent sampling
 - Trajectory loading from PolyzyMD outputs
 - Centroid/representative frame finding for trajectory alignment
+- Registry pattern for extensible analysis types
 """
 
 from polyzymd.analysis.core.config_hash import (
@@ -63,6 +64,14 @@ from polyzymd.analysis.core.diagnostics import (
     format_diagnostic_message,
     validate_equilibration_time,
 )
+from polyzymd.analysis.core.registry import (
+    BaseAnalysisSettings,
+    BaseComparisonSettings,
+    BaseAnalyzer,
+    AnalysisSettingsRegistry,
+    ComparisonSettingsRegistry,
+    AnalyzerRegistry,
+)
 
 __all__ = [
     # Config hashing
@@ -113,4 +122,11 @@ __all__ = [
     "get_protein_residue_range",
     "format_diagnostic_message",
     "validate_equilibration_time",
+    # Registry pattern
+    "BaseAnalysisSettings",
+    "BaseComparisonSettings",
+    "BaseAnalyzer",
+    "AnalysisSettingsRegistry",
+    "ComparisonSettingsRegistry",
+    "AnalyzerRegistry",
 ]
