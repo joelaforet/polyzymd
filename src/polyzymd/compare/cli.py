@@ -14,7 +14,7 @@ from typing import Optional
 import click
 import yaml
 
-from polyzymd.compare.comparator import RMSFComparator
+from polyzymd.compare.comparators.rmsf import RMSFComparator
 from polyzymd.compare.config import (
     ComparisonConfig,
     generate_comparison_template,
@@ -435,7 +435,7 @@ def rmsf(
     try:
         comparator = RMSFComparator(
             config=config,
-            rmsf_settings=rmsf_settings,
+            analysis_settings=rmsf_settings,
             equilibration=equilibration,
             selection_override=selection if override else None,
             reference_mode_override=reference_mode if override else None,

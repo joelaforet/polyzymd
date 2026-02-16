@@ -29,7 +29,7 @@ Usage:
     polyzymd compare contacts --eq-time 10ns
 """
 
-from polyzymd.compare.comparator import RMSFComparator
+from polyzymd.compare.comparators.rmsf import RMSFComparator
 from polyzymd.compare.config import (
     ComparisonConfig,
     ConditionConfig,
@@ -41,6 +41,14 @@ from polyzymd.compare.contacts_formatters import (
     format_contacts_markdown,
     format_contacts_result,
 )
+from polyzymd.compare.core.base import (
+    ANOVASummary,
+    BaseComparator,
+    BaseComparisonResult,
+    BaseConditionSummary,
+    PairwiseComparison,
+)
+from polyzymd.compare.core.registry import ComparatorRegistry
 from polyzymd.compare.formatters import (
     format_console_table,
     format_markdown,
@@ -79,6 +87,13 @@ from polyzymd.compare.triad_formatters import (
 )
 
 __all__ = [
+    # Core/Base classes
+    "BaseComparator",
+    "BaseComparisonResult",
+    "BaseConditionSummary",
+    "PairwiseComparison",
+    "ANOVASummary",
+    "ComparatorRegistry",
     # Config
     "ComparisonConfig",
     "ConditionConfig",
