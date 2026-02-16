@@ -94,7 +94,15 @@ conditions:
 
 defaults:
   equilibration_time: "10ns"
-  selection: "protein and name CA"
+
+# Analysis settings: WHAT to analyze (shared across conditions)
+analysis_settings:
+  rmsf:
+    selection: "protein and name CA"
+
+# Comparison settings: HOW to compare (must have entry for each analysis)
+comparison_settings:
+  rmsf: {}  # Empty is OK, but must be present
 ```
 
 ### Step 3: Validate Configuration
@@ -142,10 +150,13 @@ from polyzymd.compare import ComparisonConfig, RMSFComparator
 # Load configuration
 config = ComparisonConfig.from_yaml("comparison.yaml")
 
+# Get RMSF settings from analysis_settings
+rmsf_settings = config.analysis_settings.get("rmsf")
+
 # Run RMSF comparison
 comparator = RMSFComparator(
     config=config,
-    rmsf_config=config.rmsf,
+    rmsf_settings=rmsf_settings,
     equilibration="10ns",
 )
 result = comparator.compare()
@@ -200,28 +211,46 @@ defaults:
   equilibration_time: "10ns"        # Time to skip (used by all analyses)
 
 # ============================================================================
-# Analysis-Specific Sections (uncomment to enable)
+# Analysis Settings (WHAT to analyze - applied to all conditions)
 # ============================================================================
+# Each key enables that analysis type. Presence of a section enables it.
 
-# RMSF comparison (required for `polyzymd compare rmsf`)
-rmsf:
-  selection: "protein and name CA"  # Atoms for RMSF calculation
-  reference_mode: "centroid"        # centroid, average, or frame
-  # reference_frame: 500            # Required if reference_mode is "frame"
+analysis_settings:
+  # RMSF Analysis
+  rmsf:
+    selection: "protein and name CA"  # Atoms for RMSF calculation
+    reference_mode: "centroid"        # centroid, average, or frame
+    # reference_frame: 500            # Required if reference_mode is "frame"
 
-# Catalytic triad comparison (required for `polyzymd compare triad`)
-# catalytic_triad:
-#   name: "enzyme_catalytic_triad"
-#   threshold: 3.5
-#   pairs:
-#     - label: "Asp-His"
-#       selection_a: "midpoint(resid 133 and name OD1 OD2)"
-#       selection_b: "resid 156 and name ND1"
+  # Catalytic triad comparison (required for `polyzymd compare triad`)
+  # catalytic_triad:
+  #   name: "enzyme_catalytic_triad"
+  #   threshold: 3.5
+  #   pairs:
+  #     - label: "Asp-His"
+  #       selection_a: "midpoint(resid 133 and name OD1 OD2)"
+  #       selection_b: "resid 156 and name ND1"
 
-# Contacts comparison (required for `polyzymd compare contacts`)
-# contacts:
-#   polymer_selection: "resname SBM EGM"
-#   cutoff: 4.5
+  # Contacts comparison (required for `polyzymd compare contacts`)
+  # contacts:
+  #   polymer_selection: "resname SBM EGM"
+  #   cutoff: 4.5
+
+# ============================================================================
+# Comparison Settings (HOW to compare - statistical parameters)
+# ============================================================================
+# Each analysis in analysis_settings MUST have a corresponding entry here.
+# Use empty {} for analyses with no comparison-specific parameters.
+
+comparison_settings:
+  rmsf: {}  # No comparison-specific parameters
+
+  # catalytic_triad: {}
+
+  # contacts:
+  #   fdr_alpha: 0.05           # FDR for Benjamini-Hochberg correction
+  #   min_effect_size: 0.5      # Cohen's d threshold
+  #   top_residues: 10          # Top residues to show in console
 ```
 
 ### Path Resolution
@@ -403,6 +432,13 @@ conditions:
 
 defaults:
   equilibration_time: "10ns"
+
+analysis_settings:
+  rmsf:
+    selection: "protein and name CA"
+
+comparison_settings:
+  rmsf: {}
 ```
 
 **Run:**
@@ -419,10 +455,13 @@ from polyzymd.compare import ComparisonConfig, RMSFComparator
 # Load comparison configuration
 config = ComparisonConfig.from_yaml("comparison.yaml")
 
+# Get RMSF settings from analysis_settings
+rmsf_settings = config.analysis_settings.get("rmsf")
+
 # Run RMSF comparison
 comparator = RMSFComparator(
     config=config,
-    rmsf_config=config.rmsf,
+    rmsf_settings=rmsf_settings,
     equilibration="10ns",
 )
 result = comparator.compare()
@@ -705,13 +744,16 @@ three visualizations in a single figure with labeled panels (A, B, C).
 ```python
 from polyzymd.compare import ComparisonConfig, RMSFComparator
 
-# Load configuration (must have rmsf: section)
+# Load configuration (must have analysis_settings.rmsf section)
 config = ComparisonConfig.from_yaml("comparison.yaml")
+
+# Get RMSF settings
+rmsf_settings = config.analysis_settings.get("rmsf")
 
 # Run comparison
 comparator = RMSFComparator(
     config=config,
-    rmsf_config=config.rmsf,
+    rmsf_settings=rmsf_settings,
     equilibration="10ns",
 )
 result = comparator.compare()
@@ -863,7 +905,7 @@ For example, a Ser-His-Asp catalytic triad:
 
 ### Adding Catalytic Triad to comparison.yaml
 
-Add a `catalytic_triad` section to your comparison.yaml:
+Add a `catalytic_triad` section to your `analysis_settings`:
 
 ```yaml
 name: "polymer_stability_study"
@@ -881,18 +923,23 @@ conditions:
 defaults:
   equilibration_time: "10ns"
 
-# Define your enzyme's catalytic triad
-catalytic_triad:
-  name: "LipA_Ser-His-Asp"
-  description: "Lipase A catalytic triad"
-  threshold: 3.5  # Angstroms (H-bond cutoff)
-  pairs:
-    - label: "Asp133-His156"
-      selection_a: "midpoint(resid 133 and name OD1 OD2)"
-      selection_b: "resid 156 and name ND1"
-    - label: "His156-Ser77"
-      selection_a: "resid 156 and name NE2"
-      selection_b: "resid 77 and name OG"
+# Define your enzyme's catalytic triad in analysis_settings
+analysis_settings:
+  catalytic_triad:
+    name: "LipA_Ser-His-Asp"
+    description: "Lipase A catalytic triad"
+    threshold: 3.5  # Angstroms (H-bond cutoff)
+    pairs:
+      - label: "Asp133-His156"
+        selection_a: "midpoint(resid 133 and name OD1 OD2)"
+        selection_b: "resid 156 and name ND1"
+      - label: "His156-Ser77"
+        selection_a: "resid 156 and name NE2"
+        selection_b: "resid 77 and name OG"
+
+# Must have corresponding entry in comparison_settings
+comparison_settings:
+  catalytic_triad: {}
 ```
 
 ### Running Triad Comparison
@@ -913,11 +960,18 @@ polyzymd compare triad -o triad_report.md
 ```python
 from polyzymd.compare import ComparisonConfig, TriadComparator
 
-# Load configuration (must have catalytic_triad section)
+# Load configuration (must have analysis_settings.catalytic_triad section)
 config = ComparisonConfig.from_yaml("comparison.yaml")
 
+# Get triad settings from analysis_settings
+triad_settings = config.analysis_settings.get("catalytic_triad")
+
 # Run triad comparison
-comparator = TriadComparator(config, equilibration="10ns")
+comparator = TriadComparator(
+    config=config,
+    triad_settings=triad_settings,
+    equilibration="10ns",
+)
 result = comparator.compare()
 
 # Print results
@@ -1025,8 +1079,15 @@ from polyzymd.compare import ComparisonConfig, TriadComparator, format_triad_res
 # Load configuration
 config = ComparisonConfig.from_yaml("comparison.yaml")
 
+# Get triad settings from analysis_settings
+triad_settings = config.analysis_settings.get("catalytic_triad")
+
 # Run triad comparison
-comparator = TriadComparator(config, equilibration="10ns")
+comparator = TriadComparator(
+    config=config,
+    triad_settings=triad_settings,
+    equilibration="10ns",
+)
 result = comparator.compare()
 
 # Access results
@@ -1104,26 +1165,20 @@ polyzymd compare contacts --format json
 
 ````{tab-item} Python
 ```python
-from polyzymd.compare import (
-    ComparisonConfig,
-    ContactsComparator,
-    ContactsComparisonConfig,
-)
+from polyzymd.compare import ComparisonConfig, ContactsComparator
 
 # Load configuration
 config = ComparisonConfig.from_yaml("comparison.yaml")
 
-# Optionally customize contacts settings
-contacts_config = ContactsComparisonConfig(
-    polymer_selection="resname SBM EGM",
-    cutoff=4.5,
-    fdr_alpha=0.05,
-)
+# Get contacts settings from analysis_settings and comparison_settings
+analysis_settings = config.analysis_settings.get("contacts")
+comparison_settings = config.comparison_settings.get("contacts")
 
 # Run comparison
 comparator = ContactsComparator(
     config=config,
-    contacts_config=contacts_config,
+    analysis_settings=analysis_settings,
+    comparison_settings=comparison_settings,
     equilibration="10ns",
 )
 result = comparator.compare()
@@ -1144,7 +1199,7 @@ result.save("results/contacts_comparison.json")
 
 ### Optional: Contacts Configuration in comparison.yaml
 
-Add a `contacts` section to customize the comparison:
+Add a `contacts` section to `analysis_settings` and `comparison_settings`:
 
 ```yaml
 name: "polymer_stability_study"
@@ -1166,13 +1221,20 @@ conditions:
 defaults:
   equilibration_time: "10ns"
 
-# Optional: Configure contacts analysis
-contacts:
-  polymer_selection: "resname SBM EGM"  # MDAnalysis selection
-  protein_selection: "protein"
-  cutoff: 4.5                            # Angstroms
-  contact_criteria: "heavy_atom"
-  fdr_alpha: 0.05                        # Benjamini-Hochberg FDR
+# Configure contacts analysis in analysis_settings
+analysis_settings:
+  contacts:
+    polymer_selection: "resname SBM EGM"  # MDAnalysis selection
+    protein_selection: "protein"
+    cutoff: 4.5                            # Angstroms
+    contact_criteria: "heavy_atom"
+
+# Comparison-specific parameters in comparison_settings
+comparison_settings:
+  contacts:
+    fdr_alpha: 0.05                        # Benjamini-Hochberg FDR
+    min_effect_size: 0.5                   # Cohen's d threshold
+    top_residues: 10                       # Top residues to show
 ```
 
 If no `contacts` section is provided, defaults are used.
@@ -1298,24 +1360,21 @@ Options:
 from polyzymd.compare import (
     ComparisonConfig,
     ContactsComparator,
-    ContactsComparisonConfig,
     format_contacts_result,
 )
 
 # Load configuration
 config = ComparisonConfig.from_yaml("comparison.yaml")
 
-# Optionally customize contacts settings
-contacts_config = ContactsComparisonConfig(
-    polymer_selection="resname SBM EGM",
-    cutoff=4.5,
-    fdr_alpha=0.05,
-)
+# Get contacts settings from analysis_settings and comparison_settings
+analysis_settings = config.analysis_settings.get("contacts")
+comparison_settings = config.comparison_settings.get("contacts")
 
 # Run comparison
 comparator = ContactsComparator(
     config=config,
-    contacts_config=contacts_config,
+    analysis_settings=analysis_settings,
+    comparison_settings=comparison_settings,
     equilibration="10ns",
 )
 result = comparator.compare()

@@ -659,8 +659,8 @@ Run statistical comparison of RMSF across conditions.
 polyzymd compare rmsf [OPTIONS]
 ```
 
-**Requires** an `rmsf:` section in comparison.yaml. This is the single source
-of truth for RMSF settings.
+**Requires** an `analysis_settings.rmsf` section in comparison.yaml, with a
+corresponding `comparison_settings.rmsf` entry (can be empty `{}`).
 
 #### Options
 
@@ -669,9 +669,9 @@ of truth for RMSF settings.
 | `--file` | `-f` | comparison.yaml | Path to comparison config file |
 | `--eq-time` | - | from config | Override equilibration time |
 | `--override` | - | false | Enable CLI overrides for RMSF settings |
-| `--selection` | - | from rmsf config | Override atom selection (requires --override) |
-| `--reference-mode` | - | from rmsf config | Override reference mode (requires --override) |
-| `--reference-frame` | - | from rmsf config | Override reference frame (requires --override) |
+| `--selection` | - | from config | Override atom selection (requires --override) |
+| `--reference-mode` | - | from config | Override reference mode (requires --override) |
+| `--reference-frame` | - | from config | Override reference frame (requires --override) |
 | `--recompute` | - | false | Force recompute RMSF |
 | `--format` | - | table | Output format: table, markdown, json |
 | `--output` | `-o` | - | Save formatted output to file |
@@ -681,7 +681,7 @@ of truth for RMSF settings.
 #### Example
 
 ```bash
-# Run comparison with default settings (uses rmsf: section from YAML)
+# Run comparison with default settings (uses analysis_settings.rmsf from YAML)
 polyzymd compare rmsf
 
 # Override equilibration time
