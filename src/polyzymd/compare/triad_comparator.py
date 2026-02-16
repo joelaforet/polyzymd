@@ -19,19 +19,20 @@ from typing import Optional
 import numpy as np
 
 from polyzymd import __version__
-from polyzymd.compare.config import ComparisonConfig, ConditionConfig, CatalyticTriadConfig
-from polyzymd.compare.triad_results import (
-    TriadComparisonResult,
-    TriadConditionSummary,
-    TriadPairSummary,
-    TriadPairwiseComparison,
-    TriadANOVASummary,
-)
+from polyzymd.compare.config import ComparisonConfig, ConditionConfig
+from polyzymd.compare.settings import CatalyticTriadAnalysisSettings
 from polyzymd.compare.statistics import (
     cohens_d,
     independent_ttest,
     one_way_anova,
     percent_change,
+)
+from polyzymd.compare.triad_results import (
+    TriadANOVASummary,
+    TriadComparisonResult,
+    TriadConditionSummary,
+    TriadPairSummary,
+    TriadPairwiseComparison,
 )
 
 LOGGER = logging.getLogger("polyzymd.compare")
@@ -47,40 +48,35 @@ class TriadComparator:
     Parameters
     ----------
     config : ComparisonConfig
-        Comparison configuration defining conditions and catalytic_triad
+        Comparison configuration defining conditions.
+    triad_settings : CatalyticTriadAnalysisSettings
+        Catalytic triad analysis settings.
     equilibration : str, optional
         Equilibration time override (e.g., "10ns")
 
     Examples
     --------
     >>> config = ComparisonConfig.from_yaml("comparison.yaml")
-    >>> comparator = TriadComparator(config, equilibration="10ns")
+    >>> triad_settings = config.analysis_settings.get("catalytic_triad")
+    >>> comparator = TriadComparator(config, triad_settings, equilibration="10ns")
     >>> result = comparator.compare()
     >>> print(result.ranking)
     ["100% SBMA", "100% EGMA", "No Polymer", "50/50 Mix"]
 
     Notes
     -----
-    The comparison.yaml must have a `catalytic_triad` section defined.
     Higher simultaneous contact fraction is better (triad is more intact).
     """
 
     def __init__(
         self,
         config: ComparisonConfig,
-        equilibration: Optional[str] = None,
+        triad_settings: CatalyticTriadAnalysisSettings,
+        equilibration: str | None = None,
     ):
         self.config = config
+        self.triad_settings = triad_settings
         self.equilibration = equilibration or config.defaults.equilibration_time
-
-        # Validate that catalytic_triad is defined
-        if config.catalytic_triad is None:
-            raise ValueError(
-                "No catalytic_triad section in comparison.yaml. "
-                "Define catalytic_triad with pairs before running triad comparison."
-            )
-
-        self.triad_config = config.catalytic_triad
 
     def compare(self, recompute: bool = False) -> TriadComparisonResult:
         """Run comparison across all conditions.
@@ -97,7 +93,7 @@ class TriadComparator:
             Complete comparison results with statistics and rankings
         """
         LOGGER.info(f"Starting triad comparison: {self.config.name}")
-        LOGGER.info(f"Triad: {self.triad_config.name}")
+        LOGGER.info(f"Triad: {self.triad_settings.name}")
         LOGGER.info(f"Conditions: {len(self.config.conditions)}")
         LOGGER.info(f"Equilibration: {self.equilibration}")
 
@@ -136,11 +132,11 @@ class TriadComparator:
         return TriadComparisonResult(
             metric="simultaneous_contact_fraction",
             name=self.config.name,
-            triad_name=self.triad_config.name,
-            triad_description=self.triad_config.description,
-            threshold=self.triad_config.threshold,
-            n_pairs=self.triad_config.n_pairs,
-            pair_labels=self.triad_config.get_pair_labels(),
+            triad_name=self.triad_settings.name,
+            triad_description=self.triad_settings.description,
+            threshold=self.triad_settings.threshold,
+            n_pairs=self.triad_settings.n_pairs,
+            pair_labels=self.triad_settings.get_pair_labels(),
             control_label=self.config.control,
             conditions=summaries,
             pairwise_comparisons=comparisons,
@@ -171,8 +167,8 @@ class TriadComparator:
             Dictionary with mean/sem simultaneous contact, n_replicates,
             replicate_values, and pair_summaries
         """
-        from polyzymd.analysis.triad import CatalyticTriadAnalyzer
         from polyzymd.analysis.results.triad import TriadAggregatedResult
+        from polyzymd.analysis.triad import CatalyticTriadAnalyzer
         from polyzymd.config.schema import SimulationConfig
 
         LOGGER.info(f"Processing condition: {cond.label}")
@@ -191,7 +187,7 @@ class TriadComparator:
             LOGGER.info(f"  Computing triad analysis for replicates {cond.replicates}...")
             analyzer = CatalyticTriadAnalyzer(
                 config=sim_config,
-                triad_config=self.triad_config,
+                triad_config=self.triad_settings,
                 equilibration=self.equilibration,
             )
             agg_result = analyzer.compute_aggregated(
@@ -258,7 +254,7 @@ class TriadComparator:
         else:
             rep_str = "reps" + "_".join(map(str, reps))
 
-        name_safe = self.triad_config.name.replace(" ", "_").replace("/", "-")
+        name_safe = self.triad_settings.name.replace(" ", "_").replace("/", "-")
         filename = f"triad_{name_safe}_{rep_str}_eq{eq_value:.0f}{eq_unit}.json"
 
         result_path = (

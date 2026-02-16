@@ -25,14 +25,15 @@ from typing import Optional
 import numpy as np
 
 from polyzymd import __version__
-from polyzymd.compare.config import ComparisonConfig, ConditionConfig, ContactsComparisonConfig
+from polyzymd.compare.config import ComparisonConfig, ConditionConfig
 from polyzymd.compare.contacts_results import (
+    AggregateComparisonResult,
+    ContactsANOVASummary,
     ContactsComparisonResult,
     ContactsConditionSummary,
     ContactsPairwiseComparison,
-    ContactsANOVASummary,
-    AggregateComparisonResult,
 )
+from polyzymd.compare.settings import ContactsAnalysisSettings, ContactsComparisonSettings
 from polyzymd.compare.statistics import (
     cohens_d,
     independent_ttest,
@@ -70,15 +71,20 @@ class ContactsComparator:
     ----------
     config : ComparisonConfig
         Comparison configuration defining conditions
-    contacts_config : ContactsComparisonConfig, optional
-        Contacts configuration. If None, uses config.contacts or defaults.
+    analysis_settings : ContactsAnalysisSettings
+        Settings defining what contacts to analyze (selections, cutoff).
+    comparison_settings : ContactsComparisonSettings, optional
+        Settings for how to compare (FDR alpha, effect sizes). Defaults to
+        ContactsComparisonSettings() if not provided.
     equilibration : str, optional
         Equilibration time override (e.g., "10ns")
 
     Examples
     --------
     >>> config = ComparisonConfig.from_yaml("comparison.yaml")
-    >>> comparator = ContactsComparator(config, equilibration="10ns")
+    >>> analysis_settings = config.analysis_settings.get("contacts")
+    >>> comparison_settings = config.comparison_settings.get("contacts")
+    >>> comparator = ContactsComparator(config, analysis_settings, comparison_settings)
     >>> result = comparator.compare()
     >>> print(result.ranking_by_coverage)
     ["100% SBMA", "50/50 Mix", "No Polymer"]
@@ -92,20 +98,14 @@ class ContactsComparator:
     def __init__(
         self,
         config: ComparisonConfig,
-        contacts_config: Optional[ContactsComparisonConfig] = None,
-        equilibration: Optional[str] = None,
+        analysis_settings: ContactsAnalysisSettings,
+        comparison_settings: ContactsComparisonSettings | None = None,
+        equilibration: str | None = None,
     ):
         self.config = config
+        self.analysis_settings = analysis_settings
+        self.comparison_settings = comparison_settings or ContactsComparisonSettings()
         self.equilibration = equilibration or config.defaults.equilibration_time
-
-        # Use provided contacts config, or from comparison config, or defaults
-        if contacts_config is not None:
-            self.contacts_config = contacts_config
-        elif config.contacts is not None:
-            self.contacts_config = config.contacts
-        else:
-            # Use defaults
-            self.contacts_config = ContactsComparisonConfig()
 
     def compare(self, recompute: bool = False) -> ContactsComparisonResult:
         """Run comparison across all conditions.
@@ -128,7 +128,7 @@ class ContactsComparator:
         This is detected by checking if the polymer selection returns 0 atoms.
         """
         LOGGER.info(f"Starting contacts comparison: {self.config.name}")
-        LOGGER.info(f"Contacts: {self.contacts_config.name}")
+        LOGGER.info("Contacts: polymer_contacts")
         LOGGER.info(f"Conditions: {len(self.config.conditions)}")
         LOGGER.info(f"Equilibration: {self.equilibration}")
 
@@ -198,13 +198,13 @@ class ContactsComparator:
 
         return ContactsComparisonResult(
             name=self.config.name,
-            contacts_name=self.contacts_config.name,
-            contacts_description=self.contacts_config.description,
-            polymer_selection=self.contacts_config.polymer_selection,
-            protein_selection=self.contacts_config.protein_selection,
-            cutoff=self.contacts_config.cutoff,
-            contact_criteria=self.contacts_config.contact_criteria,
-            fdr_alpha=self.contacts_config.fdr_alpha,
+            contacts_name="polymer_contacts",
+            contacts_description=None,
+            polymer_selection=self.analysis_settings.polymer_selection,
+            protein_selection=self.analysis_settings.protein_selection,
+            cutoff=self.analysis_settings.cutoff,
+            contact_criteria="distance",
+            fdr_alpha=self.comparison_settings.fdr_alpha,
             control_label=effective_control,
             conditions=summaries,
             pairwise_comparisons=comparisons,
@@ -268,7 +268,7 @@ class ContactsComparator:
                     try:
                         universe = mda.Universe(str(topology_path))
                         polymer_atoms = universe.select_atoms(
-                            self.contacts_config.polymer_selection
+                            self.analysis_settings.polymer_selection
                         )
 
                         if len(polymer_atoms) > 0:
@@ -280,7 +280,7 @@ class ContactsComparator:
                         else:
                             LOGGER.debug(
                                 f"  {cond.label} rep {rep}: 0 polymer atoms with selection "
-                                f"'{self.contacts_config.polymer_selection}'"
+                                f"'{self.analysis_settings.polymer_selection}'"
                             )
 
                     except Exception as e:
@@ -293,7 +293,7 @@ class ContactsComparator:
                     excluded_conditions.append(cond)
                     LOGGER.info(
                         f"  Excluding '{cond.label}': no polymer atoms found with selection "
-                        f"'{self.contacts_config.polymer_selection}'"
+                        f"'{self.analysis_settings.polymer_selection}'"
                     )
 
             except Exception as e:
@@ -447,7 +447,7 @@ class ContactsComparator:
         universe = mda.Universe(str(topology_path), traj_files)
 
         # Convert equilibration time to start frame
-        from polyzymd.analysis.core.loader import parse_time_string, convert_time
+        from polyzymd.analysis.core.loader import convert_time, parse_time_string
 
         eq_value, eq_unit = parse_time_string(self.equilibration)
         eq_time_ps = convert_time(eq_value, eq_unit, "ps")
@@ -462,14 +462,14 @@ class ContactsComparator:
         LOGGER.info(f"    Equilibration: {self.equilibration} -> frame {start_frame}")
 
         # Create selectors
-        target_selector = MDAnalysisSelector(self.contacts_config.protein_selection)
-        query_selector = MDAnalysisSelector(self.contacts_config.polymer_selection)
+        target_selector = MDAnalysisSelector(self.analysis_settings.protein_selection)
+        query_selector = MDAnalysisSelector(self.analysis_settings.polymer_selection)
 
         # Create analyzer
         analyzer = ParallelContactAnalyzer(
             target_selector=target_selector,
             query_selector=query_selector,
-            cutoff=self.contacts_config.cutoff,
+            cutoff=self.analysis_settings.cutoff,
         )
 
         # Run analysis
@@ -534,10 +534,10 @@ class ContactsComparator:
             return
 
         first_cond, first_result = condition_data[0]
-        first_resids = set(rs.protein_resid for rs in first_result.residue_stats)
+        first_resids = {rs.protein_resid for rs in first_result.residue_stats}
 
         for cond, result in condition_data[1:]:
-            resids = set(rs.protein_resid for rs in result.residue_stats)
+            resids = {rs.protein_resid for rs in result.residue_stats}
             if resids != first_resids:
                 missing_in_first = resids - first_resids
                 missing_in_other = first_resids - resids

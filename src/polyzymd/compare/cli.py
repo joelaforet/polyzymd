@@ -17,10 +17,15 @@ import yaml
 from polyzymd.compare.comparator import RMSFComparator
 from polyzymd.compare.config import (
     ComparisonConfig,
-    RMSFComparisonConfig,
     generate_comparison_template,
 )
 from polyzymd.compare.formatters import format_result
+from polyzymd.compare.settings import (
+    CatalyticTriadAnalysisSettings,
+    ContactsAnalysisSettings,
+    ContactsComparisonSettings,
+    RMSFAnalysisSettings,
+)
 
 LOGGER = logging.getLogger("polyzymd.compare.cli")
 
@@ -196,15 +201,8 @@ def validate(config_file: Path, output_format: str):
             "conditions_count": len(config.conditions),
             "condition_labels": [c.label for c in config.conditions],
             "control": config.control,
-            "sections_configured": [],
+            "sections_configured": config.analysis_settings.get_enabled_analyses(),
         }
-
-        if config.rmsf:
-            result["summary"]["sections_configured"].append("rmsf")
-        if config.catalytic_triad:
-            result["summary"]["sections_configured"].append("catalytic_triad")
-        if config.contacts:
-            result["summary"]["sections_configured"].append("contacts")
 
     except yaml.YAMLError as e:
         result["errors"].append(f"YAML syntax error: {e}")
@@ -384,25 +382,26 @@ def rmsf(
         click.echo(f"Error loading config: {e}", err=True)
         sys.exit(1)
 
-    # Check for rmsf: section (required)
-    if config.rmsf is None:
-        click.echo("Error: No 'rmsf:' section in comparison.yaml", err=True)
+    # Get RMSF settings from analysis_settings
+    rmsf_settings = config.analysis_settings.get("rmsf")
+    if rmsf_settings is None:
+        click.echo("Error: No 'rmsf' in analysis_settings section", err=True)
         click.echo("", err=True)
-        click.echo(
-            "RMSF comparison requires an 'rmsf:' section. Add to your comparison.yaml:", err=True
-        )
+        click.echo("RMSF comparison requires an 'analysis_settings.rmsf' section:", err=True)
         click.echo("", err=True)
-        click.echo("  rmsf:", err=True)
-        click.echo('    selection: "protein and name CA"', err=True)
-        click.echo('    reference_mode: "centroid"', err=True)
+        click.echo("  analysis_settings:", err=True)
+        click.echo("    rmsf:", err=True)
+        click.echo('      selection: "protein and name CA"', err=True)
+        click.echo('      reference_mode: "centroid"', err=True)
         click.echo("", err=True)
-        click.echo("For frame-based alignment:", err=True)
+        click.echo("And a corresponding comparison_settings entry:", err=True)
         click.echo("", err=True)
-        click.echo("  rmsf:", err=True)
-        click.echo('    selection: "protein and name CA"', err=True)
-        click.echo('    reference_mode: "frame"', err=True)
-        click.echo("    reference_frame: 500", err=True)
+        click.echo("  comparison_settings:", err=True)
+        click.echo("    rmsf: {}", err=True)
         sys.exit(1)
+
+    # Cast to concrete type for attribute access
+    rmsf_settings = RMSFAnalysisSettings.model_validate(rmsf_settings.model_dump())
 
     # Validate config
     errors = config.validate_config()
@@ -417,12 +416,12 @@ def rmsf(
 
     # Build effective settings (YAML + optional overrides)
     equilibration = eq_time or config.defaults.equilibration_time
-    effective_selection = selection if override and selection else config.rmsf.selection
+    effective_selection = selection if override and selection else rmsf_settings.selection
     effective_ref_mode = (
-        reference_mode if override and reference_mode else config.rmsf.reference_mode
+        reference_mode if override and reference_mode else rmsf_settings.reference_mode
     )
     effective_ref_frame = (
-        reference_frame if override and reference_frame else config.rmsf.reference_frame
+        reference_frame if override and reference_frame else rmsf_settings.reference_frame
     )
 
     click.echo(f"Equilibration: {equilibration}")
@@ -436,7 +435,7 @@ def rmsf(
     try:
         comparator = RMSFComparator(
             config=config,
-            rmsf_config=config.rmsf,
+            rmsf_settings=rmsf_settings,
             equilibration=equilibration,
             selection_override=selection if override else None,
             reference_mode_override=reference_mode if override else None,
@@ -680,20 +679,30 @@ def triad(
         click.echo(f"Error loading config: {e}", err=True)
         sys.exit(1)
 
-    # Check for catalytic_triad section
-    if config.catalytic_triad is None:
-        click.echo("Error: No catalytic_triad section in comparison.yaml", err=True)
+    # Check for catalytic_triad section in analysis_settings
+    triad_settings = config.analysis_settings.get("catalytic_triad")
+    if triad_settings is None:
+        click.echo("Error: No 'catalytic_triad' in analysis_settings section", err=True)
         click.echo("", err=True)
         click.echo("Add a catalytic_triad section to your comparison.yaml:", err=True)
         click.echo("", err=True)
-        click.echo("  catalytic_triad:", err=True)
-        click.echo('    name: "enzyme_triad"', err=True)
-        click.echo("    threshold: 3.5", err=True)
-        click.echo("    pairs:", err=True)
-        click.echo('      - label: "Asp-His"', err=True)
-        click.echo('        selection_a: "resid 133 and name OD1"', err=True)
-        click.echo('        selection_b: "resid 156 and name ND1"', err=True)
+        click.echo("  analysis_settings:", err=True)
+        click.echo("    catalytic_triad:", err=True)
+        click.echo('      name: "enzyme_triad"', err=True)
+        click.echo("      threshold: 3.5", err=True)
+        click.echo("      pairs:", err=True)
+        click.echo('        - label: "Asp-His"', err=True)
+        click.echo('          selection_a: "resid 133 and name OD1"', err=True)
+        click.echo('          selection_b: "resid 156 and name ND1"', err=True)
+        click.echo("", err=True)
+        click.echo("And a corresponding comparison_settings entry:", err=True)
+        click.echo("", err=True)
+        click.echo("  comparison_settings:", err=True)
+        click.echo("    catalytic_triad: {}", err=True)
         sys.exit(1)
+
+    # Cast to concrete type for attribute access
+    triad_settings = CatalyticTriadAnalysisSettings.model_validate(triad_settings.model_dump())
 
     # Validate config
     errors = config.validate_config()
@@ -704,21 +713,22 @@ def triad(
         sys.exit(1)
 
     click.echo(f"Comparison: {config.name}")
-    click.echo(f"Triad: {config.catalytic_triad.name}")
-    click.echo(f"Pairs: {', '.join(config.catalytic_triad.get_pair_labels())}")
+    click.echo(f"Triad: {triad_settings.name}")
+    click.echo(f"Pairs: {', '.join(triad_settings.get_pair_labels())}")
     click.echo(f"Conditions: {len(config.conditions)}")
 
     # Apply overrides
     equilibration = eq_time or config.defaults.equilibration_time
 
     click.echo(f"Equilibration: {equilibration}")
-    click.echo(f"Threshold: {config.catalytic_triad.threshold} A")
+    click.echo(f"Threshold: {triad_settings.threshold} A")
     click.echo()
 
     # Run comparison
     try:
         comparator = TriadComparator(
             config=config,
+            triad_settings=triad_settings,
             equilibration=equilibration,
         )
         result = comparator.compare(recompute=recompute)
@@ -845,7 +855,6 @@ def contacts(
         polyzymd compare contacts -f my_comparison.yaml -o report.md
     """
     from polyzymd.analysis.core.logging_utils import setup_logging
-    from polyzymd.compare.config import ContactsComparisonConfig
     from polyzymd.compare.contacts_comparator import ContactsComparator
     from polyzymd.compare.contacts_formatters import format_contacts_result
 
@@ -876,24 +885,53 @@ def contacts(
             click.echo(f"  - {error}", err=True)
         sys.exit(1)
 
-    # Build contacts config with overrides
-    if config.contacts is not None:
-        contacts_config = config.contacts
-    else:
-        contacts_config = ContactsComparisonConfig()
+    # Get contacts settings from analysis_settings
+    contacts_analysis = config.analysis_settings.get("contacts")
+    if contacts_analysis is None:
+        click.echo("Error: No 'contacts' in analysis_settings section", err=True)
+        click.echo("", err=True)
+        click.echo(
+            "Contacts comparison requires an 'analysis_settings.contacts' section:", err=True
+        )
+        click.echo("", err=True)
+        click.echo("  analysis_settings:", err=True)
+        click.echo("    contacts:", err=True)
+        click.echo('      polymer_selection: "chainID C"', err=True)
+        click.echo("      cutoff: 4.5", err=True)
+        click.echo("", err=True)
+        click.echo("And a corresponding comparison_settings entry:", err=True)
+        click.echo("", err=True)
+        click.echo("  comparison_settings:", err=True)
+        click.echo("    contacts:", err=True)
+        click.echo("      fdr_alpha: 0.05", err=True)
+        sys.exit(1)
 
-    # Apply CLI overrides
+    # Cast to concrete types
+    contacts_analysis = ContactsAnalysisSettings.model_validate(contacts_analysis.model_dump())
+
+    # Get comparison settings (optional, defaults will be used if not present)
+    contacts_comparison_raw = config.comparison_settings.get("contacts")
+    if contacts_comparison_raw is not None:
+        contacts_comparison = ContactsComparisonSettings.model_validate(
+            contacts_comparison_raw.model_dump()
+        )
+    else:
+        contacts_comparison = ContactsComparisonSettings()
+
+    # Apply CLI overrides to analysis settings
     if polymer_selection:
-        contacts_config = ContactsComparisonConfig(
-            **{**contacts_config.model_dump(), "polymer_selection": polymer_selection}
+        contacts_analysis = ContactsAnalysisSettings(
+            **{**contacts_analysis.model_dump(), "polymer_selection": polymer_selection}
         )
     if cutoff is not None:
-        contacts_config = ContactsComparisonConfig(
-            **{**contacts_config.model_dump(), "cutoff": cutoff}
+        contacts_analysis = ContactsAnalysisSettings(
+            **{**contacts_analysis.model_dump(), "cutoff": cutoff}
         )
+
+    # Apply CLI overrides to comparison settings
     if fdr_alpha is not None:
-        contacts_config = ContactsComparisonConfig(
-            **{**contacts_config.model_dump(), "fdr_alpha": fdr_alpha}
+        contacts_comparison = ContactsComparisonSettings(
+            **{**contacts_comparison.model_dump(), "fdr_alpha": fdr_alpha}
         )
 
     click.echo(f"Comparison: {config.name}")
@@ -903,9 +941,9 @@ def contacts(
     equilibration = eq_time or config.defaults.equilibration_time
 
     click.echo(f"Equilibration: {equilibration}")
-    click.echo(f"Polymer selection: {contacts_config.polymer_selection}")
-    click.echo(f"Contact cutoff: {contacts_config.cutoff} A")
-    click.echo(f"FDR alpha: {contacts_config.fdr_alpha}")
+    click.echo(f"Polymer selection: {contacts_analysis.polymer_selection}")
+    click.echo(f"Contact cutoff: {contacts_analysis.cutoff} A")
+    click.echo(f"FDR alpha: {contacts_comparison.fdr_alpha}")
     if config.control:
         click.echo(f"Control: {config.control}")
     click.echo()
@@ -914,7 +952,8 @@ def contacts(
     try:
         comparator = ContactsComparator(
             config=config,
-            contacts_config=contacts_config,
+            analysis_settings=contacts_analysis,
+            comparison_settings=contacts_comparison,
             equilibration=equilibration,
         )
         result = comparator.compare(recompute=recompute)

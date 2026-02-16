@@ -31,11 +31,8 @@ Usage:
 
 from polyzymd.compare.comparator import RMSFComparator
 from polyzymd.compare.config import (
-    CatalyticTriadConfig,
     ComparisonConfig,
     ConditionConfig,
-    ContactsComparisonConfig,
-    RMSFComparisonConfig,
 )
 from polyzymd.compare.contacts_comparator import ContactsComparator
 from polyzymd.compare.contacts_formatters import (
@@ -63,6 +60,14 @@ from polyzymd.compare.plotting import (
     plot_summary_panel,
 )
 from polyzymd.compare.results import ComparisonResult
+from polyzymd.compare.settings import (
+    CatalyticTriadAnalysisSettings,
+    CatalyticTriadComparisonSettings,
+    ContactsAnalysisSettings,
+    ContactsComparisonSettings,
+    RMSFAnalysisSettings,
+    RMSFComparisonSettings,
+)
 from polyzymd.compare.triad_comparator import TriadComparator
 from polyzymd.compare.triad_formatters import (
     format_triad_console_table,
@@ -76,9 +81,13 @@ __all__ = [
     # Config
     "ComparisonConfig",
     "ConditionConfig",
-    "CatalyticTriadConfig",
-    "ContactsComparisonConfig",
-    "RMSFComparisonConfig",
+    # Analysis Settings
+    "RMSFAnalysisSettings",
+    "RMSFComparisonSettings",
+    "CatalyticTriadAnalysisSettings",
+    "CatalyticTriadComparisonSettings",
+    "ContactsAnalysisSettings",
+    "ContactsComparisonSettings",
     # RMSF comparison
     "RMSFComparator",
     "ComparisonResult",

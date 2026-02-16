@@ -16,13 +16,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-# Import settings to trigger registration and provide backward-compatible aliases
-from polyzymd.compare.settings import (
+# Import settings to trigger registration
+from polyzymd.compare.settings import (  # noqa: F401
     RMSFAnalysisSettings,
     RMSFComparisonSettings,
     DistancesAnalysisSettings,
@@ -40,13 +40,6 @@ from polyzymd.analysis.core.registry import (
     BaseComparisonSettings,
     ComparisonSettingsRegistry,
 )
-
-# Backward-compatible aliases for old class names
-# These allow existing code to import the old names
-RMSFComparisonConfig = RMSFAnalysisSettings
-CatalyticTriadConfig = CatalyticTriadAnalysisSettings
-TriadPairConfig = TriadPairSettings
-ContactsComparisonConfig = ContactsAnalysisSettings
 
 logger = logging.getLogger(__name__)
 
@@ -111,10 +104,8 @@ class AnalysisDefaults(BaseModel):
 class AnalysisSettingsContainer(BaseModel):
     """Container for analysis settings (WHAT to analyze).
 
-    Uses dynamic attribute access via __getattr__ to support any registered
-    analysis type without hardcoding field names.
-
-    Attributes are stored in _settings dict and accessed dynamically.
+    Uses dynamic attribute access to support any registered analysis type
+    without hardcoding field names.
     """
 
     model_config = {"extra": "allow"}
@@ -318,8 +309,8 @@ class ComparisonConfig(BaseModel):
     """
 
     name: str
-    description: Optional[str] = None
-    control: Optional[str] = None
+    description: str | None = None
+    control: str | None = None
     conditions: list[ConditionConfig]
     defaults: AnalysisDefaults = Field(default_factory=AnalysisDefaults)
     analysis_settings: AnalysisSettingsContainer = Field(default_factory=AnalysisSettingsContainer)
