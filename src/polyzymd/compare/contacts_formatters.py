@@ -11,9 +11,7 @@ Note:
 
 from __future__ import annotations
 
-from polyzymd.compare.contacts_results import (
-    ContactsComparisonResult,
-)
+from polyzymd.compare.results import ContactsComparisonResult
 
 
 def format_contacts_console_table(

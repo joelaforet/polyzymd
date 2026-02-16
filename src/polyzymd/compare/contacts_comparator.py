@@ -26,7 +26,7 @@ import numpy as np
 
 from polyzymd import __version__
 from polyzymd.compare.config import ComparisonConfig, ConditionConfig
-from polyzymd.compare.contacts_results import (
+from polyzymd.compare.results import (
     AggregateComparisonResult,
     ContactsANOVASummary,
     ContactsComparisonResult,

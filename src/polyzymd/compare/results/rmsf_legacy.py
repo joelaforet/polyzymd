@@ -1,7 +1,10 @@
-"""Result models for comparison analysis.
+"""RMSF comparison result models (legacy).
 
-This module defines Pydantic models for structured comparison results
-that can be serialized to JSON and used for downstream plotting.
+These are the original result classes used by the old RMSFComparator.
+They are kept for backward compatibility with existing saved results.
+
+For new code, prefer using RMSFConditionSummary and RMSFComparisonResult
+from polyzymd.compare.results.rmsf which inherit from the OOP base classes.
 """
 
 from __future__ import annotations

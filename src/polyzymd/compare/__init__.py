@@ -41,12 +41,6 @@ from polyzymd.compare.contacts_formatters import (
     format_contacts_markdown,
     format_contacts_result,
 )
-from polyzymd.compare.contacts_results import (
-    AggregateComparisonResult,
-    ContactsComparisonResult,
-    ContactsConditionSummary,
-    ContactsPairwiseComparison,
-)
 from polyzymd.compare.formatters import (
     format_console_table,
     format_markdown,
@@ -59,7 +53,15 @@ from polyzymd.compare.plotting import (
     plot_rmsf_comparison,
     plot_summary_panel,
 )
-from polyzymd.compare.results import ComparisonResult
+from polyzymd.compare.results import (
+    AggregateComparisonResult,
+    ComparisonResult,
+    ContactsComparisonResult,
+    ContactsConditionSummary,
+    ContactsPairwiseComparison,
+    TriadComparisonResult,
+    TriadConditionSummary,
+)
 from polyzymd.compare.settings import (
     CatalyticTriadAnalysisSettings,
     CatalyticTriadComparisonSettings,
@@ -75,7 +77,6 @@ from polyzymd.compare.triad_formatters import (
     format_triad_result,
     triad_to_json,
 )
-from polyzymd.compare.triad_results import TriadComparisonResult, TriadConditionSummary
 
 __all__ = [
     # Config

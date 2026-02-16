@@ -14,13 +14,13 @@ import numpy as np
 
 from polyzymd import __version__
 from polyzymd.compare.config import ComparisonConfig, ConditionConfig
-from polyzymd.compare.settings import RMSFAnalysisSettings
 from polyzymd.compare.results import (
     ANOVASummary,
     ComparisonResult,
     ConditionSummary,
     PairwiseComparison,
-)
+)  # noqa: F401 (re-exported from results/)
+from polyzymd.compare.settings import RMSFAnalysisSettings
 from polyzymd.compare.statistics import (
     cohens_d,
     independent_ttest,

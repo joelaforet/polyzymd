@@ -20,19 +20,19 @@ import numpy as np
 
 from polyzymd import __version__
 from polyzymd.compare.config import ComparisonConfig, ConditionConfig
+from polyzymd.compare.results import (
+    TriadANOVASummary,
+    TriadComparisonResult,
+    TriadConditionSummary,
+    TriadPairSummary,
+    TriadPairwiseComparison,
+)
 from polyzymd.compare.settings import CatalyticTriadAnalysisSettings
 from polyzymd.compare.statistics import (
     cohens_d,
     independent_ttest,
     one_way_anova,
     percent_change,
-)
-from polyzymd.compare.triad_results import (
-    TriadANOVASummary,
-    TriadComparisonResult,
-    TriadConditionSummary,
-    TriadPairSummary,
-    TriadPairwiseComparison,
 )
 
 LOGGER = logging.getLogger("polyzymd.compare")

@@ -6,7 +6,7 @@ for different output formats: console tables, Markdown, and JSON.
 
 from __future__ import annotations
 
-from polyzymd.compare.triad_results import TriadComparisonResult
+from polyzymd.compare.results import TriadComparisonResult
 
 
 def format_triad_console_table(
