@@ -868,7 +868,8 @@ for cond in data["conditions"]:
 | `--format table/markdown/json` | Output format |
 | `-o FILE` | Save output to file |
 | `--recompute` | Force recomputation (ignore cache) |
-| `-v, --verbose` | Show detailed logging |
+| `-q, --quiet` | Suppress INFO messages |
+| `--debug` | Enable DEBUG logging |
 
 ---
 

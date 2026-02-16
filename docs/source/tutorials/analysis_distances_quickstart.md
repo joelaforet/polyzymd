@@ -450,7 +450,7 @@ to automatic plot generation.
 **Fix:**
 - Check residue numbering in your PDB vs. MDAnalysis (0-indexed vs 1-indexed)
 - Verify atom names match your topology: `protein and resid 77` to see available atoms
-- Use `polyzymd -v analyze distances ...` for detailed selection diagnostics
+- Use `polyzymd --debug analyze distances ...` for detailed selection diagnostics
 
 ### Very wide distance distribution
 

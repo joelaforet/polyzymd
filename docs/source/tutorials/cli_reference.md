@@ -9,25 +9,23 @@ All commands support these global options:
 ```bash
 polyzymd --version        # Show version
 polyzymd --help           # Show help
-polyzymd -v <command>     # Verbose output (debug logging)
+polyzymd -q <command>     # Quiet mode (suppress INFO, show warnings/errors only)
+polyzymd --debug <command>  # Debug mode (show DEBUG logging for troubleshooting)
 polyzymd --openff-logs <command>  # Enable verbose OpenFF logs
 ```
 
 ### Logging Behavior
 
-By default, PolyzyMD suppresses verbose log messages from OpenFF Interchange and Toolkit libraries. These libraries generate per-atom INFO messages during system building (e.g., "Preset charges applied to atom index 8667" or "Key collision with different parameters"). For large systems with tens of thousands of atoms, this can produce millions of log lines.
-
-**Default behavior:** OpenFF INFO logs are suppressed; only WARNING and ERROR messages are shown.
-
-**To enable OpenFF logs for debugging:**
-
-```bash
-polyzymd --openff-logs build -c config.yaml
-polyzymd --openff-logs run -c config.yaml
+By default, PolyzyMD shows INFO-level logging with full format:
+```
+2026-02-16 13:08:40,691 - polyzymd.compare - INFO - Loading trajectory...
 ```
 
-This is useful when:
-- Debugging force field parameter assignment issues
+**Quiet mode (`-q` / `--quiet`):** Suppress INFO messages, show only WARNING and ERROR with minimal format (timestamp + message only). Useful for scripting or reducing output clutter.
+
+**Debug mode (`--debug`):** Show DEBUG-level messages with full format. Useful for troubleshooting issues.
+
+**OpenFF logs:** OpenFF Interchange and Toolkit libraries are suppressed by default (they generate per-atom INFO messages during system building). Use `--openff-logs` to enable them for debugging force field issues.
 - Investigating charge assignment problems
 - Troubleshooting system building failures
 
@@ -584,7 +582,8 @@ of truth for RMSF settings.
 | `--recompute` | - | false | Force recompute RMSF |
 | `--format` | - | table | Output format: table, markdown, json |
 | `--output` | `-o` | - | Save formatted output to file |
-| `--verbose` | `-v` | false | Show detailed logging |
+| `--quiet` | `-q` | false | Suppress INFO messages |
+| `--debug` | - | false | Enable DEBUG logging |
 
 #### Example
 

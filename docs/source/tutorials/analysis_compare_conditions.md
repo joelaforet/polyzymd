@@ -553,7 +553,8 @@ Options:
   --recompute                     Force recompute RMSF
   --format [table|markdown|json]  Output format [default: table]
   -o, --output PATH               Save formatted output to file
-  -v, --verbose                   Show detailed logging
+  -q, --quiet                     Suppress INFO messages
+  --debug                         Enable DEBUG logging
 ```
 
 ### polyzymd compare validate
@@ -1012,7 +1013,8 @@ Options:
   --recompute                     Force recompute triad analysis
   --format [table|markdown|json]  Output format [default: table]
   -o, --output PATH               Save formatted output to file
-  -v, --verbose                   Show detailed logging
+  -q, --quiet                     Suppress INFO messages
+  --debug                         Enable DEBUG logging
 ```
 
 ### Python API for Triad Comparison
@@ -1286,7 +1288,8 @@ Options:
   --recompute                     Force recompute contacts analysis
   --format [table|markdown|json]  Output format [default: table]
   -o, --output PATH               Save formatted output to file
-  -v, --verbose                   Show detailed logging
+  -q, --quiet                     Suppress INFO messages
+  --debug                         Enable DEBUG logging
 ```
 
 ### Python API for Contacts Comparison

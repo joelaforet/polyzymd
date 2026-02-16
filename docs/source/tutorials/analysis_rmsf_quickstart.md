@@ -407,10 +407,10 @@ uncertainties may be underestimated. See [Best Practices Guide](analysis_rmsf_be
 
 ### No output / silent failure
 
-**Fix**: Add verbose flag to see detailed logging:
+**Fix**: Add debug flag to see detailed logging:
 
 ```bash
-polyzymd -v analyze rmsf -c config.yaml -r 1 --eq-time 10ns
+polyzymd --debug analyze rmsf -c config.yaml -r 1 --eq-time 10ns
 ```
 
 ### Missing Replicate Warning

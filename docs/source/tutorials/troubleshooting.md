@@ -415,8 +415,8 @@ conda list | grep -E "openmm|openff|pydantic"
 # Configuration validation
 polyzymd validate -c config.yaml
 
-# Verbose mode
-polyzymd -v build -c config.yaml --dry-run
+# Debug mode for troubleshooting
+polyzymd --debug build -c config.yaml --dry-run
 
 # Enable OpenFF logs for debugging force field issues
 polyzymd --openff-logs build -c config.yaml
