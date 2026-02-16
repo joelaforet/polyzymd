@@ -211,6 +211,142 @@ def init(eq_time: str) -> None:
 
 
 # -----------------------------------------------------------------------------
+# Validate Command - Check analysis.yaml for errors
+# -----------------------------------------------------------------------------
+
+
+@analyze.command()
+@click.option(
+    "-f",
+    "--file",
+    "config_file",
+    type=click.Path(path_type=Path),
+    default="analysis.yaml",
+    help="Path to analysis.yaml config file.",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    help="Output format: table (default) or json.",
+)
+def validate(config_file: Path, output_format: str):
+    """Validate an analysis.yaml configuration file.
+
+    Checks the configuration for errors without running any analyses.
+    Useful for catching configuration problems before running expensive
+    computations.
+
+    \b
+    Validates:
+      - YAML syntax and structure
+      - Required fields present
+      - Replicates list is non-empty
+      - Distance pairs defined if distances enabled
+      - Triad pairs defined if catalytic_triad enabled
+      - Contact selections defined if contacts enabled
+
+    \b
+    Example:
+        polyzymd analyze validate
+        polyzymd analyze validate -f my_analysis.yaml
+        polyzymd analyze validate --format json
+    """
+    import json as json_module
+
+    import yaml
+
+    config_file = Path(config_file).resolve()
+
+    # Prepare result structure
+    result = {
+        "file": str(config_file),
+        "valid": False,
+        "errors": [],
+        "summary": {},
+    }
+
+    # Check file exists
+    if not config_file.exists():
+        result["errors"].append(f"File not found: {config_file}")
+        _output_validation_result(result, output_format)
+        sys.exit(1)
+
+    # Try to load and validate
+    try:
+        from polyzymd.analysis.config import AnalysisConfig
+
+        config = AnalysisConfig.from_yaml(config_file)
+
+        # Run validation
+        errors = config.validate_config()
+        result["errors"] = errors
+        result["valid"] = len(errors) == 0
+
+        # Build summary
+        result["summary"] = {
+            "replicates": config.replicates,
+            "equilibration_time": config.defaults.equilibration_time,
+            "enabled_analyses": config.get_enabled_analyses(),
+        }
+
+    except yaml.YAMLError as e:
+        result["errors"].append(f"YAML syntax error: {e}")
+    except Exception as e:
+        result["errors"].append(f"Validation error: {e}")
+
+    _output_validation_result(result, output_format)
+
+    if not result["valid"]:
+        sys.exit(1)
+
+
+def _output_validation_result(result: dict, output_format: str) -> None:
+    """Output validation result in the specified format.
+
+    Parameters
+    ----------
+    result : dict
+        Validation result dictionary
+    output_format : str
+        Output format: 'table' or 'json'
+    """
+    import json as json_module
+
+    if output_format == "json":
+        click.echo(json_module.dumps(result, indent=2))
+        return
+
+    # Human-readable table format
+    click.echo(f"Validating: {result['file']}")
+    click.echo()
+
+    if result["valid"]:
+        click.secho("✓ Configuration is valid", fg="green")
+        click.echo()
+
+        summary = result.get("summary", {})
+        if summary:
+            replicates = summary.get("replicates", [])
+            if replicates:
+                click.echo(f"  Replicates: {replicates}")
+            eq_time = summary.get("equilibration_time")
+            if eq_time:
+                click.echo(f"  Equilibration time: {eq_time}")
+            enabled = summary.get("enabled_analyses", [])
+            if enabled:
+                click.echo(f"  Enabled analyses: {', '.join(enabled)}")
+            else:
+                click.echo("  Enabled analyses: (none)")
+    else:
+        click.secho("✗ Configuration has errors", fg="red")
+        click.echo()
+        for error in result["errors"]:
+            click.echo(f"  • {error}", err=True)
+
+
+# -----------------------------------------------------------------------------
 # Run Command - Execute all enabled analyses
 # -----------------------------------------------------------------------------
 

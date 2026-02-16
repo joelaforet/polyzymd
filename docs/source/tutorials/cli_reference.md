@@ -452,8 +452,101 @@ Analyze MD trajectories with various metrics.
 polyzymd analyze COMMAND [OPTIONS]
 
 Commands:
+  init       Initialize analysis.yaml in current directory
+  validate   Validate analysis.yaml configuration
+  run        Run all enabled analyses from analysis.yaml
   rmsf       Compute RMSF (Root Mean Square Fluctuation) analysis
   distances  Compute inter-atomic distance analysis
+```
+
+### polyzymd analyze init
+
+Initialize analysis configuration for a simulation project.
+
+```bash
+polyzymd analyze init [OPTIONS]
+
+Options:
+  --eq-time TEXT    Default equilibration time [default: 10ns]
+```
+
+Must be run from a directory containing `config.yaml`.
+
+#### Example
+
+```bash
+cd my_simulation_project
+polyzymd analyze init
+polyzymd analyze init --eq-time 20ns
+```
+
+### polyzymd analyze validate
+
+Validate an analysis.yaml configuration file without running analyses.
+
+```bash
+polyzymd analyze validate [OPTIONS]
+
+Options:
+  -f, --file PATH        Path to analysis.yaml [default: analysis.yaml]
+  --format [table|json]  Output format [default: table]
+```
+
+#### What It Checks
+
+- YAML syntax and structure
+- Required fields present
+- Replicates list is non-empty
+- Distance pairs defined if distances enabled
+- Triad pairs defined if catalytic_triad enabled
+- Contact selections defined if contacts enabled
+
+#### Example
+
+```bash
+# Basic validation
+polyzymd analyze validate
+
+# Validate specific file
+polyzymd analyze validate -f path/to/analysis.yaml
+
+# JSON output for CI integration
+polyzymd analyze validate --format json
+```
+
+**Output (success):**
+```
+Validating: /path/to/analysis.yaml
+
+✓ Configuration is valid
+
+  Replicates: [1, 2, 3]
+  Equilibration time: 10ns
+  Enabled analyses: rmsf, contacts
+```
+
+**Output (errors):**
+```
+Validating: /path/to/analysis.yaml
+
+✗ Configuration has errors
+
+  • No replicates specified
+  • Distance analysis enabled but no pairs defined
+```
+
+**JSON output:**
+```json
+{
+  "file": "/path/to/analysis.yaml",
+  "valid": true,
+  "errors": [],
+  "summary": {
+    "replicates": [1, 2, 3],
+    "equilibration_time": "10ns",
+    "enabled_analyses": ["rmsf", "contacts"]
+  }
+}
 ```
 
 ### polyzymd analyze rmsf
@@ -603,13 +696,75 @@ polyzymd compare rmsf --format markdown -o report.md
 
 ### polyzymd compare validate
 
-Check that a comparison.yaml configuration is valid.
+Validate a comparison.yaml configuration file without running analyses.
 
 ```bash
 polyzymd compare validate [OPTIONS]
 
 Options:
-  -f, --file PATH    Config file [default: comparison.yaml]
+  -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
+  --format [table|json]  Output format [default: table]
+```
+
+#### What It Checks
+
+- YAML syntax and structure
+- Required fields present
+- At least 2 conditions defined
+- Condition labels are unique
+- Control label matches a condition (if specified)
+- Config files exist for each condition
+
+#### Example
+
+```bash
+# Basic validation
+polyzymd compare validate
+
+# Validate specific file
+polyzymd compare validate -f path/to/comparison.yaml
+
+# JSON output for CI integration
+polyzymd compare validate --format json
+```
+
+**Output (success):**
+```
+Validating: /path/to/comparison.yaml
+
+✓ Configuration is valid
+
+  Name: polymer_study
+  Conditions: 3
+    - WT, PEG, SBMA
+  Control: WT
+  Analysis sections: rmsf, catalytic_triad
+```
+
+**Output (errors):**
+```
+Validating: /path/to/comparison.yaml
+
+✗ Configuration has errors
+
+  • Control 'NoPolymer' not found in conditions: ['WT', 'PEG']
+  • Config file not found: /path/to/missing/config.yaml
+```
+
+**JSON output:**
+```json
+{
+  "file": "/path/to/comparison.yaml",
+  "valid": true,
+  "errors": [],
+  "summary": {
+    "name": "polymer_study",
+    "conditions_count": 3,
+    "condition_labels": ["WT", "PEG", "SBMA"],
+    "control": "WT",
+    "sections_configured": ["rmsf", "catalytic_triad"]
+  }
+}
 ```
 
 ### polyzymd compare show
