@@ -236,7 +236,10 @@ class ContactsComparator:
         """
         import MDAnalysis as mda
 
+        from polyzymd.analysis.core.logging_utils import suppress_mdanalysis_info
         from polyzymd.config.schema import SimulationConfig
+
+        suppress_mdanalysis_info()
 
         valid_conditions = []
         excluded_conditions = []
@@ -423,6 +426,9 @@ class ContactsComparator:
 
         from polyzymd.analysis.common.selectors import MDAnalysisSelector
         from polyzymd.analysis.contacts.calculator_parallel import ParallelContactAnalyzer
+        from polyzymd.analysis.core.logging_utils import suppress_mdanalysis_info
+
+        suppress_mdanalysis_info()
 
         LOGGER.info(f"  Computing contacts for replicate {replicate}...")
 
