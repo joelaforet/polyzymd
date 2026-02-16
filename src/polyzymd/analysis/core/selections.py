@@ -35,6 +35,7 @@ the center of mass of a group of residues (e.g., lid opening in lipases).
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -46,6 +47,59 @@ from numpy.typing import NDArray
 if TYPE_CHECKING:
     from MDAnalysis.core.groups import AtomGroup
     from MDAnalysis.core.universe import Universe
+
+LOGGER = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Selection Translation (PolyzyMD → MDAnalysis)
+# =============================================================================
+
+
+def translate_selection(selection: str) -> str:
+    """Translate PolyzyMD selection keywords to MDAnalysis equivalents.
+
+    This allows users to use the same selection syntax in analysis as they
+    use in config.yaml for restraints and other atom selections.
+
+    Translations
+    ------------
+    - ``pdbindex N`` → ``id N`` (PDB ATOM serial number)
+
+    The ``pdbindex`` keyword refers to the 1-indexed atom serial number
+    from the PDB ATOM record (column 7-11), which is what PyMOL displays
+    as "id". In MDAnalysis, this is accessed via the ``id`` selection keyword.
+
+    Note: MDAnalysis also has ``bynum`` which is 1-indexed *positional*
+    (i.e., bynum 1 = first atom, bynum 2 = second atom), but this does NOT
+    correspond to PDB serial numbers when there are gaps in numbering.
+    We use ``id`` because it matches actual PDB serial numbers.
+
+    Parameters
+    ----------
+    selection : str
+        Selection string with possible PolyzyMD-specific keywords
+
+    Returns
+    -------
+    str
+        Selection string with MDAnalysis-compatible keywords
+
+    Examples
+    --------
+    >>> translate_selection("pdbindex 100 and name CA")
+    "id 100 and name CA"
+
+    >>> translate_selection("midpoint(pdbindex 100 and name OD1 OD2)")
+    "midpoint(id 100 and name OD1 OD2)"
+    """
+    # pdbindex N → id N (PDB ATOM serial number)
+    translated = re.sub(r"\bpdbindex\b", "id", selection, flags=re.IGNORECASE)
+
+    if translated != selection:
+        LOGGER.debug("Translated selection keyword: 'pdbindex' → 'id' (PDB ATOM serial number)")
+
+    return translated
 
 
 class SelectionMode(str, Enum):
@@ -87,6 +141,9 @@ _COM_PATTERN = re.compile(r"^com\s*\(\s*(.+)\s*\)$", re.IGNORECASE)
 def parse_selection_string(selection: str) -> ParsedSelection:
     """Parse a selection string to extract mode and MDAnalysis selection.
 
+    Also translates PolyzyMD-specific keywords (like ``pdbindex``) to their
+    MDAnalysis equivalents (like ``id``).
+
     Parameters
     ----------
     selection : str
@@ -94,6 +151,7 @@ def parse_selection_string(selection: str) -> ParsedSelection:
         - "resid 77 and name OG" - standard MDAnalysis
         - "midpoint(resid 133 and name OD1 OD2)" - midpoint mode
         - "com(resid 50-75)" - center of mass mode
+        - "pdbindex 100 and name CA" - PolyzyMD pdbindex (translated to id)
 
     Returns
     -------
@@ -107,6 +165,10 @@ def parse_selection_string(selection: str) -> ParsedSelection:
     <SelectionMode.MIDPOINT: 'midpoint'>
     >>> parsed.selection
     "resid 133 and name OD1 OD2"
+
+    >>> parsed = parse_selection_string("pdbindex 100 and name CA")
+    >>> parsed.selection
+    "id 100 and name CA"
     """
     selection = selection.strip()
 
@@ -115,7 +177,7 @@ def parse_selection_string(selection: str) -> ParsedSelection:
     if midpoint_match:
         inner = midpoint_match.group(1).strip()
         return ParsedSelection(
-            selection=inner,
+            selection=translate_selection(inner),
             mode=SelectionMode.MIDPOINT,
             original=selection,
         )
@@ -125,14 +187,14 @@ def parse_selection_string(selection: str) -> ParsedSelection:
     if com_match:
         inner = com_match.group(1).strip()
         return ParsedSelection(
-            selection=inner,
+            selection=translate_selection(inner),
             mode=SelectionMode.COM,
             original=selection,
         )
 
-    # Standard MDAnalysis selection
+    # Standard MDAnalysis selection (also translate)
     return ParsedSelection(
-        selection=selection,
+        selection=translate_selection(selection),
         mode=SelectionMode.SINGLE,
         original=selection,
     )

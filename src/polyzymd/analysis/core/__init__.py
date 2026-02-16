@@ -48,6 +48,7 @@ from polyzymd.analysis.core.centroid import (
 from polyzymd.analysis.core.selections import (
     SelectionMode,
     ParsedSelection,
+    translate_selection,
     parse_selection_string,
     select_atoms,
     get_position,
@@ -99,6 +100,7 @@ __all__ = [
     # Selection parsing
     "SelectionMode",
     "ParsedSelection",
+    "translate_selection",
     "parse_selection_string",
     "select_atoms",
     "get_position",

@@ -263,12 +263,30 @@ for pr in result.pair_results:
 
 ## Special Selection Syntax
 
-PolyzyMD extends MDAnalysis selections with two special position modes:
+PolyzyMD extends MDAnalysis selections with special position modes and keywords:
+
+### Position Modes
 
 | Syntax | Description | Use Case |
 |--------|-------------|----------|
 | `midpoint(selection)` | Geometric midpoint of selected atoms | Carboxylate groups (Asp, Glu) |
 | `com(selection)` | Center of mass of selected atoms | Entire residues, aromatic rings |
+
+### PolyzyMD Keywords
+
+| Keyword | Description | Example |
+|---------|-------------|---------|
+| `pdbindex N` | Atom by PDB serial number (1-indexed) | `pdbindex 2740 and name CA` |
+
+The `pdbindex` keyword lets you reference atoms by their PDB ATOM serial number
+(the number displayed in PyMOL as "id"). This is especially useful when copying
+atom selections from restraint definitions in `config.yaml`.
+
+```{tip}
+**Consistency with restraints:** You can use the same `pdbindex` selections in
+both your restraint configuration (config.yaml) and analysis commands. This
+makes it easy to verify that restrained distances match observed distances.
+```
 
 ### Examples
 
@@ -281,6 +299,9 @@ selection_b: "com(resname LIG)"
 
 # Standard single atom
 selection_a: "resid 77 and name OG"
+
+# Atom by PDB serial number
+selection_a: "pdbindex 2740"
 ```
 
 ```{tip}
