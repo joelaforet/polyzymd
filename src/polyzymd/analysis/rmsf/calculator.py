@@ -45,10 +45,10 @@ from polyzymd.analysis.core.autocorrelation import (
     estimate_correlation_time,
     get_independent_indices,
 )
-from polyzymd.analysis.core.centroid import (
-    ReferenceMode,
-    find_centroid_frame,
-    get_reference_mode_description,
+from polyzymd.analysis.core.centroid import ReferenceMode
+from polyzymd.analysis.core.alignment import (
+    AlignmentConfig,
+    align_trajectory,
 )
 from polyzymd.analysis.core.config_hash import compute_config_hash, validate_config_hash
 from polyzymd.analysis.core.loader import (
@@ -73,7 +73,6 @@ if TYPE_CHECKING:
 # MDAnalysis is optional
 try:
     import MDAnalysis as mda
-    from MDAnalysis.analysis import align
     from MDAnalysis.analysis.rms import RMSF
 
     HAS_MDANALYSIS = True
@@ -397,6 +396,9 @@ class RMSFCalculator:
     ) -> int | None:
         """Find reference frame and align trajectory in-memory.
 
+        This method delegates to the shared align_trajectory() utility,
+        constructing an AlignmentConfig from this calculator's settings.
+
         Parameters
         ----------
         u : Universe
@@ -411,85 +413,22 @@ class RMSFCalculator:
         int or None
             Reference frame index (0-indexed), or None if using average structure
         """
-        LOGGER.info(f"Finding reference structure using mode='{self.reference_mode}'")
+        # Build alignment config from calculator settings
+        alignment_config = AlignmentConfig(
+            enabled=True,
+            reference_mode=self.reference_mode,
+            reference_frame=self.reference_frame,
+            selection=self.alignment_selection,
+            centroid_selection=self.centroid_selection,
+        )
 
-        ref_frame_idx: int | None = None
-
-        if self.reference_mode == "centroid":
-            # Find most populated state via K-Means
-            ref_frame_idx = find_centroid_frame(
-                u,
-                selection=self.centroid_selection,
-                start_frame=start_frame,
-                stop_frame=stop_frame,
-                verbose=True,
-            )
-            LOGGER.info(f"Centroid frame: {ref_frame_idx} (0-indexed)")
-
-            # Align to centroid frame
-            LOGGER.info("Aligning trajectory to centroid frame...")
-            aligner = align.AlignTraj(
-                u,
-                u,
-                select=self.alignment_selection,
-                ref_frame=ref_frame_idx,
-                in_memory=True,
-            ).run()
-            del aligner
-
-        elif self.reference_mode == "average":
-            # Compute average structure and align to it
-            LOGGER.info("Computing average structure...")
-            average = align.AverageStructure(
-                u,
-                u,
-                select=self.alignment_selection,
-                ref_frame=start_frame,  # Need a reference for initial alignment
-            ).run()
-            ref_universe = average.results.universe
-
-            LOGGER.info("Aligning trajectory to average structure...")
-            aligner = align.AlignTraj(
-                u,
-                ref_universe,
-                select=self.alignment_selection,
-                in_memory=True,
-            ).run()
-            del aligner
-            del average
-
-            ref_frame_idx = None  # Average is not a real frame
-
-        elif self.reference_mode == "frame":
-            # Use user-specified frame (convert from 1-indexed to 0-indexed)
-            ref_frame_idx = self.reference_frame - 1
-
-            # Validate
-            n_frames = len(u.trajectory)
-            if ref_frame_idx < 0 or ref_frame_idx >= n_frames:
-                raise ValueError(
-                    f"reference_frame={self.reference_frame} (1-indexed) is out of range. "
-                    f"Valid range: 1 to {n_frames}"
-                )
-
-            LOGGER.info(
-                f"Using user-specified frame {self.reference_frame} (0-indexed: {ref_frame_idx})"
-            )
-
-            # Align to specified frame
-            aligner = align.AlignTraj(
-                u,
-                u,
-                select=self.alignment_selection,
-                ref_frame=ref_frame_idx,
-                in_memory=True,
-            ).run()
-            del aligner
-
-        else:
-            raise ValueError(f"Unknown reference_mode: {self.reference_mode}")
-
-        return ref_frame_idx
+        # Use the shared alignment utility
+        return align_trajectory(
+            u,
+            alignment_config,
+            start_frame=start_frame,
+            stop_frame=stop_frame,
+        )
 
     def compute_aggregated(
         self,
