@@ -72,6 +72,11 @@ from polyzymd.analysis.core.registry import (
     ComparisonSettingsRegistry,
     AnalyzerRegistry,
 )
+from polyzymd.analysis.core.metric_type import (
+    MetricType,
+    AutocorrelationStrategy,
+    get_autocorrelation_strategy,
+)
 
 __all__ = [
     # Config hashing
@@ -129,4 +134,8 @@ __all__ = [
     "AnalysisSettingsRegistry",
     "ComparisonSettingsRegistry",
     "AnalyzerRegistry",
+    # Metric type for autocorrelation handling
+    "MetricType",
+    "AutocorrelationStrategy",
+    "get_autocorrelation_strategy",
 ]
