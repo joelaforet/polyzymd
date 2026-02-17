@@ -19,75 +19,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from polyzymd.analysis.contacts.criteria.base import ContactCriteria, ContactCheckResult
+from polyzymd.analysis.contacts.criteria.base import ContactCheckResult, ContactCriteria
+from polyzymd.analysis.core.pbc import minimum_image_distance, pairwise_distances_pbc
 
 if TYPE_CHECKING:
     from MDAnalysis.core.groups import AtomGroup
-
-
-def _minimum_image_distance(
-    pos1: NDArray[np.float64],
-    pos2: NDArray[np.float64],
-    box: NDArray[np.float64] | None = None,
-) -> float:
-    """Calculate minimum image distance between two positions.
-
-    Parameters
-    ----------
-    pos1, pos2 : NDArray
-        Position vectors (3,)
-    box : NDArray, optional
-        Box dimensions for PBC. If None, no PBC applied.
-
-    Returns
-    -------
-    float
-        Minimum image distance
-    """
-    diff = pos2 - pos1
-
-    if box is not None:
-        # Apply minimum image convention for orthorhombic box
-        if box.ndim == 1 and len(box) >= 3:
-            box_lengths = box[:3]
-            diff = diff - box_lengths * np.round(diff / box_lengths)
-
-    return float(np.linalg.norm(diff))
-
-
-def _pairwise_distances_with_pbc(
-    positions1: NDArray[np.float64],
-    positions2: NDArray[np.float64],
-    box: NDArray[np.float64] | None = None,
-) -> NDArray[np.float64]:
-    """Calculate pairwise distances between two sets of positions.
-
-    Uses minimum image convention if box is provided.
-
-    Parameters
-    ----------
-    positions1 : NDArray
-        First set of positions, shape (N, 3)
-    positions2 : NDArray
-        Second set of positions, shape (M, 3)
-    box : NDArray, optional
-        Box dimensions for PBC
-
-    Returns
-    -------
-    NDArray
-        Distance matrix of shape (N, M)
-    """
-    # Compute difference vectors: (N, 1, 3) - (1, M, 3) -> (N, M, 3)
-    diff = positions1[:, np.newaxis, :] - positions2[np.newaxis, :, :]
-
-    if box is not None and box.ndim == 1 and len(box) >= 3:
-        box_lengths = box[:3]
-        diff = diff - box_lengths * np.round(diff / box_lengths)
-
-    # Compute distances
-    distances = np.linalg.norm(diff, axis=2)
-    return distances
 
 
 class AnyAtomWithinCutoff(ContactCriteria):
@@ -138,7 +74,7 @@ class AnyAtomWithinCutoff(ContactCriteria):
         pbc_box = box if self.use_pbc else None
 
         # Calculate pairwise distances
-        distances = _pairwise_distances_with_pbc(pos1, pos2, pbc_box)
+        distances = pairwise_distances_pbc(pos1, pos2, pbc_box)
 
         # Find minimum distance
         min_dist = float(np.min(distances))
@@ -229,7 +165,7 @@ class AnyAtomToCOM(ContactCriteria):
         closest_idx = 0
 
         for i, pos in enumerate(query_positions):
-            dist = _minimum_image_distance(pos, target_center, pbc_box)
+            dist = minimum_image_distance(pos, target_center, pbc_box)
             if dist < min_dist:
                 min_dist = dist
                 closest_idx = i
@@ -304,7 +240,7 @@ class COMToCOM(ContactCriteria):
 
         # Calculate distance
         pbc_box = box if self.use_pbc else None
-        dist = _minimum_image_distance(query_center, target_center, pbc_box)
+        dist = minimum_image_distance(query_center, target_center, pbc_box)
 
         return ContactCheckResult(
             is_contact=dist <= self._cutoff,
@@ -370,7 +306,7 @@ class MinimumDistance(ContactCriteria):
         pos2 = target_atoms.positions
         pbc_box = box if self.use_pbc else None
 
-        distances = _pairwise_distances_with_pbc(pos1, pos2, pbc_box)
+        distances = pairwise_distances_pbc(pos1, pos2, pbc_box)
         min_dist = float(np.min(distances))
         min_idx = np.unravel_index(np.argmin(distances), distances.shape)
 
