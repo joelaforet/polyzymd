@@ -20,6 +20,15 @@ from polyzymd.compare.results.contacts import (
     ContactsConditionSummary,
     ContactsPairwiseComparison,
 )
+
+# Distance result classes
+from polyzymd.compare.results.distances import (
+    DistanceANOVASummary,
+    DistanceComparisonResult,
+    DistanceConditionSummary,
+    DistancePairSummary,
+    DistancePairwiseComparison,
+)
 from polyzymd.compare.results.rmsf import RMSFComparisonResult, RMSFConditionSummary
 
 # Legacy RMSF result classes (for backward compatibility with old comparator)
@@ -60,4 +69,10 @@ __all__ = [
     "ContactsComparisonResult",
     "ContactsConditionSummary",
     "ContactsPairwiseComparison",
+    # Distances
+    "DistanceANOVASummary",
+    "DistanceComparisonResult",
+    "DistanceConditionSummary",
+    "DistancePairSummary",
+    "DistancePairwiseComparison",
 ]
