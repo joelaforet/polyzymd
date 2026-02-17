@@ -126,11 +126,18 @@ class DistancePairSettings(BaseAnalysisSettings):
         First atom/point selection.
     selection_b : str
         Second atom/point selection.
+    threshold : float, optional
+        Per-pair distance threshold (Angstroms). If None, uses the global
+        threshold from DistancesAnalysisSettings.
     """
 
     label: str = Field(..., description="Human-readable label for this pair")
     selection_a: str = Field(..., description="First atom/point selection")
     selection_b: str = Field(..., description="Second atom/point selection")
+    threshold: Optional[float] = Field(
+        default=None,
+        description="Per-pair distance threshold (Angstroms). If None, uses global threshold.",
+    )
 
     @classmethod
     def analysis_type(cls) -> str:
@@ -139,11 +146,14 @@ class DistancePairSettings(BaseAnalysisSettings):
 
     def to_analysis_yaml_dict(self) -> dict[str, Any]:
         """Convert to analysis.yaml-compatible dictionary."""
-        return {
+        result: dict[str, Any] = {
             "label": self.label,
             "selection_a": self.selection_a,
             "selection_b": self.selection_b,
         }
+        if self.threshold is not None:
+            result["threshold"] = self.threshold
+        return result
 
 
 @AnalysisSettingsRegistry.register("distances")
