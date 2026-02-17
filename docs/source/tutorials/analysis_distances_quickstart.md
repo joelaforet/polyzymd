@@ -462,6 +462,160 @@ to automatic plot generation.
 | `-r 1-5` | Replicates 1 through 5 |
 | `-r 1,3,5` | Specific replicates |
 
+## PBC-Aware Distances and Trajectory Alignment
+
+```{versionadded} 0.3.0
+Distance calculations now include PBC-aware distances and trajectory alignment
+by default.
+```
+
+### Periodic Boundary Conditions (PBC)
+
+By default, distances are computed using the **minimum image convention**, which
+correctly handles molecules near periodic boundaries. This prevents artificially
+large distances (60-70Å) when atoms are actually close but on opposite sides of
+the simulation box.
+
+```{note}
+**When does PBC matter?** PBC correction is critical when:
+- Molecules diffuse across box boundaries
+- Long polymers span the periodic box
+- Active sites are near the box edge
+
+For well-centered proteins in large boxes, PBC usually has minimal effect, but
+it's always safer to keep it enabled (the default).
+```
+
+**Supported box types:**
+- ✅ Orthorhombic boxes (cubic, rectangular): Fully supported
+- ⚠️ Triclinic boxes: Warning issued, falls back to Euclidean distance
+
+`````{tab-set}
+
+````{tab-item} YAML
+```yaml
+# analysis.yaml
+distances:
+  use_pbc: true  # Default, can be omitted
+  pairs:
+    - label: "Ser77-His156"
+      selection_a: "resid 77 and name OG"
+      selection_b: "resid 156 and name NE2"
+```
+````
+
+````{tab-item} Python
+```python
+from polyzymd.analysis import DistanceCalculator
+
+# PBC enabled by default
+calc = DistanceCalculator(
+    config=config,
+    pairs=pairs,
+    equilibration="10ns",
+    use_pbc=True,  # Default, can be omitted
+)
+
+# Disable PBC (not recommended)
+calc = DistanceCalculator(
+    config=config,
+    pairs=pairs,
+    equilibration="10ns",
+    use_pbc=False,
+)
+```
+````
+
+`````
+
+### Trajectory Alignment
+
+By default, trajectories are **aligned to a reference structure** before computing
+distances. This removes rotational drift and center-of-mass motion that can add
+noise to distance measurements.
+
+**Why alignment matters:** MD simulations allow the entire system to rotate and
+translate. Without alignment, even a rigid protein will show larger fluctuations
+in inter-atomic distances due to this global motion.
+
+**Reference modes:**
+
+| Mode | Description | Best for |
+|------|-------------|----------|
+| `centroid` (default) | Align to most populated conformational cluster (K-Means) | General use |
+| `average` | Align to mathematical average structure | Pure thermal fluctuation analysis |
+| `frame` | Align to a specific frame number | Comparing to known functional conformation |
+
+```{note}
+When alignment is performed, an INFO-level log message notifies you. This
+ensures you're aware that trajectory coordinates have been modified in-memory.
+```
+
+`````{tab-set}
+
+````{tab-item} YAML
+```yaml
+# analysis.yaml
+distances:
+  align_trajectory: true  # Default
+  alignment_mode: centroid  # Default
+  alignment_selection: "protein and name CA"  # Default
+  pairs:
+    - label: "Ser77-His156"
+      selection_a: "resid 77 and name OG"
+      selection_b: "resid 156 and name NE2"
+```
+````
+
+````{tab-item} Python
+```python
+from polyzymd.analysis import DistanceCalculator
+from polyzymd.analysis.core.alignment import AlignmentConfig
+
+# Default: align to centroid using CA atoms
+calc = DistanceCalculator(
+    config=config,
+    pairs=pairs,
+    equilibration="10ns",
+)
+
+# Custom alignment: align to frame 500
+calc = DistanceCalculator(
+    config=config,
+    pairs=pairs,
+    equilibration="10ns",
+    alignment=AlignmentConfig(
+        reference_mode="frame",
+        reference_frame=500,
+        selection="protein and backbone",
+    ),
+)
+
+# Disable alignment (not recommended for most analyses)
+calc = DistanceCalculator(
+    config=config,
+    pairs=pairs,
+    equilibration="10ns",
+    alignment=AlignmentConfig(enabled=False),
+)
+```
+````
+
+`````
+
+### Cache Invalidation
+
+The result filename includes PBC and alignment settings, so changing these
+parameters automatically invalidates the cache:
+
+```
+distances_resid77_OG-resid133_NE2_eq10ns_pbc_align-centroid.json
+distances_resid77_OG-resid133_NE2_eq10ns_nopbc_noalign.json
+```
+
+This means you can safely experiment with different settings without manually
+clearing cached results.
+
 ## Troubleshooting
 
 ### "Selection matched no atoms"
