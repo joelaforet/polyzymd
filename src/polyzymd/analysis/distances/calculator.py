@@ -29,16 +29,16 @@ from polyzymd.analysis.core.autocorrelation import (
     estimate_correlation_time,
 )
 from polyzymd.analysis.core.config_hash import compute_config_hash, validate_config_hash
+from polyzymd.analysis.core.diagnostics import validate_equilibration_time
 from polyzymd.analysis.core.loader import (
     TrajectoryLoader,
     convert_time,
     parse_time_string,
     time_to_frame,
 )
-from polyzymd.analysis.core.diagnostics import validate_equilibration_time
 from polyzymd.analysis.core.selections import (
-    parse_selection_string,
     get_position,
+    parse_selection_string,
 )
 from polyzymd.analysis.core.statistics import compute_sem
 from polyzymd.analysis.results.base import get_polyzymd_version
@@ -51,6 +51,7 @@ from polyzymd.analysis.results.distances import (
 
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
+
     from polyzymd.config.schema import SimulationConfig
 
 # MDAnalysis is optional
@@ -154,15 +155,17 @@ class DistanceCalculator:
         that selects exactly one atom (or a center-of-mass group).
     equilibration : str, optional
         Equilibration time to skip. Default is "0ns".
-    threshold : float, optional
-        Distance threshold for contact analysis (Angstroms).
-        If specified, computes fraction of frames below threshold.
+    thresholds : sequence of float or float, optional
+        Distance thresholds for contact analysis (Angstroms).
+        Can be a single float (applied to all pairs) or a sequence
+        with one threshold per pair. If specified, computes fraction
+        of frames below threshold for each pair.
 
     Examples
     --------
     >>> config = load_config("config.yaml")
     >>>
-    >>> # Catalytic triad distances
+    >>> # Catalytic triad distances with per-pair thresholds
     >>> pairs = [
     ...     ("resid 77 and name OG", "resid 133 and name NE2"),
     ...     ("resid 133 and name NE2", "resid 156 and name OD1"),
@@ -172,7 +175,15 @@ class DistanceCalculator:
     ...     config,
     ...     pairs=pairs,
     ...     equilibration="100ns",
-    ...     threshold=3.5,  # H-bond cutoff
+    ...     thresholds=[3.5, 4.0],  # Different threshold per pair
+    ... )
+    >>>
+    >>> # Or use a single threshold for all pairs
+    >>> calc = DistanceCalculator(
+    ...     config,
+    ...     pairs=pairs,
+    ...     equilibration="100ns",
+    ...     thresholds=3.5,  # Same threshold for all pairs
     ... )
     >>>
     >>> result = calc.compute(replicate=1)
@@ -185,13 +196,26 @@ class DistanceCalculator:
         config: "SimulationConfig",
         pairs: Sequence[tuple[str, str]],
         equilibration: str = "0ns",
-        threshold: float | None = None,
+        thresholds: Sequence[float | None] | float | None = None,
     ) -> None:
         _require_mdanalysis()
 
         self.config = config
         self.pairs = list(pairs)
-        self.threshold = threshold
+
+        # Normalize thresholds to a list matching pairs length
+        if thresholds is None:
+            self.thresholds: list[float | None] = [None] * len(self.pairs)
+        elif isinstance(thresholds, (int, float)):
+            self.thresholds = [float(thresholds)] * len(self.pairs)
+        else:
+            thresholds_list = list(thresholds)
+            if len(thresholds_list) != len(self.pairs):
+                raise ValueError(
+                    f"thresholds length ({len(thresholds_list)}) must match "
+                    f"pairs length ({len(self.pairs)})"
+                )
+            self.thresholds = thresholds_list
 
         # Parse equilibration time
         eq_value, eq_unit = parse_time_string(equilibration)
@@ -279,7 +303,7 @@ class DistanceCalculator:
 
         # Compute distances for each pair
         pair_results = []
-        for sel1, sel2 in self.pairs:
+        for idx, (sel1, sel2) in enumerate(self.pairs):
             pr = self._compute_pair(
                 u,
                 sel1,
@@ -287,6 +311,7 @@ class DistanceCalculator:
                 start_frame,
                 timestep=timestep,
                 store_distribution=store_distributions,
+                threshold=self.thresholds[idx],
             )
             pair_results.append(pr)
 
@@ -453,7 +478,7 @@ class DistanceCalculator:
                 per_replicate_means=per_rep_means,
                 per_replicate_stds=per_rep_stds,
                 per_replicate_medians=per_rep_medians,
-                threshold=self.threshold,
+                threshold=self.thresholds[pair_idx],
                 overall_fraction_below=(fraction_stats.mean if fraction_stats else None),
                 sem_fraction_below=(fraction_stats.sem if fraction_stats else None),
                 per_replicate_fractions_below=(per_rep_fractions if per_rep_fractions else None),
@@ -498,12 +523,12 @@ class DistanceCalculator:
         return agg_result
 
     def _update_threshold_if_needed(self, result: DistanceResult) -> DistanceResult:
-        """Update contact fractions if threshold changed since caching.
+        """Update contact fractions if thresholds changed since caching.
 
-        If the cached result used a different threshold than currently requested,
+        If the cached result used different thresholds than currently requested,
         and the distances array is available, recompute fraction_below_threshold
         from the stored distances. This avoids expensive trajectory reprocessing
-        when only the threshold parameter changes.
+        when only threshold parameters change.
 
         Parameters
         ----------
@@ -515,29 +540,31 @@ class DistanceCalculator:
         DistanceResult
             Updated result with recomputed contact fractions if needed.
         """
-        if self.threshold is None:
-            return result  # No threshold requested, nothing to update
+        # Check if any thresholds are requested
+        if all(t is None for t in self.thresholds):
+            return result  # No thresholds requested, nothing to update
 
         updated_pairs = []
         any_updated = False
 
-        for pr in result.pair_results:
+        for idx, pr in enumerate(result.pair_results):
+            expected_threshold = self.thresholds[idx] if idx < len(self.thresholds) else None
             cached_threshold = pr.threshold
-            needs_update = cached_threshold != self.threshold
+            needs_update = cached_threshold != expected_threshold
 
-            if needs_update:
+            if needs_update and expected_threshold is not None:
                 if pr.distances is not None and len(pr.distances) > 0:
                     # Recompute from stored distances
                     distances_arr = np.array(pr.distances)
-                    new_fraction = float(np.mean(distances_arr < self.threshold))
+                    new_fraction = float(np.mean(distances_arr < expected_threshold))
                     LOGGER.info(
                         f"Recomputing contact fraction for {pr.pair_label} "
-                        f"(threshold: {cached_threshold} → {self.threshold})"
+                        f"(threshold: {cached_threshold} -> {expected_threshold})"
                     )
                     # Create updated result with new threshold/fraction
                     pr = pr.model_copy(
                         update={
-                            "threshold": self.threshold,
+                            "threshold": expected_threshold,
                             "fraction_below_threshold": new_fraction,
                         }
                     )
@@ -563,6 +590,7 @@ class DistanceCalculator:
         start_frame: int,
         timestep: float = 1.0,
         store_distribution: bool = True,
+        threshold: float | None = None,
     ) -> DistancePairResult:
         """Compute distances for a single pair with KDE and autocorrelation analysis.
 
@@ -580,6 +608,8 @@ class DistanceCalculator:
             Time between frames in ps
         store_distribution : bool
             Whether to store full distance array
+        threshold : float, optional
+            Distance threshold for contact analysis (Angstroms)
 
         Returns
         -------
@@ -631,8 +661,8 @@ class DistanceCalculator:
 
         # Threshold analysis
         fraction_below = None
-        if self.threshold is not None:
-            fraction_below = float(np.mean(distances_arr < self.threshold))
+        if threshold is not None:
+            fraction_below = float(np.mean(distances_arr < threshold))
 
         # Compute histogram
         hist_counts, hist_edges = np.histogram(distances_arr, bins=50)
@@ -734,7 +764,7 @@ class DistanceCalculator:
             statistical_inefficiency=statistical_inefficiency,
             autocorrelation_warning=autocorrelation_warning,
             # Threshold analysis
-            threshold=self.threshold,
+            threshold=threshold,
             fraction_below_threshold=fraction_below,
             # Histogram
             histogram_edges=hist_edges.tolist(),
