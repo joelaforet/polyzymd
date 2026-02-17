@@ -1000,12 +1000,14 @@ def contacts(
 @click.argument(
     "comparison_type",
     type=str,
+    required=False,
+    default=None,
 )
 @click.option(
     "-f",
     "--file",
     "config_file",
-    type=click.Path(exists=True, path_type=Path),
+    type=click.Path(path_type=Path),
     default="comparison.yaml",
     help="Path to comparison.yaml config file.",
 )
@@ -1052,7 +1054,7 @@ def contacts(
     help="List available comparison types and exit.",
 )
 def run_comparison(
-    comparison_type: str,
+    comparison_type: Optional[str],
     config_file: Path,
     eq_time: Optional[str],
     recompute: bool,
@@ -1092,10 +1094,22 @@ def run_comparison(
             click.echo(f"  - {comp_type}: {comparator_cls.__name__}")
         return
 
+    # Require comparison_type if not listing
+    if comparison_type is None:
+        click.echo("Error: Missing argument 'COMPARISON_TYPE'.", err=True)
+        click.echo("Use 'polyzymd compare run --list' to see available types.", err=True)
+        sys.exit(1)
+
     # Set up logging
     setup_logging(quiet=quiet, debug=debug)
 
     config_file = Path(config_file).resolve()
+    if not config_file.exists():
+        click.echo(f"Error: Config file not found: {config_file}", err=True)
+        click.echo(
+            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
+        )
+        sys.exit(1)
 
     # Check if comparison type is registered
     available = ComparatorRegistry.list_available()
