@@ -1,12 +1,13 @@
 # Comparing Conditions Across Simulations
 
-Statistically compare RMSF, contacts, and other metrics across multiple simulation conditions
+Statistically compare RMSF, contacts, distances, and other metrics across multiple simulation conditions
 with automated t-tests, effect size calculations, and ranking.
 
 ```{note}
 **New to analysis?** Start with the individual quick start guides:
 - [RMSF Quick Start](analysis_rmsf_quickstart.md) for flexibility analysis
 - [Contacts Quick Start](analysis_contacts_quickstart.md) for polymer-protein contacts
+- [Distance Analysis Quick Start](analysis_distances_quickstart.md) for inter-atomic distances
 
 Then return here to compare conditions.
 ```
@@ -22,14 +23,15 @@ vim my_polymer_study/comparison.yaml
 
 # 3. Run comparisons
 cd my_polymer_study
-polyzymd compare rmsf --eq-time 10ns      # Compare flexibility
-polyzymd compare triad --eq-time 10ns     # Compare triad geometry (if defined)
-polyzymd compare contacts --eq-time 10ns  # Compare polymer-protein contacts
+polyzymd compare run rmsf --eq-time 10ns      # Compare flexibility
+polyzymd compare run triad --eq-time 10ns     # Compare triad geometry (if defined)
+polyzymd compare run contacts --eq-time 10ns  # Compare polymer-protein contacts
+polyzymd compare run distances --eq-time 10ns # Compare inter-atomic distances
 
 # Output formats
-polyzymd compare rmsf --format table     # Console table (default)
-polyzymd compare rmsf --format markdown  # For documentation
-polyzymd compare rmsf --format json      # Machine-readable
+polyzymd compare run rmsf --format table     # Console table (default)
+polyzymd compare run rmsf --format markdown  # For documentation
+polyzymd compare run rmsf --format json      # Machine-readable
 ```
 
 ## Overview
@@ -1428,10 +1430,345 @@ for comp in result.aggregate_comparisons:
 For mechanistic insights correlating contacts with flexibility changes, see
 `polyzymd compare report` (coming soon).
 
+## Comparing Distances Across Conditions
+
+Compare **inter-atomic distances** across conditions with statistical analysis.
+This is useful for tracking specific interactions (e.g., substrate proximity,
+hydrogen bond distances) that may change with different polymer environments.
+
+```{note}
+**New to distance analysis?** Start with the [Distance Analysis Quick Start](analysis_distances_quickstart.md)
+to understand distance pair definitions and selection syntax, then return here
+to compare conditions.
+```
+
+### Key Metrics
+
+The distances comparison provides **dual-metric ranking**:
+
+| Metric | Description | Ranking |
+|--------|-------------|---------|
+| **Mean Distance** | Average distance across trajectory (primary) | Lowest first (closer = better) |
+| **Fraction Below Threshold** | % of frames below contact threshold (secondary) | Highest first (more contact = better) |
+
+This dual approach captures both the typical distance AND the frequency of close contacts.
+
+### Running Distances Comparison
+
+`````{tab-set}
+````{tab-item} CLI (Recommended)
+```bash
+# Basic comparison
+polyzymd compare run distances -f comparison.yaml
+
+# With custom equilibration time
+polyzymd compare run distances -f comparison.yaml --eq-time 10ns
+
+# Different output formats
+polyzymd compare run distances -f comparison.yaml --format markdown
+polyzymd compare run distances -f comparison.yaml --format json -o distances_report.json
+```
+````
+
+````{tab-item} Python
+```python
+from polyzymd.compare import ComparisonConfig
+from polyzymd.compare.comparators import DistancesComparator
+
+# Load configuration
+config = ComparisonConfig.from_yaml("comparison.yaml")
+
+# Get distances settings from analysis_settings
+distances_settings = config.analysis_settings.get("distances")
+
+# Run comparison
+comparator = DistancesComparator(
+    config=config,
+    analysis_settings=distances_settings,
+    equilibration="10ns",
+)
+result = comparator.compare()
+
+# Access results
+print(f"Closest mean distance: {result.ranking[0]}")
+if result.ranking_by_fraction:
+    print(f"Highest contact fraction: {result.ranking_by_fraction[0]}")
+
+for cond in result.conditions:
+    print(f"{cond.label}: {cond.overall_mean_distance:.2f} A")
+    if cond.overall_fraction_below is not None:
+        print(f"  Contact fraction: {cond.overall_fraction_below*100:.1f}%")
+
+# Save result
+result.save("results/distances_comparison.json")
+```
+````
+`````
+
+### Adding Distances to comparison.yaml
+
+Add a `distances` section to your `analysis_settings`:
+
+```yaml
+name: "substrate_proximity_study"
+control: "No Polymer"
+
+conditions:
+  - label: "No Polymer"
+    config: "../noPoly_LipA_DMSO/config.yaml"
+    replicates: [1, 2, 3]
+
+  - label: "100% SBMA"
+    config: "../SBMA_100_DMSO/config.yaml"
+    replicates: [1, 2, 3]
+
+  - label: "100% EGMA"
+    config: "../EGMA_100_DMSO/config.yaml"
+    replicates: [1, 2, 3]
+
+defaults:
+  equilibration_time: "10ns"
+
+# Define distance pairs in analysis_settings
+analysis_settings:
+  distances:
+    threshold: 3.5  # Angstroms (optional, enables fraction analysis)
+    pairs:
+      - label: "Ser77-Substrate"
+        selection_a: "resid 77 and name OG"
+        selection_b: "resname RBY and name C1"  # Substrate atom
+      - label: "His156-Substrate"
+        selection_a: "resid 156 and name NE2"
+        selection_b: "resname RBY and name O2"
+
+# Must have corresponding entry in comparison_settings
+comparison_settings:
+  distances: {}
+```
+
+### Example Output
+
+```
+Distance Comparison: substrate_proximity_study
+================================================================================
+Pairs analyzed: 2
+Pair labels: Ser77-Substrate, His156-Substrate
+Contact threshold: 3.5 A
+Equilibration: 10ns
+Control: No Polymer
+
+Condition Summary (ranked by mean distance, lowest first)
+--------------------------------------------------------------------------------
+Rank  Condition                 Mean Dist    SEM        % Below    N   
+--------------------------------------------------------------------------------
+1     100% SBMA                 7.46 A       0.421         0.4%   3    
+2     100% EGMA                 7.66 A       0.270         1.6%   3    
+3     No Polymer                8.02 A       0.315         0.0%   3   *
+--------------------------------------------------------------------------------
+* = control condition
+
+Secondary Ranking (by % below threshold, highest first)
+------------------------------------------------------------
+1     100% EGMA                 1.6% (SEM: 0.31%)
+2     100% SBMA                 0.4% (SEM: 0.31%)
+3     No Polymer                0.0% (SEM: 0.00%)
+
+Per-Pair Distances (Mean +/- SEM across replicates)
+------------------------------------------------------------------------------------------
+Condition                 Ser77-Substrate His156-Substrate
+------------------------------------------------------------------------------------------
+100% SBMA                 7.46+/-0.42     6.12+/-0.25    
+100% EGMA                 7.66+/-0.27     6.45+/-0.18    
+No Polymer                8.02+/-0.31     6.89+/-0.22    
+------------------------------------------------------------------------------------------
+
+Pairwise Comparisons (Distance Metric)
+------------------------------------------------------------------------------------------
+Comparison                     % Change   p-value      Cohen d    Effect       Direction 
+------------------------------------------------------------------------------------------
+100% SBMA vs No Polymer        -7.0%      0.0451*      0.87       large        closer    
+100% EGMA vs No Polymer        -4.4%      0.1234       0.70       medium       closer    
+------------------------------------------------------------------------------------------
+* p < 0.05
+Negative % change = lower distance (closer)
+
+Pairwise Comparisons (Fraction Below Threshold)
+------------------------------------------------------------------------------------------
+Comparison                     % Change   p-value      Cohen d    Effect       Direction   
+------------------------------------------------------------------------------------------
+100% SBMA vs No Polymer        +0.4%      0.2161       -1.20      large        more_contact
+100% EGMA vs No Polymer        +1.6%      0.0065*      -4.25      large        more_contact
+------------------------------------------------------------------------------------------
+* p < 0.05
+Positive % change = more frames below threshold (more contact)
+
+One-way ANOVA
+--------------------------------------------------
+Distance metric:
+  F-statistic: 3.901
+  p-value:     0.0512
+  Significant: No (alpha=0.05)
+Fraction metric:
+  F-statistic: 5.880
+  p-value:     0.0171
+  Significant: Yes (alpha=0.05)
+
+Interpretation
+--------------------------------------------------------------------------------
+Closest mean distance: 100% SBMA (7.46 A)
+  -> 7.0% closer than control (No Polymer)
+  -> Statistically significant (p=0.0451, d=0.87 [large])
+
+Highest contact fraction: 100% EGMA (1.6% below threshold)
+
+Analysis completed: 2026-02-16 21:03:40
+PolyzyMD version: 1.0.0
+```
+
+### Interpreting Results
+
+**Primary metric (Mean Distance):**
+- Lower distance = closer = atoms more frequently in proximity
+- Ranking from lowest to highest (Rank 1 = closest)
+- Negative % change vs control = improvement (closer)
+
+**Secondary metric (Fraction Below Threshold):**
+- Only computed if `threshold` is specified in config
+- Higher fraction = more frames with close contact
+- Ranking from highest to lowest (Rank 1 = most contact)
+- Positive % change vs control = improvement (more contact)
+
+**Why dual metrics?**
+- Mean distance captures typical behavior
+- Fraction below threshold captures extreme events (e.g., catalytic encounters)
+- A condition might have similar mean distance but more frequent close approaches
+
+### Statistical Analysis
+
+Both metrics undergo independent statistical testing:
+
+| Test | Applied To | Interpretation |
+|------|-----------|----------------|
+| **t-test** | Each condition vs control | p < 0.05 = significant difference |
+| **Cohen's d** | Each comparison | Effect magnitude (regardless of p-value) |
+| **ANOVA** | All conditions | Any condition differs? (3+ conditions) |
+
+**Effect size interpretation:**
+
+| Cohen's d | Interpretation |
+|-----------|---------------|
+| < 0.2 | Negligible |
+| 0.2 - 0.5 | Small |
+| 0.5 - 0.8 | Medium |
+| > 0.8 | Large |
+
+### CLI Reference for Distances
+
+```bash
+polyzymd compare run distances [OPTIONS]
+
+Options:
+  -f, --file PATH                 Config file [default: comparison.yaml]
+  --eq-time TEXT                  Override equilibration time
+  --recompute                     Force recompute distance analysis
+  --format [table|markdown|json]  Output format [default: table]
+  -o, --output PATH               Save formatted output to file
+  -q, --quiet                     Suppress INFO messages
+  --debug                         Enable DEBUG logging
+```
+
+### Python API for Distances Comparison
+
+```python
+from polyzymd.compare import ComparisonConfig
+from polyzymd.compare.comparators import DistancesComparator
+from polyzymd.compare.distances_formatters import format_distances_result
+
+# Load configuration
+config = ComparisonConfig.from_yaml("comparison.yaml")
+
+# Get distances settings
+distances_settings = config.analysis_settings.get("distances")
+
+# Run comparison
+comparator = DistancesComparator(
+    config=config,
+    analysis_settings=distances_settings,
+    equilibration="10ns",
+)
+result = comparator.compare()
+
+# Access primary ranking (by mean distance)
+print(f"Closest: {result.ranking[0]}")
+for cond in result.conditions:
+    print(f"{cond.label}: {cond.overall_mean_distance:.2f} ± {cond.overall_sem_distance:.3f} A")
+
+# Access secondary ranking (by fraction below threshold)
+if result.ranking_by_fraction:
+    print(f"\nHighest contact: {result.ranking_by_fraction[0]}")
+    for cond in result.conditions:
+        if cond.overall_fraction_below is not None:
+            print(f"{cond.label}: {cond.overall_fraction_below*100:.1f}%")
+
+# Access per-pair details
+for cond in result.conditions:
+    print(f"\n{cond.label}:")
+    for pair in cond.pair_summaries:
+        print(f"  {pair.label}: {pair.mean_distance:.2f} ± {pair.sem_distance:.2f} A")
+
+# Format output
+print(format_distances_result(result, format="markdown"))
+
+# Save result
+result.save("results/distances_comparison.json")
+```
+
+### Loading Saved Distance Results
+
+```python
+from polyzymd.compare.results import DistanceComparisonResult
+
+# Load from JSON
+result = DistanceComparisonResult.load("results/distances_comparison_my_study.json")
+
+# Access condition data
+control = result.get_condition("No Polymer")
+print(f"Control mean distance: {control.overall_mean_distance:.2f} A")
+
+# Get pairwise comparison
+comp = result.get_comparison("100% SBMA")
+if comp and comp.distance_significant:
+    print(f"SBMA significantly closer (p={comp.distance_p_value:.4f})")
+```
+
+### Use Cases for Distance Comparison
+
+| Use Case | Configuration |
+|----------|---------------|
+| **Substrate binding** | Distance from catalytic residues to substrate atoms |
+| **Active site geometry** | Similar to triad, but for non-catalytic interactions |
+| **Polymer-residue proximity** | Distance from polymer termini to specific residues |
+| **Conformational changes** | Distance between domains or loops |
+
+### Distances vs Catalytic Triad Comparison
+
+| Feature | `compare run distances` | `compare run triad` |
+|---------|-------------------------|---------------------|
+| **Metric** | Mean distance + fraction | Simultaneous contact fraction |
+| **Pairs** | Any atom pairs | Pre-defined triad geometry |
+| **Ranking** | Dual (distance + fraction) | Single (simultaneous contact) |
+| **Use case** | General distance tracking | Catalytic geometry integrity |
+
+```{tip}
+Use **distances** for monitoring specific interactions with dual-metric analysis.
+Use **triad** when all pairs must be in contact simultaneously (catalytic triad geometry).
+```
+
 ## See Also
 
 - [RMSF Quick Start](analysis_rmsf_quickstart.md) -- Run individual RMSF analysis
 - [Contacts Quick Start](analysis_contacts_quickstart.md) -- Run individual contacts analysis
+- [Distance Analysis Quick Start](analysis_distances_quickstart.md) -- Run individual distance analysis
 - [Catalytic Triad Analysis](analysis_triad_quickstart.md) -- Run individual triad analysis
 - [Statistical Best Practices](analysis_rmsf_best_practices.md) -- Understanding statistics
 - [Reference Selection](analysis_reference_selection.md) -- Alignment options

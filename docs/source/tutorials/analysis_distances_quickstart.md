@@ -512,7 +512,7 @@ both measure atom-pair distances, but serve different purposes:
 |---------|-----------|-----------------|
 | **Focus** | Any atom pairs | Pre-defined catalytic geometry |
 | **Configuration** | `analysis.yaml` or CLI | `comparison.yaml` with conditions |
-| **Multi-condition** | Run separately per condition | Built-in condition comparison |
+| **Multi-condition** | Via `compare run distances` | Built-in condition comparison |
 | **Simultaneous contacts** | Not computed | Key metric (all pairs < threshold) |
 | **Use case** | Ad-hoc distance measurements | Structured enzyme comparisons |
 
@@ -521,9 +521,27 @@ Use **distances** for exploratory analysis of specific interactions.
 Use **catalytic triad** when comparing enzyme integrity across conditions.
 ```
 
+## Comparing Distances Across Conditions
+
+To statistically compare distances across multiple simulation conditions (e.g.,
+different polymer compositions), use the `compare run distances` command:
+
+```bash
+# Add distances section to comparison.yaml, then:
+polyzymd compare run distances -f comparison.yaml
+```
+
+This provides:
+- **Dual-metric ranking**: By mean distance (primary) and fraction below threshold (secondary)
+- **Statistical tests**: t-tests, Cohen's d effect sizes, ANOVA
+- **Per-pair summaries**: Distance statistics for each defined pair
+
+See [Comparing Distances Across Conditions](analysis_compare_conditions.md#comparing-distances-across-conditions)
+for full documentation.
+
 ## Next Steps
 
+- **Compare distances across conditions**: [Comparing Conditions Guide](analysis_compare_conditions.md#comparing-distances-across-conditions)
 - **Catalytic triad analysis**: [Triad Quick Start](analysis_triad_quickstart.md)
 - **Understand statistics**: [Statistical Best Practices](analysis_statistics_best_practices.md)
-- **Compare conditions**: [Comparing Conditions Guide](analysis_compare_conditions.md)
 - **Contact analysis**: [Contacts Quick Start](analysis_contacts_quickstart.md)
