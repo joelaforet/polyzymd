@@ -186,8 +186,17 @@ class RMSFComparisonPlotter(BasePlotter):
                 with open(result_file) as f:
                     agg_data = json.load(f)
 
-                mean_val = agg_data.get("overall_mean") or agg_data.get("mean_rmsf")
-                sem_val = agg_data.get("overall_sem") or agg_data.get("sem_rmsf", 0)
+                # Support multiple key naming conventions
+                mean_val = (
+                    agg_data.get("overall_mean_rmsf")
+                    or agg_data.get("overall_mean")
+                    or agg_data.get("mean_rmsf")
+                )
+                sem_val = (
+                    agg_data.get("overall_sem_rmsf")
+                    or agg_data.get("overall_sem")
+                    or agg_data.get("sem_rmsf", 0)
+                )
 
                 if mean_val is not None:
                     plot_labels.append(label)
@@ -366,11 +375,20 @@ class RMSFProfilePlotter(BasePlotter):
             with open(result_file) as f:
                 data = json.load(f)
 
-            # Check for per-residue data
-            if "per_residue_rmsf" in data:
+            # Check for per-residue data (support multiple key naming conventions)
+            if "mean_rmsf_per_residue" in data:
+                # Current schema format
+                per_res = data["mean_rmsf_per_residue"]
+                return {
+                    "residues": data.get("residue_ids", list(range(1, len(per_res) + 1))),
+                    "rmsf": per_res,
+                    "sem": data.get("sem_rmsf_per_residue", []),
+                }
+            elif "per_residue_rmsf" in data:
+                # Legacy format
                 per_res = data["per_residue_rmsf"]
                 return {
-                    "residues": list(range(1, len(per_res) + 1)),
+                    "residues": data.get("residue_ids", list(range(1, len(per_res) + 1))),
                     "rmsf": per_res,
                     "sem": data.get("per_residue_sem", []),
                 }

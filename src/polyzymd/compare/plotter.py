@@ -385,13 +385,17 @@ class ComparisonPlotter:
         Path
             Absolute path to output directory
         """
-        # If output_dir is relative, resolve relative to first condition's project
         output_dir = self.settings.output_dir
         if not output_dir.is_absolute():
-            # Use the parent of the first condition's config as base
-            if self.config.conditions:
+            # Use comparison.yaml parent directory as base
+            if self.config.source_path is not None:
+                base = self.config.source_path.parent
+            elif self.config.conditions:
+                # Fallback: use first condition's config parent
                 base = self.config.conditions[0].config.parent
-                output_dir = base / output_dir
+            else:
+                base = Path.cwd()
+            output_dir = base / output_dir
         return output_dir.resolve()
 
     @property

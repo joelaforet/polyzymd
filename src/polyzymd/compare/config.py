@@ -473,6 +473,7 @@ class ComparisonConfig(BaseModel):
         default_factory=ComparisonSettingsContainer
     )
     plot_settings: PlotSettings = Field(default_factory=PlotSettings)
+    source_path: Path | None = Field(default=None, exclude=True)
 
     @field_validator("analysis_settings", mode="before")
     @classmethod
@@ -549,7 +550,9 @@ class ComparisonConfig(BaseModel):
                     if not cond_path.is_absolute():
                         cond["config"] = str(config_dir / cond_path)
 
-        return cls(**data)
+        config = cls(**data)
+        config.source_path = path.resolve()
+        return config
 
     def to_yaml(self, path: Path | str) -> None:
         """Save comparison config to YAML file.
