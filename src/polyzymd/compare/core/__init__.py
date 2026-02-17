@@ -39,6 +39,7 @@ from polyzymd.compare.core.base import (
     BaseComparator,
     BaseComparisonResult,
     BaseConditionSummary,
+    MetricType,
     PairwiseComparison,
 )
 from polyzymd.compare.core.registry import ComparatorRegistry
@@ -49,5 +50,6 @@ __all__ = [
     "BaseComparisonResult",
     "BaseConditionSummary",
     "ComparatorRegistry",
+    "MetricType",
     "PairwiseComparison",
 ]

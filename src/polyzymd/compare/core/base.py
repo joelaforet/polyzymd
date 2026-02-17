@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar
 from pydantic import BaseModel, Field
 
 from polyzymd import __version__
+from polyzymd.analysis.core.metric_type import MetricType
 from polyzymd.compare.statistics import (
     cohens_d,
     independent_ttest,
@@ -355,6 +356,37 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
         -------
         str
             Type identifier used in registry and CLI.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def metric_type(self) -> MetricType:
+        """Declare whether this comparator's metric is mean or variance-based.
+
+        This determines how autocorrelation is handled in the underlying analysis:
+
+        - **MEAN_BASED**: Use all frames for computation, correct uncertainty
+          using N_eff (effective sample size). Examples: average distance,
+          contact fraction, catalytic triad proximity.
+
+        - **VARIANCE_BASED**: Subsample to independent frames separated by 2τ
+          (correlation time) to avoid bias in variance estimates. Examples:
+          RMSF, fluctuation metrics.
+
+        Contributors implementing new comparators MUST declare the appropriate
+        metric type to ensure correct statistical treatment per LiveCoMS
+        best practices (Grossfield et al., 2018).
+
+        Returns
+        -------
+        MetricType
+            The metric type for this comparator.
+
+        References
+        ----------
+        - Grossfield et al. (2018) LiveCoMS 1:5067 (Best Practices for Uncertainty)
+        - GitHub: dmzuckerman/Sampling-Uncertainty
         """
         ...
 

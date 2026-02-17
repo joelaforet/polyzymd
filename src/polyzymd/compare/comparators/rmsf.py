@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from polyzymd import __version__
+from polyzymd.analysis.core.metric_type import MetricType
 from polyzymd.compare.core.base import ANOVASummary, BaseComparator
 from polyzymd.compare.core.registry import ComparatorRegistry
 from polyzymd.compare.results.rmsf import RMSFComparisonResult, RMSFConditionSummary
@@ -90,6 +91,22 @@ class RMSFComparator(
     def comparison_type_name(cls) -> str:
         """Return the comparison type identifier."""
         return "rmsf"
+
+    @property
+    def metric_type(self) -> MetricType:
+        """RMSF is a variance-based metric.
+
+        RMSF measures root-mean-square fluctuations, which are inherently
+        variance-based. Correlated frames lead to biased variance estimates,
+        so independent subsampling (2τ separation) is required for accurate
+        uncertainty quantification.
+
+        Returns
+        -------
+        MetricType
+            MetricType.VARIANCE_BASED
+        """
+        return MetricType.VARIANCE_BASED
 
     # ========================================================================
     # Abstract Method Implementations

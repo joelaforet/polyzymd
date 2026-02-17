@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from polyzymd import __version__
+from polyzymd.analysis.core.metric_type import MetricType
 from polyzymd.compare.core.base import ANOVASummary, BaseComparator, PairwiseComparison
 from polyzymd.compare.core.registry import ComparatorRegistry
 from polyzymd.compare.results.triad import (
@@ -99,6 +100,23 @@ class TriadComparator(
     def comparison_type_name(cls) -> str:
         """Return the comparison type identifier."""
         return "triad"
+
+    @property
+    def metric_type(self) -> MetricType:
+        """Catalytic triad contact fraction is a mean-based metric.
+
+        The simultaneous contact fraction is an average over frames
+        (fraction of frames where all pairs are in contact). The mean
+        converges regardless of autocorrelation, but we need to correct
+        the uncertainty using N_eff (effective sample size = N/g where
+        g is the statistical inefficiency).
+
+        Returns
+        -------
+        MetricType
+            MetricType.MEAN_BASED
+        """
+        return MetricType.MEAN_BASED
 
     # ========================================================================
     # Abstract Method Implementations
