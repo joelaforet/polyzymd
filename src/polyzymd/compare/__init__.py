@@ -29,12 +29,13 @@ Usage:
     polyzymd compare contacts --eq-time 10ns
 """
 
+from polyzymd.compare.comparators.contacts import ContactsComparator
 from polyzymd.compare.comparators.rmsf import RMSFComparator
+from polyzymd.compare.comparators.triad import TriadComparator
 from polyzymd.compare.config import (
     ComparisonConfig,
     ConditionConfig,
 )
-from polyzymd.compare.contacts_comparator import ContactsComparator
 from polyzymd.compare.contacts_formatters import (
     contacts_to_json,
     format_contacts_console_table,
@@ -78,7 +79,6 @@ from polyzymd.compare.settings import (
     RMSFAnalysisSettings,
     RMSFComparisonSettings,
 )
-from polyzymd.compare.triad_comparator import TriadComparator
 from polyzymd.compare.triad_formatters import (
     format_triad_console_table,
     format_triad_markdown,
