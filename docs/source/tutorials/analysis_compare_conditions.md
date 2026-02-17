@@ -238,6 +238,19 @@ analysis_settings:
   #   polymer_selection: "resname SBM EGM"
   #   cutoff: 4.5
 
+  # Distances comparison (required for `polyzymd compare distances`)
+  # distances:
+  #   threshold: 3.5  # Global default threshold (Angstroms, optional)
+  #   pairs:
+  #     - label: "Catalytic H-bond"
+  #       selection_a: "resid 77 and name OG"
+  #       selection_b: "resid 133 and name NE2"
+  #       threshold: 3.5  # Per-pair threshold (optional, overrides global)
+  #     - label: "Lid Opening"
+  #       selection_a: "com(resid 141-148)"
+  #       selection_b: "com(resid 281-289)"
+  #       threshold: 15.0  # Different threshold for large-scale motion
+
 # ============================================================================
 # Comparison Settings (HOW to compare - statistical parameters)
 # ============================================================================
@@ -253,6 +266,8 @@ comparison_settings:
   #   fdr_alpha: 0.05           # FDR for Benjamini-Hochberg correction
   #   min_effect_size: 0.5      # Cohen's d threshold
   #   top_residues: 10          # Top residues to show in console
+
+  # distances: {}  # No comparison-specific parameters
 ```
 
 ### Path Resolution
@@ -1532,19 +1547,66 @@ defaults:
 # Define distance pairs in analysis_settings
 analysis_settings:
   distances:
-    threshold: 3.5  # Angstroms (optional, enables fraction analysis)
+    threshold: 3.5  # Global default threshold (Angstroms, optional)
     pairs:
-      - label: "Ser77-Substrate"
+      - label: "Catalytic H-bond"
         selection_a: "resid 77 and name OG"
-        selection_b: "resname RBY and name C1"  # Substrate atom
-      - label: "His156-Substrate"
-        selection_a: "resid 156 and name NE2"
-        selection_b: "resname RBY and name O2"
+        selection_b: "resid 133 and name NE2"
+        threshold: 3.5  # Per-pair threshold (overrides global)
+      - label: "Lid Domain Opening"
+        selection_a: "com(resid 141-148)"
+        selection_b: "com(resid 281-289)"
+        threshold: 15.0  # Different threshold for this pair
 
 # Must have corresponding entry in comparison_settings
 comparison_settings:
   distances: {}
 ```
+
+### Per-Pair Thresholds
+
+Different distance pairs often have different biologically relevant thresholds:
+
+| Type of Distance | Typical Threshold |
+|------------------|-------------------|
+| Hydrogen bond | 3.0 - 3.5 A |
+| Salt bridge | 4.0 - 4.5 A |
+| Aromatic stacking | 4.0 - 5.0 A |
+| Domain separation | 10 - 20 A |
+| Lid opening | 15 - 25 A |
+
+**Threshold resolution order:**
+1. Per-pair `threshold` in the pair definition (highest priority)
+2. Global `threshold` in the `distances` section (fallback)
+3. No threshold (fraction below not computed)
+
+**Example with mixed thresholds:**
+
+```yaml
+analysis_settings:
+  distances:
+    threshold: 4.0  # Default for pairs without explicit threshold
+    pairs:
+      - label: "Ser77-His133 H-bond"
+        selection_a: "resid 77 and name OG"
+        selection_b: "resid 133 and name NE2"
+        threshold: 3.5  # H-bond cutoff
+
+      - label: "Asp156-His133 H-bond"
+        selection_a: "midpoint(resid 156 and name OD1 OD2)"
+        selection_b: "resid 133 and name ND1"
+        # Uses global threshold: 4.0 A
+
+      - label: "Lid-to-Core Distance"
+        selection_a: "com(resid 141-148)"
+        selection_b: "com(resid 281-289)"
+        threshold: 15.0  # Large-scale motion threshold
+```
+
+**Threshold cache invalidation:** When you change a threshold value, PolyzyMD
+automatically detects the mismatch and recomputes contact fractions from the
+stored per-replicate distance data. This avoids expensive trajectory
+reprocessing - only the statistical aggregation is recalculated.
 
 ### Example Output
 
