@@ -838,8 +838,13 @@ class DistanceCalculator:
         )
 
     def _make_result_filename(self) -> str:
-        """Generate filename for result JSON."""
+        """Generate filename for result JSON.
+
+        Includes analysis settings that affect results to ensure cache
+        invalidation when settings change.
+        """
         eq_str = f"eq{self.equilibration_time:.0f}{self.equilibration_unit}"
+
         # Create short label from first pair
         if self.pairs:
             pair_label = _make_pair_label(*self.pairs[0])
@@ -847,14 +852,52 @@ class DistanceCalculator:
                 pair_label += f"_and{len(self.pairs) - 1}more"
         else:
             pair_label = "nopairs"
-        return f"distances_{pair_label}_{eq_str}.json"
+
+        # Build settings suffix for cache invalidation
+        settings_parts = []
+
+        # PBC setting
+        pbc_str = "pbc" if self._use_pbc else "nopbc"
+        settings_parts.append(pbc_str)
+
+        # Alignment setting
+        if self._alignment.enabled:
+            align_str = f"align-{self._alignment.reference_mode}"
+        else:
+            align_str = "noalign"
+        settings_parts.append(align_str)
+
+        settings_suffix = "_".join(settings_parts)
+
+        return f"distances_{pair_label}_{eq_str}_{settings_suffix}.json"
 
     def _make_aggregated_filename(self, replicates: Sequence[int]) -> str:
-        """Generate filename for aggregated result."""
+        """Generate filename for aggregated result.
+
+        Includes analysis settings that affect results to ensure cache
+        invalidation when settings change.
+        """
         eq_str = f"eq{self.equilibration_time:.0f}{self.equilibration_unit}"
         reps = sorted(replicates)
         if reps == list(range(reps[0], reps[-1] + 1)):
             rep_str = f"reps{reps[0]}-{reps[-1]}"
         else:
             rep_str = "reps" + "_".join(map(str, reps))
-        return f"distances_{rep_str}_{eq_str}.json"
+
+        # Build settings suffix for cache invalidation
+        settings_parts = []
+
+        # PBC setting
+        pbc_str = "pbc" if self._use_pbc else "nopbc"
+        settings_parts.append(pbc_str)
+
+        # Alignment setting
+        if self._alignment.enabled:
+            align_str = f"align-{self._alignment.reference_mode}"
+        else:
+            align_str = "noalign"
+        settings_parts.append(align_str)
+
+        settings_suffix = "_".join(settings_parts)
+
+        return f"distances_{rep_str}_{eq_str}_{settings_suffix}.json"
