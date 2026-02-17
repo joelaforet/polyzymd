@@ -1151,6 +1151,7 @@ def run_comparison(
         "rmsf": "rmsf",
         "triad": "catalytic_triad",
         "contacts": "contacts",
+        "distances": "distances",
     }
     settings_key = settings_key_map.get(comparison_type, comparison_type)
 
@@ -1208,6 +1209,10 @@ def run_comparison(
             from polyzymd.compare.contacts_formatters import format_contacts_result
 
             formatted = format_contacts_result(result, format=output_format)
+        elif comparison_type == "distances":
+            from polyzymd.compare.distances_formatters import format_distances_result
+
+            formatted = format_distances_result(result, format=output_format)
         else:
             # Generic JSON output for unknown types
             formatted = result.model_dump_json(indent=2)
