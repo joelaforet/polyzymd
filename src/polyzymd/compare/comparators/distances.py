@@ -23,9 +23,9 @@ from polyzymd import __version__
 from polyzymd.analysis.core.metric_type import MetricType
 from polyzymd.compare.core.registry import ComparatorRegistry
 from polyzymd.compare.results.distances import (
-    DistanceANOVASummary,
     DistanceComparisonResult,
     DistanceConditionSummary,
+    DistancePairANOVA,
     DistancePairSummary,
     DistancePairwiseComparison,
 )
@@ -61,7 +61,9 @@ class DistancesComparator:
     ANOVA, and effect size calculations on both mean distance and fraction
     below threshold.
 
-    The primary ranking metric is mean distance (lower = closer = better).
+    Each distance pair is compared independently - there is no cross-pair
+    averaging since different pairs measure fundamentally different physical
+    quantities (e.g., H-bond distances vs lid-opening distances).
 
     Parameters
     ----------
@@ -79,7 +81,7 @@ class DistancesComparator:
     >>> dist_settings = config.analysis_settings.get("distances")
     >>> comparator = DistancesComparator(config, dist_settings, equilibration="10ns")
     >>> result = comparator.compare()
-    >>> print(result.ranking)  # Sorted by mean distance (ascending)
+    >>> print(result.ranking_by_pair["Catalytic H-bond"])  # Per-pair ranking
     ["100% SBMA", "No Polymer", "50/50 Mix", "100% EGMA"]
 
     Notes
@@ -130,6 +132,10 @@ class DistancesComparator:
     def compare(self, recompute: bool = False) -> DistanceComparisonResult:
         """Run the comparison across all conditions.
 
+        Each distance pair is compared independently - rankings and statistics
+        are computed per-pair since averaging unrelated distances (e.g., H-bond
+        + lid-opening) is not semantically meaningful.
+
         Parameters
         ----------
         recompute : bool
@@ -138,12 +144,13 @@ class DistancesComparator:
         Returns
         -------
         DistanceComparisonResult
-            Complete comparison result.
+            Complete comparison result with per-pair rankings.
         """
+        pair_labels = self.analysis_settings.get_pair_labels()
         logger.info(f"Starting distance comparison: {self.config.name}")
         logger.info(f"Conditions: {len(self.config.conditions)}")
         logger.info(f"Equilibration: {self.equilibration}")
-        logger.info(f"Pairs: {self.analysis_settings.get_pair_labels()}")
+        logger.info(f"Pairs: {pair_labels}")
 
         # Load/compute data for each condition
         condition_data: list[tuple["ConditionConfig", DistanceConditionData]] = []
@@ -166,51 +173,62 @@ class DistancesComparator:
         # Determine control
         effective_control = self._get_effective_control(summaries)
 
-        # Pairwise comparisons
-        comparisons = self._compute_pairwise_comparisons(summaries, effective_control)
+        # Compute per-pair rankings
+        # For each pair, rank conditions by mean distance (ascending = lowest first)
+        ranking_by_pair: dict[str, list[str]] = {}
+        fraction_ranking_by_pair: dict[str, list[str]] = {}
 
-        # ANOVA (if 3+ conditions)
-        anova = None
-        if len(summaries) >= 3:
-            anova = self._compute_anova(summaries)
+        for pair_label in pair_labels:
+            # Get pair data from each condition
+            pair_data = []
+            for summary in summaries:
+                pair_summary = summary.get_pair(pair_label)
+                pair_data.append((summary.label, pair_summary))
 
-        # Rank by mean distance (ascending = lowest first)
-        ranking = [s.label for s in sorted(summaries, key=lambda s: s.overall_mean_distance)]
+            # Rank by mean distance (ascending)
+            sorted_by_distance = sorted(pair_data, key=lambda x: x[1].mean_distance)
+            ranking_by_pair[pair_label] = [label for label, _ in sorted_by_distance]
 
-        # Rank by fraction (descending = highest first) if threshold specified
-        ranking_by_fraction = None
-        if self.analysis_settings.threshold is not None:
-            # Filter to conditions with fraction data
-            with_fraction = [s for s in summaries if s.overall_fraction_below is not None]
+            # Rank by fraction below threshold (descending) if threshold specified
+            with_fraction = [
+                (label, ps) for label, ps in pair_data if ps.fraction_below_threshold is not None
+            ]
             if with_fraction:
-                ranking_by_fraction = [
-                    s.label
-                    for s in sorted(
-                        with_fraction, key=lambda s: s.overall_fraction_below or 0, reverse=True
-                    )
-                ]
+                sorted_by_fraction = sorted(
+                    with_fraction, key=lambda x: x[1].fraction_below_threshold or 0, reverse=True
+                )
+                fraction_ranking_by_pair[pair_label] = [label for label, _ in sorted_by_fraction]
+
+        # Pairwise comparisons (now per-pair)
+        comparisons = self._compute_pairwise_comparisons(summaries, effective_control, pair_labels)
+
+        # ANOVA (if 3+ conditions) - now per-pair
+        anova_by_pair: list[DistancePairANOVA] | None = None
+        if len(summaries) >= 3:
+            anova_by_pair = self._compute_anova(summaries, pair_labels)
 
         # Build result
         result = DistanceComparisonResult(
             metric="mean_distance",
             name=self.config.name,
             n_pairs=len(self.analysis_settings.pairs),
-            pair_labels=self.analysis_settings.get_pair_labels(),
-            threshold=self.analysis_settings.threshold,
+            pair_labels=pair_labels,
             control_label=effective_control,
             conditions=summaries,
             pairwise_comparisons=comparisons,
-            anova=anova,
-            ranking=ranking,
-            ranking_by_fraction=ranking_by_fraction,
+            anova_by_pair=anova_by_pair,
+            ranking_by_pair=ranking_by_pair,
+            fraction_ranking_by_pair=fraction_ranking_by_pair if fraction_ranking_by_pair else None,
             equilibration_time=self.equilibration,
             created_at=datetime.now(),
             polyzymd_version=__version__,
         )
 
-        logger.info(f"Comparison complete. Ranking by distance: {ranking}")
-        if ranking_by_fraction:
-            logger.info(f"Ranking by contact fraction: {ranking_by_fraction}")
+        # Log rankings per pair
+        for pair_label in pair_labels:
+            logger.info(f"Ranking for '{pair_label}': {ranking_by_pair[pair_label]}")
+            if pair_label in fraction_ranking_by_pair:
+                logger.info(f"  Contact fraction ranking: {fraction_ranking_by_pair[pair_label]}")
 
         return result
 
@@ -231,7 +249,7 @@ class DistancesComparator:
         Returns
         -------
         dict
-            Dictionary with pair summaries, overall stats, and replicate values.
+            Dictionary with pair_summaries and n_replicates.
         """
         from polyzymd.analysis.distances.calculator import DistanceCalculator
         from polyzymd.analysis.results.distances import DistanceAggregatedResult
@@ -282,70 +300,29 @@ class DistancesComparator:
             )
 
         # Build pair summaries from aggregated result
+        # Note: We do NOT compute cross-pair averages here. Each pair is compared
+        # independently since averaging unrelated distances (e.g., H-bond distance
+        # + lid-opening distance) is not semantically meaningful.
         pair_summaries = []
-        per_replicate_overall_distances = []  # Average across pairs per replicate
-        per_replicate_overall_fractions = []  # Average fraction per replicate
-
-        # Initialize per-replicate accumulators
-        n_reps = agg_result.n_replicates
-        rep_distance_sums = [0.0] * n_reps
-        rep_fraction_sums = [0.0] * n_reps
-        n_pairs_with_fraction = 0
 
         for pr in agg_result.pair_results:
             pair_summary = DistancePairSummary(
                 label=pr.pair_label,
                 selection_a=pr.selection1,
                 selection_b=pr.selection2,
+                threshold=pr.threshold,
                 mean_distance=pr.overall_mean,
                 sem_distance=pr.overall_sem,
                 fraction_below_threshold=pr.overall_fraction_below,
                 sem_fraction_below=pr.sem_fraction_below,
                 per_replicate_means=pr.per_replicate_means,
+                per_replicate_fractions=pr.per_replicate_fractions_below,
             )
             pair_summaries.append(pair_summary)
-
-            # Accumulate per-replicate values
-            for i, mean in enumerate(pr.per_replicate_means):
-                rep_distance_sums[i] += mean
-
-            if pr.per_replicate_fractions_below:
-                n_pairs_with_fraction += 1
-                for i, frac in enumerate(pr.per_replicate_fractions_below):
-                    rep_fraction_sums[i] += frac
-
-        # Compute per-replicate overall averages
-        n_pairs = len(agg_result.pair_results)
-        per_replicate_overall_distances = [s / n_pairs for s in rep_distance_sums]
-
-        if n_pairs_with_fraction > 0:
-            per_replicate_overall_fractions = [s / n_pairs_with_fraction for s in rep_fraction_sums]
-        else:
-            per_replicate_overall_fractions = None
-
-        # Compute overall statistics
-        overall_mean_distance = float(np.mean(per_replicate_overall_distances))
-        overall_sem_distance = float(
-            np.std(per_replicate_overall_distances, ddof=1) / np.sqrt(n_reps)
-        )
-
-        overall_fraction_below = None
-        overall_sem_fraction_below = None
-        if per_replicate_overall_fractions:
-            overall_fraction_below = float(np.mean(per_replicate_overall_fractions))
-            overall_sem_fraction_below = float(
-                np.std(per_replicate_overall_fractions, ddof=1) / np.sqrt(n_reps)
-            )
 
         return {
             "pair_summaries": pair_summaries,
             "n_replicates": agg_result.n_replicates,
-            "overall_mean_distance": overall_mean_distance,
-            "overall_sem_distance": overall_sem_distance,
-            "overall_fraction_below": overall_fraction_below,
-            "overall_sem_fraction_below": overall_sem_fraction_below,
-            "per_replicate_distances": per_replicate_overall_distances,
-            "per_replicate_fractions": per_replicate_overall_fractions,
         }
 
     def _build_condition_summary(
@@ -372,12 +349,6 @@ class DistancesComparator:
             config_path=str(cond.config),
             n_replicates=data["n_replicates"],
             pair_summaries=data["pair_summaries"],
-            overall_mean_distance=data["overall_mean_distance"],
-            overall_sem_distance=data["overall_sem_distance"],
-            overall_fraction_below=data["overall_fraction_below"],
-            overall_sem_fraction_below=data["overall_sem_fraction_below"],
-            replicate_values=data["per_replicate_distances"],
-            replicate_fractions=data["per_replicate_fractions"],
         )
 
     def _get_effective_control(self, summaries: list[DistanceConditionSummary]) -> str | None:
@@ -408,11 +379,12 @@ class DistancesComparator:
         self,
         summaries: list[DistanceConditionSummary],
         control_label: str | None,
+        pair_labels: list[str],
     ) -> list[DistancePairwiseComparison]:
-        """Compute pairwise statistical comparisons.
+        """Compute pairwise statistical comparisons for each distance pair.
 
-        If control is specified, compare all vs control.
-        Otherwise, compare all pairs.
+        For each distance pair, compare conditions either all-vs-control or
+        all pairwise combinations.
 
         Parameters
         ----------
@@ -420,57 +392,85 @@ class DistancesComparator:
             Condition summaries.
         control_label : str or None
             Control condition label.
+        pair_labels : list[str]
+            Labels of distance pairs to compare.
 
         Returns
         -------
         list[DistancePairwiseComparison]
-            Pairwise comparison results.
+            Pairwise comparison results (one per pair per condition comparison).
         """
         comparisons = []
 
-        if control_label:
-            # Compare all vs control
-            control = next(s for s in summaries if s.label == control_label)
-            for summary in summaries:
-                if summary.label == control_label:
-                    continue
-                comp = self._compare_pair(control, summary)
-                comparisons.append(comp)
-        else:
-            # Compare all pairs
-            for i, summary_a in enumerate(summaries):
-                for summary_b in summaries[i + 1 :]:
-                    comp = self._compare_pair(summary_a, summary_b)
+        for pair_label in pair_labels:
+            if control_label:
+                # Compare all vs control for this pair
+                control = next(s for s in summaries if s.label == control_label)
+                control_pair = control.get_pair(pair_label)
+                for summary in summaries:
+                    if summary.label == control_label:
+                        continue
+                    treatment_pair = summary.get_pair(pair_label)
+                    comp = self._compare_pair_data(
+                        pair_label=pair_label,
+                        cond_a_label=control.label,
+                        cond_b_label=summary.label,
+                        pair_a=control_pair,
+                        pair_b=treatment_pair,
+                    )
                     comparisons.append(comp)
+            else:
+                # Compare all pairs of conditions for this distance pair
+                for i, summary_a in enumerate(summaries):
+                    pair_a = summary_a.get_pair(pair_label)
+                    for summary_b in summaries[i + 1 :]:
+                        pair_b = summary_b.get_pair(pair_label)
+                        comp = self._compare_pair_data(
+                            pair_label=pair_label,
+                            cond_a_label=summary_a.label,
+                            cond_b_label=summary_b.label,
+                            pair_a=pair_a,
+                            pair_b=pair_b,
+                        )
+                        comparisons.append(comp)
 
         return comparisons
 
-    def _compare_pair(
+    def _compare_pair_data(
         self,
-        cond_a: DistanceConditionSummary,
-        cond_b: DistanceConditionSummary,
+        pair_label: str,
+        cond_a_label: str,
+        cond_b_label: str,
+        pair_a: DistancePairSummary,
+        pair_b: DistancePairSummary,
     ) -> DistancePairwiseComparison:
-        """Compare two conditions statistically.
+        """Compare two conditions statistically for a single distance pair.
 
         Parameters
         ----------
-        cond_a : DistanceConditionSummary
-            First condition (typically control).
-        cond_b : DistanceConditionSummary
-            Second condition (typically treatment).
+        pair_label : str
+            Label of the distance pair being compared.
+        cond_a_label : str
+            Label of first condition (typically control).
+        cond_b_label : str
+            Label of second condition (typically treatment).
+        pair_a : DistancePairSummary
+            Pair data from condition A.
+        pair_b : DistancePairSummary
+            Pair data from condition B.
 
         Returns
         -------
         DistancePairwiseComparison
             Statistical comparison result.
         """
-        # Distance metric comparison
-        values_a = cond_a.replicate_values
-        values_b = cond_b.replicate_values
+        # Distance metric comparison using per-replicate values
+        values_a = pair_a.per_replicate_means
+        values_b = pair_b.per_replicate_means
 
         ttest_dist = independent_ttest(values_a, values_b)
         effect_dist = cohens_d(values_a, values_b)
-        pct_dist = percent_change(cond_a.overall_mean_distance, cond_b.overall_mean_distance)
+        pct_dist = percent_change(pair_a.mean_distance, pair_b.mean_distance)
 
         # Direction for distance: negative change = closer = improving
         if pct_dist < -1:  # 1% threshold for "closer"
@@ -489,14 +489,14 @@ class DistancesComparator:
         fraction_sig = None
         fraction_pct = None
 
-        if cond_a.replicate_fractions and cond_b.replicate_fractions:
-            frac_a = cond_a.replicate_fractions
-            frac_b = cond_b.replicate_fractions
+        if pair_a.per_replicate_fractions and pair_b.per_replicate_fractions:
+            frac_a = pair_a.per_replicate_fractions
+            frac_b = pair_b.per_replicate_fractions
 
             ttest_frac = independent_ttest(frac_a, frac_b)
             effect_frac = cohens_d(frac_a, frac_b)
             pct_frac = percent_change(
-                cond_a.overall_fraction_below or 0, cond_b.overall_fraction_below or 0
+                pair_a.fraction_below_threshold or 0, pair_b.fraction_below_threshold or 0
             )
 
             fraction_t = ttest_frac.t_statistic
@@ -516,8 +516,9 @@ class DistancesComparator:
             fraction_pct = pct_frac
 
         return DistancePairwiseComparison(
-            condition_a=cond_a.label,
-            condition_b=cond_b.label,
+            pair_label=pair_label,
+            condition_a=cond_a_label,
+            condition_b=cond_b_label,
             # Distance metric
             distance_t_statistic=ttest_dist.t_statistic,
             distance_p_value=ttest_dist.p_value,
@@ -536,43 +537,65 @@ class DistancesComparator:
             fraction_percent_change=fraction_pct,
         )
 
-    def _compute_anova(self, summaries: list[DistanceConditionSummary]) -> DistanceANOVASummary:
-        """Compute ANOVA across all conditions.
+    def _compute_anova(
+        self,
+        summaries: list[DistanceConditionSummary],
+        pair_labels: list[str],
+    ) -> list[DistancePairANOVA]:
+        """Compute ANOVA across all conditions for each distance pair.
 
         Parameters
         ----------
         summaries : list[DistanceConditionSummary]
             Condition summaries.
+        pair_labels : list[str]
+            Labels of distance pairs.
 
         Returns
         -------
-        DistanceANOVASummary
-            ANOVA results for both metrics.
+        list[DistancePairANOVA]
+            ANOVA results for each pair.
         """
-        # Distance ANOVA
-        distance_groups = [s.replicate_values for s in summaries]
-        anova_dist = one_way_anova(*distance_groups)
+        anova_results = []
 
-        # Fraction ANOVA (if available)
-        fraction_f = None
-        fraction_p = None
-        fraction_sig = None
+        for pair_label in pair_labels:
+            # Get per-replicate values for this pair from each condition
+            distance_groups = []
+            fraction_groups = []
 
-        fraction_groups = [s.replicate_fractions for s in summaries if s.replicate_fractions]
-        if len(fraction_groups) == len(summaries):
-            anova_frac = one_way_anova(*fraction_groups)
-            fraction_f = anova_frac.f_statistic
-            fraction_p = anova_frac.p_value
-            fraction_sig = anova_frac.significant
+            for summary in summaries:
+                pair_data = summary.get_pair(pair_label)
+                distance_groups.append(pair_data.per_replicate_means)
+                if pair_data.per_replicate_fractions:
+                    fraction_groups.append(pair_data.per_replicate_fractions)
 
-        return DistanceANOVASummary(
-            distance_f_statistic=anova_dist.f_statistic,
-            distance_p_value=anova_dist.p_value,
-            distance_significant=anova_dist.significant,
-            fraction_f_statistic=fraction_f,
-            fraction_p_value=fraction_p,
-            fraction_significant=fraction_sig,
-        )
+            # Distance ANOVA
+            anova_dist = one_way_anova(*distance_groups)
+
+            # Fraction ANOVA (if available for all conditions)
+            fraction_f = None
+            fraction_p = None
+            fraction_sig = None
+
+            if len(fraction_groups) == len(summaries):
+                anova_frac = one_way_anova(*fraction_groups)
+                fraction_f = anova_frac.f_statistic
+                fraction_p = anova_frac.p_value
+                fraction_sig = anova_frac.significant
+
+            anova_results.append(
+                DistancePairANOVA(
+                    pair_label=pair_label,
+                    distance_f_statistic=anova_dist.f_statistic,
+                    distance_p_value=anova_dist.p_value,
+                    distance_significant=anova_dist.significant,
+                    fraction_f_statistic=fraction_f,
+                    fraction_p_value=fraction_p,
+                    fraction_significant=fraction_sig,
+                )
+            )
+
+        return anova_results
 
     def _update_aggregated_thresholds_if_needed(
         self,

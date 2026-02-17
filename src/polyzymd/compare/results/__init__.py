@@ -23,9 +23,9 @@ from polyzymd.compare.results.contacts import (
 
 # Distance result classes
 from polyzymd.compare.results.distances import (
-    DistanceANOVASummary,
     DistanceComparisonResult,
     DistanceConditionSummary,
+    DistancePairANOVA,
     DistancePairSummary,
     DistancePairwiseComparison,
 )
@@ -70,9 +70,9 @@ __all__ = [
     "ContactsConditionSummary",
     "ContactsPairwiseComparison",
     # Distances
-    "DistanceANOVASummary",
     "DistanceComparisonResult",
     "DistanceConditionSummary",
+    "DistancePairANOVA",
     "DistancePairSummary",
     "DistancePairwiseComparison",
 ]

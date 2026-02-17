@@ -3,8 +3,13 @@
 This module defines Pydantic models for structured distance comparison results
 that can be serialized to JSON and used for downstream plotting.
 
-The primary ranking metric is mean distance (lower = closer interactions).
-Secondary metric is fraction below threshold (if threshold is specified).
+Each distance pair is compared independently across conditions - there is no
+cross-pair averaging since different pairs measure fundamentally different
+physical quantities (e.g., H-bond distances vs lid-opening distances).
+
+For each pair:
+- Primary ranking: mean distance (lower = closer = better)
+- Secondary ranking: fraction below threshold (higher = more contact = better)
 """
 
 from __future__ import annotations
@@ -29,6 +34,8 @@ class DistancePairSummary(BaseModel):
         MDAnalysis selection for first atom/group.
     selection_b : str
         MDAnalysis selection for second atom/group.
+    threshold : float, optional
+        Distance threshold used for this pair (Angstroms).
     mean_distance : float
         Mean distance in Angstroms (averaged across replicates).
     sem_distance : float
@@ -38,21 +45,29 @@ class DistancePairSummary(BaseModel):
     sem_fraction_below : float, optional
         SEM of fraction below threshold.
     per_replicate_means : list[float]
-        Mean distance from each replicate.
+        Mean distance from each replicate (for statistical tests).
+    per_replicate_fractions : list[float], optional
+        Fraction below threshold from each replicate.
     """
 
     label: str
     selection_a: str
     selection_b: str
+    threshold: Optional[float] = None
     mean_distance: float
     sem_distance: float
     fraction_below_threshold: Optional[float] = None
     sem_fraction_below: Optional[float] = None
     per_replicate_means: list[float] = Field(default_factory=list)
+    per_replicate_fractions: Optional[list[float]] = None
 
 
 class DistanceConditionSummary(BaseModel):
     """Summary statistics for one condition in a distance comparison.
+
+    Note: There is no "overall" distance metric across pairs, since averaging
+    unrelated distances (e.g., H-bond + lid-opening) is not meaningful.
+    Each pair is compared independently.
 
     Attributes
     ----------
@@ -64,39 +79,42 @@ class DistanceConditionSummary(BaseModel):
         Number of replicates included.
     pair_summaries : list[DistancePairSummary]
         Summary for each distance pair.
-    overall_mean_distance : float
-        Average mean distance across all pairs (primary metric).
-    overall_sem_distance : float
-        SEM of overall mean distance.
-    overall_fraction_below : float, optional
-        Average fraction below threshold across all pairs.
-    overall_sem_fraction_below : float, optional
-        SEM of overall fraction below threshold.
-    replicate_values : list[float]
-        Per-replicate overall mean distances (for statistical tests).
-    replicate_fractions : list[float], optional
-        Per-replicate overall fractions (for statistical tests).
     """
 
     label: str
     config_path: str
     n_replicates: int
     pair_summaries: list[DistancePairSummary]
-    overall_mean_distance: float
-    overall_sem_distance: float
-    overall_fraction_below: Optional[float] = None
-    overall_sem_fraction_below: Optional[float] = None
-    replicate_values: list[float] = Field(default_factory=list)
-    replicate_fractions: Optional[list[float]] = None
+
+    def get_pair(self, label: str) -> DistancePairSummary:
+        """Get a pair summary by label.
+
+        Parameters
+        ----------
+        label : str
+            Pair label.
+
+        Returns
+        -------
+        DistancePairSummary
+            The matching pair summary.
+        """
+        for ps in self.pair_summaries:
+            if ps.label == label:
+                return ps
+        raise KeyError(f"Pair '{label}' not found in condition '{self.label}'")
 
 
 class DistancePairwiseComparison(BaseModel):
-    """Statistical comparison between two conditions for distance analysis.
+    """Statistical comparison between two conditions for a single distance pair.
 
-    Includes comparisons for both mean distance and fraction metrics.
+    Each comparison is specific to one pair - cross-pair comparisons are not
+    meaningful since different pairs measure different physical quantities.
 
     Attributes
     ----------
+    pair_label : str
+        Label of the distance pair being compared.
     condition_a : str
         Label of first condition (typically control).
     condition_b : str
@@ -135,6 +153,7 @@ class DistancePairwiseComparison(BaseModel):
         Percent change in fraction below threshold.
     """
 
+    pair_label: str
     condition_a: str
     condition_b: str
 
@@ -157,13 +176,13 @@ class DistancePairwiseComparison(BaseModel):
     fraction_percent_change: Optional[float] = None
 
 
-class DistanceANOVASummary(BaseModel):
-    """ANOVA result summary for distance comparison.
-
-    Includes results for both metrics.
+class DistancePairANOVA(BaseModel):
+    """ANOVA result for a single distance pair.
 
     Attributes
     ----------
+    pair_label : str
+        Label of the distance pair.
     distance_f_statistic : float
         F-statistic for mean distance.
     distance_p_value : float
@@ -178,6 +197,7 @@ class DistanceANOVASummary(BaseModel):
         Whether fraction p < 0.05.
     """
 
+    pair_label: str
     distance_f_statistic: float
     distance_p_value: float
     distance_significant: bool
@@ -190,8 +210,9 @@ class DistanceComparisonResult(BaseModel):
     """Complete distance comparison analysis result.
 
     This is the main output from DistancesComparator.compare().
-    Contains all condition summaries, statistical comparisons,
-    and rankings for both metrics.
+
+    Each distance pair is compared independently - rankings and statistics
+    are computed per-pair since averaging unrelated distances is not meaningful.
 
     Attributes
     ----------
@@ -203,20 +224,20 @@ class DistanceComparisonResult(BaseModel):
         Number of distance pairs analyzed.
     pair_labels : list[str]
         Labels for each pair.
-    threshold : float, optional
-        Distance threshold used (if any).
     control_label : str, optional
         Label of the control condition.
     conditions : list[DistanceConditionSummary]
         Summary for each condition.
     pairwise_comparisons : list[DistancePairwiseComparison]
-        Statistical comparisons.
-    anova : DistanceANOVASummary, optional
-        ANOVA result if 3+ conditions.
-    ranking : list[str]
-        Labels sorted by mean distance (ascending = lowest first).
-    ranking_by_fraction : list[str], optional
-        Labels sorted by fraction below threshold (descending = highest first).
+        Statistical comparisons (grouped by pair).
+    anova_by_pair : list[DistancePairANOVA], optional
+        ANOVA results for each pair (if 3+ conditions).
+    ranking_by_pair : dict[str, list[str]]
+        Condition labels sorted by mean distance, keyed by pair label.
+        Lower distance = better = earlier in list.
+    fraction_ranking_by_pair : dict[str, list[str]], optional
+        Condition labels sorted by fraction below threshold, keyed by pair.
+        Higher fraction = better = earlier in list.
     equilibration_time : str
         Equilibration time used.
     created_at : datetime
@@ -229,13 +250,12 @@ class DistanceComparisonResult(BaseModel):
     name: str
     n_pairs: int
     pair_labels: list[str]
-    threshold: Optional[float] = None
     control_label: Optional[str] = None
     conditions: list[DistanceConditionSummary]
     pairwise_comparisons: list[DistancePairwiseComparison]
-    anova: Optional[DistanceANOVASummary] = None
-    ranking: list[str]
-    ranking_by_fraction: Optional[list[str]] = None
+    anova_by_pair: Optional[list[DistancePairANOVA]] = None
+    ranking_by_pair: dict[str, list[str]]
+    fraction_ranking_by_pair: Optional[dict[str, list[str]]] = None
     equilibration_time: str
     created_at: datetime
     polyzymd_version: str = __version__
@@ -293,12 +313,31 @@ class DistanceComparisonResult(BaseModel):
                 return cond
         raise KeyError(f"Condition '{label}' not found")
 
-    def get_comparison(self, label: str) -> Optional[DistancePairwiseComparison]:
-        """Get pairwise comparison for a condition vs control.
+    def get_comparisons_for_pair(self, pair_label: str) -> list[DistancePairwiseComparison]:
+        """Get all pairwise comparisons for a specific pair.
 
         Parameters
         ----------
-        label : str
+        pair_label : str
+            The pair label.
+
+        Returns
+        -------
+        list[DistancePairwiseComparison]
+            Comparisons for this pair.
+        """
+        return [c for c in self.pairwise_comparisons if c.pair_label == pair_label]
+
+    def get_comparison(
+        self, pair_label: str, condition_b: str
+    ) -> Optional[DistancePairwiseComparison]:
+        """Get pairwise comparison for a specific pair and condition vs control.
+
+        Parameters
+        ----------
+        pair_label : str
+            The pair label.
+        condition_b : str
             Treatment condition label.
 
         Returns
@@ -307,6 +346,38 @@ class DistanceComparisonResult(BaseModel):
             The comparison, or None if not found.
         """
         for comp in self.pairwise_comparisons:
-            if comp.condition_b == label:
+            if comp.pair_label == pair_label and comp.condition_b == condition_b:
                 return comp
         return None
+
+    def get_ranking(self, pair_label: str) -> list[str]:
+        """Get ranking for a specific pair.
+
+        Parameters
+        ----------
+        pair_label : str
+            The pair label.
+
+        Returns
+        -------
+        list[str]
+            Condition labels sorted by mean distance (lowest first).
+        """
+        return self.ranking_by_pair.get(pair_label, [])
+
+    def get_fraction_ranking(self, pair_label: str) -> list[str]:
+        """Get fraction ranking for a specific pair.
+
+        Parameters
+        ----------
+        pair_label : str
+            The pair label.
+
+        Returns
+        -------
+        list[str]
+            Condition labels sorted by fraction below threshold (highest first).
+        """
+        if self.fraction_ranking_by_pair is None:
+            return []
+        return self.fraction_ranking_by_pair.get(pair_label, [])
