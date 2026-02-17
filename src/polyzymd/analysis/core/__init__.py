@@ -80,7 +80,6 @@ from polyzymd.analysis.core.metric_type import (
     get_autocorrelation_strategy,
 )
 from polyzymd.analysis.core.pbc import (
-    is_orthorhombic,
     minimum_image_distance,
     pairwise_distances_pbc,
 )
@@ -151,7 +150,6 @@ __all__ = [
     "AutocorrelationStrategy",
     "get_autocorrelation_strategy",
     # PBC utilities
-    "is_orthorhombic",
     "minimum_image_distance",
     "pairwise_distances_pbc",
     # Trajectory alignment

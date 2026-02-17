@@ -6,9 +6,21 @@ to ensure consistent handling across the codebase.
 
 Supported Box Types
 -------------------
-- **Orthorhombic boxes** (cubic, rectangular): Fully supported
-- **Triclinic boxes**: Not supported; a warning is logged and PBC correction
-  is skipped (falls back to simple Euclidean distance)
+Both **orthorhombic** (cubic, rectangular) and **triclinic** (e.g., truncated
+dodecahedron, rhombic dodecahedron) boxes are fully supported. This is achieved
+by delegating to MDAnalysis distance functions which handle all box types.
+
+Box Format
+----------
+The box parameter uses MDAnalysis format: ``[Lx, Ly, Lz, alpha, beta, gamma]``
+
+- ``Lx, Ly, Lz``: Box edge lengths in Angstroms
+- ``alpha``: Angle between edges b and c (degrees)
+- ``beta``: Angle between edges a and c (degrees)
+- ``gamma``: Angle between edges a and b (degrees)
+
+For orthorhombic boxes, all angles are 90°. For triclinic boxes (like truncated
+dodecahedron), angles differ from 90°.
 
 Usage
 -----
@@ -37,49 +49,8 @@ References
 
 from __future__ import annotations
 
-import logging
-import warnings
-from typing import TYPE_CHECKING
-
 import numpy as np
 from numpy.typing import NDArray
-
-if TYPE_CHECKING:
-    pass
-
-LOGGER = logging.getLogger(__name__)
-
-# Track whether we've warned about triclinic boxes (warn once)
-_TRICLINIC_WARNING_ISSUED = False
-
-
-def is_orthorhombic(box: NDArray[np.floating]) -> bool:
-    """Check if box is orthorhombic (all angles approximately 90°).
-
-    Parameters
-    ----------
-    box : NDArray
-        Box dimensions in MDAnalysis format: [Lx, Ly, Lz, alpha, beta, gamma]
-        or just lengths [Lx, Ly, Lz].
-
-    Returns
-    -------
-    bool
-        True if box is orthorhombic (angles within 0.01° of 90°).
-    """
-    if box is None:
-        return False
-
-    # If only lengths provided, assume orthorhombic
-    if len(box) == 3:
-        return True
-
-    if len(box) >= 6:
-        alpha, beta, gamma = box[3:6]
-        # Check if all angles are approximately 90 degrees
-        return all(abs(angle - 90.0) < 0.01 for angle in [alpha, beta, gamma])
-
-    return False
 
 
 def minimum_image_distance(
@@ -90,8 +61,7 @@ def minimum_image_distance(
     """Calculate minimum image distance between two positions.
 
     Uses the minimum image convention for periodic boundary conditions.
-    For orthorhombic boxes, this finds the shortest distance considering
-    all periodic images.
+    Both orthorhombic and triclinic boxes are fully supported.
 
     Parameters
     ----------
@@ -99,17 +69,13 @@ def minimum_image_distance(
         Position vectors of shape (3,) in Angstroms.
     box : NDArray, optional
         Box dimensions in MDAnalysis format: [Lx, Ly, Lz, alpha, beta, gamma]
-        or just [Lx, Ly, Lz]. If None, no PBC correction is applied.
+        or just [Lx, Ly, Lz] (assumes orthorhombic). If None, no PBC
+        correction is applied.
 
     Returns
     -------
     float
         Minimum image distance in Angstroms.
-
-    Warnings
-    --------
-    If a triclinic box is detected (non-90° angles), a warning is logged
-    once per session and PBC correction is skipped.
 
     Examples
     --------
@@ -119,34 +85,25 @@ def minimum_image_distance(
     >>> minimum_image_distance(pos1, pos2, box)
     2.0  # Not 98.0, because pos2 is closer via the periodic image
     """
-    global _TRICLINIC_WARNING_ISSUED
+    from MDAnalysis.lib.distances import calc_bonds
 
-    diff = pos2 - pos1
+    # Reshape to (1, 3) for calc_bonds which expects arrays
+    p1 = np.asarray(pos1, dtype=np.float32).reshape(1, 3)
+    p2 = np.asarray(pos2, dtype=np.float32).reshape(1, 3)
 
     if box is not None:
-        if is_orthorhombic(box):
-            # Apply minimum image convention for orthorhombic box
-            box_lengths = box[:3]
-            diff = diff - box_lengths * np.round(diff / box_lengths)
-        else:
-            # Triclinic box - warn and skip PBC
-            if not _TRICLINIC_WARNING_ISSUED:
-                warnings.warn(
-                    "Triclinic box detected. PBC correction is only implemented for "
-                    "orthorhombic boxes. Falling back to simple Euclidean distance. "
-                    "This warning is shown once per session.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                LOGGER.warning(
-                    "Triclinic box detected (angles: %.1f, %.1f, %.1f). PBC correction skipped.",
-                    box[3] if len(box) > 3 else 90,
-                    box[4] if len(box) > 4 else 90,
-                    box[5] if len(box) > 5 else 90,
-                )
-                _TRICLINIC_WARNING_ISSUED = True
+        box_arr = np.asarray(box, dtype=np.float32)
+        # Expand 3-element box to 6-element (assume orthorhombic)
+        if len(box_arr) == 3:
+            box_arr = np.array(
+                [box_arr[0], box_arr[1], box_arr[2], 90.0, 90.0, 90.0],
+                dtype=np.float32,
+            )
+        result = calc_bonds(p1, p2, box=box_arr)
+    else:
+        result = calc_bonds(p1, p2)
 
-    return float(np.linalg.norm(diff))
+    return float(result[0])
 
 
 def pairwise_distances_pbc(
@@ -156,7 +113,8 @@ def pairwise_distances_pbc(
 ) -> NDArray[np.float64]:
     """Calculate pairwise distances between two sets of positions.
 
-    Uses minimum image convention if an orthorhombic box is provided.
+    Uses the minimum image convention for periodic boundary conditions.
+    Both orthorhombic and triclinic boxes are fully supported.
 
     Parameters
     ----------
@@ -166,19 +124,13 @@ def pairwise_distances_pbc(
         Second set of positions, shape (M, 3) in Angstroms.
     box : NDArray, optional
         Box dimensions in MDAnalysis format: [Lx, Ly, Lz, alpha, beta, gamma]
-        or just [Lx, Ly, Lz]. If None, no PBC correction is applied.
+        or just [Lx, Ly, Lz] (assumes orthorhombic). If None, no PBC
+        correction is applied.
 
     Returns
     -------
     NDArray[np.float64]
         Distance matrix of shape (N, M) in Angstroms.
-
-    Notes
-    -----
-    For large arrays, this can be memory-intensive as it creates an
-    intermediate array of shape (N, M, 3). For very large systems,
-    consider using MDAnalysis.lib.distances.distance_array() which
-    is optimized for performance.
 
     Examples
     --------
@@ -188,43 +140,21 @@ def pairwise_distances_pbc(
     >>> pairwise_distances_pbc(pos1, pos2, box)
     array([[2.], [49.]])
     """
-    global _TRICLINIC_WARNING_ISSUED
+    from MDAnalysis.lib.distances import distance_array
 
-    # Compute difference vectors: (N, 1, 3) - (1, M, 3) -> (N, M, 3)
-    diff = positions1[:, np.newaxis, :] - positions2[np.newaxis, :, :]
+    p1 = np.asarray(positions1, dtype=np.float32)
+    p2 = np.asarray(positions2, dtype=np.float32)
 
     if box is not None:
-        if is_orthorhombic(box):
-            box_lengths = box[:3]
-            diff = diff - box_lengths * np.round(diff / box_lengths)
-        else:
-            # Triclinic box - warn and skip PBC
-            if not _TRICLINIC_WARNING_ISSUED:
-                warnings.warn(
-                    "Triclinic box detected. PBC correction is only implemented for "
-                    "orthorhombic boxes. Falling back to simple Euclidean distance. "
-                    "This warning is shown once per session.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                LOGGER.warning(
-                    "Triclinic box detected (angles: %.1f, %.1f, %.1f). PBC correction skipped.",
-                    box[3] if len(box) > 3 else 90,
-                    box[4] if len(box) > 4 else 90,
-                    box[5] if len(box) > 5 else 90,
-                )
-                _TRICLINIC_WARNING_ISSUED = True
+        box_arr = np.asarray(box, dtype=np.float32)
+        # Expand 3-element box to 6-element (assume orthorhombic)
+        if len(box_arr) == 3:
+            box_arr = np.array(
+                [box_arr[0], box_arr[1], box_arr[2], 90.0, 90.0, 90.0],
+                dtype=np.float32,
+            )
+        result = distance_array(p1, p2, box=box_arr)
+    else:
+        result = distance_array(p1, p2)
 
-    # Compute distances
-    distances = np.linalg.norm(diff, axis=2)
-    return distances.astype(np.float64)
-
-
-def reset_triclinic_warning() -> None:
-    """Reset the triclinic warning flag.
-
-    This is primarily useful for testing. In production, the warning
-    should only be shown once per session.
-    """
-    global _TRICLINIC_WARNING_ISSUED
-    _TRICLINIC_WARNING_ISSUED = False
+    return result.astype(np.float64)
