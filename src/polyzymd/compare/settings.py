@@ -203,6 +203,17 @@ class DistancesAnalysisSettings(BaseAnalysisSettings):
         """Get list of pair labels."""
         return [p.label for p in self.pairs]
 
+    def get_pair_thresholds(self) -> list[float | None]:
+        """Get list of thresholds per pair, using global threshold as fallback.
+
+        Returns
+        -------
+        list[float | None]
+            List of thresholds, one per pair. If a pair has no explicit threshold,
+            the global threshold is used. If neither is set, None is returned.
+        """
+        return [p.threshold if p.threshold is not None else self.threshold for p in self.pairs]
+
 
 @ComparisonSettingsRegistry.register("distances")
 class DistancesComparisonSettings(BaseComparisonSettings):
