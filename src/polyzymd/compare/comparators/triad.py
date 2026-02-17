@@ -407,7 +407,11 @@ class TriadComparator(
         filename = f"triad_{name_safe}_{rep_str}_eq{eq_value:.0f}{eq_unit}.json"
 
         result_path = (
-            sim_config.output.projects_directory / "analysis" / "triad" / "aggregated" / filename
+            sim_config.output.projects_directory
+            / "analysis"
+            / "catalytic_triad"
+            / "aggregated"
+            / filename
         )
 
         return result_path

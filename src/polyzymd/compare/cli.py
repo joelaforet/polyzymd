@@ -1222,3 +1222,153 @@ def run_comparison(
         output_path = Path(output_path)
         output_path.write_text(formatted)
         click.echo(f"Saved output: {output_path}")
+
+
+@compare.command("plot-all")
+@click.option(
+    "-f",
+    "--file",
+    "config_file",
+    type=click.Path(exists=True, path_type=Path),
+    default="comparison.yaml",
+    help="Path to comparison.yaml config file.",
+)
+@click.option(
+    "-o",
+    "--output-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Override output directory (default: from plot_settings in config).",
+)
+@click.option(
+    "-a",
+    "--analysis",
+    "analysis_type",
+    type=str,
+    default=None,
+    help="Generate plots for specific analysis type only (e.g., 'rmsf', 'catalytic_triad').",
+)
+@click.option(
+    "-p",
+    "--plot-type",
+    type=str,
+    default=None,
+    help="Generate specific plot type only (e.g., 'triad_kde_panel').",
+)
+@click.option(
+    "--list-available",
+    is_flag=True,
+    help="List available plot types for enabled analyses.",
+)
+@click.option(
+    "-q",
+    "--quiet",
+    is_flag=True,
+    help="Suppress INFO messages.",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable DEBUG logging.",
+)
+def plot_all(
+    config_file: Path,
+    output_dir: Optional[Path],
+    analysis_type: Optional[str],
+    plot_type: Optional[str],
+    list_available: bool,
+    quiet: bool,
+    debug: bool,
+):
+    """Generate all plots from comparison.yaml configuration.
+
+    This is the config-driven plotting command that reads plot_settings
+    from comparison.yaml and generates all configured plots automatically.
+
+    \b
+    Available plot types (registered via PlotterRegistry):
+      - triad_kde_panel: Multi-row KDE panel for catalytic triad distances
+      - triad_threshold_bars: Grouped bar chart of triad contact fractions
+      - rmsf_comparison: Bar chart comparing whole-protein RMSF
+      - rmsf_profile: Per-residue RMSF line plot
+      - distance_kde: KDE distribution plots for distance pairs
+      - distance_threshold_bars: Contact fraction bar chart
+
+    \b
+    Examples:
+        polyzymd compare plot-all -f comparison.yaml
+        polyzymd compare plot-all -f comparison.yaml -a catalytic_triad
+        polyzymd compare plot-all -f comparison.yaml -p triad_kde_panel
+        polyzymd compare plot-all --list-available
+    """
+    from polyzymd.compare.plotter import ComparisonPlotter, PlotterRegistry
+
+    # Configure logging
+    log_level = logging.WARNING if quiet else (logging.DEBUG if debug else logging.INFO)
+    logging.basicConfig(
+        level=log_level,
+        format="%(levelname)s: %(message)s",
+    )
+
+    # Load config
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+    except Exception as e:
+        click.echo(f"Error loading config: {e}", err=True)
+        sys.exit(1)
+
+    # Override output directory if specified
+    if output_dir:
+        config.plot_settings.output_dir = output_dir
+
+    # Create plotter
+    plotter = ComparisonPlotter(config)
+
+    # List available plots
+    if list_available:
+        click.echo("Registered plot types:")
+        for ptype in PlotterRegistry.list_available():
+            click.echo(f"  - {ptype}")
+        click.echo()
+        click.echo("Available plots for enabled analyses:")
+        available = plotter.list_available_plots()
+        for atype, ptypes in available.items():
+            click.echo(f"  {atype}:")
+            for pt in ptypes:
+                click.echo(f"    - {pt}")
+        return
+
+    click.echo(f"Comparison: {config.name}")
+    click.echo(f"Conditions: {len(config.conditions)}")
+    click.echo(f"Output directory: {plotter.output_dir}")
+    click.echo()
+
+    # Generate plots
+    try:
+        if plot_type and analysis_type:
+            # Specific plot type for specific analysis
+            click.echo(f"Generating {plot_type} for {analysis_type}...")
+            generated = plotter.plot_single(plot_type, analysis_type)
+        elif analysis_type:
+            # All plots for specific analysis
+            click.echo(f"Generating plots for {analysis_type}...")
+            generated = plotter.plot_analysis(analysis_type)
+        else:
+            # All plots for all analyses
+            click.echo("Generating all plots...")
+            generated = plotter.plot_all()
+    except Exception as e:
+        click.echo(f"Error generating plots: {e}", err=True)
+        if debug:
+            import traceback
+
+            traceback.print_exc()
+        sys.exit(1)
+
+    click.echo()
+    if generated:
+        click.echo(f"Generated {len(generated)} plots:")
+        for path in generated:
+            click.echo(f"  - {path}")
+    else:
+        click.echo("No plots generated. Check that analyses are enabled in config.")

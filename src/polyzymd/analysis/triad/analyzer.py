@@ -206,7 +206,10 @@ class CatalyticTriadAnalyzer:
         """
         if output_dir is None:
             output_dir = (
-                self.config.output.projects_directory / "analysis" / "triad" / f"run_{replicate}"
+                self.config.output.projects_directory
+                / "analysis"
+                / "catalytic_triad"
+                / f"run_{replicate}"
             )
 
         result_file = output_dir / self._make_result_filename()
@@ -385,7 +388,12 @@ class CatalyticTriadAnalyzer:
         requested_replicates = list(replicates)
 
         if output_dir is None:
-            output_dir = self.config.output.projects_directory / "analysis" / "triad" / "aggregated"
+            output_dir = (
+                self.config.output.projects_directory
+                / "analysis"
+                / "catalytic_triad"
+                / "aggregated"
+            )
 
         # Compute individual replicates with error handling
         individual_results = []
@@ -517,7 +525,7 @@ class CatalyticTriadAnalyzer:
                 str(
                     self.config.output.projects_directory
                     / "analysis"
-                    / "triad"
+                    / "catalytic_triad"
                     / f"run_{r.replicate}"
                     / self._make_result_filename()
                 )

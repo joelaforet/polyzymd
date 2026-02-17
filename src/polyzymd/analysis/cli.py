@@ -196,7 +196,7 @@ def init(eq_time: str) -> None:
     analysis_dir.mkdir(exist_ok=True)
     (analysis_dir / "rmsf").mkdir(exist_ok=True)
     (analysis_dir / "distances").mkdir(exist_ok=True)
-    (analysis_dir / "triad").mkdir(exist_ok=True)
+    (analysis_dir / "catalytic_triad").mkdir(exist_ok=True)
 
     # Generate template
     template = generate_analysis_template(eq_time)

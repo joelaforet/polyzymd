@@ -167,12 +167,15 @@ class AnalysisSettingsContainer(BaseModel):
         -------
         list[str]
             Names of configured analyses (presence implies enabled).
+
+        Notes
+        -----
+        Uses actual model data from comparison.yaml rather than relying on
+        a registry. This makes comparison.yaml the source of truth for which
+        analyses are enabled.
         """
-        enabled = []
-        for analysis_type in AnalysisSettingsRegistry.list_available():
-            if self.get(analysis_type) is not None:
-                enabled.append(analysis_type)
-        return enabled
+        # Use actual model data - if an analysis section exists and has a value, it's enabled
+        return [key for key, value in self.model_dump().items() if value is not None]
 
     def to_analysis_yaml_dict(self, replicates: list[int], eq_time: str) -> dict[str, Any]:
         """Convert to analysis.yaml-compatible dictionary.
