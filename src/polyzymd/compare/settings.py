@@ -31,7 +31,6 @@ from polyzymd.analysis.core.registry import (
     ComparisonSettingsRegistry,
 )
 
-
 # ============================================================================
 # RMSF Settings
 # ============================================================================

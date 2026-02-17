@@ -855,7 +855,7 @@ def contacts(
         polyzymd compare contacts -f my_comparison.yaml -o report.md
     """
     from polyzymd.analysis.core.logging_utils import setup_logging
-    from polyzymd.compare.contacts_comparator import ContactsComparator
+    from polyzymd.compare.comparators.contacts import ContactsComparator
     from polyzymd.compare.contacts_formatters import format_contacts_result
 
     # Set up logging with colored output
@@ -987,6 +987,220 @@ def contacts(
         result,
         format=output_format,
     )
+    click.echo(formatted)
+
+    # Save formatted output if requested
+    if output_path:
+        output_path = Path(output_path)
+        output_path.write_text(formatted)
+        click.echo(f"Saved output: {output_path}")
+
+
+@compare.command("run")
+@click.argument(
+    "comparison_type",
+    type=str,
+)
+@click.option(
+    "-f",
+    "--file",
+    "config_file",
+    type=click.Path(exists=True, path_type=Path),
+    default="comparison.yaml",
+    help="Path to comparison.yaml config file.",
+)
+@click.option(
+    "--eq-time",
+    default=None,
+    help="Override equilibration time (e.g., '10ns', '5000ps').",
+)
+@click.option(
+    "--recompute",
+    is_flag=True,
+    help="Force recompute even if cached results exist.",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "markdown", "json"]),
+    default="table",
+    help="Output format: table (default), markdown, or json.",
+)
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Save output to file.",
+)
+@click.option(
+    "-q",
+    "--quiet",
+    is_flag=True,
+    help="Suppress INFO messages, show warnings/errors only.",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable DEBUG logging for troubleshooting.",
+)
+@click.option(
+    "--list",
+    "list_types",
+    is_flag=True,
+    help="List available comparison types and exit.",
+)
+def run_comparison(
+    comparison_type: str,
+    config_file: Path,
+    eq_time: Optional[str],
+    recompute: bool,
+    output_format: str,
+    output_path: Optional[Path],
+    quiet: bool,
+    debug: bool,
+    list_types: bool,
+):
+    """Run a comparison using the registry pattern.
+
+    This is a generic command that can run any registered comparison type.
+    Use --list to see available comparison types.
+
+    \b
+    Available comparison types:
+      - rmsf: Compare RMSF (flexibility) across conditions
+      - triad: Compare catalytic triad geometry across conditions
+      - contacts: Compare polymer-protein contacts across conditions
+
+    \b
+    Example:
+        polyzymd compare run rmsf
+        polyzymd compare run triad --eq-time 10ns
+        polyzymd compare run contacts --format markdown
+        polyzymd compare run --list
+    """
+    from polyzymd.analysis.core.logging_utils import setup_logging
+    from polyzymd.compare.core.registry import ComparatorRegistry
+
+    # Handle --list flag
+    if list_types:
+        available = ComparatorRegistry.list_available()
+        click.echo("Available comparison types:")
+        for comp_type in available:
+            comparator_cls = ComparatorRegistry.get(comp_type)
+            click.echo(f"  - {comp_type}: {comparator_cls.__name__}")
+        return
+
+    # Set up logging
+    setup_logging(quiet=quiet, debug=debug)
+
+    config_file = Path(config_file).resolve()
+
+    # Check if comparison type is registered
+    available = ComparatorRegistry.list_available()
+    if comparison_type not in available:
+        click.echo(f"Error: Unknown comparison type '{comparison_type}'", err=True)
+        click.echo(f"Available types: {', '.join(available)}", err=True)
+        click.echo("", err=True)
+        click.echo("Use 'polyzymd compare run --list' to see all available types.", err=True)
+        sys.exit(1)
+
+    # Load config
+    click.echo(f"Loading config: {config_file}")
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        click.echo(
+            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
+        )
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error loading config: {e}", err=True)
+        sys.exit(1)
+
+    # Validate config
+    errors = config.validate_config()
+    if errors:
+        click.echo("Configuration errors:", err=True)
+        for error in errors:
+            click.echo(f"  - {error}", err=True)
+        sys.exit(1)
+
+    # Get the comparator class from registry
+    comparator_cls = ComparatorRegistry.get(comparison_type)
+
+    # Get analysis settings for this comparison type
+    # Map comparison_type to analysis_settings key
+    settings_key_map = {
+        "rmsf": "rmsf",
+        "triad": "catalytic_triad",
+        "contacts": "contacts",
+    }
+    settings_key = settings_key_map.get(comparison_type, comparison_type)
+
+    analysis_settings = config.analysis_settings.get(settings_key)
+    if analysis_settings is None:
+        click.echo(f"Error: No '{settings_key}' in analysis_settings section", err=True)
+        click.echo("", err=True)
+        click.echo(
+            f"Add an analysis_settings.{settings_key} section to your comparison.yaml", err=True
+        )
+        sys.exit(1)
+
+    click.echo(f"Comparison: {config.name}")
+    click.echo(f"Type: {comparison_type}")
+    click.echo(f"Conditions: {len(config.conditions)}")
+
+    # Build equilibration
+    equilibration = eq_time or config.defaults.equilibration_time
+    click.echo(f"Equilibration: {equilibration}")
+    click.echo()
+
+    # Create comparator and run
+    try:
+        comparator = comparator_cls(
+            config=config,
+            analysis_settings=analysis_settings,
+            equilibration=equilibration,
+        )
+        result = comparator.compare(recompute=recompute)
+    except Exception as e:
+        click.echo(f"Error during comparison: {e}", err=True)
+        if debug:
+            import traceback
+
+            traceback.print_exc()
+        sys.exit(1)
+
+    # Save JSON result
+    results_dir = config_file.parent / "results"
+    results_dir.mkdir(exist_ok=True)
+    json_path = results_dir / f"{comparison_type}_comparison_{config.name.replace(' ', '_')}.json"
+    result.save(json_path)
+    click.echo(f"Saved result: {json_path}")
+    click.echo()
+
+    # Format output based on comparison type
+    try:
+        if comparison_type == "rmsf":
+            formatted = format_result(result, format=output_format)
+        elif comparison_type == "triad":
+            from polyzymd.compare.triad_formatters import format_triad_result
+
+            formatted = format_triad_result(result, format=output_format)
+        elif comparison_type == "contacts":
+            from polyzymd.compare.contacts_formatters import format_contacts_result
+
+            formatted = format_contacts_result(result, format=output_format)
+        else:
+            # Generic JSON output for unknown types
+            formatted = result.model_dump_json(indent=2)
+    except Exception as e:
+        click.echo(f"Warning: Could not format result: {e}", err=True)
+        formatted = result.model_dump_json(indent=2)
+
     click.echo(formatted)
 
     # Save formatted output if requested
