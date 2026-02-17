@@ -38,6 +38,11 @@ from polyzymd.compare.statistics import (
 )
 
 if TYPE_CHECKING:
+    from polyzymd.analysis.results.distances import (
+        DistanceAggregatedResult,
+        DistancePairAggregatedResult,
+        DistanceResult,
+    )
     from polyzymd.compare.config import ComparisonConfig, ConditionConfig
 
 logger = logging.getLogger("polyzymd.compare")
@@ -237,13 +242,27 @@ class DistancesComparator:
         # Load simulation config
         sim_config = SimulationConfig.from_yaml(cond.config)
 
+        # Get per-pair thresholds
+        pair_thresholds = self.analysis_settings.get_pair_thresholds()
+
         # Try to find existing aggregated result
         result_path = self._find_aggregated_result(sim_config, cond.replicates)
 
+        agg_result: DistanceAggregatedResult | None = None
+
         if result_path and result_path.exists() and not recompute:
             logger.info(f"  Loading cached result: {result_path}")
-            agg_result = DistanceAggregatedResult.load(result_path)
-        else:
+            cached_result = DistanceAggregatedResult.load(result_path)
+
+            # Validate and update thresholds if needed
+            agg_result = self._update_aggregated_thresholds_if_needed(
+                cached_result, sim_config, cond.replicates, pair_thresholds
+            )
+            if agg_result is None:
+                # Threshold update failed, need full recompute
+                logger.info("  Threshold update failed, forcing full recompute...")
+
+        if agg_result is None:
             # Compute distance analysis
             logger.info(f"  Computing distance analysis for replicates {cond.replicates}...")
 
@@ -254,7 +273,7 @@ class DistancesComparator:
                 config=sim_config,
                 pairs=pairs,
                 equilibration=self.equilibration,
-                threshold=self.analysis_settings.threshold,
+                thresholds=pair_thresholds,
             )
             agg_result = calculator.compute_aggregated(
                 replicates=cond.replicates,
@@ -554,6 +573,215 @@ class DistancesComparator:
             fraction_p_value=fraction_p,
             fraction_significant=fraction_sig,
         )
+
+    def _update_aggregated_thresholds_if_needed(
+        self,
+        agg_result: "DistanceAggregatedResult",
+        sim_config: Any,
+        replicates: list[int],
+        expected_thresholds: list[float | None],
+    ) -> "DistanceAggregatedResult | None":
+        """Update contact fractions in aggregated result if thresholds changed.
+
+        If the cached aggregated result used different thresholds than currently
+        requested, attempts to reload individual replicate results and recompute
+        the contact fractions from the stored distances. This avoids expensive
+        full trajectory reprocessing when only threshold parameters change.
+
+        Parameters
+        ----------
+        agg_result : DistanceAggregatedResult
+            Cached aggregated result to potentially update.
+        sim_config : SimulationConfig
+            Simulation configuration for locating replicate results.
+        replicates : list[int]
+            Replicate numbers included in the aggregation.
+        expected_thresholds : list[float | None]
+            Expected thresholds for each pair (from analysis settings).
+
+        Returns
+        -------
+        DistanceAggregatedResult or None
+            Updated aggregated result with recomputed contact fractions,
+            or None if the update failed and full recomputation is needed.
+        """
+        from polyzymd.analysis.results.distances import (
+            DistanceAggregatedResult,
+            DistancePairAggregatedResult,
+            DistanceResult,
+        )
+
+        # Check if any thresholds mismatch
+        needs_update = False
+        for idx, pr in enumerate(agg_result.pair_results):
+            expected = expected_thresholds[idx] if idx < len(expected_thresholds) else None
+            cached = pr.threshold
+            if expected != cached:
+                needs_update = True
+                logger.info(
+                    f"Threshold mismatch for {pr.pair_label}: cached={cached}, expected={expected}"
+                )
+                break
+
+        if not needs_update:
+            return agg_result  # No update needed
+
+        logger.info("Attempting to recompute contact fractions from cached replicate results...")
+
+        # Try to load individual replicate results
+        individual_results: list[DistanceResult] = []
+        for rep in replicates:
+            result_path = self._find_replicate_result(sim_config, rep)
+            if result_path is None or not result_path.exists():
+                logger.warning(
+                    f"Cannot find replicate {rep} result file for threshold update. "
+                    f"Full recomputation required."
+                )
+                return None
+
+            try:
+                result = DistanceResult.load(result_path)
+                individual_results.append(result)
+            except Exception as e:
+                logger.warning(f"Failed to load replicate {rep} result: {e}")
+                return None
+
+        # Check that all replicate results have stored distances
+        for result in individual_results:
+            for pr in result.pair_results:
+                if pr.distances is None or len(pr.distances) == 0:
+                    logger.warning(
+                        f"Replicate {result.replicate} pair {pr.pair_label} has no stored "
+                        f"distances. Full recomputation required."
+                    )
+                    return None
+
+        # Recompute aggregated pair results with new thresholds
+        updated_pair_results: list[DistancePairAggregatedResult] = []
+
+        for pair_idx, agg_pr in enumerate(agg_result.pair_results):
+            new_threshold = (
+                expected_thresholds[pair_idx] if pair_idx < len(expected_thresholds) else None
+            )
+
+            # Recompute per-replicate fractions from stored distances
+            per_rep_fractions: list[float] = []
+            for result in individual_results:
+                pr = result.pair_results[pair_idx]
+                if new_threshold is not None and pr.distances:
+                    distances_arr = np.array(pr.distances)
+                    fraction = float(np.mean(distances_arr < new_threshold))
+                    per_rep_fractions.append(fraction)
+
+            # Compute aggregated fraction statistics
+            overall_fraction = None
+            sem_fraction = None
+            per_rep_fractions_out = None
+
+            if per_rep_fractions and new_threshold is not None:
+                overall_fraction = float(np.mean(per_rep_fractions))
+                if len(per_rep_fractions) > 1:
+                    sem_fraction = float(
+                        np.std(per_rep_fractions, ddof=1) / np.sqrt(len(per_rep_fractions))
+                    )
+                else:
+                    sem_fraction = 0.0
+                per_rep_fractions_out = per_rep_fractions
+
+            # Create updated pair result
+            updated_pr = agg_pr.model_copy(
+                update={
+                    "threshold": new_threshold,
+                    "overall_fraction_below": overall_fraction,
+                    "sem_fraction_below": sem_fraction,
+                    "per_replicate_fractions_below": per_rep_fractions_out,
+                }
+            )
+            updated_pair_results.append(updated_pr)
+
+        # Create updated aggregated result
+        updated_agg = agg_result.model_copy(update={"pair_results": updated_pair_results})
+        logger.info("Successfully recomputed contact fractions from cached replicate results.")
+
+        return updated_agg
+
+    def _find_replicate_result(
+        self,
+        sim_config: Any,
+        replicate: int,
+    ) -> Path | None:
+        """Find path to existing single replicate distance result.
+
+        Parameters
+        ----------
+        sim_config : SimulationConfig
+            Simulation configuration.
+        replicate : int
+            Replicate number.
+
+        Returns
+        -------
+        Path or None
+            Path to result file if it might exist.
+        """
+        # Parse equilibration time
+        eq_str = self.equilibration.lower()
+        if eq_str.endswith("ns"):
+            eq_value = float(eq_str[:-2])
+            eq_unit = "ns"
+        elif eq_str.endswith("ps"):
+            eq_value = float(eq_str[:-2])
+            eq_unit = "ps"
+        else:
+            eq_value = float(eq_str)
+            eq_unit = "ns"
+
+        # Build expected filename pattern (matches _make_result_filename in calculator)
+        pairs = self.analysis_settings.get_pair_selections()
+        if pairs:
+            # Create short label from first pair
+            sel1, sel2 = pairs[0]
+            # Simplified label extraction (matches calculator logic)
+            import re
+
+            def _sel_to_label(sel: str) -> str:
+                label = sel.lower()
+                label = re.sub(r"\b(and|or|not|protein)\b", "", label)
+                resid_match = re.search(r"resid\s*(\d+)", label)
+                name_match = re.search(r"name\s+(\w+)", label)
+                parts = []
+                if resid_match:
+                    parts.append(f"resid{resid_match.group(1)}")
+                if "midpoint" in sel.lower():
+                    parts.append("mid")
+                elif "com" in sel.lower():
+                    parts.append("com")
+                elif name_match:
+                    parts.append(name_match.group(1).upper())
+                if parts:
+                    return "_".join(parts)
+                label = re.sub(r"[^a-z0-9]+", "_", label)
+                return label.strip("_")
+
+            l1 = _sel_to_label(sel1)
+            l2 = _sel_to_label(sel2)
+            pair_label = f"{l1}-{l2}"
+            if len(pairs) > 1:
+                pair_label += f"_and{len(pairs) - 1}more"
+        else:
+            pair_label = "nopairs"
+
+        filename = f"distances_{pair_label}_eq{eq_value:.0f}{eq_unit}.json"
+
+        result_path = (
+            sim_config.output.projects_directory
+            / "analysis"
+            / "distances"
+            / f"run_{replicate}"
+            / filename
+        )
+
+        return result_path
 
     def _find_aggregated_result(
         self,
