@@ -6,6 +6,8 @@ This module provides foundational utilities for trajectory analysis:
 - Autocorrelation analysis for independent sampling
 - Trajectory loading from PolyzyMD outputs
 - Centroid/representative frame finding for trajectory alignment
+- Trajectory alignment utilities (shared across all analysis modules)
+- PBC-aware distance calculations
 - Registry pattern for extensible analysis types
 """
 
@@ -77,6 +79,16 @@ from polyzymd.analysis.core.metric_type import (
     AutocorrelationStrategy,
     get_autocorrelation_strategy,
 )
+from polyzymd.analysis.core.pbc import (
+    is_orthorhombic,
+    minimum_image_distance,
+    pairwise_distances_pbc,
+)
+from polyzymd.analysis.core.alignment import (
+    AlignmentConfig,
+    align_trajectory,
+    get_alignment_description,
+)
 
 __all__ = [
     # Config hashing
@@ -138,4 +150,12 @@ __all__ = [
     "MetricType",
     "AutocorrelationStrategy",
     "get_autocorrelation_strategy",
+    # PBC utilities
+    "is_orthorhombic",
+    "minimum_image_distance",
+    "pairwise_distances_pbc",
+    # Trajectory alignment
+    "AlignmentConfig",
+    "align_trajectory",
+    "get_alignment_description",
 ]
