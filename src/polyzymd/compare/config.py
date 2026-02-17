@@ -270,6 +270,149 @@ class ComparisonSettingsContainer(BaseModel):
 
 
 # ============================================================================
+# Plot Settings Configuration
+# ============================================================================
+
+
+class RMSFPlotSettings(BaseModel):
+    """RMSF-specific plot customization.
+
+    Attributes
+    ----------
+    show_error : bool
+        Show error bands/bars on plots (default True)
+    highlight_residues : list[int]
+        Residue numbers to highlight with vertical lines (e.g., active site)
+    figsize_profile : tuple[float, float]
+        Figure size for per-residue profile plots
+    figsize_comparison : tuple[float, float]
+        Figure size for bar comparison plots
+    """
+
+    show_error: bool = True
+    highlight_residues: list[int] = Field(default_factory=list)
+    figsize_profile: tuple[float, float] = (14, 4)
+    figsize_comparison: tuple[float, float] = (8, 6)
+
+
+class TriadPlotSettings(BaseModel):
+    """Triad-specific plot customization.
+
+    Attributes
+    ----------
+    generate_kde_panel : bool
+        Generate multi-row KDE panel plot (default True)
+    generate_bars : bool
+        Generate grouped threshold bar chart (default True)
+    generate_2d_kde : bool
+        Generate 2D joint KDE plot (default False, more specialized)
+    threshold_line_color : str
+        Color for threshold vertical line
+    kde_fill_alpha : float
+        Transparency for KDE fill (0-1)
+    figsize_kde_panel : tuple[float, float] | None
+        Figure size for KDE panel (auto-calculated if None)
+    figsize_bars : tuple[float, float]
+        Figure size for bar chart
+    """
+
+    generate_kde_panel: bool = True
+    generate_bars: bool = True
+    generate_2d_kde: bool = False
+    threshold_line_color: str = "red"
+    kde_fill_alpha: float = 0.7
+    figsize_kde_panel: tuple[float, float] | None = None
+    figsize_bars: tuple[float, float] = (10, 6)
+
+
+class DistancesPlotSettings(BaseModel):
+    """Distance analysis plot customization.
+
+    Attributes
+    ----------
+    show_threshold : bool
+        Show threshold line on distribution plots
+    use_kde : bool
+        Use KDE instead of histogram for distributions
+    figsize : tuple[float, float]
+        Default figure size for distance plots
+    """
+
+    show_threshold: bool = True
+    use_kde: bool = True
+    figsize: tuple[float, float] = (10, 6)
+
+
+class ContactsPlotSettings(BaseModel):
+    """Contacts analysis plot customization.
+
+    Attributes
+    ----------
+    figsize : tuple[float, float]
+        Default figure size for contact plots
+    """
+
+    figsize: tuple[float, float] = (10, 8)
+
+
+class PlotSettings(BaseModel):
+    """Global plot settings for comparison.yaml.
+
+    Controls plot generation for all analyses. Can be customized
+    per-analysis type using nested settings.
+
+    Attributes
+    ----------
+    output_dir : Path
+        Directory for generated plots (relative to comparison.yaml)
+    format : str
+        Image format: "png", "pdf", or "svg"
+    dpi : int
+        Resolution for raster formats (PNG)
+    style : str
+        Plot style preset: "publication", "presentation", or "minimal"
+    color_palette : str
+        Seaborn/matplotlib color palette name
+
+    Examples
+    --------
+    In comparison.yaml:
+
+    .. code-block:: yaml
+
+        plot_settings:
+          output_dir: "figures/"
+          format: "png"
+          dpi: 300
+          style: "publication"
+
+          rmsf:
+            highlight_residues: [77, 133, 156]
+
+          triad:
+            generate_2d_kde: true
+    """
+
+    output_dir: Path = Field(default=Path("figures/"))
+    format: str = Field(default="png", pattern="^(png|pdf|svg)$")
+    dpi: int = Field(default=300, ge=50, le=600)
+    style: str = Field(default="publication", pattern="^(publication|presentation|minimal)$")
+    color_palette: str = "tab10"
+
+    # Per-analysis plot settings
+    rmsf: RMSFPlotSettings = Field(default_factory=RMSFPlotSettings)
+    triad: TriadPlotSettings = Field(default_factory=TriadPlotSettings)
+    distances: DistancesPlotSettings = Field(default_factory=DistancesPlotSettings)
+    contacts: ContactsPlotSettings = Field(default_factory=ContactsPlotSettings)
+
+    @field_validator("output_dir", mode="before")
+    @classmethod
+    def resolve_output_dir(cls, v: str | Path) -> Path:
+        """Convert string paths to Path objects."""
+        return Path(v)
+
+
+# ============================================================================
 # Main Comparison Configuration
 # ============================================================================
 
@@ -280,9 +423,10 @@ class ComparisonConfig(BaseModel):
     A comparison config defines multiple simulation conditions to compare,
     along with analysis settings and comparison-specific parameters.
 
-    The schema follows a two-section pattern:
+    The schema follows a three-section pattern:
     - analysis_settings: WHAT to analyze (shared across conditions)
     - comparison_settings: HOW to compare (statistical parameters)
+    - plot_settings: HOW to visualize (plot customization)
 
     Attributes
     ----------
@@ -300,6 +444,8 @@ class ComparisonConfig(BaseModel):
         Analysis parameters (WHAT to analyze)
     comparison_settings : ComparisonSettingsContainer
         Comparison parameters (HOW to compare)
+    plot_settings : PlotSettings
+        Plot customization (HOW to visualize)
 
     Examples
     --------
@@ -323,6 +469,7 @@ class ComparisonConfig(BaseModel):
     comparison_settings: ComparisonSettingsContainer = Field(
         default_factory=ComparisonSettingsContainer
     )
+    plot_settings: PlotSettings = Field(default_factory=PlotSettings)
 
     @field_validator("analysis_settings", mode="before")
     @classmethod
