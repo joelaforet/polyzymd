@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+from polyzymd.analysis.core.alignment import AlignmentConfig, align_trajectory
 from polyzymd.analysis.core.autocorrelation import (
     compute_acf,
     estimate_correlation_time,
@@ -36,6 +37,7 @@ from polyzymd.analysis.core.loader import (
     parse_time_string,
     time_to_frame,
 )
+from polyzymd.analysis.core.pbc import minimum_image_distance
 from polyzymd.analysis.core.selections import (
     get_position,
     parse_selection_string,
@@ -141,9 +143,10 @@ class DistanceCalculator:
     This class handles distance analysis workflow:
     1. Load trajectories from config
     2. Apply equilibration offset
-    3. Compute distances for specified atom pairs
-    4. Calculate distributions and statistics
-    5. Aggregate across replicates with SEM
+    3. Optionally align trajectory to remove rotational drift
+    4. Compute PBC-aware distances for specified atom pairs
+    5. Calculate distributions and statistics
+    6. Aggregate across replicates with SEM
 
     Parameters
     ----------
@@ -160,6 +163,26 @@ class DistanceCalculator:
         Can be a single float (applied to all pairs) or a sequence
         with one threshold per pair. If specified, computes fraction
         of frames below threshold for each pair.
+    use_pbc : bool, optional
+        If True (default), use periodic boundary conditions with minimum
+        image convention for distance calculations. For orthorhombic boxes,
+        this corrects distances across periodic boundaries. Triclinic boxes
+        trigger a warning and fall back to Euclidean distance.
+    alignment : AlignmentConfig, optional
+        Trajectory alignment configuration. If None (default), alignment
+        is enabled using centroid mode with "protein and name CA" selection.
+        Set `AlignmentConfig(enabled=False)` to disable alignment.
+
+    Notes
+    -----
+    **PBC-aware distances**: By default, distances are computed using the
+    minimum image convention, which correctly handles molecules near periodic
+    boundaries. This prevents artificially large distances (60-70Å) when the
+    true distance is small.
+
+    **Trajectory alignment**: By default, the trajectory is aligned to remove
+    rotational drift and center-of-mass motion. This reduces noise in distance
+    measurements. Alignment is performed in-memory before frame iteration.
 
     Examples
     --------
@@ -186,6 +209,13 @@ class DistanceCalculator:
     ...     thresholds=3.5,  # Same threshold for all pairs
     ... )
     >>>
+    >>> # Disable alignment (not recommended)
+    >>> calc = DistanceCalculator(
+    ...     config,
+    ...     pairs=pairs,
+    ...     alignment=AlignmentConfig(enabled=False),
+    ... )
+    >>>
     >>> result = calc.compute(replicate=1)
     >>> for pr in result.pair_results:
     ...     print(f"{pr.pair_label}: {pr.mean_distance:.2f} Å")
@@ -197,6 +227,8 @@ class DistanceCalculator:
         pairs: Sequence[tuple[str, str]],
         equilibration: str = "0ns",
         thresholds: Sequence[float | None] | float | None = None,
+        use_pbc: bool = True,
+        alignment: AlignmentConfig | None = None,
     ) -> None:
         _require_mdanalysis()
 
@@ -216,6 +248,11 @@ class DistanceCalculator:
                     f"pairs length ({len(self.pairs)})"
                 )
             self.thresholds = thresholds_list
+
+        # PBC and alignment settings
+        self._use_pbc = use_pbc
+        # Default alignment: enabled with centroid reference
+        self._alignment = alignment if alignment is not None else AlignmentConfig()
 
         # Parse equilibration time
         eq_value, eq_unit = parse_time_string(equilibration)
@@ -300,6 +337,22 @@ class DistanceCalculator:
         LOGGER.info(
             f"Trajectory: {n_frames_total} frames, using {n_frames_used} after equilibration"
         )
+
+        # Apply trajectory alignment if configured
+        ref_frame = None
+        if self._alignment.enabled:
+            ref_frame = align_trajectory(
+                u,
+                self._alignment,
+                start_frame=start_frame,
+                stop_frame=n_frames_total,
+            )
+
+        # Log PBC status
+        if self._use_pbc:
+            LOGGER.info("Using PBC-aware distance calculation (minimum image convention)")
+        else:
+            LOGGER.debug("PBC disabled; using simple Euclidean distances")
 
         # Compute distances for each pair
         pair_results = []
@@ -646,8 +699,13 @@ class DistanceCalculator:
             pos1 = get_position(atoms1, parsed1.mode)
             pos2 = get_position(atoms2, parsed2.mode)
 
-            dist = np.linalg.norm(pos2 - pos1)
-            distances.append(float(dist))
+            # Compute distance (PBC-aware if enabled)
+            if self._use_pbc:
+                box = ts.dimensions  # [Lx, Ly, Lz, alpha, beta, gamma]
+                dist = minimum_image_distance(pos1, pos2, box)
+            else:
+                dist = float(np.linalg.norm(pos2 - pos1))
+            distances.append(dist)
 
         distances_arr = np.array(distances, dtype=np.float64)
         n_frames_used = len(distances_arr)
