@@ -101,6 +101,7 @@ Trajectory Analysis
    tutorials/analysis_compare_conditions
    tutorials/analysis_triad_quickstart
    tutorials/analysis_triad_best_practices
+   tutorials/extending_comparators
 
 API Reference
 -------------

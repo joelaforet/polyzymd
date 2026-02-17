@@ -395,6 +395,146 @@ scontrol show job <job_id>
 cat slurm_logs/s0_r1_*.out
 ```
 
+## Analysis Module (`analysis/`)
+
+The analysis module provides post-simulation trajectory analysis tools.
+
+### Structure
+
+```
+src/polyzymd/analysis/
+├── core/
+│   ├── metric_type.py       # MetricType enum (MEAN_BASED, VARIANCE_BASED)
+│   ├── autocorrelation.py   # ACF, correlation time calculations
+│   ├── statistics.py        # StatResult, compute_sem
+│   └── loader.py            # Trajectory loading utilities
+├── contacts/                # Contact analysis
+│   ├── calculator_parallel.py
+│   ├── aggregator.py
+│   └── results.py
+├── rmsf.py                  # RMSF calculator
+├── triad.py                 # Catalytic triad analysis
+├── distances.py             # Distance calculator
+└── results/                 # Result models (Pydantic)
+```
+
+### Key Classes
+
+| Class | Purpose |
+|-------|---------|
+| `RMSFCalculator` | Root-mean-square fluctuation analysis |
+| `DistanceCalculator` | Pairwise distance measurements |
+| `CatalyticTriadAnalyzer` | Active site geometry monitoring |
+| `ParallelContactAnalyzer` | Polymer-protein contacts (parallelized) |
+
+### MetricType System
+
+All analysis metrics must declare their type for correct autocorrelation handling:
+
+```python
+from polyzymd.analysis.core.metric_type import MetricType
+
+# For averages (contact fraction, mean distance)
+metric_type = MetricType.MEAN_BASED
+
+# For fluctuations (RMSF, standard deviation)
+metric_type = MetricType.VARIANCE_BASED
+```
+
+See {doc}`analysis_statistics_best_practices` for details on autocorrelation.
+
+## Compare Module (`compare/`)
+
+The compare module enables statistical comparison across multiple simulation conditions.
+
+### Structure
+
+```
+src/polyzymd/compare/
+├── core/
+│   ├── base.py              # BaseComparator (Template Method pattern)
+│   └── registry.py          # ComparatorRegistry with @register decorator
+├── comparators/
+│   ├── rmsf.py              # RMSFComparator (VARIANCE_BASED)
+│   ├── triad.py             # TriadComparator (MEAN_BASED)
+│   └── contacts.py          # ContactsComparator (MEAN_BASED)
+├── results/                 # Result models per comparator type
+├── settings.py              # Pydantic settings models
+├── config.py                # ComparisonConfig, ConditionConfig
+├── statistics.py            # t-tests, ANOVA, Cohen's d
+└── cli.py                   # CLI commands
+```
+
+### Design Patterns
+
+#### Template Method Pattern
+
+`BaseComparator` defines the comparison algorithm skeleton:
+
+```python
+def compare(self, recompute: bool = False) -> TResult:
+    # 1. Filter conditions
+    valid, excluded = self._filter_conditions()
+    
+    # 2. Load/compute analysis per condition
+    for cond in valid:
+        data = self._load_or_compute(cond, recompute)  # Abstract
+    
+    # 3. Build summaries
+    summaries = [self._build_condition_summary(c, d) for c, d in ...]  # Abstract
+    
+    # 4. Pairwise statistical tests (shared implementation)
+    comparisons = self._compute_pairwise_comparisons(summaries)
+    
+    # 5. ANOVA if 3+ conditions (shared implementation)
+    anova = self._compute_anova(summaries) if len(summaries) >= 3 else None
+    
+    # 6. Rank conditions
+    ranking = self._compute_ranking(summaries)
+    
+    # 7. Build result
+    return self._build_result(...)  # Abstract
+```
+
+Subclasses implement abstract methods; statistical logic is shared (DRY).
+
+#### Registry Pattern
+
+New comparators register automatically:
+
+```python
+from polyzymd.compare.core.registry import ComparatorRegistry
+
+@ComparatorRegistry.register("my_metric")
+class MyComparator(BaseComparator[...]):
+    ...
+
+# Usage
+ComparatorRegistry.list_available()  # ['contacts', 'my_metric', 'rmsf', 'triad']
+comparator = ComparatorRegistry.create("my_metric", config, settings)
+```
+
+### Abstract Methods for Custom Comparators
+
+| Method | Purpose |
+|--------|---------|
+| `comparison_type_name()` | Return type identifier (e.g., "rmsf") |
+| `metric_type` (property) | Declare MEAN_BASED or VARIANCE_BASED |
+| `_load_or_compute()` | Load cached results or compute analysis |
+| `_build_condition_summary()` | Convert raw data to structured summary |
+| `_build_result()` | Construct final comparison result |
+| `_get_replicate_values()` | Extract values for statistical tests |
+| `_interpret_direction()` | Interpret improvement/decline direction |
+| `_rank_summaries()` | Sort summaries (best first) |
+
+### Where to Modify
+
+- **Add new comparator**: Create class in `comparators/`, inherit `BaseComparator`, use `@ComparatorRegistry.register()`
+- **Add new result model**: Create in `results/`, inherit from base classes
+- **Add CLI command**: Modify `cli.py` or use generic `polyzymd compare run <type>`
+
+See {doc}`extending_comparators` for a complete guide.
+
 ## Testing Your Changes
 
 After modifying the code:
@@ -423,4 +563,6 @@ After modifying the code:
 
 - [Configuration Guide](configuration.md) - YAML config options
 - [HPC/SLURM Guide](hpc_slurm.md) - Job submission details
+- [Extending Comparators](extending_comparators.md) - Create custom comparators
+- [Statistics Best Practices](analysis_statistics_best_practices.md) - Autocorrelation handling
 - [API Overview](../api/overview.rst) - Class and method reference
