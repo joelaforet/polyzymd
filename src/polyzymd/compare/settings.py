@@ -20,7 +20,7 @@ All settings classes are auto-registered on module import.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 from pydantic import Field, field_validator, model_validator
 
@@ -30,6 +30,9 @@ from polyzymd.analysis.core.registry import (
     BaseComparisonSettings,
     ComparisonSettingsRegistry,
 )
+
+if TYPE_CHECKING:
+    from polyzymd.analysis.core.alignment import AlignmentConfig
 
 # ============================================================================
 # RMSF Settings
@@ -166,6 +169,20 @@ class DistancesAnalysisSettings(BaseAnalysisSettings):
         Distance threshold for contact analysis (Angstroms).
     pairs : list[DistancePairSettings]
         List of atom pairs to measure distances between.
+    use_pbc : bool
+        Use PBC-aware minimum image distances. Default True.
+    align_trajectory : bool
+        Align trajectory before distance calculation. Default True.
+        When enabled, removes rotational drift and COM motion that
+        can add noise to inter-domain distance measurements.
+    alignment_selection : str
+        MDAnalysis selection for trajectory alignment.
+        Default: "protein and name CA".
+    alignment_mode : str
+        Reference mode for alignment: "centroid", "average", or "frame".
+        Default: "centroid".
+    alignment_frame : int, optional
+        Reference frame (1-indexed) when alignment_mode="frame".
     """
 
     threshold: Optional[float] = Field(
@@ -173,6 +190,28 @@ class DistancesAnalysisSettings(BaseAnalysisSettings):
     )
     pairs: list[DistancePairSettings] = Field(
         default_factory=list, description="Distance pairs to monitor"
+    )
+
+    # PBC and alignment settings (new)
+    use_pbc: bool = Field(
+        default=True,
+        description="Use PBC-aware minimum image distances",
+    )
+    align_trajectory: bool = Field(
+        default=True,
+        description="Align trajectory before distance calculation (removes drift)",
+    )
+    alignment_selection: str = Field(
+        default="protein and name CA",
+        description="MDAnalysis selection for trajectory alignment",
+    )
+    alignment_mode: str = Field(
+        default="centroid",
+        description="Reference mode: centroid, average, or frame",
+    )
+    alignment_frame: Optional[int] = Field(
+        default=None,
+        description="Reference frame (1-indexed) when alignment_mode='frame'",
     )
 
     @classmethod
@@ -188,12 +227,40 @@ class DistancesAnalysisSettings(BaseAnalysisSettings):
             raise ValueError("At least one distance pair must be defined")
         return v
 
+    @field_validator("alignment_mode", mode="after")
+    @classmethod
+    def validate_alignment_mode(cls, v: str) -> str:
+        """Validate alignment mode is one of the allowed values."""
+        valid = {"centroid", "average", "frame"}
+        if v not in valid:
+            raise ValueError(f"alignment_mode must be one of {valid}, got '{v}'")
+        return v
+
+    @model_validator(mode="after")
+    def validate_alignment_frame_required(self) -> "DistancesAnalysisSettings":
+        """Ensure alignment_frame is provided when alignment_mode is 'frame'."""
+        if (
+            self.align_trajectory
+            and self.alignment_mode == "frame"
+            and self.alignment_frame is None
+        ):
+            raise ValueError("alignment_frame is required when alignment_mode is 'frame'")
+        return self
+
     def to_analysis_yaml_dict(self) -> dict[str, Any]:
         """Convert to analysis.yaml-compatible dictionary."""
-        return {
+        result: dict[str, Any] = {
             "enabled": True,
             "pairs": [p.to_analysis_yaml_dict() for p in self.pairs],
+            "use_pbc": self.use_pbc,
+            "align_trajectory": self.align_trajectory,
         }
+        if self.align_trajectory:
+            result["alignment_selection"] = self.alignment_selection
+            result["alignment_mode"] = self.alignment_mode
+            if self.alignment_frame is not None:
+                result["alignment_frame"] = self.alignment_frame
+        return result
 
     def get_pair_selections(self) -> list[tuple[str, str]]:
         """Get list of (selection_a, selection_b) tuples."""
@@ -213,6 +280,28 @@ class DistancesAnalysisSettings(BaseAnalysisSettings):
             the global threshold is used. If neither is set, None is returned.
         """
         return [p.threshold if p.threshold is not None else self.threshold for p in self.pairs]
+
+    def get_alignment_config(self) -> "AlignmentConfig":
+        """Build an AlignmentConfig from these settings.
+
+        Returns
+        -------
+        AlignmentConfig
+            Configuration for trajectory alignment, ready to pass to
+            align_trajectory() or DistanceCalculator.
+
+        Notes
+        -----
+        Import is done inside the method to avoid circular imports.
+        """
+        from polyzymd.analysis.core.alignment import AlignmentConfig
+
+        return AlignmentConfig(
+            enabled=self.align_trajectory,
+            reference_mode=self.alignment_mode,  # type: ignore[arg-type]
+            reference_frame=self.alignment_frame,
+            selection=self.alignment_selection,
+        )
 
 
 @ComparisonSettingsRegistry.register("distances")
