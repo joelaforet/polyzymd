@@ -62,11 +62,11 @@ catalytic_triad:
   threshold: 3.5  # Angstroms - H-bond distance cutoff
   pairs:
     - label: "Asp-His"
-      selection_a: "midpoint(resid 133 and name OD1 OD2)"
-      selection_b: "resid 156 and name ND1"
+      selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
+      selection_b: "protein and resid 156 and name ND1"
     - label: "His-Ser"
-      selection_a: "resid 156 and name NE2"
-      selection_b: "resid 77 and name OG"
+      selection_a: "protein and resid 156 and name NE2"
+      selection_b: "protein and resid 77 and name OG"
 ```
 
 ### Example: LipA (Lipase A)
@@ -80,11 +80,11 @@ catalytic_triad:
   threshold: 3.5
   pairs:
     - label: "Asp133-His156"
-      selection_a: "midpoint(resid 133 and name OD1 OD2)"
-      selection_b: "resid 156 and name ND1"
+      selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
+      selection_b: "protein and resid 156 and name ND1"
     - label: "His156-Ser77"
-      selection_a: "resid 156 and name NE2"
-      selection_b: "resid 77 and name OG"
+      selection_a: "protein and resid 156 and name NE2"
+      selection_b: "protein and resid 77 and name OG"
 ```
 
 ### Selection Syntax
@@ -93,9 +93,29 @@ PolyzyMD supports three types of atom selections:
 
 | Syntax | Description | Example |
 |--------|-------------|---------|
-| Standard | MDAnalysis selection | `resid 77 and name OG` |
-| `midpoint()` | Geometric midpoint of selected atoms | `midpoint(resid 133 and name OD1 OD2)` |
-| `com()` | Center of mass of selected atoms | `com(resid 133 and name OD1 OD2)` |
+| Standard | MDAnalysis selection | `protein and resid 77 and name OG` |
+| `midpoint()` | Geometric midpoint of selected atoms | `midpoint(protein and resid 133 and name OD1 OD2)` |
+| `com()` | Center of mass of selected atoms | `com(protein and resid 133 and name OD1 OD2)` |
+
+:::{warning}
+**Chain-Aware Selections Required**
+
+Residue numbers restart at 1 for each chain in PolyzyMD systems. A selection like
+`resid 77` will match residues from **all chains** (protein, polymer, and water).
+
+For protein residues, always use `protein and resid X`:
+
+```yaml
+# INCORRECT - may include polymer/water atoms with same residue number
+selection_a: "resid 77 and name OG"
+
+# CORRECT - restricts to protein chain only
+selection_a: "protein and resid 77 and name OG"
+```
+
+PolyzyMD will emit a runtime warning if your selection spans multiple chains,
+but it's best to write correct selections from the start.
+:::
 
 ```{tip}
 Use `midpoint()` for carboxylate groups (Asp, Glu) where either oxygen can
@@ -128,11 +148,11 @@ catalytic_triad:
   threshold: 3.5
   pairs:
     - label: "Asp133-His156"
-      selection_a: "midpoint(resid 133 and name OD1 OD2)"
-      selection_b: "resid 156 and name ND1"
+      selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
+      selection_b: "protein and resid 156 and name ND1"
     - label: "His156-Ser77"
-      selection_a: "resid 156 and name NE2"
-      selection_b: "resid 77 and name OG"
+      selection_a: "protein and resid 156 and name NE2"
+      selection_b: "protein and resid 77 and name OG"
 ```
 
 Then run with minimal CLI arguments:
@@ -322,11 +342,11 @@ catalytic_triad:
   threshold: 3.5
   pairs:
     - label: "Asp133-His156"
-      selection_a: "midpoint(resid 133 and name OD1 OD2)"
-      selection_b: "resid 156 and name ND1"
+      selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
+      selection_b: "protein and resid 156 and name ND1"
     - label: "His156-Ser77"
-      selection_a: "resid 156 and name NE2"
-      selection_b: "resid 77 and name OG"
+      selection_a: "protein and resid 156 and name NE2"
+      selection_b: "protein and resid 77 and name OG"
 ```
 
 ```bash

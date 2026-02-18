@@ -225,13 +225,18 @@ analysis_settings:
     # reference_frame: 500            # Required if reference_mode is "frame"
 
   # Catalytic triad comparison (required for `polyzymd compare triad`)
+  #
+  # IMPORTANT: Always use "protein and resid X" for protein residues!
+  # Residue numbers restart per chain, so bare "resid X" may match
+  # atoms from polymer or water chains, causing incorrect distances.
+  #
   # catalytic_triad:
   #   name: "enzyme_catalytic_triad"
   #   threshold: 3.5
   #   pairs:
   #     - label: "Asp-His"
-  #       selection_a: "midpoint(resid 133 and name OD1 OD2)"
-  #       selection_b: "resid 156 and name ND1"
+  #       selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
+  #       selection_b: "protein and resid 156 and name ND1"
 
   # Contacts comparison (required for `polyzymd compare contacts`)
   # contacts:
@@ -239,16 +244,20 @@ analysis_settings:
   #   cutoff: 4.5
 
   # Distances comparison (required for `polyzymd compare distances`)
+  #
+  # IMPORTANT: Always use "protein and resid X" for protein residues!
+  # See warning above in catalytic_triad section.
+  #
   # distances:
   #   threshold: 3.5  # Global default threshold (Angstroms, optional)
   #   pairs:
   #     - label: "Catalytic H-bond"
-  #       selection_a: "resid 77 and name OG"
-  #       selection_b: "resid 133 and name NE2"
+  #       selection_a: "protein and resid 77 and name OG"
+  #       selection_b: "protein and resid 133 and name NE2"
   #       threshold: 3.5  # Per-pair threshold (optional, overrides global)
   #     - label: "Lid Opening"
-  #       selection_a: "com(resid 141-148)"
-  #       selection_b: "com(resid 281-289)"
+  #       selection_a: "com(protein and resid 141-148)"
+  #       selection_b: "com(protein and resid 281-289)"
   #       threshold: 15.0  # Different threshold for large-scale motion
 
 # ============================================================================
@@ -948,11 +957,11 @@ analysis_settings:
     threshold: 3.5  # Angstroms (H-bond cutoff)
     pairs:
       - label: "Asp133-His156"
-        selection_a: "midpoint(resid 133 and name OD1 OD2)"
-        selection_b: "resid 156 and name ND1"
+        selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
+        selection_b: "protein and resid 156 and name ND1"
       - label: "His156-Ser77"
-        selection_a: "resid 156 and name NE2"
-        selection_b: "resid 77 and name OG"
+        selection_a: "protein and resid 156 and name NE2"
+        selection_b: "protein and resid 77 and name OG"
 
 # Must have corresponding entry in comparison_settings
 comparison_settings:
@@ -1550,12 +1559,12 @@ analysis_settings:
     threshold: 3.5  # Global default threshold (Angstroms, optional)
     pairs:
       - label: "Catalytic H-bond"
-        selection_a: "resid 77 and name OG"
-        selection_b: "resid 133 and name NE2"
+        selection_a: "protein and resid 77 and name OG"
+        selection_b: "protein and resid 133 and name NE2"
         threshold: 3.5  # Per-pair threshold (overrides global)
       - label: "Lid Domain Opening"
-        selection_a: "com(resid 141-148)"
-        selection_b: "com(resid 281-289)"
+        selection_a: "com(protein and resid 141-148)"
+        selection_b: "com(protein and resid 281-289)"
         threshold: 15.0  # Different threshold for this pair
 
 # Must have corresponding entry in comparison_settings
@@ -1588,18 +1597,18 @@ analysis_settings:
     threshold: 4.0  # Default for pairs without explicit threshold
     pairs:
       - label: "Ser77-His133 H-bond"
-        selection_a: "resid 77 and name OG"
-        selection_b: "resid 133 and name NE2"
+        selection_a: "protein and resid 77 and name OG"
+        selection_b: "protein and resid 133 and name NE2"
         threshold: 3.5  # H-bond cutoff
 
       - label: "Asp156-His133 H-bond"
-        selection_a: "midpoint(resid 156 and name OD1 OD2)"
-        selection_b: "resid 133 and name ND1"
+        selection_a: "midpoint(protein and resid 156 and name OD1 OD2)"
+        selection_b: "protein and resid 133 and name ND1"
         # Uses global threshold: 4.0 A
 
       - label: "Lid-to-Core Distance"
-        selection_a: "com(resid 141-148)"
-        selection_b: "com(resid 281-289)"
+        selection_a: "com(protein and resid 141-148)"
+        selection_b: "com(protein and resid 281-289)"
         threshold: 15.0  # Large-scale motion threshold
 ```
 

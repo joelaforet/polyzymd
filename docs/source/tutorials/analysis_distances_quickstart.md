@@ -265,6 +265,26 @@ for pr in result.pair_results:
 
 PolyzyMD extends MDAnalysis selections with special position modes and keywords:
 
+:::{warning}
+**Chain-Aware Selections Required**
+
+Residue numbers restart at 1 for each chain in PolyzyMD systems. A selection like
+`resid 141-148` will match residues from **all chains** (protein, polymer, and water).
+
+For protein residues, always use `protein and resid X`:
+
+```yaml
+# INCORRECT - selects from all chains, causing wrong distances
+selection_a: "com(resid 141-148)"
+
+# CORRECT - restricts to protein chain only
+selection_a: "com(protein and resid 141-148)"
+```
+
+PolyzyMD will emit a runtime warning if your selection spans multiple chains,
+but it's best to write correct selections from the start.
+:::
+
 ### Position Modes
 
 | Syntax | Description | Use Case |
@@ -291,16 +311,16 @@ makes it easy to verify that restrained distances match observed distances.
 ### Examples
 
 ```yaml
-# Midpoint of Asp carboxylate oxygens
-selection_a: "midpoint(resid 133 and name OD1 OD2)"
+# Midpoint of Asp carboxylate oxygens (protein residue)
+selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
 
-# Center of mass of entire ligand
+# Center of mass of entire ligand (non-protein, no chain restriction needed)
 selection_b: "com(resname LIG)"
 
-# Standard single atom
-selection_a: "resid 77 and name OG"
+# Standard single atom (protein residue)
+selection_a: "protein and resid 77 and name OG"
 
-# Atom by PDB serial number
+# Atom by PDB serial number (unique, no chain restriction needed)
 selection_a: "pdbindex 2740"
 ```
 
@@ -316,7 +336,7 @@ On the command line, use quotes to protect the special syntax:
 
 ```bash
 polyzymd analyze distances -c config.yaml -r 1 --eq-time 10ns \
-    --pair "resid 156 and name ND1 : midpoint(resid 133 and name OD1 OD2)"
+    --pair "protein and resid 156 and name ND1 : midpoint(protein and resid 133 and name OD1 OD2)"
 ```
 
 ## Output Files

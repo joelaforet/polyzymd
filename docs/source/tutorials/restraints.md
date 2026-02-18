@@ -100,15 +100,32 @@ PolyzyMD uses an MDAnalysis-inspired selection syntax.
 Use `and` / `or` to combine:
 
 ```yaml
-# Both conditions must be true
-selection: "resid 77 and name OG"
+# Both conditions must be true (use 'protein and' for protein residues!)
+selection: "protein and resid 77 and name OG"
 
 # Either condition
 selection: "resname SER or resname THR"
 
 # Complex combinations
-selection: "(resid 77 and name OG) or (resid 110 and name NE2)"
+selection: "(protein and resid 77 and name OG) or (protein and resid 110 and name NE2)"
 ```
+
+:::{warning}
+**Chain-Aware Selections Required**
+
+Residue numbers restart at 1 for each chain in PolyzyMD systems. A selection like
+`resid 77` will match residues from **all chains** (protein, polymer, and water).
+
+For protein residues, always use `protein and resid X`:
+
+```yaml
+# INCORRECT - may match polymer/water atoms with same residue number
+selection: "resid 77 and name OG"
+
+# CORRECT - restricts to protein chain only
+selection: "protein and resid 77 and name OG"
+```
+:::
 
 ### Index Conventions
 
