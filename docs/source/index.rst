@@ -98,6 +98,7 @@ Trajectory Analysis
    tutorials/analysis_distances_quickstart
    tutorials/analysis_contacts_quickstart
    tutorials/analysis_contacts_cookbook
+   tutorials/analysis_binding_preference
    tutorials/analysis_compare_conditions
    tutorials/analysis_triad_quickstart
    tutorials/analysis_triad_best_practices
