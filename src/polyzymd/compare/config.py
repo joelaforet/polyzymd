@@ -353,9 +353,27 @@ class ContactsPlotSettings(BaseModel):
     ----------
     figsize : tuple[float, float]
         Default figure size for contact plots
+    generate_enrichment_heatmap : bool
+        Generate binding preference enrichment heatmap (default True)
+    generate_enrichment_bars : bool
+        Generate binding preference bar charts (default True)
+    figsize_enrichment_heatmap : tuple[float, float] | None
+        Figure size for enrichment heatmap (auto-calculated if None)
+    figsize_enrichment_bars : tuple[float, float]
+        Figure size for enrichment bar charts
+    enrichment_colormap : str
+        Colormap for enrichment heatmap (diverging recommended)
+    show_enrichment_error : bool
+        Show error bars on enrichment bar charts (default True)
     """
 
     figsize: tuple[float, float] = (10, 8)
+    generate_enrichment_heatmap: bool = True
+    generate_enrichment_bars: bool = True
+    figsize_enrichment_heatmap: tuple[float, float] | None = None
+    figsize_enrichment_bars: tuple[float, float] = (10, 6)
+    enrichment_colormap: str = "RdBu_r"  # Diverging: red=high, blue=low
+    show_enrichment_error: bool = True
 
 
 class PlotSettings(BaseModel):

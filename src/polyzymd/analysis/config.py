@@ -153,6 +153,25 @@ class ContactsConfig(BaseModel):
         "secondary_structure", or "none".
     compute_residence_times : bool
         If True, compute residence time statistics for contacts.
+    compute_binding_preference : bool
+        If True, compute binding preference analysis with enrichment ratios.
+        Requires surface exposure calculation using rust_sasa_python.
+    polymer_type_selections : dict[str, str], optional
+        Define polymer types with MDAnalysis selections.
+        Keys are type labels, values are MDAnalysis selection strings.
+        Example: {"SBMA": "chainID C and resname SBM", "EGMA": "chainID C and resname EGM"}
+    protein_group_selections : dict[str, str], optional
+        Define protein groups with MDAnalysis selections.
+        Keys are group labels, values are MDAnalysis selection strings.
+        Example: {"aromatic": "protein and resname PHE TRP TYR HIS"}
+        If not specified, defaults to standard AA class groupings.
+    surface_exposure_threshold : float
+        Relative SASA threshold (0-1) for surface exposure filtering.
+        Residues with SASA/maxSASA > threshold are considered exposed.
+        Default 0.2 (20% of max theoretical SASA).
+    enzyme_pdb_for_sasa : str, optional
+        Path to enzyme PDB for SASA calculation. If not specified,
+        uses the enzyme_pdb from the main simulation config.
     """
 
     enabled: bool = False
@@ -162,6 +181,13 @@ class ContactsConfig(BaseModel):
     polymer_types: Optional[list[str]] = None
     grouping: str = "aa_class"
     compute_residence_times: bool = True
+
+    # Binding preference analysis
+    compute_binding_preference: bool = False
+    polymer_type_selections: Optional[dict[str, str]] = None
+    protein_group_selections: Optional[dict[str, str]] = None
+    surface_exposure_threshold: float = 0.2
+    enzyme_pdb_for_sasa: Optional[str] = None
 
 
 # =============================================================================
@@ -418,4 +444,39 @@ rmsf:
 #   polymer_types: ["SBM", "EGP"]   # Optional: filter by polymer type
 #   grouping: "aa_class"            # Group by: aa_class, secondary_structure, none
 #   compute_residence_times: true
+#
+#   # -------------------------------------------------------------------------
+#   # Binding Preference Analysis (Enrichment Ratios)
+#   # -------------------------------------------------------------------------
+#   # Computes enrichment ratios to answer: "Does polymer type X preferentially
+#   # bind amino acid class Y?" Requires rust_sasa_python for surface exposure.
+#   #
+#   # Enrichment > 1.0 = preferential binding
+#   # Enrichment = 1.0 = random/expected
+#   # Enrichment < 1.0 = avoidance
+#   #
+#   compute_binding_preference: true
+#
+#   # Define polymer types with MDAnalysis selections
+#   # Each key becomes a bar group in plots
+#   polymer_type_selections:
+#     SBMA: "chainID C and resname SBM"
+#     EGMA: "chainID C and resname EGM"
+#
+#   # Define protein groups with MDAnalysis selections
+#   # Each key becomes a category in enrichment analysis
+#   # These defaults classify residues by amino acid physicochemical properties
+#   protein_group_selections:
+#     aromatic: "protein and resname PHE TRP TYR HIS"
+#     polar: "protein and resname SER THR ASN GLN CYS"
+#     nonpolar: "protein and resname ALA VAL ILE LEU MET GLY PRO"
+#     charged_positive: "protein and resname ARG LYS"
+#     charged_negative: "protein and resname ASP GLU"
+#     # Add custom groups as needed:
+#     # active_site: "protein and resid 77 133 156"
+#     # hydrophobic_patch: "protein and resid 12 15 45 67"
+#
+#   # Surface exposure filtering
+#   # Only residues with relative SASA > threshold are considered
+#   surface_exposure_threshold: 0.2  # 20% of max theoretical SASA
 '''

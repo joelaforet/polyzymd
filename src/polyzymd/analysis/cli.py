@@ -561,6 +561,154 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
             click.echo(click.style(f"Catalytic triad analysis failed: {e}", fg="red"))
             failed.append("Catalytic triad")
 
+    # Run contacts analysis
+    if config.contacts.enabled:
+        click.echo()
+        click.echo(click.style("=" * 60, fg="blue"))
+        click.echo(click.style("Running contact analysis...", fg="blue"))
+        click.echo(click.style("=" * 60, fg="blue"))
+        try:
+            from polyzymd.analysis.contacts import ParallelContactAnalyzer
+            from polyzymd.analysis.contacts.aggregator import aggregate_contact_results
+            from polyzymd.analysis.common.selectors import MDAnalysisSelector
+            from polyzymd.analysis.core.loader import (
+                TrajectoryLoader,
+                parse_time_string,
+                time_to_frame,
+            )
+
+            # Parse equilibration time
+            eq_value, eq_unit = parse_time_string(config.defaults.equilibration_time)
+
+            # Create selectors
+            target_selector = MDAnalysisSelector(config.contacts.protein_selection)
+            query_selector = MDAnalysisSelector(config.contacts.polymer_selection)
+
+            # Use TrajectoryLoader for consistent path resolution
+            loader = TrajectoryLoader(sim_config)
+
+            contact_results = []
+            binding_pref_results = []
+
+            for rep in config.replicates:
+                click.echo(f"  Replicate {rep}...", nl=False)
+                try:
+                    # Load universe
+                    universe = loader.load_universe(rep)
+
+                    # Convert equilibration time to start frame
+                    timestep = loader.get_timestep(rep)
+                    if eq_unit == "ns":
+                        eq_time_ps = eq_value * 1000
+                    elif eq_unit == "us":
+                        eq_time_ps = eq_value * 1e6
+                    else:
+                        eq_time_ps = eq_value
+                    start_frame = time_to_frame(eq_time_ps, "ps", timestep, "ps")
+
+                    # Create analyzer
+                    analyzer = ParallelContactAnalyzer(
+                        target_selector=target_selector,
+                        query_selector=query_selector,
+                        cutoff=config.contacts.cutoff,
+                    )
+
+                    # Run analysis
+                    result = analyzer.run(universe, start=start_frame)
+                    contact_results.append(result)
+
+                    # Report basic stats
+                    n_contacted = result.n_contacted_residues
+                    coverage = result.coverage_fraction()
+                    click.echo(
+                        click.style(
+                            f" done ({n_contacted}/{result.n_protein_residues} residues, "
+                            f"{coverage:.1%} coverage)",
+                            fg="green",
+                        )
+                    )
+
+                    # Compute binding preference if enabled
+                    if config.contacts.compute_binding_preference:
+                        from polyzymd.analysis.contacts import (
+                            compute_binding_preference_from_config,
+                        )
+
+                        # Get enzyme PDB path
+                        enzyme_pdb = config.contacts.enzyme_pdb_for_sasa
+                        if enzyme_pdb is None:
+                            enzyme_pdb = sim_config.system.enzyme_pdb
+                        enzyme_pdb = Path(enzyme_pdb)
+                        if not enzyme_pdb.is_absolute():
+                            enzyme_pdb = sim_config_path.parent / enzyme_pdb
+
+                        click.echo(f"    Computing binding preference...", nl=False)
+                        bp_result = compute_binding_preference_from_config(
+                            contact_result=result,
+                            universe=universe,
+                            enzyme_pdb_path=enzyme_pdb,
+                            config=config.contacts,
+                        )
+                        binding_pref_results.append(bp_result)
+                        n_entries = len(bp_result.entries)
+                        click.echo(click.style(f" done ({n_entries} entries)", fg="green"))
+
+                except Exception as e:
+                    click.echo(click.style(f" FAILED: {e}", fg="red"))
+                    failed.append(f"Contacts rep {rep}")
+
+            # Aggregate and save results
+            if contact_results:
+                # Save individual results
+                analysis_dir = sim_config.output.projects_directory / "analysis" / "contacts"
+                analysis_dir.mkdir(parents=True, exist_ok=True)
+
+                for i, (rep, result) in enumerate(zip(config.replicates, contact_results)):
+                    output_file = analysis_dir / f"contacts_rep{rep}.json"
+                    result.save(output_file)
+
+                    if binding_pref_results and i < len(binding_pref_results):
+                        bp_file = analysis_dir / f"binding_preference_rep{rep}.json"
+                        binding_pref_results[i].save(bp_file)
+
+                # Aggregate if multiple replicates
+                if len(contact_results) > 1:
+                    click.echo("  Aggregating results...", nl=False)
+                    agg_result = aggregate_contact_results(contact_results)
+                    agg_file = (
+                        analysis_dir
+                        / f"contacts_aggregated_reps{config.replicates[0]}-{config.replicates[-1]}.json"
+                    )
+                    import json
+
+                    with open(agg_file, "w") as f:
+                        json.dump(agg_result.to_dict(), f, indent=2)
+
+                    # Aggregate binding preference
+                    if binding_pref_results:
+                        from polyzymd.analysis.contacts import aggregate_binding_preference
+
+                        agg_bp = aggregate_binding_preference(binding_pref_results)
+                        agg_bp_file = (
+                            analysis_dir
+                            / f"binding_preference_aggregated_reps{config.replicates[0]}-{config.replicates[-1]}.json"
+                        )
+                        agg_bp.save(agg_bp_file)
+                        click.echo(click.style(" done (contacts + binding preference)", fg="green"))
+                    else:
+                        click.echo(click.style(" done", fg="green"))
+
+                click.echo(f"  Results saved: {analysis_dir}")
+
+            completed.append(f"Contacts ({len(config.replicates)} replicates)")
+        except Exception as e:
+            click.echo(click.style(f"Contact analysis failed: {e}", fg="red"))
+            if LOGGER.level == logging.DEBUG:
+                import traceback
+
+                traceback.print_exc()
+            failed.append("Contacts")
+
     # Print summary
     click.echo()
     click.echo(click.style("=" * 60, fg="green" if not failed else "yellow"))
@@ -1093,6 +1241,23 @@ def distances(
     default=None,
     help="Custom output directory for results",
 )
+@click.option(
+    "--binding-preference",
+    is_flag=True,
+    help="Compute binding preference analysis with enrichment ratios (requires rust-sasa-python)",
+)
+@click.option(
+    "--enzyme-pdb",
+    type=click.Path(exists=True),
+    default=None,
+    help="Path to enzyme PDB for SASA calculation (default: uses config enzyme_pdb)",
+)
+@click.option(
+    "--surface-threshold",
+    type=float,
+    default=0.2,
+    help="Relative SASA threshold for surface exposure (default: 0.2 = 20%)",
+)
 def contacts(
     config: str,
     replicates: str,
@@ -1105,6 +1270,9 @@ def contacts(
     plot: bool,
     recompute: bool,
     output_dir: Optional[str],
+    binding_preference: bool,
+    enzyme_pdb: Optional[str],
+    surface_threshold: float,
 ) -> None:
     """Analyze polymer-protein contacts.
 
@@ -1134,6 +1302,10 @@ def contacts(
             --polymer-selection "segid C and resname SBM" \\
             --protein-selection "protein and (resname TRP PHE TYR)" \\
             --residence-times --plot
+
+        # With binding preference analysis (enrichment ratios)
+        polyzymd analyze contacts -c config.yaml -r 1-3 \\
+            --binding-preference --surface-threshold 0.2
     """
     require_analysis_deps()
 
@@ -1170,6 +1342,8 @@ def contacts(
     click.echo(f"  Polymer selection: {polymer_selection}")
     click.echo(f"  Protein selection: {protein_selection}")
     click.echo(f"  Grouping: {grouping}")
+    if binding_preference:
+        click.echo(f"  Binding preference: enabled (threshold={surface_threshold})")
 
     # Parse equilibration time
     eq_value, eq_unit = parse_time_string(eq_time)
@@ -1184,6 +1358,8 @@ def contacts(
 
         # Process each replicate
         results = []
+        binding_pref_results = []
+        universes = []  # Keep universe references for binding preference
         for rep in rep_list:
             click.echo(f"  Processing replicate {rep}...", nl=False)
 
@@ -1220,6 +1396,7 @@ def contacts(
             )
 
             results.append(result)
+            universes.append(universe)
 
             # Report basic stats
             n_contacted = result.n_contacted_residues
@@ -1236,6 +1413,88 @@ def contacts(
         if not results:
             click.echo(click.style("No results generated!", fg="red"), err=True)
             sys.exit(1)
+
+        # Compute binding preference if enabled
+        if binding_preference and results:
+            click.echo()
+            click.echo("Computing binding preference...")
+
+            from polyzymd.analysis.contacts import (
+                SurfaceExposureFilter,
+                compute_binding_preference,
+                resolve_protein_group_selections,
+                aggregate_binding_preference,
+            )
+
+            # Determine enzyme PDB path
+            if enzyme_pdb:
+                enzyme_pdb_path = Path(enzyme_pdb)
+            else:
+                enzyme_pdb_path = sim_config.system.enzyme_pdb
+                if not Path(enzyme_pdb_path).is_absolute():
+                    enzyme_pdb_path = Path(config).parent / enzyme_pdb_path
+
+            # Calculate surface exposure (once - same for all replicates)
+            click.echo(f"  Calculating surface exposure from: {enzyme_pdb_path}")
+            exposure_filter = SurfaceExposureFilter(threshold=surface_threshold)
+            try:
+                surface_exposure = exposure_filter.calculate(enzyme_pdb_path)
+                click.echo(
+                    f"  Found {surface_exposure.exposed_count}/{surface_exposure.total_count} "
+                    f"surface-exposed residues"
+                )
+            except Exception as e:
+                click.echo(
+                    click.style(f"  SASA calculation failed: {e}", fg="red"),
+                    err=True,
+                )
+                click.echo(
+                    "  Install rust-sasa-python: pip install rust-sasa-python",
+                    err=True,
+                )
+                binding_preference = False  # Disable for rest of processing
+
+            if binding_preference:
+                # Resolve protein groups (use default AA class selections)
+                universe = universes[0]  # Use first universe for selection resolution
+                protein_groups = resolve_protein_group_selections(universe, None)
+                click.echo(f"  Protein groups: {', '.join(protein_groups.keys())}")
+
+                # Compute binding preference for each replicate
+                for i, (result, universe) in enumerate(zip(results, universes)):
+                    try:
+                        bp_result = compute_binding_preference(
+                            contact_result=result,
+                            surface_exposure=surface_exposure,
+                            protein_groups=protein_groups,
+                        )
+                        binding_pref_results.append(bp_result)
+
+                        # Save per-replicate binding preference file
+                        if output_path:
+                            bp_rep_file = output_path / f"binding_preference_rep{rep_list[i]}.json"
+                        else:
+                            bp_rep_file = (
+                                sim_config.output.projects_directory
+                                / "analysis"
+                                / "contacts"
+                                / f"binding_preference_rep{rep_list[i]}.json"
+                            )
+                        bp_rep_file.parent.mkdir(parents=True, exist_ok=True)
+                        bp_result.save(bp_rep_file)
+
+                        click.echo(
+                            f"  Replicate {rep_list[i]}: "
+                            f"{len(bp_result.polymer_types())} polymer types × "
+                            f"{len(bp_result.protein_groups())} groups"
+                        )
+                    except Exception as e:
+                        click.echo(
+                            click.style(
+                                f"  Replicate {rep_list[i]} binding preference FAILED: {e}",
+                                fg="red",
+                            )
+                        )
 
         # Aggregate if multiple replicates
         if len(results) > 1:
@@ -1273,6 +1532,41 @@ def contacts(
                 json.dump(agg_result.to_dict(), f, indent=2)
             click.echo(f"  Results saved: {output_file}")
 
+            # Aggregate and save binding preference if computed
+            if binding_pref_results:
+                from polyzymd.analysis.contacts import aggregate_binding_preference
+
+                agg_bp = aggregate_binding_preference(binding_pref_results)
+                bp_file = (
+                    output_file.parent
+                    / f"binding_preference_aggregated_reps{rep_list[0]}-{rep_list[-1]}.json"
+                )
+                agg_bp.save(bp_file)
+                click.echo(f"  Binding preference saved: {bp_file}")
+
+                # Print enrichment summary grouped by polymer type
+                click.echo("  Enrichment summary (mean ± SEM):")
+                for ptype in agg_bp.polymer_types():
+                    click.echo(f"    {ptype}:")
+                    for entry in agg_bp.entries:
+                        if entry.polymer_type == ptype and entry.mean_enrichment is not None:
+                            click.echo(
+                                f"      {entry.protein_group}: "
+                                f"{entry.mean_enrichment:.2f} ± {entry.sem_enrichment or 0:.2f}"
+                            )
+
+                # Print surface-exposed coverage
+                exposed_resids = surface_exposure.exposed_resids
+                contacted_exposed = sum(
+                    1
+                    for rs in agg_result.residue_stats
+                    if rs.protein_resid in exposed_resids and rs.contact_fraction_mean > 0
+                )
+                click.echo(
+                    f"  Surface-exposed coverage: {contacted_exposed}/{len(exposed_resids)} "
+                    f"({contacted_exposed / len(exposed_resids):.1%})"
+                )
+
         else:
             # Single replicate
             result = results[0]
@@ -1307,6 +1601,33 @@ def contacts(
             output_file.parent.mkdir(parents=True, exist_ok=True)
             result.save(output_file)
             click.echo(f"  Results saved: {output_file}")
+
+            # Save binding preference if computed
+            if binding_pref_results:
+                bp_file = output_file.parent / f"binding_preference_rep{rep_list[0]}.json"
+                binding_pref_results[0].save(bp_file)
+                click.echo(f"  Binding preference saved: {bp_file}")
+
+                # Print enrichment summary grouped by polymer type
+                bp_result = binding_pref_results[0]
+                click.echo("  Enrichment summary:")
+                for ptype in bp_result.polymer_types():
+                    click.echo(f"    {ptype}:")
+                    for entry in bp_result.entries:
+                        if entry.polymer_type == ptype and entry.enrichment_ratio is not None:
+                            click.echo(f"      {entry.protein_group}: {entry.enrichment_ratio:.2f}")
+
+                # Print surface-exposed coverage
+                exposed_resids = surface_exposure.exposed_resids
+                contacted_exposed = sum(
+                    1
+                    for rc in result.residue_contacts
+                    if rc.protein_resid in exposed_resids and rc.total_contact_events > 0
+                )
+                click.echo(
+                    f"  Surface-exposed coverage: {contacted_exposed}/{len(exposed_resids)} "
+                    f"({contacted_exposed / len(exposed_resids):.1%})"
+                )
 
         # Generate plot if requested
         if plot:
