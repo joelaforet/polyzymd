@@ -451,6 +451,18 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
         How to group protein residues: aa_class, secondary_structure, or none.
     compute_residence_times : bool
         If True, compute residence time statistics.
+    compute_binding_preference : bool
+        If True, compute binding preference enrichment analysis.
+    surface_exposure_threshold : float
+        Relative SASA threshold for surface exposure (0.0-1.0).
+    enzyme_pdb_for_sasa : str, optional
+        Path to enzyme PDB for SASA calculation. If not provided,
+        uses the first PDB found in the condition directory.
+    include_default_aa_groups : bool
+        If True, include default AA class groupings (aromatic, polar, etc.)
+    protein_groups : dict[str, list[int]], optional
+        Custom protein groups as {name: [resid1, resid2, ...]}.
+        Overrides default AA class groups if names conflict.
     """
 
     polymer_selection: str = Field(
@@ -468,6 +480,29 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
     )
     compute_residence_times: bool = Field(
         default=True, description="Compute residence time statistics"
+    )
+
+    # Binding preference settings
+    compute_binding_preference: bool = Field(
+        default=False, description="Compute binding preference enrichment analysis"
+    )
+    surface_exposure_threshold: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="Relative SASA threshold for surface exposure (0.2 = 20%)",
+    )
+    enzyme_pdb_for_sasa: Optional[str] = Field(
+        default=None,
+        description="Path to enzyme PDB for SASA calculation (relative to comparison.yaml)",
+    )
+    include_default_aa_groups: bool = Field(
+        default=True,
+        description="Include default AA class groupings (aromatic, polar, nonpolar, charged)",
+    )
+    protein_groups: Optional[dict[str, list[int]]] = Field(
+        default=None,
+        description="Custom protein groups as {name: [resid1, resid2, ...]}",
     )
 
     @classmethod
@@ -496,6 +531,17 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
         }
         if self.polymer_types:
             result["polymer_types"] = self.polymer_types
+
+        # Binding preference settings (only include if enabled)
+        if self.compute_binding_preference:
+            result["compute_binding_preference"] = True
+            result["surface_exposure_threshold"] = self.surface_exposure_threshold
+            result["include_default_aa_groups"] = self.include_default_aa_groups
+            if self.enzyme_pdb_for_sasa:
+                result["enzyme_pdb_for_sasa"] = self.enzyme_pdb_for_sasa
+            if self.protein_groups:
+                result["protein_groups"] = self.protein_groups
+
         return result
 
 
