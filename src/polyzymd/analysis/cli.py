@@ -944,7 +944,7 @@ def distances(
             config=sim_config,
             pairs=distance_pairs,
             equilibration=eq_time,
-            threshold=threshold,
+            thresholds=threshold,
         )
 
         if len(rep_list) == 1:
