@@ -173,6 +173,10 @@ contacts:
   protein_selection: "protein"
   cutoff: 4.5                         # Contact distance (Angstroms)
   compute_residence_times: true       # Track contact durations
+  
+  # Binding preference analysis (optional)
+  # Computes enrichment: does polymer X prefer amino acid class Y?
+  compute_binding_preference: false   # Enable in comparison.yaml instead
 ```
 
 ```{tip}
@@ -422,6 +426,12 @@ contacts:
   polymer_selection: "chainID C"
   protein_selection: "protein"
   cutoff: 4.5
+  
+  # Binding preference: which amino acid classes does each polymer prefer?
+  compute_binding_preference: true
+  surface_exposure_threshold: 0.2     # 20% relative SASA
+  enzyme_pdb_for_sasa: "../structures/enzyme.pdb"
+  include_default_aa_groups: true     # aromatic, polar, charged, etc.
 ```
 
 ### 3.3 Validate Your Configuration
@@ -656,6 +666,11 @@ For the full distance analysis guide, see [Distance Analysis Quick Start](analys
 
 ### 4.4 Compare Polymer-Protein Contacts
 
+Contacts analysis provides three complementary views:
+1. **Coverage & contact fraction** — How much of the protein does the polymer contact?
+2. **Residence times** — How persistent are the contacts?
+3. **Binding preference** — Which amino acid classes does each polymer prefer?
+
 `````{tab-set}
 ````{tab-item} CLI
 ```bash
@@ -710,13 +725,47 @@ Condition            EGM          SBM
 100% EGMA       7.1±0.4           --
 --------------------------------------------------------------------------------
 
+Binding Preference - Enrichment by Amino Acid Class
+--------------------------------------------------------------------------------
+Surface exposure threshold: 20% relative SASA
+
+  Polymer: EGM
+  Protein Group        100% EGMA          
+  ----------------------------------------
+  aromatic             1.90±0.06 +        
+  charged_negative     0.45±0.04 -        
+  charged_positive     0.79±0.10 -        
+  nonpolar             1.31±0.04 +        
+  polar                0.71±0.02 -        
+
+  Polymer: SBM
+  Protein Group        100% SBMA          
+  ----------------------------------------
+  aromatic             1.29±0.03 +        
+  charged_negative     0.90±0.05 -        
+  charged_positive     1.02±0.03 +        
+  nonpolar             0.95±0.03 -        
+  polar                1.00±0.00 =        
+
+  + = enriched (>1.0), - = depleted (<1.0)
+--------------------------------------------------------------------------------
+
 Results saved: results/contacts_comparison_polymer_stabilization_study.json
 ```
 
 **Interpretation:**
-- EGMA has broader coverage (88.4% of residues contacted)
-- SBMA has higher contact fraction (30.2%) and longer residence times (10.0 frames)
-- This suggests SBMA forms fewer but more persistent contacts
+- **Coverage:** EGMA has broader coverage (88.4% of residues contacted)
+- **Contact intensity:** SBMA has higher contact fraction (30.2%) and longer residence times (10.0 frames), suggesting fewer but more persistent contacts
+- **Binding preference:**
+  - EGMA strongly prefers **aromatic** (1.9×) and **nonpolar** (1.3×) residues, consistent with its hydrophobic character
+  - EGMA avoids **charged** residues (0.45× for negative, 0.79× for positive)
+  - SBMA shows more balanced binding with slight preference for aromatics (1.29×) and charged positive (1.02×)
+
+```{tip}
+**Understanding enrichment:** A value of 1.9 means the polymer contacts aromatic
+residues 1.9× more than expected by random chance (based on surface availability).
+See [Binding Preference Analysis](analysis_binding_preference.md) for full details.
+```
 
 ---
 
@@ -917,6 +966,7 @@ Now that you've completed the analysis workflow:
    - [RMSF Best Practices](analysis_rmsf_best_practices.md) — Reference modes, uncertainty
    - [Triad Best Practices](analysis_triad_best_practices.md) — H-bond definitions
    - [Contacts Cookbook](analysis_contacts_cookbook.md) — Advanced queries
+   - [Binding Preference Analysis](analysis_binding_preference.md) — Amino acid class enrichment
 
 2. **Understand the statistics:**
    - [Statistics Best Practices](analysis_statistics_best_practices.md) — Autocorrelation, SEM correction
@@ -933,6 +983,7 @@ Now that you've completed the analysis workflow:
 - [Catalytic Triad Quick Start](analysis_triad_quickstart.md)
 - [Distance Analysis Quick Start](analysis_distances_quickstart.md)
 - [Contacts Quick Start](analysis_contacts_quickstart.md)
+- [Binding Preference Analysis](analysis_binding_preference.md)
 - [Statistics Best Practices](analysis_statistics_best_practices.md)
 - [Comparing Conditions](analysis_compare_conditions.md)
 - [CLI Reference](cli_reference.md)
