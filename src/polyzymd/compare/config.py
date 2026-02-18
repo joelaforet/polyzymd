@@ -728,23 +728,32 @@ analysis_settings:
     # reference_frame: 500      # Required if reference_mode is "frame"
 
   # Catalytic Triad / Active Site Distances
+  #
+  # IMPORTANT: Always use "protein and resid X" for protein residues!
+  # Residue numbers restart per chain. Without "protein and", your selection
+  # may match atoms from polymer or water chains, causing incorrect distances.
+  #
   # catalytic_triad:
   #   name: "enzyme_catalytic_triad"
   #   threshold: 3.5  # Angstroms (H-bond cutoff)
   #   pairs:
   #     - label: "Asp-His"
-  #       selection_a: "midpoint(resid 133 and name OD1 OD2)"
-  #       selection_b: "resid 156 and name ND1"
+  #       selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
+  #       selection_b: "protein and resid 156 and name ND1"
   #     - label: "His-Ser"
-  #       selection_a: "resid 156 and name NE2"
-  #       selection_b: "resid 77 and name OG"
+  #       selection_a: "protein and resid 156 and name NE2"
+  #       selection_b: "protein and resid 77 and name OG"
 
   # Distance Analysis (general inter-atomic distances)
+  #
+  # IMPORTANT: Always use "protein and resid X" for protein residues!
+  # See warning above in catalytic_triad section.
+  #
   # distances:
   #   threshold: 3.5
   #   pairs:
   #     - label: "Ser77-Substrate"
-  #       selection_a: "resid 77 and name OG"
+  #       selection_a: "protein and resid 77 and name OG"
   #       selection_b: "resname RBY and name C1"
 
   # Polymer-Protein Contact Analysis

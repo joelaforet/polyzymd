@@ -169,6 +169,7 @@ description: "Description of your simulation system"
 #   - lower_wall   : Only restrains if distance below threshold
 #
 # Selection syntax:
+#   protein         : All protein atoms (use to restrict to protein chain)
 #   resid N        : Residue number (1-indexed, matches PDB)
 #   resname XXX    : Residue name (e.g., LIG, SER)
 #   name XXX       : Atom name (e.g., CA, OG, C1)
@@ -176,11 +177,14 @@ description: "Description of your simulation system"
 #   index N        : Internal atom index (0-indexed)
 #   and/or         : Combine selections
 #
+# IMPORTANT: Residue numbers restart per chain. For protein residues,
+# always use "protein and resid X" to avoid matching polymer/water atoms.
+#
 # restraints:
 #   - type: "flat_bottom"
 #     name: "substrate_restraint"
 #     atom1:
-#       selection: "resid 100 and name OG"   # Example: Serine OG
+#       selection: "protein and resid 100 and name OG"   # Example: Serine OG
 #       description: "Catalytic residue"
 #     atom2:
 #       selection: "resname LIG and name C1"  # Example: Ligand carbon
