@@ -7,6 +7,22 @@ This module provides registered plotters for polymer-protein contacts analysis:
 Both plotters are automatically registered with PlotterRegistry and
 discovered by ComparisonPlotter.plot_all() when contacts analysis
 is enabled and binding preference data is available.
+
+Data Loading Pattern
+--------------------
+Plotters receive a `data` dict from `ComparisonPlotter._load_analysis_data()` with:
+
+    data[condition_label] = {
+        "condition": ConditionConfig,      # Condition metadata
+        "sim_config": SimulationConfig,    # Full simulation config
+        "analysis_dir": Path,              # Path to analysis/{analysis_type}/
+        "aggregated_dir": Path,            # Path to analysis/{analysis_type}/aggregated/
+        "replicates": list[int],           # Replicate numbers
+    }
+
+Plotters must load their own analysis results from `analysis_dir`, NOT expect
+data to be passed via kwargs. This follows the registry pattern established
+by other plotters (e.g., TriadKDEPanelPlotter, TriadThresholdBarsPlotter).
 """
 
 from __future__ import annotations
@@ -20,6 +36,9 @@ import numpy as np
 from polyzymd.compare.plotter import BasePlotter, PlotterRegistry
 
 if TYPE_CHECKING:
+    from polyzymd.analysis.contacts.binding_preference import (
+        AggregatedBindingPreferenceResult,
+    )
     from polyzymd.compare.config import ComparisonConfig
 
 logger = logging.getLogger(__name__)
@@ -37,6 +56,11 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
     The heatmap uses a diverging colormap centered at 1.0 (neutral enrichment),
     with values > 1.0 (preferential binding) shown in warm colors and
     values < 1.0 (avoidance) shown in cool colors.
+
+    Data Loading
+    ------------
+    This plotter loads `AggregatedBindingPreferenceResult` from each condition's
+    `analysis_dir`, looking for files matching `binding_preference_aggregated*.json`.
     """
 
     @classmethod
@@ -62,51 +86,61 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
         output_dir: Path,
         **kwargs,
     ) -> list[Path]:
-        """Generate enrichment heatmap from contacts comparison data.
+        """Generate enrichment heatmap comparing binding preferences across conditions.
+
+        Loads aggregated binding preference results from each condition's
+        `analysis_dir` and creates a multi-panel heatmap showing enrichment
+        ratios for all (polymer_type, protein_group) combinations.
 
         Parameters
         ----------
         data : dict
-            Mapping of condition_label -> condition data dict containing
-            binding_preference key with enrichment data
+            Mapping of condition_label -> condition data dict from
+            `ComparisonPlotter._load_analysis_data()`. Each entry contains:
+            - "analysis_dir": Path to analysis/contacts/ directory
+            - "replicates": list[int] of replicate numbers
+            - "condition": ConditionConfig object
         labels : sequence of str
-            Condition labels (order matches data keys)
+            Condition labels in desired display order
         output_dir : Path
-            Directory to save plots
+            Directory to save plot files
+        **kwargs
+            Additional keyword arguments (unused, for interface compatibility)
 
         Returns
         -------
         list[Path]
-            Paths to generated plot files
+            Paths to generated plot files (empty if no data available)
         """
         import matplotlib.pyplot as plt
 
-        # Get binding preference comparison from comparison result
-        comparison_result = kwargs.get("comparison_result")
-        if comparison_result is None:
-            logger.warning("No comparison result provided for binding preference heatmap")
+        # Load binding preference results from each condition
+        binding_results = self._load_binding_preference_results(data, labels)
+
+        if not binding_results:
+            logger.info("No binding preference data found - skipping heatmap")
             return []
 
-        binding_pref = getattr(comparison_result, "binding_preference", None)
-        if binding_pref is None:
-            logger.info("No binding preference data in comparison result - skipping heatmap")
-            return []
+        # Get common polymer types and protein groups across all conditions
+        all_polymer_types: set[str] = set()
+        all_protein_groups: set[str] = set()
+        for result in binding_results.values():
+            all_polymer_types.update(result.polymer_types())
+            all_protein_groups.update(result.protein_groups())
 
-        if not binding_pref.entries:
-            logger.warning("Binding preference has no entries - skipping heatmap")
-            return []
-
-        # Extract data for heatmaps
-        polymer_types = binding_pref.polymer_types
-        protein_groups = binding_pref.protein_groups
-        condition_labels = binding_pref.condition_labels
+        polymer_types = sorted(all_polymer_types)
+        protein_groups = sorted(all_protein_groups)
 
         if not polymer_types or not protein_groups:
             logger.warning("No polymer types or protein groups found - skipping heatmap")
             return []
 
-        # Build enrichment matrices for each condition
-        n_conditions = len(condition_labels)
+        # Filter to conditions with data
+        valid_labels = [label for label in labels if label in binding_results]
+        if not valid_labels:
+            return []
+
+        n_conditions = len(valid_labels)
         n_rows = len(protein_groups)
         n_cols = len(polymer_types)
 
@@ -125,11 +159,10 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
 
         # Determine global min/max for consistent colorbar
         all_values = []
-        for entry in binding_pref.entries:
-            for cond_label in condition_labels:
-                values = entry.condition_values.get(cond_label)
-                if values:
-                    all_values.append(values[0])  # mean enrichment
+        for result in binding_results.values():
+            for entry in result.entries:
+                if entry.mean_enrichment is not None:
+                    all_values.append(entry.mean_enrichment)
 
         if not all_values:
             logger.warning("No enrichment values found - skipping heatmap")
@@ -144,21 +177,20 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
         vmin = max(0, 1.0 - max_deviation)
         vmax = 1.0 + max_deviation
 
+        im = None  # Track last imshow for colorbar
+
         # Plot each condition
-        for idx, cond_label in enumerate(condition_labels):
+        for idx, cond_label in enumerate(valid_labels):
             ax = axes_flat[idx]
+            result = binding_results[cond_label]
 
             # Build matrix for this condition
             matrix = np.zeros((n_rows, n_cols))
             for i, prot_group in enumerate(protein_groups):
                 for j, poly_type in enumerate(polymer_types):
-                    entry = binding_pref.get_entry(poly_type, prot_group)
-                    if entry:
-                        values = entry.condition_values.get(cond_label)
-                        if values:
-                            matrix[i, j] = values[0]  # mean enrichment
-                        else:
-                            matrix[i, j] = np.nan
+                    entry = result.get_entry(poly_type, prot_group)
+                    if entry and entry.mean_enrichment is not None:
+                        matrix[i, j] = entry.mean_enrichment
                     else:
                         matrix[i, j] = np.nan
 
@@ -205,19 +237,76 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
             axes_flat[idx].set_visible(False)
 
         # Add colorbar
-        cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
-        cbar = fig.colorbar(im, cax=cbar_ax)
-        cbar.set_label("Enrichment Ratio", rotation=270, labelpad=15)
+        if im is not None:
+            cbar_ax = fig.add_axes((0.92, 0.15, 0.02, 0.7))
+            cbar = fig.colorbar(im, cax=cbar_ax)
+            cbar.set_label("Enrichment Ratio", rotation=270, labelpad=15)
 
-        # Add reference line at 1.0 (neutral enrichment)
-        cbar.ax.axhline(y=1.0, color="black", linewidth=1.5, linestyle="--")
+            # Add reference line at 1.0 (neutral enrichment)
+            cbar.ax.axhline(y=1.0, color="black", linewidth=1.5, linestyle="--")
 
         fig.suptitle("Binding Preference Enrichment", fontsize=14, fontweight="bold", y=0.98)
-        plt.tight_layout(rect=[0, 0, 0.9, 0.95])
+        plt.tight_layout(rect=(0, 0, 0.9, 0.95))
 
         # Save
         output_path = self._get_output_path(output_dir, "binding_preference_heatmap")
         return [self._save_figure(fig, output_path)]
+
+    def _load_binding_preference_results(
+        self,
+        data: dict[str, Any],
+        labels: Sequence[str],
+    ) -> dict[str, "AggregatedBindingPreferenceResult"]:
+        """Load aggregated binding preference results for each condition.
+
+        Parameters
+        ----------
+        data : dict
+            Mapping of condition_label -> condition data dict
+        labels : sequence of str
+            Condition labels to load
+
+        Returns
+        -------
+        dict
+            Mapping of label -> AggregatedBindingPreferenceResult
+        """
+        from polyzymd.analysis.contacts.binding_preference import (
+            AggregatedBindingPreferenceResult,
+        )
+
+        results: dict[str, AggregatedBindingPreferenceResult] = {}
+
+        for label in labels:
+            cond_data = data.get(label)
+            if cond_data is None:
+                continue
+
+            analysis_dir = cond_data.get("analysis_dir")
+            if not analysis_dir:
+                continue
+
+            analysis_dir = Path(analysis_dir)
+
+            # Find aggregated binding preference file
+            # Pattern: binding_preference_aggregated_reps*.json
+            agg_files = list(analysis_dir.glob("binding_preference_aggregated*.json"))
+
+            if not agg_files:
+                logger.debug(f"No aggregated binding preference in {analysis_dir}")
+                continue
+
+            # Use the most recent aggregated file
+            result_file = sorted(agg_files)[-1]
+
+            try:
+                result = AggregatedBindingPreferenceResult.load(result_file)
+                results[label] = result
+                logger.debug(f"Loaded binding preference for {label} from {result_file}")
+            except Exception as e:
+                logger.warning(f"Failed to load binding preference {result_file}: {e}")
+
+        return results
 
 
 @PlotterRegistry.register("binding_preference_bars")
@@ -231,6 +320,11 @@ class BindingPreferenceBarPlotter(BasePlotter):
     - Reference line at 1.0 (neutral enrichment)
 
     One plot is generated per polymer type.
+
+    Data Loading
+    ------------
+    This plotter loads `AggregatedBindingPreferenceResult` from each condition's
+    `analysis_dir`, looking for files matching `binding_preference_aggregated*.json`.
     """
 
     @classmethod
@@ -255,78 +349,90 @@ class BindingPreferenceBarPlotter(BasePlotter):
         output_dir: Path,
         **kwargs,
     ) -> list[Path]:
-        """Generate enrichment bar chart from contacts comparison data.
+        """Generate enrichment bar chart comparing binding preferences across conditions.
+
+        Loads aggregated binding preference results from each condition's
+        `analysis_dir` and creates grouped bar charts showing enrichment
+        ratios for each protein group, with one plot per polymer type.
 
         Parameters
         ----------
         data : dict
-            Mapping of condition_label -> condition data dict
+            Mapping of condition_label -> condition data dict from
+            `ComparisonPlotter._load_analysis_data()`. Each entry contains:
+            - "analysis_dir": Path to analysis/contacts/ directory
+            - "replicates": list[int] of replicate numbers
+            - "condition": ConditionConfig object
         labels : sequence of str
-            Condition labels
+            Condition labels in desired display order
         output_dir : Path
-            Directory to save plots
+            Directory to save plot files
+        **kwargs
+            Additional keyword arguments (unused, for interface compatibility)
 
         Returns
         -------
         list[Path]
-            Paths to generated plot files
+            Paths to generated plot files (empty if no data available)
         """
         import matplotlib.pyplot as plt
 
-        # Get binding preference comparison from comparison result
-        comparison_result = kwargs.get("comparison_result")
-        if comparison_result is None:
-            logger.warning("No comparison result provided for binding preference bars")
+        # Load binding preference results from each condition
+        binding_results = self._load_binding_preference_results(data, labels)
+
+        if not binding_results:
+            logger.info("No binding preference data found - skipping bar plots")
             return []
 
-        binding_pref = getattr(comparison_result, "binding_preference", None)
-        if binding_pref is None:
-            logger.info("No binding preference data in comparison result - skipping bars")
-            return []
+        # Get common polymer types and protein groups across all conditions
+        all_polymer_types: set[str] = set()
+        all_protein_groups: set[str] = set()
+        for result in binding_results.values():
+            all_polymer_types.update(result.polymer_types())
+            all_protein_groups.update(result.protein_groups())
 
-        if not binding_pref.entries:
-            logger.warning("Binding preference has no entries - skipping bars")
-            return []
-
-        polymer_types = binding_pref.polymer_types
-        protein_groups = binding_pref.protein_groups
-        condition_labels = binding_pref.condition_labels
+        polymer_types = sorted(all_polymer_types)
+        protein_groups = sorted(all_protein_groups)
 
         if not polymer_types or not protein_groups:
             logger.warning("No polymer types or protein groups found - skipping bars")
             return []
 
+        # Filter to conditions with data
+        valid_labels = [label for label in labels if label in binding_results]
+        if not valid_labels:
+            return []
+
         # Generate one plot per polymer type
-        output_paths = []
+        output_paths: list[Path] = []
 
         for poly_type in polymer_types:
-            fig, ax = plt.subplots(figsize=self.settings.contacts.figsize_enrichment_bars)
+            fig, ax = plt.subplots(
+                figsize=self.settings.contacts.figsize_enrichment_bars,
+                dpi=self.settings.dpi,
+            )
 
             n_groups = len(protein_groups)
-            n_conditions = len(condition_labels)
+            n_conditions = len(valid_labels)
             bar_width = 0.8 / n_conditions
             x = np.arange(n_groups)
 
             # Get colors from palette
             colors = self._get_colors(n_conditions)
 
-            for i, cond_label in enumerate(condition_labels):
+            for i, cond_label in enumerate(valid_labels):
+                result = binding_results[cond_label]
                 means = []
                 sems = []
 
                 for prot_group in protein_groups:
-                    entry = binding_pref.get_entry(poly_type, prot_group)
-                    if entry:
-                        values = entry.condition_values.get(cond_label)
-                        if values:
-                            means.append(values[0])
-                            sems.append(values[1])
-                        else:
-                            means.append(0)
-                            sems.append(0)
+                    entry = result.get_entry(poly_type, prot_group)
+                    if entry and entry.mean_enrichment is not None:
+                        means.append(entry.mean_enrichment)
+                        sems.append(entry.sem_enrichment or 0.0)
                     else:
-                        means.append(0)
-                        sems.append(0)
+                        means.append(0.0)
+                        sems.append(0.0)
 
                 offset = (i - n_conditions / 2 + 0.5) * bar_width
                 ax.bar(
@@ -364,7 +470,63 @@ class BindingPreferenceBarPlotter(BasePlotter):
 
         return output_paths
 
-    def _get_colors(self, n_colors: int) -> list[str]:
+    def _load_binding_preference_results(
+        self,
+        data: dict[str, Any],
+        labels: Sequence[str],
+    ) -> dict[str, "AggregatedBindingPreferenceResult"]:
+        """Load aggregated binding preference results for each condition.
+
+        Parameters
+        ----------
+        data : dict
+            Mapping of condition_label -> condition data dict
+        labels : sequence of str
+            Condition labels to load
+
+        Returns
+        -------
+        dict
+            Mapping of label -> AggregatedBindingPreferenceResult
+        """
+        from polyzymd.analysis.contacts.binding_preference import (
+            AggregatedBindingPreferenceResult,
+        )
+
+        results: dict[str, AggregatedBindingPreferenceResult] = {}
+
+        for label in labels:
+            cond_data = data.get(label)
+            if cond_data is None:
+                continue
+
+            analysis_dir = cond_data.get("analysis_dir")
+            if not analysis_dir:
+                continue
+
+            analysis_dir = Path(analysis_dir)
+
+            # Find aggregated binding preference file
+            # Pattern: binding_preference_aggregated_reps*.json
+            agg_files = list(analysis_dir.glob("binding_preference_aggregated*.json"))
+
+            if not agg_files:
+                logger.debug(f"No aggregated binding preference in {analysis_dir}")
+                continue
+
+            # Use the most recent aggregated file
+            result_file = sorted(agg_files)[-1]
+
+            try:
+                result = AggregatedBindingPreferenceResult.load(result_file)
+                results[label] = result
+                logger.debug(f"Loaded binding preference for {label} from {result_file}")
+            except Exception as e:
+                logger.warning(f"Failed to load binding preference {result_file}: {e}")
+
+        return results
+
+    def _get_colors(self, n_colors: int) -> list:
         """Get colors from the configured palette.
 
         Parameters
@@ -374,8 +536,8 @@ class BindingPreferenceBarPlotter(BasePlotter):
 
         Returns
         -------
-        list[str]
-            List of color values
+        list
+            List of color values (RGB tuples or color strings)
         """
         import matplotlib.pyplot as plt
 
@@ -383,7 +545,7 @@ class BindingPreferenceBarPlotter(BasePlotter):
         try:
             import seaborn as sns
 
-            return sns.color_palette(self.settings.color_palette, n_colors)
+            return list(sns.color_palette(self.settings.color_palette, n_colors))
         except ImportError:
             # Fall back to matplotlib
             cmap = plt.cm.get_cmap(self.settings.color_palette)
