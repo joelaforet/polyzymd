@@ -173,6 +173,13 @@ class CatalyticTriadAnalyzer:
                     )
                     raise ValueError(f"Selection '{selection}' matched no atoms.\n\n{diag}")
 
+                # Warn if selection spans multiple chains (common user error)
+                from polyzymd.analysis.core.diagnostics import warn_if_multi_chain_selection
+
+                warn_if_multi_chain_selection(
+                    atoms, selection, f"for triad pair '{pair.label}' ({sel_name})"
+                )
+
         LOGGER.info("All triad selections validated successfully")
 
     def compute(

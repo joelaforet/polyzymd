@@ -687,6 +687,15 @@ class DistanceCalculator:
             diag = get_selection_diagnostics(u, sel2)
             raise ValueError(f"Selection '{sel2}' matched no atoms.\n\n{diag}")
 
+        # Warn if selections span multiple chains (common user error)
+        # Residue numbers restart per chain, so "resid 141-148" may match
+        # atoms from protein, polymer, AND water chains
+        from polyzymd.analysis.core.diagnostics import warn_if_multi_chain_selection
+
+        pair_label = _make_pair_label(sel1, sel2)
+        warn_if_multi_chain_selection(atoms1, sel1, f"for distance pair '{pair_label}'")
+        warn_if_multi_chain_selection(atoms2, sel2, f"for distance pair '{pair_label}'")
+
         # Compute distances over trajectory
         distances = []
         n_frames_total = len(u.trajectory)

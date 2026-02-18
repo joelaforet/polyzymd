@@ -14,15 +14,21 @@ get_protein_residue_range
     Get the range of residue IDs in the protein
 format_diagnostic_message
     Format diagnostic lines into a readable message
+warn_if_multi_chain_selection
+    Warn if a selection matched atoms from multiple chains
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from MDAnalysis import Universe
+    from MDAnalysis.core.groups import AtomGroup
+
+LOGGER = logging.getLogger(__name__)
 
 
 def get_protein_residue_range(universe: "Universe") -> Optional[tuple[int, int]]:
@@ -277,3 +283,86 @@ def validate_equilibration_time(
         )
 
     return (True, None)
+
+
+def warn_if_multi_chain_selection(
+    atoms: "AtomGroup",
+    selection: str,
+    context: str = "",
+) -> bool:
+    """Warn if a selection matched atoms from multiple chains.
+
+    Residue numbers restart at 1 for each chain in PolyzyMD systems.
+    A selection like ``resid 141-148`` without chain restriction will
+    match residues from protein (chain A), polymers (chain C), and
+    potentially water (chain D+), leading to incorrect calculations.
+
+    This function checks if the selected atoms span multiple chains
+    and logs a warning if so.
+
+    Parameters
+    ----------
+    atoms : AtomGroup
+        The atoms selected by MDAnalysis
+    selection : str
+        The original selection string (for error message)
+    context : str, optional
+        Additional context for the warning message (e.g., "for pair 'Lid Domain'")
+
+    Returns
+    -------
+    bool
+        True if atoms span multiple chains (warning was issued),
+        False if atoms are from a single chain (no warning)
+
+    Examples
+    --------
+    >>> atoms = u.select_atoms("resid 141-148")  # May match multiple chains!
+    >>> warn_if_multi_chain_selection(atoms, "resid 141-148", "for Lid Domain distance")
+    True  # Warning logged
+
+    >>> atoms = u.select_atoms("protein and resid 141-148")  # Single chain
+    >>> warn_if_multi_chain_selection(atoms, "protein and resid 141-148")
+    False  # No warning
+
+    Notes
+    -----
+    PolyzyMD uses a chain convention:
+    - Chain A: Protein (enzyme)
+    - Chain B: Substrate (small molecule)
+    - Chain C: Polymer
+    - Chain D+: Solvent, ions
+
+    When analyzing protein residues, always use ``protein and resid X``
+    or ``chainid A and resid X`` to avoid accidentally including atoms
+    from polymers or water that happen to have the same residue numbers.
+    """
+    if len(atoms) == 0:
+        return False
+
+    # Get unique chain IDs
+    try:
+        chain_ids = set(atom.chainID for atom in atoms)
+    except AttributeError:
+        # Fallback to segment IDs if chainID not available
+        chain_ids = set(atoms.segments.segids)
+
+    if len(chain_ids) > 1:
+        # Get residue names to help user understand what was selected
+        resnames = set(atoms.resnames)
+        resnames_str = ", ".join(sorted(resnames)[:5])
+        if len(resnames) > 5:
+            resnames_str += f", ... ({len(resnames)} total)"
+
+        context_str = f" {context}" if context else ""
+
+        LOGGER.warning(
+            f"Selection '{selection}' matched atoms from multiple chains: {sorted(chain_ids)}.{context_str}\n"
+            f"  Residue types selected: {resnames_str}\n"
+            f"  This may cause incorrect calculations (e.g., COM includes polymer/water atoms).\n"
+            f"  Consider adding 'protein and' or 'chainid A and' to restrict to a single chain.\n"
+            f"  Example: 'com(protein and resid 141-148)' instead of 'com(resid 141-148)'"
+        )
+        return True
+
+    return False
