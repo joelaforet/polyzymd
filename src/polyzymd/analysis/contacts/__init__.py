@@ -122,6 +122,22 @@ from polyzymd.analysis.contacts.results import (
 )
 from polyzymd.analysis.contacts.calculator import ContactAnalyzer
 from polyzymd.analysis.contacts.calculator_parallel import ParallelContactAnalyzer
+from polyzymd.analysis.contacts.surface_exposure import (
+    ResidueExposure,
+    SurfaceExposureResult,
+    SurfaceExposureFilter,
+)
+from polyzymd.analysis.contacts.binding_preference import (
+    BindingPreferenceEntry,
+    BindingPreferenceResult,
+    AggregatedBindingPreferenceEntry,
+    AggregatedBindingPreferenceResult,
+    compute_binding_preference,
+    aggregate_binding_preference,
+    resolve_protein_group_selections,
+    resolve_polymer_type_selections,
+    compute_binding_preference_from_config,
+)
 
 __all__ = [
     # Criteria (Strategy pattern)
@@ -137,4 +153,18 @@ __all__ = [
     # Calculators
     "ContactAnalyzer",
     "ParallelContactAnalyzer",
+    # Surface Exposure
+    "ResidueExposure",
+    "SurfaceExposureResult",
+    "SurfaceExposureFilter",
+    # Binding Preference
+    "BindingPreferenceEntry",
+    "BindingPreferenceResult",
+    "AggregatedBindingPreferenceEntry",
+    "AggregatedBindingPreferenceResult",
+    "compute_binding_preference",
+    "aggregate_binding_preference",
+    "resolve_protein_group_selections",
+    "resolve_polymer_type_selections",
+    "compute_binding_preference_from_config",
 ]
