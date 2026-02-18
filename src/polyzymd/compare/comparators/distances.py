@@ -292,6 +292,8 @@ class DistancesComparator:
                 pairs=pairs,
                 equilibration=self.equilibration,
                 thresholds=pair_thresholds,
+                use_pbc=self.analysis_settings.use_pbc,
+                alignment=self.analysis_settings.get_alignment_config(),
             )
             agg_result = calculator.compute_aggregated(
                 replicates=cond.replicates,
@@ -844,9 +846,26 @@ class DistancesComparator:
         else:
             rep_str = "reps" + "_".join(map(str, reps))
 
+        # Build settings suffix to match DistanceCalculator._make_aggregated_filename()
+        settings_parts = []
+
+        # PBC setting
+        pbc_str = "pbc" if self.analysis_settings.use_pbc else "nopbc"
+        settings_parts.append(pbc_str)
+
+        # Alignment setting
+        alignment_config = self.analysis_settings.get_alignment_config()
+        if alignment_config.enabled:
+            align_str = f"align-{alignment_config.reference_mode}"
+        else:
+            align_str = "noalign"
+        settings_parts.append(align_str)
+
+        settings_suffix = "_".join(settings_parts)
+
         # The DistanceCalculator uses a pattern like:
-        # distances_reps1-3_eq100ns.json
-        filename = f"distances_{rep_str}_eq{eq_value:.0f}{eq_unit}.json"
+        # distances_reps1-3_eq100ns_pbc_align-centroid.json
+        filename = f"distances_{rep_str}_eq{eq_value:.0f}{eq_unit}_{settings_suffix}.json"
 
         result_path = (
             sim_config.output.projects_directory
