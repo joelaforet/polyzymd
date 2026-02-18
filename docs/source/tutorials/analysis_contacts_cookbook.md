@@ -20,6 +20,7 @@ This cookbook answers questions like:
 | [Recipe 3](#recipe-3-comparing-residence-times-by-polymer-type) | Do zwitterionic polymers form more persistent contacts? |
 | [Recipe 4](#recipe-4-active-site-contacts-vs-surface-contacts) | Does polymer bind near the active site? |
 | [Recipe 5](#recipe-5-complex-queries-with-compositeselector) | Complex multi-criteria selections |
+| [Recipe 6](#recipe-6-binding-preference-enrichment-analysis) | Which AA classes does my polymer prefer? (Enrichment analysis) |
 
 ---
 
@@ -751,6 +752,138 @@ that are **outside** the cutoff distance from the reference atoms.
 
 ---
 
+## Recipe 6: Binding Preference Enrichment Analysis
+
+### Scientific Question
+
+*"Which amino acid classes does my polymer preferentially bind, normalized by
+surface availability?"*
+
+Raw contact counts can be misleading because protein surfaces have unequal
+distributions of amino acid types. **Binding preference analysis** normalizes
+by surface exposure to reveal true polymer-residue preferences.
+
+```{seealso}
+For a comprehensive guide to binding preference analysis, including formulas
+and interpretation, see [Binding Preference Analysis](analysis_binding_preference.md).
+```
+
+### Quick Comparison Setup
+
+`````{tab-set}
+
+````{tab-item} YAML (Recommended)
+Enable binding preference in your `comparison.yaml`:
+
+```yaml
+# comparison.yaml
+name: "Polymer AA Preference Study"
+
+structures:
+  enzyme_pdb: "structures/enzyme.pdb"
+
+conditions:
+  - label: "100% SBMA"
+    config: "../sbma_100/config.yaml"
+    replicates: [1, 2, 3]
+
+  - label: "100% EGMA"
+    config: "../egma_100/config.yaml"
+    replicates: [1, 2, 3]
+
+analysis_settings:
+  contacts:
+    polymer_selection: "resname SBM EGM"
+    cutoff: 4.5
+    
+    # Enable binding preference
+    compute_binding_preference: true
+    surface_exposure_threshold: 0.2
+    enzyme_pdb_for_sasa: "structures/enzyme.pdb"
+    include_default_aa_groups: true
+    
+    # Optional: custom groups
+    protein_groups:
+      catalytic_triad: [77, 133, 156]
+```
+
+```bash
+polyzymd compare contacts -f comparison.yaml
+```
+
+The output includes an enrichment table showing which AA classes each
+polymer type prefers (+) or avoids (-).
+````
+
+````{tab-item} Python
+```python
+from polyzymd.analysis.contacts import ContactResult
+from polyzymd.analysis.contacts.binding_preference import compute_binding_preference
+from polyzymd.analysis.contacts.surface_exposure import SurfaceExposureFilter
+
+# Load contacts and compute surface exposure
+contacts = ContactResult.load("analysis/contacts/contacts_rep1.json")
+exposure = SurfaceExposureFilter(threshold=0.2).calculate("enzyme.pdb")
+
+# Define protein groups (resids from your structure)
+protein_groups = {
+    "aromatic": {12, 45, 67, 89, 102},
+    "charged_positive": {23, 34, 56, 78},
+    "charged_negative": {15, 28, 91},
+    "nonpolar": {5, 10, 20, 30, 40, 50, 60, 70},
+    "polar": {8, 18, 25, 35, 42, 55, 65},
+}
+
+# Compute enrichment
+result = compute_binding_preference(contacts, exposure, protein_groups)
+
+# Display results
+print("Enrichment (>1 = preference, <1 = avoidance):")
+for poly, groups in result.enrichment_matrix().items():
+    print(f"\n{poly}:")
+    for group, enrich in sorted(groups.items(), key=lambda x: -x[1]):
+        marker = "+" if enrich > 1 else "-" if enrich < 1 else "="
+        print(f"  {group:20s} {enrich:5.2f} {marker}")
+```
+````
+
+`````
+
+### Interpreting Enrichment Values
+
+| Enrichment | Interpretation |
+|------------|----------------|
+| **> 1.5** | Strong preference — polymer seeks out this AA class |
+| **1.0 - 1.5** | Slight preference — above random chance |
+| **≈ 1.0** | Neutral — matches surface availability |
+| **0.5 - 1.0** | Slight avoidance — below random chance |
+| **< 0.5** | Strong avoidance — polymer actively avoids |
+
+### Example Findings
+
+From the enrichment data:
+
+```
+EGM (EGMA):
+  aromatic             1.90 +    # Strong preference for π-stacking
+  nonpolar             1.31 +    # Hydrophobic interactions
+  polar                0.71 -    # Avoids polar residues
+  charged_negative     0.45 -    # Strong avoidance of ASP/GLU
+
+SBM (SBMA):
+  aromatic             1.29 +    # Moderate aromatic preference
+  charged_positive     1.02 +    # Slight preference for LYS/ARG
+  nonpolar             0.95 -    # Near-neutral
+  polar                1.00 =    # Neutral
+```
+
+**Interpretation:**
+- EGMA is hydrophobic and prefers aromatic/nonpolar surfaces
+- SBMA is zwitterionic and shows more balanced binding
+- Both polymers avoid negatively charged residues
+
+---
+
 ## API Reference Summary
 
 ### ContactResult Methods
@@ -807,5 +940,6 @@ from polyzymd.analysis.common.groupings import (
 ## See Also
 
 - [Contacts Quick Start](analysis_contacts_quickstart.md) - basic usage and CLI reference
+- [Binding Preference Analysis](analysis_binding_preference.md) - enrichment formulas and interpretation
 - [Comparing Conditions](analysis_compare_conditions.md) - statistical comparison across simulations
 - [RMSF Quick Start](analysis_rmsf_quickstart.md) - complementary flexibility analysis

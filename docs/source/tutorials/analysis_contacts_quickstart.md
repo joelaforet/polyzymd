@@ -688,6 +688,7 @@ For very large systems or long trajectories:
 
 ## See Also
 
+- [Binding Preference Analysis](analysis_binding_preference.md) - enrichment-based AA class preferences
 - [Contacts Analysis Cookbook](analysis_contacts_cookbook.md) - worked examples for scientific questions
 - [RMSF Analysis Quick Start](analysis_rmsf_quickstart.md) - complementary stability analysis
 - [Catalytic Triad Analysis](analysis_triad_quickstart.md) - active site geometry
