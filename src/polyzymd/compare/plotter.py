@@ -126,21 +126,45 @@ class BasePlotter(ABC):
     ) -> list[Path]:
         """Generate and save plot(s).
 
+        This method receives pre-loaded condition metadata from
+        `ComparisonPlotter._load_analysis_data()` and must load its own
+        analysis results from the filesystem.
+
         Parameters
         ----------
-        data : Any
-            Data to plot (structure depends on plot type)
+        data : dict[str, dict]
+            Mapping of condition_label -> condition data dict containing:
+            - "condition": ConditionConfig object with condition metadata
+            - "sim_config": SimulationConfig object with full config
+            - "analysis_dir": Path to analysis/{analysis_type}/ directory
+            - "aggregated_dir": Path to analysis/{analysis_type}/aggregated/
+            - "replicates": list[int] of replicate numbers
+
+            **IMPORTANT**: Plotters must load their own analysis results from
+            `analysis_dir` or `aggregated_dir`. The orchestrator does NOT pass
+            pre-loaded results via kwargs.
         labels : sequence of str
-            Condition labels
+            Condition labels in desired display order
         output_dir : Path
-            Directory to save plots
+            Directory to save plot files
         **kwargs
-            Additional plot-specific parameters
+            Reserved for future use. Do NOT expect analysis results here.
 
         Returns
         -------
         list[Path]
-            Paths to generated plot files
+            Paths to generated plot files (may be empty if no data available)
+
+        Examples
+        --------
+        Correct pattern for loading data in a plotter:
+
+        >>> def plot(self, data, labels, output_dir, **kwargs):
+        ...     for label in labels:
+        ...         analysis_dir = Path(data[label]["analysis_dir"])
+        ...         result_file = analysis_dir / "my_result.json"
+        ...         result = MyResult.load(result_file)
+        ...         # ... generate plot from result ...
         """
         ...
 
