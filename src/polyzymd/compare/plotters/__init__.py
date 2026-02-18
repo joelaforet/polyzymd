@@ -12,6 +12,8 @@ rmsf : RMSFComparisonPlotter, RMSFProfilePlotter
     RMSF comparison visualization
 distances : DistanceKDEPlotter, DistanceThresholdPlotter
     Distance analysis visualization
+contacts : BindingPreferenceHeatmapPlotter, BindingPreferenceBarPlotter
+    Binding preference enrichment visualization
 
 Adding New Plotters
 -------------------
@@ -25,10 +27,11 @@ is loaded, ensuring they are registered before use.
 """
 
 # Import all plotter modules to trigger registration
-from polyzymd.compare.plotters import distances, rmsf, triad
+from polyzymd.compare.plotters import contacts, distances, rmsf, triad
 
 __all__ = [
     "triad",
     "rmsf",
     "distances",
+    "contacts",
 ]
