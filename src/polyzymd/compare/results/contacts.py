@@ -27,6 +27,98 @@ from pydantic import BaseModel, Field
 from polyzymd import __version__
 
 
+class BindingPreferenceComparisonEntry(BaseModel):
+    """Cross-condition binding preference comparison for one (polymer_type, protein_group) pair.
+
+    Provides statistical comparison of enrichment ratios across conditions.
+
+    Attributes
+    ----------
+    polymer_type : str
+        Polymer residue type (e.g., "SBM", "EGM")
+    protein_group : str
+        Protein group label (e.g., "aromatic", "charged_positive")
+    condition_values : dict[str, tuple[float, float]]
+        Mapping of condition label to (mean_enrichment, sem_enrichment)
+    pairwise_p_values : dict[str, float], optional
+        P-values for pairwise comparisons (e.g., "A_vs_B": 0.05)
+    highest_enrichment_condition : str
+        Condition with highest mean enrichment
+    lowest_enrichment_condition : str
+        Condition with lowest mean enrichment
+    """
+
+    polymer_type: str
+    protein_group: str
+    condition_values: dict[str, tuple[float, float]] = Field(
+        default_factory=dict, description="condition_label -> (mean, sem)"
+    )
+    pairwise_p_values: dict[str, float] = Field(
+        default_factory=dict, description="Pairwise comparison p-values"
+    )
+    highest_enrichment_condition: Optional[str] = None
+    lowest_enrichment_condition: Optional[str] = None
+
+
+class BindingPreferenceComparisonSummary(BaseModel):
+    """Summary of binding preference comparison across conditions.
+
+    Contains per-condition enrichment matrices and cross-condition comparisons.
+
+    Attributes
+    ----------
+    entries : list[BindingPreferenceComparisonEntry]
+        Comparison data for each (polymer_type, protein_group) pair
+    polymer_types : list[str]
+        All polymer types found across conditions
+    protein_groups : list[str]
+        All protein groups analyzed
+    n_conditions : int
+        Number of conditions compared
+    condition_labels : list[str]
+        Labels of all conditions
+    surface_exposure_threshold : float
+        SASA threshold used for surface filtering
+    """
+
+    entries: list[BindingPreferenceComparisonEntry] = Field(default_factory=list)
+    polymer_types: list[str] = Field(default_factory=list)
+    protein_groups: list[str] = Field(default_factory=list)
+    n_conditions: int = 0
+    condition_labels: list[str] = Field(default_factory=list)
+    surface_exposure_threshold: Optional[float] = None
+
+    def get_entry(
+        self, polymer_type: str, protein_group: str
+    ) -> Optional[BindingPreferenceComparisonEntry]:
+        """Get entry for a (polymer_type, protein_group) pair."""
+        for entry in self.entries:
+            if entry.polymer_type == polymer_type and entry.protein_group == protein_group:
+                return entry
+        return None
+
+    def get_enrichment_matrix_for_condition(
+        self, condition_label: str
+    ) -> dict[str, dict[str, float]]:
+        """Get enrichment matrix for a specific condition.
+
+        Returns
+        -------
+        dict[str, dict[str, float]]
+            {polymer_type: {protein_group: enrichment}}
+        """
+        result: dict[str, dict[str, float]] = {}
+        for entry in self.entries:
+            if entry.polymer_type not in result:
+                result[entry.polymer_type] = {}
+            values = entry.condition_values.get(condition_label)
+            if values:
+                result[entry.polymer_type][entry.protein_group] = values[0]  # mean
+            else:
+                result[entry.polymer_type][entry.protein_group] = 0.0
+        return result
+
+
 class AggregateComparisonResult(BaseModel):
     """Statistical comparison for aggregate metrics (coverage, mean contact fraction).
 
@@ -221,6 +313,10 @@ class ContactsComparisonResult(BaseModel):
     excluded_conditions: list[str] = Field(
         default_factory=list,
         description="Conditions excluded from analysis (no polymer atoms found)",
+    )
+    binding_preference: Optional[BindingPreferenceComparisonSummary] = Field(
+        default=None,
+        description="Binding preference comparison across conditions (if computed)",
     )
     equilibration_time: str
     created_at: datetime
