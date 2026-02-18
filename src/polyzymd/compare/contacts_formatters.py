@@ -126,6 +126,52 @@ def format_contacts_console_table(
         lines.append("-" * 80)
         lines.append("")
 
+    # Binding Preference Enrichment Summary
+    if result.binding_preference and result.binding_preference.entries:
+        bp = result.binding_preference
+        lines.append("Binding Preference - Enrichment by Amino Acid Class")
+        lines.append("-" * 95)
+        if bp.surface_exposure_threshold is not None:
+            lines.append(
+                f"Surface exposure threshold: {bp.surface_exposure_threshold * 100:.0f}% "
+                "relative SASA"
+            )
+        else:
+            lines.append("Surface exposure threshold: not specified")
+        lines.append("")
+
+        # Group entries by polymer type
+        for poly_type in sorted(bp.polymer_types):
+            lines.append(f"  Polymer: {poly_type}")
+            lines.append(
+                f"  {'Protein Group':<20} "
+                + " ".join(f"{cond[:15]:<18}" for cond in bp.condition_labels)
+            )
+            lines.append("  " + "-" * (20 + 18 * len(bp.condition_labels)))
+
+            for group in sorted(bp.protein_groups):
+                entry = bp.get_entry(poly_type, group)
+                if not entry:
+                    continue
+
+                row_parts = [f"  {group:<20}"]
+                for cond in bp.condition_labels:
+                    values = entry.condition_values.get(cond)
+                    if values:
+                        mean, sem = values
+                        # Enrichment > 1 means preference, < 1 means avoidance
+                        marker = "+" if mean > 1.0 else "-" if mean < 1.0 else " "
+                        row_parts.append(f"{mean:>5.2f}±{sem:<4.2f} {marker:<6}")
+                    else:
+                        row_parts.append(f"{'--':>18}")
+                lines.append("".join(row_parts))
+
+            lines.append("")
+
+        lines.append("  + = enriched (>1.0), - = depleted (<1.0)")
+        lines.append("-" * 95)
+        lines.append("")
+
     # Pairwise aggregate comparisons
     if show_pairwise and result.pairwise_comparisons:
         lines.append("Aggregate Comparisons")
@@ -291,6 +337,54 @@ def format_contacts_markdown(
         )
 
     lines.append("")
+
+    # Binding Preference Enrichment Summary
+    if result.binding_preference and result.binding_preference.entries:
+        bp = result.binding_preference
+        lines.append("## Binding Preference - Enrichment by Amino Acid Class")
+        lines.append("")
+        if bp.surface_exposure_threshold is not None:
+            lines.append(
+                f"Surface exposure threshold: {bp.surface_exposure_threshold * 100:.0f}% "
+                "relative SASA"
+            )
+        else:
+            lines.append("Surface exposure threshold: not specified")
+        lines.append("")
+
+        for poly_type in sorted(bp.polymer_types):
+            lines.append(f"### Polymer: {poly_type}")
+            lines.append("")
+
+            # Build header row
+            header = "| Protein Group |"
+            divider = "|---------------|"
+            for cond in bp.condition_labels:
+                header += f" {cond[:20]} |"
+                divider += "-------------|"
+            lines.append(header)
+            lines.append(divider)
+
+            for group in sorted(bp.protein_groups):
+                entry = bp.get_entry(poly_type, group)
+                if not entry:
+                    continue
+
+                row = f"| **{group}** |"
+                for cond in bp.condition_labels:
+                    values = entry.condition_values.get(cond)
+                    if values:
+                        mean, sem = values
+                        marker = "+" if mean > 1.0 else "-" if mean < 1.0 else ""
+                        row += f" {mean:.2f}±{sem:.2f} {marker} |"
+                    else:
+                        row += " -- |"
+                lines.append(row)
+
+            lines.append("")
+
+        lines.append("> **Key:** + = enriched (>1.0), - = depleted (<1.0)")
+        lines.append("")
 
     # Aggregate comparisons
     if show_pairwise and result.pairwise_comparisons:
