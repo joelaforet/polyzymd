@@ -3,22 +3,45 @@
 This module computes enrichment ratios that answer the scientific question:
 "Does polymer type X preferentially bind amino acid class Y?"
 
-Enrichment Calculation
-----------------------
+Enrichment Calculation (Zero-Centered)
+--------------------------------------
 For each (polymer_type, protein_group) pair:
 
     contact_share = Σ(contact_frames for exposed residues in group) /
                     Σ(contact_frames for all exposed residues)
 
-    expected_share = n_exposed_residues_in_group / n_total_exposed_residues
+Enrichment is normalized by polymer composition and **centered at zero**:
 
-    enrichment = contact_share / expected_share
+    enrichment = (contact_share / expected_share) - 1
 
-Interpretation:
-- Enrichment > 1.0 = preferential binding (polymer contacts this group
-  more than expected by random chance)
-- Enrichment = 1.0 = neutral (contact frequency matches surface availability)
-- Enrichment < 1.0 = avoidance (polymer contacts this group less than expected)
+Interpretation (applies to both normalization methods):
+- enrichment > 0: Preferential binding (more contacts than expected)
+    - +0.5 means "50% more contacts than expected"
+- enrichment = 0: Neutral (contact frequency matches random chance)
+- enrichment < 0: Avoidance (fewer contacts than expected)
+    - -0.3 means "30% fewer contacts than expected"
+- enrichment = -1: Complete avoidance (no contacts at all)
+
+Dual Normalization
+------------------
+Two normalization methods are provided to distinguish chemical affinity
+from geometric/steric effects:
+
+**Residue-based** (default, matches experimental concentration ratios):
+
+    expected_by_residue = polymer_residue_count / total_polymer_residues
+    enrichment_by_residue = (contact_share / expected_by_residue) - 1
+
+**Atom-based** (accounts for monomer size differences):
+
+    expected_by_atoms = polymer_heavy_atoms / total_polymer_heavy_atoms
+    enrichment_by_atoms = (contact_share / expected_by_atoms) - 1
+
+Interpretation of dual metrics:
+- Both positive → Strong evidence of chemical preference
+- Both negative → Strong evidence of avoidance
+- Residue positive, Atom ~0 → Enrichment explained by larger monomer size
+- Residue ~0, Atom positive → Smaller monomer "punches above its weight"
 
 The contact-frame weighting ensures that residues contacted for longer durations
 contribute proportionally more to the enrichment calculation. A residue contacted
@@ -26,7 +49,10 @@ for 60% of the simulation contributes 60x more than one contacted for 1 frame.
 
 Examples
 --------
->>> from polyzymd.analysis.contacts.binding_preference import compute_binding_preference
+>>> from polyzymd.analysis.contacts.binding_preference import (
+...     compute_binding_preference,
+...     extract_polymer_composition,
+... )
 >>> from polyzymd.analysis.contacts.surface_exposure import SurfaceExposureFilter
 >>>
 >>> # Load contact results and compute surface exposure
@@ -40,18 +66,26 @@ Examples
 ...     "charged": {23, 34, 56, 78},
 ... }
 >>>
+>>> # Extract polymer composition from trajectory
+>>> polymer_composition = extract_polymer_composition(universe)
+>>>
 >>> # Compute binding preference
 >>> result = compute_binding_preference(
 ...     contact_result,
 ...     surface_exposure,
 ...     protein_groups,
+...     polymer_composition,
 ... )
 >>>
->>> # Check enrichment
+>>> # Check enrichment (default: by residue)
 >>> print(result.get_enrichment("SBM", "aromatic"))
-1.45  # SBMA prefers aromatic residues
->>> print(result.enrichment_matrix())
-{'SBM': {'aromatic': 1.45, 'charged': 0.82}, 'EGM': {...}}
+0.45  # SBMA has 45% more contacts than expected with aromatic residues
+>>>
+>>> # Compare normalizations
+>>> print(result.enrichment_matrix(by="residue"))  # Default
+{'SBM': {'aromatic': 0.45, 'charged': -0.18}, 'EGM': {...}}
+>>> print(result.enrichment_matrix(by="atoms"))    # Size-adjusted
+{'SBM': {'aromatic': 0.12, 'charged': -0.25}, 'EGM': {...}}
 """
 
 from __future__ import annotations
@@ -76,11 +110,138 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class PolymerComposition(BaseModel):
+    """Polymer composition data extracted from trajectory.
+
+    Contains counts of residues and heavy atoms for each polymer type,
+    enabling normalization of enrichment ratios by polymer availability.
+
+    This data is used for dual normalization of binding preference:
+
+    - **Residue-based**: Normalizes by number of polymer residues per type.
+      Matches the experimental viewpoint where concentrations are specified
+      in terms of monomer units.
+
+    - **Atom-based**: Normalizes by number of heavy atoms (non-hydrogen) per type.
+      Accounts for differences in monomer size, since larger monomers have
+      more surface area and thus more opportunity for contacts.
+
+    Attributes
+    ----------
+    residue_counts : dict[str, int]
+        Number of residues per polymer type (e.g., {"SBM": 50, "EGM": 50})
+    heavy_atom_counts : dict[str, int]
+        Number of heavy atoms (non-hydrogen) per polymer type.
+        Heavy atoms are defined as all atoms with element != 'H'.
+
+    Examples
+    --------
+    >>> composition = PolymerComposition(
+    ...     residue_counts={"SBM": 50, "EGM": 50},
+    ...     heavy_atom_counts={"SBM": 750, "EGM": 400},
+    ... )
+    >>> composition.total_residues
+    100
+    >>> composition.residue_fraction("SBM")
+    0.5
+    >>> composition.heavy_atom_fraction("SBM")
+    0.652  # SBM has larger monomers
+    """
+
+    residue_counts: dict[str, int] = Field(
+        default_factory=dict,
+        description="Number of residues per polymer type",
+    )
+    heavy_atom_counts: dict[str, int] = Field(
+        default_factory=dict,
+        description="Number of heavy atoms (non-H) per polymer type",
+    )
+
+    @property
+    def total_residues(self) -> int:
+        """Total polymer residues across all types."""
+        return sum(self.residue_counts.values())
+
+    @property
+    def total_heavy_atoms(self) -> int:
+        """Total heavy atoms across all polymer types."""
+        return sum(self.heavy_atom_counts.values())
+
+    def residue_fraction(self, polymer_type: str) -> float:
+        """Fraction of residues that are this polymer type.
+
+        Parameters
+        ----------
+        polymer_type : str
+            Polymer type name (e.g., "SBM")
+
+        Returns
+        -------
+        float
+            Fraction in range [0, 1], or 0.0 if type not found
+        """
+        total = self.total_residues
+        if total == 0:
+            return 0.0
+        return self.residue_counts.get(polymer_type, 0) / total
+
+    def heavy_atom_fraction(self, polymer_type: str) -> float:
+        """Fraction of heavy atoms that are this polymer type.
+
+        Parameters
+        ----------
+        polymer_type : str
+            Polymer type name (e.g., "SBM")
+
+        Returns
+        -------
+        float
+            Fraction in range [0, 1], or 0.0 if type not found
+        """
+        total = self.total_heavy_atoms
+        if total == 0:
+            return 0.0
+        return self.heavy_atom_counts.get(polymer_type, 0) / total
+
+    def polymer_types(self) -> list[str]:
+        """Get sorted list of polymer types in this composition."""
+        return sorted(set(self.residue_counts.keys()) | set(self.heavy_atom_counts.keys()))
+
+
 class BindingPreferenceEntry(BaseModel):
     """Single entry in the binding preference matrix.
 
     Represents the binding preference metrics for one
     (polymer_type, protein_group) combination.
+
+    Enrichment Interpretation (centered at zero)
+    --------------------------------------------
+    - enrichment > 0: Preferential binding (more contacts than expected)
+        - +0.5 means "50% more contacts than expected"
+    - enrichment = 0: Neutral (contact frequency matches random chance)
+    - enrichment < 0: Avoidance (fewer contacts than expected)
+        - -0.3 means "30% fewer contacts than expected"
+    - enrichment = -1: Complete avoidance (no contacts at all)
+
+    Dual Normalization
+    ------------------
+    Two normalization methods are provided to distinguish chemical
+    affinity from geometric/steric effects:
+
+    - **enrichment_by_residue**: Normalized by residue count. Matches
+      experimental concentration ratios. Use this for direct comparison
+      with experimental expectations.
+
+    - **enrichment_by_atoms**: Normalized by heavy atom count. Accounts
+      for monomer size differences. Use this to identify true chemical
+      affinity vs. effects explained by larger monomers having more
+      contact surface area.
+
+    Interpretation of agreement/disagreement:
+    - Both positive: Strong evidence of chemical preference
+    - Both negative: Strong evidence of avoidance
+    - Residue positive, Atom ~0: Enrichment explained by larger monomer size
+    - Residue ~0, Atom positive: Smaller monomer "punches above its weight"
 
     Attributes
     ----------
@@ -90,10 +251,8 @@ class BindingPreferenceEntry(BaseModel):
         Protein group label (e.g., "aromatic", "charged_positive")
     total_contact_frames : int
         Sum of contact frames across all exposed residues in this group.
-        This is the numerator for contact_share calculation.
     mean_contact_fraction : float
         Average per-residue contact fraction within this group.
-        (total_contact_frames / n_frames) / n_exposed_in_group
     n_residues_in_group : int
         Total residues in this protein group (exposed + buried)
     n_exposed_in_group : int
@@ -102,13 +261,22 @@ class BindingPreferenceEntry(BaseModel):
         Number of exposed residues that had at least one contact
     contact_share : float
         Fraction of this polymer's total contacts that went to this group.
-        = total_contact_frames / total_polymer_contact_frames
-    expected_share : float
-        Expected share based on surface availability.
-        = n_exposed_in_group / n_total_exposed
-    enrichment_ratio : float | None
-        contact_share / expected_share.
-        None if denominator is zero.
+    polymer_residue_count : int
+        Number of residues of this polymer type in the system.
+    total_polymer_residues : int
+        Total polymer residues across all types.
+    expected_share_by_residue : float
+        Expected contact share based on polymer residue count.
+    enrichment_by_residue : float | None
+        Enrichment normalized by residue count: (contact_share / expected) - 1
+    polymer_heavy_atom_count : int
+        Number of heavy atoms (non-hydrogen) for this polymer type.
+    total_polymer_heavy_atoms : int
+        Total heavy atoms across all polymer types.
+    expected_share_by_atoms : float
+        Expected contact share based on heavy atom count.
+    enrichment_by_atoms : float | None
+        Enrichment normalized by heavy atom count: (contact_share / expected) - 1
     """
 
     polymer_type: str
@@ -127,9 +295,41 @@ class BindingPreferenceEntry(BaseModel):
     contact_share: float = Field(
         default=0.0, description="Fraction of polymer's contacts to this group"
     )
-    expected_share: float = Field(default=0.0, description="Expected share by surface availability")
-    enrichment_ratio: float | None = Field(
-        default=None, description="Enrichment vs expected (contact_share/expected_share)"
+
+    # Residue-based normalization (matches experimental ratios)
+    polymer_residue_count: int = Field(
+        default=0,
+        description="Number of residues of this polymer type in the system",
+    )
+    total_polymer_residues: int = Field(
+        default=0,
+        description="Total polymer residues across all types",
+    )
+    expected_share_by_residue: float = Field(
+        default=0.0,
+        description="Expected contact share based on polymer residue count",
+    )
+    enrichment_by_residue: float | None = Field(
+        default=None,
+        description="Enrichment by residue count: (contact_share / expected) - 1",
+    )
+
+    # Atom-based normalization (accounts for monomer size)
+    polymer_heavy_atom_count: int = Field(
+        default=0,
+        description="Number of heavy atoms (non-H) for this polymer type",
+    )
+    total_polymer_heavy_atoms: int = Field(
+        default=0,
+        description="Total heavy atoms across all polymer types",
+    )
+    expected_share_by_atoms: float = Field(
+        default=0.0,
+        description="Expected contact share based on heavy atom count",
+    )
+    enrichment_by_atoms: float | None = Field(
+        default=None,
+        description="Enrichment by heavy atoms: (contact_share / expected) - 1",
     )
 
 
@@ -142,6 +342,11 @@ class BindingPreferenceResult(BaseModel):
     - "Does SBMA preferentially bind aromatic residues?"
     - "How does EGMA's preference for charged residues compare to SBMA?"
     - "Which amino acid class does this polymer type prefer?"
+
+    Enrichment values are centered at zero:
+    - enrichment > 0: Preferential binding
+    - enrichment = 0: Neutral (random chance)
+    - enrichment < 0: Avoidance
 
     Attributes
     ----------
@@ -157,8 +362,11 @@ class BindingPreferenceResult(BaseModel):
         Mapping of group name to MDAnalysis selection string
     polymer_types_used : dict[str, str]
         Mapping of polymer type name to MDAnalysis selection string
+    polymer_composition : PolymerComposition
+        Polymer composition data (residue/atom counts per type)
     schema_version : int
-        Version for forward compatibility
+        Version for forward compatibility. Version 2 introduces
+        dual normalization (by residue and by heavy atoms).
     """
 
     entries: list[BindingPreferenceEntry] = Field(default_factory=list)
@@ -167,8 +375,12 @@ class BindingPreferenceResult(BaseModel):
     surface_exposure_threshold: float | None = None
     protein_groups_used: dict[str, str] = Field(default_factory=dict)
     polymer_types_used: dict[str, str] = Field(default_factory=dict)
+    polymer_composition: PolymerComposition | None = Field(
+        default=None,
+        description="Polymer composition data (residue/atom counts per type)",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
-    schema_version: int = 1
+    schema_version: int = 2  # Version 2: dual normalization
 
     def to_dataframe(self) -> "pd.DataFrame":
         """Convert to pandas DataFrame for analysis/plotting.
@@ -184,10 +396,27 @@ class BindingPreferenceResult(BaseModel):
 
         return pd.DataFrame([e.model_dump() for e in self.entries])
 
-    def enrichment_matrix(self) -> dict[str, dict[str, float]]:
+    def enrichment_matrix(self, by: str = "residue") -> dict[str, dict[str, float]]:
         """Get enrichment as nested dict: {polymer_type: {protein_group: value}}.
 
-        Useful for quick lookups and programmatic comparison.
+        Enrichment values are centered at zero:
+        - > 0: Preferential binding (more contacts than expected)
+        - = 0: Neutral (matches random chance)
+        - < 0: Avoidance (fewer contacts than expected)
+
+        Parameters
+        ----------
+        by : str, default "residue"
+            Normalization method to use:
+
+            - "residue": Normalize by polymer residue count. Matches
+              experimental concentration ratios. This is the default
+              because it aligns with how experimentalists typically
+              describe polymer compositions.
+
+            - "atoms": Normalize by heavy atom count. Accounts for
+              monomer size differences. Use this to distinguish true
+              chemical affinity from geometric/steric effects.
 
         Returns
         -------
@@ -197,17 +426,38 @@ class BindingPreferenceResult(BaseModel):
 
         Examples
         --------
+        >>> # Default: residue-based enrichment
         >>> matrix = result.enrichment_matrix()
         >>> print(matrix["SBM"]["aromatic"])
-        1.45
+        0.45  # 45% more contacts than expected
+
+        >>> # Atom-based enrichment (accounts for monomer size)
+        >>> matrix_atoms = result.enrichment_matrix(by="atoms")
+        >>> print(matrix_atoms["SBM"]["aromatic"])
+        0.12  # Only 12% enrichment when accounting for size
+
+        Notes
+        -----
+        To change the default normalization in your analysis, explicitly
+        pass the ``by`` parameter. For comparing both normalizations:
+
+        >>> residue_enr = result.enrichment_matrix(by="residue")
+        >>> atom_enr = result.enrichment_matrix(by="atoms")
         """
+        if by not in ("residue", "atoms"):
+            raise ValueError(f"by must be 'residue' or 'atoms', got {by!r}")
+
         result: dict[str, dict[str, float]] = {}
         for entry in self.entries:
             if entry.polymer_type not in result:
                 result[entry.polymer_type] = {}
-            result[entry.polymer_type][entry.protein_group] = (
-                entry.enrichment_ratio if entry.enrichment_ratio is not None else 0.0
-            )
+
+            if by == "atoms":
+                value = entry.enrichment_by_atoms
+            else:
+                value = entry.enrichment_by_residue
+
+            result[entry.polymer_type][entry.protein_group] = value if value is not None else 0.0
         return result
 
     def contact_fraction_matrix(self) -> dict[str, dict[str, float]]:
@@ -240,7 +490,9 @@ class BindingPreferenceResult(BaseModel):
             result[entry.polymer_type][entry.protein_group] = entry.contact_share
         return result
 
-    def get_enrichment(self, polymer_type: str, protein_group: str) -> float | None:
+    def get_enrichment(
+        self, polymer_type: str, protein_group: str, by: str = "residue"
+    ) -> float | None:
         """Get enrichment for a specific (polymer_type, protein_group) pair.
 
         Parameters
@@ -249,15 +501,19 @@ class BindingPreferenceResult(BaseModel):
             Polymer type name
         protein_group : str
             Protein group name
+        by : str, default "residue"
+            Normalization method: "residue" or "atoms"
 
         Returns
         -------
         float or None
-            Enrichment ratio, or None if pair not found
+            Enrichment value (centered at zero), or None if pair not found
         """
         for entry in self.entries:
             if entry.polymer_type == polymer_type and entry.protein_group == protein_group:
-                return entry.enrichment_ratio
+                if by == "atoms":
+                    return entry.enrichment_by_atoms
+                return entry.enrichment_by_residue
         return None
 
     def get_entry(self, polymer_type: str, protein_group: str) -> BindingPreferenceEntry | None:
@@ -321,6 +577,7 @@ def compute_binding_preference(
     contact_result: "ContactResult",
     surface_exposure: "SurfaceExposureResult",
     protein_groups: dict[str, set[int]],
+    polymer_composition: PolymerComposition,
     polymer_types: list[str] | None = None,
     protein_group_selections: dict[str, str] | None = None,
     polymer_type_selections: dict[str, str] | None = None,
@@ -334,6 +591,7 @@ def compute_binding_preference(
     The enrichment calculation accounts for:
     1. Surface exposure (only exposed residues are considered)
     2. Contact duration (contact frames are summed, not binary counts)
+    3. Polymer composition (normalization by residue count or heavy atom count)
 
     Parameters
     ----------
@@ -345,6 +603,9 @@ def compute_binding_preference(
         Mapping of group name to residue IDs in that group.
         Only surface-exposed residues in each group are counted.
         Example: {"aromatic": {12, 45, 67}, "charged": {23, 34}}
+    polymer_composition : PolymerComposition
+        Polymer composition data (residue and heavy atom counts per type).
+        Used for dual normalization of enrichment ratios.
     polymer_types : list[str], optional
         If provided, only compute for these polymer residue types.
         If None, all polymer types found in contacts are used.
@@ -356,20 +617,37 @@ def compute_binding_preference(
     Returns
     -------
     BindingPreferenceResult
-        Enrichment-normalized binding preference metrics
+        Binding preference metrics with dual enrichment normalization
 
     Notes
     -----
-    The enrichment ratio is computed as:
+    Enrichment Calculation (centered at zero)
+    -----------------------------------------
+    For each (polymer_type, protein_group) pair:
 
-        enrichment = contact_share / expected_share
-
-    where:
         contact_share = polymer_contacts_to_group / polymer_total_contacts
-        expected_share = n_exposed_in_group / n_total_exposed
 
-    This normalizes by surface availability, so enrichment > 1 indicates
-    that the polymer contacts this group more than expected by chance.
+    Two normalization methods are computed:
+
+    1. **Residue-based** (matches experimental concentration ratios):
+
+        expected_by_residue = polymer_residue_count / total_polymer_residues
+        enrichment_by_residue = (contact_share / expected_by_residue) - 1
+
+    2. **Atom-based** (accounts for monomer size via heavy atoms):
+
+        expected_by_atoms = polymer_heavy_atoms / total_polymer_heavy_atoms
+        enrichment_by_atoms = (contact_share / expected_by_atoms) - 1
+
+    Interpretation (both methods):
+    - enrichment > 0: Preferential binding (more contacts than expected)
+    - enrichment = 0: Neutral (matches random chance)
+    - enrichment < 0: Avoidance (fewer contacts than expected)
+    - enrichment = -1: Complete avoidance (no contacts at all)
+
+    When to use which metric:
+    - enrichment_by_residue: Direct comparison to experimental concentration ratios
+    - enrichment_by_atoms: Reveals true chemical affinity vs. geometric/steric effects
     """
     exposed_resids = surface_exposure.exposed_resids
     n_frames = contact_result.n_frames
@@ -378,6 +656,10 @@ def compute_binding_preference(
     logger.info(
         f"Computing binding preference: {total_exposed} exposed residues, "
         f"{len(protein_groups)} protein groups"
+    )
+    logger.info(
+        f"Polymer composition: {polymer_composition.residue_counts} residues, "
+        f"{polymer_composition.heavy_atom_counts} heavy atoms"
     )
 
     # Filter protein_groups to only exposed residues
@@ -438,11 +720,40 @@ def compute_binding_preference(
                 contact_data[poly_type][gname]["total_frames"] += contact_frames
                 contact_data[poly_type][gname]["residues_contacted"].add(resid)
 
+    # Helper function for enrichment calculation (centered at zero)
+    def calc_enrichment(contact_share: float, expected: float) -> float | None:
+        """Calculate enrichment: (observed / expected) - 1, centered at zero."""
+        if expected > 0 and contact_share > 0:
+            return (contact_share / expected) - 1
+        elif expected > 0 and contact_share == 0:
+            return -1.0  # Complete avoidance
+        else:
+            return None  # Cannot compute (no polymer of this type)
+
+    # Get polymer composition totals
+    total_poly_residues = polymer_composition.total_residues
+    total_poly_atoms = polymer_composition.total_heavy_atoms
+
     # Build result entries with enrichment calculations
     entries = []
 
     for poly_type in sorted(contact_data.keys()):
         total_poly_contacts = total_contacts_by_polymer.get(poly_type, 0)
+
+        # Get polymer composition for this type
+        poly_res_count = polymer_composition.residue_counts.get(poly_type, 0)
+        poly_atom_count = polymer_composition.heavy_atom_counts.get(poly_type, 0)
+
+        # Calculate expected shares by each normalization method
+        if total_poly_residues > 0:
+            expected_share_by_residue = poly_res_count / total_poly_residues
+        else:
+            expected_share_by_residue = 0.0
+
+        if total_poly_atoms > 0:
+            expected_share_by_atoms = poly_atom_count / total_poly_atoms
+        else:
+            expected_share_by_atoms = 0.0
 
         for group_name in sorted(protein_groups.keys()):
             n_total_in_group = len(protein_groups.get(group_name, set()))
@@ -461,24 +772,15 @@ def compute_binding_preference(
             else:
                 mean_frac = 0.0
 
-            # Calculate contact share and expected share
+            # Calculate contact share
             if total_poly_contacts > 0:
                 contact_share = contact_frames / total_poly_contacts
             else:
                 contact_share = 0.0
 
-            if total_exposed > 0:
-                expected_share = n_exposed_in_group / total_exposed
-            else:
-                expected_share = 0.0
-
-            # Calculate enrichment ratio
-            if expected_share > 0 and contact_share > 0:
-                enrichment = contact_share / expected_share
-            elif expected_share > 0 and contact_share == 0:
-                enrichment = 0.0  # No contacts = zero enrichment
-            else:
-                enrichment = None  # Can't compute (no exposed residues in group)
+            # Calculate enrichment (centered at zero) for both normalizations
+            enrichment_by_residue = calc_enrichment(contact_share, expected_share_by_residue)
+            enrichment_by_atoms = calc_enrichment(contact_share, expected_share_by_atoms)
 
             entries.append(
                 BindingPreferenceEntry(
@@ -490,8 +792,16 @@ def compute_binding_preference(
                     n_exposed_in_group=n_exposed_in_group,
                     n_residues_contacted=n_residues_contacted,
                     contact_share=contact_share,
-                    expected_share=expected_share,
-                    enrichment_ratio=enrichment,
+                    # Residue-based normalization
+                    polymer_residue_count=poly_res_count,
+                    total_polymer_residues=total_poly_residues,
+                    expected_share_by_residue=expected_share_by_residue,
+                    enrichment_by_residue=enrichment_by_residue,
+                    # Atom-based normalization
+                    polymer_heavy_atom_count=poly_atom_count,
+                    total_polymer_heavy_atoms=total_poly_atoms,
+                    expected_share_by_atoms=expected_share_by_atoms,
+                    enrichment_by_atoms=enrichment_by_atoms,
                 )
             )
 
@@ -502,6 +812,7 @@ def compute_binding_preference(
         surface_exposure_threshold=surface_exposure.threshold,
         protein_groups_used=protein_group_selections or {},
         polymer_types_used=polymer_type_selections or {},
+        polymer_composition=polymer_composition,
     )
 
     # Log summary
@@ -519,7 +830,8 @@ def aggregate_binding_preference(
 ) -> "AggregatedBindingPreferenceResult":
     """Aggregate binding preference across replicates.
 
-    Computes mean ± SEM for enrichment ratios across multiple replicates.
+    Computes mean ± SEM for both residue-based and atom-based enrichment
+    ratios across multiple replicates.
 
     Parameters
     ----------
@@ -529,10 +841,20 @@ def aggregate_binding_preference(
     Returns
     -------
     AggregatedBindingPreferenceResult
-        Aggregated results with mean and SEM
+        Aggregated results with mean and SEM for both normalization methods
     """
     if not results:
         raise ValueError("No results to aggregate")
+
+    # Helper function for computing mean and SEM
+    def _compute_stats(values: list[float]) -> tuple[float | None, float | None]:
+        """Compute mean and SEM from a list of values."""
+        n = len(values)
+        if n == 0:
+            return None, None
+        mean_val = float(np.mean(values))
+        sem_val = float(np.std(values, ddof=1) / np.sqrt(n)) if n > 1 else 0.0
+        return mean_val, sem_val
 
     # Collect all (polymer_type, protein_group) pairs
     all_pairs: set[tuple[str, str]] = set()
@@ -543,60 +865,57 @@ def aggregate_binding_preference(
     entries = []
     for poly_type, prot_group in sorted(all_pairs):
         # Collect values from each replicate
-        enrichments = []
+        enrichments_by_residue = []
+        enrichments_by_atoms = []
         contact_fractions = []
         contact_shares = []
-        contact_frames = []
 
         for r in results:
             entry = r.get_entry(poly_type, prot_group)
             if entry is not None:
-                if entry.enrichment_ratio is not None:
-                    enrichments.append(entry.enrichment_ratio)
+                if entry.enrichment_by_residue is not None:
+                    enrichments_by_residue.append(entry.enrichment_by_residue)
+                if entry.enrichment_by_atoms is not None:
+                    enrichments_by_atoms.append(entry.enrichment_by_atoms)
                 contact_fractions.append(entry.mean_contact_fraction)
                 contact_shares.append(entry.contact_share)
-                contact_frames.append(entry.total_contact_frames)
 
-        # Compute statistics
-        n_reps = len(enrichments)
-        if n_reps > 0:
-            mean_enrichment = float(np.mean(enrichments))
-            sem_enrichment = (
-                float(np.std(enrichments, ddof=1) / np.sqrt(n_reps)) if n_reps > 1 else 0.0
-            )
-        else:
-            mean_enrichment = None
-            sem_enrichment = None
-
-        mean_contact_fraction = float(np.mean(contact_fractions)) if contact_fractions else 0.0
-        sem_contact_fraction = (
-            float(np.std(contact_fractions, ddof=1) / np.sqrt(len(contact_fractions)))
-            if len(contact_fractions) > 1
-            else 0.0
-        )
-
+        # Compute statistics for both normalizations
+        mean_enr_res, sem_enr_res = _compute_stats(enrichments_by_residue)
+        mean_enr_atoms, sem_enr_atoms = _compute_stats(enrichments_by_atoms)
+        mean_contact_fraction, sem_contact_fraction = _compute_stats(contact_fractions)
         mean_contact_share = float(np.mean(contact_shares)) if contact_shares else 0.0
 
         # Get group metadata from first result
         first_entry = results[0].get_entry(poly_type, prot_group)
         n_exposed = first_entry.n_exposed_in_group if first_entry else 0
         n_total = first_entry.n_residues_in_group if first_entry else 0
-        expected_share = first_entry.expected_share if first_entry else 0.0
+        expected_by_residue = first_entry.expected_share_by_residue if first_entry else 0.0
+        expected_by_atoms = first_entry.expected_share_by_atoms if first_entry else 0.0
 
         entries.append(
             AggregatedBindingPreferenceEntry(
                 polymer_type=poly_type,
                 protein_group=prot_group,
-                mean_enrichment=mean_enrichment,
-                sem_enrichment=sem_enrichment,
-                mean_contact_fraction=mean_contact_fraction,
-                sem_contact_fraction=sem_contact_fraction,
+                # Residue-based enrichment
+                mean_enrichment_by_residue=mean_enr_res,
+                sem_enrichment_by_residue=sem_enr_res,
+                per_replicate_enrichments_by_residue=enrichments_by_residue,
+                # Atom-based enrichment
+                mean_enrichment_by_atoms=mean_enr_atoms,
+                sem_enrichment_by_atoms=sem_enr_atoms,
+                per_replicate_enrichments_by_atoms=enrichments_by_atoms,
+                # Contact metrics
+                mean_contact_fraction=mean_contact_fraction if mean_contact_fraction else 0.0,
+                sem_contact_fraction=sem_contact_fraction if sem_contact_fraction else 0.0,
                 mean_contact_share=mean_contact_share,
-                expected_share=expected_share,
+                # Expected shares
+                expected_share_by_residue=expected_by_residue,
+                expected_share_by_atoms=expected_by_atoms,
+                # Group metadata
                 n_exposed_in_group=n_exposed,
                 n_residues_in_group=n_total,
-                n_replicates=n_reps,
-                per_replicate_enrichments=enrichments,
+                n_replicates=len(enrichments_by_residue),
             )
         )
 
@@ -607,37 +926,102 @@ def aggregate_binding_preference(
         surface_exposure_threshold=results[0].surface_exposure_threshold if results else None,
         protein_groups_used=results[0].protein_groups_used if results else {},
         polymer_types_used=results[0].polymer_types_used if results else {},
+        polymer_composition=results[0].polymer_composition if results else None,
     )
 
 
 class AggregatedBindingPreferenceEntry(BaseModel):
     """Aggregated binding preference for one (polymer_type, protein_group) pair.
 
-    Contains mean ± SEM across replicates.
+    Contains mean ± SEM across replicates for both residue-based and
+    atom-based enrichment normalizations.
+
+    Enrichment values are centered at zero:
+    - > 0: Preferential binding
+    - = 0: Neutral (random chance)
+    - < 0: Avoidance
     """
 
     polymer_type: str
     protein_group: str
-    mean_enrichment: float | None = Field(description="Mean enrichment ratio across replicates")
-    sem_enrichment: float | None = Field(description="Standard error of enrichment")
-    mean_contact_fraction: float = Field(description="Mean per-residue contact fraction")
-    sem_contact_fraction: float = Field(
-        default=0.0, description="Standard error of contact fraction"
+
+    # Residue-based enrichment (matches experimental ratios)
+    mean_enrichment_by_residue: float | None = Field(
+        default=None,
+        description="Mean residue-normalized enrichment across replicates",
     )
-    mean_contact_share: float = Field(default=0.0, description="Mean contact share")
-    expected_share: float = Field(default=0.0, description="Expected share by surface availability")
-    n_exposed_in_group: int = Field(default=0, description="Surface-exposed residues in group")
-    n_residues_in_group: int = Field(default=0, description="Total residues in group")
-    n_replicates: int = Field(default=0, description="Number of replicates with valid data")
-    per_replicate_enrichments: list[float] = Field(
-        default_factory=list, description="Enrichment values from each replicate"
+    sem_enrichment_by_residue: float | None = Field(
+        default=None,
+        description="Standard error of residue-normalized enrichment",
+    )
+    per_replicate_enrichments_by_residue: list[float] = Field(
+        default_factory=list,
+        description="Residue-normalized enrichment values from each replicate",
+    )
+
+    # Atom-based enrichment (accounts for monomer size)
+    mean_enrichment_by_atoms: float | None = Field(
+        default=None,
+        description="Mean atom-normalized enrichment across replicates",
+    )
+    sem_enrichment_by_atoms: float | None = Field(
+        default=None,
+        description="Standard error of atom-normalized enrichment",
+    )
+    per_replicate_enrichments_by_atoms: list[float] = Field(
+        default_factory=list,
+        description="Atom-normalized enrichment values from each replicate",
+    )
+
+    # Contact metrics
+    mean_contact_fraction: float = Field(
+        default=0.0,
+        description="Mean per-residue contact fraction",
+    )
+    sem_contact_fraction: float = Field(
+        default=0.0,
+        description="Standard error of contact fraction",
+    )
+    mean_contact_share: float = Field(
+        default=0.0,
+        description="Mean contact share",
+    )
+
+    # Expected shares (from polymer composition)
+    expected_share_by_residue: float = Field(
+        default=0.0,
+        description="Expected contact share based on polymer residue count",
+    )
+    expected_share_by_atoms: float = Field(
+        default=0.0,
+        description="Expected contact share based on heavy atom count",
+    )
+
+    # Group metadata
+    n_exposed_in_group: int = Field(
+        default=0,
+        description="Surface-exposed residues in group",
+    )
+    n_residues_in_group: int = Field(
+        default=0,
+        description="Total residues in group",
+    )
+    n_replicates: int = Field(
+        default=0,
+        description="Number of replicates with valid data",
     )
 
 
 class AggregatedBindingPreferenceResult(BaseModel):
     """Binding preference aggregated across replicates.
 
-    Contains mean ± SEM for all metrics across multiple replicates.
+    Contains mean ± SEM for all metrics across multiple replicates,
+    with dual enrichment normalization (by residue and by heavy atoms).
+
+    Enrichment values are centered at zero:
+    - > 0: Preferential binding
+    - = 0: Neutral (random chance)
+    - < 0: Avoidance
     """
 
     entries: list[AggregatedBindingPreferenceEntry] = Field(default_factory=list)
@@ -646,7 +1030,11 @@ class AggregatedBindingPreferenceResult(BaseModel):
     surface_exposure_threshold: float | None = None
     protein_groups_used: dict[str, str] = Field(default_factory=dict)
     polymer_types_used: dict[str, str] = Field(default_factory=dict)
-    schema_version: int = 1
+    polymer_composition: PolymerComposition | None = Field(
+        default=None,
+        description="Polymer composition data (residue/atom counts per type)",
+    )
+    schema_version: int = 2  # Version 2: dual normalization
 
     def to_dataframe(self) -> "pd.DataFrame":
         """Convert to pandas DataFrame."""
@@ -654,15 +1042,33 @@ class AggregatedBindingPreferenceResult(BaseModel):
 
         return pd.DataFrame([e.model_dump() for e in self.entries])
 
-    def enrichment_matrix(self) -> dict[str, dict[str, float]]:
-        """Get mean enrichment as nested dict."""
+    def enrichment_matrix(self, by: str = "residue") -> dict[str, dict[str, float]]:
+        """Get mean enrichment as nested dict.
+
+        Parameters
+        ----------
+        by : str, default "residue"
+            Normalization method: "residue" or "atoms"
+
+        Returns
+        -------
+        dict[str, dict[str, float]]
+            Nested mapping: {polymer_type: {protein_group: mean_enrichment}}
+        """
+        if by not in ("residue", "atoms"):
+            raise ValueError(f"by must be 'residue' or 'atoms', got {by!r}")
+
         result: dict[str, dict[str, float]] = {}
         for entry in self.entries:
             if entry.polymer_type not in result:
                 result[entry.polymer_type] = {}
-            result[entry.polymer_type][entry.protein_group] = (
-                entry.mean_enrichment if entry.mean_enrichment is not None else 0.0
-            )
+
+            if by == "atoms":
+                value = entry.mean_enrichment_by_atoms
+            else:
+                value = entry.mean_enrichment_by_residue
+
+            result[entry.polymer_type][entry.protein_group] = value if value is not None else 0.0
         return result
 
     def get_entry(
@@ -914,6 +1320,141 @@ def resolve_polymer_type_selections(
         return []
 
 
+def extract_polymer_composition(
+    universe: "Universe",
+    polymer_type_selections: dict[str, str] | None = None,
+) -> PolymerComposition:
+    """Extract polymer composition (residue and heavy atom counts) from trajectory.
+
+    This function counts the number of residues and heavy atoms for each
+    polymer type in the system. The composition data is used for dual
+    normalization of binding preference enrichment ratios.
+
+    Parameters
+    ----------
+    universe : Universe
+        MDAnalysis Universe with loaded topology
+    polymer_type_selections : dict[str, str], optional
+        Mapping of type name to MDAnalysis selection string.
+        If None, auto-detects from "chainID C" using unique resnames.
+
+    Returns
+    -------
+    PolymerComposition
+        Composition data with residue_counts and heavy_atom_counts per type.
+        Heavy atoms are defined as all atoms with element != 'H'.
+
+    Notes
+    -----
+    For auto-detection (polymer_type_selections=None), the function:
+    1. Selects all atoms in chainID C
+    2. Groups residues by resname
+    3. Counts residues and heavy atoms per resname
+
+    For explicit selections, each selection string defines which atoms
+    belong to that polymer type. The function counts residues (unique
+    resids) and heavy atoms within each selection.
+
+    Examples
+    --------
+    >>> # Auto-detect from chain C
+    >>> composition = extract_polymer_composition(universe)
+    >>> print(composition.residue_counts)
+    {'SBM': 50, 'EGM': 50}
+    >>> print(composition.heavy_atom_counts)
+    {'SBM': 750, 'EGM': 400}
+
+    >>> # Explicit selections
+    >>> selections = {"SBMA": "chainID C and resname SBM"}
+    >>> composition = extract_polymer_composition(universe, selections)
+    """
+    residue_counts: dict[str, int] = {}
+    heavy_atom_counts: dict[str, int] = {}
+
+    if polymer_type_selections is not None:
+        # Use explicit selections
+        for type_name, selection in polymer_type_selections.items():
+            try:
+                atoms = universe.select_atoms(selection)
+                if len(atoms) == 0:
+                    logger.warning(
+                        f"Polymer type '{type_name}' selection matched no atoms: {selection}"
+                    )
+                    continue
+
+                # Count unique residues
+                n_residues = len(atoms.residues)
+                residue_counts[type_name] = n_residues
+
+                # Count heavy atoms (non-hydrogen)
+                # MDAnalysis stores element info - filter out hydrogens
+                try:
+                    heavy_atoms = atoms.select_atoms("not element H")
+                    n_heavy = len(heavy_atoms)
+                except Exception:
+                    # Fallback: count atoms with mass > 1.1 (heavier than H)
+                    n_heavy = sum(1 for a in atoms if a.mass > 1.1)
+
+                heavy_atom_counts[type_name] = n_heavy
+
+                logger.debug(
+                    f"Polymer type '{type_name}': {n_residues} residues, {n_heavy} heavy atoms"
+                )
+
+            except Exception as e:
+                logger.warning(f"Failed to extract composition for '{type_name}': {e}")
+
+    else:
+        # Auto-detect from chain C
+        try:
+            polymer_atoms = universe.select_atoms("chainID C")
+            if len(polymer_atoms) == 0:
+                logger.warning("No atoms found in chainID C for polymer composition")
+                return PolymerComposition()
+
+            # Group by resname
+            resnames = set(polymer_atoms.residues.resnames)
+
+            for resname in resnames:
+                # Select atoms of this resname within chain C
+                type_atoms = universe.select_atoms(f"chainID C and resname {resname}")
+
+                # Count residues
+                n_residues = len(type_atoms.residues)
+                residue_counts[resname] = n_residues
+
+                # Count heavy atoms
+                try:
+                    heavy_atoms = type_atoms.select_atoms("not element H")
+                    n_heavy = len(heavy_atoms)
+                except Exception:
+                    # Fallback: count atoms with mass > 1.1
+                    n_heavy = sum(1 for a in type_atoms if a.mass > 1.1)
+
+                heavy_atom_counts[resname] = n_heavy
+
+                logger.debug(
+                    f"Auto-detected polymer '{resname}': {n_residues} residues, "
+                    f"{n_heavy} heavy atoms"
+                )
+
+        except Exception as e:
+            logger.warning(f"Failed to extract polymer composition: {e}")
+            return PolymerComposition()
+
+    composition = PolymerComposition(
+        residue_counts=residue_counts,
+        heavy_atom_counts=heavy_atom_counts,
+    )
+
+    logger.info(
+        f"Polymer composition extracted: {composition.total_residues} total residues, "
+        f"{composition.total_heavy_atoms} total heavy atoms across {len(residue_counts)} types"
+    )
+
+    return composition
+
+
 def compute_binding_preference_from_config(
     contact_result: "ContactResult",
     universe: "Universe",
@@ -988,11 +1529,15 @@ def compute_binding_preference_from_config(
     polymer_types = resolve_polymer_type_selections(universe, config.polymer_type_selections)
     logger.info(f"Polymer types for binding preference: {polymer_types}")
 
-    # Step 4: Compute binding preference
+    # Step 4: Extract polymer composition for dual normalization
+    polymer_composition = extract_polymer_composition(universe, config.polymer_type_selections)
+
+    # Step 5: Compute binding preference
     result = compute_binding_preference(
         contact_result=contact_result,
         surface_exposure=surface_exposure,
         protein_groups=protein_groups,
+        polymer_composition=polymer_composition,
         polymer_types=polymer_types if polymer_types else None,
         protein_group_selections=config.protein_group_selections,
         polymer_type_selections=config.polymer_type_selections,

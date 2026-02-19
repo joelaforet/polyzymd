@@ -8,6 +8,22 @@ Both plotters are automatically registered with PlotterRegistry and
 discovered by ComparisonPlotter.plot_all() when contacts analysis
 is enabled and binding preference data is available.
 
+Enrichment Interpretation (Zero-Centered)
+-----------------------------------------
+The enrichment values displayed are centered at zero:
+- enrichment > 0: Preferential binding (more contacts than expected)
+    - +0.5 means "50% more contacts than expected"
+- enrichment = 0: Neutral (contact frequency matches random chance)
+- enrichment < 0: Avoidance (fewer contacts than expected)
+    - -0.3 means "30% fewer contacts than expected"
+
+Normalization Method
+--------------------
+By default, plotters use residue-based normalization which matches
+experimental concentration ratios. To use atom-based normalization
+(which accounts for monomer size differences), set:
+    settings.contacts.enrichment_normalization = "atoms"
+
 Data Loading Pattern
 --------------------
 Plotters receive a `data` dict from `ComparisonPlotter._load_analysis_data()` with:
@@ -53,9 +69,14 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
     - Columns: Polymer types (e.g., SBM, EGM)
     - Multiple subplots: One per condition
 
-    The heatmap uses a diverging colormap centered at 1.0 (neutral enrichment),
-    with values > 1.0 (preferential binding) shown in warm colors and
-    values < 1.0 (avoidance) shown in cool colors.
+    The heatmap uses a diverging colormap centered at 0.0 (neutral enrichment),
+    with values > 0 (preferential binding) shown in warm colors and
+    values < 0 (avoidance) shown in cool colors.
+
+    Normalization
+    -------------
+    By default, uses residue-based normalization. Configure with
+    settings.contacts.enrichment_normalization = "atoms" for atom-based.
 
     Data Loading
     ------------
@@ -157,25 +178,31 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
         )
         axes_flat = axes.flatten()
 
+        # Determine which normalization to use (residue vs atoms)
+        norm_by = getattr(self.settings.contacts, "enrichment_normalization", "residue")
+        if norm_by not in ("residue", "atoms"):
+            norm_by = "residue"
+
         # Determine global min/max for consistent colorbar
         all_values = []
         for result in binding_results.values():
             for entry in result.entries:
-                if entry.mean_enrichment is not None:
-                    all_values.append(entry.mean_enrichment)
+                if norm_by == "atoms":
+                    val = entry.mean_enrichment_by_atoms
+                else:
+                    val = entry.mean_enrichment_by_residue
+                if val is not None:
+                    all_values.append(val)
 
         if not all_values:
             logger.warning("No enrichment values found - skipping heatmap")
             plt.close(fig)
             return []
 
-        vmin = max(0, min(all_values) - 0.1)
-        vmax = max(all_values) + 0.1
-
-        # Symmetric around 1.0 for diverging colormap
-        max_deviation = max(abs(1.0 - vmin), abs(vmax - 1.0))
-        vmin = max(0, 1.0 - max_deviation)
-        vmax = 1.0 + max_deviation
+        # Symmetric around 0.0 for diverging colormap (zero-centered enrichment)
+        max_abs = max(abs(min(all_values)), abs(max(all_values)))
+        vmin = -max_abs - 0.1
+        vmax = max_abs + 0.1
 
         im = None  # Track last imshow for colorbar
 
@@ -189,8 +216,12 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
             for i, prot_group in enumerate(protein_groups):
                 for j, poly_type in enumerate(polymer_types):
                     entry = result.get_entry(poly_type, prot_group)
-                    if entry and entry.mean_enrichment is not None:
-                        matrix[i, j] = entry.mean_enrichment
+                    if entry:
+                        if norm_by == "atoms":
+                            val = entry.mean_enrichment_by_atoms
+                        else:
+                            val = entry.mean_enrichment_by_residue
+                        matrix[i, j] = val if val is not None else np.nan
                     else:
                         matrix[i, j] = np.nan
 
@@ -208,12 +239,14 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
                 for j in range(n_cols):
                     val = matrix[i, j]
                     if not np.isnan(val):
-                        # Use black or white text based on background
-                        text_color = "white" if abs(val - 1.0) > 0.3 else "black"
+                        # Use black or white text based on background intensity
+                        text_color = "white" if abs(val) > 0.3 else "black"
+                        # Format with +/- sign for clarity
+                        sign = "+" if val > 0 else ""
                         ax.text(
                             j,
                             i,
-                            f"{val:.2f}",
+                            f"{sign}{val:.2f}",
                             ha="center",
                             va="center",
                             color=text_color,
@@ -240,10 +273,11 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
         if im is not None:
             cbar_ax = fig.add_axes((0.92, 0.15, 0.02, 0.7))
             cbar = fig.colorbar(im, cax=cbar_ax)
-            cbar.set_label("Enrichment Ratio", rotation=270, labelpad=15)
+            norm_label = "by residue" if norm_by == "residue" else "by atoms"
+            cbar.set_label(f"Enrichment ({norm_label})", rotation=270, labelpad=15)
 
-            # Add reference line at 1.0 (neutral enrichment)
-            cbar.ax.axhline(y=1.0, color="black", linewidth=1.5, linestyle="--")
+            # Add reference line at 0.0 (neutral enrichment)
+            cbar.ax.axhline(y=0.0, color="black", linewidth=1.5, linestyle="--")
 
         fig.suptitle("Binding Preference Enrichment", fontsize=14, fontweight="bold", y=0.98)
         plt.tight_layout(rect=(0, 0, 0.9, 0.95))
@@ -317,9 +351,14 @@ class BindingPreferenceBarPlotter(BasePlotter):
     - Groups: Protein groups (e.g., aromatic, polar, charged)
     - Bars within group: One per condition
     - Error bars: SEM across replicates
-    - Reference line at 1.0 (neutral enrichment)
+    - Reference line at 0.0 (neutral enrichment)
 
     One plot is generated per polymer type.
+
+    Normalization
+    -------------
+    By default, uses residue-based normalization. Configure with
+    settings.contacts.enrichment_normalization = "atoms" for atom-based.
 
     Data Loading
     ------------
@@ -403,6 +442,11 @@ class BindingPreferenceBarPlotter(BasePlotter):
         if not valid_labels:
             return []
 
+        # Determine which normalization to use (residue vs atoms)
+        norm_by = getattr(self.settings.contacts, "enrichment_normalization", "residue")
+        if norm_by not in ("residue", "atoms"):
+            norm_by = "residue"
+
         # Generate one plot per polymer type
         output_paths: list[Path] = []
 
@@ -427,9 +471,19 @@ class BindingPreferenceBarPlotter(BasePlotter):
 
                 for prot_group in protein_groups:
                     entry = result.get_entry(poly_type, prot_group)
-                    if entry and entry.mean_enrichment is not None:
-                        means.append(entry.mean_enrichment)
-                        sems.append(entry.sem_enrichment or 0.0)
+                    if entry:
+                        if norm_by == "atoms":
+                            mean_val = entry.mean_enrichment_by_atoms
+                            sem_val = entry.sem_enrichment_by_atoms
+                        else:
+                            mean_val = entry.mean_enrichment_by_residue
+                            sem_val = entry.sem_enrichment_by_residue
+                        if mean_val is not None:
+                            means.append(mean_val)
+                            sems.append(sem_val or 0.0)
+                        else:
+                            means.append(0.0)
+                            sems.append(0.0)
                     else:
                         means.append(0.0)
                         sems.append(0.0)
@@ -446,19 +500,17 @@ class BindingPreferenceBarPlotter(BasePlotter):
                     alpha=0.85,
                 )
 
-            # Reference line at 1.0 (neutral)
-            ax.axhline(y=1.0, color="black", linestyle="--", linewidth=1.5, label="Neutral (1.0)")
+            # Reference line at 0.0 (neutral, zero-centered enrichment)
+            ax.axhline(y=0.0, color="black", linestyle="--", linewidth=1.5, label="Neutral (0)")
 
             # Labels and formatting
+            norm_label = "by residue" if norm_by == "residue" else "by atoms"
             ax.set_xlabel("Protein Group")
-            ax.set_ylabel("Enrichment Ratio")
+            ax.set_ylabel(f"Enrichment ({norm_label})")
             ax.set_title(f"Binding Preference: {poly_type}", fontweight="bold")
             ax.set_xticks(x)
             ax.set_xticklabels(protein_groups, rotation=45, ha="right")
             ax.legend(loc="best", fontsize=9)
-
-            # Set y-axis to start at 0
-            ax.set_ylim(bottom=0)
 
             plt.tight_layout()
 

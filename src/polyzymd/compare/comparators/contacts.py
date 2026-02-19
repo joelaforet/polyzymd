@@ -1100,7 +1100,8 @@ class ContactsComparator(
         """Compute binding preference for a condition from contacts data.
 
         Computes surface exposure from enzyme PDB, resolves protein groups,
-        and calculates binding preference enrichment for each replicate.
+        extracts polymer composition, and calculates binding preference
+        enrichment for each replicate.
 
         Parameters
         ----------
@@ -1118,9 +1119,12 @@ class ContactsComparator(
         AggregatedBindingPreferenceResult or None
             Computed and aggregated result, or None on failure.
         """
+        import MDAnalysis as mda
+
         from polyzymd.analysis.contacts.binding_preference import (
             aggregate_binding_preference,
             compute_binding_preference,
+            extract_polymer_composition,
             resolve_protein_groups_from_surface_exposure,
         )
         from polyzymd.analysis.contacts.results import ContactResult
@@ -1131,6 +1135,7 @@ class ContactsComparator(
         include_defaults = getattr(self.analysis_settings, "include_default_aa_groups", True)
         custom_groups = getattr(self.analysis_settings, "protein_groups", None)
         enzyme_pdb_setting = getattr(self.analysis_settings, "enzyme_pdb_for_sasa", None)
+        polymer_type_selections = getattr(self.analysis_settings, "polymer_type_selections", None)
 
         # Resolve enzyme PDB path
         if enzyme_pdb_setting:
@@ -1174,6 +1179,39 @@ class ContactsComparator(
             logger.warning(f"No protein groups resolved for {cond.label}")
             return None
 
+        # Extract polymer composition from first replicate's topology
+        # (polymer composition is the same across replicates)
+        polymer_composition = None
+        first_rep = cond.replicates[0] if cond.replicates else 1
+        run_dir = sim_config.get_working_directory(first_rep)
+        topology_path = run_dir / "solvated_system.pdb"
+
+        if topology_path.exists():
+            try:
+                universe = mda.Universe(str(topology_path))
+                polymer_composition = extract_polymer_composition(universe, polymer_type_selections)
+                logger.debug(
+                    f"Extracted polymer composition for {cond.label}: "
+                    f"{polymer_composition.total_residues} residues, "
+                    f"{polymer_composition.total_heavy_atoms} heavy atoms"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to extract polymer composition for {cond.label}: {e}")
+        else:
+            logger.warning(
+                f"Cannot extract polymer composition for {cond.label}: "
+                f"topology not found at {topology_path}"
+            )
+
+        if polymer_composition is None:
+            # Create empty composition (will result in NaN enrichments)
+            from polyzymd.analysis.contacts.binding_preference import PolymerComposition
+
+            polymer_composition = PolymerComposition()
+            logger.warning(
+                f"Using empty polymer composition for {cond.label} - enrichment ratios will be NaN"
+            )
+
         # Compute binding preference for each replicate
         rep_results = []
         for rep in cond.replicates:
@@ -1188,6 +1226,7 @@ class ContactsComparator(
                     contact_result=contact_result,
                     surface_exposure=surface_exposure,
                     protein_groups=protein_groups,
+                    polymer_composition=polymer_composition,
                 )
                 rep_results.append(bp_result)
 
@@ -1415,17 +1454,22 @@ class ContactsComparator(
 
                 for cond_label, result in condition_results.items():
                     # Get enrichment value based on result type
+                    # Use residue-based enrichment by default (matches experimental ratios)
                     if isinstance(result, AggregatedBindingPreferenceResult):
                         entry = result.get_entry(poly_type, prot_group)
-                        if entry and entry.mean_enrichment is not None:
-                            mean_val = entry.mean_enrichment
-                            sem_val = entry.sem_enrichment if entry.sem_enrichment else 0.0
+                        if entry and entry.mean_enrichment_by_residue is not None:
+                            mean_val = entry.mean_enrichment_by_residue
+                            sem_val = (
+                                entry.sem_enrichment_by_residue
+                                if entry.sem_enrichment_by_residue
+                                else 0.0
+                            )
                             condition_values[cond_label] = (mean_val, sem_val)
                             enrichments_for_ranking.append((cond_label, mean_val))
                     elif isinstance(result, BindingPreferenceResult):
                         entry = result.get_entry(poly_type, prot_group)
-                        if entry and entry.enrichment_ratio is not None:
-                            mean_val = entry.enrichment_ratio
+                        if entry and entry.enrichment_by_residue is not None:
+                            mean_val = entry.enrichment_by_residue
                             condition_values[cond_label] = (mean_val, 0.0)  # No SEM for single rep
                             enrichments_for_ranking.append((cond_label, mean_val))
 
@@ -1495,13 +1539,14 @@ class ContactsComparator(
         )
 
         # Collect per-replicate enrichments for each condition
+        # Use residue-based enrichment by default (matches experimental ratios)
         condition_enrichments: dict[str, list[float]] = {}
 
         for cond_label, result in condition_results.items():
             if isinstance(result, AggregatedBindingPreferenceResult):
                 entry = result.get_entry(polymer_type, protein_group)
-                if entry and entry.per_replicate_enrichments:
-                    condition_enrichments[cond_label] = entry.per_replicate_enrichments
+                if entry and entry.per_replicate_enrichments_by_residue:
+                    condition_enrichments[cond_label] = entry.per_replicate_enrichments_by_residue
 
         # Need at least 2 conditions with per-replicate data
         if len(condition_enrichments) < 2:
