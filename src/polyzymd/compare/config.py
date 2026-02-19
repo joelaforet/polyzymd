@@ -781,6 +781,24 @@ analysis_settings:
   #   cutoff: 4.5
   #   grouping: "aa_class"  # aa_class, secondary_structure, or none
   #   compute_residence_times: true
+  #
+  #   # Binding Preference Analysis (enrichment by residue group)
+  #   # --------------------------------------------------------
+  #   # Computes which residue types (aromatic, polar, etc.) are preferentially
+  #   # contacted by the polymer, normalized by surface exposure.
+  #   #
+  #   # IMPORTANT: Place your enzyme PDB in the structures/ directory!
+  #   # The path is relative to this comparison.yaml file.
+  #   #
+  #   # compute_binding_preference: true
+  #   # surface_exposure_threshold: 0.2  # 20% relative SASA = surface exposed
+  #   # enzyme_pdb_for_sasa: "structures/enzyme.pdb"
+  #   # include_default_aa_groups: true  # aromatic, polar, nonpolar, charged
+  #   #
+  #   # Custom protein groups (residue IDs from your enzyme):
+  #   # protein_groups:
+  #   #   catalytic_triad: [77, 133, 156]
+  #   #   lid_domain: [141, 142, 143, 144, 145]
 
 # ============================================================================
 # Comparison Settings (HOW to compare - statistical parameters)
