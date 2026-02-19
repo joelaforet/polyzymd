@@ -1454,22 +1454,18 @@ class ContactsComparator(
 
                 for cond_label, result in condition_results.items():
                     # Get enrichment value based on result type
-                    # Use residue-based enrichment by default (matches experimental ratios)
+                    # Enrichment is normalized by protein surface availability
                     if isinstance(result, AggregatedBindingPreferenceResult):
                         entry = result.get_entry(poly_type, prot_group)
-                        if entry and entry.mean_enrichment_by_residue is not None:
-                            mean_val = entry.mean_enrichment_by_residue
-                            sem_val = (
-                                entry.sem_enrichment_by_residue
-                                if entry.sem_enrichment_by_residue
-                                else 0.0
-                            )
+                        if entry and entry.mean_enrichment is not None:
+                            mean_val = entry.mean_enrichment
+                            sem_val = entry.sem_enrichment if entry.sem_enrichment else 0.0
                             condition_values[cond_label] = (mean_val, sem_val)
                             enrichments_for_ranking.append((cond_label, mean_val))
                     elif isinstance(result, BindingPreferenceResult):
                         entry = result.get_entry(poly_type, prot_group)
-                        if entry and entry.enrichment_by_residue is not None:
-                            mean_val = entry.enrichment_by_residue
+                        if entry and entry.enrichment is not None:
+                            mean_val = entry.enrichment
                             condition_values[cond_label] = (mean_val, 0.0)  # No SEM for single rep
                             enrichments_for_ranking.append((cond_label, mean_val))
 
@@ -1539,14 +1535,14 @@ class ContactsComparator(
         )
 
         # Collect per-replicate enrichments for each condition
-        # Use residue-based enrichment by default (matches experimental ratios)
+        # Enrichment is normalized by protein surface availability
         condition_enrichments: dict[str, list[float]] = {}
 
         for cond_label, result in condition_results.items():
             if isinstance(result, AggregatedBindingPreferenceResult):
                 entry = result.get_entry(polymer_type, protein_group)
-                if entry and entry.per_replicate_enrichments_by_residue:
-                    condition_enrichments[cond_label] = entry.per_replicate_enrichments_by_residue
+                if entry and entry.per_replicate_enrichments:
+                    condition_enrichments[cond_label] = entry.per_replicate_enrichments
 
         # Need at least 2 conditions with per-replicate data
         if len(condition_enrichments) < 2:

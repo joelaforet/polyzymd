@@ -13,16 +13,19 @@ Enrichment Interpretation (Zero-Centered)
 The enrichment values displayed are centered at zero:
 - enrichment > 0: Preferential binding (more contacts than expected)
     - +0.5 means "50% more contacts than expected"
-- enrichment = 0: Neutral (contact frequency matches random chance)
+- enrichment = 0: Neutral (contact frequency matches surface availability)
 - enrichment < 0: Avoidance (fewer contacts than expected)
     - -0.3 means "30% fewer contacts than expected"
 
 Normalization Method
 --------------------
-By default, plotters use residue-based normalization which matches
-experimental concentration ratios. To use atom-based normalization
-(which accounts for monomer size differences), set:
-    settings.contacts.enrichment_normalization = "atoms"
+Enrichment is normalized by protein surface availability:
+    expected_share = n_exposed_in_group / total_exposed_residues
+    enrichment = (contact_share / expected_share) - 1
+
+This normalization asks: "Given how much of the protein surface is
+aromatic/charged/etc., does this polymer type contact that surface
+proportionally, more than proportionally, or less?"
 
 Data Loading Pattern
 --------------------
@@ -75,8 +78,7 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
 
     Normalization
     -------------
-    By default, uses residue-based normalization. Configure with
-    settings.contacts.enrichment_normalization = "atoms" for atom-based.
+    Enrichment is normalized by protein surface availability.
 
     Data Loading
     ------------
@@ -178,19 +180,11 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
         )
         axes_flat = axes.flatten()
 
-        # Determine which normalization to use (residue vs atoms)
-        norm_by = getattr(self.settings.contacts, "enrichment_normalization", "residue")
-        if norm_by not in ("residue", "atoms"):
-            norm_by = "residue"
-
         # Determine global min/max for consistent colorbar
         all_values = []
         for result in binding_results.values():
             for entry in result.entries:
-                if norm_by == "atoms":
-                    val = entry.mean_enrichment_by_atoms
-                else:
-                    val = entry.mean_enrichment_by_residue
+                val = entry.mean_enrichment
                 if val is not None:
                     all_values.append(val)
 
@@ -217,10 +211,7 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
                 for j, poly_type in enumerate(polymer_types):
                     entry = result.get_entry(poly_type, prot_group)
                     if entry:
-                        if norm_by == "atoms":
-                            val = entry.mean_enrichment_by_atoms
-                        else:
-                            val = entry.mean_enrichment_by_residue
+                        val = entry.mean_enrichment
                         matrix[i, j] = val if val is not None else np.nan
                     else:
                         matrix[i, j] = np.nan
@@ -273,8 +264,7 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
         if im is not None:
             cbar_ax = fig.add_axes((0.92, 0.15, 0.02, 0.7))
             cbar = fig.colorbar(im, cax=cbar_ax)
-            norm_label = "by residue" if norm_by == "residue" else "by atoms"
-            cbar.set_label(f"Enrichment ({norm_label})", rotation=270, labelpad=15)
+            cbar.set_label("Enrichment (surface-normalized)", rotation=270, labelpad=15)
 
             # Add reference line at 0.0 (neutral enrichment)
             cbar.ax.axhline(y=0.0, color="black", linewidth=1.5, linestyle="--")
@@ -357,8 +347,7 @@ class BindingPreferenceBarPlotter(BasePlotter):
 
     Normalization
     -------------
-    By default, uses residue-based normalization. Configure with
-    settings.contacts.enrichment_normalization = "atoms" for atom-based.
+    Enrichment is normalized by protein surface availability.
 
     Data Loading
     ------------
@@ -442,11 +431,6 @@ class BindingPreferenceBarPlotter(BasePlotter):
         if not valid_labels:
             return []
 
-        # Determine which normalization to use (residue vs atoms)
-        norm_by = getattr(self.settings.contacts, "enrichment_normalization", "residue")
-        if norm_by not in ("residue", "atoms"):
-            norm_by = "residue"
-
         # Generate one plot per polymer type
         output_paths: list[Path] = []
 
@@ -472,12 +456,8 @@ class BindingPreferenceBarPlotter(BasePlotter):
                 for prot_group in protein_groups:
                     entry = result.get_entry(poly_type, prot_group)
                     if entry:
-                        if norm_by == "atoms":
-                            mean_val = entry.mean_enrichment_by_atoms
-                            sem_val = entry.sem_enrichment_by_atoms
-                        else:
-                            mean_val = entry.mean_enrichment_by_residue
-                            sem_val = entry.sem_enrichment_by_residue
+                        mean_val = entry.mean_enrichment
+                        sem_val = entry.sem_enrichment
                         if mean_val is not None:
                             means.append(mean_val)
                             sems.append(sem_val or 0.0)
@@ -504,9 +484,8 @@ class BindingPreferenceBarPlotter(BasePlotter):
             ax.axhline(y=0.0, color="black", linestyle="--", linewidth=1.5, label="Neutral (0)")
 
             # Labels and formatting
-            norm_label = "by residue" if norm_by == "residue" else "by atoms"
             ax.set_xlabel("Protein Group")
-            ax.set_ylabel(f"Enrichment ({norm_label})")
+            ax.set_ylabel("Enrichment (surface-normalized)")
             ax.set_title(f"Binding Preference: {poly_type}", fontweight="bold")
             ax.set_xticks(x)
             ax.set_xticklabels(protein_groups, rotation=45, ha="right")

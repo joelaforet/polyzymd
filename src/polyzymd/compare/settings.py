@@ -464,9 +464,9 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
         Custom protein groups as {name: [resid1, resid2, ...]}.
         Overrides default AA class groups if names conflict.
     enrichment_normalization : str
-        Normalization method for enrichment display in plots and console.
-        Options: "residue" (default, matches experimental ratios) or
-        "atoms" (accounts for monomer size differences).
+        **DEPRECATED** (kept for backward compatibility).
+        Enrichment is now always normalized by protein surface availability.
+        This field is ignored.
     polymer_type_selections : dict[str, str], optional
         Custom polymer type definitions as {name: "MDAnalysis selection"}.
         If not provided, polymer types are auto-detected from unique
@@ -514,7 +514,7 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
     )
     enrichment_normalization: str = Field(
         default="residue",
-        description="Normalization method for enrichment display: 'residue' or 'atoms'",
+        description="DEPRECATED: Enrichment is now always normalized by protein surface availability. This field is ignored.",
     )
     polymer_type_selections: Optional[dict[str, str]] = Field(
         default=None,
@@ -562,7 +562,7 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
             result["compute_binding_preference"] = True
             result["surface_exposure_threshold"] = self.surface_exposure_threshold
             result["include_default_aa_groups"] = self.include_default_aa_groups
-            result["enrichment_normalization"] = self.enrichment_normalization
+            # Note: enrichment_normalization is deprecated and no longer included
             if self.enzyme_pdb_for_sasa:
                 result["enzyme_pdb_for_sasa"] = self.enzyme_pdb_for_sasa
             if self.protein_groups:
