@@ -47,7 +47,15 @@ where:
 \text{Contact Share} = \frac{\sum_{\text{residues in group}} \text{contact frames}}{\sum_{\text{all residues}} \text{contact frames}}
 ```
 
-The **expected share** can be normalized in two ways (see [Dual Normalization](#dual-normalization) below).
+and:
+
+```{math}
+\text{Expected Share} = \frac{\text{exposed residues in group}}{\text{total exposed residues}}
+```
+
+This **surface-availability normalization** asks: *"Given how much of the
+protein surface is aromatic/charged/etc., does this polymer type contact that
+surface proportionally?"*
 
 ### Interpretation (Zero-Centered Scale)
 
@@ -63,41 +71,25 @@ The **expected share** can be normalized in two ways (see [Dual Normalization](#
 - `-0.30` means "30% fewer contacts than expected"
 - `+1.00` means "2× as many contacts as expected" (100% more)
 
-### Dual Normalization
+### Why Surface-Availability Normalization?
 
-Two normalization methods are provided to distinguish **chemical affinity**
-from **geometric/steric effects**:
+The correct baseline for "expected contacts" is **protein surface availability**,
+not polymer composition. Here's why:
 
-**Residue-based normalization** (default, `by="residue"`):
+**The question we're asking**: *"Does this polymer type preferentially bind
+aromatic residues?"*
 
-```{math}
-\text{Expected Share} = \frac{\text{polymer residue count}}{\text{total polymer residues}}
-```
+**The correct comparison**: If aromatic residues comprise 10% of the protein's
+surface, and this polymer contacts aromatics 15% of the time, then enrichment
+= (0.15 / 0.10) - 1 = +0.50 (50% preference).
 
-This matches the **experimental viewpoint** where polymer concentrations are
-specified in terms of monomer units (e.g., "0.2mM SBMA : 0.8mM EGMA = 1:4 ratio").
+**What NOT to compare**: The fraction of the polymer that is SBMA vs EGMA is
+irrelevant to this question — it tells us about polymer composition, not about
+which protein groups the polymer prefers.
 
-**Atom-based normalization** (`by="atoms"`):
-
-```{math}
-\text{Expected Share} = \frac{\text{polymer heavy atoms}}{\text{total polymer heavy atoms}}
-```
-
-This accounts for **monomer size differences**, since larger monomers have
-more surface area and thus more contact opportunities.
-
-### Interpreting Dual Metrics
-
-| `enrichment_by_residue` | `enrichment_by_atoms` | Interpretation |
-|-------------------------|----------------------|----------------|
-| **Positive** | **Positive** | Strong evidence of **chemical preference** |
-| **Negative** | **Negative** | Strong evidence of **avoidance** |
-| **Positive** | **~0** | Enrichment explained by **larger monomer size** |
-| **~0** | **Positive** | Smaller monomer "**punches above its weight**" |
-
-```{tip}
-Use residue-based enrichment for direct comparison with experimental expectations.
-Use atom-based enrichment to reveal true chemical affinity vs. steric effects.
+```{note}
+Polymer composition (residue counts, heavy atom counts) is stored as **metadata**
+in the results for secondary analysis, but is not used in the enrichment formula.
 ```
 
 ### Why Contact Frames, Not Binary Counts?
@@ -210,7 +202,7 @@ protein_groups = {
     "polar": {8, 18, 25, 35, 42, 55},       # SER, THR, etc.
 }
 
-# Extract polymer composition from trajectory (required for dual normalization)
+# Extract polymer composition from trajectory (stored as metadata)
 from polyzymd.analysis.contacts.binding_preference import extract_polymer_composition
 polymer_composition = extract_polymer_composition(universe)  # universe from trajectory
 
@@ -222,21 +214,20 @@ result = compute_binding_preference(
     polymer_composition=polymer_composition,
 )
 
-# Access enrichment values (default: by residue)
-print("Enrichment matrix (by residue):")
-for polymer_type, groups in result.enrichment_matrix(by="residue").items():
+# Access enrichment values (normalized by protein surface availability)
+print("Enrichment matrix:")
+for polymer_type, groups in result.enrichment_matrix().items():
     print(f"\n{polymer_type}:")
     for group, enrichment in groups.items():
         marker = "+" if enrichment > 0 else "-" if enrichment < 0 else "="
         print(f"  {group}: {enrichment:+.2f} {marker}")
 
-# Compare with atom-based normalization
-print("\nEnrichment matrix (by atoms):")
-for polymer_type, groups in result.enrichment_matrix(by="atoms").items():
-    print(f"\n{polymer_type}:")
-    for group, enrichment in groups.items():
-        marker = "+" if enrichment > 0 else "-" if enrichment < 0 else "="
-        print(f"  {group}: {enrichment:+.2f} {marker}")
+# Get detailed entry for a specific pair
+entry = result.get_entry("SBM", "aromatic")
+print(f"\nSBM → aromatic:")
+print(f"  Contact share: {entry.contact_share:.3f}")
+print(f"  Expected share (surface): {entry.expected_share:.3f}")
+print(f"  Enrichment: {entry.enrichment:+.2f}")
 ```
 ````
 `````
@@ -250,7 +241,7 @@ see output like this:
 Binding Preference - Enrichment by Amino Acid Class
 -----------------------------------------------------------------------------------------------
 Surface exposure threshold: 20% relative SASA
-Enrichment normalized by: residue count
+Enrichment normalized by: protein surface availability
 
   Polymer: EGM
   Protein Group        0% SBMA / 100%     25% SBMA / 75%     50% SBMA / 50%     
@@ -304,24 +295,7 @@ From the example above, we can draw several conclusions:
 | `enzyme_pdb_for_sasa` | str | `null` | Path to enzyme PDB for SASA calculation |
 | `include_default_aa_groups` | bool | `true` | Use standard AA class groupings |
 | `protein_groups` | dict | `null` | Custom protein groups `{name: [resids]}` |
-| `enrichment_normalization` | str | `"residue"` | Normalization method: `"residue"` or `"atoms"` |
 | `polymer_type_selections` | dict | `null` | Custom polymer type definitions (see below) |
-
-### Enrichment Normalization
-
-The `enrichment_normalization` setting controls which normalization method is
-used for display and plotting:
-
-```yaml
-analysis_settings:
-  contacts:
-    compute_binding_preference: true
-    enrichment_normalization: "residue"  # Default: matches experimental ratios
-    # enrichment_normalization: "atoms"  # Alternative: accounts for monomer size
-```
-
-Both normalizations are always computed and stored in the output. This setting
-only controls which one is displayed in plots and console output.
 
 ### Polymer Type Selections
 
@@ -440,14 +414,12 @@ project/
       "n_exposed_in_group": 7,
       "n_residues_contacted": 6,
       "contact_share": 0.164,
+      "expected_share": 0.086,
+      "enrichment": 0.907,
       "polymer_residue_count": 50,
       "total_polymer_residues": 100,
-      "expected_share_by_residue": 0.5,
-      "enrichment_by_residue": 0.328,
       "polymer_heavy_atom_count": 750,
-      "total_polymer_heavy_atoms": 1150,
-      "expected_share_by_atoms": 0.652,
-      "enrichment_by_atoms": -0.254
+      "total_polymer_heavy_atoms": 1150
     }
   ],
   "polymer_composition": {
@@ -457,14 +429,14 @@ project/
   "n_frames": 10000,
   "total_exposed_residues": 81,
   "surface_exposure_threshold": 0.2,
-  "schema_version": 2
+  "schema_version": 3
 }
 ```
 
 ```{note}
-The schema version has been updated to `2` to reflect the new dual-normalization
-fields. Both `enrichment_by_residue` and `enrichment_by_atoms` are always
-computed and stored, regardless of the `enrichment_normalization` display setting.
+Schema version 3 uses **surface-availability normalization** for enrichment.
+Polymer composition (residue/atom counts) is stored as metadata for secondary
+analysis but is not used in the enrichment calculation.
 ```
 
 ## Statistical Treatment
@@ -537,7 +509,6 @@ analysis_settings:
     surface_exposure_threshold: 0.2
     enzyme_pdb_for_sasa: "structures/lipase.pdb"
     include_default_aa_groups: true
-    enrichment_normalization: "residue"  # Use residue-based for comparison
     
     # Custom groups for mechanistic insight
     protein_groups:
@@ -591,11 +562,10 @@ result = compute_binding_preference(
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `enrichment_matrix(by="residue")` | `dict[str, dict[str, float]]` | Enrichment values (zero-centered) |
-| `enrichment_matrix(by="atoms")` | `dict[str, dict[str, float]]` | Atom-normalized enrichment |
+| `enrichment_matrix()` | `dict[str, dict[str, float]]` | Enrichment values (zero-centered) |
 | `contact_fraction_matrix()` | `dict[str, dict[str, float]]` | Mean contact fractions |
 | `contact_share_matrix()` | `dict[str, dict[str, float]]` | Contact shares |
-| `get_enrichment(polymer, group)` | `float` | Single enrichment (residue-based) |
+| `get_enrichment(polymer, group)` | `float` | Single enrichment value |
 | `get_entry(polymer, group)` | `BindingPreferenceEntry` | Full entry with all metrics |
 | `to_dataframe()` | `pd.DataFrame` | Convert to pandas for analysis |
 | `save(path)` | `None` | Save to JSON |
@@ -613,14 +583,12 @@ result = compute_binding_preference(
 | `n_exposed_in_group` | int | Surface-exposed residues in group |
 | `n_residues_contacted` | int | Exposed residues with any contact |
 | `contact_share` | float | Fraction of polymer's contacts to group |
-| `polymer_residue_count` | int | Residues of this polymer type |
-| `total_polymer_residues` | int | Total polymer residues (all types) |
-| `expected_share_by_residue` | float | Expected share by residue count |
-| `enrichment_by_residue` | float | Zero-centered enrichment (residue-based) |
-| `polymer_heavy_atom_count` | int | Heavy atoms of this polymer type |
-| `total_polymer_heavy_atoms` | int | Total polymer heavy atoms (all types) |
-| `expected_share_by_atoms` | float | Expected share by atom count |
-| `enrichment_by_atoms` | float | Zero-centered enrichment (atom-based) |
+| `expected_share` | float | Expected share (surface availability) |
+| `enrichment` | float | Zero-centered enrichment |
+| `polymer_residue_count` | int | Residues of this polymer type (metadata) |
+| `total_polymer_residues` | int | Total polymer residues (metadata) |
+| `polymer_heavy_atom_count` | int | Heavy atoms of this polymer type (metadata) |
+| `total_polymer_heavy_atoms` | int | Total polymer heavy atoms (metadata) |
 
 ### PolymerComposition
 
@@ -644,6 +612,177 @@ print(composition.total_residues)        # 100
 print(composition.residue_fraction("SBM"))  # 0.5
 print(composition.heavy_atom_fraction("SBM"))  # 0.652 (larger monomer)
 ```
+
+## System Coverage Analysis
+
+While binding preference answers *"What does each polymer type prefer?"*,
+**system coverage** answers a complementary question: *"What does this polymer
+mixture collectively cover?"*
+
+### When to Use System Coverage
+
+System coverage is useful when comparing **copolymer compositions** (conditions)
+rather than individual polymer types:
+
+- *"Does a 70:30 SBMA:EGMA mixture cover aromatic residues differently than
+  a 30:70 mixture?"*
+- *"Which copolymer ratio provides better coverage of the active site?"*
+- *"How does aggregate polymer coverage change across my experimental conditions?"*
+
+### The Coverage Formula
+
+For each protein group, system coverage computes:
+
+```{math}
+\text{Coverage Share} = \frac{\sum_{\text{all polymers}} \text{contacts to group}}{\sum_{\text{all polymers}} \text{total contacts}}
+```
+
+```{math}
+\text{Coverage Enrichment} = \frac{\text{Coverage Share}}{\text{Expected Share}} - 1
+```
+
+where Expected Share is based on protein surface availability (same as binding
+preference).
+
+### How It Differs from Binding Preference
+
+| Aspect | Binding Preference | System Coverage |
+|--------|-------------------|-----------------|
+| **Question** | What does SBMA prefer? | What does this mixture cover? |
+| **Scope** | Per polymer type | Collapsed across all polymers |
+| **Use case** | Compare polymer chemistries | Compare copolymer ratios |
+| **Comparable across** | Conditions (abundance cancels) | Conditions (aggregate behavior) |
+
+```{important}
+Both metrics are **automatically computed** when you enable binding preference.
+System coverage is stored in `result.system_coverage`.
+```
+
+### Accessing System Coverage
+
+`````{tab-set}
+````{tab-item} Python
+```python
+from polyzymd.analysis.contacts import BindingPreferenceResult
+
+# Load binding preference result (includes system coverage)
+result = BindingPreferenceResult.load("binding_preference_rep1.json")
+
+# Access system coverage
+if result.system_coverage:
+    coverage = result.system_coverage
+    
+    # Get coverage enrichment for each protein group
+    print("System Coverage Enrichment:")
+    for entry in coverage.entries:
+        marker = "+" if entry.coverage_enrichment > 0 else "-"
+        print(f"  {entry.protein_group}: {entry.coverage_enrichment:+.2f} {marker}")
+    
+    # See which polymers contributed to each group
+    entry = coverage.get_entry("aromatic")
+    print(f"\nContributions to aromatic coverage:")
+    for polymer, contrib in entry.polymer_contributions.items():
+        print(f"  {polymer}: {contrib:.1%}")
+```
+````
+
+````{tab-item} JSON Structure
+System coverage is nested within the binding preference JSON:
+
+```json
+{
+  "entries": [...],
+  "polymer_composition": {...},
+  "system_coverage": {
+    "entries": [
+      {
+        "protein_group": "aromatic",
+        "total_contact_frames": 25432,
+        "coverage_share": 0.164,
+        "expected_share": 0.086,
+        "coverage_enrichment": 0.907,
+        "n_exposed_in_group": 7,
+        "n_residues_in_group": 20,
+        "polymer_contributions": {
+          "SBM": 0.45,
+          "EGM": 0.55
+        }
+      }
+    ],
+    "n_frames": 10000,
+    "total_contact_frames": 154892,
+    "total_exposed_residues": 81,
+    "polymer_types_included": ["SBM", "EGM"],
+    "schema_version": 1
+  },
+  "schema_version": 4
+}
+```
+````
+`````
+
+### Interpreting Polymer Contributions
+
+The `polymer_contributions` field shows how much each polymer type contributed
+to the coverage of a specific protein group. For example:
+
+```python
+# For aromatic coverage:
+polymer_contributions = {"SBM": 0.45, "EGM": 0.55}
+# 45% of contacts to aromatics came from SBMA
+# 55% of contacts to aromatics came from EGMA
+```
+
+This helps understand:
+- Which polymer is "doing the work" for each protein group
+- Whether coverage is balanced across polymer types
+- How polymer ratio affects coverage patterns
+
+### Aggregation Across Replicates
+
+System coverage is automatically aggregated when you aggregate binding preference:
+
+```python
+from polyzymd.analysis.contacts import (
+    aggregate_binding_preference,
+    AggregatedBindingPreferenceResult,
+)
+
+# Aggregate multiple replicates
+aggregated = aggregate_binding_preference([result1, result2, result3])
+
+# Access aggregated system coverage
+if aggregated.system_coverage:
+    for entry in aggregated.system_coverage.entries:
+        print(f"{entry.protein_group}:")
+        print(f"  Mean coverage enrichment: {entry.mean_coverage_enrichment:+.2f}")
+        print(f"  SEM: ±{entry.sem_coverage_enrichment:.2f}")
+        print(f"  Replicates: {entry.n_replicates}")
+```
+
+### SystemCoverageResult Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `coverage_enrichment_dict()` | `dict[str, float]` | {group: enrichment} mapping |
+| `coverage_share_dict()` | `dict[str, float]` | {group: share} mapping |
+| `get_entry(group)` | `SystemCoverageEntry` | Full entry for a group |
+| `protein_groups()` | `list[str]` | List of protein groups |
+| `to_dataframe()` | `pd.DataFrame` | Convert to pandas |
+| `save(path)` / `load(path)` | | JSON serialization |
+
+### SystemCoverageEntry Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `protein_group` | str | Protein group label |
+| `total_contact_frames` | int | Sum of ALL polymer contacts to group |
+| `coverage_share` | float | Fraction of all contacts to this group |
+| `expected_share` | float | Expected share (surface availability) |
+| `coverage_enrichment` | float | Zero-centered enrichment |
+| `n_exposed_in_group` | int | Surface-exposed residues in group |
+| `n_residues_in_group` | int | Total residues in group |
+| `polymer_contributions` | dict[str, float] | Fraction from each polymer type |
 
 ## Troubleshooting
 
