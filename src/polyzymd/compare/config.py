@@ -365,6 +365,16 @@ class ContactsPlotSettings(BaseModel):
         Colormap for enrichment heatmap (diverging recommended)
     show_enrichment_error : bool
         Show error bars on enrichment bar charts (default True)
+    generate_system_coverage_heatmap : bool
+        Generate system coverage enrichment heatmap (default True)
+    generate_system_coverage_bars : bool
+        Generate system coverage bar charts (default True)
+    figsize_system_coverage_heatmap : tuple[float, float] | None
+        Figure size for system coverage heatmap (auto-calculated if None)
+    figsize_system_coverage_bars : tuple[float, float]
+        Figure size for system coverage bar charts
+    show_system_coverage_error : bool
+        Show error bars on system coverage bar charts (default True)
     """
 
     figsize: tuple[float, float] = (10, 8)
@@ -374,6 +384,13 @@ class ContactsPlotSettings(BaseModel):
     figsize_enrichment_bars: tuple[float, float] = (10, 6)
     enrichment_colormap: str = "RdBu_r"  # Diverging: red=high, blue=low
     show_enrichment_error: bool = True
+
+    # System coverage plot settings
+    generate_system_coverage_heatmap: bool = True
+    generate_system_coverage_bars: bool = True
+    figsize_system_coverage_heatmap: tuple[float, float] | None = None
+    figsize_system_coverage_bars: tuple[float, float] = (10, 6)
+    show_system_coverage_error: bool = True
 
 
 class PlotSettings(BaseModel):

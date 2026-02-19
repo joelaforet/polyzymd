@@ -784,6 +784,115 @@ if aggregated.system_coverage:
 | `n_residues_in_group` | int | Total residues in group |
 | `polymer_contributions` | dict[str, float] | Fraction from each polymer type |
 
+## Visualization
+
+Both binding preference and system coverage generate publication-ready plots
+when you run `polyzymd compare contacts`. These plots are automatically
+enabled by default but can be controlled via `plot_settings`.
+
+### Available Plots
+
+| Plot Type | Description | Settings Field |
+|-----------|-------------|----------------|
+| **Binding Preference Heatmap** | Enrichment by (polymer type × protein group) across conditions | `generate_enrichment_heatmap` |
+| **Binding Preference Bars** | Grouped bars per polymer type, comparing conditions | `generate_enrichment_bars` |
+| **System Coverage Heatmap** | Aggregate coverage by protein group across conditions | `generate_system_coverage_heatmap` |
+| **System Coverage Bars** | Grouped bars showing aggregate coverage across conditions | `generate_system_coverage_bars` |
+
+### Configuring Plot Settings
+
+`````{tab-set}
+````{tab-item} YAML
+```yaml
+# comparison.yaml
+plot_settings:
+  output_dir: "figures/"
+  format: "png"
+  dpi: 300
+  
+  contacts:
+    # Binding preference plots
+    generate_enrichment_heatmap: true
+    generate_enrichment_bars: true
+    figsize_enrichment_heatmap: [12, 8]  # Auto-calculated if null
+    figsize_enrichment_bars: [10, 6]
+    enrichment_colormap: "RdBu_r"  # Diverging colormap
+    show_enrichment_error: true
+    
+    # System coverage plots
+    generate_system_coverage_heatmap: true
+    generate_system_coverage_bars: true
+    figsize_system_coverage_heatmap: [10, 6]  # Auto-calculated if null
+    figsize_system_coverage_bars: [10, 6]
+    show_system_coverage_error: true
+```
+````
+
+````{tab-item} Python
+```python
+from polyzymd.compare.config import PlotSettings, ContactsPlotSettings
+
+plot_settings = PlotSettings(
+    output_dir="figures/",
+    format="png",
+    dpi=300,
+    contacts=ContactsPlotSettings(
+        generate_enrichment_heatmap=True,
+        generate_system_coverage_heatmap=True,
+        enrichment_colormap="RdBu_r",
+        show_enrichment_error=True,
+        show_system_coverage_error=True,
+    ),
+)
+```
+````
+`````
+
+### Understanding the Heatmaps
+
+**Binding Preference Heatmap:**
+- One subplot per condition
+- Rows: Protein groups (aromatic, polar, etc.)
+- Columns: Polymer types (SBMA, EGMA, etc.)
+- Color: Zero-centered diverging colormap
+  - **Red (positive)**: Preferential binding
+  - **White (zero)**: Neutral
+  - **Blue (negative)**: Avoidance
+
+**System Coverage Heatmap:**
+- Single heatmap comparing conditions
+- Rows: Protein groups
+- Columns: Conditions (100% SBMA, 50/50 copolymer, etc.)
+- Shows aggregate coverage across all polymer types
+
+### Understanding the Bar Charts
+
+**Binding Preference Bars:**
+- One plot per polymer type
+- Groups: Protein groups
+- Bars within group: One per condition
+- Error bars: SEM across replicates
+
+**System Coverage Bars:**
+- Single plot comparing all conditions
+- Groups: Protein groups
+- Bars within group: One per condition
+- Shows how different copolymer compositions collectively cover each protein group
+
+### Disabling Specific Plots
+
+To disable specific plot types, set the corresponding field to `false`:
+
+```yaml
+plot_settings:
+  contacts:
+    # Only generate bar charts, not heatmaps
+    generate_enrichment_heatmap: false
+    generate_system_coverage_heatmap: false
+    generate_enrichment_bars: true
+    generate_system_coverage_bars: true
+```
+
 ## Troubleshooting
 
 ### "No exposed residues in group"
