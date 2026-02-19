@@ -108,35 +108,40 @@ References
        https://doi.org/10.1021/ct0502864
 """
 
+from polyzymd.analysis.contacts.binding_preference import (
+    AggregatedBindingPreferenceEntry,
+    AggregatedBindingPreferenceResult,
+    AggregatedSystemCoverageEntry,
+    AggregatedSystemCoverageResult,
+    BindingPreferenceEntry,
+    BindingPreferenceResult,
+    SystemCoverageEntry,
+    SystemCoverageResult,
+    aggregate_binding_preference,
+    aggregate_system_coverage,
+    compute_binding_preference,
+    compute_binding_preference_from_config,
+    resolve_polymer_type_selections,
+    resolve_protein_group_selections,
+)
+from polyzymd.analysis.contacts.calculator import ContactAnalyzer
+from polyzymd.analysis.contacts.calculator_parallel import ParallelContactAnalyzer
 from polyzymd.analysis.contacts.criteria import (
-    ContactCriteria,
-    AnyAtomWithinCutoff,
     AnyAtomToCOM,
+    AnyAtomWithinCutoff,
     COMToCOM,
+    ContactCriteria,
     MinimumDistance,
 )
 from polyzymd.analysis.contacts.results import (
     ContactEvent,
-    ResidueContactData,
     ContactResult,
+    ResidueContactData,
 )
-from polyzymd.analysis.contacts.calculator import ContactAnalyzer
-from polyzymd.analysis.contacts.calculator_parallel import ParallelContactAnalyzer
 from polyzymd.analysis.contacts.surface_exposure import (
     ResidueExposure,
-    SurfaceExposureResult,
     SurfaceExposureFilter,
-)
-from polyzymd.analysis.contacts.binding_preference import (
-    BindingPreferenceEntry,
-    BindingPreferenceResult,
-    AggregatedBindingPreferenceEntry,
-    AggregatedBindingPreferenceResult,
-    compute_binding_preference,
-    aggregate_binding_preference,
-    resolve_protein_group_selections,
-    resolve_polymer_type_selections,
-    compute_binding_preference_from_config,
+    SurfaceExposureResult,
 )
 
 __all__ = [
@@ -167,4 +172,10 @@ __all__ = [
     "resolve_protein_group_selections",
     "resolve_polymer_type_selections",
     "compute_binding_preference_from_config",
+    # System Coverage
+    "SystemCoverageEntry",
+    "SystemCoverageResult",
+    "AggregatedSystemCoverageEntry",
+    "AggregatedSystemCoverageResult",
+    "aggregate_system_coverage",
 ]
