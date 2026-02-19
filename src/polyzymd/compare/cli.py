@@ -944,6 +944,10 @@ def contacts(
     click.echo(f"Polymer selection: {contacts_analysis.polymer_selection}")
     click.echo(f"Contact cutoff: {contacts_analysis.cutoff} A")
     click.echo(f"FDR alpha: {contacts_comparison.fdr_alpha}")
+    click.echo(f"Compute binding preference: {contacts_analysis.compute_binding_preference}")
+    if contacts_analysis.compute_binding_preference:
+        click.echo(f"  Surface threshold: {contacts_analysis.surface_exposure_threshold}")
+        click.echo(f"  Enzyme PDB: {contacts_analysis.enzyme_pdb_for_sasa}")
     if config.control:
         click.echo(f"Control: {config.control}")
     click.echo()

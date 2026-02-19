@@ -949,6 +949,8 @@ class ContactsComparator(
         compute_enabled = getattr(self.analysis_settings, "compute_binding_preference", False)
         recompute = getattr(self, "_recompute", False)
 
+        logger.info(f"Binding preference: compute_enabled={compute_enabled}, recompute={recompute}")
+
         # Collect binding preference results per condition
         condition_results: dict[
             str, AggregatedBindingPreferenceResult | BindingPreferenceResult
@@ -962,6 +964,7 @@ class ContactsComparator(
             try:
                 sim_config = SimulationConfig.from_yaml(cond.config)
                 analysis_dir = sim_config.output.projects_directory / "analysis" / "contacts"
+                logger.debug(f"Binding preference for {cond.label}: analysis_dir={analysis_dir}")
 
                 # If not recomputing, try to load existing results
                 if not recompute:
@@ -970,10 +973,14 @@ class ContactsComparator(
                         condition_results[cond.label] = result
                         if surface_threshold is None:
                             surface_threshold = result.surface_exposure_threshold
+                        logger.debug(f"  Loaded cached binding preference for {cond.label}")
                         continue
+                    else:
+                        logger.debug(f"  No cached binding preference for {cond.label}")
 
                 # If compute is enabled, compute binding preference
                 if compute_enabled:
+                    logger.info(f"  Computing binding preference for {cond.label}...")
                     computed = self._compute_condition_binding_preference(
                         cond, sim_config, analysis_dir, cond_data_map.get(cond.label)
                     )
@@ -981,7 +988,10 @@ class ContactsComparator(
                         condition_results[cond.label] = computed
                         if surface_threshold is None:
                             surface_threshold = computed.surface_exposure_threshold
+                        logger.info(f"  Computed binding preference for {cond.label}")
                         continue
+                    else:
+                        logger.warning(f"  Failed to compute binding preference for {cond.label}")
 
                 logger.debug(f"No binding preference data for {cond.label}")
 
