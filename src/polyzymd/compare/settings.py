@@ -20,7 +20,7 @@ All settings classes are auto-registered on module import.
 
 from __future__ import annotations
 
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from pydantic import Field, field_validator, model_validator
 
@@ -463,6 +463,14 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
     protein_groups : dict[str, list[int]], optional
         Custom protein groups as {name: [resid1, resid2, ...]}.
         Overrides default AA class groups if names conflict.
+    enrichment_normalization : str
+        Normalization method for enrichment display in plots and console.
+        Options: "residue" (default, matches experimental ratios) or
+        "atoms" (accounts for monomer size differences).
+    polymer_type_selections : dict[str, str], optional
+        Custom polymer type definitions as {name: "MDAnalysis selection"}.
+        If not provided, polymer types are auto-detected from unique
+        residue names in the polymer selection.
     """
 
     polymer_selection: str = Field(
@@ -504,6 +512,14 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
         default=None,
         description="Custom protein groups as {name: [resid1, resid2, ...]}",
     )
+    enrichment_normalization: str = Field(
+        default="residue",
+        description="Normalization method for enrichment display: 'residue' or 'atoms'",
+    )
+    polymer_type_selections: Optional[dict[str, str]] = Field(
+        default=None,
+        description="Custom polymer type selections as {name: 'MDAnalysis selection'}",
+    )
 
     @classmethod
     def analysis_type(cls) -> str:
@@ -517,6 +533,15 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
         valid = {"aa_class", "secondary_structure", "none"}
         if v not in valid:
             raise ValueError(f"grouping must be one of {valid}, got '{v}'")
+        return v
+
+    @field_validator("enrichment_normalization", mode="after")
+    @classmethod
+    def validate_enrichment_normalization(cls, v: str) -> str:
+        """Validate enrichment normalization method."""
+        valid = {"residue", "atoms"}
+        if v not in valid:
+            raise ValueError(f"enrichment_normalization must be one of {valid}, got '{v}'")
         return v
 
     def to_analysis_yaml_dict(self) -> dict[str, Any]:
@@ -537,10 +562,13 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
             result["compute_binding_preference"] = True
             result["surface_exposure_threshold"] = self.surface_exposure_threshold
             result["include_default_aa_groups"] = self.include_default_aa_groups
+            result["enrichment_normalization"] = self.enrichment_normalization
             if self.enzyme_pdb_for_sasa:
                 result["enzyme_pdb_for_sasa"] = self.enzyme_pdb_for_sasa
             if self.protein_groups:
                 result["protein_groups"] = self.protein_groups
+            if self.polymer_type_selections:
+                result["polymer_type_selections"] = self.polymer_type_selections
 
         return result
 

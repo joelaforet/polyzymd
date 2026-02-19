@@ -34,10 +34,11 @@ true preferences.
 
 ## The Enrichment Formula
 
-For each (polymer type, protein group) pair, we compute an **enrichment ratio**:
+For each (polymer type, protein group) pair, we compute a **zero-centered
+enrichment** value:
 
 ```{math}
-\text{Enrichment} = \frac{\text{Contact Share}}{\text{Expected Share}}
+\text{Enrichment} = \frac{\text{Contact Share}}{\text{Expected Share}} - 1
 ```
 
 where:
@@ -46,17 +47,58 @@ where:
 \text{Contact Share} = \frac{\sum_{\text{residues in group}} \text{contact frames}}{\sum_{\text{all residues}} \text{contact frames}}
 ```
 
-```{math}
-\text{Expected Share} = \frac{N_{\text{exposed in group}}}{N_{\text{total exposed}}}
-```
+The **expected share** can be normalized in two ways (see [Dual Normalization](#dual-normalization) below).
 
-### Interpretation
+### Interpretation (Zero-Centered Scale)
 
 | Enrichment | Meaning |
 |------------|---------|
-| **> 1.0** | **Preferential binding** — polymer contacts this group more than expected by random chance |
-| **= 1.0** | **Neutral** — contact frequency matches surface availability |
-| **< 1.0** | **Avoidance** — polymer contacts this group less than expected |
+| **> 0** | **Preferential binding** — polymer contacts this group more than expected |
+| **= 0** | **Neutral** — contact frequency matches random chance |
+| **< 0** | **Avoidance** — polymer contacts this group less than expected |
+| **= -1** | **Complete avoidance** — no contacts observed |
+
+**Examples:**
+- `+0.45` means "45% more contacts than expected"
+- `-0.30` means "30% fewer contacts than expected"
+- `+1.00` means "2× as many contacts as expected" (100% more)
+
+### Dual Normalization
+
+Two normalization methods are provided to distinguish **chemical affinity**
+from **geometric/steric effects**:
+
+**Residue-based normalization** (default, `by="residue"`):
+
+```{math}
+\text{Expected Share} = \frac{\text{polymer residue count}}{\text{total polymer residues}}
+```
+
+This matches the **experimental viewpoint** where polymer concentrations are
+specified in terms of monomer units (e.g., "0.2mM SBMA : 0.8mM EGMA = 1:4 ratio").
+
+**Atom-based normalization** (`by="atoms"`):
+
+```{math}
+\text{Expected Share} = \frac{\text{polymer heavy atoms}}{\text{total polymer heavy atoms}}
+```
+
+This accounts for **monomer size differences**, since larger monomers have
+more surface area and thus more contact opportunities.
+
+### Interpreting Dual Metrics
+
+| `enrichment_by_residue` | `enrichment_by_atoms` | Interpretation |
+|-------------------------|----------------------|----------------|
+| **Positive** | **Positive** | Strong evidence of **chemical preference** |
+| **Negative** | **Negative** | Strong evidence of **avoidance** |
+| **Positive** | **~0** | Enrichment explained by **larger monomer size** |
+| **~0** | **Positive** | Smaller monomer "**punches above its weight**" |
+
+```{tip}
+Use residue-based enrichment for direct comparison with experimental expectations.
+Use atom-based enrichment to reveal true chemical affinity vs. steric effects.
+```
 
 ### Why Contact Frames, Not Binary Counts?
 
@@ -168,20 +210,33 @@ protein_groups = {
     "polar": {8, 18, 25, 35, 42, 55},       # SER, THR, etc.
 }
 
+# Extract polymer composition from trajectory (required for dual normalization)
+from polyzymd.analysis.contacts.binding_preference import extract_polymer_composition
+polymer_composition = extract_polymer_composition(universe)  # universe from trajectory
+
 # Compute binding preference
 result = compute_binding_preference(
     contact_result=contacts,
     surface_exposure=surface_exposure,
     protein_groups=protein_groups,
+    polymer_composition=polymer_composition,
 )
 
-# Access enrichment values
-print("Enrichment matrix:")
-for polymer_type, groups in result.enrichment_matrix().items():
+# Access enrichment values (default: by residue)
+print("Enrichment matrix (by residue):")
+for polymer_type, groups in result.enrichment_matrix(by="residue").items():
     print(f"\n{polymer_type}:")
     for group, enrichment in groups.items():
-        marker = "+" if enrichment > 1.0 else "-" if enrichment < 1.0 else "="
-        print(f"  {group}: {enrichment:.2f} {marker}")
+        marker = "+" if enrichment > 0 else "-" if enrichment < 0 else "="
+        print(f"  {group}: {enrichment:+.2f} {marker}")
+
+# Compare with atom-based normalization
+print("\nEnrichment matrix (by atoms):")
+for polymer_type, groups in result.enrichment_matrix(by="atoms").items():
+    print(f"\n{polymer_type}:")
+    for group, enrichment in groups.items():
+        marker = "+" if enrichment > 0 else "-" if enrichment < 0 else "="
+        print(f"  {group}: {enrichment:+.2f} {marker}")
 ```
 ````
 `````
@@ -195,26 +250,27 @@ see output like this:
 Binding Preference - Enrichment by Amino Acid Class
 -----------------------------------------------------------------------------------------------
 Surface exposure threshold: 20% relative SASA
+Enrichment normalized by: residue count
 
   Polymer: EGM
   Protein Group        0% SBMA / 100%     25% SBMA / 75%     50% SBMA / 50%     
   ----------------------------------------------------------------------------------
-  aromatic             1.90±0.06 +        1.65±0.16 +        1.50±0.06 +        
-  charged_negative     0.45±0.04 -        0.56±0.10 -        0.61±0.08 -        
-  charged_positive     0.79±0.10 -        0.89±0.07 -        0.94±0.04 -        
-  nonpolar             1.31±0.04 +        1.14±0.01 +        1.13±0.06 +        
-  polar                0.71±0.02 -        0.87±0.05 -        0.88±0.03 -        
+  aromatic            +0.90±0.06 +       +0.65±0.16 +       +0.50±0.06 +        
+  charged_negative    -0.55±0.04 -       -0.44±0.10 -       -0.39±0.08 -        
+  charged_positive    -0.21±0.10 -       -0.11±0.07 -       -0.06±0.04 -        
+  nonpolar            +0.31±0.04 +       +0.14±0.01 +       +0.13±0.06 +        
+  polar               -0.29±0.02 -       -0.13±0.05 -       -0.12±0.03 -        
 
   Polymer: SBM
   Protein Group        100% SBMA / 0%     25% SBMA / 75%     50% SBMA / 50%     
   ----------------------------------------------------------------------------------
-  aromatic             1.29±0.03 +        1.83±0.09 +        1.54±0.07 +        
-  charged_negative     0.90±0.05 -        0.76±0.18 -        0.71±0.11 -        
-  charged_positive     1.02±0.03 +        1.22±0.10 +        1.10±0.02 +        
-  nonpolar             0.95±0.03 -        0.91±0.12 -        0.88±0.05 -        
-  polar                1.00±0.00 =        0.83±0.04 -        1.01±0.06 +        
+  aromatic            +0.29±0.03 +       +0.83±0.09 +       +0.54±0.07 +        
+  charged_negative    -0.10±0.05 -       -0.24±0.18 -       -0.29±0.11 -        
+  charged_positive    +0.02±0.03 +       +0.22±0.10 +       +0.10±0.02 +        
+  nonpolar            -0.05±0.03 -       -0.09±0.12 -       -0.12±0.05 -        
+  polar               +0.00±0.00 =       -0.17±0.04 -       +0.01±0.06 +        
 
-  + = enriched (>1.0), - = depleted (<1.0)
+  + = enriched (>0), - = depleted (<0)
 ```
 
 ### Interpreting These Results
@@ -222,19 +278,19 @@ Surface exposure threshold: 20% relative SASA
 From the example above, we can draw several conclusions:
 
 1. **EGMA (EGM)** shows:
-   - Strong preference for **aromatic** residues (1.9× enrichment)
-   - Strong preference for **nonpolar** residues (1.3× enrichment)
-   - Avoidance of **charged** residues (0.45× for negative, 0.79× for positive)
+   - Strong preference for **aromatic** residues (+0.90 = 90% more contacts than expected)
+   - Strong preference for **nonpolar** residues (+0.31 = 31% more contacts)
+   - Avoidance of **charged** residues (-0.55 for negative, -0.21 for positive)
    - This is consistent with EGMA's hydrophobic PEG-like character
 
 2. **SBMA (SBM)** shows:
-   - Moderate preference for **aromatic** residues (1.29× enrichment)
-   - Slight preference for **charged positive** residues (1.02×)
+   - Moderate preference for **aromatic** residues (+0.29)
+   - Slight preference for **charged positive** residues (+0.02)
    - Near-neutral behavior for most groups
    - This reflects SBMA's zwitterionic nature (balanced charges)
 
 3. **Composition effects**: As SBMA ratio increases (25% → 50% → 100%):
-   - EGMA's aromatic preference decreases (1.90 → 1.65 → 1.50)
+   - EGMA's aromatic preference decreases (+0.90 → +0.65 → +0.50)
    - This suggests competition for aromatic binding sites
 
 ## Configuration Options
@@ -248,6 +304,48 @@ From the example above, we can draw several conclusions:
 | `enzyme_pdb_for_sasa` | str | `null` | Path to enzyme PDB for SASA calculation |
 | `include_default_aa_groups` | bool | `true` | Use standard AA class groupings |
 | `protein_groups` | dict | `null` | Custom protein groups `{name: [resids]}` |
+| `enrichment_normalization` | str | `"residue"` | Normalization method: `"residue"` or `"atoms"` |
+| `polymer_type_selections` | dict | `null` | Custom polymer type definitions (see below) |
+
+### Enrichment Normalization
+
+The `enrichment_normalization` setting controls which normalization method is
+used for display and plotting:
+
+```yaml
+analysis_settings:
+  contacts:
+    compute_binding_preference: true
+    enrichment_normalization: "residue"  # Default: matches experimental ratios
+    # enrichment_normalization: "atoms"  # Alternative: accounts for monomer size
+```
+
+Both normalizations are always computed and stored in the output. This setting
+only controls which one is displayed in plots and console output.
+
+### Polymer Type Selections
+
+By default, polymer types are auto-detected from unique residue names in the
+polymer selection. You can explicitly define polymer types with custom
+selections:
+
+```yaml
+analysis_settings:
+  contacts:
+    polymer_selection: "chainID C"
+    compute_binding_preference: true
+    
+    # Explicit polymer type definitions
+    polymer_type_selections:
+      SBMA: "chainID C and resname SBM"
+      EGMA: "chainID C and resname EGM"
+      OEGMA: "chainID C and resname OEG"
+```
+
+This is useful when:
+- Residue names don't match your preferred labels
+- You want to group multiple residue types together
+- You need fine-grained control over what counts as each polymer type
 
 ### Custom Protein Groups
 
@@ -342,15 +440,31 @@ project/
       "n_exposed_in_group": 7,
       "n_residues_contacted": 6,
       "contact_share": 0.164,
-      "expected_share": 0.086,
-      "enrichment_ratio": 1.90
+      "polymer_residue_count": 50,
+      "total_polymer_residues": 100,
+      "expected_share_by_residue": 0.5,
+      "enrichment_by_residue": 0.328,
+      "polymer_heavy_atom_count": 750,
+      "total_polymer_heavy_atoms": 1150,
+      "expected_share_by_atoms": 0.652,
+      "enrichment_by_atoms": -0.254
     }
   ],
+  "polymer_composition": {
+    "residue_counts": {"SBM": 50, "EGM": 50},
+    "heavy_atom_counts": {"SBM": 750, "EGM": 400}
+  },
   "n_frames": 10000,
   "total_exposed_residues": 81,
   "surface_exposure_threshold": 0.2,
-  "schema_version": 1
+  "schema_version": 2
 }
+```
+
+```{note}
+The schema version has been updated to `2` to reflect the new dual-normalization
+fields. Both `enrichment_by_residue` and `enrichment_by_atoms` are always
+computed and stored, regardless of the `enrichment_normalization` display setting.
 ```
 
 ## Statistical Treatment
@@ -423,6 +537,7 @@ analysis_settings:
     surface_exposure_threshold: 0.2
     enzyme_pdb_for_sasa: "structures/lipase.pdb"
     include_default_aa_groups: true
+    enrichment_normalization: "residue"  # Use residue-based for comparison
     
     # Custom groups for mechanistic insight
     protein_groups:
@@ -441,22 +556,33 @@ polyzymd compare contacts -f comparison.yaml
 
 | Observation | Interpretation | Design Implication |
 |-------------|----------------|-------------------|
-| EGMA aromatic enrichment > 2.0 | Strong π-stacking with surface Trp/Phe/Tyr | May bind near aromatic-rich active sites |
-| SBMA charged_positive ≈ 1.0 | Neutral towards Lys/Arg despite zwitterionic nature | Balanced electrostatics |
-| SBMA catalytic_triad < 0.5 | Avoids active site | Good for maintaining catalytic activity |
-| EGMA lid_helix > 1.5 | Preferentially binds lid domain | May affect lid dynamics |
+| EGMA aromatic enrichment > +1.0 | Strong π-stacking with surface Trp/Phe/Tyr | May bind near aromatic-rich active sites |
+| SBMA charged_positive ≈ 0 | Neutral towards Lys/Arg despite zwitterionic nature | Balanced electrostatics |
+| SBMA catalytic_triad < -0.5 | Avoids active site | Good for maintaining catalytic activity |
+| EGMA lid_helix > +0.5 | Preferentially binds lid domain | May affect lid dynamics |
 
 ## API Reference
 
 ### compute_binding_preference
 
 ```python
-from polyzymd.analysis.contacts.binding_preference import compute_binding_preference
+from polyzymd.analysis.contacts.binding_preference import (
+    compute_binding_preference,
+    extract_polymer_composition,
+)
 
+# First, extract polymer composition from trajectory
+polymer_composition = extract_polymer_composition(
+    universe,                    # MDAnalysis Universe with trajectory
+    polymer_type_selections=None,  # Optional: custom polymer type definitions
+)
+
+# Then compute binding preference
 result = compute_binding_preference(
     contact_result,      # ContactResult from trajectory analysis
     surface_exposure,    # SurfaceExposureResult from SASA calculation
     protein_groups,      # dict[str, set[int]] of group name -> resids
+    polymer_composition, # PolymerComposition from extract_polymer_composition()
     polymer_types=None,  # Optional filter for polymer types
 )
 ```
@@ -465,10 +591,11 @@ result = compute_binding_preference(
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `enrichment_matrix()` | `dict[str, dict[str, float]]` | Nested dict of enrichment values |
+| `enrichment_matrix(by="residue")` | `dict[str, dict[str, float]]` | Enrichment values (zero-centered) |
+| `enrichment_matrix(by="atoms")` | `dict[str, dict[str, float]]` | Atom-normalized enrichment |
 | `contact_fraction_matrix()` | `dict[str, dict[str, float]]` | Mean contact fractions |
 | `contact_share_matrix()` | `dict[str, dict[str, float]]` | Contact shares |
-| `get_enrichment(polymer, group)` | `float` | Single enrichment value |
+| `get_enrichment(polymer, group)` | `float` | Single enrichment (residue-based) |
 | `get_entry(polymer, group)` | `BindingPreferenceEntry` | Full entry with all metrics |
 | `to_dataframe()` | `pd.DataFrame` | Convert to pandas for analysis |
 | `save(path)` | `None` | Save to JSON |
@@ -486,8 +613,37 @@ result = compute_binding_preference(
 | `n_exposed_in_group` | int | Surface-exposed residues in group |
 | `n_residues_contacted` | int | Exposed residues with any contact |
 | `contact_share` | float | Fraction of polymer's contacts to group |
-| `expected_share` | float | Expected share by surface availability |
-| `enrichment_ratio` | float | contact_share / expected_share |
+| `polymer_residue_count` | int | Residues of this polymer type |
+| `total_polymer_residues` | int | Total polymer residues (all types) |
+| `expected_share_by_residue` | float | Expected share by residue count |
+| `enrichment_by_residue` | float | Zero-centered enrichment (residue-based) |
+| `polymer_heavy_atom_count` | int | Heavy atoms of this polymer type |
+| `total_polymer_heavy_atoms` | int | Total polymer heavy atoms (all types) |
+| `expected_share_by_atoms` | float | Expected share by atom count |
+| `enrichment_by_atoms` | float | Zero-centered enrichment (atom-based) |
+
+### PolymerComposition
+
+```python
+from polyzymd.analysis.contacts.binding_preference import (
+    PolymerComposition,
+    extract_polymer_composition,
+)
+
+# Auto-extract from trajectory
+composition = extract_polymer_composition(universe)
+
+# Or create manually
+composition = PolymerComposition(
+    residue_counts={"SBM": 50, "EGM": 50},
+    heavy_atom_counts={"SBM": 750, "EGM": 400},
+)
+
+# Access properties
+print(composition.total_residues)        # 100
+print(composition.residue_fraction("SBM"))  # 0.5
+print(composition.heavy_atom_fraction("SBM"))  # 0.652 (larger monomer)
+```
 
 ## Troubleshooting
 
@@ -508,13 +664,14 @@ The SASA calculation requires a PDB file. Ensure:
 2. The file exists and has correct format
 3. Alternatively, place a symlink in the `structures/` directory
 
-### Enrichment values of 0.0
+### Enrichment values of -1.0
 
-An enrichment of exactly 0.0 means:
-- No contacts were observed for this (polymer, group) pair, OR
-- The expected share is 0 (no exposed residues)
+An enrichment of exactly -1.0 means **complete avoidance** (no contacts
+observed for this polymer-group pair). This is expected for:
+- Buried residue groups with no surface exposure
+- Polymer types that physically cannot reach certain regions
 
-Check the `n_exposed_in_group` field to diagnose.
+Check the `n_exposed_in_group` and `n_residues_contacted` fields to diagnose.
 
 ### High SEM values
 
