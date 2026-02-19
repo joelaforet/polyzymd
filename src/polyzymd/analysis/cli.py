@@ -637,7 +637,7 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
                         # Get enzyme PDB path
                         enzyme_pdb = config.contacts.enzyme_pdb_for_sasa
                         if enzyme_pdb is None:
-                            enzyme_pdb = sim_config.system.enzyme_pdb
+                            enzyme_pdb = sim_config.enzyme.pdb_path
                         enzyme_pdb = Path(enzyme_pdb)
                         if not enzyme_pdb.is_absolute():
                             enzyme_pdb = sim_config_path.parent / enzyme_pdb
@@ -1430,7 +1430,7 @@ def contacts(
             if enzyme_pdb:
                 enzyme_pdb_path = Path(enzyme_pdb)
             else:
-                enzyme_pdb_path = sim_config.system.enzyme_pdb
+                enzyme_pdb_path = sim_config.enzyme.pdb_path
                 if not Path(enzyme_pdb_path).is_absolute():
                     enzyme_pdb_path = Path(config).parent / enzyme_pdb_path
 
