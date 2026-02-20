@@ -1526,52 +1526,6 @@ class ContactsComparator(
     ) -> BindingPreferenceComparisonSummary:
         """Build binding preference comparison summary from per-condition results.
 
-        Supports both old overlapping-groups format (schema v4-) and new
-        partition-based format (schema v5+). When partition-based data is
-        available, extracts from `binding_preference.aa_class_binding`.
-
-        Parameters
-        ----------
-        condition_results : dict
-            Mapping of condition_label to binding preference result
-            (either BindingPreferenceResult or AggregatedBindingPreferenceResult)
-        surface_threshold : float or None
-            SASA threshold used for surface filtering
-
-        Returns
-        -------
-        BindingPreferenceComparisonSummary
-            Cross-condition comparison summary
-        """
-        from polyzymd.analysis.contacts.binding_preference import (
-            AggregatedBindingPreferenceResult,
-            AggregatedPolymerBindingPreferenceResult,
-            BindingPreferenceResult,
-            PolymerBindingPreferenceResult,
-        )
-
-        # Check if partition-based data is available in any result
-        has_partition_data = any(
-            (isinstance(r, AggregatedBindingPreferenceResult) and r.binding_preference is not None)
-            or (isinstance(r, BindingPreferenceResult) and r.binding_preference is not None)
-            for r in condition_results.values()
-        )
-
-        if has_partition_data:
-            logger.debug("Using partition-based binding preference data (schema v5+)")
-            return self._build_binding_preference_summary_v5(condition_results, surface_threshold)
-
-        # Fall back to old overlapping-groups format
-        logger.debug("Using legacy overlapping-groups binding preference data (schema v4-)")
-        return self._build_binding_preference_summary_legacy(condition_results, surface_threshold)
-
-    def _build_binding_preference_summary_v5(
-        self,
-        condition_results: dict[str, Any],
-        surface_threshold: float | None,
-    ) -> BindingPreferenceComparisonSummary:
-        """Build summary from partition-based binding preference (schema v5+).
-
         Extracts data from `binding_preference.aa_class_binding` which contains
         per-polymer enrichments for AA class partitions (aromatic, polar, etc.).
         contact_share sums to 1.0 within each partition.
@@ -1580,6 +1534,7 @@ class ContactsComparator(
         ----------
         condition_results : dict
             Mapping of condition_label to binding preference result
+            (either BindingPreferenceResult or AggregatedBindingPreferenceResult)
         surface_threshold : float or None
             SASA threshold used for surface filtering
 
@@ -1678,9 +1633,7 @@ class ContactsComparator(
                     lowest_cond = sorted_by_enrichment[-1][0]
 
                 # Compute pairwise p-values using t-tests on per-replicate enrichments
-                pairwise_p_values = self._compute_binding_pref_pairwise_pvalues_v5(
-                    per_replicate_data
-                )
+                pairwise_p_values = self._compute_binding_pref_pairwise_pvalues(per_replicate_data)
 
                 entries.append(
                     BindingPreferenceComparisonEntry(
@@ -1702,7 +1655,7 @@ class ContactsComparator(
             surface_exposure_threshold=surface_threshold,
         )
 
-    def _compute_binding_pref_pairwise_pvalues_v5(
+    def _compute_binding_pref_pairwise_pvalues(
         self,
         per_replicate_data: dict[str, list[float]],
     ) -> dict[str, float]:
@@ -1741,172 +1694,5 @@ class ContactsComparator(
                     pairwise_p_values[key] = ttest_result.p_value
                 except Exception as e:
                     logger.warning(f"T-test failed for {cond_a} vs {cond_b}: {e}")
-
-        return pairwise_p_values
-
-    def _build_binding_preference_summary_legacy(
-        self,
-        condition_results: dict[str, Any],
-        surface_threshold: float | None,
-    ) -> BindingPreferenceComparisonSummary:
-        """Build summary from legacy overlapping-groups format (schema v4-).
-
-        This is the original implementation that extracts from `entries` list.
-        Kept for backwards compatibility with older cached results.
-
-        Parameters
-        ----------
-        condition_results : dict
-            Mapping of condition_label to binding preference result
-        surface_threshold : float or None
-            SASA threshold used for surface filtering
-
-        Returns
-        -------
-        BindingPreferenceComparisonSummary
-            Cross-condition comparison summary
-        """
-        from polyzymd.analysis.contacts.binding_preference import (
-            AggregatedBindingPreferenceResult,
-            BindingPreferenceResult,
-        )
-
-        # Collect all polymer types and protein groups across conditions
-        all_polymer_types: set[str] = set()
-        all_protein_groups: set[str] = set()
-
-        for result in condition_results.values():
-            all_polymer_types.update(result.polymer_types())
-            all_protein_groups.update(result.protein_groups())
-
-        polymer_types = sorted(all_polymer_types)
-        protein_groups = sorted(all_protein_groups)
-        condition_labels = sorted(condition_results.keys())
-
-        # Build comparison entries for each (polymer_type, protein_group) pair
-        entries = []
-        for poly_type in polymer_types:
-            for prot_group in protein_groups:
-                condition_values: dict[str, tuple[float, float]] = {}
-                enrichments_for_ranking: list[tuple[str, float]] = []
-
-                for cond_label, result in condition_results.items():
-                    # Get enrichment value based on result type
-                    # Enrichment is normalized by protein surface availability
-                    if isinstance(result, AggregatedBindingPreferenceResult):
-                        entry = result.get_entry(poly_type, prot_group)
-                        if entry and entry.mean_enrichment is not None:
-                            mean_val = entry.mean_enrichment
-                            sem_val = entry.sem_enrichment if entry.sem_enrichment else 0.0
-                            condition_values[cond_label] = (mean_val, sem_val)
-                            enrichments_for_ranking.append((cond_label, mean_val))
-                    elif isinstance(result, BindingPreferenceResult):
-                        entry = result.get_entry(poly_type, prot_group)
-                        if entry and entry.enrichment is not None:
-                            mean_val = entry.enrichment
-                            condition_values[cond_label] = (mean_val, 0.0)  # No SEM for single rep
-                            enrichments_for_ranking.append((cond_label, mean_val))
-
-                # Skip if no data for this pair
-                if not condition_values:
-                    continue
-
-                # Determine highest and lowest enrichment conditions
-                highest_cond = None
-                lowest_cond = None
-                if enrichments_for_ranking:
-                    sorted_by_enrichment = sorted(
-                        enrichments_for_ranking, key=lambda x: x[1], reverse=True
-                    )
-                    highest_cond = sorted_by_enrichment[0][0]
-                    lowest_cond = sorted_by_enrichment[-1][0]
-
-                # Compute pairwise p-values using t-tests on per-replicate enrichments
-                pairwise_p_values = self._compute_binding_pref_pairwise_pvalues(
-                    poly_type, prot_group, condition_results
-                )
-
-                entries.append(
-                    BindingPreferenceComparisonEntry(
-                        polymer_type=poly_type,
-                        protein_group=prot_group,
-                        condition_values=condition_values,
-                        pairwise_p_values=pairwise_p_values,
-                        highest_enrichment_condition=highest_cond,
-                        lowest_enrichment_condition=lowest_cond,
-                    )
-                )
-
-        return BindingPreferenceComparisonSummary(
-            entries=entries,
-            polymer_types=polymer_types,
-            protein_groups=protein_groups,
-            n_conditions=len(condition_results),
-            condition_labels=condition_labels,
-            surface_exposure_threshold=surface_threshold,
-        )
-
-    def _compute_binding_pref_pairwise_pvalues(
-        self,
-        polymer_type: str,
-        protein_group: str,
-        condition_results: dict[str, Any],
-    ) -> dict[str, float]:
-        """Compute pairwise t-test p-values for binding preference enrichment.
-
-        Parameters
-        ----------
-        polymer_type : str
-            Polymer type to compare
-        protein_group : str
-            Protein group to compare
-        condition_results : dict
-            Condition results
-
-        Returns
-        -------
-        dict[str, float]
-            Mapping of "condA_vs_condB" to p-value
-        """
-        from polyzymd.analysis.contacts.binding_preference import (
-            AggregatedBindingPreferenceResult,
-        )
-
-        # Collect per-replicate enrichments for each condition
-        # Enrichment is normalized by protein surface availability
-        condition_enrichments: dict[str, list[float]] = {}
-
-        for cond_label, result in condition_results.items():
-            if isinstance(result, AggregatedBindingPreferenceResult):
-                entry = result.get_entry(polymer_type, protein_group)
-                if entry and entry.per_replicate_enrichments:
-                    condition_enrichments[cond_label] = entry.per_replicate_enrichments
-
-        # Need at least 2 conditions with per-replicate data
-        if len(condition_enrichments) < 2:
-            return {}
-
-        # Compute pairwise t-tests
-        pairwise_p_values: dict[str, float] = {}
-        cond_labels = sorted(condition_enrichments.keys())
-
-        for i, cond_a in enumerate(cond_labels):
-            for cond_b in cond_labels[i + 1 :]:
-                values_a = condition_enrichments[cond_a]
-                values_b = condition_enrichments[cond_b]
-
-                # Need at least 2 values in each group for t-test
-                if len(values_a) < 2 or len(values_b) < 2:
-                    continue
-
-                try:
-                    ttest_result = independent_ttest(values_a, values_b)
-                    key = f"{cond_a}_vs_{cond_b}"
-                    pairwise_p_values[key] = ttest_result.p_value
-                except Exception as e:
-                    logger.warning(
-                        f"T-test failed for {polymer_type}/{protein_group} "
-                        f"{cond_a} vs {cond_b}: {e}"
-                    )
 
         return pairwise_p_values
