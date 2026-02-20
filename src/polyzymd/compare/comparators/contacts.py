@@ -279,7 +279,9 @@ class ContactsComparator(
         results: list[ContactResult] = []
         successful_reps: list[int] = []
         for rep in cond.replicates:
-            result = self._load_or_compute_replicate(sim_config, rep, recompute)
+            result = self._load_or_compute_replicate(
+                sim_config, rep, recompute, cond_config_path=cond.config
+            )
             if result is not None:
                 results.append(result)
                 successful_reps.append(rep)
@@ -397,6 +399,11 @@ class ContactsComparator(
         Conditions without polymer atoms (e.g., "No Polymer" controls) are
         excluded from contacts analysis since there's nothing to analyze.
 
+        This method first checks for cached contact results. If cached results
+        exist, the condition is considered valid (since it must have had polymer
+        to generate contacts). This allows analysis to proceed even when the
+        original trajectory files are not available locally.
+
         Returns
         -------
         tuple[list[ConditionConfig], list[ConditionConfig]]
@@ -414,7 +421,26 @@ class ContactsComparator(
             try:
                 sim_config = SimulationConfig.from_yaml(cond.config)
 
-                # Find any replicate that exists
+                # First check: do cached contact results exist?
+                # If so, trust them - the condition must have had polymer
+                has_cached_results = False
+                for rep in cond.replicates:
+                    result_path = self._find_replicate_result(
+                        sim_config, rep, cond_config_path=cond.config
+                    )
+                    if result_path and result_path.exists():
+                        has_cached_results = True
+                        logger.debug(
+                            f"  {cond.label} rep {rep}: found cached result at {result_path}"
+                        )
+                        break
+
+                if has_cached_results:
+                    valid_conditions.append(cond)
+                    logger.debug(f"  Including '{cond.label}': cached results found")
+                    continue
+
+                # Fallback: check topology for polymer atoms
                 has_polymer = False
                 for rep in cond.replicates:
                     run_dir = sim_config.get_working_directory(rep)
@@ -471,6 +497,7 @@ class ContactsComparator(
         sim_config: Any,
         replicate: int,
         recompute: bool,
+        cond_config_path: Path | None = None,
     ) -> Any | None:
         """Load or compute contacts for a single replicate.
 
@@ -482,6 +509,8 @@ class ContactsComparator(
             Replicate number.
         recompute : bool
             Force recompute.
+        cond_config_path : Path, optional
+            Path to condition's config.yaml for fallback result location.
 
         Returns
         -------
@@ -491,7 +520,9 @@ class ContactsComparator(
         from polyzymd.analysis.contacts.results import ContactResult
 
         # Try to find existing result
-        result_path = self._find_replicate_result(sim_config, replicate)
+        result_path = self._find_replicate_result(
+            sim_config, replicate, cond_config_path=cond_config_path
+        )
 
         if result_path and result_path.exists() and not recompute:
             logger.info(f"  Loading cached result for rep {replicate}: {result_path}")
@@ -600,15 +631,93 @@ class ContactsComparator(
         self,
         sim_config: Any,
         replicate: int,
+        cond_config_path: Path | None = None,
     ) -> Path | None:
-        """Find path to existing replicate contacts result."""
+        """Find path to existing replicate contacts result.
+
+        Checks multiple locations in order:
+        1. sim_config.output.projects_directory / analysis / contacts /
+        2. cond_config_path.parent / analysis / contacts / (if provided)
+
+        This allows cached results to be found even when the original
+        projects_directory points to a remote/unavailable location.
+
+        Parameters
+        ----------
+        sim_config : SimulationConfig
+            Simulation configuration object.
+        replicate : int
+            Replicate number.
+        cond_config_path : Path, optional
+            Path to the condition's config.yaml file. Used as fallback
+            location for finding cached results.
+
+        Returns
+        -------
+        Path or None
+            Path to the result file if found, None otherwise.
+        """
+        # Primary location: projects_directory
         result_path = (
             sim_config.output.projects_directory
             / "analysis"
             / "contacts"
             / f"contacts_rep{replicate}.json"
         )
+        if result_path.exists():
+            return result_path
+
+        # Fallback: config file's parent directory
+        if cond_config_path is not None:
+            fallback_path = (
+                cond_config_path.parent / "analysis" / "contacts" / f"contacts_rep{replicate}.json"
+            )
+            if fallback_path.exists():
+                return fallback_path
+
+        # Return primary path even if doesn't exist (for error messages)
         return result_path
+
+    def _get_analysis_dir(
+        self,
+        sim_config: Any,
+        cond_config_path: Path | None = None,
+    ) -> Path:
+        """Get analysis directory with fallback to condition config parent.
+
+        Checks multiple locations in order:
+        1. sim_config.output.projects_directory / analysis / contacts /
+        2. cond_config_path.parent / analysis / contacts / (if provided and exists)
+
+        This allows cached results to be found even when the original
+        projects_directory points to a remote/unavailable location.
+
+        Parameters
+        ----------
+        sim_config : SimulationConfig
+            Simulation configuration object.
+        cond_config_path : Path, optional
+            Path to the condition's config.yaml file. Used as fallback
+            location for finding cached results.
+
+        Returns
+        -------
+        Path
+            Analysis directory path (primary location, or fallback if it exists).
+        """
+        # Primary location: projects_directory
+        primary_dir = sim_config.output.projects_directory / "analysis" / "contacts"
+        if primary_dir.exists():
+            return primary_dir
+
+        # Fallback: config file's parent directory
+        if cond_config_path is not None:
+            fallback_dir = cond_config_path.parent / "analysis" / "contacts"
+            if fallback_dir.exists():
+                return fallback_dir
+
+        # Return primary path even if doesn't exist (for error messages)
+        return primary_dir
 
     def _validate_residue_sets(
         self,
@@ -963,7 +1072,7 @@ class ContactsComparator(
         for cond in conditions:
             try:
                 sim_config = SimulationConfig.from_yaml(cond.config)
-                analysis_dir = sim_config.output.projects_directory / "analysis" / "contacts"
+                analysis_dir = self._get_analysis_dir(sim_config, cond_config_path=cond.config)
                 logger.debug(f"Binding preference for {cond.label}: analysis_dir={analysis_dir}")
 
                 # If not recomputing, try to load existing results
@@ -1339,7 +1448,7 @@ class ContactsComparator(
         for cond in conditions:
             try:
                 sim_config = SimulationConfig.from_yaml(cond.config)
-                analysis_dir = sim_config.output.projects_directory / "analysis" / "contacts"
+                analysis_dir = self._get_analysis_dir(sim_config, cond_config_path=cond.config)
 
                 # Try aggregated result first (multi-replicate)
                 agg_path = analysis_dir / "binding_preference_aggregated.json"

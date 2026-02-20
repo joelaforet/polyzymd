@@ -567,8 +567,13 @@ class ComparisonPlotter:
                 sim_config = SimulationConfig.from_yaml(condition.config)
                 projects_dir = sim_config.output.projects_directory
 
-                # Build path to analysis results
+                # Build path to analysis results - with fallback to config parent
                 analysis_dir = projects_dir / "analysis" / analysis_type
+                if not analysis_dir.exists() and condition.config is not None:
+                    # Fallback: check relative to condition config file
+                    fallback_dir = condition.config.parent / "analysis" / analysis_type
+                    if fallback_dir.exists():
+                        analysis_dir = fallback_dir
 
                 # Load aggregated results if available
                 aggregated_dir = analysis_dir / "aggregated"
