@@ -67,6 +67,148 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# -----------------------------------------------------------------------------
+# Helper functions for binding preference data access (shared by plotters)
+# -----------------------------------------------------------------------------
+
+
+def _get_polymer_types_and_aa_classes(
+    binding_results: dict[str, "AggregatedBindingPreferenceResult"],
+) -> tuple[list[str], list[str]]:
+    """Extract polymer types and AA classes from binding preference results.
+
+    Supports both old overlapping-groups format (entries) and new
+    partition-based format (binding_preference.aa_class_binding).
+
+    Parameters
+    ----------
+    binding_results : dict
+        Mapping of label -> AggregatedBindingPreferenceResult
+
+    Returns
+    -------
+    tuple[list[str], list[str]]
+        (polymer_types, aa_classes) in canonical order
+    """
+    all_polymer_types: set[str] = set()
+    all_aa_classes: set[str] = set()
+
+    for result in binding_results.values():
+        # Check for new partition-based format first
+        if result.binding_preference is not None:
+            bp = result.binding_preference
+            all_polymer_types.update(bp.polymer_types)
+            all_aa_classes.update(bp.aa_class_names())
+        else:
+            # Fall back to old overlapping-groups format
+            all_polymer_types.update(result.polymer_types())
+            all_aa_classes.update(result.protein_groups())
+
+    polymer_types = sorted(all_polymer_types)
+
+    # Use canonical AA class order
+    canonical_order = ["aromatic", "polar", "nonpolar", "charged_positive", "charged_negative"]
+    aa_classes = [aa for aa in canonical_order if aa in all_aa_classes]
+    # Add any non-canonical groups at the end
+    for aa in sorted(all_aa_classes):
+        if aa not in aa_classes:
+            aa_classes.append(aa)
+
+    return polymer_types, aa_classes
+
+
+def _get_enrichment_value(
+    result: "AggregatedBindingPreferenceResult",
+    polymer_type: str,
+    aa_class: str,
+) -> float | None:
+    """Get mean enrichment value for a (polymer_type, aa_class) pair.
+
+    Supports both old and new binding preference formats.
+
+    Parameters
+    ----------
+    result : AggregatedBindingPreferenceResult
+        The binding preference result
+    polymer_type : str
+        Polymer type name
+    aa_class : str
+        AA class name (protein group)
+
+    Returns
+    -------
+    float | None
+        Mean enrichment value, or None if not found
+    """
+    # Check for new partition-based format first
+    if result.binding_preference is not None:
+        bp = result.binding_preference
+        aa_binding = bp.aa_class_binding.get(polymer_type)
+        if aa_binding is not None:
+            for entry in aa_binding.entries:
+                if entry.partition_element == aa_class:
+                    return entry.mean_enrichment
+        return None
+
+    # Fall back to old overlapping-groups format
+    entry = result.get_entry(polymer_type, aa_class)
+    if entry is not None:
+        return entry.mean_enrichment
+    return None
+
+
+def _get_enrichment_with_sem(
+    result: "AggregatedBindingPreferenceResult",
+    polymer_type: str,
+    aa_class: str,
+) -> tuple[float, float]:
+    """Get mean enrichment and SEM for a (polymer_type, aa_class) pair.
+
+    Supports both old and new binding preference formats.
+
+    Parameters
+    ----------
+    result : AggregatedBindingPreferenceResult
+        The binding preference result
+    polymer_type : str
+        Polymer type name
+    aa_class : str
+        AA class name (protein group)
+
+    Returns
+    -------
+    tuple[float, float]
+        (mean_enrichment, sem_enrichment), or (0.0, 0.0) if not found
+    """
+    # Check for new partition-based format first
+    if result.binding_preference is not None:
+        bp = result.binding_preference
+        aa_binding = bp.aa_class_binding.get(polymer_type)
+        if aa_binding is not None:
+            for entry in aa_binding.entries:
+                if entry.partition_element == aa_class:
+                    mean_val = entry.mean_enrichment
+                    sem_val = entry.sem_enrichment
+                    if mean_val is not None:
+                        return (mean_val, sem_val or 0.0)
+                    return (0.0, 0.0)
+        return (0.0, 0.0)
+
+    # Fall back to old overlapping-groups format
+    entry = result.get_entry(polymer_type, aa_class)
+    if entry is not None:
+        mean_val = entry.mean_enrichment
+        sem_val = entry.sem_enrichment
+        if mean_val is not None:
+            return (mean_val, sem_val or 0.0)
+    return (0.0, 0.0)
+
+
+# -----------------------------------------------------------------------------
+# Plotter Classes
+# -----------------------------------------------------------------------------
+
+
 @PlotterRegistry.register("binding_preference_heatmap")
 class BindingPreferenceHeatmapPlotter(BasePlotter):
     """Generate enrichment heatmap for binding preference across conditions.
@@ -148,15 +290,9 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
             logger.info("No binding preference data found - skipping heatmap")
             return []
 
-        # Get common polymer types and protein groups across all conditions
-        all_polymer_types: set[str] = set()
-        all_protein_groups: set[str] = set()
-        for result in binding_results.values():
-            all_polymer_types.update(result.polymer_types())
-            all_protein_groups.update(result.protein_groups())
-
-        polymer_types = sorted(all_polymer_types)
-        protein_groups = sorted(all_protein_groups)
+        # Get common polymer types and AA classes (protein groups) across all conditions
+        # Uses new partition-based format if available, falls back to old format
+        polymer_types, protein_groups = _get_polymer_types_and_aa_classes(binding_results)
 
         if not polymer_types or not protein_groups:
             logger.warning("No polymer types or protein groups found - skipping heatmap")
@@ -185,12 +321,14 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
         axes_flat = axes.flatten()
 
         # Determine global min/max for consistent colorbar
+        # Use helper method to support both old and new formats
         all_values = []
         for result in binding_results.values():
-            for entry in result.entries:
-                val = entry.mean_enrichment
-                if val is not None:
-                    all_values.append(val)
+            for poly_type in polymer_types:
+                for prot_group in protein_groups:
+                    val = _get_enrichment_value(result, poly_type, prot_group)
+                    if val is not None:
+                        all_values.append(val)
 
         if not all_values:
             logger.warning("No enrichment values found - skipping heatmap")
@@ -209,16 +347,12 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
             ax = axes_flat[idx]
             result = binding_results[cond_label]
 
-            # Build matrix for this condition
+            # Build matrix for this condition using helper method
             matrix = np.zeros((n_rows, n_cols))
             for i, prot_group in enumerate(protein_groups):
                 for j, poly_type in enumerate(polymer_types):
-                    entry = result.get_entry(poly_type, prot_group)
-                    if entry:
-                        val = entry.mean_enrichment
-                        matrix[i, j] = val if val is not None else np.nan
-                    else:
-                        matrix[i, j] = np.nan
+                    val = _get_enrichment_value(result, poly_type, prot_group)
+                    matrix[i, j] = val if val is not None else np.nan
 
             # Plot heatmap
             im = ax.imshow(
@@ -417,14 +551,8 @@ class BindingPreferenceBarPlotter(BasePlotter):
             return []
 
         # Get common polymer types and protein groups across all conditions
-        all_polymer_types: set[str] = set()
-        all_protein_groups: set[str] = set()
-        for result in binding_results.values():
-            all_polymer_types.update(result.polymer_types())
-            all_protein_groups.update(result.protein_groups())
-
-        polymer_types = sorted(all_polymer_types)
-        protein_groups = sorted(all_protein_groups)
+        # Use module-level helper to support both old and new formats
+        polymer_types, protein_groups = _get_polymer_types_and_aa_classes(binding_results)
 
         if not polymer_types or not protein_groups:
             logger.warning("No polymer types or protein groups found - skipping bars")
@@ -458,19 +586,10 @@ class BindingPreferenceBarPlotter(BasePlotter):
                 sems = []
 
                 for prot_group in protein_groups:
-                    entry = result.get_entry(poly_type, prot_group)
-                    if entry:
-                        mean_val = entry.mean_enrichment
-                        sem_val = entry.sem_enrichment
-                        if mean_val is not None:
-                            means.append(mean_val)
-                            sems.append(sem_val or 0.0)
-                        else:
-                            means.append(0.0)
-                            sems.append(0.0)
-                    else:
-                        means.append(0.0)
-                        sems.append(0.0)
+                    # Use module-level helper to support both old and new formats
+                    mean_val, sem_val = _get_enrichment_with_sem(result, poly_type, prot_group)
+                    means.append(mean_val)
+                    sems.append(sem_val)
 
                 offset = (i - n_conditions / 2 + 0.5) * bar_width
                 ax.bar(

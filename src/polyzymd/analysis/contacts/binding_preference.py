@@ -336,7 +336,10 @@ class BindingPreferenceResult(BaseModel):
         Version for forward compatibility. Version 4 adds system_coverage.
     """
 
-    entries: list[BindingPreferenceEntry] = Field(default_factory=list)
+    entries: list[BindingPreferenceEntry] = Field(
+        default_factory=list,
+        description="DEPRECATED: Overlapping-groups entries. Use binding_preference instead.",
+    )
     n_frames: int = 0
     total_exposed_residues: int = 0
     surface_exposure_threshold: float | None = None
@@ -350,8 +353,16 @@ class BindingPreferenceResult(BaseModel):
         default=None,
         description="System-level coverage metrics collapsed across polymer types",
     )
+    binding_preference: "PolymerBindingPreferenceResult | None" = Field(
+        default=None,
+        description=(
+            "Partition-based per-polymer binding preference. "
+            "contact_share sums to 1.0 within each partition for each polymer. "
+            "This is the primary binding preference output (v5+)."
+        ),
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
-    schema_version: int = 4  # Version 4: adds system_coverage field
+    schema_version: int = 5  # Version 5: adds partition-based binding_preference
 
     def to_dataframe(self) -> "pd.DataFrame":
         """Convert to pandas DataFrame for analysis/plotting.
@@ -549,6 +560,308 @@ def _compute_enrichment(coverage_share: float, expected_share: float) -> float |
         return -1.0  # Complete avoidance
     else:
         return None  # Cannot compute (no expected share)
+
+
+def _compute_partition_binding(
+    partition_name: str,
+    partition_type: Literal["aa_class", "user_defined"],
+    partition_groups: dict[str, set[int]],
+    exposed_partition: dict[str, set[int]],
+    polymer_type: str,
+    contact_data_for_polymer: dict[str, dict[str, Any]],
+    total_exposed: int,
+    total_contact_frames_for_polymer: int,
+) -> "PartitionBindingResult":
+    """Compute binding preference for a single partition and single polymer type.
+
+    This is the per-polymer version of _compute_partition_coverage.
+    It computes contact_share and enrichment for one polymer type across
+    all elements in a partition.
+
+    Parameters
+    ----------
+    partition_name : str
+        Name of the partition (e.g., "aa_class", "lid_helices")
+    partition_type : str
+        One of: "aa_class", "user_defined"
+    partition_groups : dict[str, set[int]]
+        Mapping of element name to ALL residue IDs in that element
+    exposed_partition : dict[str, set[int]]
+        Mapping of element name to EXPOSED residue IDs only
+    polymer_type : str
+        Polymer type this binding is for (e.g., "SBM")
+    contact_data_for_polymer : dict[str, dict[str, Any]]
+        Contact data for this polymer: {element_name: {"total_frames": int, "residues_contacted": set}}
+    total_exposed : int
+        Total number of exposed residues across all elements in the partition
+    total_contact_frames_for_polymer : int
+        Total contact frames for this polymer type (for contact_share denominator)
+
+    Returns
+    -------
+    PartitionBindingResult
+        Binding result for this polymer type on this partition
+    """
+    # Import here to avoid circular dependency
+    from polyzymd.analysis.contacts.binding_preference import (
+        PartitionBindingEntry,
+        PartitionBindingResult,
+    )
+
+    # Build partition entries
+    binding_entries = []
+    total_contact_share = 0.0
+    total_expected_share = 0.0
+
+    for element_name in sorted(partition_groups.keys()):
+        n_total = len(partition_groups.get(element_name, set()))
+        n_exposed = len(exposed_partition.get(element_name, set()))
+
+        # Calculate expected share based on surface availability
+        expected_share = n_exposed / total_exposed if total_exposed > 0 else 0.0
+        total_expected_share += expected_share
+
+        # Get contact data for this element
+        edata = contact_data_for_polymer.get(
+            element_name, {"total_frames": 0, "residues_contacted": set()}
+        )
+        total_frames = edata.get("total_frames", 0)
+        residues_contacted = edata.get("residues_contacted", set())
+        n_residues_contacted = len(residues_contacted)
+
+        # Calculate contact share (fraction of this polymer's contacts to this element)
+        if total_contact_frames_for_polymer > 0:
+            contact_share = total_frames / total_contact_frames_for_polymer
+        else:
+            contact_share = 0.0
+        total_contact_share += contact_share
+
+        # Calculate enrichment
+        enrichment = _compute_enrichment(contact_share, expected_share)
+
+        binding_entries.append(
+            PartitionBindingEntry(
+                partition_element=element_name,
+                polymer_type=polymer_type,
+                total_contact_frames=total_frames,
+                contact_share=contact_share,
+                expected_share=expected_share,
+                enrichment=enrichment,
+                n_exposed_in_element=n_exposed,
+                n_residues_in_element=n_total,
+                n_residues_contacted=n_residues_contacted,
+            )
+        )
+
+    return PartitionBindingResult(
+        partition_name=partition_name,
+        partition_type=partition_type,
+        polymer_type=polymer_type,
+        entries=binding_entries,
+        total_contact_share=total_contact_share,
+        total_expected_share=total_expected_share,
+        total_contact_frames=total_contact_frames_for_polymer,
+    )
+
+
+def _compute_polymer_binding_preference(
+    contact_data: dict[str, dict[str, dict[str, Any]]],
+    total_contacts_by_polymer: dict[str, int],
+    protein_groups: dict[str, set[int]],
+    exposed_groups: dict[str, set[int]],
+    protein_partitions: dict[str, list[str]] | None,
+    total_exposed: int,
+    n_frames: int,
+    surface_exposure_threshold: float | None,
+    polymer_composition: "PolymerComposition | None",
+    protein_groups_used: dict[str, str] | None,
+) -> "PolymerBindingPreferenceResult":
+    """Compute per-polymer binding preference using partition-based analysis.
+
+    Parameters
+    ----------
+    contact_data : dict[str, dict[str, dict[str, Any]]]
+        Contact data: {polymer_type: {group_name: {"total_frames": int, "residues_contacted": set}}}
+    total_contacts_by_polymer : dict[str, int]
+        Total contact frames per polymer type
+    protein_groups : dict[str, set[int]]
+        All protein groups (AA classes + custom)
+    exposed_groups : dict[str, set[int]]
+        Exposed residues per group
+    protein_partitions : dict[str, list[str]] | None
+        User-defined partitions
+    total_exposed : int
+        Total exposed residues
+    n_frames : int
+        Number of frames analyzed
+    surface_exposure_threshold : float | None
+        SASA threshold used
+    polymer_composition : PolymerComposition | None
+        Polymer composition metadata
+    protein_groups_used : dict[str, str] | None
+        Selection strings used (for metadata)
+
+    Returns
+    -------
+    PolymerBindingPreferenceResult
+        Per-polymer partition-based binding preference
+    """
+    # Import here to avoid circular dependency
+    from polyzymd.analysis.contacts.binding_preference import PolymerBindingPreferenceResult
+
+    all_polymer_types = sorted(contact_data.keys())
+
+    # Separate AA class groups from custom groups
+    aa_class_names = set(DEFAULT_AA_CLASS_SELECTIONS.keys())
+    aa_class_groups: dict[str, set[int]] = {}
+    aa_class_exposed: dict[str, set[int]] = {}
+
+    for group_name, resids in protein_groups.items():
+        if group_name in aa_class_names:
+            aa_class_groups[group_name] = resids
+            aa_class_exposed[group_name] = exposed_groups.get(group_name, set())
+
+    # Get all exposed residue IDs (for computing "rest_of_protein")
+    all_exposed_resids: set[int] = set()
+    for resids in exposed_groups.values():
+        all_exposed_resids.update(resids)
+
+    # Compute total exposed for AA class partition
+    aa_class_total_exposed = sum(len(resids) for resids in aa_class_exposed.values())
+
+    # ---------------------------------------------------------------------
+    # 1. Compute AA Class Partition for each polymer type
+    # ---------------------------------------------------------------------
+    aa_class_binding: dict[str, "PartitionBindingResult"] = {}
+
+    for poly_type in all_polymer_types:
+        poly_contact_data = contact_data.get(poly_type, {})
+        total_frames = total_contacts_by_polymer.get(poly_type, 0)
+
+        # Filter contact data to AA class groups only
+        aa_contact_data: dict[str, dict[str, Any]] = {}
+        for group_name in aa_class_groups:
+            if group_name in poly_contact_data:
+                aa_contact_data[group_name] = poly_contact_data[group_name]
+            else:
+                aa_contact_data[group_name] = {"total_frames": 0, "residues_contacted": set()}
+
+        # Compute total contact frames for AA class groups only
+        aa_total_frames = sum(d.get("total_frames", 0) for d in aa_contact_data.values())
+
+        aa_class_binding[poly_type] = _compute_partition_binding(
+            partition_name="aa_class",
+            partition_type="aa_class",
+            partition_groups=aa_class_groups,
+            exposed_partition=aa_class_exposed,
+            polymer_type=poly_type,
+            contact_data_for_polymer=aa_contact_data,
+            total_exposed=aa_class_total_exposed,
+            total_contact_frames_for_polymer=aa_total_frames,
+        )
+
+    # ---------------------------------------------------------------------
+    # 2. Compute User-Defined Partitions for each polymer type
+    # ---------------------------------------------------------------------
+    user_defined_partitions: dict[str, dict[str, "PartitionBindingResult"]] = {}
+
+    if protein_partitions:
+        for partition_name, group_names in protein_partitions.items():
+            # Build partition groups from referenced group names
+            partition_groups_map: dict[str, set[int]] = {}
+            partition_exposed_map: dict[str, set[int]] = {}
+            all_partition_exposed: set[int] = set()
+
+            for group_name in group_names:
+                if group_name not in protein_groups:
+                    logger.warning(
+                        f"Partition '{partition_name}' references undefined group "
+                        f"'{group_name}' - skipping this group"
+                    )
+                    continue
+
+                partition_groups_map[group_name] = protein_groups[group_name]
+                partition_exposed_map[group_name] = exposed_groups.get(group_name, set())
+                all_partition_exposed.update(partition_exposed_map[group_name])
+
+            if not partition_groups_map:
+                logger.warning(f"Partition '{partition_name}' has no valid groups - skipping")
+                continue
+
+            # Check if we need to add rest_of_protein
+            rest_exposed = all_exposed_resids - all_partition_exposed
+            if rest_exposed:
+                # Partition doesn't cover all residues - add rest_of_protein
+                rest_all = set().union(*exposed_groups.values()) - all_partition_exposed
+                partition_groups_map["rest_of_protein"] = rest_all
+                partition_exposed_map["rest_of_protein"] = rest_exposed
+                logger.debug(
+                    f"Partition '{partition_name}': auto-added 'rest_of_protein' "
+                    f"with {len(rest_exposed)} exposed residues"
+                )
+
+            # Compute total exposed for this partition
+            user_partition_total_exposed = sum(len(r) for r in partition_exposed_map.values())
+
+            # Compute for each polymer type
+            user_defined_partitions[partition_name] = {}
+            for poly_type in all_polymer_types:
+                poly_contact_data = contact_data.get(poly_type, {})
+
+                # Build contact data for this partition
+                partition_contact_data: dict[str, dict[str, Any]] = {}
+                for group_name in partition_groups_map:
+                    if group_name == "rest_of_protein":
+                        # Aggregate contacts from groups NOT in this partition
+                        rest_frames = 0
+                        rest_residues: set[int] = set()
+                        for gname, gdata in poly_contact_data.items():
+                            if gname not in group_names:
+                                rest_frames += gdata.get("total_frames", 0)
+                                rest_residues.update(gdata.get("residues_contacted", set()))
+                        partition_contact_data["rest_of_protein"] = {
+                            "total_frames": rest_frames,
+                            "residues_contacted": rest_residues,
+                        }
+                    elif group_name in poly_contact_data:
+                        partition_contact_data[group_name] = poly_contact_data[group_name]
+                    else:
+                        partition_contact_data[group_name] = {
+                            "total_frames": 0,
+                            "residues_contacted": set(),
+                        }
+
+                # Compute total frames for this partition
+                partition_total_frames = sum(
+                    d.get("total_frames", 0) for d in partition_contact_data.values()
+                )
+
+                user_defined_partitions[partition_name][poly_type] = _compute_partition_binding(
+                    partition_name=partition_name,
+                    partition_type="user_defined",
+                    partition_groups=partition_groups_map,
+                    exposed_partition=partition_exposed_map,
+                    polymer_type=poly_type,
+                    contact_data_for_polymer=partition_contact_data,
+                    total_exposed=user_partition_total_exposed,
+                    total_contact_frames_for_polymer=partition_total_frames,
+                )
+
+            logger.info(
+                f"Computed user-defined partition '{partition_name}' binding for "
+                f"{len(all_polymer_types)} polymer types"
+            )
+
+    return PolymerBindingPreferenceResult(
+        aa_class_binding=aa_class_binding,
+        user_defined_partitions=user_defined_partitions,
+        n_frames=n_frames,
+        total_exposed_residues=total_exposed,
+        surface_exposure_threshold=surface_exposure_threshold,
+        polymer_types=all_polymer_types,
+        polymer_composition=polymer_composition,
+        protein_groups_used=protein_groups_used or {},
+    )
 
 
 def _compute_partition_coverage(
@@ -1301,8 +1614,23 @@ def compute_binding_preference(
         protein_partitions=protein_partitions,
     )
 
+    # Compute per-polymer partition-based binding preference (NEW in v5)
+    # This is the primary output - contact_share sums to 1.0 within each partition
+    binding_preference = _compute_polymer_binding_preference(
+        contact_data=contact_data,
+        total_contacts_by_polymer=total_contacts_by_polymer,
+        protein_groups=protein_groups,
+        exposed_groups=exposed_groups,
+        protein_partitions=protein_partitions,
+        total_exposed=total_exposed,
+        n_frames=n_frames,
+        surface_exposure_threshold=surface_exposure.threshold,
+        polymer_composition=polymer_composition,
+        protein_groups_used=protein_group_selections,
+    )
+
     result = BindingPreferenceResult(
-        entries=entries,
+        entries=entries,  # DEPRECATED: kept for backward compat
         n_frames=n_frames,
         total_exposed_residues=total_exposed,
         surface_exposure_threshold=surface_exposure.threshold,
@@ -1310,6 +1638,7 @@ def compute_binding_preference(
         polymer_types_used=polymer_type_selections or {},
         polymer_composition=polymer_composition,
         system_coverage=system_coverage,
+        binding_preference=binding_preference,  # NEW: partition-based per-polymer
     )
 
     # Log summary
@@ -1325,6 +1654,23 @@ def compute_binding_preference(
         f"{n_custom_groups} custom groups, "
         f"{system_coverage.total_contact_frames} total contact frames"
     )
+
+    # Log partition-based binding preference summary
+    if binding_preference:
+        n_user_partitions = len(binding_preference.user_defined_partitions)
+        logger.info(
+            f"Partition-based binding preference computed: "
+            f"{len(binding_preference.polymer_types)} polymer types, "
+            f"AA class partition + {n_user_partitions} user partitions"
+        )
+        # Validate contact_share sums to ~1.0
+        for poly_type, aa_result in binding_preference.aa_class_binding.items():
+            total_share = aa_result.total_contact_share
+            if abs(total_share - 1.0) > 0.01:
+                logger.warning(
+                    f"AA class partition for {poly_type}: contact_share sums to "
+                    f"{total_share:.4f} (expected ~1.0)"
+                )
 
     return result
 
@@ -1425,8 +1771,22 @@ def aggregate_binding_preference(
             f"from {len(system_coverages)} replicates"
         )
 
+    # Aggregate partition-based binding preference if present in all results
+    aggregated_binding_preference = None
+    binding_preferences = [
+        r.binding_preference for r in results if r.binding_preference is not None
+    ]
+    if len(binding_preferences) == len(results) and len(binding_preferences) > 0:
+        aggregated_binding_preference = aggregate_polymer_binding_preference(binding_preferences)
+        logger.debug(
+            f"Aggregated binding preference: "
+            f"{len(aggregated_binding_preference.aa_class_binding)} polymer types, "
+            f"{len(aggregated_binding_preference.user_defined_partitions)} user partitions "
+            f"from {len(binding_preferences)} replicates"
+        )
+
     return AggregatedBindingPreferenceResult(
-        entries=entries,
+        entries=entries,  # DEPRECATED: kept for backward compat
         n_replicates=len(results),
         total_exposed_residues=results[0].total_exposed_residues if results else 0,
         surface_exposure_threshold=results[0].surface_exposure_threshold if results else None,
@@ -1434,6 +1794,7 @@ def aggregate_binding_preference(
         polymer_types_used=results[0].polymer_types_used if results else {},
         polymer_composition=results[0].polymer_composition if results else None,
         system_coverage=aggregated_system_coverage,
+        binding_preference=aggregated_binding_preference,  # NEW: partition-based per-polymer
     )
 
 
@@ -1534,7 +1895,15 @@ class AggregatedBindingPreferenceResult(BaseModel):
         default=None,
         description="Aggregated system-level coverage metrics",
     )
-    schema_version: int = 4  # Version 4: adds system_coverage field
+    binding_preference: "AggregatedPolymerBindingPreferenceResult | None" = Field(
+        default=None,
+        description=(
+            "Aggregated partition-based per-polymer binding preference. "
+            "contact_share sums to 1.0 within each partition for each polymer. "
+            "This is the primary binding preference output (v5+)."
+        ),
+    )
+    schema_version: int = 5  # Version 5: adds partition-based binding_preference
 
     def to_dataframe(self) -> "pd.DataFrame":
         """Convert to pandas DataFrame."""
@@ -2030,6 +2399,676 @@ class SystemCoverageResult(BaseModel):
         """
         data = json.loads(Path(path).read_text())
         return cls.model_validate(data)
+
+
+# =============================================================================
+# Partition-Based Binding Preference Models (Per-Polymer)
+# =============================================================================
+# These models implement partition-based binding preference, which is similar
+# to system coverage but computed per-polymer-type. This answers the question:
+# "Does polymer X preferentially bind to AA class Y compared to surface availability?"
+#
+# Key difference from SystemCoverage:
+# - SystemCoverage collapses all polymer contacts (polymer-agnostic)
+# - BindingPreference maintains per-polymer enrichments (polymer-specific)
+
+
+class PartitionBindingEntry(BaseModel):
+    """Binding metrics for one partition element for a specific polymer type.
+
+    A partition element is a mutually exclusive subset of protein residues.
+    Within a partition, all elements together cover the entire protein surface
+    exactly once (no residue is counted in multiple elements).
+
+    This entry is for a SINGLE polymer type, answering:
+    "What fraction of SBMA's contacts go to aromatic residues?"
+
+    This ensures that:
+    - contact_share sums to 1.0 across all elements in the partition (for this polymer)
+    - expected_share sums to 1.0 across all elements in the partition
+    - enrichment is mathematically valid (no inflated denominators)
+
+    Attributes
+    ----------
+    partition_element : str
+        Name of this partition element (e.g., "aromatic", "lid_helix_5", "rest_of_protein")
+    polymer_type : str
+        Polymer type this entry is for (e.g., "SBM", "EGM")
+    total_contact_frames : int
+        Sum of contact frames from THIS polymer type to residues in this element
+    contact_share : float
+        Fraction of this polymer's contacts that went to this element.
+        Sums to 1.0 across all elements in the partition (for this polymer).
+    expected_share : float
+        Expected share based on surface availability (n_exposed / total_exposed).
+        Sums to 1.0 across all elements in the partition.
+    enrichment : float | None
+        Zero-centered enrichment: (contact_share / expected_share) - 1
+    n_exposed_in_element : int
+        Number of surface-exposed residues in this element
+    n_residues_in_element : int
+        Total residues in this element (exposed + buried)
+    n_residues_contacted : int
+        Number of exposed residues that had at least one contact from this polymer
+    """
+
+    partition_element: str
+    polymer_type: str
+    total_contact_frames: int = Field(
+        default=0,
+        description="Sum of contact frames from THIS polymer type to this element",
+    )
+    contact_share: float = Field(
+        default=0.0,
+        description="Fraction of this polymer's contacts that went to this element",
+    )
+    expected_share: float = Field(
+        default=0.0,
+        description="Expected share based on protein surface availability",
+    )
+    enrichment: float | None = Field(
+        default=None,
+        description="Zero-centered enrichment: (contact_share / expected_share) - 1",
+    )
+    n_exposed_in_element: int = Field(
+        default=0,
+        description="Surface-exposed residues in this element",
+    )
+    n_residues_in_element: int = Field(
+        default=0,
+        description="Total residues in this element",
+    )
+    n_residues_contacted: int = Field(
+        default=0,
+        description="Exposed residues contacted by this polymer type",
+    )
+
+
+class PartitionBindingResult(BaseModel):
+    """Binding preference for a complete partition for ONE polymer type.
+
+    A partition divides the protein surface into mutually exclusive regions
+    that together cover the entire surface. This class stores the binding
+    preference of a single polymer type across all partition elements.
+
+    This ensures valid enrichment calculations where both contact_share
+    and expected_share sum to 1.0.
+
+    Partition Types
+    ---------------
+    - **aa_class**: 5-way partition by amino acid class
+      (aromatic, polar, nonpolar, charged_positive, charged_negative)
+    - **user_defined**: N+1 way partition with user-specified groups
+      plus "rest_of_protein" (auto-added if groups don't cover all residues)
+
+    Attributes
+    ----------
+    partition_name : str
+        Descriptive name (e.g., "aa_class", "lid_helices")
+    partition_type : str
+        One of: "aa_class", "user_defined"
+    polymer_type : str
+        Polymer type this result is for (e.g., "SBM", "EGM")
+    entries : list[PartitionBindingEntry]
+        Binding metrics for each element in the partition
+    total_contact_share : float
+        Validation check: should be ~1.0
+    total_expected_share : float
+        Validation check: should be ~1.0
+    total_contact_frames : int
+        Total contact frames from this polymer type (across all elements)
+    """
+
+    partition_name: str
+    partition_type: Literal["aa_class", "user_defined"]
+    polymer_type: str
+    entries: list[PartitionBindingEntry] = Field(default_factory=list)
+    total_contact_share: float = Field(
+        default=1.0,
+        description="Sum of contact_share across elements (validation: should be ~1.0)",
+    )
+    total_expected_share: float = Field(
+        default=1.0,
+        description="Sum of expected_share across elements (validation: should be ~1.0)",
+    )
+    total_contact_frames: int = Field(
+        default=0,
+        description="Total contact frames from this polymer type",
+    )
+
+    def to_dataframe(self) -> "pd.DataFrame":
+        """Convert to pandas DataFrame for analysis/plotting."""
+        import pandas as pd
+
+        return pd.DataFrame([e.model_dump() for e in self.entries])
+
+    def enrichment_dict(self) -> dict[str, float]:
+        """Get enrichment as dict: {element: enrichment}."""
+        return {
+            e.partition_element: (e.enrichment if e.enrichment is not None else 0.0)
+            for e in self.entries
+        }
+
+    def contact_share_dict(self) -> dict[str, float]:
+        """Get contact shares as dict: {element: share}."""
+        return {e.partition_element: e.contact_share for e in self.entries}
+
+    def expected_share_dict(self) -> dict[str, float]:
+        """Get expected shares as dict: {element: share}."""
+        return {e.partition_element: e.expected_share for e in self.entries}
+
+    def get_entry(self, element_name: str) -> PartitionBindingEntry | None:
+        """Get the entry for a specific partition element."""
+        for entry in self.entries:
+            if entry.partition_element == element_name:
+                return entry
+        return None
+
+    def element_names(self) -> list[str]:
+        """Get list of partition element names."""
+        return [e.partition_element for e in self.entries]
+
+
+class PolymerBindingPreferenceResult(BaseModel):
+    """Per-polymer binding preference using proper partition structure.
+
+    This result stores binding preference for ALL polymer types, with each
+    polymer having its own partition-based enrichment calculations.
+
+    Unlike SystemCoverageResult (which collapses all polymer contacts), this
+    maintains per-polymer data to answer: "Does SBMA prefer aromatic residues
+    more than EGMA does?"
+
+    Partition Strategy (per polymer type)
+    -------------------------------------
+    1. **AA Class Partition** (always computed):
+       5-way partition by amino acid class. Every surface residue belongs
+       to exactly one class. Each polymer type gets its own enrichment values.
+
+    2. **User-Defined Partitions** (from protein_partitions config):
+       Custom partitions specified by the user. Each partition references groups
+       from protein_groups. 'rest_of_protein' is auto-added if groups don't
+       cover all exposed protein residues. Each polymer type gets its own
+       enrichment values per partition.
+
+    Attributes
+    ----------
+    aa_class_binding : dict[str, PartitionBindingResult]
+        AA class partition binding for each polymer type.
+        Keys are polymer type names (e.g., "SBM", "EGM").
+    user_defined_partitions : dict[str, dict[str, PartitionBindingResult]]
+        User-defined partitions for each polymer type.
+        Outer keys are partition names, inner keys are polymer types.
+        Example: {"lid_helices": {"SBM": ..., "EGM": ...}}
+    n_frames : int
+        Total frames analyzed
+    total_exposed_residues : int
+        Number of surface-exposed protein residues
+    surface_exposure_threshold : float | None
+        SASA threshold used for surface filtering
+    polymer_types : list[str]
+        Polymer types included in this result
+    polymer_composition : PolymerComposition | None
+        Polymer composition metadata
+    schema_version : int
+        Schema version (5 = partition-based binding preference)
+    """
+
+    aa_class_binding: dict[str, PartitionBindingResult] = Field(
+        default_factory=dict,
+        description="AA class partition binding for each polymer type",
+    )
+    user_defined_partitions: dict[str, dict[str, PartitionBindingResult]] = Field(
+        default_factory=dict,
+        description=(
+            "User-defined partitions for each polymer type. "
+            "Outer key: partition name, inner key: polymer type."
+        ),
+    )
+
+    # Metadata
+    n_frames: int = 0
+    total_exposed_residues: int = 0
+    surface_exposure_threshold: float | None = None
+    polymer_types: list[str] = Field(default_factory=list)
+    polymer_composition: PolymerComposition | None = None
+    protein_groups_used: dict[str, str] = Field(default_factory=dict)
+    schema_version: int = 5  # Version 5: partition-based per-polymer binding
+
+    def get_aa_class_enrichment(self, polymer_type: str, aa_class: str) -> float | None:
+        """Get binding enrichment for an AA class for a specific polymer.
+
+        Parameters
+        ----------
+        polymer_type : str
+            Polymer type (e.g., "SBM")
+        aa_class : str
+            One of: aromatic, polar, nonpolar, charged_positive, charged_negative
+
+        Returns
+        -------
+        float | None
+            Binding enrichment, or None if not found
+        """
+        if polymer_type not in self.aa_class_binding:
+            return None
+        entry = self.aa_class_binding[polymer_type].get_entry(aa_class)
+        return entry.enrichment if entry else None
+
+    def get_user_partition_enrichment(
+        self, partition_name: str, polymer_type: str, element_name: str
+    ) -> float | None:
+        """Get binding enrichment for a user partition element for a specific polymer.
+
+        Parameters
+        ----------
+        partition_name : str
+            Name of the user-defined partition (e.g., "lid_helices")
+        polymer_type : str
+            Polymer type (e.g., "SBM")
+        element_name : str
+            Element within the partition (e.g., "lid_helix_5")
+
+        Returns
+        -------
+        float | None
+            Binding enrichment, or None if not found
+        """
+        if partition_name not in self.user_defined_partitions:
+            return None
+        if polymer_type not in self.user_defined_partitions[partition_name]:
+            return None
+        entry = self.user_defined_partitions[partition_name][polymer_type].get_entry(element_name)
+        return entry.enrichment if entry else None
+
+    def aa_class_enrichment_matrix(self) -> dict[str, dict[str, float]]:
+        """Get AA class enrichments as nested dict: {polymer_type: {aa_class: enrichment}}.
+
+        Returns
+        -------
+        dict[str, dict[str, float]]
+            Nested mapping of enrichment values.
+        """
+        result: dict[str, dict[str, float]] = {}
+        for poly_type, partition_result in self.aa_class_binding.items():
+            result[poly_type] = partition_result.enrichment_dict()
+        return result
+
+    def user_partition_enrichment_matrix(self, partition_name: str) -> dict[str, dict[str, float]]:
+        """Get user partition enrichments as nested dict.
+
+        Parameters
+        ----------
+        partition_name : str
+            Name of the user-defined partition
+
+        Returns
+        -------
+        dict[str, dict[str, float]]
+            {polymer_type: {element_name: enrichment}}
+        """
+        if partition_name not in self.user_defined_partitions:
+            return {}
+        result: dict[str, dict[str, float]] = {}
+        for poly_type, partition_result in self.user_defined_partitions[partition_name].items():
+            result[poly_type] = partition_result.enrichment_dict()
+        return result
+
+    def aa_class_names(self) -> list[str]:
+        """Get list of AA class names in canonical order."""
+        canonical_order = ["aromatic", "polar", "nonpolar", "charged_positive", "charged_negative"]
+        if not self.aa_class_binding:
+            return []
+        # Get from first polymer type
+        first_poly = next(iter(self.aa_class_binding.values()))
+        names = first_poly.element_names()
+        return [n for n in canonical_order if n in names]
+
+    def user_partition_names(self) -> list[str]:
+        """Get list of user-defined partition names."""
+        return sorted(self.user_defined_partitions.keys())
+
+    def save(self, path: str | Path) -> None:
+        """Save to JSON file."""
+        Path(path).write_text(json.dumps(self.model_dump(), indent=2))
+        logger.info(f"Saved polymer binding preference result to {path}")
+
+    @classmethod
+    def load(cls, path: str | Path) -> "PolymerBindingPreferenceResult":
+        """Load from JSON file."""
+        data = json.loads(Path(path).read_text())
+        return cls.model_validate(data)
+
+
+# =============================================================================
+# Aggregated Partition-Based Binding Preference Models
+# =============================================================================
+
+
+class AggregatedPartitionBindingEntry(BaseModel):
+    """Aggregated binding metrics for one partition element for a specific polymer type.
+
+    Contains mean ± SEM across replicates for binding preference, enabling
+    statistical comparison of binding enrichment across conditions.
+
+    Attributes
+    ----------
+    partition_element : str
+        Element name (e.g., "aromatic", "lid_helix_5", "rest_of_protein")
+    polymer_type : str
+        Polymer type this entry is for (e.g., "SBM", "EGM")
+    mean_contact_share : float
+        Mean contact share across replicates
+    sem_contact_share : float
+        Standard error of contact share
+    mean_enrichment : float | None
+        Mean enrichment across replicates
+    sem_enrichment : float | None
+        Standard error of enrichment
+    per_replicate_enrichments : list[float]
+        Enrichment values from each replicate
+    expected_share : float
+        Expected share based on surface availability
+    n_exposed_in_element : int
+        Surface-exposed residues in this element
+    n_residues_in_element : int
+        Total residues in this element
+    n_replicates : int
+        Number of replicates with valid data
+    """
+
+    partition_element: str
+    polymer_type: str
+    mean_contact_share: float = Field(
+        default=0.0,
+        description="Mean contact share across replicates",
+    )
+    sem_contact_share: float = Field(
+        default=0.0,
+        description="Standard error of contact share",
+    )
+    mean_enrichment: float | None = Field(
+        default=None,
+        description="Mean enrichment across replicates",
+    )
+    sem_enrichment: float | None = Field(
+        default=None,
+        description="Standard error of enrichment",
+    )
+    per_replicate_enrichments: list[float] = Field(
+        default_factory=list,
+        description="Enrichment values from each replicate",
+    )
+    expected_share: float = Field(
+        default=0.0,
+        description="Expected share based on surface availability",
+    )
+    n_exposed_in_element: int = Field(
+        default=0,
+        description="Surface-exposed residues in this element",
+    )
+    n_residues_in_element: int = Field(
+        default=0,
+        description="Total residues in this element",
+    )
+    n_replicates: int = Field(
+        default=0,
+        description="Number of replicates with valid data",
+    )
+
+
+class AggregatedPartitionBindingResult(BaseModel):
+    """Aggregated binding preference for a partition for ONE polymer type.
+
+    Contains aggregated statistics across replicates for all partition elements.
+
+    Attributes
+    ----------
+    partition_name : str
+        Descriptive name (e.g., "aa_class", "lid_helices")
+    partition_type : str
+        One of: "aa_class", "user_defined"
+    polymer_type : str
+        Polymer type this result is for
+    entries : list[AggregatedPartitionBindingEntry]
+        Aggregated binding metrics for each element
+    mean_total_contact_share : float
+        Mean of total_contact_share across replicates (validation: should be ~1.0)
+    n_replicates : int
+        Number of replicates
+    """
+
+    partition_name: str
+    partition_type: Literal["aa_class", "user_defined"]
+    polymer_type: str
+    entries: list[AggregatedPartitionBindingEntry] = Field(default_factory=list)
+    mean_total_contact_share: float = Field(
+        default=1.0,
+        description="Mean sum of contact_share across elements (should be ~1.0)",
+    )
+    n_replicates: int = Field(default=0)
+
+    def enrichment_dict(self) -> dict[str, float]:
+        """Get mean enrichment as dict: {element: mean_enrichment}."""
+        return {
+            e.partition_element: (e.mean_enrichment if e.mean_enrichment is not None else 0.0)
+            for e in self.entries
+        }
+
+    def element_names(self) -> list[str]:
+        """Get list of partition element names."""
+        return [e.partition_element for e in self.entries]
+
+
+class AggregatedPolymerBindingPreferenceResult(BaseModel):
+    """Aggregated per-polymer binding preference across replicates.
+
+    Contains mean ± SEM for all partition-based binding metrics.
+
+    Attributes
+    ----------
+    aa_class_binding : dict[str, AggregatedPartitionBindingResult]
+        Aggregated AA class partition binding for each polymer type.
+    user_defined_partitions : dict[str, dict[str, AggregatedPartitionBindingResult]]
+        Aggregated user-defined partitions for each polymer type.
+    n_replicates : int
+        Number of replicates
+    total_exposed_residues : int
+        Number of surface-exposed protein residues
+    surface_exposure_threshold : float | None
+        SASA threshold used
+    polymer_types : list[str]
+        Polymer types included
+    schema_version : int
+        Schema version
+    """
+
+    aa_class_binding: dict[str, AggregatedPartitionBindingResult] = Field(
+        default_factory=dict,
+        description="Aggregated AA class partition binding for each polymer type",
+    )
+    user_defined_partitions: dict[str, dict[str, AggregatedPartitionBindingResult]] = Field(
+        default_factory=dict,
+        description="Aggregated user-defined partitions for each polymer type",
+    )
+
+    n_replicates: int = 0
+    total_exposed_residues: int = 0
+    surface_exposure_threshold: float | None = None
+    polymer_types: list[str] = Field(default_factory=list)
+    schema_version: int = 5
+
+    def aa_class_enrichment_matrix(self) -> dict[str, dict[str, float]]:
+        """Get AA class enrichments as nested dict: {polymer_type: {aa_class: mean_enrichment}}."""
+        result: dict[str, dict[str, float]] = {}
+        for poly_type, partition_result in self.aa_class_binding.items():
+            result[poly_type] = partition_result.enrichment_dict()
+        return result
+
+    def aa_class_names(self) -> list[str]:
+        """Get list of AA class names in canonical order."""
+        canonical_order = ["aromatic", "polar", "nonpolar", "charged_positive", "charged_negative"]
+        if not self.aa_class_binding:
+            return []
+        first_poly = next(iter(self.aa_class_binding.values()))
+        names = first_poly.element_names()
+        return [n for n in canonical_order if n in names]
+
+    def user_partition_names(self) -> list[str]:
+        """Get list of user-defined partition names."""
+        return sorted(self.user_defined_partitions.keys())
+
+
+def _aggregate_partition_binding(
+    partitions: list[PartitionBindingResult],
+) -> AggregatedPartitionBindingResult:
+    """Aggregate partition binding results across replicates.
+
+    Parameters
+    ----------
+    partitions : list[PartitionBindingResult]
+        Partition binding results from multiple replicates (same polymer type)
+
+    Returns
+    -------
+    AggregatedPartitionBindingResult
+        Aggregated result with mean and SEM
+    """
+    if not partitions:
+        raise ValueError("No partitions to aggregate")
+
+    first = partitions[0]
+    polymer_type = first.polymer_type
+    partition_name = first.partition_name
+    partition_type = first.partition_type
+
+    # Helper function for computing mean and SEM
+    def _compute_stats(values: list[float]) -> tuple[float | None, float | None]:
+        n = len(values)
+        if n == 0:
+            return None, None
+        mean_val = float(np.mean(values))
+        sem_val = float(np.std(values, ddof=1) / np.sqrt(n)) if n > 1 else 0.0
+        return mean_val, sem_val
+
+    # Collect all element names
+    all_elements: set[str] = set()
+    for p in partitions:
+        all_elements.update(p.element_names())
+
+    entries = []
+    for element_name in sorted(all_elements):
+        # Collect values from each replicate
+        contact_shares = []
+        enrichments = []
+
+        for p in partitions:
+            entry = p.get_entry(element_name)
+            if entry:
+                contact_shares.append(entry.contact_share)
+                if entry.enrichment is not None:
+                    enrichments.append(entry.enrichment)
+
+        # Compute statistics
+        mean_contact_share, sem_contact_share = _compute_stats(contact_shares)
+        mean_enrichment, sem_enrichment = _compute_stats(enrichments)
+
+        # Get metadata from first replicate
+        first_entry = first.get_entry(element_name)
+        n_exposed = first_entry.n_exposed_in_element if first_entry else 0
+        n_total = first_entry.n_residues_in_element if first_entry else 0
+        expected_share = first_entry.expected_share if first_entry else 0.0
+
+        entries.append(
+            AggregatedPartitionBindingEntry(
+                partition_element=element_name,
+                polymer_type=polymer_type,
+                mean_contact_share=mean_contact_share if mean_contact_share else 0.0,
+                sem_contact_share=sem_contact_share if sem_contact_share else 0.0,
+                mean_enrichment=mean_enrichment,
+                sem_enrichment=sem_enrichment,
+                per_replicate_enrichments=enrichments,
+                expected_share=expected_share,
+                n_exposed_in_element=n_exposed,
+                n_residues_in_element=n_total,
+                n_replicates=len(enrichments),
+            )
+        )
+
+    # Compute mean total contact share (validation)
+    total_shares = [p.total_contact_share for p in partitions]
+    mean_total_share = float(np.mean(total_shares)) if total_shares else 1.0
+
+    return AggregatedPartitionBindingResult(
+        partition_name=partition_name,
+        partition_type=partition_type,
+        polymer_type=polymer_type,
+        entries=entries,
+        mean_total_contact_share=mean_total_share,
+        n_replicates=len(partitions),
+    )
+
+
+def aggregate_polymer_binding_preference(
+    results: list[PolymerBindingPreferenceResult],
+) -> AggregatedPolymerBindingPreferenceResult:
+    """Aggregate per-polymer binding preference across replicates.
+
+    Parameters
+    ----------
+    results : list[PolymerBindingPreferenceResult]
+        Per-polymer binding preference results from multiple replicates
+
+    Returns
+    -------
+    AggregatedPolymerBindingPreferenceResult
+        Aggregated results with mean and SEM for all partitions
+    """
+    if not results:
+        raise ValueError("No results to aggregate")
+
+    # Collect all polymer types
+    all_polymer_types: set[str] = set()
+    for r in results:
+        all_polymer_types.update(r.polymer_types)
+
+    # Aggregate AA class binding for each polymer type
+    aggregated_aa_class: dict[str, AggregatedPartitionBindingResult] = {}
+    for poly_type in sorted(all_polymer_types):
+        poly_partitions = [
+            r.aa_class_binding[poly_type] for r in results if poly_type in r.aa_class_binding
+        ]
+        if poly_partitions:
+            aggregated_aa_class[poly_type] = _aggregate_partition_binding(poly_partitions)
+
+    # Aggregate user-defined partitions
+    all_partition_names: set[str] = set()
+    for r in results:
+        all_partition_names.update(r.user_defined_partitions.keys())
+
+    aggregated_user_partitions: dict[str, dict[str, AggregatedPartitionBindingResult]] = {}
+    for partition_name in sorted(all_partition_names):
+        aggregated_user_partitions[partition_name] = {}
+        for poly_type in sorted(all_polymer_types):
+            poly_partitions = [
+                r.user_defined_partitions[partition_name][poly_type]
+                for r in results
+                if partition_name in r.user_defined_partitions
+                and poly_type in r.user_defined_partitions[partition_name]
+            ]
+            if poly_partitions:
+                aggregated_user_partitions[partition_name][poly_type] = (
+                    _aggregate_partition_binding(poly_partitions)
+                )
+
+    return AggregatedPolymerBindingPreferenceResult(
+        aa_class_binding=aggregated_aa_class,
+        user_defined_partitions=aggregated_user_partitions,
+        n_replicates=len(results),
+        total_exposed_residues=results[0].total_exposed_residues if results else 0,
+        surface_exposure_threshold=results[0].surface_exposure_threshold if results else None,
+        polymer_types=sorted(all_polymer_types),
+    )
 
 
 # =============================================================================

@@ -1526,11 +1526,238 @@ class ContactsComparator(
     ) -> BindingPreferenceComparisonSummary:
         """Build binding preference comparison summary from per-condition results.
 
+        Supports both old overlapping-groups format (schema v4-) and new
+        partition-based format (schema v5+). When partition-based data is
+        available, extracts from `binding_preference.aa_class_binding`.
+
         Parameters
         ----------
         condition_results : dict
             Mapping of condition_label to binding preference result
             (either BindingPreferenceResult or AggregatedBindingPreferenceResult)
+        surface_threshold : float or None
+            SASA threshold used for surface filtering
+
+        Returns
+        -------
+        BindingPreferenceComparisonSummary
+            Cross-condition comparison summary
+        """
+        from polyzymd.analysis.contacts.binding_preference import (
+            AggregatedBindingPreferenceResult,
+            AggregatedPolymerBindingPreferenceResult,
+            BindingPreferenceResult,
+            PolymerBindingPreferenceResult,
+        )
+
+        # Check if partition-based data is available in any result
+        has_partition_data = any(
+            (isinstance(r, AggregatedBindingPreferenceResult) and r.binding_preference is not None)
+            or (isinstance(r, BindingPreferenceResult) and r.binding_preference is not None)
+            for r in condition_results.values()
+        )
+
+        if has_partition_data:
+            logger.debug("Using partition-based binding preference data (schema v5+)")
+            return self._build_binding_preference_summary_v5(condition_results, surface_threshold)
+
+        # Fall back to old overlapping-groups format
+        logger.debug("Using legacy overlapping-groups binding preference data (schema v4-)")
+        return self._build_binding_preference_summary_legacy(condition_results, surface_threshold)
+
+    def _build_binding_preference_summary_v5(
+        self,
+        condition_results: dict[str, Any],
+        surface_threshold: float | None,
+    ) -> BindingPreferenceComparisonSummary:
+        """Build summary from partition-based binding preference (schema v5+).
+
+        Extracts data from `binding_preference.aa_class_binding` which contains
+        per-polymer enrichments for AA class partitions (aromatic, polar, etc.).
+        contact_share sums to 1.0 within each partition.
+
+        Parameters
+        ----------
+        condition_results : dict
+            Mapping of condition_label to binding preference result
+        surface_threshold : float or None
+            SASA threshold used for surface filtering
+
+        Returns
+        -------
+        BindingPreferenceComparisonSummary
+            Cross-condition comparison summary
+        """
+        from polyzymd.analysis.contacts.binding_preference import (
+            AggregatedBindingPreferenceResult,
+            AggregatedPartitionBindingResult,
+            BindingPreferenceResult,
+            PartitionBindingResult,
+        )
+
+        # Collect all polymer types and AA classes (protein groups) across conditions
+        all_polymer_types: set[str] = set()
+        all_aa_classes: set[str] = set()
+
+        for result in condition_results.values():
+            bp = None
+            if isinstance(result, AggregatedBindingPreferenceResult):
+                bp = result.binding_preference
+            elif isinstance(result, BindingPreferenceResult):
+                bp = result.binding_preference
+
+            if bp is not None:
+                all_polymer_types.update(bp.polymer_types)
+                all_aa_classes.update(bp.aa_class_names())
+
+        polymer_types = sorted(all_polymer_types)
+        # Use canonical AA class order
+        canonical_order = ["aromatic", "polar", "nonpolar", "charged_positive", "charged_negative"]
+        protein_groups = [aa for aa in canonical_order if aa in all_aa_classes]
+        condition_labels = sorted(condition_results.keys())
+
+        # Build comparison entries for each (polymer_type, aa_class) pair
+        entries = []
+        for poly_type in polymer_types:
+            for aa_class in protein_groups:
+                condition_values: dict[str, tuple[float, float]] = {}
+                enrichments_for_ranking: list[tuple[str, float]] = []
+                per_replicate_data: dict[str, list[float]] = {}
+
+                for cond_label, result in condition_results.items():
+                    bp = None
+                    if isinstance(result, AggregatedBindingPreferenceResult):
+                        bp = result.binding_preference
+                    elif isinstance(result, BindingPreferenceResult):
+                        bp = result.binding_preference
+
+                    if bp is None:
+                        continue
+
+                    # Get AA class binding for this polymer type
+                    aa_binding = bp.aa_class_binding.get(poly_type)
+                    if aa_binding is None:
+                        continue
+
+                    # Get entry for this AA class
+                    if isinstance(aa_binding, AggregatedPartitionBindingResult):
+                        # Aggregated result - find entry by element name
+                        entry = None
+                        for e in aa_binding.entries:
+                            if e.partition_element == aa_class:
+                                entry = e
+                                break
+                        if entry is not None:
+                            mean_val = entry.mean_enrichment
+                            sem_val = entry.sem_enrichment
+                            if mean_val is not None:
+                                condition_values[cond_label] = (mean_val, sem_val or 0.0)
+                                enrichments_for_ranking.append((cond_label, mean_val))
+                            if entry.per_replicate_enrichments:
+                                per_replicate_data[cond_label] = entry.per_replicate_enrichments
+
+                    elif isinstance(aa_binding, PartitionBindingResult):
+                        # Single replicate result
+                        entry = aa_binding.get_entry(aa_class)
+                        if entry is not None and entry.enrichment is not None:
+                            condition_values[cond_label] = (entry.enrichment, 0.0)
+                            enrichments_for_ranking.append((cond_label, entry.enrichment))
+
+                # Skip if no data for this pair
+                if not condition_values:
+                    continue
+
+                # Determine highest and lowest enrichment conditions
+                highest_cond = None
+                lowest_cond = None
+                if enrichments_for_ranking:
+                    sorted_by_enrichment = sorted(
+                        enrichments_for_ranking, key=lambda x: x[1], reverse=True
+                    )
+                    highest_cond = sorted_by_enrichment[0][0]
+                    lowest_cond = sorted_by_enrichment[-1][0]
+
+                # Compute pairwise p-values using t-tests on per-replicate enrichments
+                pairwise_p_values = self._compute_binding_pref_pairwise_pvalues_v5(
+                    per_replicate_data
+                )
+
+                entries.append(
+                    BindingPreferenceComparisonEntry(
+                        polymer_type=poly_type,
+                        protein_group=aa_class,
+                        condition_values=condition_values,
+                        pairwise_p_values=pairwise_p_values,
+                        highest_enrichment_condition=highest_cond,
+                        lowest_enrichment_condition=lowest_cond,
+                    )
+                )
+
+        return BindingPreferenceComparisonSummary(
+            entries=entries,
+            polymer_types=polymer_types,
+            protein_groups=protein_groups,
+            n_conditions=len(condition_results),
+            condition_labels=condition_labels,
+            surface_exposure_threshold=surface_threshold,
+        )
+
+    def _compute_binding_pref_pairwise_pvalues_v5(
+        self,
+        per_replicate_data: dict[str, list[float]],
+    ) -> dict[str, float]:
+        """Compute pairwise t-test p-values from per-replicate enrichment data.
+
+        Parameters
+        ----------
+        per_replicate_data : dict[str, list[float]]
+            Mapping of condition_label to list of enrichment values
+
+        Returns
+        -------
+        dict[str, float]
+            Mapping of "condA_vs_condB" to p-value
+        """
+        # Need at least 2 conditions with per-replicate data
+        if len(per_replicate_data) < 2:
+            return {}
+
+        # Compute pairwise t-tests
+        pairwise_p_values: dict[str, float] = {}
+        cond_labels = sorted(per_replicate_data.keys())
+
+        for i, cond_a in enumerate(cond_labels):
+            for cond_b in cond_labels[i + 1 :]:
+                values_a = per_replicate_data[cond_a]
+                values_b = per_replicate_data[cond_b]
+
+                # Need at least 2 values in each group for t-test
+                if len(values_a) < 2 or len(values_b) < 2:
+                    continue
+
+                try:
+                    ttest_result = independent_ttest(values_a, values_b)
+                    key = f"{cond_a}_vs_{cond_b}"
+                    pairwise_p_values[key] = ttest_result.p_value
+                except Exception as e:
+                    logger.warning(f"T-test failed for {cond_a} vs {cond_b}: {e}")
+
+        return pairwise_p_values
+
+    def _build_binding_preference_summary_legacy(
+        self,
+        condition_results: dict[str, Any],
+        surface_threshold: float | None,
+    ) -> BindingPreferenceComparisonSummary:
+        """Build summary from legacy overlapping-groups format (schema v4-).
+
+        This is the original implementation that extracts from `entries` list.
+        Kept for backwards compatibility with older cached results.
+
+        Parameters
+        ----------
+        condition_results : dict
+            Mapping of condition_label to binding preference result
         surface_threshold : float or None
             SASA threshold used for surface filtering
 
