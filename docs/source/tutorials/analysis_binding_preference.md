@@ -400,43 +400,79 @@ project/
             └── binding_preference_aggregated_reps1-3.json  # Aggregated
 ```
 
-### JSON Structure
+### JSON Structure (Schema v5)
+
+Schema version 5 introduced **partition-based binding preference**, where each
+polymer type has its own partition-based enrichment results. This ensures that
+`contact_share` sums to exactly 1.0 within each partition (no overlapping group
+bugs).
 
 ```json
 {
-  "entries": [
-    {
-      "polymer_type": "SBM",
-      "protein_group": "aromatic",
-      "total_contact_frames": 12543,
-      "mean_contact_fraction": 0.45,
-      "n_residues_in_group": 20,
-      "n_exposed_in_group": 7,
-      "n_residues_contacted": 6,
-      "contact_share": 0.164,
-      "expected_share": 0.086,
-      "enrichment": 0.907,
-      "polymer_residue_count": 50,
-      "total_polymer_residues": 100,
-      "polymer_heavy_atom_count": 750,
-      "total_polymer_heavy_atoms": 1150
-    }
-  ],
+  "entries": [/* Legacy entries for backwards compatibility */],
   "polymer_composition": {
     "residue_counts": {"SBM": 50, "EGM": 50},
     "heavy_atom_counts": {"SBM": 750, "EGM": 400}
   },
+  "binding_preference": {
+    "aa_class_binding": {
+      "SBM": {
+        "partition_name": "aa_class",
+        "partition_type": "aa_class",
+        "polymer_type": "SBM",
+        "entries": [
+          {
+            "partition_element": "aromatic",
+            "polymer_type": "SBM",
+            "total_contact_frames": 12543,
+            "contact_share": 0.164,
+            "expected_share": 0.086,
+            "enrichment": 0.907,
+            "n_exposed_in_element": 7,
+            "n_residues_in_element": 20,
+            "n_residues_contacted": 6
+          },
+          {"partition_element": "polar", /* ... */},
+          {"partition_element": "nonpolar", /* ... */},
+          {"partition_element": "charged_positive", /* ... */},
+          {"partition_element": "charged_negative", /* ... */}
+        ],
+        "total_contact_share": 1.0,
+        "total_expected_share": 1.0
+      },
+      "EGM": {/* same structure for EGM */}
+    },
+    "user_defined_partitions": {
+      "lid_helices": {
+        "SBM": {/* PartitionBindingResult */},
+        "EGM": {/* PartitionBindingResult */}
+      }
+    },
+    "n_frames": 10000,
+    "total_exposed_residues": 81,
+    "surface_exposure_threshold": 0.2,
+    "polymer_types": ["SBM", "EGM"],
+    "schema_version": 5
+  },
+  "system_coverage": {/* SystemCoverageResult */},
   "n_frames": 10000,
   "total_exposed_residues": 81,
   "surface_exposure_threshold": 0.2,
-  "schema_version": 3
+  "schema_version": 5
 }
 ```
 
+```{important}
+**Schema v5 guarantees**: Within each partition (e.g., `aa_class`), the
+`contact_share` values sum to exactly 1.0 for each polymer type. This
+eliminates the overlapping-groups bug present in earlier versions where
+residues could be counted in multiple groups.
+```
+
 ```{note}
-Schema version 3 uses **surface-availability normalization** for enrichment.
-Polymer composition (residue/atom counts) is stored as metadata for secondary
-analysis but is not used in the enrichment calculation.
+The legacy `entries` field is retained for backwards compatibility with
+visualization tools. For programmatic access, use the `binding_preference`
+field with its partition-based structure.
 ```
 
 ## Statistical Treatment
@@ -658,23 +694,25 @@ Both metrics are **automatically computed** when you enable binding preference.
 System coverage is stored in `result.system_coverage`.
 ```
 
-### Partition-Based Architecture (Schema v2)
+### Partition-Based Architecture
 
-System coverage uses a **partition-based architecture** that ensures mathematically
-correct enrichment calculations. Each partition is a collection of **mutually
-exclusive** protein groups that together cover the protein surface.
+Both **binding preference** (schema v5) and **system coverage** (schema v2) use
+a **partition-based architecture** that ensures mathematically correct enrichment
+calculations. Each partition is a collection of **mutually exclusive** protein
+groups that together cover the protein surface.
 
 ```{important}
 **Why Partitions Must Be Mutually Exclusive**
 
-The enrichment formula requires that both `coverage_share` and `expected_share`
+The enrichment formula requires that both `contact_share` and `expected_share`
 sum to exactly 1.0 across all groups in a partition:
 
-$$\sum_{\text{groups}} \text{coverage\_share}_i = 1.0$$
+$$\sum_{\text{groups}} \text{contact\_share}_i = 1.0$$
 $$\sum_{\text{groups}} \text{expected\_share}_i = 1.0$$
 
 If groups **overlap** (share residues), the `expected_share` sum exceeds 1.0,
-causing systematically negative enrichments—a subtle but serious bug.
+causing systematically negative enrichments—a subtle but serious bug that was
+fixed in schema v5.
 ```
 
 #### Built-in Partitions
@@ -798,14 +836,43 @@ if result.system_coverage:
 ```
 ````
 
-````{tab-item} JSON Structure (Schema v2)
-System coverage uses a partition-based JSON structure:
+````{tab-item} JSON Structure (Schema v5)
+The full result uses schema v5 with both `binding_preference` (per-polymer)
+and `system_coverage` (aggregate) fields:
 
 ```javascript
 // Note: ... indicates additional fields omitted for brevity
 {
-  "entries": [/* binding preference entries */],
+  "entries": [/* Legacy binding preference entries */],
   "polymer_composition": {/* polymer counts */},
+  "binding_preference": {
+    "aa_class_binding": {
+      "SBM": {
+        "partition_name": "aa_class",
+        "polymer_type": "SBM",
+        "entries": [
+          {
+            "partition_element": "aromatic",
+            "polymer_type": "SBM",
+            "total_contact_frames": 12543,
+            "contact_share": 0.164,
+            "expected_share": 0.086,
+            "enrichment": 0.907,
+            "n_exposed_in_element": 7,
+            "n_residues_in_element": 20,
+            "n_residues_contacted": 6
+          },
+          /* ... other AA classes ... */
+        ],
+        "total_contact_share": 1.0,
+        "total_expected_share": 1.0
+      },
+      "EGM": {/* same structure */}
+    },
+    "user_defined_partitions": {/* optional user partitions per polymer */},
+    "polymer_types": ["SBM", "EGM"],
+    "schema_version": 5
+  },
   "system_coverage": {
     "aa_class_coverage": {
       "partition_name": "aa_class",
@@ -851,8 +918,14 @@ System coverage uses a partition-based JSON structure:
     "polymer_types_included": ["SBM", "EGM"],
     "schema_version": 2
   },
-  "schema_version": 4
+  "schema_version": 5
 }
+```
+
+```{note}
+The outer `schema_version: 5` indicates the BindingPreferenceResult format.
+The inner `system_coverage.schema_version: 2` indicates the SystemCoverageResult
+format (unchanged from previous versions).
 ```
 ````
 `````
