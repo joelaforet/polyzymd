@@ -470,20 +470,14 @@ class BindingPreferenceResult(BaseModel):
 
     def polymer_types(self) -> list[str]:
         """Get list of polymer types in this result."""
-        return sorted(set(e.polymer_type for e in self.entries))
+        return sorted({e.polymer_type for e in self.entries})
 
     def protein_groups(self) -> list[str]:
         """Get list of protein groups in this result."""
-        return sorted(set(e.protein_group for e in self.entries))
+        return sorted({e.protein_group for e in self.entries})
 
     def save(self, path: str | Path) -> None:
-        """Save to JSON file.
-
-        Parameters
-        ----------
-        path : str or Path
-            Output path for JSON file
-        """
+        """Save to JSON file."""
         Path(path).write_text(json.dumps(self.model_dump(), indent=2))
         logger.info(f"Saved binding preference result to {path}")
 
@@ -734,7 +728,7 @@ def _compute_system_coverage(
     from polyzymd.analysis.common.aa_classification import DEFAULT_AA_CLASS_SELECTIONS
 
     # Collect all polymer types
-    all_polymer_types = sorted(set(e.polymer_type for e in entries))
+    all_polymer_types = sorted({e.polymer_type for e in entries})
 
     # Separate AA class groups from custom groups
     aa_class_names = set(DEFAULT_AA_CLASS_SELECTIONS.keys())
@@ -1425,7 +1419,9 @@ def aggregate_binding_preference(
     if len(system_coverages) == len(results) and len(system_coverages) > 0:
         aggregated_system_coverage = aggregate_system_coverage(system_coverages)
         logger.debug(
-            f"Aggregated system coverage: {len(aggregated_system_coverage.entries)} groups "
+            f"Aggregated system coverage: "
+            f"{len(aggregated_system_coverage.aa_class_coverage.entries)} AA classes, "
+            f"{len(aggregated_system_coverage.custom_group_coverages)} custom groups "
             f"from {len(system_coverages)} replicates"
         )
 
@@ -1581,11 +1577,11 @@ class AggregatedBindingPreferenceResult(BaseModel):
 
     def polymer_types(self) -> list[str]:
         """Get list of polymer types."""
-        return sorted(set(e.polymer_type for e in self.entries))
+        return sorted({e.polymer_type for e in self.entries})
 
     def protein_groups(self) -> list[str]:
         """Get list of protein groups."""
-        return sorted(set(e.protein_group for e in self.entries))
+        return sorted({e.protein_group for e in self.entries})
 
     def save(self, path: str | Path) -> None:
         """Save to JSON file."""
