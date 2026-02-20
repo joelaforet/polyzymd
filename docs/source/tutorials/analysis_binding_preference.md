@@ -801,10 +801,11 @@ if result.system_coverage:
 ````{tab-item} JSON Structure (Schema v2)
 System coverage uses a partition-based JSON structure:
 
-```json
+```javascript
+// Note: ... indicates additional fields omitted for brevity
 {
-  "entries": [...],
-  "polymer_composition": {...},
+  "entries": [/* binding preference entries */],
+  "polymer_composition": {/* polymer counts */},
   "system_coverage": {
     "aa_class_coverage": {
       "partition_name": "aa_class",
@@ -819,18 +820,18 @@ System coverage uses a partition-based JSON structure:
           "n_residues_in_group": 20,
           "polymer_contributions": {"SBM": 0.45, "EGM": 0.55}
         },
-        {"partition_element": "polar", ...},
-        {"partition_element": "nonpolar", ...},
-        {"partition_element": "charged_positive", ...},
-        {"partition_element": "charged_negative", ...}
+        {"partition_element": "polar", /* ... */},
+        {"partition_element": "nonpolar", /* ... */},
+        {"partition_element": "charged_positive", /* ... */},
+        {"partition_element": "charged_negative", /* ... */}
       ]
     },
     "custom_group_coverages": {
       "lid_helix_5": {
         "partition_name": "lid_helix_5_vs_rest",
         "entries": [
-          {"partition_element": "lid_helix_5", ...},
-          {"partition_element": "rest_of_protein", ...}
+          {"partition_element": "lid_helix_5", /* ... */},
+          {"partition_element": "rest_of_protein", /* ... */}
         ]
       }
     },
@@ -838,9 +839,9 @@ System coverage uses a partition-based JSON structure:
       "lid_helices": {
         "partition_name": "lid_helices",
         "entries": [
-          {"partition_element": "lid_helix_5", ...},
-          {"partition_element": "lid_helix_10", ...},
-          {"partition_element": "rest_of_protein", ...}
+          {"partition_element": "lid_helix_5", /* ... */},
+          {"partition_element": "lid_helix_10", /* ... */},
+          {"partition_element": "rest_of_protein", /* ... */}
         ]
       }
     },

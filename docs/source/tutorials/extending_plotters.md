@@ -137,8 +137,8 @@ data = {
 
 ### Correct Pattern: Load From Filesystem
 
-````{tab-set}
-```{tab-item} Correct ✓
+`````{tab-set}
+````{tab-item} Correct ✓
 :sync: correct
 
 ```python
@@ -150,9 +150,9 @@ def plot(self, data, labels, output_dir, **kwargs):
         result = MyAggregatedResult.load(result_file)
         # ... use result for plotting ...
 ```
-```
+````
 
-```{tab-item} Incorrect ✗
+````{tab-item} Incorrect ✗
 :sync: incorrect
 
 ```python
@@ -162,8 +162,8 @@ def plot(self, data, labels, output_dir, **kwargs):
     if comparison_result is None:
         return []  # Always returns empty!
 ```
-```
 ````
+`````
 
 ## Step-by-Step Guide
 
