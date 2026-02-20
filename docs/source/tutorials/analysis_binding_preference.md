@@ -658,6 +658,111 @@ Both metrics are **automatically computed** when you enable binding preference.
 System coverage is stored in `result.system_coverage`.
 ```
 
+### Partition-Based Architecture (Schema v2)
+
+System coverage uses a **partition-based architecture** that ensures mathematically
+correct enrichment calculations. Each partition is a collection of **mutually
+exclusive** protein groups that together cover the protein surface.
+
+```{important}
+**Why Partitions Must Be Mutually Exclusive**
+
+The enrichment formula requires that both `coverage_share` and `expected_share`
+sum to exactly 1.0 across all groups in a partition:
+
+$$\sum_{\text{groups}} \text{coverage\_share}_i = 1.0$$
+$$\sum_{\text{groups}} \text{expected\_share}_i = 1.0$$
+
+If groups **overlap** (share residues), the `expected_share` sum exceeds 1.0,
+causing systematically negative enrichments—a subtle but serious bug.
+```
+
+#### Built-in Partitions
+
+System coverage automatically computes several partition types:
+
+| Partition | Groups | Description |
+|-----------|--------|-------------|
+| **AA Class** | aromatic, polar, nonpolar, charged_positive, charged_negative | 5-way classification by amino acid chemistry |
+| **Custom Binary** | {custom_group, rest_of_protein} | One partition per custom group in `protein_groups` |
+| **Combined Custom** | {all custom groups, rest_of_protein} | Only if custom groups don't overlap |
+| **User-Defined** | User-specified groups from `protein_partitions` | Configurable via YAML |
+
+### User-Defined Partitions
+
+For specialized analyses, you can define custom partitions that organize protein
+regions into mutually exclusive groups:
+
+`````{tab-set}
+````{tab-item} YAML
+```yaml
+# comparison.yaml
+analysis_settings:
+  contacts:
+    # First, define individual protein groups (can overlap)
+    protein_groups:
+      lid_helix_5: "resid 141:155"
+      lid_helix_10: "resid 281:295"
+      catalytic_triad: "resid 131 163 194"
+      active_site_loop: "resid 75:85"
+      
+    # Then, define partitions (must be mutually exclusive within each partition)
+    protein_partitions:
+      lid_helices:
+        - lid_helix_5
+        - lid_helix_10
+      catalytic_regions:
+        - catalytic_triad
+        - active_site_loop
+```
+````
+
+````{tab-item} Python
+```python
+from polyzymd.compare.settings import ContactsAnalysisSettings
+
+settings = ContactsAnalysisSettings(
+    protein_groups={
+        "lid_helix_5": "resid 141:155",
+        "lid_helix_10": "resid 281:295",
+        "catalytic_triad": "resid 131 163 194",
+        "active_site_loop": "resid 75:85",
+    },
+    protein_partitions={
+        "lid_helices": ["lid_helix_5", "lid_helix_10"],
+        "catalytic_regions": ["catalytic_triad", "active_site_loop"],
+    },
+)
+```
+````
+`````
+
+```{note}
+**Automatic `rest_of_protein`**: If your partition groups don't cover all
+exposed protein residues, a `rest_of_protein` element is automatically added
+to ensure the partition sums to 1.0.
+```
+
+#### Validation at Config Load Time
+
+PolyzyMD validates partition definitions when the config is loaded, **failing
+fast** with a clear error if groups overlap:
+
+```python
+# This will raise ValidationError at load time:
+protein_partitions:
+  bad_partition:
+    - lid_helix_5           # resid 141:155
+    - lid_domain_combined   # resid 130:160 — overlaps with lid_helix_5!
+```
+
+Error message:
+```
+ValidationError: Partition 'bad_partition' has overlapping groups: 
+lid_helix_5 and lid_domain_combined share residues {141, 142, ..., 155}.
+Partitions must contain mutually exclusive groups.
+```
+
 ### Accessing System Coverage
 
 `````{tab-set}
@@ -672,48 +777,78 @@ result = BindingPreferenceResult.load("binding_preference_rep1.json")
 if result.system_coverage:
     coverage = result.system_coverage
     
-    # Get coverage enrichment for each protein group
-    print("System Coverage Enrichment:")
-    for entry in coverage.entries:
-        marker = "+" if entry.coverage_enrichment > 0 else "-"
-        print(f"  {entry.protein_group}: {entry.coverage_enrichment:+.2f} {marker}")
+    # Get AA class coverage enrichment
+    print("AA Class Coverage Enrichment:")
+    for entry in coverage.aa_class_coverage.entries:
+        print(f"  {entry.partition_element}: {entry.coverage_enrichment:+.2f}")
     
-    # See which polymers contributed to each group
-    entry = coverage.get_entry("aromatic")
-    print(f"\nContributions to aromatic coverage:")
-    for polymer, contrib in entry.polymer_contributions.items():
-        print(f"  {polymer}: {contrib:.1%}")
+    # Get custom group enrichment (vs rest_of_protein)
+    print("\nCustom Group Coverage:")
+    for group_name in coverage.custom_group_names():
+        enrichment = coverage.get_custom_group_enrichment(group_name)
+        print(f"  {group_name}: {enrichment:+.2f}")
+    
+    # Access user-defined partitions
+    print("\nUser-Defined Partitions:")
+    for partition_name in coverage.user_partition_names():
+        partition = coverage.get_user_partition(partition_name)
+        print(f"  {partition_name}:")
+        for entry in partition.entries:
+            print(f"    {entry.partition_element}: {entry.coverage_enrichment:+.2f}")
 ```
 ````
 
-````{tab-item} JSON Structure
-System coverage is nested within the binding preference JSON:
+````{tab-item} JSON Structure (Schema v2)
+System coverage uses a partition-based JSON structure:
 
 ```json
 {
   "entries": [...],
   "polymer_composition": {...},
   "system_coverage": {
-    "entries": [
-      {
-        "protein_group": "aromatic",
-        "total_contact_frames": 25432,
-        "coverage_share": 0.164,
-        "expected_share": 0.086,
-        "coverage_enrichment": 0.907,
-        "n_exposed_in_group": 7,
-        "n_residues_in_group": 20,
-        "polymer_contributions": {
-          "SBM": 0.45,
-          "EGM": 0.55
-        }
+    "aa_class_coverage": {
+      "partition_name": "aa_class",
+      "entries": [
+        {
+          "partition_element": "aromatic",
+          "total_contact_frames": 25432,
+          "coverage_share": 0.164,
+          "expected_share": 0.086,
+          "coverage_enrichment": 0.907,
+          "n_exposed_in_group": 7,
+          "n_residues_in_group": 20,
+          "polymer_contributions": {"SBM": 0.45, "EGM": 0.55}
+        },
+        {"partition_element": "polar", ...},
+        {"partition_element": "nonpolar", ...},
+        {"partition_element": "charged_positive", ...},
+        {"partition_element": "charged_negative", ...}
+      ]
+    },
+    "custom_group_coverages": {
+      "lid_helix_5": {
+        "partition_name": "lid_helix_5_vs_rest",
+        "entries": [
+          {"partition_element": "lid_helix_5", ...},
+          {"partition_element": "rest_of_protein", ...}
+        ]
       }
-    ],
+    },
+    "user_defined_partitions": {
+      "lid_helices": {
+        "partition_name": "lid_helices",
+        "entries": [
+          {"partition_element": "lid_helix_5", ...},
+          {"partition_element": "lid_helix_10", ...},
+          {"partition_element": "rest_of_protein", ...}
+        ]
+      }
+    },
     "n_frames": 10000,
     "total_contact_frames": 154892,
     "total_exposed_residues": 81,
     "polymer_types_included": ["SBM", "EGM"],
-    "schema_version": 1
+    "schema_version": 2
   },
   "schema_version": 4
 }
@@ -753,29 +888,38 @@ aggregated = aggregate_binding_preference([result1, result2, result3])
 
 # Access aggregated system coverage
 if aggregated.system_coverage:
-    for entry in aggregated.system_coverage.entries:
-        print(f"{entry.protein_group}:")
-        print(f"  Mean coverage enrichment: {entry.mean_coverage_enrichment:+.2f}")
+    # AA class coverage with statistics
+    for entry in aggregated.system_coverage.aa_class_coverage.entries:
+        print(f"{entry.partition_element}:")
+        print(f"  Mean enrichment: {entry.mean_coverage_enrichment:+.2f}")
         print(f"  SEM: ±{entry.sem_coverage_enrichment:.2f}")
         print(f"  Replicates: {entry.n_replicates}")
+    
+    # User-defined partitions with statistics
+    for partition_name in aggregated.system_coverage.user_partition_names():
+        partition = aggregated.system_coverage.get_user_partition(partition_name)
+        print(f"\n{partition_name}:")
+        for entry in partition.entries:
+            print(f"  {entry.partition_element}: {entry.mean_coverage_enrichment:+.2f} ± {entry.sem_coverage_enrichment:.2f}")
 ```
 
 ### SystemCoverageResult Methods
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `coverage_enrichment_dict()` | `dict[str, float]` | {group: enrichment} mapping |
-| `coverage_share_dict()` | `dict[str, float]` | {group: share} mapping |
-| `get_entry(group)` | `SystemCoverageEntry` | Full entry for a group |
-| `protein_groups()` | `list[str]` | List of protein groups |
-| `to_dataframe()` | `pd.DataFrame` | Convert to pandas |
+| `aa_class_enrichment_dict()` | `dict[str, float]` | {aa_class: enrichment} mapping |
+| `get_aa_class_enrichment(cls)` | `float` | Enrichment for specific AA class |
+| `get_custom_group_enrichment(name)` | `float` | Enrichment for custom group |
+| `custom_group_names()` | `list[str]` | List of custom group names |
+| `user_partition_names()` | `list[str]` | List of user-defined partition names |
+| `get_user_partition(name)` | `PartitionCoverageResult` | Get user-defined partition |
 | `save(path)` / `load(path)` | | JSON serialization |
 
-### SystemCoverageEntry Fields
+### PartitionCoverageEntry Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `protein_group` | str | Protein group label |
+| `partition_element` | str | Group name within the partition |
 | `total_contact_frames` | int | Sum of ALL polymer contacts to group |
 | `coverage_share` | float | Fraction of all contacts to this group |
 | `expected_share` | float | Expected share (surface availability) |
@@ -783,6 +927,42 @@ if aggregated.system_coverage:
 | `n_exposed_in_group` | int | Surface-exposed residues in group |
 | `n_residues_in_group` | int | Total residues in group |
 | `polymer_contributions` | dict[str, float] | Fraction from each polymer type |
+
+### Why Overlapping Groups Cause Bugs
+
+Understanding why partitions must be mutually exclusive helps avoid subtle errors:
+
+```{admonition} Worked Example: The Overlap Bug
+:class: warning
+
+**Setup**: Consider two groups that overlap:
+- `lid_helix_5`: residues {141, 142, 143, 144, 145}
+- `lid_domain`: residues {140, 141, 142, 143, 144, 145, 146, 147}
+
+**Expected shares** (if treated as a "partition"):
+- `lid_helix_5`: 5 exposed residues → expected_share = 5/100 = 0.05
+- `lid_domain`: 8 exposed residues → expected_share = 8/100 = 0.08
+- **Sum: 0.13** (should be 1.0!)
+
+The 5 overlapping residues are **double-counted** in expected_share.
+
+**Coverage shares** (actual contacts):
+- `lid_helix_5`: 1000 contact-frames → coverage_share = 1000/20000 = 0.05
+- `lid_domain`: 1600 contact-frames → coverage_share = 1600/20000 = 0.08
+- **Sum: 0.13** (contacts aren't double-counted if we sum over groups)
+
+Wait—but contacts **are** double-counted! Those 5 overlapping residues contribute
+to **both** groups. So coverage_share also sums to >1.0? No—the denominator
+(total contacts) is shared, making coverage_shares additive only if groups
+don't overlap.
+
+**Result**: enrichment = (0.05 / 0.05) - 1 = 0, but the "expected" baseline
+is wrong because the partition doesn't sum to 1.0. Comparisons between groups
+become meaningless.
+
+**Solution**: Use mutually exclusive partitions. PolyzyMD validates this at
+config load time.
+```
 
 ## Visualization
 
@@ -798,6 +978,7 @@ enabled by default but can be controlled via `plot_settings`.
 | **Binding Preference Bars** | Grouped bars per polymer type, comparing conditions | `generate_enrichment_bars` |
 | **System Coverage Heatmap** | Aggregate coverage by protein group across conditions | `generate_system_coverage_heatmap` |
 | **System Coverage Bars** | Grouped bars showing aggregate coverage across conditions | `generate_system_coverage_bars` |
+| **User Partition Bars** | One grouped bar chart per user-defined partition | `generate_user_partition_bars` |
 
 ### Configuring Plot Settings
 
@@ -819,12 +1000,17 @@ plot_settings:
     enrichment_colormap: "RdBu_r"  # Diverging colormap
     show_enrichment_error: true
     
-    # System coverage plots
+    # System coverage plots (AA class partition)
     generate_system_coverage_heatmap: true
     generate_system_coverage_bars: true
     figsize_system_coverage_heatmap: [10, 6]  # Auto-calculated if null
     figsize_system_coverage_bars: [10, 6]
     show_system_coverage_error: true
+    
+    # User-defined partition plots
+    generate_user_partition_bars: true
+    figsize_user_partition_bars: [10, 6]
+    show_user_partition_error: true
 ```
 ````
 
@@ -842,6 +1028,9 @@ plot_settings = PlotSettings(
         enrichment_colormap="RdBu_r",
         show_enrichment_error=True,
         show_system_coverage_error=True,
+        # User partition plots
+        generate_user_partition_bars=True,
+        show_user_partition_error=True,
     ),
 )
 ```
@@ -875,9 +1064,15 @@ plot_settings = PlotSettings(
 
 **System Coverage Bars:**
 - Single plot comparing all conditions
-- Groups: Protein groups
+- Groups: AA class groups (aromatic, polar, etc.)
 - Bars within group: One per condition
 - Shows how different copolymer compositions collectively cover each protein group
+
+**User Partition Bars:**
+- One plot per user-defined partition
+- Groups: Partition elements (e.g., lid_helix_5, lid_helix_10, rest_of_protein)
+- Bars within group: One per condition
+- Useful for comparing coverage of specific structural regions across conditions
 
 ### Disabling Specific Plots
 
@@ -891,6 +1086,7 @@ plot_settings:
     generate_system_coverage_heatmap: false
     generate_enrichment_bars: true
     generate_system_coverage_bars: true
+    generate_user_partition_bars: true  # Enable user partition plots
 ```
 
 ## Troubleshooting

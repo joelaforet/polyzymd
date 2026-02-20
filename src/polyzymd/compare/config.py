@@ -826,7 +826,20 @@ analysis_settings:
   #   # Custom protein groups (residue IDs from your enzyme):
   #   # protein_groups:
   #   #   catalytic_triad: [77, 133, 156]
-  #   #   lid_domain: [141, 142, 143, 144, 145]
+  #   #   lid_helix_5: [141, 142, 143, 144, 145]
+  #   #   lid_helix_10: [281, 282, 283, 284, 285]
+  #   #
+  #   # User-defined partitions for system coverage plots
+  #   # -------------------------------------------------
+  #   # Groups within a partition MUST be mutually exclusive (no overlapping
+  #   # residues). A "rest_of_protein" element is automatically added if the
+  #   # groups don't cover all surface-exposed residues. One plot is generated
+  #   # per partition.
+  #   #
+  #   # protein_partitions:
+  #   #   lid_helices:          # partition name (becomes plot title)
+  #   #     - lid_helix_5       # must be defined in protein_groups above
+  #   #     - lid_helix_10
 
 # ============================================================================
 # Comparison Settings (HOW to compare - statistical parameters)
