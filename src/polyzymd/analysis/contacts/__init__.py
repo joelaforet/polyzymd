@@ -111,10 +111,13 @@ References
 from polyzymd.analysis.contacts.binding_preference import (
     AggregatedBindingPreferenceEntry,
     AggregatedBindingPreferenceResult,
-    AggregatedSystemCoverageEntry,
+    AggregatedPartitionCoverageEntry,
+    AggregatedPartitionCoverageResult,
     AggregatedSystemCoverageResult,
     BindingPreferenceEntry,
     BindingPreferenceResult,
+    PartitionCoverageEntry,
+    PartitionCoverageResult,
     SystemCoverageEntry,
     SystemCoverageResult,
     aggregate_binding_preference,
@@ -172,10 +175,13 @@ __all__ = [
     "resolve_protein_group_selections",
     "resolve_polymer_type_selections",
     "compute_binding_preference_from_config",
-    # System Coverage
+    # System Coverage (Partition-based, v2)
     "SystemCoverageEntry",
     "SystemCoverageResult",
-    "AggregatedSystemCoverageEntry",
+    "PartitionCoverageEntry",
+    "PartitionCoverageResult",
+    "AggregatedPartitionCoverageEntry",
+    "AggregatedPartitionCoverageResult",
     "AggregatedSystemCoverageResult",
     "aggregate_system_coverage",
 ]

@@ -588,16 +588,15 @@ class BindingPreferenceBarPlotter(BasePlotter):
 
 @PlotterRegistry.register("system_coverage_heatmap")
 class SystemCoverageHeatmapPlotter(BasePlotter):
-    """Generate heatmap of system coverage enrichment across conditions.
+    """Generate heatmap of AA class coverage enrichment across conditions.
 
     Creates a figure showing coverage enrichment as a heatmap with:
-    - Rows: Protein groups (e.g., aromatic, polar, charged)
+    - Rows: AA class groups (aromatic, polar, nonpolar, charged_+, charged_-)
     - Columns: Conditions (e.g., 100% SBMA, 50/50 copolymer)
 
-    Unlike binding preference (which has one entry per polymer type × protein group),
-    system coverage collapses across all polymer types to show aggregate coverage.
-    This allows direct comparison of how different copolymer compositions collectively
-    cover the protein surface.
+    This plotter uses the partition-based system coverage (schema v2), which
+    ensures mathematically valid enrichment calculations by using mutually
+    exclusive AA class groups that sum to 1.0 for both observed and expected.
 
     The heatmap uses a diverging colormap centered at 0.0 (neutral enrichment),
     with values > 0 (preferential coverage) shown in warm colors and
@@ -607,7 +606,7 @@ class SystemCoverageHeatmapPlotter(BasePlotter):
     ------------
     This plotter loads `AggregatedBindingPreferenceResult` from each condition's
     `analysis_dir`, looking for files matching `binding_preference_aggregated*.json`,
-    then extracts the `system_coverage` field.
+    then extracts the `system_coverage.aa_class_coverage` field.
     """
 
     @classmethod
@@ -632,11 +631,11 @@ class SystemCoverageHeatmapPlotter(BasePlotter):
         output_dir: Path,
         **kwargs,
     ) -> list[Path]:
-        """Generate system coverage heatmap comparing conditions.
+        """Generate AA class coverage heatmap comparing conditions.
 
         Loads aggregated binding preference results from each condition's
-        `analysis_dir`, extracts system coverage, and creates a heatmap showing
-        coverage enrichment for each protein group across conditions.
+        `analysis_dir`, extracts AA class coverage partition, and creates a
+        heatmap showing coverage enrichment for each AA class across conditions.
 
         Parameters
         ----------
@@ -667,15 +666,12 @@ class SystemCoverageHeatmapPlotter(BasePlotter):
             logger.info("No system coverage data found - skipping heatmap")
             return []
 
-        # Get common protein groups across all conditions
-        all_protein_groups: set[str] = set()
-        for result in coverage_results.values():
-            all_protein_groups.update(result.protein_groups())
+        # Get AA class names (canonical order)
+        first_result = next(iter(coverage_results.values()))
+        aa_classes = first_result.aa_class_names()
 
-        protein_groups = sorted(all_protein_groups)
-
-        if not protein_groups:
-            logger.warning("No protein groups found - skipping heatmap")
+        if not aa_classes:
+            logger.warning("No AA classes found - skipping heatmap")
             return []
 
         # Filter to conditions with data
@@ -684,21 +680,21 @@ class SystemCoverageHeatmapPlotter(BasePlotter):
             return []
 
         n_conditions = len(valid_labels)
-        n_groups = len(protein_groups)
+        n_groups = len(aa_classes)
 
-        # Create heatmap: rows = protein groups, columns = conditions
+        # Create heatmap: rows = AA classes, columns = conditions
         figsize = self.settings.contacts.figsize_system_coverage_heatmap or (
             max(6, 1.5 * n_conditions),
             max(4, 0.5 * n_groups + 2),
         )
         fig, ax = plt.subplots(figsize=figsize, dpi=self.settings.dpi)
 
-        # Build matrix: rows = protein groups, columns = conditions
+        # Build matrix: rows = AA classes, columns = conditions
         matrix = np.zeros((n_groups, n_conditions))
         for col_idx, cond_label in enumerate(valid_labels):
             result = coverage_results[cond_label]
-            for row_idx, prot_group in enumerate(protein_groups):
-                entry = result.get_entry(prot_group)
+            for row_idx, aa_class in enumerate(aa_classes):
+                entry = result.aa_class_coverage.get_entry(aa_class)
                 if entry and entry.mean_coverage_enrichment is not None:
                     matrix[row_idx, col_idx] = entry.mean_coverage_enrichment
                 else:
@@ -746,10 +742,10 @@ class SystemCoverageHeatmapPlotter(BasePlotter):
         ax.set_xticks(range(n_conditions))
         ax.set_xticklabels(valid_labels, rotation=45, ha="right")
         ax.set_yticks(range(n_groups))
-        ax.set_yticklabels(protein_groups)
+        ax.set_yticklabels(aa_classes)
         ax.set_xlabel("Condition")
-        ax.set_ylabel("Protein Group")
-        ax.set_title("System Coverage Enrichment", fontweight="bold")
+        ax.set_ylabel("Amino Acid Class")
+        ax.set_title("AA Class Coverage Enrichment", fontweight="bold")
 
         # Add colorbar
         cbar = fig.colorbar(im, ax=ax, shrink=0.8)
@@ -825,22 +821,23 @@ class SystemCoverageHeatmapPlotter(BasePlotter):
 
 @PlotterRegistry.register("system_coverage_bars")
 class SystemCoverageBarPlotter(BasePlotter):
-    """Generate grouped bar chart of system coverage enrichment.
+    """Generate grouped bar chart of AA class coverage enrichment.
 
     Creates a figure showing coverage enrichment as grouped bars with:
-    - Groups: Protein groups (e.g., aromatic, polar, charged)
+    - Groups: AA classes (aromatic, polar, nonpolar, charged_+, charged_-)
     - Bars within group: One per condition
     - Error bars: SEM across replicates
     - Reference line at 0.0 (neutral enrichment)
 
-    Unlike binding preference (which creates one plot per polymer type),
-    system coverage creates a single plot showing aggregate coverage.
+    This plotter uses the partition-based system coverage (schema v2), which
+    ensures mathematically valid enrichment calculations by using mutually
+    exclusive AA class groups.
 
     Data Loading
     ------------
     This plotter loads `AggregatedBindingPreferenceResult` from each condition's
     `analysis_dir`, looking for files matching `binding_preference_aggregated*.json`,
-    then extracts the `system_coverage` field.
+    then extracts the `system_coverage.aa_class_coverage` field.
     """
 
     @classmethod
@@ -865,11 +862,12 @@ class SystemCoverageBarPlotter(BasePlotter):
         output_dir: Path,
         **kwargs,
     ) -> list[Path]:
-        """Generate system coverage bar chart comparing conditions.
+        """Generate AA class coverage bar chart comparing conditions.
 
         Loads aggregated binding preference results from each condition's
-        `analysis_dir`, extracts system coverage, and creates a grouped bar
-        chart showing coverage enrichment for each protein group across conditions.
+        `analysis_dir`, extracts AA class coverage partition, and creates a
+        grouped bar chart showing coverage enrichment for each AA class across
+        conditions.
 
         Parameters
         ----------
@@ -900,15 +898,12 @@ class SystemCoverageBarPlotter(BasePlotter):
             logger.info("No system coverage data found - skipping bar chart")
             return []
 
-        # Get common protein groups across all conditions
-        all_protein_groups: set[str] = set()
-        for result in coverage_results.values():
-            all_protein_groups.update(result.protein_groups())
+        # Get AA class names (canonical order)
+        first_result = next(iter(coverage_results.values()))
+        aa_classes = first_result.aa_class_names()
 
-        protein_groups = sorted(all_protein_groups)
-
-        if not protein_groups:
-            logger.warning("No protein groups found - skipping bar chart")
+        if not aa_classes:
+            logger.warning("No AA classes found - skipping bar chart")
             return []
 
         # Filter to conditions with data
@@ -922,7 +917,7 @@ class SystemCoverageBarPlotter(BasePlotter):
             dpi=self.settings.dpi,
         )
 
-        n_groups = len(protein_groups)
+        n_groups = len(aa_classes)
         n_conditions = len(valid_labels)
         bar_width = 0.8 / n_conditions
         x = np.arange(n_groups)
@@ -935,8 +930,8 @@ class SystemCoverageBarPlotter(BasePlotter):
             means = []
             sems = []
 
-            for prot_group in protein_groups:
-                entry = result.get_entry(prot_group)
+            for aa_class in aa_classes:
+                entry = result.aa_class_coverage.get_entry(aa_class)
                 if entry and entry.mean_coverage_enrichment is not None:
                     means.append(entry.mean_coverage_enrichment)
                     sems.append(entry.sem_coverage_enrichment or 0.0)
@@ -960,11 +955,11 @@ class SystemCoverageBarPlotter(BasePlotter):
         ax.axhline(y=0.0, color="black", linestyle="--", linewidth=1.5, label="Neutral (0)")
 
         # Labels and formatting
-        ax.set_xlabel("Protein Group")
+        ax.set_xlabel("Amino Acid Class")
         ax.set_ylabel("Coverage Enrichment (surface-normalized)")
-        ax.set_title("System Coverage by Protein Group", fontweight="bold")
+        ax.set_title("AA Class Coverage by Condition", fontweight="bold")
         ax.set_xticks(x)
-        ax.set_xticklabels(protein_groups, rotation=45, ha="right")
+        ax.set_xticklabels(aa_classes, rotation=45, ha="right")
         ax.legend(loc="best", fontsize=9)
 
         plt.tight_layout()

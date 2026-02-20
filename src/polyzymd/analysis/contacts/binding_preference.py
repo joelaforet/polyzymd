@@ -80,7 +80,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -505,6 +505,176 @@ class BindingPreferenceResult(BaseModel):
         return cls.model_validate(data)
 
 
+# =============================================================================
+# System Coverage Helper Functions
+# =============================================================================
+
+
+def _detect_overlapping_groups(groups: dict[str, set[int]]) -> list[tuple[str, str]]:
+    """Detect pairs of groups that share residue IDs.
+
+    Parameters
+    ----------
+    groups : dict[str, set[int]]
+        Mapping of group name to residue IDs
+
+    Returns
+    -------
+    list[tuple[str, str]]
+        List of (group_a, group_b) pairs that have overlapping residue IDs
+    """
+    group_names = list(groups.keys())
+    overlaps = []
+
+    for i, g1 in enumerate(group_names):
+        for g2 in group_names[i + 1 :]:
+            if groups[g1] & groups[g2]:  # Non-empty intersection
+                overlaps.append((g1, g2))
+
+    return overlaps
+
+
+def _compute_enrichment(coverage_share: float, expected_share: float) -> float | None:
+    """Calculate zero-centered enrichment: (observed / expected) - 1.
+
+    Parameters
+    ----------
+    coverage_share : float
+        Fraction of contacts to this element
+    expected_share : float
+        Expected fraction based on surface availability
+
+    Returns
+    -------
+    float | None
+        Enrichment value, or None if expected_share is 0
+    """
+    if expected_share > 0 and coverage_share > 0:
+        return (coverage_share / expected_share) - 1
+    elif expected_share > 0 and coverage_share == 0:
+        return -1.0  # Complete avoidance
+    else:
+        return None  # Cannot compute (no expected share)
+
+
+def _compute_partition_coverage(
+    partition_name: str,
+    partition_type: Literal["aa_class", "binary_custom", "combined_custom"],
+    partition_groups: dict[str, set[int]],
+    exposed_partition: dict[str, set[int]],
+    entries: list["BindingPreferenceEntry"],
+    total_exposed: int,
+    all_polymer_types: list[str],
+) -> PartitionCoverageResult:
+    """Compute coverage for a single partition.
+
+    A partition divides the protein surface into mutually exclusive elements.
+    This function validates the partition and computes coverage metrics.
+
+    Parameters
+    ----------
+    partition_name : str
+        Name of the partition (e.g., "aa_class", "lid_helix_5_vs_rest")
+    partition_type : str
+        One of: "aa_class", "binary_custom", "combined_custom"
+    partition_groups : dict[str, set[int]]
+        Mapping of element name to ALL residue IDs in that element
+    exposed_partition : dict[str, set[int]]
+        Mapping of element name to EXPOSED residue IDs only
+    entries : list[BindingPreferenceEntry]
+        Binding preference entries to aggregate
+    total_exposed : int
+        Total number of exposed residues across all elements
+    all_polymer_types : list[str]
+        List of all polymer types
+
+    Returns
+    -------
+    PartitionCoverageResult
+        Coverage result for this partition
+    """
+    # Build a mapping: resid -> partition_element
+    resid_to_element: dict[int, str] = {}
+    for element_name, resids in partition_groups.items():
+        for resid in resids:
+            resid_to_element[resid] = element_name
+
+    # Aggregate contact frames by partition element
+    # Structure: {element: {"total_frames": int, "by_polymer": {poly: frames}}}
+    element_totals: dict[str, dict[str, Any]] = {
+        element_name: {"total_frames": 0, "by_polymer": dict.fromkeys(all_polymer_types, 0)}
+        for element_name in partition_groups.keys()
+    }
+
+    for entry in entries:
+        # Determine which element this entry's protein_group maps to
+        element_name = entry.protein_group
+        if element_name in element_totals:
+            element_totals[element_name]["total_frames"] += entry.total_contact_frames
+            element_totals[element_name]["by_polymer"][entry.polymer_type] = (
+                element_totals[element_name]["by_polymer"].get(entry.polymer_type, 0)
+                + entry.total_contact_frames
+            )
+
+    # Calculate grand total of contacts across all elements
+    grand_total = sum(et["total_frames"] for et in element_totals.values())
+
+    # Build partition entries
+    coverage_entries = []
+    total_coverage_share = 0.0
+    total_expected_share = 0.0
+
+    for element_name in sorted(partition_groups.keys()):
+        n_total = len(partition_groups.get(element_name, set()))
+        n_exposed = len(exposed_partition.get(element_name, set()))
+
+        # Calculate expected share
+        expected_share = n_exposed / total_exposed if total_exposed > 0 else 0.0
+        total_expected_share += expected_share
+
+        # Get contact data
+        edata = element_totals.get(element_name, {"total_frames": 0, "by_polymer": {}})
+        total_frames = edata["total_frames"]
+        by_polymer = edata.get("by_polymer", {})
+
+        # Calculate coverage share
+        coverage_share = total_frames / grand_total if grand_total > 0 else 0.0
+        total_coverage_share += coverage_share
+
+        # Calculate enrichment
+        enrichment = _compute_enrichment(coverage_share, expected_share)
+
+        # Calculate polymer contributions
+        polymer_contributions: dict[str, float] = {}
+        if total_frames > 0:
+            for pt, pf in by_polymer.items():
+                polymer_contributions[pt] = pf / total_frames
+        else:
+            for pt in all_polymer_types:
+                polymer_contributions[pt] = 0.0
+
+        coverage_entries.append(
+            PartitionCoverageEntry(
+                partition_element=element_name,
+                total_contact_frames=total_frames,
+                coverage_share=coverage_share,
+                expected_share=expected_share,
+                coverage_enrichment=enrichment,
+                n_exposed_in_element=n_exposed,
+                n_residues_in_element=n_total,
+                polymer_contributions=polymer_contributions,
+            )
+        )
+
+    return PartitionCoverageResult(
+        partition_name=partition_name,
+        partition_type=partition_type,
+        entries=coverage_entries,
+        total_coverage_share=total_coverage_share,
+        total_expected_share=total_expected_share,
+    )
+
+
 def _compute_system_coverage(
     entries: list[BindingPreferenceEntry],
     protein_groups: dict[str, set[int]],
@@ -514,10 +684,22 @@ def _compute_system_coverage(
     surface_exposure_threshold: float | None,
     protein_group_selections: dict[str, str] | None,
 ) -> SystemCoverageResult:
-    """Compute system-level coverage from binding preference entries.
+    """Compute system-level coverage using partition-based analysis.
 
-    This is an internal helper that aggregates binding preference data across
-    polymer types to compute system-level coverage metrics.
+    This function computes coverage enrichments using proper partitions to
+    avoid the overlap bug where custom groups and AA classes can inflate
+    the expected_share denominator.
+
+    Partition Strategy
+    ------------------
+    1. **AA Class Partition**: 5-way partition by amino acid class.
+       Always computed, uses only the 5 default AA classes.
+
+    2. **Binary Custom Partitions**: For each custom group, compute a
+       binary partition (group vs rest_of_protein).
+
+    3. **Combined Custom Partition**: If custom groups don't overlap,
+       combine them all + rest_of_protein into a single partition.
 
     Parameters
     ----------
@@ -539,100 +721,233 @@ def _compute_system_coverage(
     Returns
     -------
     SystemCoverageResult
-        System-level coverage metrics collapsed across polymer types
+        Partition-based coverage metrics (schema v2)
     """
-
-    # Helper function for enrichment calculation (centered at zero)
-    def calc_enrichment(coverage_share: float, expected: float) -> float | None:
-        """Calculate enrichment: (observed / expected) - 1, centered at zero."""
-        if expected > 0 and coverage_share > 0:
-            return (coverage_share / expected) - 1
-        elif expected > 0 and coverage_share == 0:
-            return -1.0  # Complete avoidance
-        else:
-            return None  # Cannot compute (no expected share)
-
-    # Aggregate contact frames by protein group (across all polymer types)
-    # Structure: {protein_group: {"total_frames": int, "by_polymer": {poly: frames}}}
-    group_totals: dict[str, dict[str, Any]] = {}
-
-    for entry in entries:
-        group_name = entry.protein_group
-        if group_name not in group_totals:
-            group_totals[group_name] = {
-                "total_frames": 0,
-                "by_polymer": {},
-                "n_exposed": entry.n_exposed_in_group,
-                "n_total": entry.n_residues_in_group,
-            }
-        group_totals[group_name]["total_frames"] += entry.total_contact_frames
-        group_totals[group_name]["by_polymer"][entry.polymer_type] = entry.total_contact_frames
-
-    # Calculate grand total of all polymer contacts
-    grand_total_contacts = sum(gt["total_frames"] for gt in group_totals.values())
+    from polyzymd.analysis.common.aa_classification import DEFAULT_AA_CLASS_SELECTIONS
 
     # Collect all polymer types
     all_polymer_types = sorted(set(e.polymer_type for e in entries))
 
-    # Build system coverage entries
-    coverage_entries = []
+    # Separate AA class groups from custom groups
+    aa_class_names = set(DEFAULT_AA_CLASS_SELECTIONS.keys())
+    aa_class_groups: dict[str, set[int]] = {}
+    aa_class_exposed: dict[str, set[int]] = {}
+    custom_groups: dict[str, set[int]] = {}
+    custom_exposed: dict[str, set[int]] = {}
+    custom_selections: dict[str, str] = {}
 
-    for group_name in sorted(protein_groups.keys()):
-        n_total_in_group = len(protein_groups.get(group_name, set()))
-        n_exposed_in_group = len(exposed_groups.get(group_name, set()))
-
-        # Calculate expected share based on protein surface availability
-        if total_exposed > 0:
-            expected_share = n_exposed_in_group / total_exposed
+    for group_name, resids in protein_groups.items():
+        if group_name in aa_class_names:
+            aa_class_groups[group_name] = resids
+            aa_class_exposed[group_name] = exposed_groups.get(group_name, set())
         else:
-            expected_share = 0.0
+            custom_groups[group_name] = resids
+            custom_exposed[group_name] = exposed_groups.get(group_name, set())
+            if protein_group_selections and group_name in protein_group_selections:
+                custom_selections[group_name] = protein_group_selections[group_name]
 
-        # Get aggregated contact data for this group
-        gdata = group_totals.get(group_name, {"total_frames": 0, "by_polymer": {}})
-        total_frames_to_group = gdata["total_frames"]
-        by_polymer = gdata.get("by_polymer", {})
+    # Get all exposed residue IDs (for computing "rest_of_protein")
+    all_exposed_resids: set[int] = set()
+    for resids in exposed_groups.values():
+        all_exposed_resids.update(resids)
 
-        # Calculate coverage share (what fraction of ALL polymer contacts went to this group?)
-        if grand_total_contacts > 0:
-            coverage_share = total_frames_to_group / grand_total_contacts
-        else:
-            coverage_share = 0.0
+    # Filter entries by group type for proper partition computation
+    aa_class_entries = [e for e in entries if e.protein_group in aa_class_names]
+    custom_entries = [e for e in entries if e.protein_group not in aa_class_names]
 
-        # Calculate coverage enrichment
-        coverage_enrichment = calc_enrichment(coverage_share, expected_share)
+    # ---------------------------------------------------------------------
+    # 1. Compute AA Class Partition (always)
+    # ---------------------------------------------------------------------
+    # Compute total exposed for AA class partition
+    aa_class_total_exposed = sum(len(resids) for resids in aa_class_exposed.values())
 
-        # Calculate polymer contributions (what fraction of contacts to this group
-        # came from each polymer type?)
-        polymer_contributions: dict[str, float] = {}
-        if total_frames_to_group > 0:
-            for poly_type, poly_frames in by_polymer.items():
-                polymer_contributions[poly_type] = poly_frames / total_frames_to_group
-        else:
-            # No contacts to this group - all polymers contribute 0
-            for poly_type in all_polymer_types:
-                polymer_contributions[poly_type] = 0.0
+    aa_class_coverage = _compute_partition_coverage(
+        partition_name="aa_class",
+        partition_type="aa_class",
+        partition_groups=aa_class_groups,
+        exposed_partition=aa_class_exposed,
+        entries=aa_class_entries,
+        total_exposed=aa_class_total_exposed,
+        all_polymer_types=all_polymer_types,
+    )
 
-        coverage_entries.append(
-            SystemCoverageEntry(
-                protein_group=group_name,
-                total_contact_frames=total_frames_to_group,
-                coverage_share=coverage_share,
-                expected_share=expected_share,
-                coverage_enrichment=coverage_enrichment,
-                n_exposed_in_group=n_exposed_in_group,
-                n_residues_in_group=n_total_in_group,
-                polymer_contributions=polymer_contributions,
+    # ---------------------------------------------------------------------
+    # 2. Compute Binary Custom Partitions (one per custom group)
+    # ---------------------------------------------------------------------
+    custom_group_coverages: dict[str, PartitionCoverageResult] = {}
+
+    for group_name, group_resids in custom_groups.items():
+        group_exposed = custom_exposed.get(group_name, set())
+
+        # Compute "rest_of_protein" as all exposed residues NOT in this group
+        rest_exposed = all_exposed_resids - group_exposed
+        rest_all = set()
+        for gname, gresids in protein_groups.items():
+            if gname != group_name:
+                rest_all.update(gresids)
+        # Actually, rest_all should be all residues NOT in this custom group
+        # We need the full protein residue set - but we only have groups
+        # For now, use the exposed residues as the proxy
+
+        # Build binary partition
+        binary_partition_groups = {
+            group_name: group_resids,
+            "rest_of_protein": rest_all - group_resids,
+        }
+        binary_partition_exposed = {
+            group_name: group_exposed,
+            "rest_of_protein": rest_exposed,
+        }
+
+        # Create synthetic entries for "rest_of_protein" by aggregating all other entries
+        # We need to compute the contact frames to "rest_of_protein"
+        rest_contact_frames: dict[str, int] = dict.fromkeys(all_polymer_types, 0)
+        group_contact_frames: dict[str, int] = dict.fromkeys(all_polymer_types, 0)
+
+        for entry in entries:
+            if entry.protein_group == group_name:
+                group_contact_frames[entry.polymer_type] = entry.total_contact_frames
+            elif entry.protein_group not in custom_groups:
+                # It's an AA class group - add to rest
+                rest_contact_frames[entry.polymer_type] = (
+                    rest_contact_frames.get(entry.polymer_type, 0) + entry.total_contact_frames
+                )
+            # Note: Other custom groups are NOT added to rest - they'll have their own partition
+
+        # Build synthetic entries for the binary partition
+        binary_entries: list[BindingPreferenceEntry] = []
+
+        # Add entries for the custom group
+        for entry in entries:
+            if entry.protein_group == group_name:
+                binary_entries.append(entry)
+
+        # Create synthetic entries for rest_of_protein
+        for pt, frames in rest_contact_frames.items():
+            binary_entries.append(
+                BindingPreferenceEntry(
+                    polymer_type=pt,
+                    protein_group="rest_of_protein",
+                    total_contact_frames=frames,
+                    mean_contact_fraction=0.0,  # Not used for partition coverage
+                    n_residues_contacted=0,  # Not used for partition coverage
+                    contact_share=0.0,
+                    expected_share=0.0,
+                    enrichment=None,
+                    n_exposed_in_group=len(rest_exposed),
+                    n_residues_in_group=len(binary_partition_groups["rest_of_protein"]),
+                )
             )
+
+        binary_total_exposed = len(group_exposed) + len(rest_exposed)
+
+        binary_coverage = _compute_partition_coverage(
+            partition_name=f"{group_name}_vs_rest",
+            partition_type="binary_custom",
+            partition_groups=binary_partition_groups,
+            exposed_partition=binary_partition_exposed,
+            entries=binary_entries,
+            total_exposed=binary_total_exposed,
+            all_polymer_types=all_polymer_types,
         )
 
+        custom_group_coverages[group_name] = binary_coverage
+
+    # ---------------------------------------------------------------------
+    # 3. Check for overlaps among custom groups
+    # ---------------------------------------------------------------------
+    overlapping_pairs = _detect_overlapping_groups(custom_exposed)
+    has_overlaps = len(overlapping_pairs) > 0
+
+    if has_overlaps:
+        logger.warning(
+            f"Custom protein groups have overlapping residues: {overlapping_pairs}. "
+            f"Combined custom partition will not be computed."
+        )
+
+    # ---------------------------------------------------------------------
+    # 4. Compute Combined Custom Partition (if no overlaps)
+    # ---------------------------------------------------------------------
+    combined_custom_coverage: PartitionCoverageResult | None = None
+
+    if custom_groups and not has_overlaps:
+        # Build combined partition: all custom groups + rest_of_protein
+        combined_partition_groups: dict[str, set[int]] = dict(custom_groups)
+        combined_partition_exposed: dict[str, set[int]] = dict(custom_exposed)
+
+        # Compute rest_of_protein for combined partition
+        all_custom_exposed: set[int] = set()
+        all_custom_resids: set[int] = set()
+        for resids in custom_exposed.values():
+            all_custom_exposed.update(resids)
+        for resids in custom_groups.values():
+            all_custom_resids.update(resids)
+
+        rest_exposed_combined = all_exposed_resids - all_custom_exposed
+        rest_all_combined: set[int] = set()
+        for gname, gresids in protein_groups.items():
+            if gname not in custom_groups:
+                rest_all_combined.update(gresids)
+        rest_all_combined = rest_all_combined - all_custom_resids
+
+        combined_partition_groups["rest_of_protein"] = rest_all_combined
+        combined_partition_exposed["rest_of_protein"] = rest_exposed_combined
+
+        # Build entries for combined partition
+        combined_entries: list[BindingPreferenceEntry] = list(custom_entries)
+
+        # Add synthetic entries for rest_of_protein
+        rest_contact_frames_combined: dict[str, int] = dict.fromkeys(all_polymer_types, 0)
+        for entry in aa_class_entries:
+            rest_contact_frames_combined[entry.polymer_type] = (
+                rest_contact_frames_combined.get(entry.polymer_type, 0) + entry.total_contact_frames
+            )
+
+        for pt, frames in rest_contact_frames_combined.items():
+            combined_entries.append(
+                BindingPreferenceEntry(
+                    polymer_type=pt,
+                    protein_group="rest_of_protein",
+                    total_contact_frames=frames,
+                    mean_contact_fraction=0.0,  # Not used for partition coverage
+                    n_residues_contacted=0,  # Not used for partition coverage
+                    contact_share=0.0,
+                    expected_share=0.0,
+                    enrichment=None,
+                    n_exposed_in_group=len(rest_exposed_combined),
+                    n_residues_in_group=len(rest_all_combined),
+                )
+            )
+
+        combined_total_exposed = sum(len(r) for r in combined_partition_exposed.values())
+
+        combined_custom_coverage = _compute_partition_coverage(
+            partition_name="combined_custom",
+            partition_type="combined_custom",
+            partition_groups=combined_partition_groups,
+            exposed_partition=combined_partition_exposed,
+            entries=combined_entries,
+            total_exposed=combined_total_exposed,
+            all_polymer_types=all_polymer_types,
+        )
+
+    # ---------------------------------------------------------------------
+    # 5. Compute total contact frames
+    # ---------------------------------------------------------------------
+    total_contact_frames = sum(e.total_contact_frames for e in entries)
+
     return SystemCoverageResult(
-        entries=coverage_entries,
+        aa_class_coverage=aa_class_coverage,
+        custom_group_coverages=custom_group_coverages,
+        combined_custom_coverage=combined_custom_coverage,
         n_frames=n_frames,
-        total_contact_frames=grand_total_contacts,
+        total_contact_frames=total_contact_frames,
         total_exposed_residues=total_exposed,
         surface_exposure_threshold=surface_exposure_threshold,
-        protein_groups_used=protein_group_selections or {},
+        custom_group_selections=custom_selections,
         polymer_types_included=all_polymer_types,
+        has_overlapping_custom_groups=has_overlaps,
+        overlapping_group_pairs=overlapping_pairs,
     )
 
 
@@ -892,8 +1207,11 @@ def compute_binding_preference(
         f"Binding preference computed: {len(entries)} entries for "
         f"{len(polymer_types_found)} polymer types × {len(protein_groups)} groups"
     )
+    n_aa_classes = len(system_coverage.aa_class_coverage.entries)
+    n_custom_groups = len(system_coverage.custom_group_coverages)
     logger.info(
-        f"System coverage computed: {len(system_coverage.entries)} protein groups, "
+        f"System coverage computed: {n_aa_classes} AA classes, "
+        f"{n_custom_groups} custom groups, "
         f"{system_coverage.total_contact_frames} total contact frames"
     )
 
@@ -1251,44 +1569,214 @@ class SystemCoverageEntry(BaseModel):
     )
 
 
-class SystemCoverageResult(BaseModel):
-    """System-level coverage analysis across all polymer types.
+# =============================================================================
+# Partition-Based Coverage Models (Schema v2)
+# =============================================================================
+# These models fix the overlap bug in the original SystemCoverageResult by
+# enforcing proper partition semantics: elements are mutually exclusive and
+# collectively exhaustive, so coverage_share and expected_share both sum to 1.0.
 
-    This result complements BindingPreferenceResult by collapsing across polymer
-    types to provide condition-level coverage metrics. While binding preference
-    answers "What does each polymer type prefer?", system coverage answers
-    "What does this polymer mixture collectively cover?"
 
-    Use Case
-    --------
-    Compare different copolymer compositions (e.g., 0:100 to 100:0 SBMA:EGMA)
-    to understand how the mixture's aggregate behavior varies with composition.
+class PartitionCoverageEntry(BaseModel):
+    """Coverage metrics for one element in a partition.
 
-    Key insight: Binding preference enrichment IS comparable across conditions
-    because polymer abundance cancels out in the ratio. System coverage provides
-    a COMPLEMENTARY view of the same data for different scientific questions.
+    A partition element is a mutually exclusive subset of protein residues.
+    Within a partition, all elements together cover the entire protein surface
+    exactly once (no residue is counted in multiple elements).
+
+    This ensures that:
+    - coverage_share sums to 1.0 across all elements in the partition
+    - expected_share sums to 1.0 across all elements in the partition
+    - enrichment is mathematically valid (no inflated denominators)
 
     Attributes
     ----------
-    entries : list[SystemCoverageEntry]
-        Coverage metrics for each protein group
+    partition_element : str
+        Name of this partition element (e.g., "aromatic", "lid_helix_5", "rest_of_protein")
+    total_contact_frames : int
+        Sum of contact frames from ALL polymer types to residues in this element
+    coverage_share : float
+        Fraction of all polymer contacts that went to this element.
+        Sums to 1.0 across all elements in the partition.
+    expected_share : float
+        Expected coverage based on surface availability (n_exposed / total_exposed).
+        Sums to 1.0 across all elements in the partition.
+    coverage_enrichment : float | None
+        Zero-centered enrichment: (coverage_share / expected_share) - 1
+    n_exposed_in_element : int
+        Number of surface-exposed residues in this element
+    n_residues_in_element : int
+        Total residues in this element (exposed + buried)
+    polymer_contributions : dict[str, float]
+        Breakdown of coverage by polymer type (sums to 1.0 for this element)
+    """
+
+    partition_element: str
+    total_contact_frames: int = Field(
+        default=0,
+        description="Sum of contact frames from ALL polymer types to this element",
+    )
+    coverage_share: float = Field(
+        default=0.0,
+        description="Fraction of all polymer contacts that went to this element",
+    )
+    expected_share: float = Field(
+        default=0.0,
+        description="Expected coverage based on protein surface availability",
+    )
+    coverage_enrichment: float | None = Field(
+        default=None,
+        description="Zero-centered enrichment: (coverage_share / expected_share) - 1",
+    )
+    n_exposed_in_element: int = Field(
+        default=0,
+        description="Surface-exposed residues in this element",
+    )
+    n_residues_in_element: int = Field(
+        default=0,
+        description="Total residues in this element",
+    )
+    polymer_contributions: dict[str, float] = Field(
+        default_factory=dict,
+        description="Fraction of contacts to this element from each polymer type",
+    )
+
+
+class PartitionCoverageResult(BaseModel):
+    """Coverage analysis for a complete partition of the protein surface.
+
+    A partition divides the protein surface into mutually exclusive regions
+    that together cover the entire surface. This ensures valid enrichment
+    calculations where both coverage_share and expected_share sum to 1.0.
+
+    Partition Types
+    ---------------
+    - **aa_class**: 5-way partition by amino acid class
+      (aromatic, polar, nonpolar, charged_positive, charged_negative)
+    - **binary_custom**: 2-way partition for a custom group vs rest_of_protein
+      (e.g., "lid_helix_5" vs "rest_of_protein")
+    - **combined_custom**: N+1 way partition with all non-overlapping custom groups
+      plus "rest_of_protein"
+
+    Attributes
+    ----------
+    partition_name : str
+        Descriptive name (e.g., "aa_class", "lid_helix_5_vs_rest")
+    partition_type : str
+        One of: "aa_class", "binary_custom", "combined_custom"
+    entries : list[PartitionCoverageEntry]
+        Coverage metrics for each element in the partition
+    total_coverage_share : float
+        Validation check: should be ~1.0
+    total_expected_share : float
+        Validation check: should be ~1.0
+    """
+
+    partition_name: str
+    partition_type: Literal["aa_class", "binary_custom", "combined_custom"]
+    entries: list[PartitionCoverageEntry] = Field(default_factory=list)
+    total_coverage_share: float = Field(
+        default=1.0,
+        description="Sum of coverage_share across elements (validation: should be ~1.0)",
+    )
+    total_expected_share: float = Field(
+        default=1.0,
+        description="Sum of expected_share across elements (validation: should be ~1.0)",
+    )
+
+    def to_dataframe(self) -> "pd.DataFrame":
+        """Convert to pandas DataFrame for analysis/plotting."""
+        import pandas as pd
+
+        return pd.DataFrame([e.model_dump() for e in self.entries])
+
+    def coverage_enrichment_dict(self) -> dict[str, float]:
+        """Get coverage enrichment as dict: {element: enrichment}."""
+        return {
+            e.partition_element: (
+                e.coverage_enrichment if e.coverage_enrichment is not None else 0.0
+            )
+            for e in self.entries
+        }
+
+    def coverage_share_dict(self) -> dict[str, float]:
+        """Get coverage shares as dict: {element: share}."""
+        return {e.partition_element: e.coverage_share for e in self.entries}
+
+    def expected_share_dict(self) -> dict[str, float]:
+        """Get expected shares as dict: {element: share}."""
+        return {e.partition_element: e.expected_share for e in self.entries}
+
+    def get_entry(self, element_name: str) -> PartitionCoverageEntry | None:
+        """Get the entry for a specific partition element."""
+        for entry in self.entries:
+            if entry.partition_element == element_name:
+                return entry
+        return None
+
+    def element_names(self) -> list[str]:
+        """Get list of partition element names."""
+        return [e.partition_element for e in self.entries]
+
+
+class SystemCoverageResult(BaseModel):
+    """System-level coverage analysis with proper partition structure.
+
+    This result uses partitions to ensure mathematically valid enrichment
+    calculations. A partition divides the protein surface into mutually
+    exclusive regions, avoiding the overlap bug where custom groups and
+    AA class groups can inflate the expected_share denominator.
+
+    Partition Strategy
+    ------------------
+    1. **AA Class Partition** (always computed):
+       5-way partition by amino acid class. Every surface residue belongs
+       to exactly one class.
+
+    2. **Binary Custom Partitions** (per custom group):
+       Each custom group is compared to "rest_of_protein". This answers:
+       "Does my lid_helix_5 have enriched polymer contacts vs non-lid regions?"
+
+    3. **Combined Custom Partition** (optional):
+       If custom groups don't overlap, all custom groups + rest_of_protein
+       form a single partition. If groups overlap, this is not computed
+       and an error is raised if explicitly requested.
+
+    Attributes
+    ----------
+    aa_class_coverage : PartitionCoverageResult
+        5-way partition by amino acid class. Always computed.
+    custom_group_coverages : dict[str, PartitionCoverageResult]
+        Binary partitions for each custom group vs rest_of_protein.
+        Keys are custom group names.
+    combined_custom_coverage : PartitionCoverageResult | None
+        All custom groups + rest_of_protein as a single partition.
+        Only computed if custom groups don't overlap.
     n_frames : int
         Total frames analyzed
     total_contact_frames : int
-        Sum of all polymer contacts across all groups and polymer types
+        Sum of all polymer contacts across all groups
     total_exposed_residues : int
         Number of surface-exposed protein residues
     surface_exposure_threshold : float | None
         SASA threshold used for surface filtering
-    protein_groups_used : dict[str, str]
-        Mapping of group name to MDAnalysis selection string
+    custom_group_selections : dict[str, str]
+        Custom group name to MDAnalysis selection (for metadata)
     polymer_types_included : list[str]
-        Polymer types that contributed to this coverage analysis
+        Polymer types that contributed to coverage
+    has_overlapping_custom_groups : bool
+        True if custom groups share residues (combined partition not computed)
+    overlapping_group_pairs : list[tuple[str, str]]
+        Pairs of custom groups that overlap (for diagnostics)
     schema_version : int
-        Version for forward compatibility
+        Schema version (2 = partition-based)
     """
 
-    entries: list[SystemCoverageEntry] = Field(default_factory=list)
+    aa_class_coverage: PartitionCoverageResult
+    custom_group_coverages: dict[str, PartitionCoverageResult] = Field(default_factory=dict)
+    combined_custom_coverage: PartitionCoverageResult | None = None
+
+    # Metadata
     n_frames: int = 0
     total_contact_frames: int = Field(
         default=0,
@@ -1296,74 +1784,74 @@ class SystemCoverageResult(BaseModel):
     )
     total_exposed_residues: int = 0
     surface_exposure_threshold: float | None = None
-    protein_groups_used: dict[str, str] = Field(default_factory=dict)
+    custom_group_selections: dict[str, str] = Field(default_factory=dict)
     polymer_types_included: list[str] = Field(default_factory=list)
-    schema_version: int = 1
+    has_overlapping_custom_groups: bool = False
+    overlapping_group_pairs: list[tuple[str, str]] = Field(default_factory=list)
+    schema_version: int = 2
 
-    def to_dataframe(self) -> "pd.DataFrame":
-        """Convert to pandas DataFrame for analysis/plotting.
-
-        Returns
-        -------
-        pd.DataFrame
-            Columns: protein_group, total_contact_frames, coverage_share,
-            expected_share, coverage_enrichment, n_exposed_in_group, etc.
-        """
-        import pandas as pd
-
-        return pd.DataFrame([e.model_dump() for e in self.entries])
-
-    def coverage_enrichment_dict(self) -> dict[str, float]:
-        """Get coverage enrichment as dict: {protein_group: enrichment}.
-
-        Returns
-        -------
-        dict[str, float]
-            Mapping of protein group to coverage enrichment.
-            Missing/invalid values are returned as 0.0.
-
-        Examples
-        --------
-        >>> enrichment = result.coverage_enrichment_dict()
-        >>> print(enrichment["aromatic"])
-        0.35  # 35% more coverage of aromatics than surface availability predicts
-        """
-        return {
-            e.protein_group: e.coverage_enrichment if e.coverage_enrichment is not None else 0.0
-            for e in self.entries
-        }
-
-    def coverage_share_dict(self) -> dict[str, float]:
-        """Get coverage shares as dict: {protein_group: share}.
-
-        Returns
-        -------
-        dict[str, float]
-            Mapping of protein group to coverage share (sums to ~1.0 across groups)
-        """
-        return {e.protein_group: e.coverage_share for e in self.entries}
-
-    def get_entry(self, protein_group: str) -> SystemCoverageEntry | None:
-        """Get the entry for a specific protein group.
+    def get_aa_class_enrichment(self, aa_class: str) -> float | None:
+        """Get coverage enrichment for an AA class.
 
         Parameters
         ----------
-        protein_group : str
-            Protein group name
+        aa_class : str
+            One of: aromatic, polar, nonpolar, charged_positive, charged_negative
 
         Returns
         -------
-        SystemCoverageEntry or None
-            Full entry, or None if not found
+        float | None
+            Coverage enrichment, or None if not found
         """
-        for entry in self.entries:
-            if entry.protein_group == protein_group:
-                return entry
-        return None
+        entry = self.aa_class_coverage.get_entry(aa_class)
+        return entry.coverage_enrichment if entry else None
 
-    def protein_groups(self) -> list[str]:
-        """Get list of protein groups in this result."""
-        return sorted(e.protein_group for e in self.entries)
+    def get_custom_group_enrichment(self, group_name: str) -> float | None:
+        """Get coverage enrichment for a custom group (vs rest_of_protein).
+
+        Parameters
+        ----------
+        group_name : str
+            Custom group name (e.g., "lid_helix_5")
+
+        Returns
+        -------
+        float | None
+            Coverage enrichment for the custom group, or None if not found
+        """
+        if group_name not in self.custom_group_coverages:
+            return None
+        partition = self.custom_group_coverages[group_name]
+        entry = partition.get_entry(group_name)
+        return entry.coverage_enrichment if entry else None
+
+    def aa_class_enrichment_dict(self) -> dict[str, float]:
+        """Get AA class enrichments as dict: {aa_class: enrichment}."""
+        return self.aa_class_coverage.coverage_enrichment_dict()
+
+    def custom_group_enrichment_dict(self) -> dict[str, float]:
+        """Get custom group enrichments as dict: {group_name: enrichment}.
+
+        Each custom group's enrichment is relative to rest_of_protein.
+        """
+        result = {}
+        for group_name, partition in self.custom_group_coverages.items():
+            entry = partition.get_entry(group_name)
+            if entry and entry.coverage_enrichment is not None:
+                result[group_name] = entry.coverage_enrichment
+            else:
+                result[group_name] = 0.0
+        return result
+
+    def aa_class_names(self) -> list[str]:
+        """Get list of AA class names in canonical order."""
+        canonical_order = ["aromatic", "polar", "nonpolar", "charged_positive", "charged_negative"]
+        names = self.aa_class_coverage.element_names()
+        return [n for n in canonical_order if n in names]
+
+    def custom_group_names(self) -> list[str]:
+        """Get list of custom group names."""
+        return sorted(self.custom_group_coverages.keys())
 
     def save(self, path: str | Path) -> None:
         """Save to JSON file.
@@ -1394,16 +1882,21 @@ class SystemCoverageResult(BaseModel):
         return cls.model_validate(data)
 
 
-class AggregatedSystemCoverageEntry(BaseModel):
-    """Aggregated system coverage for one protein group across replicates.
+# =============================================================================
+# Aggregated Partition Coverage Models (Schema v2)
+# =============================================================================
 
-    Contains mean ± SEM for coverage metrics across multiple replicates,
-    enabling statistical comparison of system-level coverage between conditions.
+
+class AggregatedPartitionCoverageEntry(BaseModel):
+    """Aggregated coverage for one partition element across replicates.
+
+    Contains mean ± SEM for coverage metrics, enabling statistical comparison
+    of coverage enrichment across conditions.
 
     Attributes
     ----------
-    protein_group : str
-        Protein group label (e.g., "aromatic", "charged_positive")
+    partition_element : str
+        Element name (e.g., "aromatic", "lid_helix_5", "rest_of_protein")
     mean_coverage_share : float
         Mean coverage share across replicates
     sem_coverage_share : float
@@ -1415,18 +1908,18 @@ class AggregatedSystemCoverageEntry(BaseModel):
     per_replicate_enrichments : list[float]
         Coverage enrichment values from each replicate
     expected_share : float
-        Expected coverage based on protein surface availability
-    n_exposed_in_group : int
-        Surface-exposed residues in this group
-    n_residues_in_group : int
-        Total residues in this group
+        Expected coverage based on surface availability
+    n_exposed_in_element : int
+        Surface-exposed residues in this element
+    n_residues_in_element : int
+        Total residues in this element
     n_replicates : int
         Number of replicates with valid data
     mean_polymer_contributions : dict[str, float]
         Mean polymer contributions across replicates
     """
 
-    protein_group: str
+    partition_element: str
     mean_coverage_share: float = Field(
         default=0.0,
         description="Mean coverage share across replicates",
@@ -1449,15 +1942,15 @@ class AggregatedSystemCoverageEntry(BaseModel):
     )
     expected_share: float = Field(
         default=0.0,
-        description="Expected coverage based on protein surface availability",
+        description="Expected coverage based on surface availability",
     )
-    n_exposed_in_group: int = Field(
+    n_exposed_in_element: int = Field(
         default=0,
-        description="Surface-exposed residues in this group",
+        description="Surface-exposed residues in this element",
     )
-    n_residues_in_group: int = Field(
+    n_residues_in_element: int = Field(
         default=0,
-        description="Total residues in this group",
+        description="Total residues in this element",
     )
     n_replicates: int = Field(
         default=0,
@@ -1469,37 +1962,27 @@ class AggregatedSystemCoverageEntry(BaseModel):
     )
 
 
-class AggregatedSystemCoverageResult(BaseModel):
-    """System coverage aggregated across replicates.
+class AggregatedPartitionCoverageResult(BaseModel):
+    """Aggregated coverage for a partition across replicates.
 
-    Contains mean ± SEM for all coverage metrics across multiple replicates.
-    Enables statistical comparison of system-level coverage between conditions.
+    Contains mean ± SEM for all elements in the partition.
 
     Attributes
     ----------
-    entries : list[AggregatedSystemCoverageEntry]
-        Coverage metrics for each protein group
+    partition_name : str
+        Name of the partition
+    partition_type : str
+        One of: "aa_class", "binary_custom", "combined_custom"
+    entries : list[AggregatedPartitionCoverageEntry]
+        Aggregated coverage for each element
     n_replicates : int
         Number of replicates aggregated
-    total_exposed_residues : int
-        Number of surface-exposed protein residues
-    surface_exposure_threshold : float | None
-        SASA threshold used for surface filtering
-    protein_groups_used : dict[str, str]
-        Mapping of group name to MDAnalysis selection string
-    polymer_types_included : list[str]
-        Polymer types that contributed to coverage
-    schema_version : int
-        Version for forward compatibility
     """
 
-    entries: list[AggregatedSystemCoverageEntry] = Field(default_factory=list)
+    partition_name: str
+    partition_type: Literal["aa_class", "binary_custom", "combined_custom"]
+    entries: list[AggregatedPartitionCoverageEntry] = Field(default_factory=list)
     n_replicates: int = 0
-    total_exposed_residues: int = 0
-    surface_exposure_threshold: float | None = None
-    protein_groups_used: dict[str, str] = Field(default_factory=dict)
-    polymer_types_included: list[str] = Field(default_factory=list)
-    schema_version: int = 1
 
     def to_dataframe(self) -> "pd.DataFrame":
         """Convert to pandas DataFrame."""
@@ -1508,31 +1991,108 @@ class AggregatedSystemCoverageResult(BaseModel):
         return pd.DataFrame([e.model_dump() for e in self.entries])
 
     def coverage_enrichment_dict(self) -> dict[str, float]:
-        """Get mean coverage enrichment as dict: {protein_group: enrichment}.
-
-        Returns
-        -------
-        dict[str, float]
-            Mapping of protein group to mean coverage enrichment.
-            Missing/invalid values are returned as 0.0.
-        """
+        """Get mean coverage enrichment as dict: {element: enrichment}."""
         return {
-            e.protein_group: (
+            e.partition_element: (
                 e.mean_coverage_enrichment if e.mean_coverage_enrichment is not None else 0.0
             )
             for e in self.entries
         }
 
-    def get_entry(self, protein_group: str) -> AggregatedSystemCoverageEntry | None:
-        """Get entry for a specific protein group."""
+    def get_entry(self, element_name: str) -> AggregatedPartitionCoverageEntry | None:
+        """Get entry for a specific partition element."""
         for entry in self.entries:
-            if entry.protein_group == protein_group:
+            if entry.partition_element == element_name:
                 return entry
         return None
 
-    def protein_groups(self) -> list[str]:
-        """Get list of protein groups."""
-        return sorted(e.protein_group for e in self.entries)
+    def element_names(self) -> list[str]:
+        """Get list of partition element names."""
+        return [e.partition_element for e in self.entries]
+
+
+class AggregatedSystemCoverageResult(BaseModel):
+    """System coverage aggregated across replicates (schema v2).
+
+    Contains aggregated partition coverages with mean ± SEM statistics
+    for statistical comparison between conditions.
+
+    Attributes
+    ----------
+    aa_class_coverage : AggregatedPartitionCoverageResult
+        Aggregated 5-way AA class partition
+    custom_group_coverages : dict[str, AggregatedPartitionCoverageResult]
+        Aggregated binary partitions for each custom group
+    combined_custom_coverage : AggregatedPartitionCoverageResult | None
+        Aggregated combined custom partition (if applicable)
+    n_replicates : int
+        Number of replicates aggregated
+    total_exposed_residues : int
+        Number of surface-exposed protein residues
+    surface_exposure_threshold : float | None
+        SASA threshold used for surface filtering
+    custom_group_selections : dict[str, str]
+        Custom group name to MDAnalysis selection
+    polymer_types_included : list[str]
+        Polymer types that contributed to coverage
+    has_overlapping_custom_groups : bool
+        True if custom groups share residues
+    schema_version : int
+        Schema version (2 = partition-based)
+    """
+
+    aa_class_coverage: AggregatedPartitionCoverageResult
+    custom_group_coverages: dict[str, AggregatedPartitionCoverageResult] = Field(
+        default_factory=dict
+    )
+    combined_custom_coverage: AggregatedPartitionCoverageResult | None = None
+
+    # Metadata
+    n_replicates: int = 0
+    total_exposed_residues: int = 0
+    surface_exposure_threshold: float | None = None
+    custom_group_selections: dict[str, str] = Field(default_factory=dict)
+    polymer_types_included: list[str] = Field(default_factory=list)
+    has_overlapping_custom_groups: bool = False
+    schema_version: int = 2
+
+    def get_aa_class_enrichment(self, aa_class: str) -> float | None:
+        """Get mean coverage enrichment for an AA class."""
+        entry = self.aa_class_coverage.get_entry(aa_class)
+        return entry.mean_coverage_enrichment if entry else None
+
+    def get_custom_group_enrichment(self, group_name: str) -> float | None:
+        """Get mean coverage enrichment for a custom group (vs rest_of_protein)."""
+        if group_name not in self.custom_group_coverages:
+            return None
+        partition = self.custom_group_coverages[group_name]
+        entry = partition.get_entry(group_name)
+        return entry.mean_coverage_enrichment if entry else None
+
+    def aa_class_enrichment_dict(self) -> dict[str, float]:
+        """Get AA class mean enrichments as dict: {aa_class: enrichment}."""
+        return self.aa_class_coverage.coverage_enrichment_dict()
+
+    def custom_group_enrichment_dict(self) -> dict[str, float]:
+        """Get custom group mean enrichments as dict: {group_name: enrichment}."""
+        result = {}
+        for group_name, partition in self.custom_group_coverages.items():
+            entry = partition.get_entry(group_name)
+            if entry and entry.mean_coverage_enrichment is not None:
+                result[group_name] = entry.mean_coverage_enrichment
+            else:
+                result[group_name] = 0.0
+        return result
+
+    def aa_class_names(self) -> list[str]:
+        """Get list of AA class names in canonical order."""
+        canonical_order = ["aromatic", "polar", "nonpolar", "charged_positive", "charged_negative"]
+        names = self.aa_class_coverage.element_names()
+        return [n for n in canonical_order if n in names]
+
+    def custom_group_names(self) -> list[str]:
+        """Get list of custom group names."""
+        return sorted(self.custom_group_coverages.keys())
 
     def save(self, path: str | Path) -> None:
         """Save to JSON file."""
@@ -1546,25 +2106,23 @@ class AggregatedSystemCoverageResult(BaseModel):
         return cls.model_validate(data)
 
 
-def aggregate_system_coverage(
-    results: list[SystemCoverageResult],
-) -> AggregatedSystemCoverageResult:
-    """Aggregate system coverage across replicates.
-
-    Computes mean ± SEM for coverage metrics across multiple replicates.
+def _aggregate_partition_coverage(
+    partitions: list[PartitionCoverageResult],
+) -> AggregatedPartitionCoverageResult:
+    """Aggregate a partition's coverage across replicates.
 
     Parameters
     ----------
-    results : list[SystemCoverageResult]
-        System coverage results from multiple replicates
+    partitions : list[PartitionCoverageResult]
+        Same partition from multiple replicates
 
     Returns
     -------
-    AggregatedSystemCoverageResult
-        Aggregated results with mean and SEM
+    AggregatedPartitionCoverageResult
+        Aggregated partition coverage
     """
-    if not results:
-        raise ValueError("No results to aggregate")
+    if not partitions:
+        raise ValueError("No partitions to aggregate")
 
     # Helper function for computing mean and SEM
     def _compute_stats(values: list[float]) -> tuple[float | None, float | None]:
@@ -1576,31 +2134,34 @@ def aggregate_system_coverage(
         sem_val = float(np.std(values, ddof=1) / np.sqrt(n)) if n > 1 else 0.0
         return mean_val, sem_val
 
-    # Collect all protein groups
-    all_groups: set[str] = set()
-    for r in results:
-        for e in r.entries:
-            all_groups.add(e.protein_group)
+    # Get partition metadata from first result
+    first_partition = partitions[0]
+
+    # Collect all element names
+    all_elements: set[str] = set()
+    for p in partitions:
+        for e in p.entries:
+            all_elements.add(e.partition_element)
 
     # Collect all polymer types
     all_polymer_types: set[str] = set()
-    for r in results:
-        all_polymer_types.update(r.polymer_types_included)
+    for p in partitions:
+        for e in p.entries:
+            all_polymer_types.update(e.polymer_contributions.keys())
 
     entries = []
-    for group_name in sorted(all_groups):
+    for element_name in sorted(all_elements):
         # Collect values from each replicate
         coverage_shares = []
         enrichments = []
         polymer_contributions_all: dict[str, list[float]] = {pt: [] for pt in all_polymer_types}
 
-        for r in results:
-            entry = r.get_entry(group_name)
+        for p in partitions:
+            entry = p.get_entry(element_name)
             if entry is not None:
                 coverage_shares.append(entry.coverage_share)
                 if entry.coverage_enrichment is not None:
                     enrichments.append(entry.coverage_enrichment)
-                # Collect polymer contributions
                 for poly_type in all_polymer_types:
                     contrib = entry.polymer_contributions.get(poly_type, 0.0)
                     polymer_contributions_all[poly_type].append(contrib)
@@ -1617,35 +2178,104 @@ def aggregate_system_coverage(
             else:
                 mean_polymer_contributions[poly_type] = 0.0
 
-        # Get metadata from first result
-        first_entry = results[0].get_entry(group_name)
-        n_exposed = first_entry.n_exposed_in_group if first_entry else 0
-        n_total = first_entry.n_residues_in_group if first_entry else 0
+        # Get metadata from first partition
+        first_entry = first_partition.get_entry(element_name)
+        n_exposed = first_entry.n_exposed_in_element if first_entry else 0
+        n_total = first_entry.n_residues_in_element if first_entry else 0
         expected_share = first_entry.expected_share if first_entry else 0.0
 
         entries.append(
-            AggregatedSystemCoverageEntry(
-                protein_group=group_name,
+            AggregatedPartitionCoverageEntry(
+                partition_element=element_name,
                 mean_coverage_share=mean_coverage_share if mean_coverage_share else 0.0,
                 sem_coverage_share=sem_coverage_share if sem_coverage_share else 0.0,
                 mean_coverage_enrichment=mean_enrichment,
                 sem_coverage_enrichment=sem_enrichment,
                 per_replicate_enrichments=enrichments,
                 expected_share=expected_share,
-                n_exposed_in_group=n_exposed,
-                n_residues_in_group=n_total,
+                n_exposed_in_element=n_exposed,
+                n_residues_in_element=n_total,
                 n_replicates=len(enrichments),
                 mean_polymer_contributions=mean_polymer_contributions,
             )
         )
 
-    return AggregatedSystemCoverageResult(
+    return AggregatedPartitionCoverageResult(
+        partition_name=first_partition.partition_name,
+        partition_type=first_partition.partition_type,
         entries=entries,
+        n_replicates=len(partitions),
+    )
+
+
+def aggregate_system_coverage(
+    results: list[SystemCoverageResult],
+) -> AggregatedSystemCoverageResult:
+    """Aggregate system coverage across replicates.
+
+    Computes mean ± SEM for coverage metrics across multiple replicates
+    for all partitions (AA class, custom groups, combined).
+
+    Parameters
+    ----------
+    results : list[SystemCoverageResult]
+        System coverage results from multiple replicates
+
+    Returns
+    -------
+    AggregatedSystemCoverageResult
+        Aggregated results with mean and SEM for all partitions
+    """
+    if not results:
+        raise ValueError("No results to aggregate")
+
+    # Aggregate AA class partition
+    aa_class_partitions = [r.aa_class_coverage for r in results]
+    aggregated_aa_class = _aggregate_partition_coverage(aa_class_partitions)
+
+    # Aggregate custom group partitions
+    # First, find all custom group names across all results
+    all_custom_groups: set[str] = set()
+    for r in results:
+        all_custom_groups.update(r.custom_group_coverages.keys())
+
+    aggregated_custom_groups: dict[str, AggregatedPartitionCoverageResult] = {}
+    for group_name in sorted(all_custom_groups):
+        # Collect this partition from all results that have it
+        group_partitions = [
+            r.custom_group_coverages[group_name]
+            for r in results
+            if group_name in r.custom_group_coverages
+        ]
+        if group_partitions:
+            aggregated_custom_groups[group_name] = _aggregate_partition_coverage(group_partitions)
+
+    # Aggregate combined custom partition (if all results have it)
+    aggregated_combined: AggregatedPartitionCoverageResult | None = None
+    combined_partitions = [
+        r.combined_custom_coverage for r in results if r.combined_custom_coverage is not None
+    ]
+    if combined_partitions and len(combined_partitions) == len(results):
+        aggregated_combined = _aggregate_partition_coverage(combined_partitions)
+
+    # Collect polymer types
+    all_polymer_types: set[str] = set()
+    for r in results:
+        all_polymer_types.update(r.polymer_types_included)
+
+    # Check for overlaps
+    has_overlaps = any(r.has_overlapping_custom_groups for r in results)
+
+    return AggregatedSystemCoverageResult(
+        aa_class_coverage=aggregated_aa_class,
+        custom_group_coverages=aggregated_custom_groups,
+        combined_custom_coverage=aggregated_combined,
         n_replicates=len(results),
         total_exposed_residues=results[0].total_exposed_residues if results else 0,
         surface_exposure_threshold=results[0].surface_exposure_threshold if results else None,
-        protein_groups_used=results[0].protein_groups_used if results else {},
+        custom_group_selections=results[0].custom_group_selections if results else {},
         polymer_types_included=sorted(all_polymer_types),
+        has_overlapping_custom_groups=has_overlaps,
     )
 
 
