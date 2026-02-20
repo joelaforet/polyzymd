@@ -559,7 +559,7 @@ def _compute_enrichment(coverage_share: float, expected_share: float) -> float |
 
 def _compute_partition_coverage(
     partition_name: str,
-    partition_type: Literal["aa_class", "binary_custom", "combined_custom"],
+    partition_type: Literal["aa_class", "binary_custom", "combined_custom", "user_defined"],
     partition_groups: dict[str, set[int]],
     exposed_partition: dict[str, set[int]],
     entries: list["BindingPreferenceEntry"],
@@ -576,7 +576,7 @@ def _compute_partition_coverage(
     partition_name : str
         Name of the partition (e.g., "aa_class", "lid_helix_5_vs_rest")
     partition_type : str
-        One of: "aa_class", "binary_custom", "combined_custom"
+        One of: "aa_class", "binary_custom", "combined_custom", "user_defined"
     partition_groups : dict[str, set[int]]
         Mapping of element name to ALL residue IDs in that element
     exposed_partition : dict[str, set[int]]
@@ -683,6 +683,7 @@ def _compute_system_coverage(
     n_frames: int,
     surface_exposure_threshold: float | None,
     protein_group_selections: dict[str, str] | None,
+    protein_partitions: dict[str, list[str]] | None = None,
 ) -> SystemCoverageResult:
     """Compute system-level coverage using partition-based analysis.
 
@@ -701,6 +702,10 @@ def _compute_system_coverage(
     3. **Combined Custom Partition**: If custom groups don't overlap,
        combine them all + rest_of_protein into a single partition.
 
+    4. **User-Defined Partitions**: Custom partitions from config.
+       Each references groups from protein_groups and must be mutually
+       exclusive. 'rest_of_protein' is auto-added if needed.
+
     Parameters
     ----------
     entries : list[BindingPreferenceEntry]
@@ -717,6 +722,9 @@ def _compute_system_coverage(
         SASA threshold used for surface filtering
     protein_group_selections : dict[str, str] | None
         Original MDAnalysis selections (for metadata)
+    protein_partitions : dict[str, list[str]] | None
+        User-defined partitions: {partition_name: [group1, group2, ...]}
+        Groups must exist in protein_groups.
 
     Returns
     -------
@@ -932,7 +940,108 @@ def _compute_system_coverage(
         )
 
     # ---------------------------------------------------------------------
-    # 5. Compute total contact frames
+    # 5. Compute User-Defined Partitions (from protein_partitions config)
+    # ---------------------------------------------------------------------
+    user_defined_partitions: dict[str, PartitionCoverageResult] = {}
+
+    if protein_partitions:
+        for partition_name, group_names in protein_partitions.items():
+            # Build partition groups from referenced group names
+            partition_groups_map: dict[str, set[int]] = {}
+            partition_exposed_map: dict[str, set[int]] = {}
+            partition_entries_list: list[BindingPreferenceEntry] = []
+
+            # Collect residues from all specified groups
+            all_partition_exposed: set[int] = set()
+
+            for group_name in group_names:
+                if group_name not in protein_groups:
+                    logger.warning(
+                        f"Partition '{partition_name}' references undefined group "
+                        f"'{group_name}' - skipping this group"
+                    )
+                    continue
+
+                partition_groups_map[group_name] = protein_groups[group_name]
+                partition_exposed_map[group_name] = exposed_groups.get(group_name, set())
+                all_partition_exposed.update(partition_exposed_map[group_name])
+
+                # Add entries for this group
+                for entry in entries:
+                    if entry.protein_group == group_name:
+                        partition_entries_list.append(entry)
+
+            if not partition_groups_map:
+                logger.warning(f"Partition '{partition_name}' has no valid groups - skipping")
+                continue
+
+            # Check if we need to add rest_of_protein
+            # (if partition doesn't cover all exposed residues)
+            rest_exposed = all_exposed_resids - all_partition_exposed
+            if rest_exposed:
+                # Partition doesn't cover all residues - add rest_of_protein
+                partition_groups_map["rest_of_protein"] = (
+                    set().union(*exposed_groups.values()) - all_partition_exposed
+                )
+                partition_exposed_map["rest_of_protein"] = rest_exposed
+
+                # Create synthetic entries for rest_of_protein
+                rest_contact_frames_user: dict[str, int] = dict.fromkeys(all_polymer_types, 0)
+                for entry in entries:
+                    if entry.protein_group not in group_names:
+                        rest_contact_frames_user[entry.polymer_type] = (
+                            rest_contact_frames_user.get(entry.polymer_type, 0)
+                            + entry.total_contact_frames
+                        )
+
+                for pt, frames in rest_contact_frames_user.items():
+                    partition_entries_list.append(
+                        BindingPreferenceEntry(
+                            polymer_type=pt,
+                            protein_group="rest_of_protein",
+                            total_contact_frames=frames,
+                            mean_contact_fraction=0.0,
+                            n_residues_contacted=0,
+                            contact_share=0.0,
+                            expected_share=0.0,
+                            enrichment=None,
+                            n_exposed_in_group=len(rest_exposed),
+                            n_residues_in_group=len(partition_groups_map["rest_of_protein"]),
+                        )
+                    )
+
+                logger.debug(
+                    f"Partition '{partition_name}': auto-added 'rest_of_protein' "
+                    f"with {len(rest_exposed)} exposed residues"
+                )
+            else:
+                logger.debug(
+                    f"Partition '{partition_name}': covers all exposed residues, "
+                    f"no 'rest_of_protein' needed"
+                )
+
+            # Compute total exposed for this partition
+            user_partition_total_exposed = sum(len(r) for r in partition_exposed_map.values())
+
+            # Compute the partition coverage
+            user_partition_coverage = _compute_partition_coverage(
+                partition_name=partition_name,
+                partition_type="user_defined",
+                partition_groups=partition_groups_map,
+                exposed_partition=partition_exposed_map,
+                entries=partition_entries_list,
+                total_exposed=user_partition_total_exposed,
+                all_polymer_types=all_polymer_types,
+            )
+
+            user_defined_partitions[partition_name] = user_partition_coverage
+            logger.info(
+                f"Computed user-defined partition '{partition_name}' with "
+                f"{len(partition_groups_map)} groups"
+            )
+
+    # ---------------------------------------------------------------------
+    # 6. Compute total contact frames
     # ---------------------------------------------------------------------
     total_contact_frames = sum(e.total_contact_frames for e in entries)
 
@@ -940,6 +1049,7 @@ def _compute_system_coverage(
         aa_class_coverage=aa_class_coverage,
         custom_group_coverages=custom_group_coverages,
         combined_custom_coverage=combined_custom_coverage,
+        user_defined_partitions=user_defined_partitions,
         n_frames=n_frames,
         total_contact_frames=total_contact_frames,
         total_exposed_residues=total_exposed,
@@ -959,6 +1069,7 @@ def compute_binding_preference(
     polymer_types: list[str] | None = None,
     protein_group_selections: dict[str, str] | None = None,
     polymer_type_selections: dict[str, str] | None = None,
+    protein_partitions: dict[str, list[str]] | None = None,
 ) -> BindingPreferenceResult:
     """Compute binding preference from contact results.
 
@@ -991,6 +1102,11 @@ def compute_binding_preference(
         Original MDAnalysis selections (for metadata/reproducibility)
     polymer_type_selections : dict[str, str], optional
         Original MDAnalysis selections (for metadata/reproducibility)
+    protein_partitions : dict[str, list[str]], optional
+        User-defined partitions for system coverage plots.
+        Each partition maps a name to a list of group names from protein_groups.
+        Groups within a partition must be mutually exclusive.
+        Example: {"lid_helices": ["lid_helix_5", "lid_helix_10"]}
 
     Returns
     -------
@@ -1188,6 +1304,7 @@ def compute_binding_preference(
         n_frames=n_frames,
         surface_exposure_threshold=surface_exposure.threshold,
         protein_group_selections=protein_group_selections,
+        protein_partitions=protein_partitions,
     )
 
     result = BindingPreferenceResult(
@@ -1673,7 +1790,7 @@ class PartitionCoverageResult(BaseModel):
     """
 
     partition_name: str
-    partition_type: Literal["aa_class", "binary_custom", "combined_custom"]
+    partition_type: Literal["aa_class", "binary_custom", "combined_custom", "user_defined"]
     entries: list[PartitionCoverageEntry] = Field(default_factory=list)
     total_coverage_share: float = Field(
         default=1.0,
@@ -1742,6 +1859,12 @@ class SystemCoverageResult(BaseModel):
        form a single partition. If groups overlap, this is not computed
        and an error is raised if explicitly requested.
 
+    4. **User-Defined Partitions** (from protein_partitions config):
+       Custom partitions specified by the user in the YAML config. Each
+       partition references groups from protein_groups and must be mutually
+       exclusive. 'rest_of_protein' is auto-added if the groups don't cover
+       all exposed protein residues. One plot per partition is generated.
+
     Attributes
     ----------
     aa_class_coverage : PartitionCoverageResult
@@ -1752,6 +1875,10 @@ class SystemCoverageResult(BaseModel):
     combined_custom_coverage : PartitionCoverageResult | None
         All custom groups + rest_of_protein as a single partition.
         Only computed if custom groups don't overlap.
+    user_defined_partitions : dict[str, PartitionCoverageResult]
+        User-defined partitions from protein_partitions config.
+        Keys are partition names, values are the computed coverage partitions.
+        'rest_of_protein' is auto-added if groups don't fully cover the protein.
     n_frames : int
         Total frames analyzed
     total_contact_frames : int
@@ -1775,6 +1902,14 @@ class SystemCoverageResult(BaseModel):
     aa_class_coverage: PartitionCoverageResult
     custom_group_coverages: dict[str, PartitionCoverageResult] = Field(default_factory=dict)
     combined_custom_coverage: PartitionCoverageResult | None = None
+    user_defined_partitions: dict[str, PartitionCoverageResult] = Field(
+        default_factory=dict,
+        description=(
+            "User-defined partitions from protein_partitions config. "
+            "Each partition contains mutually exclusive groups defined by the user, "
+            "with 'rest_of_protein' auto-added if groups don't cover all protein residues."
+        ),
+    )
 
     # Metadata
     n_frames: int = 0
@@ -1852,6 +1987,25 @@ class SystemCoverageResult(BaseModel):
     def custom_group_names(self) -> list[str]:
         """Get list of custom group names."""
         return sorted(self.custom_group_coverages.keys())
+
+    def user_partition_names(self) -> list[str]:
+        """Get list of user-defined partition names."""
+        return sorted(self.user_defined_partitions.keys())
+
+    def get_user_partition(self, partition_name: str) -> PartitionCoverageResult | None:
+        """Get a user-defined partition by name.
+
+        Parameters
+        ----------
+        partition_name : str
+            Name of the partition (e.g., "lid_helices")
+
+        Returns
+        -------
+        PartitionCoverageResult | None
+            The partition result, or None if not found
+        """
+        return self.user_defined_partitions.get(partition_name)
 
     def save(self, path: str | Path) -> None:
         """Save to JSON file.
@@ -1980,7 +2134,7 @@ class AggregatedPartitionCoverageResult(BaseModel):
     """
 
     partition_name: str
-    partition_type: Literal["aa_class", "binary_custom", "combined_custom"]
+    partition_type: Literal["aa_class", "binary_custom", "combined_custom", "user_defined"]
     entries: list[AggregatedPartitionCoverageEntry] = Field(default_factory=list)
     n_replicates: int = 0
 
@@ -2046,6 +2200,13 @@ class AggregatedSystemCoverageResult(BaseModel):
         default_factory=dict
     )
     combined_custom_coverage: AggregatedPartitionCoverageResult | None = None
+    user_defined_partitions: dict[str, AggregatedPartitionCoverageResult] = Field(
+        default_factory=dict,
+        description=(
+            "Aggregated user-defined partitions from protein_partitions config. "
+            "Keys are partition names, values are aggregated coverage results."
+        ),
+    )
 
     # Metadata
     n_replicates: int = 0
@@ -2258,6 +2419,25 @@ def aggregate_system_coverage(
     if combined_partitions and len(combined_partitions) == len(results):
         aggregated_combined = _aggregate_partition_coverage(combined_partitions)
 
+    # Aggregate user-defined partitions
+    # Find all user-defined partition names across all results
+    all_user_partitions: set[str] = set()
+    for r in results:
+        all_user_partitions.update(r.user_defined_partitions.keys())
+
+    aggregated_user_partitions: dict[str, AggregatedPartitionCoverageResult] = {}
+    for partition_name in sorted(all_user_partitions):
+        # Collect this partition from all results that have it
+        partition_results = [
+            r.user_defined_partitions[partition_name]
+            for r in results
+            if partition_name in r.user_defined_partitions
+        ]
+        if partition_results:
+            aggregated_user_partitions[partition_name] = _aggregate_partition_coverage(
+                partition_results
+            )
+
     # Collect polymer types
     all_polymer_types: set[str] = set()
     for r in results:
@@ -2270,6 +2450,7 @@ def aggregate_system_coverage(
         aa_class_coverage=aggregated_aa_class,
         custom_group_coverages=aggregated_custom_groups,
         combined_custom_coverage=aggregated_combined,
+        user_defined_partitions=aggregated_user_partitions,
         n_replicates=len(results),
         total_exposed_residues=results[0].total_exposed_residues if results else 0,
         surface_exposure_threshold=results[0].surface_exposure_threshold if results else None,

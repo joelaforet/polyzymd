@@ -512,6 +512,16 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
         default=None,
         description="Custom protein groups as {name: [resid1, resid2, ...]}",
     )
+    protein_partitions: Optional[dict[str, list[str]]] = Field(
+        default=None,
+        description=(
+            "Custom partitions for system coverage comparison. "
+            "Each partition defines a mutually exclusive set of protein groups "
+            "that will generate one comparison plot. Format: {partition_name: [group1, group2, ...]}. "
+            "Groups must be defined in protein_groups. If groups don't cover all protein residues, "
+            "'rest_of_protein' is auto-added. Overlapping groups within a partition cause validation error."
+        ),
+    )
     enrichment_normalization: str = Field(
         default="residue",
         description="DEPRECATED: Enrichment is now always normalized by protein surface availability. This field is ignored.",
@@ -544,6 +554,57 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
             raise ValueError(f"enrichment_normalization must be one of {valid}, got '{v}'")
         return v
 
+    @model_validator(mode="after")
+    def validate_protein_partitions(self) -> "ContactsAnalysisSettings":
+        """Validate protein_partitions references and mutual exclusivity.
+
+        Validates:
+        1. All groups referenced in partitions exist in protein_groups
+        2. Groups within each partition don't overlap (mutually exclusive)
+        """
+        if not self.protein_partitions:
+            return self
+
+        # protein_groups must exist if partitions are defined
+        if not self.protein_groups:
+            raise ValueError(
+                "protein_partitions requires protein_groups to be defined. "
+                "Define the groups first, then reference them in partitions."
+            )
+
+        protein_groups = self.protein_groups
+
+        for partition_name, group_names in self.protein_partitions.items():
+            if not group_names:
+                raise ValueError(
+                    f"Partition '{partition_name}' is empty. "
+                    "Each partition must contain at least one group."
+                )
+
+            # Check all referenced groups exist
+            for group_name in group_names:
+                if group_name not in protein_groups:
+                    available = ", ".join(sorted(protein_groups.keys()))
+                    raise ValueError(
+                        f"Partition '{partition_name}' references undefined group '{group_name}'. "
+                        f"Available groups: {available}"
+                    )
+
+            # Check for overlapping groups within this partition
+            seen_resids: dict[int, str] = {}  # resid -> first group that contains it
+            for group_name in group_names:
+                group_resids = protein_groups[group_name]
+                for resid in group_resids:
+                    if resid in seen_resids:
+                        raise ValueError(
+                            f"Partition '{partition_name}' has overlapping groups: "
+                            f"residue {resid} is in both '{seen_resids[resid]}' and '{group_name}'. "
+                            "Groups within a partition must be mutually exclusive."
+                        )
+                    seen_resids[resid] = group_name
+
+        return self
+
     def to_analysis_yaml_dict(self) -> dict[str, Any]:
         """Convert to analysis.yaml-compatible dictionary."""
         result: dict[str, Any] = {
@@ -567,6 +628,8 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
                 result["enzyme_pdb_for_sasa"] = self.enzyme_pdb_for_sasa
             if self.protein_groups:
                 result["protein_groups"] = self.protein_groups
+            if self.protein_partitions:
+                result["protein_partitions"] = self.protein_partitions
             if self.polymer_type_selections:
                 result["polymer_type_selections"] = self.polymer_type_selections
 

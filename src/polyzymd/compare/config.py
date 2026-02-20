@@ -375,6 +375,12 @@ class ContactsPlotSettings(BaseModel):
         Figure size for system coverage bar charts
     show_system_coverage_error : bool
         Show error bars on system coverage bar charts (default True)
+    generate_user_partition_bars : bool
+        Generate user-defined partition bar charts (default True)
+    figsize_user_partition_bars : tuple[float, float]
+        Figure size for user-defined partition bar charts
+    show_user_partition_error : bool
+        Show error bars on user-defined partition bar charts (default True)
     """
 
     figsize: tuple[float, float] = (10, 8)
@@ -391,6 +397,11 @@ class ContactsPlotSettings(BaseModel):
     figsize_system_coverage_heatmap: tuple[float, float] | None = None
     figsize_system_coverage_bars: tuple[float, float] = (10, 6)
     show_system_coverage_error: bool = True
+
+    # User-defined partition plot settings
+    generate_user_partition_bars: bool = True
+    figsize_user_partition_bars: tuple[float, float] = (10, 6)
+    show_user_partition_error: bool = True
 
 
 class PlotSettings(BaseModel):

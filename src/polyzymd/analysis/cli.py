@@ -1424,6 +1424,7 @@ def contacts(
                 compute_binding_preference,
                 resolve_protein_group_selections,
                 aggregate_binding_preference,
+                extract_polymer_composition,
             )
 
             # Determine enzyme PDB path
@@ -1460,6 +1461,13 @@ def contacts(
                 protein_groups = resolve_protein_group_selections(universe, None)
                 click.echo(f"  Protein groups: {', '.join(protein_groups.keys())}")
 
+                # Extract polymer composition (once - same for all replicates)
+                polymer_composition = extract_polymer_composition(universe, None)
+                click.echo(
+                    f"  Polymer composition: {polymer_composition.total_residues} residues, "
+                    f"{polymer_composition.total_heavy_atoms} heavy atoms"
+                )
+
                 # Compute binding preference for each replicate
                 for i, (result, universe) in enumerate(zip(results, universes)):
                     try:
@@ -1467,6 +1475,7 @@ def contacts(
                             contact_result=result,
                             surface_exposure=surface_exposure,
                             protein_groups=protein_groups,
+                            polymer_composition=polymer_composition,
                         )
                         binding_pref_results.append(bp_result)
 

@@ -1136,6 +1136,7 @@ class ContactsComparator(
         custom_groups = getattr(self.analysis_settings, "protein_groups", None)
         enzyme_pdb_setting = getattr(self.analysis_settings, "enzyme_pdb_for_sasa", None)
         polymer_type_selections = getattr(self.analysis_settings, "polymer_type_selections", None)
+        protein_partitions = getattr(self.analysis_settings, "protein_partitions", None)
 
         # Resolve enzyme PDB path
         if enzyme_pdb_setting:
@@ -1227,6 +1228,7 @@ class ContactsComparator(
                     surface_exposure=surface_exposure,
                     protein_groups=protein_groups,
                     polymer_composition=polymer_composition,
+                    protein_partitions=protein_partitions,
                 )
                 rep_results.append(bp_result)
 
