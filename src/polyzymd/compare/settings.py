@@ -785,6 +785,120 @@ class ExposureComparisonSettings(BaseComparisonSettings):
         return "exposure"
 
 
+# ============================================================================
+# Binding Free Energy Settings
+# ============================================================================
+
+
+@AnalysisSettingsRegistry.register("binding_free_energy")
+class BindingFreeEnergyAnalysisSettings(BaseAnalysisSettings):
+    """Settings for binding free energy analysis via Boltzmann inversion.
+
+    Computes the selectivity free energy difference:
+
+        ΔΔG = -k_B·T · ln(contact_share / expected_share)
+
+    where:
+    - contact_share  = fraction of polymer contacts directed at an AA group
+    - expected_share = fraction of exposed surface belonging to that AA group
+    - T              = simulation temperature (from SimulationConfig)
+
+    This is a post-processing analysis that consumes binding preference results
+    from the contacts analysis layer (no new per-frame computation is needed).
+
+    Attributes
+    ----------
+    units : str
+        Energy units for output. One of "kcal/mol" or "kJ/mol".
+    surface_exposure_threshold : float
+        SASA threshold used when computing binding preference. Must match
+        the value used in the contacts analysis to find correct cache files.
+    protein_partitions : dict[str, list[str]], optional
+        User-defined partition groups (same format as contacts settings).
+        If None, only the default AA-class partition is used.
+    """
+
+    units: str = Field(
+        default="kcal/mol",
+        description="Energy units: 'kcal/mol' (default) or 'kJ/mol'",
+    )
+    surface_exposure_threshold: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="SASA threshold for surface-exposed residues (must match contacts settings)",
+    )
+    protein_partitions: Optional[dict[str, list[str]]] = Field(
+        default=None,
+        description="User-defined protein partitions (same format as contacts settings)",
+    )
+
+    @field_validator("units")
+    @classmethod
+    def validate_units(cls, v: str) -> str:
+        """Validate energy units."""
+        allowed = {"kcal/mol", "kJ/mol"}
+        if v not in allowed:
+            raise ValueError(f"units must be one of {sorted(allowed)}, got '{v}'")
+        return v
+
+    @classmethod
+    def analysis_type(cls) -> str:
+        """Return the analysis type identifier."""
+        return "binding_free_energy"
+
+    def k_b(self) -> float:
+        """Return k_B in the selected energy units.
+
+        Returns
+        -------
+        float
+            Boltzmann constant in kcal/(mol·K) or kJ/(mol·K).
+        """
+        if self.units == "kJ/mol":
+            return 0.0083144626  # kJ/(mol·K)
+        return 0.0019872041  # kcal/(mol·K)  [default]
+
+    def to_analysis_yaml_dict(self) -> dict:
+        """Convert to analysis.yaml-compatible dictionary.
+
+        Returns
+        -------
+        dict
+            Dictionary suitable for writing to analysis.yaml.
+        """
+        result: dict = {
+            "enabled": True,
+            "units": self.units,
+            "surface_exposure_threshold": self.surface_exposure_threshold,
+        }
+        if self.protein_partitions is not None:
+            result["protein_partitions"] = self.protein_partitions
+        return result
+
+
+@ComparisonSettingsRegistry.register("binding_free_energy")
+class BindingFreeEnergyComparisonSettings(BaseComparisonSettings):
+    """Comparison settings for binding free energy analysis.
+
+    Attributes
+    ----------
+    fdr_alpha : float
+        False discovery rate alpha for Benjamini-Hochberg correction
+        of p-values across (polymer_type, AA_group) pairs.
+    """
+
+    fdr_alpha: float = Field(
+        default=0.05,
+        description="FDR alpha for Benjamini-Hochberg correction",
+    )
+
+    @classmethod
+    def analysis_type(cls) -> str:
+        """Return the analysis type identifier."""
+        return "binding_free_energy"
+
+
 def get_all_analysis_types() -> list[str]:
     """Get all registered analysis types.
 
