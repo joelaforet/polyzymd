@@ -21,6 +21,8 @@ from polyzymd.compare.config import (
 )
 from polyzymd.compare.formatters import format_result
 from polyzymd.compare.settings import (
+    BindingFreeEnergyAnalysisSettings,
+    BindingFreeEnergyComparisonSettings,
     CatalyticTriadAnalysisSettings,
     ContactsAnalysisSettings,
     ContactsComparisonSettings,
@@ -1414,6 +1416,7 @@ def run_comparison(
         "contacts": "contacts",
         "distances": "distances",
         "exposure": "exposure",
+        "binding_free_energy": "binding_free_energy",
     }
     settings_key = settings_key_map.get(comparison_type, comparison_type)
 
@@ -1643,3 +1646,211 @@ def plot_all(
             click.echo(f"  - {path}")
     else:
         click.echo("No plots generated. Check that analyses are enabled in config.")
+
+
+@compare.command(name="binding-free-energy")
+@click.option(
+    "-f",
+    "--file",
+    "config_file",
+    type=click.Path(exists=True, path_type=Path),
+    default="comparison.yaml",
+    help="Path to comparison.yaml config file.",
+)
+@click.option(
+    "--eq-time",
+    default=None,
+    help="Override equilibration time (e.g., '10ns', '5000ps').",
+)
+@click.option(
+    "--units",
+    type=click.Choice(["kcal/mol", "kJ/mol"]),
+    default=None,
+    help="Override energy units (default: kcal/mol).",
+)
+@click.option(
+    "--fdr-alpha",
+    default=None,
+    type=float,
+    help="Override FDR alpha for Benjamini-Hochberg correction (default: 0.05).",
+)
+@click.option(
+    "--recompute",
+    is_flag=True,
+    help="Force recompute binding preference analysis even if cached results exist.",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "markdown", "json"]),
+    default="table",
+    help="Output format: table (default), markdown, or json.",
+)
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Save output to file. Also saves JSON result to results/ directory.",
+)
+@click.option(
+    "-q",
+    "--quiet",
+    is_flag=True,
+    help="Suppress INFO messages, show warnings/errors only.",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable DEBUG logging for troubleshooting.",
+)
+def binding_free_energy(
+    config_file: Path,
+    eq_time: Optional[str],
+    units: Optional[str],
+    fdr_alpha: Optional[float],
+    recompute: bool,
+    output_format: str,
+    output_path: Optional[Path],
+    quiet: bool,
+    debug: bool,
+):
+    """Compute ΔΔG (Gibbs free energy differences) from binding preference data.
+
+    Converts existing binding preference probability data into physically grounded
+    Gibbs free energy differences via Boltzmann inversion:
+
+    \b
+        ΔΔG = -k_B·T · ln(contact_share / expected_share)
+
+    This answers: which residue groups does each polymer condition preferentially
+    contact, and by how much in real energy units?
+
+    Requires a 'binding_free_energy' section in analysis_settings (comparison.yaml),
+    with contacts analysis already cached for each condition.
+
+    \b
+    Example:
+        polyzymd compare binding-free-energy
+        polyzymd compare binding-free-energy --units kJ/mol --format markdown
+        polyzymd compare binding-free-energy --fdr-alpha 0.01 -o bfe_report.md
+    """
+    from polyzymd.analysis.core.logging_utils import setup_logging
+    from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
+    from polyzymd.compare.comparators.binding_free_energy import BindingFreeEnergyComparator
+
+    setup_logging(quiet=quiet, debug=debug)
+
+    config_file = Path(config_file).resolve()
+
+    # Load and validate config
+    click.echo(f"Loading config: {config_file}")
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        click.echo(
+            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
+        )
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error loading config: {e}", err=True)
+        sys.exit(1)
+
+    errors = config.validate_config()
+    if errors:
+        click.echo("Configuration errors:", err=True)
+        for error in errors:
+            click.echo(f"  - {error}", err=True)
+        sys.exit(1)
+
+    # Get binding_free_energy settings from analysis_settings
+    bfe_analysis_raw = config.analysis_settings.get("binding_free_energy")
+    if bfe_analysis_raw is None:
+        click.echo("Error: No 'binding_free_energy' in analysis_settings section", err=True)
+        click.echo("", err=True)
+        click.echo(
+            "Binding free energy comparison requires an "
+            "'analysis_settings.binding_free_energy' section:",
+            err=True,
+        )
+        click.echo("", err=True)
+        click.echo("  analysis_settings:", err=True)
+        click.echo("    binding_free_energy:", err=True)
+        click.echo("      units: kcal/mol", err=True)
+        click.echo("      surface_exposure_threshold: 0.2", err=True)
+        click.echo("", err=True)
+        click.echo("And a corresponding comparison_settings entry:", err=True)
+        click.echo("", err=True)
+        click.echo("  comparison_settings:", err=True)
+        click.echo("    binding_free_energy:", err=True)
+        click.echo("      fdr_alpha: 0.05", err=True)
+        sys.exit(1)
+
+    bfe_analysis = BindingFreeEnergyAnalysisSettings.model_validate(bfe_analysis_raw.model_dump())
+
+    bfe_comparison_raw = config.comparison_settings.get("binding_free_energy")
+    if bfe_comparison_raw is not None:
+        bfe_comparison = BindingFreeEnergyComparisonSettings.model_validate(
+            bfe_comparison_raw.model_dump()
+        )
+    else:
+        bfe_comparison = BindingFreeEnergyComparisonSettings()
+
+    # Apply CLI overrides
+    if units is not None:
+        bfe_analysis = BindingFreeEnergyAnalysisSettings(
+            **{**bfe_analysis.model_dump(), "units": units}
+        )
+    if fdr_alpha is not None:
+        bfe_comparison = BindingFreeEnergyComparisonSettings(
+            **{**bfe_comparison.model_dump(), "fdr_alpha": fdr_alpha}
+        )
+
+    equilibration = eq_time or config.defaults.equilibration_time
+
+    click.echo(f"Comparison: {config.name}")
+    click.echo(f"Conditions: {len(config.conditions)}")
+    click.echo(f"Equilibration: {equilibration}")
+    click.echo(f"Units: {bfe_analysis.units}")
+    click.echo(f"Surface exposure threshold: {bfe_analysis.surface_exposure_threshold}")
+    click.echo(f"FDR alpha: {bfe_comparison.fdr_alpha}")
+    if config.control:
+        click.echo(f"Control: {config.control}")
+    click.echo()
+
+    # Run comparison
+    try:
+        comparator = BindingFreeEnergyComparator(
+            config=config,
+            analysis_settings=bfe_analysis,
+            comparison_settings=bfe_comparison,
+            equilibration=equilibration,
+        )
+        result = comparator.compare(recompute=recompute)
+    except Exception as e:
+        click.echo(f"Error during comparison: {e}", err=True)
+        if debug:
+            import traceback
+
+            traceback.print_exc()
+        sys.exit(1)
+
+    # Save JSON result
+    results_dir = config_file.parent / "results"
+    results_dir.mkdir(exist_ok=True)
+    json_path = results_dir / f"bfe_comparison_{config.name.replace(' ', '_')}.json"
+    result.save(json_path)
+    click.echo(f"Saved result: {json_path}")
+    click.echo()
+
+    # Format and display output
+    formatted = format_bfe_result(result, format=output_format)
+    click.echo(formatted)
+
+    # Save formatted output if requested
+    if output_path:
+        output_path = Path(output_path)
+        output_path.write_text(formatted)
+        click.echo(f"Saved output: {output_path}")

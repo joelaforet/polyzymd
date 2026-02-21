@@ -30,6 +30,8 @@ from polyzymd.analysis.core.registry import (
 
 # Import settings to trigger registration
 from polyzymd.compare.settings import (  # noqa: F401
+    BindingFreeEnergyAnalysisSettings,
+    BindingFreeEnergyComparisonSettings,
     CatalyticTriadAnalysisSettings,
     CatalyticTriadComparisonSettings,
     ContactsAnalysisSettings,
@@ -857,6 +859,16 @@ analysis_settings:
   #   probe_radius_nm: 0.14        # SASA probe radius (nm)
   #   n_sphere_points: 960         # number of sphere points for SASA computation
 
+  # Binding Free Energy Analysis (ΔΔG via Boltzmann inversion)
+  # Requires contacts analysis with compute_binding_preference: true to be run first.
+  # Converts binding preference probabilities into ΔΔG = -k_B·T·ln(contact_share / expected_share).
+  # Run: polyzymd compare binding-free-energy
+  #
+  # binding_free_energy:
+  #   units: kcal/mol              # energy units: kcal/mol or kJ/mol
+  #   surface_exposure_threshold: 0.2  # minimum relative SASA to be considered surface-exposed
+  #   # protein_partitions: null   # optional: restrict to user-defined AA partitions
+
 # ============================================================================
 # Comparison Settings (HOW to compare - statistical parameters)
 # ============================================================================
@@ -876,4 +888,7 @@ comparison_settings:
   #   top_residues: 10          # Number of top residues to show in console
 
   # exposure: {{}}              # No comparison-specific parameters for exposure
+
+  # binding_free_energy:
+  #   fdr_alpha: 0.05           # FDR for Benjamini-Hochberg correction
 """
