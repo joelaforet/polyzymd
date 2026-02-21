@@ -153,6 +153,7 @@ prepared simulation input), NOT a trajectory frame.
         click.echo("     polyzymd compare run rmsf      # Compare flexibility")
         click.echo("     polyzymd compare run triad     # Compare triad geometry")
         click.echo("     polyzymd compare run contacts  # Compare polymer-protein contacts")
+        click.echo("     polyzymd compare exposure      # Compare chaperone-like activity")
         click.echo()
 
     except Exception as e:
@@ -1030,6 +1031,230 @@ def contacts(
         click.echo(f"Saved output: {output_path}")
 
 
+@compare.command()
+@click.option(
+    "-f",
+    "--file",
+    "config_file",
+    type=click.Path(exists=True, path_type=Path),
+    default="comparison.yaml",
+    help="Path to comparison.yaml config file.",
+)
+@click.option(
+    "--eq-time",
+    default=None,
+    help="Override equilibration time (e.g., '10ns', '5000ps').",
+)
+@click.option(
+    "--exposure-threshold",
+    default=None,
+    type=float,
+    help="Override exposure threshold (fraction SASA; default: 0.20).",
+)
+@click.option(
+    "--polymer-resnames",
+    default=None,
+    help="Override polymer residue names as comma-separated list (e.g., 'SBM,EGM').",
+)
+@click.option(
+    "--recompute-sasa",
+    is_flag=True,
+    help="Force recompute SASA even if cached results exist.",
+)
+@click.option(
+    "--recompute-exposure",
+    is_flag=True,
+    help="Force recompute exposure dynamics even if cached results exist.",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "markdown", "json"]),
+    default="table",
+    help="Output format: table (default), markdown, or json.",
+)
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Save output to file. Also saves JSON result to results/ directory.",
+)
+@click.option(
+    "-q",
+    "--quiet",
+    is_flag=True,
+    help="Suppress INFO messages, show warnings/errors only.",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable DEBUG logging for troubleshooting.",
+)
+def exposure(
+    config_file: Path,
+    eq_time: Optional[str],
+    exposure_threshold: Optional[float],
+    polymer_resnames: Optional[str],
+    recompute_sasa: bool,
+    recompute_exposure: bool,
+    output_format: str,
+    output_path: Optional[Path],
+    quiet: bool,
+    debug: bool,
+):
+    """Compare chaperone-like polymer activity across conditions.
+
+    Analyzes exposure dynamics: classifies protein residues as stably
+    exposed, stably buried, or transiently exposed, then detects chaperone
+    events (buried -> exposed -> polymer contact -> re-buried) across all
+    conditions.
+
+    Requires contacts analysis to have been run first for each condition
+    (contacts_rep{N}.json must exist in analysis/contacts/).
+
+    Optionally define an exposure section in comparison.yaml for custom settings:
+    - exposure_threshold: fraction SASA defining 'exposed' (default: 0.20)
+    - polymer_resnames: list of polymer residue names for enrichment
+    - transient_lower / transient_upper: thresholds for classifying residues
+
+    \b
+    Example:
+        polyzymd compare exposure
+        polyzymd compare exposure --eq-time 10ns --format markdown
+        polyzymd compare exposure --recompute-sasa --recompute-exposure
+        polyzymd compare exposure --exposure-threshold 0.25 -o report.md
+    """
+    from polyzymd.analysis.core.logging_utils import setup_logging
+    from polyzymd.compare.comparators.exposure import ExposureDynamicsComparator
+    from polyzymd.compare.exposure_formatters import format_exposure_result
+    from polyzymd.compare.settings import ExposureAnalysisSettings, ExposureComparisonSettings
+
+    # Set up logging with colored output
+    setup_logging(quiet=quiet, debug=debug)
+
+    config_file = Path(config_file).resolve()
+
+    # Load and validate config
+    click.echo(f"Loading config: {config_file}")
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        click.echo(
+            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
+        )
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error loading config: {e}", err=True)
+        sys.exit(1)
+
+    # Validate config
+    errors = config.validate_config()
+    if errors:
+        click.echo("Configuration errors:", err=True)
+        for error in errors:
+            click.echo(f"  - {error}", err=True)
+        sys.exit(1)
+
+    # Get exposure settings from analysis_settings (optional — use defaults if absent)
+    exposure_analysis_raw = config.analysis_settings.get("exposure")
+    if exposure_analysis_raw is not None:
+        exposure_analysis = ExposureAnalysisSettings.model_validate(
+            exposure_analysis_raw.model_dump()
+        )
+    else:
+        exposure_analysis = ExposureAnalysisSettings()
+
+    # Get comparison settings (optional)
+    exposure_comparison_raw = config.comparison_settings.get("exposure")
+    if exposure_comparison_raw is not None:
+        exposure_comparison = ExposureComparisonSettings.model_validate(
+            exposure_comparison_raw.model_dump()
+        )
+    else:
+        exposure_comparison = ExposureComparisonSettings()
+
+    # Apply CLI overrides to analysis settings
+    overrides: dict = {}
+    if exposure_threshold is not None:
+        overrides["exposure_threshold"] = exposure_threshold
+    if polymer_resnames is not None:
+        overrides["polymer_resnames"] = [r.strip() for r in polymer_resnames.split(",")]
+    if overrides:
+        exposure_analysis = ExposureAnalysisSettings(
+            **{**exposure_analysis.model_dump(), **overrides}
+        )
+
+    # Recompute flags: --recompute-sasa or --recompute-exposure both force a full recompute
+    recompute = recompute_sasa or recompute_exposure
+
+    click.echo(f"Comparison: {config.name}")
+    click.echo(f"Conditions: {len(config.conditions)}")
+
+    equilibration = eq_time or config.defaults.equilibration_time
+    click.echo(f"Equilibration: {equilibration}")
+    click.echo(f"Exposure threshold: {exposure_analysis.exposure_threshold}")
+    click.echo(f"Probe radius: {exposure_analysis.probe_radius_nm} nm")
+    if exposure_analysis.polymer_resnames:
+        click.echo(f"Polymer residue names: {', '.join(exposure_analysis.polymer_resnames)}")
+    if config.control:
+        click.echo(f"Control: {config.control}")
+    if recompute_sasa:
+        click.echo("Recompute SASA: yes")
+    if recompute_exposure:
+        click.echo("Recompute exposure: yes")
+    click.echo()
+
+    # Run comparison
+    try:
+        comparator = ExposureDynamicsComparator(
+            config=config,
+            analysis_settings=exposure_analysis,
+            comparison_settings=exposure_comparison,
+            equilibration=equilibration,
+        )
+        result = comparator.compare(recompute=recompute)
+    except Exception as e:
+        click.echo(f"Error during comparison: {e}", err=True)
+        if debug:
+            import traceback
+
+            traceback.print_exc()
+        sys.exit(1)
+
+    # Show auto-excluded conditions warning
+    if result.excluded_conditions:
+        click.secho(
+            f"Note: {len(result.excluded_conditions)} condition(s) auto-excluded (no polymer): "
+            f"{', '.join(result.excluded_conditions)}",
+            fg="yellow",
+        )
+        click.echo()
+
+    # Save JSON result
+    results_dir = config_file.parent / "results"
+    results_dir.mkdir(exist_ok=True)
+    json_path = results_dir / f"exposure_comparison_{config.name.replace(' ', '_')}.json"
+    result.save(json_path)
+    click.echo(f"Saved result: {json_path}")
+    click.echo()
+
+    # Format and display output
+    formatted = format_exposure_result(
+        result,
+        format=output_format,
+    )
+    click.echo(formatted)
+
+    # Save formatted output if requested
+    if output_path:
+        output_path = Path(output_path)
+        output_path.write_text(formatted)
+        click.echo(f"Saved output: {output_path}")
+
+
 @compare.command("run")
 @click.argument(
     "comparison_type",
@@ -1108,12 +1333,14 @@ def run_comparison(
       - rmsf: Compare RMSF (flexibility) across conditions
       - triad: Compare catalytic triad geometry across conditions
       - contacts: Compare polymer-protein contacts across conditions
+      - exposure: Compare chaperone-like polymer activity across conditions
 
     \b
     Example:
         polyzymd compare run rmsf
         polyzymd compare run triad --eq-time 10ns
         polyzymd compare run contacts --format markdown
+        polyzymd compare run exposure --format json
         polyzymd compare run --list
     """
     from polyzymd.analysis.core.logging_utils import setup_logging
@@ -1186,6 +1413,7 @@ def run_comparison(
         "triad": "catalytic_triad",
         "contacts": "contacts",
         "distances": "distances",
+        "exposure": "exposure",
     }
     settings_key = settings_key_map.get(comparison_type, comparison_type)
 
@@ -1247,6 +1475,10 @@ def run_comparison(
             from polyzymd.compare.distances_formatters import format_distances_result
 
             formatted = format_distances_result(result, format=output_format)
+        elif comparison_type == "exposure":
+            from polyzymd.compare.exposure_formatters import format_exposure_result
+
+            formatted = format_exposure_result(result, format=output_format)
         else:
             # Generic JSON output for unknown types
             formatted = result.model_dump_json(indent=2)

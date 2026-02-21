@@ -841,6 +841,22 @@ analysis_settings:
   #   #     - lid_helix_5       # must be defined in protein_groups above
   #   #     - lid_helix_10
 
+  # Exposure Dynamics Analysis (chaperone-like polymer activity)
+  # Requires contacts analysis to be run first for each condition.
+  # Run: polyzymd compare exposure
+  #
+  # exposure:
+  #   exposure_threshold: 0.20     # fraction SASA defining 'exposed' residue
+  #   transient_lower: 0.20        # lower bound: residue must reach this to be transient
+  #   transient_upper: 0.80        # upper bound: residue must also reach this threshold
+  #   min_event_length: 1          # minimum consecutive frames to count as an event
+  #   protein_chain: "A"           # chain ID for the protein
+  #   protein_selection: "protein" # MDAnalysis selection for protein
+  #   polymer_selection: "chainID C"  # MDAnalysis selection for polymer
+  #   # polymer_resnames: [SBM, EGM]  # optional: residue names for enrichment analysis
+  #   probe_radius_nm: 0.14        # SASA probe radius (nm)
+  #   n_sphere_points: 960         # number of sphere points for SASA computation
+
 # ============================================================================
 # Comparison Settings (HOW to compare - statistical parameters)
 # ============================================================================
@@ -858,4 +874,6 @@ comparison_settings:
   #   fdr_alpha: 0.05           # FDR for Benjamini-Hochberg correction
   #   min_effect_size: 0.5      # Cohen's d threshold (0.2=small, 0.5=medium, 0.8=large)
   #   top_residues: 10          # Number of top residues to show in console
+
+  # exposure: {{}}              # No comparison-specific parameters for exposure
 """
