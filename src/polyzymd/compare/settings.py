@@ -680,6 +680,111 @@ class ContactsComparisonSettings(BaseComparisonSettings):
 # ============================================================================
 
 
+# ============================================================================
+# Exposure Dynamics Settings
+# ============================================================================
+
+
+@AnalysisSettingsRegistry.register("exposure")
+class ExposureAnalysisSettings(BaseAnalysisSettings):
+    """Exposure dynamics analysis settings (dynamic SASA-based chaperone analysis).
+
+    Attributes
+    ----------
+    protein_selection : str
+        MDAnalysis selection for protein atoms (chain A by default).
+    polymer_selection : str
+        MDAnalysis selection for polymer atoms (chain C by default).
+    exposure_threshold : float
+        Relative SASA threshold for classifying a residue as exposed.
+    transient_lower : float
+        Lower bound of exposure fraction for "transient" classification.
+    transient_upper : float
+        Upper bound of exposure fraction for "transient" classification.
+    min_event_length : int
+        Minimum exposed-window length (frames) to count as an event.
+    probe_radius_nm : float
+        Probe radius for MDTraj shrake_rupley, in nm.
+    n_sphere_points : int
+        Number of sphere points for shrake_rupley.
+    protein_chain : str
+        Chain letter for protein (default "A").
+    polymer_resnames : list[str], optional
+        Subset of polymer monomer resnames to include. If None, all detected.
+    """
+
+    protein_selection: str = Field(
+        default="protein", description="MDAnalysis selection for protein"
+    )
+    polymer_selection: str = Field(
+        default="chainID C", description="MDAnalysis selection for polymer"
+    )
+    exposure_threshold: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="Relative SASA threshold for exposed classification",
+    )
+    transient_lower: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="Lower exposure fraction bound for 'transient' residues",
+    )
+    transient_upper: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description="Upper exposure fraction bound for 'transient' residues",
+    )
+    min_event_length: int = Field(
+        default=1,
+        ge=1,
+        description="Minimum exposed-window length (frames) to count as event",
+    )
+    probe_radius_nm: float = Field(default=0.14, description="Probe radius for SASA in nm")
+    n_sphere_points: int = Field(
+        default=960, description="Number of sphere points for shrake_rupley"
+    )
+    protein_chain: str = Field(default="A", description="Chain letter for protein")
+    polymer_resnames: Optional[list[str]] = Field(
+        default=None,
+        description="Subset of polymer resnames to analyze. If None, all detected.",
+    )
+
+    @classmethod
+    def analysis_type(cls) -> str:
+        """Return the analysis type identifier."""
+        return "exposure"
+
+    def to_analysis_yaml_dict(self) -> dict[str, Any]:
+        """Convert to analysis.yaml-compatible dictionary."""
+        result: dict[str, Any] = {
+            "enabled": True,
+            "exposure_threshold": self.exposure_threshold,
+            "transient_lower": self.transient_lower,
+            "transient_upper": self.transient_upper,
+            "min_event_length": self.min_event_length,
+            "protein_chain": self.protein_chain,
+        }
+        if self.polymer_resnames:
+            result["polymer_resnames"] = self.polymer_resnames
+        return result
+
+
+@ComparisonSettingsRegistry.register("exposure")
+class ExposureComparisonSettings(BaseComparisonSettings):
+    """Comparison settings for exposure dynamics analysis.
+
+    Currently no comparison-specific parameters beyond the defaults.
+    """
+
+    @classmethod
+    def analysis_type(cls) -> str:
+        """Return the analysis type identifier."""
+        return "exposure"
+
+
 def get_all_analysis_types() -> list[str]:
     """Get all registered analysis types.
 

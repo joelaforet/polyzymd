@@ -14,6 +14,8 @@ distances : DistanceKDEPlotter, DistanceThresholdPlotter
     Distance analysis visualization
 contacts : BindingPreferenceHeatmapPlotter, BindingPreferenceBarPlotter
     Binding preference enrichment visualization
+exposure : ExposureChaperoneFractionPlotter, ExposureEnrichmentHeatmapPlotter
+    Dynamic chaperone activity visualization
 
 Adding New Plotters
 -------------------
@@ -27,11 +29,12 @@ is loaded, ensuring they are registered before use.
 """
 
 # Import all plotter modules to trigger registration
-from polyzymd.compare.plotters import contacts, distances, rmsf, triad
+from polyzymd.compare.plotters import contacts, distances, exposure, rmsf, triad
 
 __all__ = [
     "triad",
     "rmsf",
     "distances",
     "contacts",
+    "exposure",
 ]
