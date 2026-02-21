@@ -2,11 +2,12 @@
 
 Your simulations just finished. Now what?
 
-This guide walks you through the **complete PolyzyMD analysis workflow**—from
+This guide walks you through the **complete PolyzyMD analysis workflow** — from
 raw trajectories to publication-ready figures comparing multiple conditions.
-By the end, you'll have analyzed protein flexibility (RMSF), active site
-geometry (catalytic triad), inter-atomic distances, and polymer-protein 
-contacts across all your simulation conditions.
+By the end, you will have analyzed protein flexibility (RMSF), active site
+geometry (catalytic triad), inter-atomic distances, polymer-protein contacts,
+binding preference enrichment, and chaperone-like exposure dynamics across all
+your simulation conditions.
 
 ```{note}
 **Prerequisites:**
@@ -14,47 +15,69 @@ contacts across all your simulation conditions.
 - A `config.yaml` file for each simulation condition
 - `solvated_system.pdb` topology in each run directory (created during build)
 
-**Time estimate:** 30-60 minutes for a typical 3-condition study
+**Time estimate:** 30–90 minutes for a typical 3-condition study (longer if
+computing SASA for exposure dynamics)
 ```
 
 ## Overview: The Analysis Pipeline
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        YOUR SIMULATION DATA                              │
-│  condition_A/config.yaml    condition_B/config.yaml    condition_C/...  │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         YOUR SIMULATION DATA                              │
+│  condition_A/config.yaml   condition_B/config.yaml   condition_C/...    │
+└──────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  STEP 1: Create analysis.yaml for each condition                        │
-│  Define: replicates, equilibration time, analysis parameters            │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│  STEP 1: Create analysis.yaml for each condition                         │
+│  Define: replicates, equilibration time, analysis parameters             │
+└──────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  STEP 2: Run individual analyses                                         │
-│  polyzymd analyze run  →  RMSF, triad, contacts per condition           │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│  STEP 2: Run individual analyses                                          │
+│  polyzymd analyze run  →  RMSF, triad, distances, contacts per condition │
+└──────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  STEP 3: Create comparison.yaml to compare conditions                   │
-│  Define: conditions, control, comparison parameters                      │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│  STEP 3: Create comparison.yaml to compare conditions                    │
+│  Define: conditions, control, comparison parameters                       │
+└──────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  STEP 4: Run statistical comparisons                                     │
-│  polyzymd compare rmsf/triad/contacts  →  p-values, effect sizes        │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│  STEP 4: Run statistical comparisons                                      │
+│  polyzymd compare rmsf         →  protein flexibility                    │
+│  polyzymd compare triad        →  active site geometry                   │
+│  polyzymd compare contacts     →  polymer coverage & contact intensity   │
+│  polyzymd compare contacts*    →  binding preference enrichment          │
+│  polyzymd compare exposure     →  chaperone-like activity (new)          │
+└──────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  STEP 5: Generate publication figures                                    │
-│  polyzymd compare plot  →  bar charts, forest plots, summary panels     │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│  STEP 5: Generate publication figures                                     │
+│  polyzymd compare plot-all  →  bar charts, KDE panels, summary plots     │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
+
+*Binding preference is enabled inside the `contacts` section of `comparison.yaml`.
+
+---
+
+## Analysis Types at a Glance
+
+| Analysis | Command | What it measures | Guide |
+|---|---|---|---|
+| RMSF | `compare rmsf` | Per-residue flexibility | [Quick Start](analysis_rmsf_quickstart.md) |
+| Catalytic Triad | `compare triad` | Active site H-bond geometry | [Quick Start](analysis_triad_quickstart.md) |
+| Distances | `analyze distances` | Specific atom-pair distances | [Quick Start](analysis_distances_quickstart.md) |
+| Contacts | `compare contacts` | Polymer coverage & contact fraction | [Quick Start](analysis_contacts_quickstart.md) |
+| Binding Preference | `compare contacts`* | Amino acid class enrichment | [Full Guide](analysis_binding_preference.md) |
+| Exposure Dynamics | `compare exposure` | Chaperone-like polymer activity | [Full Guide](analysis_exposure_dynamics.md) |
+
+*Binding preference is part of the contacts analysis; enable `compute_binding_preference: true` in your config.
 
 ---
 
@@ -108,7 +131,7 @@ cd noPoly_enzyme_DMSO/
 polyzymd analyze init
 ```
 
-This creates an `analysis.yaml` with default values. Now customize it:
+This creates an `analysis.yaml` with default values. Customize it:
 
 ```yaml
 # analysis.yaml - No Polymer Control
@@ -119,7 +142,7 @@ replicates: [1, 2, 3]
 
 # Shared parameters
 defaults:
-  equilibration_time: "10ns"    # Skip first 10ns for equilibration
+  equilibration_time: "10ns"    # Skip first 10 ns for equilibration
 
 # ─────────────────────────────────────────────────────────────────────────
 # RMSF Analysis: Protein flexibility
@@ -139,12 +162,12 @@ catalytic_triad:
   pairs:
     # Ser77 OG ↔ His156 NE2 (nucleophile-histidine)
     - label: "Ser77-His156"
-      selection_a: "resid 77 and name OG"
-      selection_b: "resid 156 and name NE2"
+      selection_a: "protein and resid 77 and name OG"
+      selection_b: "protein and resid 156 and name NE2"
     # His156 ND1 ↔ Asp133 OD1/OD2 midpoint (histidine-aspartate)
     - label: "His156-Asp133"
-      selection_a: "resid 156 and name ND1"
-      selection_b: "midpoint(resid 133 and name OD1 OD2)"
+      selection_a: "protein and resid 156 and name ND1"
+      selection_b: "midpoint(protein and resid 133 and name OD1 OD2)"
 
 # ─────────────────────────────────────────────────────────────────────────
 # Distance Analysis: Specific atom-pair distances
@@ -155,10 +178,10 @@ distances:
     # Substrate to catalytic serine (reaction distance)
     - label: "Substrate-Ser77"
       selection_a: "resname SUB and name C1"      # Replace with your substrate
-      selection_b: "resid 77 and name OG"
+      selection_b: "protein and resid 77 and name OG"
     # Histidine to substrate (proton shuttle)
     - label: "His156-Substrate"
-      selection_a: "resid 156 and name NE2"
+      selection_a: "protein and resid 156 and name NE2"
       selection_b: "resname SUB and name O1"
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -173,10 +196,6 @@ contacts:
   protein_selection: "protein"
   cutoff: 4.5                         # Contact distance (Angstroms)
   compute_residence_times: true       # Track contact durations
-  
-  # Binding preference analysis (optional)
-  # Computes enrichment: does polymer X prefer amino acid class Y?
-  compute_binding_preference: false   # Enable in comparison.yaml instead
 ```
 
 ```{tip}
@@ -186,6 +205,9 @@ residues. Common triads:
 - **Lipases:** Ser-His-Asp (e.g., Ser77, His156, Asp133)
 - **Proteases:** Ser-His-Asp or Cys-His-Asn
 - **Esterases:** Ser-Glu-His
+
+Always use `"protein and resid X"` in selections — without `protein and`, your
+selection may accidentally match atoms from polymer or solvent chains.
 ```
 
 ### 1.3 Copy to Other Conditions
@@ -207,8 +229,6 @@ come from each condition's `config.yaml` pointing to different trajectories.
 ## Step 2: Run Individual Analyses
 
 ### 2.1 Run All Analyses for Each Condition
-
-For each condition, run the complete analysis suite:
 
 `````{tab-set}
 ````{tab-item} One at a time
@@ -255,9 +275,9 @@ parallel -j3 "cd {} && polyzymd analyze run" ::: \
 Loading configuration from: config.yaml
 Analysis: noPoly_enzyme_DMSO
 
-Enabled analyses: rmsf, catalytic_triad, contacts
+Enabled analyses: rmsf, catalytic_triad, distances, contacts
 
-[1/3] RMSF Analysis
+[1/4] RMSF Analysis
   Replicates: 1, 2, 3
   Selection: protein and name CA
   Reference mode: average
@@ -266,7 +286,7 @@ Enabled analyses: rmsf, catalytic_triad, contacts
   Processing replicate 3... done (181 residues, mean RMSF: 0.70 Å)
   Results saved: analysis/rmsf/
 
-[2/3] Catalytic Triad Analysis
+[2/4] Catalytic Triad Analysis
   Triad: Ser-His-Asp
   Pairs: Ser77-His156, His156-Asp133
   Threshold: 3.5 Å
@@ -275,15 +295,17 @@ Enabled analyses: rmsf, catalytic_triad, contacts
   Processing replicate 3... done (71.8% simultaneous contact)
   Results saved: analysis/triad/
 
-[3/3] Contacts Analysis
+[3/4] Distance Analysis
+  Pairs: Substrate-Ser77, His156-Substrate
+  Results saved: analysis/distances/
+
+[4/4] Contacts Analysis
   Note: No polymer atoms found (chainID C). Skipping.
 
 Analysis complete! Results in: analysis/
 ```
 
 ### 2.2 Verify Results
-
-Check that results were created:
 
 ```bash
 ls -la analysis/
@@ -299,7 +321,23 @@ analysis/
 │   ├── triad_rep1.json
 │   ├── triad_rep2.json
 │   └── triad_rep3.json
-└── contacts/           # Empty for no-polymer control
+├── distances/
+│   ├── distances_rep1.json
+│   ├── distances_rep2.json
+│   └── distances_rep3.json
+└── contacts/           # Empty for no-polymer control; populated for polymer conditions
+    ├── contacts_rep1.json
+    ├── contacts_rep2.json
+    └── contacts_rep3.json
+```
+
+```{note}
+The `contacts/` directory will be empty for the no-polymer control — that is
+expected. The comparison step automatically excludes conditions without polymer
+when running `compare contacts` and `compare exposure`.
+
+Exposure dynamics analysis reads from the cached `contacts_repN.json` files
+produced here. **Run contacts first before running `compare exposure`.**
 ```
 
 ### 2.3 Quick Inspection (Optional)
@@ -324,8 +362,7 @@ polyzymd analyze triad -c config.yaml -r 1 --eq-time 10ns
 ````{tab-item} Distances
 ```bash
 # View distances for one replicate
-polyzymd analyze distances -c config.yaml -r 1 --eq-time 10ns \
-    --pair "resname SUB and name C1 : resid 77 and name OG"
+polyzymd analyze distances -c config.yaml -r 1 --eq-time 10ns
 ```
 ````
 
@@ -341,8 +378,6 @@ polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns
 
 ## Step 3: Set Up Cross-Condition Comparison
 
-Now that individual analyses are complete, we'll compare conditions statistically.
-
 ### 3.1 Create a Comparison Project
 
 ```bash
@@ -350,7 +385,7 @@ Now that individual analyses are complete, we'll compare conditions statisticall
 cd my_enzyme_study/
 
 # Create comparison project
-polyzymd compare init polymer_stabilization_study
+polyzymd compare init -n polymer_stabilization_study
 ```
 
 This creates:
@@ -359,12 +394,15 @@ This creates:
 polymer_stabilization_study/
 ├── comparison.yaml    # Template to edit
 ├── results/           # Comparison outputs (auto-populated)
-└── figures/           # Publication figures (auto-populated)
+├── figures/           # Publication figures (auto-populated)
+└── structures/        # Place your enzyme PDB here (for binding preference)
+    └── README.md
 ```
 
 ### 3.2 Configure comparison.yaml
 
-Edit `comparison.yaml` to define your conditions:
+Edit `comparison.yaml` to define your conditions and analyses. This single file
+drives all comparison analyses:
 
 ```yaml
 # comparison.yaml - Polymer Stabilization Study
@@ -399,39 +437,65 @@ defaults:
   equilibration_time: "10ns"
 
 # ─────────────────────────────────────────────────────────────────────────
-# RMSF Comparison Settings
+# Analysis Settings (WHAT to analyze)
 # ─────────────────────────────────────────────────────────────────────────
-rmsf:
-  selection: "protein and name CA"
-  reference_mode: "average"
+analysis_settings:
+
+  rmsf:
+    selection: "protein and name CA"
+    reference_mode: "average"
+
+  catalytic_triad:
+    name: "Ser-His-Asp"
+    threshold: 3.5
+    pairs:
+      - label: "Ser77-His156"
+        selection_a: "protein and resid 77 and name OG"
+        selection_b: "protein and resid 156 and name NE2"
+      - label: "His156-Asp133"
+        selection_a: "protein and resid 156 and name ND1"
+        selection_b: "midpoint(protein and resid 133 and name OD1 OD2)"
+
+  contacts:
+    polymer_selection: "chainID C"
+    protein_selection: "protein"
+    cutoff: 4.5
+    grouping: "aa_class"
+    compute_residence_times: true
+
+    # Binding preference: which amino acid classes does each polymer prefer?
+    # Requires your enzyme's static PDB in the structures/ directory.
+    compute_binding_preference: true
+    surface_exposure_threshold: 0.2     # 20% relative SASA = surface exposed
+    enzyme_pdb_for_sasa: "structures/enzyme.pdb"
+    include_default_aa_groups: true     # aromatic, polar, charged, nonpolar
+
+  # Exposure dynamics: chaperone-like polymer activity
+  # Reads from cached contacts_repN.json — run contacts first.
+  exposure:
+    exposure_threshold: 0.20          # Fraction SASA defining "exposed"
+    transient_lower: 0.20             # Residue must dip below this threshold
+    transient_upper: 0.80             # ...and rise above this threshold
+    min_event_length: 1               # Minimum frames to count as an event
+    protein_chain: "A"
+    protein_selection: "protein"
+    polymer_selection: "chainID C"
+    probe_radius_nm: 0.14
+    n_sphere_points: 960
 
 # ─────────────────────────────────────────────────────────────────────────
-# Catalytic Triad Comparison Settings
+# Comparison Settings (HOW to compare — statistical parameters)
 # ─────────────────────────────────────────────────────────────────────────
-catalytic_triad:
-  name: "Ser-His-Asp"
-  threshold: 3.5
-  pairs:
-    - label: "Ser77-His156"
-      selection_a: "resid 77 and name OG"
-      selection_b: "resid 156 and name NE2"
-    - label: "His156-Asp133"
-      selection_a: "resid 156 and name ND1"
-      selection_b: "midpoint(resid 133 and name OD1 OD2)"
+comparison_settings:
+  rmsf: {}
 
-# ─────────────────────────────────────────────────────────────────────────
-# Contacts Comparison Settings
-# ─────────────────────────────────────────────────────────────────────────
-contacts:
-  polymer_selection: "chainID C"
-  protein_selection: "protein"
-  cutoff: 4.5
-  
-  # Binding preference: which amino acid classes does each polymer prefer?
-  compute_binding_preference: true
-  surface_exposure_threshold: 0.2     # 20% relative SASA
-  enzyme_pdb_for_sasa: "../structures/enzyme.pdb"
-  include_default_aa_groups: true     # aromatic, polar, charged, etc.
+  catalytic_triad: {}
+
+  contacts:
+    fdr_alpha: 0.05
+    min_effect_size: 0.5
+
+  exposure: {}
 ```
 
 ### 3.3 Validate Your Configuration
@@ -451,18 +515,18 @@ Validating: comparison.yaml
 Validation PASSED
 
   Name: polymer_stabilization_study
-  Description: Effect of SBMA vs EGMA polymer conjugation on enzyme stability
   Control: No Polymer
-  
+
   Conditions: 3
     ✓ No Polymer: 3 replicates (config found)
     ✓ 100% SBMA: 3 replicates (config found)
     ✓ 100% EGMA: 3 replicates (config found)
-  
+
   Analyses configured:
-    ✓ rmsf: protein and name CA
+    ✓ rmsf
     ✓ catalytic_triad: Ser-His-Asp (2 pairs)
-    ✓ contacts: chainID C ↔ protein
+    ✓ contacts: chainID C ↔ protein, cutoff 4.5 Å
+    ✓ exposure: threshold 0.20
 ```
 
 ---
@@ -471,26 +535,11 @@ Validation PASSED
 
 ### 4.1 Compare RMSF (Protein Flexibility)
 
-`````{tab-set}
-````{tab-item} CLI
+Compares mean per-residue RMSF across conditions. Lower RMSF = more rigid protein.
+
 ```bash
 polyzymd compare rmsf
 ```
-````
-
-````{tab-item} Python
-```python
-from polyzymd.compare import ComparisonConfig, RMSFComparator
-
-config = ComparisonConfig.from_yaml("comparison.yaml")
-comparator = RMSFComparator(config, rmsf_config=config.rmsf, equilibration="10ns")
-result = comparator.compare()
-
-print(f"Most stable: {result.ranking[0]}")
-result.save("results/rmsf_comparison.json")
-```
-````
-`````
 
 **Example output:**
 
@@ -519,37 +568,24 @@ Comparison                     % Change   p-value      Cohen's d  Effect
 100% EGMA vs No Polymer        -16.4%     0.1944       1.27       large
 --------------------------------------------------------------------------------
 * p < 0.05
-
-Results saved: results/rmsf_comparison_polymer_stabilization_study.json
 ```
 
-**Interpretation:**
-- 100% SBMA significantly reduces RMSF by 22.9% (p < 0.05)
-- 100% EGMA shows a large effect (Cohen's d = 1.27) but isn't statistically
-  significant with N=3 replicates
+**Interpretation:** 100% SBMA significantly reduces RMSF by 22.9% (p < 0.05).
+100% EGMA shows a large effect (Cohen's d = 1.27) but does not reach significance
+with N=3 replicates.
+
+For detailed guidance: [RMSF Quick Start](analysis_rmsf_quickstart.md) · [RMSF Best Practices](analysis_rmsf_best_practices.md)
+
+---
 
 ### 4.2 Compare Catalytic Triad Geometry
 
-`````{tab-set}
-````{tab-item} CLI
+Compares the fraction of time all active-site H-bond distances are simultaneously
+within threshold. Higher fraction = better-maintained active site geometry.
+
 ```bash
 polyzymd compare triad
 ```
-````
-
-````{tab-item} Python
-```python
-from polyzymd.compare import ComparisonConfig, TriadComparator
-
-config = ComparisonConfig.from_yaml("comparison.yaml")
-comparator = TriadComparator(config, equilibration="10ns")
-result = comparator.compare()
-
-print(f"Best triad integrity: {result.ranking[0]}")
-result.save("results/triad_comparison.json")
-```
-````
-`````
 
 **Example output:**
 
@@ -578,119 +614,62 @@ Comparison                     % Change   p-value      Cohen's d  Effect
 100% EGMA vs No Polymer        -5.0%      0.5234       -0.52      medium
 ---------------------------------------------------------------------------
 Positive % change = improved triad integrity
-
-Results saved: results/triad_comparison_polymer_stabilization_study.json
 ```
 
-**Interpretation:**
-- 100% SBMA significantly improves triad integrity by 21.1% (p < 0.05)
-- 100% EGMA slightly reduces triad integrity but not significantly
+**Interpretation:** SBMA significantly improves active site geometry (+21.1%,
+p < 0.05). EGMA slightly reduces it, but the difference is not significant.
 
-### 4.3 Analyze Distances (Single Condition)
+For detailed guidance: [Catalytic Triad Quick Start](analysis_triad_quickstart.md) · [Triad Best Practices](analysis_triad_best_practices.md)
 
-Distance analysis measures specific atom-pair distances over time. Unlike the
-comparison-focused RMSF and triad analyses, distances are typically computed
-per-condition and then compared manually or via custom scripts.
+---
 
-`````{tab-set}
-````{tab-item} CLI
+### 4.3 Analyze Distances
+
+Distance analysis measures specific atom-pair distances over time. Use this
+for individual atom-pair statistics, KDE-based mode estimation, or any
+inter-atomic distance that falls outside the catalytic triad framework.
+
 ```bash
-# Single replicate with threshold analysis
-polyzymd analyze distances -c config.yaml -r 1 --eq-time 10ns \
-    --pair "resname SUB and name C1 : resid 77 and name OG" \
-    --threshold 3.5
-
-# Multiple replicates (aggregated with SEM)
-polyzymd analyze distances -c config.yaml -r 1-3 --eq-time 10ns \
-    --pair "resname SUB and name C1 : resid 77 and name OG" \
-    --pair "resid 156 and name NE2 : resname SUB and name O1" \
-    --threshold 3.5 --plot
-```
-````
-
-````{tab-item} Python
-```python
-from polyzymd.config.schema import SimulationConfig
-from polyzymd.analysis import DistanceCalculator
-
-config = SimulationConfig.from_yaml("config.yaml")
-
-# Define distance pairs
-pairs = [
-    ("resname SUB and name C1", "resid 77 and name OG"),  # Substrate-Ser
-    ("resid 156 and name NE2", "resname SUB and name O1"),  # His-Substrate
-]
-
-# Create calculator with threshold for contact analysis
-calc = DistanceCalculator(
-    config=config,
-    pairs=pairs,
-    equilibration="10ns",
-    threshold=3.5,  # Contact cutoff
-)
-
 # Single replicate
-result = calc.compute(replicate=1)
-for pr in result.pair_results:
-    print(f"{pr.pair_label}: {pr.mean_distance:.2f} ± {pr.sem_distance:.2f} Å")
-    if pr.fraction_below_threshold is not None:
-        print(f"  Contact fraction: {pr.fraction_below_threshold:.1%}")
+polyzymd analyze distances -c config.yaml -r 1 --eq-time 10ns
 
-# Aggregate across replicates
-agg = calc.compute_aggregated(replicates=[1, 2, 3])
+# Multiple replicates with a contact threshold
+polyzymd compare distances --eq-time 10ns
 ```
-````
-`````
+
+```{tip}
+**Distances vs. triad:** Use **triad** when you need simultaneous contact
+analysis (all pairs below threshold at once). Use **distances** when you
+want individual pair statistics, KDE distributions, or custom atom selections.
+```
 
 **Example output:**
 
 ```
-Distance Analysis Complete (Aggregated)
-  Replicates: 1-3
-  resname_SUB_C1-resid77_OG:
-    Mean: 4.21 ± 0.18 Å (SEM across 3 replicates)
-    Contact fraction (<3.5Å): 32.4% ± 4.2%
-  resid156_NE2-resname_SUB_O1:
+Distance Analysis (Aggregated, replicates 1–3)
+  Substrate-Ser77:
+    Mean: 4.21 ± 0.18 Å
+    Contact fraction (<3.5 Å): 32.4% ± 4.2%
+  His156-Substrate:
     Mean: 3.89 ± 0.25 Å
-    Contact fraction (<3.5Å): 48.7% ± 5.1%
+    Contact fraction (<3.5 Å): 48.7% ± 5.1%
 ```
 
-```{tip}
-**Distance vs. Triad analysis:** Use **triad** when you need simultaneous
-contact analysis (all pairs below threshold at once). Use **distances** when
-you want individual pair statistics, KDE-based mode estimation, or custom
-atom selections beyond the catalytic triad.
-```
+For detailed guidance: [Distance Analysis Quick Start](analysis_distances_quickstart.md)
 
-For the full distance analysis guide, see [Distance Analysis Quick Start](analysis_distances_quickstart.md).
+---
 
 ### 4.4 Compare Polymer-Protein Contacts
 
 Contacts analysis provides three complementary views:
-1. **Coverage & contact fraction** — How much of the protein does the polymer contact?
-2. **Residence times** — How persistent are the contacts?
-3. **Binding preference** — Which amino acid classes does each polymer prefer?
 
-`````{tab-set}
-````{tab-item} CLI
+1. **Coverage** — What fraction of protein residues does the polymer contact?
+2. **Contact fraction** — How often, on average, is each contacted residue in contact?
+3. **Residence times** — How persistent are individual contacts?
+
 ```bash
 polyzymd compare contacts
 ```
-````
-
-````{tab-item} Python
-```python
-from polyzymd.compare import ComparisonConfig, ContactsComparator
-
-config = ComparisonConfig.from_yaml("comparison.yaml")
-comparator = ContactsComparator(config, equilibration="10ns")
-result = comparator.compare()
-
-print(f"Highest coverage: {result.ranking_by_coverage[0]}")
-result.save("results/contacts_comparison.json")
-```
-````
-`````
 
 **Example output:**
 
@@ -703,69 +682,178 @@ Note: 1 condition auto-excluded (no polymer atoms): No Polymer
 
 Condition Summary - Coverage (ranked, highest first)
 --------------------------------------------------------------------------------
-Rank  Condition            Coverage     SEM        N   
+Rank  Condition            Coverage     SEM        N
 --------------------------------------------------------------------------------
-1     100% EGMA               88.4%      0.55%  3    
-2     100% SBMA               74.9%      0.28%  3    
+1     100% EGMA               88.4%      0.55%  3
+2     100% SBMA               74.9%      0.28%  3
 --------------------------------------------------------------------------------
 
 Condition Summary - Mean Contact Fraction (ranked, highest first)
 --------------------------------------------------------------------------------
-Rank  Condition            Contact %    SEM        N   
+Rank  Condition            Contact %    SEM        N
 --------------------------------------------------------------------------------
-1     100% SBMA               30.2%      0.50%  3    
-2     100% EGMA               25.3%      2.64%  3    
+1     100% SBMA               30.2%      0.50%  3
+2     100% EGMA               25.3%      2.64%  3
 --------------------------------------------------------------------------------
 
 Residence Time by Polymer Type (frames)
 --------------------------------------------------------------------------------
 Condition            EGM          SBM
 --------------------------------------------------------------------------------
-100% SBMA             --    10.0±0.2 
+100% SBMA             --    10.0±0.2
 100% EGMA       7.1±0.4           --
 --------------------------------------------------------------------------------
+```
 
+**Interpretation:** EGMA contacts more of the protein surface (88.4%) while
+SBMA makes fewer but more persistent contacts (higher contact fraction and longer
+residence times).
+
+For detailed guidance: [Contacts Quick Start](analysis_contacts_quickstart.md) · [Contacts Cookbook](analysis_contacts_cookbook.md)
+
+---
+
+### 4.5 Analyze Binding Preference
+
+Binding preference analysis answers: *"Does the polymer preferentially contact
+certain amino acid classes, controlling for surface availability?"*
+
+Enable `compute_binding_preference: true` in the `contacts` section of your
+`comparison.yaml` (shown in Step 3.2 above), then re-run contacts:
+
+```bash
+# Copy your enzyme's reference PDB to the structures directory first
+cp /path/to/enzyme.pdb structures/
+
+polyzymd compare contacts
+```
+
+The binding preference table appears at the end of the contacts output:
+
+```
 Binding Preference - Enrichment by Amino Acid Class
 --------------------------------------------------------------------------------
 Surface exposure threshold: 20% relative SASA
 
   Polymer: EGM
-  Protein Group        100% EGMA          
+  Protein Group        100% EGMA
   ----------------------------------------
-  aromatic             1.90±0.06 +        
-  charged_negative     0.45±0.04 -        
-  charged_positive     0.79±0.10 -        
-  nonpolar             1.31±0.04 +        
-  polar                0.71±0.02 -        
+  aromatic             1.90±0.06 +
+  charged_negative     0.45±0.04 -
+  charged_positive     0.79±0.10 -
+  nonpolar             1.31±0.04 +
+  polar                0.71±0.02 -
 
   Polymer: SBM
-  Protein Group        100% SBMA          
+  Protein Group        100% SBMA
   ----------------------------------------
-  aromatic             1.29±0.03 +        
-  charged_negative     0.90±0.05 -        
-  charged_positive     1.02±0.03 +        
-  nonpolar             0.95±0.03 -        
-  polar                1.00±0.00 =        
+  aromatic             1.29±0.03 +
+  charged_negative     0.90±0.05 -
+  charged_positive     1.02±0.03 +
+  nonpolar             0.95±0.03 -
+  polar                1.00±0.00 =
 
   + = enriched (>1.0), - = depleted (<1.0)
+```
+
+**Interpretation:** EGMA strongly prefers aromatic (1.9×) and nonpolar (1.3×)
+residues, consistent with its hydrophobic character. SBMA shows more balanced
+binding. A value of 1.9 means the polymer contacts aromatic residues 1.9× more
+often than expected given surface availability.
+
+For the full formula derivation and interpretation guide:
+[Binding Preference Analysis](analysis_binding_preference.md)
+
+---
+
+### 4.6 Compare Exposure Dynamics
+
+Exposure dynamics analysis answers: *"Does the polymer act as a molecular
+chaperone — co-localizing with transiently exposed protein residues during
+their exposure episodes?"*
+
+This is a two-metric analysis:
+
+- **Chaperone fraction** — Of all exposure episodes for a transiently exposed
+  residue, what fraction have polymer contact during the episode?
+- **Transient residue fraction** — What fraction of protein residues undergo
+  transient exposure events?
+
+```{note}
+Exposure dynamics reads from the cached `contacts_repN.json` files produced
+by contacts analysis. Always run contacts first.
+```
+
+```bash
+polyzymd compare exposure
+```
+
+**Optional flags:**
+
+```bash
+# Force recompute SASA from trajectory (slow; only needed if trajectory changed)
+polyzymd compare exposure --recompute-sasa
+
+# Force recompute exposure classification (fast)
+polyzymd compare exposure --recompute-exposure
+
+# Override exposure threshold
+polyzymd compare exposure --exposure-threshold 0.25
+
+# Override polymer residue names for enrichment
+polyzymd compare exposure --polymer-resnames "SBM,EGM"
+```
+
+**Example output:**
+
+```
+Exposure Dynamics Comparison: polymer_stabilization_study
+================================================================================
+Metric: chaperone_fraction
+Equilibration: 10ns
+Note: 1 condition auto-excluded (no polymer): No Polymer
+
+Condition Summary - Chaperone Fraction (ranked, highest first)
+--------------------------------------------------------------------------------
+Rank  Condition            Chaperone %    SEM        N
+--------------------------------------------------------------------------------
+1     100% SBMA               42.3%      3.1%   3
+2     100% EGMA               28.7%      4.8%   3
 --------------------------------------------------------------------------------
 
-Results saved: results/contacts_comparison_polymer_stabilization_study.json
+Condition Summary - Transient Residue Fraction (ranked, highest first)
+--------------------------------------------------------------------------------
+Rank  Condition            Transient %    SEM        N
+--------------------------------------------------------------------------------
+1     100% EGMA               18.2%      1.4%   3
+2     100% SBMA               14.6%      1.9%   3
+--------------------------------------------------------------------------------
+
+Chaperone Event Counts (mean over replicates)
+--------------------------------------------------------------------------------
+Condition            Transient Res   Chaperone Events   Unassisted Events
+--------------------------------------------------------------------------------
+100% SBMA                     26.5               31.2               42.1
+100% EGMA                     32.9               23.8               59.1
+--------------------------------------------------------------------------------
+
+Pairwise Statistical Comparisons (chaperone_fraction)
+---------------------------------------------------------------------------
+Comparison                     % Change   p-value      Cohen's d  Effect
+---------------------------------------------------------------------------
+100% SBMA vs 100% EGMA         +47.4%     0.0412*      2.14       large
+---------------------------------------------------------------------------
+* p < 0.05
 ```
 
-**Interpretation:**
-- **Coverage:** EGMA has broader coverage (88.4% of residues contacted)
-- **Contact intensity:** SBMA has higher contact fraction (30.2%) and longer residence times (10.0 frames), suggesting fewer but more persistent contacts
-- **Binding preference:**
-  - EGMA strongly prefers **aromatic** (1.9×) and **nonpolar** (1.3×) residues, consistent with its hydrophobic character
-  - EGMA avoids **charged** residues (0.45× for negative, 0.79× for positive)
-  - SBMA shows more balanced binding with slight preference for aromatics (1.29×) and charged positive (1.02×)
+**Interpretation:** SBMA has a significantly higher chaperone fraction (42.3%
+vs 28.7%) — when protein residues transiently expose, SBMA is more likely to be
+present during that exposure window. EGMA contacts a larger fraction of transiently
+exposed residues but provides less persistent co-localization during individual
+episodes.
 
-```{tip}
-**Understanding enrichment:** A value of 1.9 means the polymer contacts aromatic
-residues 1.9× more than expected by random chance (based on surface availability).
-See [Binding Preference Analysis](analysis_binding_preference.md) for full details.
-```
+For the full derivation, worked examples, and limitations:
+[Exposure Dynamics Analysis](analysis_exposure_dynamics.md)
 
 ---
 
@@ -773,102 +861,61 @@ See [Binding Preference Analysis](analysis_binding_preference.md) for full detai
 
 ### 5.1 Generate All Plots
 
-`````{tab-set}
-````{tab-item} CLI
 ```bash
-# RMSF comparison plots
-polyzymd compare plot results/rmsf_comparison_polymer_stabilization_study.json \
-    --dpi 300 --format png
+cd polymer_stabilization_study/
 
-# Triad comparison plots  
-polyzymd compare plot results/triad_comparison_polymer_stabilization_study.json \
-    --dpi 300 --format png
+# Generate all configured plots
+polyzymd compare plot-all
 
-# For vector graphics (publications)
-polyzymd compare plot results/rmsf_comparison_polymer_stabilization_study.json \
-    --format pdf
+# Generate plots for a specific analysis only
+polyzymd compare plot-all -a rmsf
+polyzymd compare plot-all -a catalytic_triad
+
+# List available plot types
+polyzymd compare plot-all --list-available
 ```
-````
 
-````{tab-item} Python
-```python
-from polyzymd.compare import (
-    ComparisonResult,
-    plot_rmsf_comparison,
-    plot_percent_change,
-    plot_effect_sizes,
-    plot_summary_panel,
-)
+### 5.2 Generated File Structure
 
-# Load RMSF results
-rmsf_result = ComparisonResult.load(
-    "results/rmsf_comparison_polymer_stabilization_study.json"
-)
-
-# Generate individual plots
-plot_rmsf_comparison(rmsf_result, save_path="figures/rmsf_bars.png", dpi=300)
-plot_percent_change(rmsf_result, save_path="figures/rmsf_pct_change.png", dpi=300)
-plot_effect_sizes(rmsf_result, save_path="figures/rmsf_effects.png", dpi=300)
-
-# Generate combined summary panel (ideal for presentations)
-plot_summary_panel(
-    rmsf_result,
-    title="Effect of Polymer Coating on Enzyme Flexibility",
-    save_path="figures/rmsf_summary.png",
-    dpi=300,
-)
-```
-````
-`````
-
-### 5.2 Generated Files
-
-After running plot commands:
+After running comparisons and plots:
 
 ```
 polymer_stabilization_study/
 ├── comparison.yaml
+├── structures/
+│   └── enzyme.pdb
 ├── results/
 │   ├── rmsf_comparison_polymer_stabilization_study.json
 │   ├── triad_comparison_polymer_stabilization_study.json
-│   └── contacts_comparison_polymer_stabilization_study.json
+│   ├── contacts_comparison_polymer_stabilization_study.json
+│   └── exposure_comparison_polymer_stabilization_study.json
 └── figures/
-    ├── rmsf_comparison.png       # Bar chart by condition
-    ├── percent_change.png        # % change vs control
-    ├── effect_sizes.png          # Forest plot of Cohen's d
-    └── summary_panel.png         # Combined 3-panel figure
+    ├── rmsf_comparison.png
+    ├── rmsf_profile.png
+    ├── triad_kde_panel.png
+    ├── triad_threshold_bars.png
+    ├── distance_kde.png
+    └── distance_threshold_bars.png
 ```
-
-### 5.3 Color Coding in Plots
-
-All plots use consistent color coding:
-
-| Color | Meaning |
-|-------|---------|
-| **Green** | Significant improvement (p < 0.05) |
-| **Blue** | Large effect (Cohen's d > 0.8) but not statistically significant |
-| **Gray** | Control condition, or negligible effect |
-| **Red** | Worse than control |
 
 ---
 
-## Step 6: Export Results for Publications
+## Step 6: Export for Publication
 
 ### 6.1 Markdown Tables
 
-Generate publication-ready tables:
+Generate formatted tables for manuscripts or supplementary material:
 
 ```bash
-# RMSF table
 polyzymd compare rmsf --format markdown -o results/rmsf_table.md
-
-# Triad table
 polyzymd compare triad --format markdown -o results/triad_table.md
+polyzymd compare contacts --format markdown -o results/contacts_table.md
+polyzymd compare exposure --format markdown -o results/exposure_table.md
 ```
 
-### 6.2 JSON for Further Analysis
+### 6.2 JSON for Custom Analysis
 
-All results are saved as JSON for custom analysis:
+All results are saved as JSON for downstream processing:
 
 ```python
 import json
@@ -876,10 +923,8 @@ import json
 with open("results/rmsf_comparison_polymer_stabilization_study.json") as f:
     data = json.load(f)
 
-# Access raw data
 for cond in data["conditions"]:
     print(f"{cond['label']}: {cond['mean_rmsf']:.3f} ± {cond['sem_rmsf']:.3f} Å")
-    print(f"  Replicate values: {cond['replicate_values']}")
 ```
 
 ---
@@ -890,7 +935,7 @@ for cond in data["conditions"]:
 
 | Command | Description |
 |---------|-------------|
-| `polyzymd analyze init` | Create analysis.yaml template |
+| `polyzymd analyze init` | Create `analysis.yaml` template |
 | `polyzymd analyze run` | Run all enabled analyses |
 | `polyzymd analyze rmsf` | Run RMSF analysis only |
 | `polyzymd analyze triad` | Run catalytic triad analysis only |
@@ -901,13 +946,14 @@ for cond in data["conditions"]:
 
 | Command | Description |
 |---------|-------------|
-| `polyzymd compare init NAME` | Create comparison project |
+| `polyzymd compare init -n NAME` | Create comparison project |
 | `polyzymd compare validate` | Check configuration |
 | `polyzymd compare rmsf` | Compare RMSF across conditions |
-| `polyzymd compare triad` | Compare triad geometry |
-| `polyzymd compare contacts` | Compare contact statistics |
-| `polyzymd compare plot FILE` | Generate publication figures |
-| `polyzymd compare show FILE` | Display saved results |
+| `polyzymd compare triad` | Compare active site geometry |
+| `polyzymd compare contacts` | Compare contacts + binding preference |
+| `polyzymd compare exposure` | Compare chaperone-like activity |
+| `polyzymd compare run TYPE` | Generic runner (any registered type) |
+| `polyzymd compare plot-all` | Generate all configured plots |
 
 ### Common Options
 
@@ -920,53 +966,96 @@ for cond in data["conditions"]:
 | `-q, --quiet` | Suppress INFO messages |
 | `--debug` | Enable DEBUG logging |
 
+### Exposure-Specific Options
+
+| Option | Description |
+|--------|-------------|
+| `--recompute-sasa` | Force recompute SASA from trajectory |
+| `--recompute-exposure` | Force recompute exposure classification |
+| `--exposure-threshold FLOAT` | Override SASA threshold (default: 0.20) |
+| `--polymer-resnames LIST` | Override polymer residue names (comma-separated) |
+
+---
+
+## Recommended Analysis Order
+
+When running a full study, follow this order to satisfy dependencies:
+
+```
+1. polyzymd analyze run           (per condition — produces contacts_repN.json)
+      ↓
+2. polyzymd compare rmsf          (no dependencies)
+   polyzymd compare triad         (no dependencies)
+   polyzymd compare distances     (no dependencies)
+   polyzymd compare contacts      (reads contacts_repN.json)
+      ↓ (contacts must be done first)
+3. polyzymd compare exposure      (reads contacts_repN.json + computes SASA)
+```
+
+Steps 2 are independent of each other and can be run in any order.
+Step 3 requires contacts to be complete for all conditions.
+
 ---
 
 ## Troubleshooting
 
 ### "Config not found" Error
 
-**Cause:** Path in comparison.yaml is incorrect relative to the comparison directory.
+**Cause:** Path in `comparison.yaml` is incorrect relative to the comparison directory.
 
-**Fix:** Use relative paths from where comparison.yaml is located:
+**Fix:** Use relative paths from where `comparison.yaml` is located:
 ```yaml
 config: "../noPoly_enzyme_DMSO/config.yaml"  # One directory up
 ```
 
 ### "No polymer atoms found"
 
-**Cause:** The control condition has no polymer (expected).
+**Cause:** The control condition has no polymer. This is expected.
 
-**This is normal.** Contacts analysis is automatically skipped for conditions
-without polymer atoms. The comparison will exclude these conditions.
+Contacts analysis is automatically skipped for conditions without polymer atoms.
+Both `compare contacts` and `compare exposure` exclude these conditions automatically —
+you will see a yellow notice in the output.
+
+### "Contacts not found for rep N"
+
+**Cause:** Running `compare exposure` before `compare contacts`.
+
+**Fix:** Run contacts analysis for all conditions first:
+```bash
+for condition in SBMA_100_enzyme_DMSO EGMA_100_enzyme_DMSO; do
+    cd $condition && polyzymd analyze run && cd ..
+done
+cd polymer_stabilization_study
+polyzymd compare contacts      # Produces contacts_repN.json cache
+polyzymd compare exposure      # Now has what it needs
+```
 
 ### High p-values Despite Large Effects
 
-**Cause:** Small sample size (N=2-3 replicates).
+**Cause:** Small sample size (N = 2–3 replicates).
 
-**This is expected.** With few replicates, only very large effects achieve
-statistical significance. Report both p-values AND effect sizes (Cohen's d).
-A large effect (d > 0.8) suggests a meaningful difference worth investigating
-with more replicates.
+With few replicates, only very large effects achieve statistical significance.
+Report both p-values **and** effect sizes (Cohen's d). A large effect (d > 0.8)
+indicates a meaningful difference worth investigating further.
+See [Statistics Best Practices](analysis_statistics_best_practices.md).
 
-### RMSF Values Don't Match Manual Calculation
+### RMSF Values Differ from Manual Calculation
 
 **Cause:** Different equilibration time or reference mode.
 
-**Fix:** Ensure `--eq-time` and reference settings match across analyses.
-Check the `rmsf:` section in both analysis.yaml and comparison.yaml.
+**Fix:** Ensure `--eq-time` and reference settings match across `analysis.yaml`
+and `comparison.yaml`. Check [RMSF Best Practices](analysis_rmsf_best_practices.md).
 
 ---
 
 ## Next Steps
 
-Now that you've completed the analysis workflow:
-
 1. **Deep dive into specific analyses:**
    - [RMSF Best Practices](analysis_rmsf_best_practices.md) — Reference modes, uncertainty
    - [Triad Best Practices](analysis_triad_best_practices.md) — H-bond definitions
-   - [Contacts Cookbook](analysis_contacts_cookbook.md) — Advanced queries
+   - [Contacts Cookbook](analysis_contacts_cookbook.md) — Advanced contact queries
    - [Binding Preference Analysis](analysis_binding_preference.md) — Amino acid class enrichment
+   - [Exposure Dynamics Analysis](analysis_exposure_dynamics.md) — Chaperone fraction, transient exposure
 
 2. **Understand the statistics:**
    - [Statistics Best Practices](analysis_statistics_best_practices.md) — Autocorrelation, SEM correction
@@ -974,6 +1063,10 @@ Now that you've completed the analysis workflow:
 
 3. **Customize selections:**
    - [Reference Selection Guide](analysis_reference_selection.md) — MDAnalysis syntax
+
+4. **Extend the framework:**
+   - [Extending Comparators](extending_comparators.md) — Add new comparison types
+   - [Extending Plotters](extending_plotters.md) — Add new plot types
 
 ---
 
@@ -984,6 +1077,7 @@ Now that you've completed the analysis workflow:
 - [Distance Analysis Quick Start](analysis_distances_quickstart.md)
 - [Contacts Quick Start](analysis_contacts_quickstart.md)
 - [Binding Preference Analysis](analysis_binding_preference.md)
+- [Exposure Dynamics Analysis](analysis_exposure_dynamics.md)
 - [Statistics Best Practices](analysis_statistics_best_practices.md)
 - [Comparing Conditions](analysis_compare_conditions.md)
 - [CLI Reference](cli_reference.md)
