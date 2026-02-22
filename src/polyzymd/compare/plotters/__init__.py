@@ -16,6 +16,8 @@ contacts : BindingPreferenceHeatmapPlotter, BindingPreferenceBarPlotter
     Binding preference enrichment visualization
 exposure : ExposureChaperoneFractionPlotter, ExposureEnrichmentHeatmapPlotter
     Dynamic chaperone activity visualization
+binding_free_energy : BFEHeatmapPlotter, BFEBarPlotter
+    ΔΔG binding free energy visualization
 
 Adding New Plotters
 -------------------
@@ -29,7 +31,14 @@ is loaded, ensuring they are registered before use.
 """
 
 # Import all plotter modules to trigger registration
-from polyzymd.compare.plotters import contacts, distances, exposure, rmsf, triad
+from polyzymd.compare.plotters import (
+    binding_free_energy,
+    contacts,
+    distances,
+    exposure,
+    rmsf,
+    triad,
+)
 
 __all__ = [
     "triad",
@@ -37,4 +46,5 @@ __all__ = [
     "distances",
     "contacts",
     "exposure",
+    "binding_free_energy",
 ]

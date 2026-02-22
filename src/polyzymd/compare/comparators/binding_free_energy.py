@@ -8,7 +8,8 @@ Physics
 -------
 In the NPT ensemble the correct thermodynamic potential is the Gibbs free energy G.
 The selectivity free energy difference for polymer binding to AA group j versus a
-surface-area-weighted random distribution is:
+reference distribution proportional to each residue group's share of the total
+solvent-exposed protein surface area is:
 
     ΔΔG_j = -k_B·T · ln(contact_share_j / expected_share_j)
 
@@ -441,7 +442,7 @@ class BindingFreeEnergyComparator(
                     entries.append(fe)
 
         # Iterate user-defined partitions if present
-        for partition_name, partition_dict in bp.partition_binding.items():
+        for partition_name, partition_dict in bp.user_defined_partitions.items():
             for polymer_type, partition_result in partition_dict.items():
                 for entry in partition_result.entries:
                     fe = self._entry_from_agg_bp_entry(
@@ -553,7 +554,7 @@ class BindingFreeEnergyComparator(
                 )
 
         # Iterate user-defined partitions if present
-        for partition_name, partition_dict in bp.partition_binding.items():
+        for partition_name, partition_dict in bp.user_defined_partitions.items():
             for polymer_type, partition_result in partition_dict.items():
                 for entry in partition_result.entries:
                     cs = entry.contact_share
@@ -611,20 +612,42 @@ class BindingFreeEnergyComparator(
         label_to_summary = {s.label: s for s in summaries}
         labels = [s.label for s in summaries]
 
-        if control and control in label_to_summary:
-            # Compare all vs control
-            summary_a = label_to_summary[control]
+        # Determine whether the control has usable BFE data.
+        # "No Polymer" conditions have no polymer contacts and therefore no entries.
+        # When the control is missing or has no valid entries, fall back to all-pairs.
+        control_has_data = (
+            control is not None
+            and control in label_to_summary
+            and any(e.delta_G is not None for e in label_to_summary[control].entries)
+        )
+
+        if control_has_data:
+            # Compare all conditions with data vs control
+            summary_a = label_to_summary[control]  # type: ignore[index]
             for label_b in labels:
                 if label_b == control:
                     continue
                 summary_b = label_to_summary[label_b]
+                # Only compare if summary_b also has data
+                if not any(e.delta_G is not None for e in summary_b.entries):
+                    continue
                 comparisons.extend(self._compare_condition_pair(summary_a, summary_b))
         else:
-            # All pairs
-            for i in range(len(labels)):
-                for j in range(i + 1, len(labels)):
-                    sa = label_to_summary[labels[i]]
-                    sb = label_to_summary[labels[j]]
+            # Fall back to all-pairs among conditions that have valid ΔΔG data
+            if control is not None and control in label_to_summary:
+                logger.info(
+                    f"Control '{control}' has no ΔΔG data (e.g. no polymer contacts). "
+                    "Falling back to all-pairs comparison among conditions with data."
+                )
+            valid_labels = [
+                lbl
+                for lbl in labels
+                if any(e.delta_G is not None for e in label_to_summary[lbl].entries)
+            ]
+            for i in range(len(valid_labels)):
+                for j in range(i + 1, len(valid_labels)):
+                    sa = label_to_summary[valid_labels[i]]
+                    sb = label_to_summary[valid_labels[j]]
                     comparisons.extend(self._compare_condition_pair(sa, sb))
 
         return comparisons

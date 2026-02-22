@@ -5,39 +5,76 @@ Physics background
 In the NPT ensemble (constant pressure, as used in all polyzymd simulations)
 the correct thermodynamic potential is the **Gibbs free energy** G.
 
-The selectivity free energy difference for a polymer binding to amino acid
-group j versus what would be expected from a surface-area-weighted random
-polymer is:
+The quantity computed here is a **selectivity free energy difference** (ΔΔG)
+that measures how much more (or less) favorable it is for a polymer to contact
+a given group of protein residues compared to what would be expected if the
+polymer contacted each exposed surface residue in proportion to that residue
+group's share of the total solvent-exposed protein surface.
 
-    ΔΔG_j = -k_B·T · ln(P_obs / P_ref)
-           = -k_B·T · ln(contact_share_j / expected_share_j)
+Concretely: if aromatic residues make up 10% of the solvent-exposed surface
+but receive 20% of the polymer's contacts, the polymer preferentially contacts
+aromatic residues. The reference (expected) distribution is simply proportional
+to surface availability — not any property of the polymer itself.
+
+    ΔΔG_j = -k_B·T · ln(contact_share_j / expected_share_j)
 
 where:
-    contact_share_j  = fraction of polymer's total contact frames that involve
-                       amino acid group j (observed binding distribution)
-    expected_share_j = fraction of solvent-exposed protein surface belonging
-                       to group j (reference: random binding distribution)
+    contact_share_j  = (contact frames involving residues in group j) /
+                       (total contact frames across all protein residues)
+                       — the observed fraction of polymer contacts directed
+                       at group j
+    expected_share_j = (number of solvent-exposed residues in group j) /
+                       (total number of solvent-exposed protein residues)
+                       — the fraction of the protein surface belonging to
+                       group j; this is the reference assuming contacts are
+                       distributed purely by surface area
     k_B              = Boltzmann constant (0.0019872041 kcal mol⁻¹ K⁻¹)
     T                = simulation temperature in Kelvin
 
 Note: contact_share / expected_share = enrichment_ratio = enrichment + 1
-(where enrichment is the existing dimensionless enrichment score).
-So ΔΔG = -kT·ln(enrichment + 1), and the two representations are equivalent.
+(where enrichment is the existing dimensionless enrichment score from binding
+preference analysis). So ΔΔG = -kT·ln(enrichment + 1), and the two
+representations are mathematically equivalent; ΔΔG simply puts the enrichment
+score on a physically meaningful energy scale.
 
 Sign convention:
-    ΔΔG < 0  →  preferential binding (favorable selectivity)
-    ΔΔG > 0  →  avoidance (unfavorable selectivity)
-    ΔΔG = 0  →  random binding (no selectivity)
+    ΔΔG < 0  →  preferential contact (observed > surface-availability reference)
+    ΔΔG > 0  →  contact avoidance (observed < surface-availability reference)
+    ΔΔG = 0  →  contacts match the surface-availability reference exactly
 
-Uncertainty propagation (delta method on f(cs, es) = -kT·ln(cs/es)):
-    σ(ΔΔG) = k_B·T · √[(σ_cs / cs)² + (σ_es / es)²]
+Uncertainty propagation
+-----------------------
+When multiple independent replicates are available, two uncertainty estimates
+are reported:
 
-where σ_cs and σ_es are the standard errors of contact_share and
-expected_share across replicates, respectively.
+1. **Between-replicate SEM on ΔΔG** (primary, used for pairwise statistics):
+   ΔΔG is computed independently for each replicate, and the SEM is taken
+   directly across those values. This is the most statistically sound approach
+   for independent replicates and is the quantity used in t-tests.
+
+2. **Delta-method propagation** (analytical approximation, stored for reference):
+   For the mean contact_share and its SEM, uncertainty is propagated through
+   the logarithm using first-order error propagation (Taylor 1997, ch. 3;
+   Bevington & Robinson 2003, ch. 3):
+
+       σ(ΔΔG) ≈ k_B·T · √[(σ_cs / cs)² + (σ_es / es)²]
+
+   where σ_cs = SEM of contact_share across replicates, and σ_es ≈ 0 because
+   expected_share is computed from a single static PDB structure (no replicate
+   variance). This simplifies to σ(ΔΔG) ≈ k_B·T · (σ_cs / cs).
+
+   References:
+   - Taylor, J. R. (1997). *An Introduction to Error Analysis*, 2nd ed.
+     University Science Books. (Ch. 3: Error propagation for functions of
+     one or more variables)
+   - Bevington, P. R. & Robinson, D. K. (2003). *Data Reduction and Error
+     Analysis for the Physical Sciences*, 3rd ed. McGraw-Hill. (Ch. 3)
+   - Wikipedia: Delta method,
+     https://en.wikipedia.org/wiki/Delta_method
 
 Temperature handling:
     ΔΔG computed at temperature T is NOT directly comparable to ΔΔG at
-    temperature T'. The probability ratios and kT values both differ.
+    temperature T'. The probability ratios and kT scale factors both differ.
     Pairwise statistical comparisons are only computed between conditions
     sharing the same simulation temperature. Cross-temperature ΔΔG values
     are displayed with their respective temperatures labeled clearly.

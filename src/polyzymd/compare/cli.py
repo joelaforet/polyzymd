@@ -1567,6 +1567,8 @@ def plot_all(
       - rmsf_profile: Per-residue RMSF line plot
       - distance_kde: KDE distribution plots for distance pairs
       - distance_threshold_bars: Contact fraction bar chart
+      - bfe_heatmap: ΔΔG heatmap (AA groups × conditions, per polymer type)
+      - bfe_bars: ΔΔG grouped bar chart with ±k_BT reference lines
 
     \b
     Examples:

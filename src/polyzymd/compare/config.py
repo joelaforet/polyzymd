@@ -406,6 +406,36 @@ class ContactsPlotSettings(BaseModel):
     show_user_partition_error: bool = True
 
 
+class BFEPlotSettings(BaseModel):
+    """Binding free energy plot customization.
+
+    Attributes
+    ----------
+    generate_heatmap : bool
+        Generate ΔΔG heatmap (rows = AA groups, columns = conditions). Default True.
+    generate_bars : bool
+        Generate ΔΔG grouped bar chart (one bar per condition per AA group). Default True.
+    figsize_heatmap : tuple[float, float] | None
+        Figure size for ΔΔG heatmap (auto-calculated if None).
+    figsize_bars : tuple[float, float]
+        Figure size for ΔΔG bar charts.
+    colormap : str
+        Diverging colormap for heatmap (default "RdBu_r": red = avoidance, blue = preference).
+    show_error_bars : bool
+        Show SEM error bars on bar charts. Default True.
+    annotate_heatmap : bool
+        Annotate each heatmap cell with its ΔΔG value. Default True.
+    """
+
+    generate_heatmap: bool = True
+    generate_bars: bool = True
+    figsize_heatmap: tuple[float, float] | None = None
+    figsize_bars: tuple[float, float] = (10, 6)
+    colormap: str = "RdBu_r"
+    show_error_bars: bool = True
+    annotate_heatmap: bool = True
+
+
 class PlotSettings(BaseModel):
     """Global plot settings for comparison.yaml.
 
@@ -455,6 +485,7 @@ class PlotSettings(BaseModel):
     triad: TriadPlotSettings = Field(default_factory=TriadPlotSettings)
     distances: DistancesPlotSettings = Field(default_factory=DistancesPlotSettings)
     contacts: ContactsPlotSettings = Field(default_factory=ContactsPlotSettings)
+    binding_free_energy: BFEPlotSettings = Field(default_factory=BFEPlotSettings)
 
     @field_validator("output_dir", mode="before")
     @classmethod
