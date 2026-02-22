@@ -15,7 +15,10 @@ from typing import Dict, List, Literal, Optional, Union
 LOGGER = logging.getLogger(__name__)
 
 # Preset types
-PresetType = Literal["aa100", "al40", "blanca-shirts", "testing"]
+PresetType = Literal["aa100", "al40", "blanca-shirts", "bridges2", "testing"]
+
+# Valid GPU types for Bridges2 (PSC).  Adding a new type is a one-line change here.
+BRIDGES2_GPU_TYPES: List[str] = ["v100-16", "v100-32", "l40s-48", "h100-80"]
 
 
 @dataclass
@@ -24,15 +27,25 @@ class SlurmConfig:
 
     Attributes:
         partition: SLURM partition(s) to use.
-        qos: Quality of service.
-        account: Account for resource allocation.
+        qos: Quality of service. Set to ``""`` to omit the ``--qos`` directive
+            entirely (required for clusters such as Bridges2 that do not use QoS).
+        account: Account / allocation ID for resource allocation.  Set to ``""``
+            when the user must supply the account at submission time via
+            ``--account``.
         time_limit: Wall time limit (HH:MM:SS).
         email: Email for notifications.
         nodes: Number of nodes.
         ntasks: Number of tasks.
-        memory: Memory allocation (e.g., "3G").
+        memory: Memory allocation (e.g. ``"3G"``).  Set to ``None`` to omit the
+            ``--mem`` directive entirely (some clusters allocate memory per GPU
+            and reject an explicit ``--mem`` request).
         gpus: Number of GPUs.
-        exclude: Nodes to exclude.
+        exclude: Nodes to exclude (omitted when ``None``).
+        gpu_type: Optional GPU type string used with the ``--gpus`` directive
+            (e.g. ``"v100-32"`` for Bridges2).  When ``None`` the classic
+            ``--gres=gpu:<N>`` directive is emitted instead.
+        gpu_directive_style: ``"gres"`` (default, Alpine-style) or ``"gpus"``
+            (Bridges2-style).  Controls which SBATCH GPU directive is written.
     """
 
     partition: str = "aa100"
@@ -42,13 +55,16 @@ class SlurmConfig:
     email: str = ""
     nodes: int = 1
     ntasks: int = 1
-    memory: str = "3G"
+    memory: Optional[str] = "3G"
     gpus: int = 1
     exclude: Optional[str] = None
+    # --- GPU directive fields (new in v1.0.1) ---
+    gpu_type: Optional[str] = None
+    gpu_directive_style: str = "gres"
 
     @classmethod
     def from_preset(cls, preset: PresetType, email: str = "") -> "SlurmConfig":
-        """Create a SlurmConfig from a preset.
+        """Create a SlurmConfig from a named preset.
 
         Args:
             preset: Preset name.
@@ -57,7 +73,7 @@ class SlurmConfig:
         Returns:
             SlurmConfig with preset values.
         """
-        presets: Dict[PresetType, Dict] = {
+        presets: Dict[str, Dict] = {
             "aa100": {
                 "partition": "aa100",
                 "qos": "normal",
@@ -76,6 +92,20 @@ class SlurmConfig:
                 "account": "blanca-shirts",
                 "time_limit": "23:59:59",
                 "exclude": "bgpu-bortz1",
+            },
+            "bridges2": {
+                "partition": "GPU-shared",
+                # Bridges2 does not use QoS — omit the directive entirely.
+                "qos": "",
+                # No shared default allocation ID; user must supply --account.
+                "account": "",
+                "time_limit": "48:00:00",
+                # GPU-shared allocates resources per GPU; explicit --mem is
+                # not required and may be rejected.  Set to None to omit.
+                "memory": None,
+                # Use the newer --gpus=<type>:<n> SBATCH syntax.
+                "gpu_type": "v100-32",
+                "gpu_directive_style": "gpus",
             },
             "testing": {
                 "partition": "atesting_a100",
@@ -144,16 +174,20 @@ class SlurmScriptGenerator:
     # - Job is submitted from projects_dir
     # - SLURM logs go to projects_dir/slurm_logs/
     # - Simulation output goes to scratch_dir
+    #
+    # {qos_line}, {mem_line}, {gpu_line} are computed conditionally in
+    # generate_initial_job() so that clusters which omit these directives
+    # (e.g. Bridges2 omits --qos and --mem) produce valid scripts.
     INITIAL_JOB_TEMPLATE = """#!/bin/bash
 #SBATCH --partition={partition}
 #SBATCH --job-name=i_{job_name}
 #SBATCH --output={output_file}
-#SBATCH --qos={qos}
+{qos_line}
 #SBATCH --nodes={nodes}
 #SBATCH --ntasks={ntasks}
-#SBATCH --mem={memory}
+{mem_line}
 #SBATCH --time={time_limit}
-#SBATCH --gres=gpu:{gpus}
+{gpu_line}
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user={email}
 #SBATCH --account={account}
@@ -210,12 +244,12 @@ echo "Segment {segment_index} completed successfully at $(date)"
 #SBATCH --partition={partition}
 #SBATCH --job-name=c_{job_name}
 #SBATCH --output={output_file}
-#SBATCH --qos={qos}
+{qos_line}
 #SBATCH --nodes={nodes}
 #SBATCH --ntasks={ntasks}
-#SBATCH --mem={memory}
+{mem_line}
 #SBATCH --time={time_limit}
-#SBATCH --gres=gpu:{gpus}
+{gpu_line}
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user={email}
 #SBATCH --account={account}
@@ -288,6 +322,35 @@ echo "Segment {segment_index} completed successfully at $(date)"
         """Get the SLURM configuration."""
         return self._config
 
+    # ------------------------------------------------------------------
+    # Internal helpers — compute optional SBATCH directive lines
+    # ------------------------------------------------------------------
+
+    def _gpu_line(self) -> str:
+        """Return the appropriate GPU SBATCH directive for this config.
+
+        Returns ``#SBATCH --gpus=<type>:<n>`` for clusters that use the newer
+        ``--gpus`` syntax (e.g. Bridges2), or ``#SBATCH --gres=gpu:<n>`` for
+        clusters that use the classic Generic RESources syntax (Alpine).
+        """
+        if self._config.gpu_directive_style == "gpus" and self._config.gpu_type:
+            return f"#SBATCH --gpus={self._config.gpu_type}:{self._config.gpus}"
+        return f"#SBATCH --gres=gpu:{self._config.gpus}"
+
+    def _qos_line(self) -> str:
+        """Return the QoS SBATCH directive, or an empty string to omit it."""
+        return f"#SBATCH --qos={self._config.qos}" if self._config.qos else ""
+
+    def _mem_line(self) -> str:
+        """Return the memory SBATCH directive, or an empty string to omit it."""
+        return f"#SBATCH --mem={self._config.memory}" if self._config.memory else ""
+
+    def _exclude_line(self) -> str:
+        """Return the exclude SBATCH directive, or an empty string to omit it."""
+        return f"#SBATCH --exclude={self._config.exclude}" if self._config.exclude else ""
+
+    # ------------------------------------------------------------------
+
     def generate_initial_job(
         self,
         context: JobContext,
@@ -308,11 +371,6 @@ echo "Segment {segment_index} completed successfully at $(date)"
         Returns:
             SLURM batch script content.
         """
-        # Format exclude line
-        exclude_line = ""
-        if self._config.exclude:
-            exclude_line = f"#SBATCH --exclude={self._config.exclude}"
-
         # Use context.projects_dir
         projects_dir = context.projects_dir if context.projects_dir != "." else "."
 
@@ -326,15 +384,15 @@ echo "Segment {segment_index} completed successfully at $(date)"
             partition=self._config.partition,
             job_name=context.job_name,
             output_file=context.output_file,
-            qos=self._config.qos,
+            qos_line=self._qos_line(),
             nodes=self._config.nodes,
             ntasks=self._config.ntasks,
-            memory=self._config.memory,
+            mem_line=self._mem_line(),
             time_limit=self._config.time_limit,
-            gpus=self._config.gpus,
+            gpu_line=self._gpu_line(),
             email=self._config.email,
             account=self._config.account,
-            exclude_line=exclude_line,
+            exclude_line=self._exclude_line(),
             conda_env=self._conda_env,
             projects_dir=projects_dir,
             scratch_dir=context.scratch_dir,
@@ -363,10 +421,6 @@ echo "Segment {segment_index} completed successfully at $(date)"
         Returns:
             SLURM batch script content.
         """
-        exclude_line = ""
-        if self._config.exclude:
-            exclude_line = f"#SBATCH --exclude={self._config.exclude}"
-
         # Use context.projects_dir
         projects_dir = context.projects_dir if context.projects_dir != "." else "."
 
@@ -377,15 +431,15 @@ echo "Segment {segment_index} completed successfully at $(date)"
             partition=self._config.partition,
             job_name=context.job_name,
             output_file=context.output_file,
-            qos=self._config.qos,
+            qos_line=self._qos_line(),
             nodes=self._config.nodes,
             ntasks=self._config.ntasks,
-            memory=self._config.memory,
+            mem_line=self._mem_line(),
             time_limit=self._config.time_limit,
-            gpus=self._config.gpus,
+            gpu_line=self._gpu_line(),
             email=self._config.email,
             account=self._config.account,
-            exclude_line=exclude_line,
+            exclude_line=self._exclude_line(),
             conda_env=self._conda_env,
             projects_dir=projects_dir,
             scratch_dir=context.scratch_dir,

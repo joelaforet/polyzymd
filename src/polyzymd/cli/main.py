@@ -774,7 +774,7 @@ def _run_openmm(
 )
 @click.option(
     "--preset",
-    type=click.Choice(["aa100", "al40", "blanca-shirts", "testing"]),
+    type=click.Choice(["aa100", "al40", "blanca-shirts", "bridges2", "testing"]),
     default="aa100",
     help="SLURM partition preset (default: aa100)",
 )
@@ -801,7 +801,24 @@ def _run_openmm(
 @click.option(
     "--memory",
     default=None,
-    help="Override SLURM memory allocation (default: 3G). Increase to 4-8G for larger systems or if you encounter OOM errors.",
+    help="Override SLURM memory allocation (e.g. '4G', '8G'). Not needed for bridges2 (allocated per GPU).",
+)
+@click.option(
+    "--account",
+    default=None,
+    help=(
+        "Override SLURM account / allocation ID. Required for bridges2 "
+        "(find yours at https://www.psc.edu/resources/bridges-2/user-guide)."
+    ),
+)
+@click.option(
+    "--gpu-type",
+    default=None,
+    type=click.Choice(["v100-16", "v100-32", "l40s-48", "h100-80"]),
+    help=(
+        "Override GPU type for presets that use the --gpus directive (e.g. bridges2). "
+        "Valid types: v100-16, v100-32, l40s-48, h100-80. Default for bridges2: v100-32."
+    ),
 )
 @click.option(
     "--openff-logs",
@@ -825,6 +842,8 @@ def submit(
     output_dir: Optional[str],
     time_limit: Optional[str],
     memory: Optional[str],
+    account: Optional[str],
+    gpu_type: Optional[str],
     submit_openff_logs: bool,
     skip_build: bool,
 ) -> None:
@@ -847,8 +866,12 @@ def submit(
         click.echo(f"Scratch directory: {scratch_dir}")
     if projects_dir:
         click.echo(f"Projects directory: {projects_dir}")
+    if account:
+        click.echo(f"Account: {account}")
     if memory:
         click.echo(f"Memory allocation: {memory}")
+    if gpu_type:
+        click.echo(f"GPU type override: {gpu_type}")
     if skip_build:
         click.echo("Skip-build mode: using pre-built systems")
 
@@ -867,6 +890,8 @@ def submit(
             projects_dir=projects_dir,
             time_limit=time_limit,
             memory=memory,
+            account=account,
+            gpu_type=gpu_type,
             openff_logs=submit_openff_logs,
             skip_build=skip_build,
         )
@@ -1097,8 +1122,7 @@ def init(name: str) -> None:
 
         # Create placeholder files
         protein_placeholder = project_dir / "structures" / "place_protein_here.placeholder.txt"
-        protein_placeholder.write_text(
-            """\
+        protein_placeholder.write_text("""\
 # ============================================================================
 # PLACEHOLDER: Place your protein PDB file here
 # ============================================================================
@@ -1119,12 +1143,10 @@ def init(name: str) -> None:
 #
 # Delete this placeholder file after adding your protein structure.
 # ============================================================================
-"""
-        )
+""")
 
         ligand_placeholder = project_dir / "structures" / "place_ligand_here.placeholder.txt"
-        ligand_placeholder.write_text(
-            """\
+        ligand_placeholder.write_text("""\
 # ============================================================================
 # PLACEHOLDER: Place your ligand SDF file here (if using substrate)
 # ============================================================================
@@ -1145,8 +1167,7 @@ def init(name: str) -> None:
 # If you're not using a substrate, you can delete this placeholder
 # and comment out the 'substrate' section in config.yaml.
 # ============================================================================
-"""
-        )
+""")
 
         # Success message
         click.echo()

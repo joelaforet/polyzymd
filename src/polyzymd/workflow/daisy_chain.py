@@ -554,6 +554,8 @@ def submit_daisy_chain(
     projects_dir: Optional[Union[str, Path]] = None,
     time_limit: Optional[str] = None,
     memory: Optional[str] = None,
+    account: Optional[str] = None,
+    gpu_type: Optional[str] = None,
     openff_logs: bool = False,
     skip_build: bool = False,
 ) -> Dict[int, List[SubmissionResult]]:
@@ -561,7 +563,7 @@ def submit_daisy_chain(
 
     Args:
         config_path: Path to simulation YAML config
-        slurm_preset: SLURM preset name (aa100, al40, blanca-shirts, testing)
+        slurm_preset: SLURM preset name (aa100, al40, blanca-shirts, bridges2, testing)
         replicates: Replicate range string (e.g., "1-5", "1,3,5")
         email: Email for job notifications
         dry_run: If True, don't submit jobs
@@ -571,11 +573,18 @@ def submit_daisy_chain(
         projects_dir: Override projects directory for scripts/logs
         time_limit: Override SLURM time limit (format: HH:MM:SS or M:SS)
         memory: Override SLURM memory allocation (e.g., "4G", "8G")
+        account: Override SLURM account / allocation ID.  Required for bridges2.
+        gpu_type: Override GPU type for presets that use the --gpus directive
+            (e.g. "v100-16", "v100-32", "l40s-48", "h100-80" on Bridges2).
         openff_logs: Enable verbose OpenFF logs in generated scripts
         skip_build: Skip system building in generated scripts (use pre-built system)
 
     Returns:
         Dictionary mapping replicate numbers to submission results
+
+    Raises:
+        ValueError: If the resolved SLURM account is empty and dry_run is False
+            (actual submission requires a non-empty account).
 
     Example:
         >>> results = submit_daisy_chain(
@@ -602,18 +611,31 @@ def submit_daisy_chain(
         script_output_dir = sim_config.output.get_job_scripts_directory()
 
     # Create SLURM config from preset
-    # Cast to PresetType for type checker (validated by argparse choices)
-    from polyzymd.workflow.slurm import PresetType
-
     slurm_config = SlurmConfig.from_preset(slurm_preset, email=email)  # type: ignore[arg-type]
 
-    # Override time limit if provided
+    # Apply CLI overrides (each is independent; all follow the same pattern)
     if time_limit:
         slurm_config.time_limit = time_limit
-
-    # Override memory if provided
     if memory:
         slurm_config.memory = memory
+    if account:
+        slurm_config.account = account
+    if gpu_type:
+        slurm_config.gpu_type = gpu_type
+
+    # Guard: an empty account will produce an invalid SBATCH script.
+    # Allow dry-run so users can inspect generated scripts before they have
+    # their allocation ID, but block actual submission.
+    if not slurm_config.account:
+        msg = (
+            f"SLURM account is required but was not set for preset '{slurm_preset}'. "
+            "Pass your allocation ID with --account <id>. "
+            "Find your Bridges2 allocation at https://www.psc.edu/resources/bridges-2/user-guide"
+        )
+        if dry_run:
+            LOGGER.warning(msg)
+        else:
+            raise ValueError(msg)
 
     # Create daisy-chain config
     dc_config = DaisyChainConfig.from_simulation_config(
@@ -660,7 +682,7 @@ def main() -> int:
     parser.add_argument(
         "--preset",
         type=str,
-        choices=["aa100", "al40", "blanca-shirts", "testing"],
+        choices=["aa100", "al40", "blanca-shirts", "bridges2", "testing"],
         default="aa100",
         help="SLURM partition preset. Default: aa100",
     )
