@@ -130,7 +130,7 @@ PolyzyMD includes presets for common HPC configurations:
 | `al40` | al40 | 1x L40 | 24h | 3GB | CU Boulder Alpine — NVIDIA L40 |
 | `blanca-shirts` | blanca-shirts | 1x | 24h | 3GB | CU Boulder Blanca — Shirts lab partition |
 | `testing` | atesting_a100 | 1x | 6min | 3GB | CU Boulder Alpine — quick tests |
-| `bridges2` | GPU-shared | 1x V100-32 | 48h | (per-GPU) | PSC Bridges2 — NVIDIA V100 32GB |
+| `bridges2` | GPU-shared | 1x V100-32 | 24h | (per-GPU) | PSC Bridges2 — NVIDIA V100 32GB |
 
 ### Using Presets
 
@@ -182,7 +182,7 @@ For custom configurations, edit the generated scripts in `job_scripts/` before s
 | QoS | `--qos=normal` | *(omitted — not used)* |
 | Memory | `--mem=3G` | *(omitted — per-GPU allocation)* |
 | Account | ucb-group | PSC allocation ID (required) |
-| Default time limit | 24h | 48h |
+| Default time limit | 24h | 24h |
 
 ### Account Requirement
 

@@ -99,7 +99,7 @@ class SlurmConfig:
                 "qos": "",
                 # No shared default allocation ID; user must supply --account.
                 "account": "",
-                "time_limit": "48:00:00",
+                "time_limit": "24:00:00",
                 # GPU-shared allocates resources per GPU; explicit --mem is
                 # not required and may be rejected.  Set to None to omit.
                 "memory": None,

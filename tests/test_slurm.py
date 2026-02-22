@@ -82,7 +82,7 @@ class TestPresetLoading:
         assert cfg.partition == "GPU-shared"
         assert cfg.qos == ""  # No QoS on Bridges2
         assert cfg.account == ""  # No shared default — user must supply
-        assert cfg.time_limit == "48:00:00"
+        assert cfg.time_limit == "24:00:00"
         assert cfg.memory is None  # Per-GPU allocation; omit --mem
         assert cfg.gpu_type == "v100-32"
         assert cfg.gpu_directive_style == "gpus"
@@ -306,9 +306,9 @@ class TestBridges2ScriptGeneration:
         script = self._gen_initial()
         assert "#SBATCH --partition=GPU-shared" in script
 
-    def test_time_limit_48h(self):
+    def test_time_limit_24h(self):
         script = self._gen_initial()
-        assert "#SBATCH --time=48:00:00" in script
+        assert "#SBATCH --time=24:00:00" in script
 
     def test_continuation_script_uses_gpus_directive(self):
         cfg = SlurmConfig.from_preset("bridges2")
