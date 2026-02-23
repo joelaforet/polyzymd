@@ -319,7 +319,7 @@ echo "Segment {segment_index} completed successfully at $(date)"
     def __init__(
         self,
         config: SlurmConfig,
-        conda_env: str = "polymerist-env",
+        conda_env: str = "polyzymd-env",
         openff_logs: bool = False,
         skip_build: bool = False,
     ) -> None:

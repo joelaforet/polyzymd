@@ -189,7 +189,7 @@ class DaisyChainSubmitter:
         self,
         sim_config: SimulationConfig,
         dc_config: DaisyChainConfig,
-        conda_env: str = "polymerist-env",
+        conda_env: str = "polyzymd-env",
         openff_logs: bool = False,
         skip_build: bool = False,
     ) -> None:
@@ -551,7 +551,7 @@ def submit_daisy_chain(
     replicates: str = "1",
     email: str = "",
     dry_run: bool = False,
-    conda_env: str = "polymerist-env",
+    conda_env: str = "polyzymd-env",
     output_dir: Optional[Union[str, Path]] = None,
     scratch_dir: Optional[Union[str, Path]] = None,
     projects_dir: Optional[Union[str, Path]] = None,
@@ -616,6 +616,11 @@ def submit_daisy_chain(
     # Create SLURM config from preset
     slurm_config = SlurmConfig.from_preset(slurm_preset, email=email)  # type: ignore[arg-type]
 
+    # Record whether the preset itself ships with an empty account.
+    # Bridges2 intentionally omits --account (allocation inferred from login),
+    # so an empty account is valid for that preset.
+    preset_account_is_empty = not slurm_config.account
+
     # Apply CLI overrides (each is independent; all follow the same pattern)
     if time_limit:
         slurm_config.time_limit = time_limit
@@ -626,14 +631,14 @@ def submit_daisy_chain(
     if gpu_type:
         slurm_config.gpu_type = gpu_type
 
-    # Guard: an empty account will produce an invalid SBATCH script.
-    # Allow dry-run so users can inspect generated scripts before they have
-    # their allocation ID, but block actual submission.
-    if not slurm_config.account:
+    # Guard: an empty account on presets that require one (e.g. Alpine) will
+    # produce an invalid SBATCH script.  Skip the guard when the preset itself
+    # ships with account="" (e.g. bridges2), where the allocation is inferred
+    # from the login session and the --account directive must be omitted.
+    if not slurm_config.account and not preset_account_is_empty:
         msg = (
             f"SLURM account is required but was not set for preset '{slurm_preset}'. "
-            "Pass your allocation ID with --account <id>. "
-            "Find your Bridges2 allocation at https://www.psc.edu/resources/bridges-2/user-guide"
+            "Pass your allocation ID with --account <id>."
         )
         if dry_run:
             LOGGER.warning(msg)
@@ -703,8 +708,8 @@ def main() -> int:
     parser.add_argument(
         "--conda-env",
         type=str,
-        default="polymerist-env",
-        help="Conda environment name. Default: polymerist-env",
+        default="polyzymd-env",
+        help="Conda environment name. Default: polyzymd-env",
     )
     parser.add_argument(
         "--output-dir",

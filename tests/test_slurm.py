@@ -506,52 +506,33 @@ class TestBridges2ScriptGeneration:
 
 
 class TestAccountValidation:
-    """submit_daisy_chain() enforces non-empty account for actual submission."""
+    """submit_daisy_chain() account guard behaviour.
 
-    def test_empty_account_raises_on_real_submission(self, tmp_path):
-        """Attempting real submission with empty account raises ValueError."""
-        from unittest.mock import MagicMock, patch
+    Bridges2 ships with account="" (allocation inferred from login) — the
+    guard must NOT fire.  The guard exists for hypothetical future presets
+    that require an account but ship with account="" by mistake; it fires
+    only when the preset's own default is non-empty and an override has
+    cleared it.
+    """
 
-        from polyzymd.workflow.daisy_chain import submit_daisy_chain
-
-        # Minimal fake SimulationConfig with required attributes
-        fake_output = MagicMock()
-        fake_output.get_job_scripts_directory.return_value = tmp_path
-        fake_sim_config = MagicMock()
-        fake_sim_config.output = fake_output
-
-        with (
-            patch(
-                "polyzymd.workflow.daisy_chain.SimulationConfig.from_yaml",
-                return_value=fake_sim_config,
-            ),
-            pytest.raises(ValueError, match="SLURM account is required"),
-        ):
-            submit_daisy_chain(
-                config_path=tmp_path / "config.yaml",
-                slurm_preset="bridges2",
-                dry_run=False,  # Real submission — must raise
-            )
-
-    def test_empty_account_warns_on_dry_run(self, tmp_path, caplog):
-        """Dry-run with empty account logs a warning but does not raise."""
-        import logging
-        from unittest.mock import MagicMock, patch
-
-        from polyzymd.workflow.daisy_chain import submit_daisy_chain
+    def _fake_sim_config(self, tmp_path):
+        from unittest.mock import MagicMock
 
         fake_output = MagicMock()
         fake_output.get_job_scripts_directory.return_value = tmp_path
         fake_sim_config = MagicMock()
         fake_sim_config.output = fake_output
+        return fake_sim_config
+
+    def _patches(self, tmp_path):
+        from unittest.mock import MagicMock, patch
 
         fake_submitter = MagicMock()
         fake_submitter.submit_all.return_value = {}
-
-        with (
+        return (
             patch(
                 "polyzymd.workflow.daisy_chain.SimulationConfig.from_yaml",
-                return_value=fake_sim_config,
+                return_value=self._fake_sim_config(tmp_path),
             ),
             patch(
                 "polyzymd.workflow.daisy_chain.DaisyChainConfig.from_simulation_config",
@@ -561,50 +542,45 @@ class TestAccountValidation:
                 "polyzymd.workflow.daisy_chain.DaisyChainSubmitter",
                 return_value=fake_submitter,
             ),
-            caplog.at_level(logging.WARNING, logger="polyzymd.workflow.daisy_chain"),
-        ):
-            # Should NOT raise
+        )
+
+    def test_bridges2_no_account_dry_run_does_not_raise(self, tmp_path):
+        """Bridges2 dry-run with no --account must not raise or warn."""
+        import logging
+
+        from polyzymd.workflow.daisy_chain import submit_daisy_chain
+
+        p1, p2, p3 = self._patches(tmp_path)
+        with p1, p2, p3:
+            # Must complete without raising
             submit_daisy_chain(
                 config_path=tmp_path / "config.yaml",
                 slurm_preset="bridges2",
                 dry_run=True,
             )
 
-        assert any("SLURM account is required" in r.message for r in caplog.records)
-
-    def test_provided_account_overrides_preset_empty(self, tmp_path):
-        """Supplying --account clears the validation error for bridges2."""
-        from unittest.mock import MagicMock, patch
-
+    def test_bridges2_no_account_real_submission_does_not_raise(self, tmp_path):
+        """Bridges2 real submission with no --account must not raise."""
         from polyzymd.workflow.daisy_chain import submit_daisy_chain
 
-        fake_output = MagicMock()
-        fake_output.get_job_scripts_directory.return_value = tmp_path
-        fake_sim_config = MagicMock()
-        fake_sim_config.output = fake_output
-
-        fake_submitter = MagicMock()
-        fake_submitter.submit_all.return_value = {}
-
-        with (
-            patch(
-                "polyzymd.workflow.daisy_chain.SimulationConfig.from_yaml",
-                return_value=fake_sim_config,
-            ),
-            patch(
-                "polyzymd.workflow.daisy_chain.DaisyChainConfig.from_simulation_config",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "polyzymd.workflow.daisy_chain.DaisyChainSubmitter",
-                return_value=fake_submitter,
-            ),
-        ):
-            # Should not raise — account is provided
+        p1, p2, p3 = self._patches(tmp_path)
+        with p1, p2, p3:
             submit_daisy_chain(
                 config_path=tmp_path / "config.yaml",
                 slurm_preset="bridges2",
-                account="abc123_gpu",
+                dry_run=False,
+            )
+
+    def test_bridges2_explicit_account_accepted(self, tmp_path):
+        """Bridges2 with an explicit --account (multiple allocations) must not raise."""
+        from polyzymd.workflow.daisy_chain import submit_daisy_chain
+
+        p1, p2, p3 = self._patches(tmp_path)
+        with p1, p2, p3:
+            submit_daisy_chain(
+                config_path=tmp_path / "config.yaml",
+                slurm_preset="bridges2",
+                account="chm250017p",
                 dry_run=True,
             )
 
