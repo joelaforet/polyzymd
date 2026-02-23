@@ -30,12 +30,14 @@ class SlurmConfig:
         qos: Quality of service. Set to ``""`` to omit the ``--qos`` directive
             entirely (required for clusters such as Bridges2 that do not use QoS).
         account: Account / allocation ID for resource allocation.  Set to ``""``
-            when the user must supply the account at submission time via
-            ``--account``.
+            to omit the ``--account`` directive entirely (e.g. Bridges2, which
+            infers the allocation from the submitting user's login).
         time_limit: Wall time limit (HH:MM:SS).
-        email: Email for notifications.
+        email: Email address for SLURM failure notifications.  Set to ``""`` to
+            omit both ``--mail-type`` and ``--mail-user`` directives.
         nodes: Number of nodes.
-        ntasks: Number of tasks.
+        ntasks: Number of tasks.  Ignored when ``gpu_directive_style == "gpus"``
+            (Bridges2-style); those scripts emit ``#SBATCH -N {nodes}`` only.
         memory: Memory allocation (e.g. ``"3G"``).  Set to ``None`` to omit the
             ``--mem`` directive entirely (some clusters allocate memory per GPU
             and reject an explicit ``--mem`` request).
@@ -46,6 +48,12 @@ class SlurmConfig:
             ``--gres=gpu:<N>`` directive is emitted instead.
         gpu_directive_style: ``"gres"`` (default, Alpine-style) or ``"gpus"``
             (Bridges2-style).  Controls which SBATCH GPU directive is written.
+            Also governs which nodes/ntasks format is emitted.
+        module_load: Module name passed to ``ml`` in the job script
+            (e.g. ``"miniforge"`` for Alpine, ``"anaconda3/2024.10-1"`` for
+            Bridges2).
+        conda_command: Conda frontend used to activate the environment
+            (``"mamba"`` for Alpine, ``"conda"`` for Bridges2).
     """
 
     partition: str = "aa100"
@@ -61,6 +69,9 @@ class SlurmConfig:
     # --- GPU directive fields (new in v1.0.1) ---
     gpu_type: Optional[str] = None
     gpu_directive_style: str = "gres"
+    # --- Module / conda fields (new in v1.0.1) ---
+    module_load: str = "miniforge"
+    conda_command: str = "mamba"
 
     @classmethod
     def from_preset(cls, preset: PresetType, email: str = "") -> "SlurmConfig":
@@ -97,15 +108,20 @@ class SlurmConfig:
                 "partition": "GPU-shared",
                 # Bridges2 does not use QoS — omit the directive entirely.
                 "qos": "",
-                # No shared default allocation ID; user must supply --account.
+                # Bridges2 infers allocation from the submitting user's login;
+                # omit the --account directive entirely.
                 "account": "",
                 "time_limit": "24:00:00",
                 # GPU-shared allocates resources per GPU; explicit --mem is
                 # not required and may be rejected.  Set to None to omit.
                 "memory": None,
-                # Use the newer --gpus=<type>:<n> SBATCH syntax.
+                # Use the newer --gpus=<type>:<n> SBATCH syntax (also selects
+                # -N 1 nodes format instead of --nodes + --ntasks).
                 "gpu_type": "v100-32",
                 "gpu_directive_style": "gpus",
+                # Bridges2 uses anaconda3 + conda rather than miniforge + mamba.
+                "module_load": "anaconda3/2024.10-1",
+                "conda_command": "conda",
             },
             "testing": {
                 "partition": "atesting_a100",
@@ -175,22 +191,21 @@ class SlurmScriptGenerator:
     # - SLURM logs go to projects_dir/slurm_logs/
     # - Simulation output goes to scratch_dir
     #
-    # {qos_line}, {mem_line}, {gpu_line} are computed conditionally in
-    # generate_initial_job() so that clusters which omit these directives
-    # (e.g. Bridges2 omits --qos and --mem) produce valid scripts.
+    # {qos_line}, {mem_line}, {gpu_line}, {nodes_line}, {account_line},
+    # {mail_line} are computed conditionally by helper methods so that clusters
+    # which omit specific directives (e.g. Bridges2 omits --qos, --mem,
+    # --account, and --ntasks) produce valid scripts without empty lines.
     INITIAL_JOB_TEMPLATE = """#!/bin/bash
 #SBATCH --partition={partition}
 #SBATCH --job-name=i_{job_name}
 #SBATCH --output={output_file}
 {qos_line}
-#SBATCH --nodes={nodes}
-#SBATCH --ntasks={ntasks}
+{nodes_line}
 {mem_line}
 #SBATCH --time={time_limit}
 {gpu_line}
-#SBATCH --mail-type=FAIL
-#SBATCH --mail-user={email}
-#SBATCH --account={account}
+{mail_line}
+{account_line}
 {exclude_line}
 
 # =============================================================================
@@ -200,14 +215,17 @@ class SlurmScriptGenerator:
 
 # Load conda environment (ignore module warnings on some HPC systems)
 module purge 2>/dev/null || true
-module load miniforge 2>/dev/null || true
+ml {module_load} 2>/dev/null || true
 
 # Initialize conda/mamba for non-interactive shell
 eval "$(conda shell.bash hook)"
-mamba activate {conda_env}
+{conda_command} activate {conda_env}
 
 # Enable strict error handling after environment setup
 set -e
+
+# Required for OpenFF Interchange.combine() functionality
+export INTERCHANGE_EXPERIMENTAL=1
 
 # Projects directory (scripts, configs, logs)
 PROJECTS_DIR="{projects_dir}"
@@ -245,14 +263,12 @@ echo "Segment {segment_index} completed successfully at $(date)"
 #SBATCH --job-name=c_{job_name}
 #SBATCH --output={output_file}
 {qos_line}
-#SBATCH --nodes={nodes}
-#SBATCH --ntasks={ntasks}
+{nodes_line}
 {mem_line}
 #SBATCH --time={time_limit}
 {gpu_line}
-#SBATCH --mail-type=FAIL
-#SBATCH --mail-user={email}
-#SBATCH --account={account}
+{mail_line}
+{account_line}
 {exclude_line}
 
 # =============================================================================
@@ -262,14 +278,17 @@ echo "Segment {segment_index} completed successfully at $(date)"
 
 # Load conda environment (ignore module warnings on some HPC systems)
 module purge 2>/dev/null || true
-module load miniforge 2>/dev/null || true
+ml {module_load} 2>/dev/null || true
 
 # Initialize conda/mamba for non-interactive shell
 eval "$(conda shell.bash hook)"
-mamba activate {conda_env}
+{conda_command} activate {conda_env}
 
 # Enable strict error handling after environment setup
 set -e
+
+# Required for OpenFF Interchange.combine() functionality
+export INTERCHANGE_EXPERIMENTAL=1
 
 # Projects directory (scripts, configs, logs)
 PROJECTS_DIR="{projects_dir}"
@@ -337,6 +356,23 @@ echo "Segment {segment_index} completed successfully at $(date)"
             return f"#SBATCH --gpus={self._config.gpu_type}:{self._config.gpus}"
         return f"#SBATCH --gres=gpu:{self._config.gpus}"
 
+    def _nodes_line(self) -> str:
+        """Return the nodes/tasks SBATCH directive(s) appropriate for this config.
+
+        Alpine-style (``gpu_directive_style == "gres"``) emits two lines::
+
+            #SBATCH --nodes=N
+            #SBATCH --ntasks=N
+
+        Bridges2-style (``gpu_directive_style == "gpus"``) emits a single
+        short-flag line::
+
+            #SBATCH -N N
+        """
+        if self._config.gpu_directive_style == "gpus":
+            return f"#SBATCH -N {self._config.nodes}"
+        return f"#SBATCH --nodes={self._config.nodes}\n#SBATCH --ntasks={self._config.ntasks}"
+
     def _qos_line(self) -> str:
         """Return the QoS SBATCH directive, or an empty string to omit it."""
         return f"#SBATCH --qos={self._config.qos}" if self._config.qos else ""
@@ -344,6 +380,24 @@ echo "Segment {segment_index} completed successfully at $(date)"
     def _mem_line(self) -> str:
         """Return the memory SBATCH directive, or an empty string to omit it."""
         return f"#SBATCH --mem={self._config.memory}" if self._config.memory else ""
+
+    def _account_line(self) -> str:
+        """Return the account SBATCH directive, or an empty string to omit it.
+
+        An empty account string means the cluster infers the allocation from the
+        submitting user's login (e.g. Bridges2).
+        """
+        return f"#SBATCH --account={self._config.account}" if self._config.account else ""
+
+    def _mail_line(self) -> str:
+        """Return the mail-type + mail-user SBATCH directives, or empty string.
+
+        Both ``--mail-type`` and ``--mail-user`` are omitted together when no
+        email address is configured, keeping the script clean.
+        """
+        if self._config.email:
+            return f"#SBATCH --mail-type=FAIL\n#SBATCH --mail-user={self._config.email}"
+        return ""
 
     def _exclude_line(self) -> str:
         """Return the exclude SBATCH directive, or an empty string to omit it."""
@@ -385,14 +439,15 @@ echo "Segment {segment_index} completed successfully at $(date)"
             job_name=context.job_name,
             output_file=context.output_file,
             qos_line=self._qos_line(),
-            nodes=self._config.nodes,
-            ntasks=self._config.ntasks,
+            nodes_line=self._nodes_line(),
             mem_line=self._mem_line(),
             time_limit=self._config.time_limit,
             gpu_line=self._gpu_line(),
-            email=self._config.email,
-            account=self._config.account,
+            mail_line=self._mail_line(),
+            account_line=self._account_line(),
             exclude_line=self._exclude_line(),
+            module_load=self._config.module_load,
+            conda_command=self._config.conda_command,
             conda_env=self._conda_env,
             projects_dir=projects_dir,
             scratch_dir=context.scratch_dir,
@@ -432,14 +487,15 @@ echo "Segment {segment_index} completed successfully at $(date)"
             job_name=context.job_name,
             output_file=context.output_file,
             qos_line=self._qos_line(),
-            nodes=self._config.nodes,
-            ntasks=self._config.ntasks,
+            nodes_line=self._nodes_line(),
             mem_line=self._mem_line(),
             time_limit=self._config.time_limit,
             gpu_line=self._gpu_line(),
-            email=self._config.email,
-            account=self._config.account,
+            mail_line=self._mail_line(),
+            account_line=self._account_line(),
             exclude_line=self._exclude_line(),
+            module_load=self._config.module_load,
+            conda_command=self._config.conda_command,
             conda_env=self._conda_env,
             projects_dir=projects_dir,
             scratch_dir=context.scratch_dir,
