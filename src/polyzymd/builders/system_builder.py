@@ -260,6 +260,7 @@ class SystemBuilder:
         self,
         padding: float = 2.0,
         tolerance: float = 2.0,
+        movebadrandom: bool = False,
         working_directory: Optional[Union[str, Path]] = None,
     ) -> Topology:
         """Pack polymers around the combined solute topology.
@@ -268,6 +269,10 @@ class SystemBuilder:
             padding: Box padding in nm. Larger values give polymers more room
                 and can significantly speed up PACKMOL convergence.
             tolerance: PACKMOL tolerance in Angstrom.
+            movebadrandom: When True, pass the ``movebadrandom`` keyword to
+                PACKMOL. Improves convergence for dense or heterogeneous
+                polymer systems (many unique chain types) by placing
+                badly-packed molecules at random positions in the box.
             working_directory: Directory for PACKMOL files.
 
         Returns:
@@ -283,15 +288,16 @@ class SystemBuilder:
             LOGGER.info("No polymers to pack, returning combined topology")
             return self._combined_topology
 
-        from openff.interchange.components import _packmol as packmol
         from openff.units import Quantity
 
         from polyzymd.utils import boxvectors
+        from polyzymd.utils.packmol import pack_polymers as _pack_polymers
 
         LOGGER.info(
             f"Packing {sum(self._polymer_counts)} polymer chains "
             f"({len(self._polymer_molecules)} unique types), "
             f"padding={padding} nm, tolerance={tolerance} A"
+            + (" [movebadrandom]" if movebadrandom else "")
         )
 
         # Calculate box vectors
@@ -299,16 +305,14 @@ class SystemBuilder:
         min_box_vecs = boxvectors.get_topology_bbox(self._combined_topology)
         box_vecs = boxvectors.pad_box_vectors_uniform(min_box_vecs, padding_qty)
 
-        # Pack polymers using OpenFF's PACKMOL wrapper
-        tolerance_qty = Quantity(tolerance, "angstrom")
-        packed_top = packmol.pack_box(
+        # Pack polymers using our custom PACKMOL runner (supports movebadrandom)
+        packed_top = _pack_polymers(
             molecules=self._polymer_molecules,
             number_of_copies=self._polymer_counts,
             solute=self._combined_topology,
-            tolerance=tolerance_qty,
             box_vectors=box_vecs,
-            box_shape=packmol.UNIT_CUBE,
-            center_solute="BRICK",
+            tolerance_angstrom=tolerance,
+            movebadrandom=movebadrandom,
             working_directory=str(working_directory) if working_directory else None,
             retain_working_files=True,
         )
@@ -973,6 +977,7 @@ class SystemBuilder:
             self.pack_polymers(
                 padding=packing.padding,
                 tolerance=packing.tolerance,
+                movebadrandom=packing.movebadrandom,
                 working_directory=self._working_dir,
             )
 

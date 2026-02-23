@@ -146,13 +146,28 @@ class PolymerPackingConfig(BaseModel):
         padding: Box padding around the solute in nanometers. Larger values
             give polymers more room and can speed up PACKMOL convergence.
         tolerance: Minimum molecular spacing for PACKMOL in Angstrom.
+        movebadrandom: When ``True``, pass the ``movebadrandom`` keyword to
+            PACKMOL.  This places badly-packed molecules at random positions
+            in the box rather than near well-packed neighbours, which
+            improves convergence for dense or heterogeneous systems (many
+            unique chain types).  Has no effect when only a single chain
+            type is present.  Default is ``False`` (PACKMOL default
+            behaviour is preserved).
 
     Example:
-        >>> PolymerPackingConfig(padding=2.5)  # Give polymers more room
+        >>> PolymerPackingConfig(padding=2.5, movebadrandom=True)
     """
 
     padding: float = Field(2.0, gt=0.0, description="Box padding around solute (nm)")
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
+    movebadrandom: bool = Field(
+        False,
+        description=(
+            "Pass the 'movebadrandom' keyword to PACKMOL. "
+            "Improves convergence for heterogeneous polymer systems "
+            "by placing badly-packed molecules at random box positions."
+        ),
+    )
 
 
 # =============================================================================
