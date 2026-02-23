@@ -8,9 +8,11 @@ Main components:
 - RMSFComparator: Compare RMSF across conditions with statistical analysis
 - TriadComparator: Compare catalytic triad geometry across conditions
 - ContactsComparator: Compare polymer-protein contacts across conditions
+- BindingFreeEnergyComparator: Compare ΔΔG binding selectivity across conditions
 - ComparisonResult: Structured results with statistics and rankings
 - TriadComparisonResult: Structured results for triad comparison
 - ContactsComparisonResult: Structured results for contacts comparison
+- BindingFreeEnergyResult: Structured results for ΔΔG comparison
 - Formatters: Output formatting for console, markdown, and JSON
 
 Usage:
@@ -27,8 +29,15 @@ Usage:
 
     # Run contacts comparison
     polyzymd compare contacts --eq-time 10ns
+
+    # Run binding free energy comparison
+    polyzymd compare binding-free-energy --units kcal/mol
 """
 
+from polyzymd.compare.binding_free_energy_formatters import (
+    format_bfe_result,
+)
+from polyzymd.compare.comparators.binding_free_energy import BindingFreeEnergyComparator
 from polyzymd.compare.comparators.contacts import ContactsComparator
 from polyzymd.compare.comparators.rmsf import RMSFComparator
 from polyzymd.compare.comparators.triad import TriadComparator
@@ -64,14 +73,20 @@ from polyzymd.compare.plotting import (
 )
 from polyzymd.compare.results import (
     AggregateComparisonResult,
+    BindingFreeEnergyResult,
     ComparisonResult,
     ContactsComparisonResult,
     ContactsConditionSummary,
     ContactsPairwiseComparison,
+    FreeEnergyConditionSummary,
+    FreeEnergyEntry,
+    FreeEnergyPairwiseEntry,
     TriadComparisonResult,
     TriadConditionSummary,
 )
 from polyzymd.compare.settings import (
+    BindingFreeEnergyAnalysisSettings,
+    BindingFreeEnergyComparisonSettings,
     CatalyticTriadAnalysisSettings,
     CatalyticTriadComparisonSettings,
     ContactsAnalysisSettings,
@@ -104,6 +119,8 @@ __all__ = [
     "CatalyticTriadComparisonSettings",
     "ContactsAnalysisSettings",
     "ContactsComparisonSettings",
+    "BindingFreeEnergyAnalysisSettings",
+    "BindingFreeEnergyComparisonSettings",
     # RMSF comparison
     "RMSFComparator",
     "ComparisonResult",
@@ -129,6 +146,13 @@ __all__ = [
     "format_contacts_markdown",
     "format_contacts_result",
     "contacts_to_json",
+    # Binding free energy comparison
+    "BindingFreeEnergyComparator",
+    "BindingFreeEnergyResult",
+    "FreeEnergyConditionSummary",
+    "FreeEnergyEntry",
+    "FreeEnergyPairwiseEntry",
+    "format_bfe_result",
     # Plotting functions
     "plot_rmsf_comparison",
     "plot_percent_change",
