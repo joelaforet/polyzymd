@@ -2,10 +2,12 @@
 
 Covers:
 - SlurmConfig.from_preset() for all named presets
-- Conditional SBATCH directive generation (gpu_line, qos_line, mem_line)
-- Bridges2-specific GPU type and directive style
+- Conditional SBATCH directive generation (gpu_line, qos_line, mem_line,
+  nodes_line, account_line, mail_line)
+- Bridges2-specific GPU type, directive style, module loading, conda command
 - BRIDGES2_GPU_TYPES registry
 - Script generation produces well-formed output for Alpine and Bridges2 presets
+- INTERCHANGE_EXPERIMENTAL=1 present in all generated scripts
 - account validation guard in submit_daisy_chain()
 """
 
@@ -56,6 +58,8 @@ class TestPresetLoading:
         assert cfg.memory == "3G"
         assert cfg.gpu_directive_style == "gres"
         assert cfg.gpu_type is None
+        assert cfg.module_load == "miniforge"
+        assert cfg.conda_command == "mamba"
 
     def test_al40_preset(self):
         cfg = SlurmConfig.from_preset("al40")
@@ -81,11 +85,13 @@ class TestPresetLoading:
         cfg = SlurmConfig.from_preset("bridges2")
         assert cfg.partition == "GPU-shared"
         assert cfg.qos == ""  # No QoS on Bridges2
-        assert cfg.account == ""  # No shared default — user must supply
+        assert cfg.account == ""  # Inferred from login; omit directive
         assert cfg.time_limit == "24:00:00"
         assert cfg.memory is None  # Per-GPU allocation; omit --mem
         assert cfg.gpu_type == "v100-32"
         assert cfg.gpu_directive_style == "gpus"
+        assert cfg.module_load == "anaconda3/2024.10-1"
+        assert cfg.conda_command == "conda"
 
     def test_preset_accepts_email(self):
         cfg = SlurmConfig.from_preset("aa100", email="user@example.com")
@@ -118,12 +124,12 @@ class TestBridges2GpuTypes:
 
 
 # ---------------------------------------------------------------------------
-# Conditional directive helpers (_gpu_line, _qos_line, _mem_line)
+# Conditional directive helpers
 # ---------------------------------------------------------------------------
 
 
 class TestConditionalDirectives:
-    """The three conditional SBATCH helper methods produce correct output."""
+    """All conditional SBATCH helper methods produce correct output."""
 
     # --- GPU line ---
 
@@ -154,6 +160,25 @@ class TestConditionalDirectives:
         cfg = SlurmConfig(gpu_directive_style="gpus", gpu_type=None, gpus=1)
         gen = _make_generator(cfg)
         assert gen._gpu_line() == "#SBATCH --gres=gpu:1"
+
+    # --- Nodes line ---
+
+    def test_nodes_line_alpine_emits_two_directives(self):
+        """Alpine (gres) style emits --nodes and --ntasks on separate lines."""
+        cfg = SlurmConfig.from_preset("aa100")
+        gen = _make_generator(cfg)
+        line = gen._nodes_line()
+        assert "#SBATCH --nodes=1" in line
+        assert "#SBATCH --ntasks=1" in line
+
+    def test_nodes_line_bridges2_emits_single_N_flag(self):
+        """Bridges2 (gpus) style emits only '#SBATCH -N N'."""
+        cfg = SlurmConfig.from_preset("bridges2")
+        gen = _make_generator(cfg)
+        line = gen._nodes_line()
+        assert line == "#SBATCH -N 1"
+        assert "--nodes" not in line
+        assert "--ntasks" not in line
 
     # --- QoS line ---
 
@@ -191,6 +216,46 @@ class TestConditionalDirectives:
         gen = _make_generator(cfg)
         assert gen._mem_line() == ""
 
+    # --- Account line ---
+
+    def test_account_line_present_when_non_empty(self):
+        cfg = SlurmConfig(account="ucb625_asc1")
+        gen = _make_generator(cfg)
+        assert gen._account_line() == "#SBATCH --account=ucb625_asc1"
+
+    def test_account_line_omitted_when_empty(self):
+        """Bridges2 infers allocation from login; account line must be absent."""
+        cfg = SlurmConfig(account="")
+        gen = _make_generator(cfg)
+        assert gen._account_line() == ""
+
+    def test_account_line_bridges2_preset_omitted(self):
+        cfg = SlurmConfig.from_preset("bridges2")
+        gen = _make_generator(cfg)
+        assert gen._account_line() == ""
+
+    def test_account_line_bridges2_with_user_account(self):
+        """User-supplied account via --account flag appears in directive."""
+        cfg = SlurmConfig.from_preset("bridges2")
+        cfg.account = "chm250017p"
+        gen = _make_generator(cfg)
+        assert gen._account_line() == "#SBATCH --account=chm250017p"
+
+    # --- Mail line ---
+
+    def test_mail_line_present_when_email_set(self):
+        cfg = SlurmConfig(email="user@pitt.edu")
+        gen = _make_generator(cfg)
+        line = gen._mail_line()
+        assert "#SBATCH --mail-type=FAIL" in line
+        assert "#SBATCH --mail-user=user@pitt.edu" in line
+
+    def test_mail_line_omitted_when_no_email(self):
+        """Both --mail-type and --mail-user omitted when email is empty."""
+        cfg = SlurmConfig(email="")
+        gen = _make_generator(cfg)
+        assert gen._mail_line() == ""
+
     # --- Exclude line ---
 
     def test_exclude_line_present(self):
@@ -205,7 +270,7 @@ class TestConditionalDirectives:
 
 
 # ---------------------------------------------------------------------------
-# Script generation — Alpine (gres) presets produce unchanged output
+# Script generation — Alpine (gres) presets produce correct output
 # ---------------------------------------------------------------------------
 
 
@@ -229,6 +294,13 @@ class TestAlpineScriptGeneration:
         assert "#SBATCH --gres=gpu:1" in script
         assert "--gpus=" not in script
 
+    def test_initial_script_has_nodes_and_ntasks(self):
+        """Alpine emits both --nodes and --ntasks (two-line form)."""
+        script = self._gen_initial("aa100")
+        assert "#SBATCH --nodes=1" in script
+        assert "#SBATCH --ntasks=1" in script
+        assert "#SBATCH -N " not in script
+
     def test_initial_script_has_qos(self):
         script = self._gen_initial("aa100")
         assert "#SBATCH --qos=normal" in script
@@ -241,9 +313,41 @@ class TestAlpineScriptGeneration:
         script = self._gen_initial("aa100")
         assert "#SBATCH --account=ucb625_asc1" in script
 
+    def test_initial_script_has_mail_directives(self):
+        script = self._gen_initial("aa100")
+        assert "#SBATCH --mail-type=FAIL" in script
+        assert "#SBATCH --mail-user=test@example.com" in script
+
+    def test_initial_script_no_mail_when_no_email(self):
+        """When no email is provided, both mail directives are omitted."""
+        cfg = SlurmConfig.from_preset("aa100")  # email="" by default
+        gen = _make_generator(cfg)
+        ctx = _make_context()
+        script = gen.generate_initial_job(
+            context=ctx,
+            config_path="config.yaml",
+            replicate=1,
+            segment_time=10.0,
+            segment_frames=250,
+        )
+        assert "--mail-type" not in script
+        assert "--mail-user" not in script
+
+    def test_initial_script_uses_miniforge_and_mamba(self):
+        """Alpine scripts load miniforge and use mamba to activate the env."""
+        script = self._gen_initial("aa100")
+        assert "ml miniforge" in script
+        assert "mamba activate test-env" in script
+        assert "conda activate" not in script
+
     def test_initial_script_has_shebang(self):
         script = self._gen_initial("aa100")
         assert script.strip().startswith("#!/bin/bash")
+
+    def test_initial_script_has_interchange_experimental(self):
+        """INTERCHANGE_EXPERIMENTAL=1 must be present in all generated scripts."""
+        script = self._gen_initial("aa100")
+        assert "export INTERCHANGE_EXPERIMENTAL=1" in script
 
     def test_continuation_script_has_gres_directive(self):
         cfg = SlurmConfig.from_preset("aa100")
@@ -252,6 +356,14 @@ class TestAlpineScriptGeneration:
         script = gen.generate_continuation_job(context=ctx, segment_time=10.0, num_samples=250)
         assert "#SBATCH --gres=gpu:1" in script
         assert "--gpus=" not in script
+
+    def test_continuation_script_has_interchange_experimental(self):
+        """INTERCHANGE_EXPERIMENTAL=1 must be present in continuation scripts."""
+        cfg = SlurmConfig.from_preset("aa100")
+        gen = _make_generator(cfg)
+        ctx = _make_context(segment_index=1)
+        script = gen.generate_continuation_job(context=ctx, segment_time=10.0, num_samples=250)
+        assert "export INTERCHANGE_EXPERIMENTAL=1" in script
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +394,13 @@ class TestBridges2ScriptGeneration:
         assert "#SBATCH --gpus=v100-32:1" in script
         assert "--gres=" not in script
 
+    def test_uses_N_flag_not_nodes_ntasks(self):
+        """Bridges2 emits '#SBATCH -N 1' instead of --nodes + --ntasks."""
+        script = self._gen_initial()
+        assert "#SBATCH -N 1" in script
+        assert "--nodes" not in script
+        assert "--ntasks" not in script
+
     def test_no_qos_directive(self):
         script = self._gen_initial()
         assert "--qos" not in script
@@ -290,9 +409,24 @@ class TestBridges2ScriptGeneration:
         script = self._gen_initial()
         assert "--mem" not in script
 
-    def test_account_in_script(self):
-        script = self._gen_initial(account="myalloc_gpu")
-        assert "#SBATCH --account=myalloc_gpu" in script
+    def test_no_account_when_empty(self):
+        """When account is empty (preset default), --account line is omitted."""
+        cfg = SlurmConfig.from_preset("bridges2")
+        gen = _make_generator(cfg)
+        ctx = _make_context()
+        script = gen.generate_initial_job(
+            context=ctx,
+            config_path="config.yaml",
+            replicate=1,
+            segment_time=10.0,
+            segment_frames=250,
+        )
+        assert "--account" not in script
+
+    def test_account_present_when_provided(self):
+        """User-supplied account via --account flag appears in script."""
+        script = self._gen_initial(account="chm250017p")
+        assert "#SBATCH --account=chm250017p" in script
 
     def test_gpu_type_override_v100_16(self):
         script = self._gen_initial(gpu_type="v100-16")
@@ -310,6 +444,23 @@ class TestBridges2ScriptGeneration:
         script = self._gen_initial()
         assert "#SBATCH --time=24:00:00" in script
 
+    def test_uses_anaconda3_module(self):
+        """Bridges2 scripts load anaconda3, not miniforge."""
+        script = self._gen_initial()
+        assert "ml anaconda3/2024.10-1" in script
+        assert "miniforge" not in script
+
+    def test_uses_conda_not_mamba(self):
+        """Bridges2 scripts activate env with conda, not mamba."""
+        script = self._gen_initial()
+        assert "conda activate test-env" in script
+        assert "mamba activate" not in script
+
+    def test_has_interchange_experimental(self):
+        """INTERCHANGE_EXPERIMENTAL=1 is present in Bridges2 initial scripts."""
+        script = self._gen_initial()
+        assert "export INTERCHANGE_EXPERIMENTAL=1" in script
+
     def test_continuation_script_uses_gpus_directive(self):
         cfg = SlurmConfig.from_preset("bridges2")
         cfg.account = "abc123_gpu"
@@ -320,6 +471,33 @@ class TestBridges2ScriptGeneration:
         assert "--gres=" not in script
         assert "--qos" not in script
         assert "--mem" not in script
+
+    def test_continuation_script_uses_N_flag(self):
+        """Bridges2 continuation scripts also use -N 1."""
+        cfg = SlurmConfig.from_preset("bridges2")
+        gen = _make_generator(cfg)
+        ctx = _make_context(segment_index=1)
+        script = gen.generate_continuation_job(context=ctx, segment_time=10.0, num_samples=250)
+        assert "#SBATCH -N 1" in script
+        assert "--nodes" not in script
+        assert "--ntasks" not in script
+
+    def test_continuation_script_uses_conda(self):
+        """Bridges2 continuation scripts use conda activate."""
+        cfg = SlurmConfig.from_preset("bridges2")
+        gen = _make_generator(cfg)
+        ctx = _make_context(segment_index=1)
+        script = gen.generate_continuation_job(context=ctx, segment_time=10.0, num_samples=250)
+        assert "conda activate test-env" in script
+        assert "mamba activate" not in script
+
+    def test_continuation_script_has_interchange_experimental(self):
+        """INTERCHANGE_EXPERIMENTAL=1 is present in Bridges2 continuation scripts."""
+        cfg = SlurmConfig.from_preset("bridges2")
+        gen = _make_generator(cfg)
+        ctx = _make_context(segment_index=1)
+        script = gen.generate_continuation_job(context=ctx, segment_time=10.0, num_samples=250)
+        assert "export INTERCHANGE_EXPERIMENTAL=1" in script
 
 
 # ---------------------------------------------------------------------------
