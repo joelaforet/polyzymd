@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/source/_static/logo.png" alt="PolyzyMD Logo" width="400">
+  <img src="docs/source/_static/Higher_resolution_PolyzyMD_logo_v1.png" alt="PolyzyMD Logo" width="400">
 </p>
 
 <h1 align="center">PolyzyMD</h1>
