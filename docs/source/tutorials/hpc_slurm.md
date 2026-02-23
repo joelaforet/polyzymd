@@ -179,27 +179,31 @@ For custom configurations, edit the generated scripts in `job_scripts/` before s
 | Feature | Alpine (`aa100`) | Bridges2 (`bridges2`) |
 |---------|-----------------|----------------------|
 | GPU directive | `--gres=gpu:N` | `--gpus=<type>:N` |
+| Nodes/tasks | `--nodes=1` + `--ntasks=1` | `-N 1` (single line) |
 | QoS | `--qos=normal` | *(omitted — not used)* |
 | Memory | `--mem=3G` | *(omitted — per-GPU allocation)* |
-| Account | ucb-group | PSC allocation ID (required) |
+| Account | ucb-group (in preset) | *(omitted — inferred from login)* |
+| Module load | `ml miniforge` | `ml anaconda3/2024.10-1` |
+| Conda frontend | `mamba activate` | `conda activate` |
 | Default time limit | 24h | 24h |
 
-### Account Requirement
+### Account
 
-Bridges2 requires an **allocation account ID** for every job. Pass it with `--account`:
+Bridges2 infers the billing allocation from your login session, so **no `--account` directive is emitted by default**. If you have multiple allocations and need to charge a specific one, pass `--account`:
 
 ```bash
 polyzymd submit -c config.yaml \
     --preset bridges2 \
-    --account abc123_gpu \
+    --account chm250017p \
     --replicates 1-3 \
     --email collaborator@pitt.edu
 ```
 
-```{warning}
-`--account` is **required** for real Bridges2 submissions. The preset sets
-`account=""` by default — omitting `--account` on a real submission (not
-`--dry-run`) will raise a `ValueError` before any jobs are submitted.
+```{note}
+Unlike Alpine presets, Bridges2 scripts omit the `#SBATCH --account=` line
+entirely when no account is specified. The `--account` CLI flag is optional
+for Bridges2 (it is required on Alpine where the preset always sets a
+group account).
 ```
 
 ### GPU Type Selection
@@ -240,9 +244,11 @@ polyzymd submit -c config.yaml \
 cat job_scripts/initial_seg0_rep1.sh | head -20
 # You should see:
 #   #SBATCH --partition=GPU-shared
-#   #SBATCH --gpus=v100-32:1      ← type-specific GPU directive
+#   #SBATCH -N 1                    ← single-line nodes directive
+#   #SBATCH --gpus=v100-32:1        ← type-specific GPU directive
 #   (no --qos line)
 #   (no --mem line)
+#   (no --account line — inferred from login)
 
 # 3. Submit for real
 polyzymd submit -c config.yaml \
@@ -469,12 +475,16 @@ The initial job script (segment 0) builds the system, runs equilibration, and ru
 #SBATCH --mail-user=your@email.edu
 #SBATCH --account=ucb625_asc1
 
-# Exit immediately if any command fails
+module purge 2>/dev/null || true
+ml miniforge 2>/dev/null || true
+
+eval "$(conda shell.bash hook)"
+mamba activate polymerist-env
+
 set -e
 
-module purge
-module load miniforge
-mamba activate polymerist-env
+# Required for OpenFF Interchange.combine() functionality
+export INTERCHANGE_EXPERIMENTAL=1
 
 # Projects directory (scripts, configs, logs)
 PROJECTS_DIR="/projects/$USER/polyzymd/my_simulation"
@@ -524,12 +534,16 @@ Continuation scripts load the checkpoint from the previous segment and continue 
 #SBATCH --mail-user=your@email.edu
 #SBATCH --account=ucb625_asc1
 
-# Exit immediately if any command fails
+module purge 2>/dev/null || true
+ml miniforge 2>/dev/null || true
+
+eval "$(conda shell.bash hook)"
+mamba activate polymerist-env
+
 set -e
 
-module purge
-module load miniforge
-mamba activate polymerist-env
+# Required for OpenFF Interchange.combine() functionality
+export INTERCHANGE_EXPERIMENTAL=1
 
 # Projects directory (scripts, configs, logs)
 PROJECTS_DIR="/projects/$USER/polyzymd/my_simulation"
