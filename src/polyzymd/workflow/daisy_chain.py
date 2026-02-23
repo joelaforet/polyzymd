@@ -231,6 +231,9 @@ class DaisyChainSubmitter:
     def _create_job_name(self, segment_index: int, replicate: int) -> str:
         """Create a descriptive job name.
 
+        The polymer composition suffix matches the directory naming convention,
+        e.g. ``s0_r1_310K_Fibronectin_SBMA-OEGMA_A75_B25``.
+
         Args:
             segment_index: Segment index
             replicate: Replicate number
@@ -244,10 +247,10 @@ class DaisyChainSubmitter:
         polymer_info = ""
         if self._sim_config.polymers and self._sim_config.polymers.enabled:
             prefix = self._sim_config.polymers.type_prefix
-            # Get minority percentage
-            probs = [m.probability for m in self._sim_config.polymers.monomers]
-            minority_pct = int(min(probs) * 100)
-            polymer_info = f"_{prefix}-{minority_pct}%"
+            # Build full composition string matching directory naming, e.g. SBMA-OEGMA_A75_B25
+            probs = {m.label: m.probability for m in self._sim_config.polymers.monomers}
+            composition = "_".join(f"{lbl}{int(probs[lbl] * 100)}" for lbl in sorted(probs))
+            polymer_info = f"_{prefix}_{composition}"
 
         return f"s{segment_index}_r{replicate}_{temp}K_{enzyme}{polymer_info}"
 

@@ -607,3 +607,102 @@ class TestAccountValidation:
                 account="abc123_gpu",
                 dry_run=True,
             )
+
+
+# ---------------------------------------------------------------------------
+# Job name generation
+# ---------------------------------------------------------------------------
+
+
+class TestJobNameGeneration:
+    """Tests for DaisyChainSubmitter._create_job_name().
+
+    Ensures the polymer composition suffix in SLURM --job-name matches the
+    directory naming convention (e.g. SBMA-OEGMA_A75_B25) rather than the
+    old minority-only format (SBMA-OEGMA-25%).
+    """
+
+    def _make_submitter(self, enzyme_name, temperature, monomers_by_label):
+        """Return a DaisyChainSubmitter with a mocked SimulationConfig.
+
+        Parameters
+        ----------
+        enzyme_name : str
+            e.g. "Fibronectin_8_to_10"
+        temperature : float
+            Simulation temperature in K.
+        monomers_by_label : dict[str, float] | None
+            Mapping of monomer label → probability, e.g. {"A": 0.75, "B": 0.25}.
+            Pass None to simulate no polymer.
+        """
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow.daisy_chain import DaisyChainSubmitter
+
+        sim_config = MagicMock()
+        sim_config.enzyme.name = enzyme_name
+        sim_config.thermodynamics.temperature = temperature
+
+        if monomers_by_label is None:
+            sim_config.polymers = None
+        else:
+            sim_config.polymers.enabled = True
+            sim_config.polymers.type_prefix = "SBMA-OEGMA"
+            monomers = []
+            for label, prob in monomers_by_label.items():
+                m = MagicMock()
+                m.label = label
+                m.probability = prob
+                monomers.append(m)
+            sim_config.polymers.monomers = monomers
+
+        dc_config = MagicMock()
+        return DaisyChainSubmitter(sim_config=sim_config, dc_config=dc_config)
+
+    def test_copolymer_uses_label_composition_format(self):
+        """75/25 copolymer should produce SBMA-OEGMA_A75_B25, not SBMA-OEGMA-25%."""
+        submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, {"A": 0.75, "B": 0.25})
+        name = submitter._create_job_name(0, 1)
+        assert "SBMA-OEGMA_A75_B25" in name
+        assert "25%" not in name
+        assert "-25" not in name
+
+    def test_copolymer_label_order_is_alphabetical(self):
+        """Labels must be sorted alphabetically regardless of input order."""
+        submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, {"B": 0.25, "A": 0.75})
+        name = submitter._create_job_name(0, 1)
+        # A must come before B
+        assert name.index("_A75") < name.index("_B25")
+
+    def test_full_name_format_two_monomers(self):
+        """Full job name should be s{seg}_r{rep}_{T}K_{enzyme}_{prefix}_{comp}."""
+        submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, {"A": 0.75, "B": 0.25})
+        assert submitter._create_job_name(0, 1) == (
+            "s0_r1_310K_Fibronectin_8_to_10_SBMA-OEGMA_A75_B25"
+        )
+
+    def test_segment_and_replicate_encoded(self):
+        """Segment and replicate indices must appear in the job name."""
+        submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, {"A": 0.75, "B": 0.25})
+        assert submitter._create_job_name(3, 2) == (
+            "s3_r2_310K_Fibronectin_8_to_10_SBMA-OEGMA_A75_B25"
+        )
+
+    def test_no_polymer_omits_composition_suffix(self):
+        """When no polymer is configured, name should have no polymer suffix."""
+        submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, None)
+        assert submitter._create_job_name(0, 1) == "s0_r1_310K_Fibronectin_8_to_10"
+
+    def test_three_monomer_composition(self):
+        """Three-monomer system should list all three labels in sorted order."""
+        submitter = self._make_submitter("LipA", 300.0, {"A": 0.50, "B": 0.30, "C": 0.20})
+        name = submitter._create_job_name(0, 1)
+        assert "SBMA-OEGMA_A50_B30_C20" in name
+
+    def test_integer_rounding_of_probabilities(self):
+        """Floating-point probabilities must round to clean integer percentages."""
+        submitter = self._make_submitter("LipA", 300.0, {"A": 0.333, "B": 0.667})
+        name = submitter._create_job_name(0, 1)
+        # int(0.333 * 100) = 33, int(0.667 * 100) = 66
+        assert "A33" in name
+        assert "B66" in name
