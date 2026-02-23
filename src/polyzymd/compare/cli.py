@@ -1482,6 +1482,10 @@ def run_comparison(
             from polyzymd.compare.exposure_formatters import format_exposure_result
 
             formatted = format_exposure_result(result, format=output_format)
+        elif comparison_type == "binding_free_energy":
+            from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
+
+            formatted = format_bfe_result(result, format=output_format)
         else:
             # Generic JSON output for unknown types
             formatted = result.model_dump_json(indent=2)
