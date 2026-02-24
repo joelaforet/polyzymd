@@ -679,10 +679,7 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
                         analysis_dir
                         / f"contacts_aggregated_reps{config.replicates[0]}-{config.replicates[-1]}.json"
                     )
-                    import json
-
-                    with open(agg_file, "w") as f:
-                        json.dump(agg_result.to_dict(), f, indent=2)
+                    agg_result.save(agg_file)
 
                     # Aggregate binding preference
                     if binding_pref_results:
@@ -1535,10 +1532,7 @@ def contacts(
                 )
 
             output_file.parent.mkdir(parents=True, exist_ok=True)
-            import json
-
-            with open(output_file, "w") as f:
-                json.dump(agg_result.to_dict(), f, indent=2)
+            agg_result.save(output_file)
             click.echo(f"  Results saved: {output_file}")
 
             # Aggregate and save binding preference if computed

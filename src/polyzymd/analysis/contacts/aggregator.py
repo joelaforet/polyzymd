@@ -23,18 +23,18 @@ References
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import BaseModel, Field
 
 from polyzymd.analysis.contacts.results import ContactResult
 from polyzymd.analysis.core.statistics import compute_sem as _compute_sem_stat
+from polyzymd.analysis.results.base import BaseAnalysisResult
 
 
-@dataclass
-class AggregatedResidueStats:
+class AggregatedResidueStats(BaseModel):
     """Aggregated statistics for a single protein residue.
 
     Attributes
@@ -65,20 +65,22 @@ class AggregatedResidueStats:
 
     protein_resid: int
     protein_resname: str
-    protein_group: str
-    contact_fraction_mean: float
-    contact_fraction_sem: float
-    contact_fraction_per_replicate: list[float]
+    protein_group: str = "unknown"
+    contact_fraction_mean: float = 0.0
+    contact_fraction_sem: float = 0.0
+    contact_fraction_per_replicate: list[float] = Field(default_factory=list)
     statistical_inefficiency_mean: float = 1.0
     statistical_inefficiency_sem: float = 0.0
     n_effective_mean: float = 0.0
     n_effective_sem: float = 0.0
-    by_polymer_type: dict[str, tuple[float, float]] = field(default_factory=dict)
+    by_polymer_type: dict[str, tuple[float, float]] = Field(default_factory=dict)
 
 
-@dataclass
-class AggregatedContactResult:
+class AggregatedContactResult(BaseAnalysisResult):
     """Aggregated contact analysis results across replicates.
+
+    Inherits from BaseAnalysisResult, which provides JSON serialization
+    (save/load), config hash tracking, and standard metadata fields.
 
     Attributes
     ----------
@@ -104,22 +106,22 @@ class AggregatedContactResult:
         Mean ± SEM contact fraction per AA group
     residence_time_by_polymer_type : dict[str, tuple[float, float]]
         Mean ± SEM residence time in frames for each polymer type
-    metadata : dict
-        Additional metadata
     """
 
-    residue_stats: list[AggregatedResidueStats]
-    n_replicates: int
-    total_frames_per_replicate: list[int]
-    criteria_label: str
-    criteria_cutoff: float
-    coverage_mean: float
-    coverage_sem: float
-    mean_contact_fraction: float
-    mean_contact_fraction_sem: float
-    group_stats: dict[str, tuple[float, float]]
-    residence_time_by_polymer_type: dict[str, tuple[float, float]] = field(default_factory=dict)
-    metadata: dict = field(default_factory=dict)
+    analysis_type: ClassVar[str] = "contacts_aggregated"
+
+    residue_stats: list[AggregatedResidueStats] = Field(default_factory=list)
+    n_replicates: int = Field(default=0, ge=0)
+    total_frames_per_replicate: list[int] = Field(default_factory=list)
+    criteria_label: str = Field(default="")
+    criteria_cutoff: float = Field(default=0.0)
+    coverage_mean: float = Field(default=0.0)
+    coverage_sem: float = Field(default=0.0)
+    mean_contact_fraction: float = Field(default=0.0)
+    mean_contact_fraction_sem: float = Field(default=0.0)
+    group_stats: dict[str, tuple[float, float]] = Field(default_factory=dict)
+    residence_time_by_polymer_type: dict[str, tuple[float, float]] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def n_residues(self) -> int:
@@ -147,48 +149,21 @@ class AggregatedContactResult:
         sems = np.array([rs.contact_fraction_sem for rs in self.residue_stats], dtype=np.float64)
         return resids, means, sems
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        return {
-            "n_replicates": self.n_replicates,
-            "n_residues": self.n_residues,
-            "criteria_label": self.criteria_label,
-            "criteria_cutoff": self.criteria_cutoff,
-            "coverage_mean": self.coverage_mean,
-            "coverage_sem": self.coverage_sem,
-            "mean_contact_fraction": self.mean_contact_fraction,
-            "mean_contact_fraction_sem": self.mean_contact_fraction_sem,
-            "residence_time_by_polymer_type": {
-                ptype: {"mean": m, "sem": s}
-                for ptype, (m, s) in self.residence_time_by_polymer_type.items()
-            },
-            "group_stats": {
-                group: {"mean": m, "sem": s} for group, (m, s) in self.group_stats.items()
-            },
-            "residue_stats": [
-                {
-                    "resid": rs.protein_resid,
-                    "resname": rs.protein_resname,
-                    "group": rs.protein_group,
-                    "contact_fraction_mean": rs.contact_fraction_mean,
-                    "contact_fraction_sem": rs.contact_fraction_sem,
-                    "statistical_inefficiency_mean": rs.statistical_inefficiency_mean,
-                    "statistical_inefficiency_sem": rs.statistical_inefficiency_sem,
-                    "n_effective_mean": rs.n_effective_mean,
-                    "n_effective_sem": rs.n_effective_sem,
-                    "per_replicate": rs.contact_fraction_per_replicate,
-                }
-                for rs in self.residue_stats
-            ],
-            "metadata": self.metadata,
-        }
-
-    def save(self, path: str) -> None:
-        """Save to JSON file."""
-        import json
-        from pathlib import Path
-
-        Path(path).write_text(json.dumps(self.to_dict(), indent=2))
+    def summary(self) -> str:
+        """Return a human-readable summary of the aggregated contact result."""
+        lines = [
+            f"Aggregated Contact Analysis ({self.n_replicates} replicates)",
+            f"  Criteria: {self.criteria_label} (cutoff={self.criteria_cutoff:.1f} Å)",
+            f"  Residues: {self.n_residues}",
+            f"  Coverage: {self.coverage_mean:.3f} ± {self.coverage_sem:.3f}",
+            f"  Mean contact fraction: {self.mean_contact_fraction:.3f}"
+            f" ± {self.mean_contact_fraction_sem:.3f}",
+        ]
+        if self.group_stats:
+            lines.append("  By group:")
+            for group, (m, s) in sorted(self.group_stats.items()):
+                lines.append(f"    {group}: {m:.3f} ± {s:.3f}")
+        return "\n".join(lines)
 
 
 def compute_sem(values: list[float]) -> tuple[float, float]:
