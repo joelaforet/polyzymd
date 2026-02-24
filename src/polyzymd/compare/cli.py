@@ -14,7 +14,11 @@ from typing import Optional
 import click
 import yaml
 
-from polyzymd.compare.cli_utils import common_compare_options, load_comparison_config
+from polyzymd.compare.cli_utils import (
+    common_compare_options,
+    load_comparison_config,
+    validate_and_report,
+)
 from polyzymd.compare.comparators.rmsf import RMSFComparator
 from polyzymd.compare.config import (
     ComparisonConfig,
@@ -385,13 +389,7 @@ def rmsf(
     # Cast to concrete type for attribute access
     rmsf_settings = RMSFAnalysisSettings.model_validate(rmsf_settings.model_dump())
 
-    # Validate config
-    errors = config.validate_config()
-    if errors:
-        click.echo("Configuration errors:", err=True)
-        for error in errors:
-            click.echo(f"  - {error}", err=True)
-        sys.exit(1)
+    validate_and_report(config)
 
     click.echo(f"Comparison: {config.name}")
     click.echo(f"Conditions: {len(config.conditions)}")
@@ -634,13 +632,7 @@ def triad(
     # Cast to concrete type for attribute access
     triad_settings = CatalyticTriadAnalysisSettings.model_validate(triad_settings.model_dump())
 
-    # Validate config
-    errors = config.validate_config()
-    if errors:
-        click.echo("Configuration errors:", err=True)
-        for error in errors:
-            click.echo(f"  - {error}", err=True)
-        sys.exit(1)
+    validate_and_report(config)
 
     click.echo(f"Comparison: {config.name}")
     click.echo(f"Triad: {triad_settings.name}")
@@ -755,13 +747,7 @@ def contacts(
 
     config = load_comparison_config(config_file)
 
-    # Validate config
-    errors = config.validate_config()
-    if errors:
-        click.echo("Configuration errors:", err=True)
-        for error in errors:
-            click.echo(f"  - {error}", err=True)
-        sys.exit(1)
+    validate_and_report(config)
 
     # Get contacts settings from analysis_settings
     contacts_analysis = config.analysis_settings.get("contacts")
@@ -945,13 +931,7 @@ def exposure(
 
     config = load_comparison_config(config_file)
 
-    # Validate config
-    errors = config.validate_config()
-    if errors:
-        click.echo("Configuration errors:", err=True)
-        for error in errors:
-            click.echo(f"  - {error}", err=True)
-        sys.exit(1)
+    validate_and_report(config)
 
     # Get exposure settings from analysis_settings (optional — use defaults if absent)
     exposure_analysis_raw = config.analysis_settings.get("exposure")
@@ -1132,13 +1112,7 @@ def run_comparison(
 
     config = load_comparison_config(config_file)
 
-    # Validate config
-    errors = config.validate_config()
-    if errors:
-        click.echo("Configuration errors:", err=True)
-        for error in errors:
-            click.echo(f"  - {error}", err=True)
-        sys.exit(1)
+    validate_and_report(config)
 
     # Get the comparator class from registry
     comparator_cls = ComparatorRegistry.get(comparison_type)
@@ -1447,12 +1421,7 @@ def binding_free_energy(
 
     config = load_comparison_config(config_file)
 
-    errors = config.validate_config()
-    if errors:
-        click.echo("Configuration errors:", err=True)
-        for error in errors:
-            click.echo(f"  - {error}", err=True)
-        sys.exit(1)
+    validate_and_report(config)
 
     # Get binding_free_energy settings from analysis_settings
     bfe_analysis_raw = config.analysis_settings.get("binding_free_energy")

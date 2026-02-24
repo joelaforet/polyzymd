@@ -111,3 +111,28 @@ def load_comparison_config(config_file: Path) -> ComparisonConfig:
         sys.exit(1)
 
     return config
+
+
+def validate_and_report(config) -> bool:
+    """Validate config and print errors if any.
+
+    Calls config.validate_config() and prints any errors to stderr.
+    Exits with sys.exit(1) if there are errors.
+
+    Parameters
+    ----------
+    config : ComparisonConfig
+        The configuration to validate.
+
+    Returns
+    -------
+    bool
+        True if validation passed (no errors).
+    """
+    errors = config.validate_config()
+    if errors:
+        click.echo("Configuration errors:", err=True)
+        for error in errors:
+            click.echo(f"  - {error}", err=True)
+        sys.exit(1)
+    return True
