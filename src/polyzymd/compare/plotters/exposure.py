@@ -110,31 +110,34 @@ class ExposureChaperoneFractionPlotter(BasePlotter):
     ) -> list[Path]:
         """Generate chaperone fraction bar chart.
 
+        Loads a saved ``ExposureComparisonResult`` from the filesystem
+        (searching ``comparison/`` directories adjacent to analysis paths).
+
         Parameters
         ----------
         data : dict
-            Mapping of condition_label → condition data dict with
+            Mapping of condition_label -> condition data dict with
             ``"analysis_dir"`` key.
         labels : sequence of str
             Condition labels (order used for x-axis).
         output_dir : Path
             Directory to save plots.
         **kwargs
-            Optional ``comparison_result`` key accepting an in-memory
-            ``ExposureComparisonResult``, bypassing disk lookup.
+            Reserved for future use.
 
         Returns
         -------
         list[Path]
             Paths to generated plot files.
         """
-        # Prefer in-memory result passed via kwargs
-        result = kwargs.get("comparison_result")
-        if result is None:
-            result = self._find_comparison_result(data, labels)
+        result = self._find_comparison_result(data, labels)
         if result is not None:
             return self._plot_from_result(result, output_dir)
-        return self._plot_from_data(data, labels, output_dir)
+        logger.warning(
+            "No ExposureComparisonResult found; skipping chaperone fraction plot. "
+            "Run ExposureDynamicsComparator.compare() first."
+        )
+        return []
 
     def _find_comparison_result(
         self,
@@ -149,7 +152,6 @@ class ExposureChaperoneFractionPlotter(BasePlotter):
         import matplotlib.pyplot as plt
         import numpy as np
 
-        output_dir.mkdir(parents=True, exist_ok=True)
         conditions = result.conditions
 
         labels = [c.label for c in conditions]
@@ -158,7 +160,7 @@ class ExposureChaperoneFractionPlotter(BasePlotter):
 
         fig, ax = plt.subplots(figsize=(max(6, len(labels) * 1.4), 5))
         x = np.arange(len(labels))
-        bars = ax.bar(x, means, yerr=sems, capsize=4, color="steelblue", alpha=0.8)
+        bars = ax.bar(x, means, yerr=sems, capsize=4, color="steelblue", alpha=0.8)  # noqa: F841
 
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=9)
@@ -167,24 +169,8 @@ class ExposureChaperoneFractionPlotter(BasePlotter):
         ax.set_ylim(bottom=0)
         fig.tight_layout()
 
-        out_path = output_dir / "exposure_chaperone_fraction.png"
-        fig.savefig(out_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        logger.info(f"Saved chaperone fraction plot: {out_path}")
-        return [out_path]
-
-    def _plot_from_data(
-        self,
-        data: dict[str, Any],
-        labels: Sequence[str],
-        output_dir: Path,
-    ) -> list[Path]:
-        """Fallback: plot from raw data dict (no comparison result available)."""
-        logger.warning(
-            "No ExposureComparisonResult found; skipping chaperone fraction plot. "
-            "Run ExposureDynamicsComparator.compare() first."
-        )
-        return []
+        output_path = self._get_output_path(output_dir, "exposure_chaperone_fraction")
+        return [self._save_figure(fig, output_path)]
 
 
 # ---------------------------------------------------------------------------
@@ -219,28 +205,25 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
         """Generate enrichment heatmaps from cached ExposureComparisonResult.
 
         Loads enrichment data from the per-condition summaries stored in the
-        comparison result JSON.
+        comparison result JSON found on disk.
 
         Parameters
         ----------
         data : dict
-            Mapping of condition_label → condition data dict.
+            Mapping of condition_label -> condition data dict.
         labels : sequence of str
             Condition labels.
         output_dir : Path
             Output directory.
         **kwargs
-            Optional ``comparison_result`` key accepting an in-memory
-            ``ExposureComparisonResult``, bypassing disk lookup.
+            Reserved for future use.
 
         Returns
         -------
         list[Path]
             Paths to generated plot files.
         """
-        result = kwargs.get("comparison_result")
-        if result is None:
-            result = self._find_comparison_result(data, labels)
+        result = self._find_comparison_result(data, labels)
         if result is None:
             logger.warning(
                 "No ExposureComparisonResult found; skipping enrichment heatmap. "
@@ -262,7 +245,6 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
         import matplotlib.pyplot as plt
         import numpy as np
 
-        output_dir.mkdir(parents=True, exist_ok=True)
         conditions = result.conditions
 
         # Collect all polymer types and AA groups across conditions
@@ -326,8 +308,5 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
         fig.suptitle("Dynamic chaperone enrichment by AA group", fontsize=11, y=1.01)
         fig.tight_layout()
 
-        out_path = output_dir / "exposure_enrichment_heatmap.png"
-        fig.savefig(out_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        logger.info(f"Saved enrichment heatmap: {out_path}")
-        return [out_path]
+        output_path = self._get_output_path(output_dir, "exposure_enrichment_heatmap")
+        return [self._save_figure(fig, output_path)]

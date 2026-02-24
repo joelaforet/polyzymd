@@ -127,8 +127,20 @@ class BasePlotter(ABC):
         """Generate and save plot(s).
 
         This method receives pre-loaded condition metadata from
-        `ComparisonPlotter._load_analysis_data()` and must load its own
+        ``ComparisonPlotter._load_analysis_data()`` and must load its own
         analysis results from the filesystem.
+
+        Two data-loading strategies are supported:
+
+        **Strategy A (per-condition)**: Load results from ``analysis_dir``
+        or ``aggregated_dir`` for each condition independently.  This is the
+        most common pattern for contact, RMSF, and distance plotters.
+
+        **Strategy B (cross-condition)**: Search for a pre-computed
+        comparison result (e.g. ``comparison/exposure_comparison.json``)
+        relative to analysis paths and load it once.  Exposure plotters
+        use this approach because their data is produced by a comparator
+        that already spans all conditions.
 
         Parameters
         ----------
@@ -141,8 +153,9 @@ class BasePlotter(ABC):
             - "replicates": list[int] of replicate numbers
 
             **IMPORTANT**: Plotters must load their own analysis results from
-            `analysis_dir` or `aggregated_dir`. The orchestrator does NOT pass
-            pre-loaded results via kwargs.
+            ``analysis_dir``, ``aggregated_dir``, or a sibling ``comparison/``
+            directory.  The orchestrator does NOT pass pre-loaded results via
+            kwargs.
         labels : sequence of str
             Condition labels in desired display order
         output_dir : Path
@@ -157,7 +170,7 @@ class BasePlotter(ABC):
 
         Examples
         --------
-        Correct pattern for loading data in a plotter:
+        Strategy A — per-condition loading:
 
         >>> def plot(self, data, labels, output_dir, **kwargs):
         ...     for label in labels:
@@ -165,6 +178,14 @@ class BasePlotter(ABC):
         ...         result_file = analysis_dir / "my_result.json"
         ...         result = MyResult.load(result_file)
         ...         # ... generate plot from result ...
+
+        Strategy B — cross-condition comparison result:
+
+        >>> def plot(self, data, labels, output_dir, **kwargs):
+        ...     result = self._find_comparison_result(data, labels)
+        ...     if result is None:
+        ...         return []
+        ...     return self._plot_from_result(result, output_dir)
         """
         ...
 
