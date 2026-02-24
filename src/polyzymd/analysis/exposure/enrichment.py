@@ -35,11 +35,13 @@ across replicates is done upstream by the comparator.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import BaseModel, Field
+
+from polyzymd.analysis.results.base import BaseAnalysisResult
 
 if TYPE_CHECKING:
     from polyzymd.analysis.contacts.results import ContactResult
@@ -56,8 +58,7 @@ _EPS = 1e-12
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class GroupEnrichmentEntry:
+class GroupEnrichmentEntry(BaseModel):
     """Enrichment of one polymer type toward one amino-acid group.
 
     Attributes
@@ -97,9 +98,11 @@ class GroupEnrichmentEntry:
     n_frames_with_exposed: int
 
 
-@dataclass
-class ChaperoneEnrichmentResult:
+class ChaperoneEnrichmentResult(BaseAnalysisResult):
     """Dynamic chaperone enrichment for all polymer types and AA groups.
+
+    Inherits from BaseAnalysisResult, which provides JSON serialization
+    (save/load), config hash tracking, and standard metadata fields.
 
     Attributes
     ----------
@@ -115,10 +118,12 @@ class ChaperoneEnrichmentResult:
         Source trajectory path (provenance).
     """
 
-    entries: list[GroupEnrichmentEntry] = field(default_factory=list)
-    polymer_types: list[str] = field(default_factory=list)
-    aa_groups: list[str] = field(default_factory=list)
-    n_frames: int = 0
+    analysis_type: ClassVar[str] = "chaperone_enrichment"
+
+    entries: list[GroupEnrichmentEntry] = Field(default_factory=list)
+    polymer_types: list[str] = Field(default_factory=list)
+    aa_groups: list[str] = Field(default_factory=list)
+    n_frames: int = Field(default=0, ge=0)
     trajectory_path: str = ""
 
     def get(self, polymer_type: str, aa_group: str) -> GroupEnrichmentEntry | None:
@@ -129,7 +134,7 @@ class ChaperoneEnrichmentResult:
         return None
 
     def enrichment_matrix_residue(self) -> NDArray[np.float64]:
-        """Return enrichment matrix (polymer_types × aa_groups), residue-based.
+        """Return enrichment matrix (polymer_types x aa_groups), residue-based.
 
         Rows correspond to ``self.polymer_types``, columns to ``self.aa_groups``.
         Missing pairs are filled with NaN.
@@ -144,7 +149,7 @@ class ChaperoneEnrichmentResult:
         return mat
 
     def enrichment_matrix_atom(self) -> NDArray[np.float64]:
-        """Return enrichment matrix (polymer_types × aa_groups), atom-based."""
+        """Return enrichment matrix (polymer_types x aa_groups), atom-based."""
         mat = np.full((len(self.polymer_types), len(self.aa_groups)), np.nan)
         pt_idx = {pt: i for i, pt in enumerate(self.polymer_types)}
         ag_idx = {ag: j for j, ag in enumerate(self.aa_groups)}
@@ -153,6 +158,20 @@ class ChaperoneEnrichmentResult:
             if i >= 0 and j >= 0:
                 mat[i, j] = e.enrichment_atom
         return mat
+
+    def summary(self) -> str:
+        """Return a human-readable summary of the enrichment result."""
+        lines = [
+            f"Chaperone Enrichment ({len(self.entries)} pairs, {self.n_frames} frames)",
+            f"  Polymer types: {', '.join(self.polymer_types) or 'none'}",
+            f"  AA groups: {', '.join(self.aa_groups) or 'none'}",
+        ]
+        for e in self.entries:
+            lines.append(
+                f"  {e.polymer_type} -> {e.aa_group}: "
+                f"residue={e.enrichment_residue:+.3f}, atom={e.enrichment_atom:+.3f}"
+            )
+        return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
