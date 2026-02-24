@@ -9,18 +9,18 @@ Design
 - Per-residue ``ResidueExposureSummary`` captures: stability classification,
   exposure fraction, chaperone event counts, unassisted event counts, and
   polymer-type breakdown of chaperone events.
-- ``ExposureDynamicsResult`` is a JSON-serialisable dataclass that can be
-  saved/loaded for caching.
+- ``ExposureDynamicsResult`` inherits from ``BaseAnalysisResult``, providing
+  JSON save/load, config hash tracking, and standard metadata fields.
 - Serialisation format: JSON (small result, human-readable, easy to diff).
 """
 
 from __future__ import annotations
 
-import json
 import logging
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
+
+from pydantic import BaseModel, Field
 
 from polyzymd.analysis.exposure.chaperone import (
     ChaperoneDetectionResult,
@@ -30,6 +30,7 @@ from polyzymd.analysis.exposure.classification import (
     ResidueStability,
     classify_residue_stability,
 )
+from polyzymd.analysis.results.base import BaseAnalysisResult
 
 if TYPE_CHECKING:
     from polyzymd.analysis.contacts.results import ContactResult
@@ -44,8 +45,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class ResidueExposureSummary:
+class ResidueExposureSummary(BaseModel):
     """Exposure dynamics summary for a single protein residue.
 
     Attributes
@@ -88,7 +88,7 @@ class ResidueExposureSummary:
     n_chaperone_events: int
     n_unassisted_events: int
     chaperone_fraction: float
-    polymer_type_counts: dict[str, int] = field(default_factory=dict)
+    polymer_type_counts: dict[str, int] = Field(default_factory=dict)
     mean_chaperone_event_duration: float = 0.0
     mean_unassisted_event_duration: float = 0.0
 
@@ -98,9 +98,11 @@ class ResidueExposureSummary:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class ExposureDynamicsResult:
+class ExposureDynamicsResult(BaseAnalysisResult):
     """Exposure dynamics results for a single MD trajectory.
+
+    Inherits from BaseAnalysisResult, which provides JSON serialization
+    (save/load), config hash tracking, and standard metadata fields.
 
     Attributes
     ----------
@@ -122,12 +124,14 @@ class ExposureDynamicsResult:
         Source topology for provenance.
     """
 
-    residues: list[ResidueExposureSummary]
-    n_frames: int
-    n_residues: int
-    transient_lower: float
-    transient_upper: float
-    min_event_length: int
+    analysis_type: ClassVar[str] = "exposure_dynamics"
+
+    residues: list[ResidueExposureSummary] = Field(default_factory=list)
+    n_frames: int = Field(default=0, ge=0)
+    n_residues: int = Field(default=0, ge=0)
+    transient_lower: float = Field(default=0.0)
+    transient_upper: float = Field(default=1.0)
+    min_event_length: int = Field(default=1, ge=1)
     trajectory_path: str = ""
     topology_path: str = ""
 
@@ -161,44 +165,24 @@ class ExposureDynamicsResult:
         return sum(r.n_unassisted_events for r in self.residues)
 
     # ------------------------------------------------------------------ #
-    # Serialisation                                                        #
+    # Summary (required by BaseAnalysisResult)                             #
     # ------------------------------------------------------------------ #
 
-    def save(self, path: Path | str) -> Path:
-        """Save to JSON.
+    def summary(self) -> str:
+        """Return a human-readable summary of exposure dynamics."""
+        lines = [
+            f"Exposure Dynamics Analysis ({self.n_residues} residues, {self.n_frames} frames)",
+            f"  Transient: {self.n_transient()}",
+            f"  Stably exposed: {self.n_stably_exposed()}",
+            f"  Stably buried: {self.n_stably_buried()}",
+            f"  Chaperone events: {self.total_chaperone_events()}",
+            f"  Unassisted events: {self.total_unassisted_events()}",
+        ]
+        return "\n".join(lines)
 
-        Parameters
-        ----------
-        path : Path or str
-            Output file path.
-
-        Returns
-        -------
-        Path
-            The path written.
-        """
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(asdict(self), indent=2))
-        logger.info(f"ExposureDynamicsResult saved to {path}")
-        return path
-
-    @classmethod
-    def load(cls, path: Path | str) -> "ExposureDynamicsResult":
-        """Load from JSON.
-
-        Parameters
-        ----------
-        path : Path or str
-            Path to JSON file written by :meth:`save`.
-
-        Returns
-        -------
-        ExposureDynamicsResult
-        """
-        data = json.loads(Path(path).read_text())
-        residues = [ResidueExposureSummary(**r) for r in data.pop("residues")]
-        return cls(residues=residues, **data)
+    # ------------------------------------------------------------------ #
+    # Cache path (class-level utility)                                     #
+    # ------------------------------------------------------------------ #
 
     @classmethod
     def cache_path(cls, analysis_dir: Path | str) -> Path:
@@ -361,5 +345,6 @@ def analyze_exposure_dynamics(
     # Save cache
     if cache_file is not None:
         result.save(cache_file)
+        logger.info(f"ExposureDynamicsResult saved to {cache_file}")
 
     return result
