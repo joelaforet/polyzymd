@@ -32,7 +32,7 @@ guidance on when to use each method.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
@@ -41,11 +41,9 @@ if TYPE_CHECKING:
     import MDAnalysis as mda
     from MDAnalysis.core.universe import Universe
 
+from polyzymd.analysis.core.alignment import ReferenceMode
+
 LOGGER = logging.getLogger(__name__)
-
-
-# Type alias for reference modes
-ReferenceMode = Literal["centroid", "average", "frame"]
 
 
 def find_centroid_frame(

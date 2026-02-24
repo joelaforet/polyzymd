@@ -21,6 +21,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from polyzymd.analysis.config import AnalysisDefaults
 from polyzymd.analysis.core.registry import (
     AnalysisSettingsRegistry,
     BaseAnalysisSettings,
@@ -87,21 +88,6 @@ class ConditionConfig(BaseModel):
         if isinstance(v, int):
             return [v]
         return list(v)
-
-
-class AnalysisDefaults(BaseModel):
-    """Default parameters for comparison analyses.
-
-    These can be overridden on the command line.
-
-    Attributes
-    ----------
-    equilibration_time : str
-        Time to skip for equilibration (e.g., "10ns", "5000ps").
-        Shared across all analyses (RMSF, contacts, triad).
-    """
-
-    equilibration_time: str = "10ns"
 
 
 # ============================================================================

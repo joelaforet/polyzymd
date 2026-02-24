@@ -43,7 +43,6 @@ from polyzymd.analysis.core.loader import (
     time_to_frame,
 )
 from polyzymd.analysis.core.centroid import (
-    ReferenceMode,
     find_centroid_frame,
     find_reference_frame,
     get_reference_mode_description,
@@ -85,6 +84,7 @@ from polyzymd.analysis.core.pbc import (
 )
 from polyzymd.analysis.core.alignment import (
     AlignmentConfig,
+    ReferenceMode,
     align_trajectory,
     get_alignment_description,
 )

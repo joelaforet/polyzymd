@@ -10,17 +10,15 @@ for reproducibility and cache validation.
 
 from __future__ import annotations
 
-from typing import ClassVar, Literal
+from typing import ClassVar
 
 from pydantic import Field
 
+from polyzymd.analysis.core.alignment import ReferenceMode
 from polyzymd.analysis.results.base import (
     AggregatedResultMixin,
     BaseAnalysisResult,
 )
-
-# Type alias matching the centroid module
-ReferenceMode = Literal["centroid", "average", "frame"]
 
 
 class RMSFResult(BaseAnalysisResult):
