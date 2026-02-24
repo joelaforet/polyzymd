@@ -122,23 +122,46 @@ class BaseComparisonSettings(BaseModel, ABC):
 
 
 class BaseAnalyzer(ABC):
-    """Abstract base class for all analyzers.
+    """Abstract base class defining the expected interface for analyzers.
 
-    Analyzers perform the actual computation on trajectories. They follow
-    a consistent interface for initialization, single-replicate computation,
-    and multi-replicate aggregation.
+    Analyzers perform computation on MD trajectories, producing structured
+    results that inherit from :class:`~polyzymd.analysis.results.base.BaseAnalysisResult`.
 
-    This ABC is provided for future refactoring of existing analyzers
-    (RMSFCalculator, ContactAnalyzer, etc.) to a unified interface.
+    Adding a New Analyzer
+    ---------------------
+    To add a new analysis type, follow these steps:
 
-    Attributes
-    ----------
-    None defined here; subclasses define their own attributes.
+    1. **Create the result class** — inherit from ``BaseAnalysisResult`` in a
+       new module under ``analysis/<your_type>/``.  Declare ``analysis_type``
+       as a ``ClassVar[str]`` and implement ``summary()``.  ``save()``/``load()``
+       are inherited automatically.
 
-    Notes
-    -----
-    Current analyzers do not inherit from this class. This is provided
-    for future extensibility and to define the expected interface.
+    2. **Create the analyzer** — implement ``analysis_type()``, ``from_config()``,
+       ``compute()`` (single replicate), ``compute_aggregated()`` (multi-replicate),
+       and a ``label`` property.
+
+    3. **Register settings** — subclass ``BaseAnalysisSettings`` and decorate
+       with ``@AnalysisSettingsRegistry.register("your_type")``.
+
+    4. **Add CLI entry point** — add a Click subcommand in ``cli/main.py``
+       under the ``analysis`` command group.
+
+    5. **Study existing implementations** — ``RMSFCalculator``,
+       ``DistanceCalculator``, and ``CatalyticTriadAnalyzer`` are good
+       references for the expected data flow and aggregation patterns.
+
+    Current Status
+    --------------
+    Existing analyzers (``RMSFCalculator``, ``ContactAnalyzer``, etc.) predate
+    this ABC and do not yet inherit from it.  New analyzers are encouraged to
+    follow this interface.  Forced migration of existing analyzers is deferred
+    to avoid high-risk refactoring.
+
+    See Also
+    --------
+    BaseAnalysisResult : Base class for all analysis result types.
+    BaseAnalysisSettings : Base class for analysis parameter configs.
+    AnalysisSettingsRegistry : Registry for analysis settings types.
     """
 
     @classmethod
