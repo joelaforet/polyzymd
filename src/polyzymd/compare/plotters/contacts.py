@@ -263,6 +263,68 @@ def _load_binding_preference_results(
     return results
 
 
+def _load_system_coverage_results(
+    data: dict[str, Any],
+    labels: Sequence[str],
+    log: logging.Logger = logger,
+) -> dict[str, "AggregatedSystemCoverageResult"]:
+    """Load system coverage results for each condition.
+
+    Parameters
+    ----------
+    data : dict
+        Mapping of condition_label -> condition data dict
+    labels : sequence of str
+        Condition labels to load
+    log : logging.Logger, optional
+        Logger instance to use, by default module logger
+
+    Returns
+    -------
+    dict
+        Mapping of label -> AggregatedSystemCoverageResult
+    """
+    from polyzymd.analysis.contacts.binding_preference import (
+        AggregatedBindingPreferenceResult,
+        AggregatedSystemCoverageResult,
+    )
+
+    results: dict[str, AggregatedSystemCoverageResult] = {}
+
+    for label in labels:
+        cond_data = data.get(label)
+        if cond_data is None:
+            continue
+
+        analysis_dir = cond_data.get("analysis_dir")
+        if not analysis_dir:
+            continue
+
+        analysis_dir = Path(analysis_dir)
+
+        # Find aggregated binding preference file
+        agg_files = list(analysis_dir.glob("binding_preference_aggregated*.json"))
+
+        if not agg_files:
+            log.debug(f"No aggregated binding preference in {analysis_dir}")
+            continue
+
+        # Use the most recent aggregated file
+        result_file = sorted(agg_files)[-1]
+
+        try:
+            bp_result = AggregatedBindingPreferenceResult.load(result_file)
+            if bp_result.system_coverage is not None:
+                results[label] = bp_result.system_coverage
+                log.debug(f"Loaded system coverage for {label} from {result_file}")
+            else:
+                log.debug(f"No system coverage in {result_file}")
+        except Exception as e:
+            log.warning(f"Failed to load binding preference {result_file}: {e}")
+
+    return results
+
+
 # -----------------------------------------------------------------------------
 # Plotter Classes
 # -----------------------------------------------------------------------------
@@ -847,59 +909,8 @@ class SystemCoverageHeatmapPlotter(BasePlotter):
         data: dict[str, Any],
         labels: Sequence[str],
     ) -> dict[str, "AggregatedSystemCoverageResult"]:
-        """Load system coverage results for each condition.
-
-        Parameters
-        ----------
-        data : dict
-            Mapping of condition_label -> condition data dict
-        labels : sequence of str
-            Condition labels to load
-
-        Returns
-        -------
-        dict
-            Mapping of label -> AggregatedSystemCoverageResult
-        """
-        from polyzymd.analysis.contacts.binding_preference import (
-            AggregatedBindingPreferenceResult,
-            AggregatedSystemCoverageResult,
-        )
-
-        results: dict[str, AggregatedSystemCoverageResult] = {}
-
-        for label in labels:
-            cond_data = data.get(label)
-            if cond_data is None:
-                continue
-
-            analysis_dir = cond_data.get("analysis_dir")
-            if not analysis_dir:
-                continue
-
-            analysis_dir = Path(analysis_dir)
-
-            # Find aggregated binding preference file
-            agg_files = list(analysis_dir.glob("binding_preference_aggregated*.json"))
-
-            if not agg_files:
-                logger.debug(f"No aggregated binding preference in {analysis_dir}")
-                continue
-
-            # Use the most recent aggregated file
-            result_file = sorted(agg_files)[-1]
-
-            try:
-                bp_result = AggregatedBindingPreferenceResult.load(result_file)
-                if bp_result.system_coverage is not None:
-                    results[label] = bp_result.system_coverage
-                    logger.debug(f"Loaded system coverage for {label} from {result_file}")
-                else:
-                    logger.debug(f"No system coverage in {result_file}")
-            except Exception as e:
-                logger.warning(f"Failed to load binding preference {result_file}: {e}")
-
-        return results
+        """Load system coverage results for each condition."""
+        return _load_system_coverage_results(data, labels, logger)
 
 
 @PlotterRegistry.register("system_coverage_bars")
@@ -1056,59 +1067,8 @@ class SystemCoverageBarPlotter(BasePlotter):
         data: dict[str, Any],
         labels: Sequence[str],
     ) -> dict[str, "AggregatedSystemCoverageResult"]:
-        """Load system coverage results for each condition.
-
-        Parameters
-        ----------
-        data : dict
-            Mapping of condition_label -> condition data dict
-        labels : sequence of str
-            Condition labels to load
-
-        Returns
-        -------
-        dict
-            Mapping of label -> AggregatedSystemCoverageResult
-        """
-        from polyzymd.analysis.contacts.binding_preference import (
-            AggregatedBindingPreferenceResult,
-            AggregatedSystemCoverageResult,
-        )
-
-        results: dict[str, AggregatedSystemCoverageResult] = {}
-
-        for label in labels:
-            cond_data = data.get(label)
-            if cond_data is None:
-                continue
-
-            analysis_dir = cond_data.get("analysis_dir")
-            if not analysis_dir:
-                continue
-
-            analysis_dir = Path(analysis_dir)
-
-            # Find aggregated binding preference file
-            agg_files = list(analysis_dir.glob("binding_preference_aggregated*.json"))
-
-            if not agg_files:
-                logger.debug(f"No aggregated binding preference in {analysis_dir}")
-                continue
-
-            # Use the most recent aggregated file
-            result_file = sorted(agg_files)[-1]
-
-            try:
-                bp_result = AggregatedBindingPreferenceResult.load(result_file)
-                if bp_result.system_coverage is not None:
-                    results[label] = bp_result.system_coverage
-                    logger.debug(f"Loaded system coverage for {label} from {result_file}")
-                else:
-                    logger.debug(f"No system coverage in {result_file}")
-            except Exception as e:
-                logger.warning(f"Failed to load binding preference {result_file}: {e}")
-
-        return results
+        """Load system coverage results for each condition."""
+        return _load_system_coverage_results(data, labels, logger)
 
     def _get_colors(self, n_colors: int) -> list:
         """Get colors from the configured palette.
@@ -1355,57 +1315,8 @@ class UserPartitionBarPlotter(BasePlotter):
         data: dict[str, Any],
         labels: Sequence[str],
     ) -> dict[str, "AggregatedSystemCoverageResult"]:
-        """Load system coverage results for each condition.
-
-        Parameters
-        ----------
-        data : dict
-            Mapping of condition_label -> condition data dict
-        labels : sequence of str
-            Condition labels to load
-
-        Returns
-        -------
-        dict
-            Mapping of label -> AggregatedSystemCoverageResult
-        """
-        from polyzymd.analysis.contacts.binding_preference import (
-            AggregatedBindingPreferenceResult,
-            AggregatedSystemCoverageResult,
-        )
-
-        results: dict[str, AggregatedSystemCoverageResult] = {}
-
-        for label in labels:
-            cond_data = data.get(label)
-            if cond_data is None:
-                continue
-
-            analysis_dir = cond_data.get("analysis_dir")
-            if not analysis_dir:
-                continue
-
-            analysis_dir = Path(analysis_dir)
-
-            agg_files = list(analysis_dir.glob("binding_preference_aggregated*.json"))
-
-            if not agg_files:
-                logger.debug(f"No aggregated binding preference in {analysis_dir}")
-                continue
-
-            result_file = sorted(agg_files)[-1]
-
-            try:
-                bp_result = AggregatedBindingPreferenceResult.load(result_file)
-                if bp_result.system_coverage is not None:
-                    results[label] = bp_result.system_coverage
-                    logger.debug(f"Loaded system coverage for {label} from {result_file}")
-                else:
-                    logger.debug(f"No system coverage in {result_file}")
-            except Exception as e:
-                logger.warning(f"Failed to load binding preference {result_file}: {e}")
-
-        return results
+        """Load system coverage results for each condition."""
+        return _load_system_coverage_results(data, labels, logger)
 
     def _get_colors(self, n_colors: int) -> list:
         """Get colors from the configured palette.
