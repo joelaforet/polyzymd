@@ -294,20 +294,18 @@ class RMSFComparator(
             Path to result file if it might exist.
         """
         # Parse equilibration time
-        eq_str = self.equilibration.lower()
-        if eq_str.endswith("ns"):
-            eq_value = float(eq_str[:-2])
-        elif eq_str.endswith("ps"):
-            eq_value = float(eq_str[:-2]) / 1000
-        else:
-            eq_value = float(eq_str)
+        from polyzymd.compare.comparators._utils import (
+            format_replicate_range,
+            parse_equilibration_time,
+        )
+
+        eq_value, eq_unit = parse_equilibration_time(self.equilibration)
+        # RMSF filenames always use ns — convert ps if needed
+        if eq_unit == "ps":
+            eq_value = eq_value / 1000
 
         # Build expected filename
-        reps = sorted(replicates)
-        if reps == list(range(reps[0], reps[-1] + 1)):
-            rep_str = f"reps{reps[0]}-{reps[-1]}"
-        else:
-            rep_str = "reps" + "_".join(map(str, reps))
+        rep_str = format_replicate_range(replicates)
 
         filename = f"rmsf_{rep_str}_eq{eq_value:.0f}ns.json"
 

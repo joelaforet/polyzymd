@@ -385,23 +385,15 @@ class TriadComparator(
             Path to result file if it might exist.
         """
         # Parse equilibration time
-        eq_str = self.equilibration.lower()
-        if eq_str.endswith("ns"):
-            eq_value = float(eq_str[:-2])
-            eq_unit = "ns"
-        elif eq_str.endswith("ps"):
-            eq_value = float(eq_str[:-2])
-            eq_unit = "ps"
-        else:
-            eq_value = float(eq_str)
-            eq_unit = "ns"
+        from polyzymd.compare.comparators._utils import (
+            format_replicate_range,
+            parse_equilibration_time,
+        )
+
+        eq_value, eq_unit = parse_equilibration_time(self.equilibration)
 
         # Build expected filename
-        reps = sorted(replicates)
-        if reps == list(range(reps[0], reps[-1] + 1)):
-            rep_str = f"reps{reps[0]}-{reps[-1]}"
-        else:
-            rep_str = "reps" + "_".join(map(str, reps))
+        rep_str = format_replicate_range(replicates)
 
         name_safe = self.analysis_settings.name.replace(" ", "_").replace("/", "-")
         filename = f"triad_{name_safe}_{rep_str}_eq{eq_value:.0f}{eq_unit}.json"

@@ -105,3 +105,51 @@ def find_replicate_result(
 
     # Return primary path even if doesn't exist (for error messages)
     return primary
+
+
+def parse_equilibration_time(eq_string: str) -> tuple[float, str]:
+    """Parse an equilibration time string like '10ns' or '500ps'.
+
+    Returns the numeric value and unit as-is, without converting between
+    units. If no unit suffix is found, defaults to ``"ns"``.
+
+    Parameters
+    ----------
+    eq_string : str
+        Equilibration time string, e.g. ``"10ns"``, ``"500ps"``, ``"10"``.
+
+    Returns
+    -------
+    tuple[float, str]
+        ``(value, unit)`` tuple, e.g. ``(10.0, "ns")`` or ``(500.0, "ps")``.
+    """
+    eq_str = eq_string.lower()
+    if eq_str.endswith("ns"):
+        return float(eq_str[:-2]), "ns"
+    elif eq_str.endswith("ps"):
+        return float(eq_str[:-2]), "ps"
+    else:
+        return float(eq_str), "ns"
+
+
+def format_replicate_range(replicates: list[int]) -> str:
+    """Format a list of replicate numbers into a compact string.
+
+    Consecutive ranges are collapsed (e.g. ``[1, 2, 3]`` → ``"reps1-3"``),
+    while non-consecutive lists are joined with underscores
+    (e.g. ``[1, 3, 5]`` → ``"reps1_3_5"``).
+
+    Parameters
+    ----------
+    replicates : list[int]
+        Replicate numbers (need not be sorted).
+
+    Returns
+    -------
+    str
+        Formatted replicate string, e.g. ``"reps1-3"`` or ``"reps1_3_5"``.
+    """
+    reps = sorted(replicates)
+    if reps == list(range(reps[0], reps[-1] + 1)):
+        return f"reps{reps[0]}-{reps[-1]}"
+    return "reps" + "_".join(map(str, reps))

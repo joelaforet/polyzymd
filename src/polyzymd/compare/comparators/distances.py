@@ -750,16 +750,9 @@ class DistancesComparator:
             Path to result file if it might exist.
         """
         # Parse equilibration time
-        eq_str = self.equilibration.lower()
-        if eq_str.endswith("ns"):
-            eq_value = float(eq_str[:-2])
-            eq_unit = "ns"
-        elif eq_str.endswith("ps"):
-            eq_value = float(eq_str[:-2])
-            eq_unit = "ps"
-        else:
-            eq_value = float(eq_str)
-            eq_unit = "ns"
+        from polyzymd.compare.comparators._utils import parse_equilibration_time
+
+        eq_value, eq_unit = parse_equilibration_time(self.equilibration)
 
         # Build expected filename pattern (matches _make_result_filename in calculator)
         pairs = self.analysis_settings.get_pair_selections()
@@ -828,23 +821,15 @@ class DistancesComparator:
             Path to result file if it might exist.
         """
         # Parse equilibration time
-        eq_str = self.equilibration.lower()
-        if eq_str.endswith("ns"):
-            eq_value = float(eq_str[:-2])
-            eq_unit = "ns"
-        elif eq_str.endswith("ps"):
-            eq_value = float(eq_str[:-2])
-            eq_unit = "ps"
-        else:
-            eq_value = float(eq_str)
-            eq_unit = "ns"
+        from polyzymd.compare.comparators._utils import (
+            format_replicate_range,
+            parse_equilibration_time,
+        )
+
+        eq_value, eq_unit = parse_equilibration_time(self.equilibration)
 
         # Build expected filename pattern
-        reps = sorted(replicates)
-        if reps == list(range(reps[0], reps[-1] + 1)):
-            rep_str = f"reps{reps[0]}-{reps[-1]}"
-        else:
-            rep_str = "reps" + "_".join(map(str, reps))
+        rep_str = format_replicate_range(replicates)
 
         # Build settings suffix to match DistanceCalculator._make_aggregated_filename()
         settings_parts = []
