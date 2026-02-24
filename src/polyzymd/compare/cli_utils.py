@@ -113,6 +113,58 @@ def load_comparison_config(config_file: Path) -> ComparisonConfig:
     return config
 
 
+def save_and_display_result(
+    result,
+    formatter,
+    output_format: str,
+    config_file: Path,
+    config_name: str,
+    result_prefix: str,
+    output_path: Path | None = None,
+) -> None:
+    """Save JSON result, format/display output, and optionally save formatted text.
+
+    Performs the three-step result output pattern shared by compare subcommands:
+    1. Save structured JSON result to ``results/`` directory
+    2. Format and echo the result to stdout
+    3. If ``output_path`` is provided, save formatted text to that file
+
+    Parameters
+    ----------
+    result : object
+        Comparison result object with a ``.save(path)`` method.
+    formatter : callable
+        Formatter function, called as ``formatter(result, format=output_format)``.
+    output_format : str
+        Output format string (e.g., ``"table"``, ``"markdown"``, ``"json"``).
+    config_file : Path
+        Path to the comparison.yaml config file (used to locate ``results/`` dir).
+    config_name : str
+        Comparison project name (used in the JSON filename).
+    result_prefix : str
+        Prefix for the JSON filename (e.g., ``"rmsf"``, ``"triad"``).
+    output_path : Path or None, optional
+        If provided, save formatted text output to this file.
+    """
+    # Save JSON result
+    results_dir = config_file.parent / "results"
+    results_dir.mkdir(exist_ok=True)
+    json_path = results_dir / f"{result_prefix}_comparison_{config_name.replace(' ', '_')}.json"
+    result.save(json_path)
+    click.echo(f"Saved result: {json_path}")
+    click.echo()
+
+    # Format and display output
+    formatted = formatter(result, format=output_format)
+    click.echo(formatted)
+
+    # Save formatted output if requested
+    if output_path:
+        output_path = Path(output_path)
+        output_path.write_text(formatted)
+        click.echo(f"Saved output: {output_path}")
+
+
 def validate_and_report(config) -> bool:
     """Validate config and print errors if any.
 

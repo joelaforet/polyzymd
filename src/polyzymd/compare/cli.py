@@ -17,6 +17,7 @@ import yaml
 from polyzymd.compare.cli_utils import (
     common_compare_options,
     load_comparison_config,
+    save_and_display_result,
     validate_and_report,
 )
 from polyzymd.compare.comparators.rmsf import RMSFComparator
@@ -430,139 +431,16 @@ def rmsf(
             traceback.print_exc()
         sys.exit(1)
 
-    # Format and display output
-    formatted = format_result(result, format=output_format)
-    click.echo(formatted)
-
-
-@compare.command()
-@click.argument(
-    "result_file",
-    type=click.Path(exists=True, path_type=Path),
-)
-@click.option(
-    "-o",
-    "--output-dir",
-    type=click.Path(path_type=Path),
-    default="figures",
-    help="Output directory for plots. Default: figures/",
-)
-@click.option(
-    "--format",
-    "img_format",
-    type=click.Choice(["png", "pdf", "svg"]),
-    default="png",
-    help="Image format for saved plots.",
-)
-@click.option(
-    "--dpi",
-    default=150,
-    help="Resolution for PNG output (default: 150).",
-)
-@click.option(
-    "--summary/--no-summary",
-    default=True,
-    help="Generate combined summary panel (default: yes).",
-)
-@click.option(
-    "--show/--no-show",
-    default=False,
-    help="Display plots interactively after saving.",
-)
-def plot(
-    result_file: Path,
-    output_dir: Path,
-    img_format: str,
-    dpi: int,
-    summary: bool,
-    show: bool,
-):
-    """Generate comparison plots from saved results.
-
-    Creates publication-ready figures from a comparison result JSON file.
-
-    \b
-    Generated plots:
-      - rmsf_comparison: Bar chart of RMSF by condition
-      - percent_change: Bar chart of % change vs control
-      - effect_sizes: Forest plot of Cohen's d values
-      - summary_panel: Combined multi-panel figure (if --summary)
-
-    \b
-    Color coding:
-      - Green: Significant improvement (p<0.05)
-      - Blue: Large effect (d>0.8) but not significant
-      - Gray: Control or no effect
-      - Red: Worse than control
-
-    \b
-    Example:
-        polyzymd compare plot results/rmsf_comparison_my_study.json
-        polyzymd compare plot results/rmsf_comparison_my_study.json -o figures/ --dpi 300
-        polyzymd compare plot results/rmsf_comparison_my_study.json --format pdf --show
-    """
-    from polyzymd.compare.plotting import (
-        plot_effect_sizes,
-        plot_percent_change,
-        plot_rmsf_comparison,
-        plot_summary_panel,
+    # Save, format, and display output
+    save_and_display_result(
+        result=result,
+        formatter=format_result,
+        output_format=output_format,
+        config_file=config_file,
+        config_name=config.name,
+        result_prefix="rmsf",
+        output_path=output_path,
     )
-    from polyzymd.compare.results import ComparisonResult
-
-    # Load result
-    try:
-        result = ComparisonResult.load(result_file)
-    except Exception as e:
-        click.echo(f"Error loading result: {e}", err=True)
-        sys.exit(1)
-
-    click.echo(f"Loaded comparison: {result.name}")
-    click.echo(f"Conditions: {len(result.conditions)}")
-    click.echo()
-
-    # Create output directory
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    generated = []
-
-    # Plot 1: RMSF comparison
-    rmsf_path = output_dir / f"rmsf_comparison.{img_format}"
-    click.echo("Generating RMSF comparison plot...")
-    plot_rmsf_comparison(result, save_path=rmsf_path, dpi=dpi)
-    generated.append(rmsf_path)
-
-    # Plot 2: Percent change (requires control)
-    if result.control_label and result.pairwise_comparisons:
-        pct_path = output_dir / f"percent_change.{img_format}"
-        click.echo("Generating percent change plot...")
-        plot_percent_change(result, save_path=pct_path, dpi=dpi)
-        generated.append(pct_path)
-
-        # Plot 3: Effect sizes
-        effect_path = output_dir / f"effect_sizes.{img_format}"
-        click.echo("Generating effect sizes plot...")
-        plot_effect_sizes(result, save_path=effect_path, dpi=dpi)
-        generated.append(effect_path)
-    else:
-        click.echo("Skipping percent change and effect size plots (no control condition)")
-
-    # Plot 4: Summary panel
-    if summary and result.control_label and result.pairwise_comparisons:
-        summary_path = output_dir / f"summary_panel.{img_format}"
-        click.echo("Generating summary panel...")
-        plot_summary_panel(result, save_path=summary_path, dpi=dpi)
-        generated.append(summary_path)
-
-    click.echo()
-    click.echo("Generated plots:")
-    for path in generated:
-        click.echo(f"  - {path}")
-
-    if show:
-        import matplotlib.pyplot as plt
-
-        plt.show()
 
 
 @compare.command()
@@ -662,24 +540,16 @@ def triad(
             traceback.print_exc()
         sys.exit(1)
 
-    # Save JSON result
-    if output_path or True:  # Always save JSON to results/
-        results_dir = config_file.parent / "results"
-        results_dir.mkdir(exist_ok=True)
-        json_path = results_dir / f"triad_comparison_{config.name.replace(' ', '_')}.json"
-        result.save(json_path)
-        click.echo(f"Saved result: {json_path}")
-        click.echo()
-
-    # Format and display output
-    formatted = format_triad_result(result, format=output_format)
-    click.echo(formatted)
-
-    # Save formatted output if requested
-    if output_path:
-        output_path = Path(output_path)
-        output_path.write_text(formatted)
-        click.echo(f"Saved output: {output_path}")
+    # Save, format, and display output
+    save_and_display_result(
+        result=result,
+        formatter=format_triad_result,
+        output_format=output_format,
+        config_file=config_file,
+        config_name=config.name,
+        result_prefix="triad",
+        output_path=output_path,
+    )
 
 
 @compare.command()
@@ -842,26 +712,16 @@ def contacts(
         )
         click.echo()
 
-    # Save JSON result
-    results_dir = config_file.parent / "results"
-    results_dir.mkdir(exist_ok=True)
-    json_path = results_dir / f"contacts_comparison_{config.name.replace(' ', '_')}.json"
-    result.save(json_path)
-    click.echo(f"Saved result: {json_path}")
-    click.echo()
-
-    # Format and display output
-    formatted = format_contacts_result(
-        result,
-        format=output_format,
+    # Save, format, and display output
+    save_and_display_result(
+        result=result,
+        formatter=format_contacts_result,
+        output_format=output_format,
+        config_file=config_file,
+        config_name=config.name,
+        result_prefix="contacts",
+        output_path=output_path,
     )
-    click.echo(formatted)
-
-    # Save formatted output if requested
-    if output_path:
-        output_path = Path(output_path)
-        output_path.write_text(formatted)
-        click.echo(f"Saved output: {output_path}")
 
 
 @compare.command()
@@ -1008,26 +868,16 @@ def exposure(
         )
         click.echo()
 
-    # Save JSON result
-    results_dir = config_file.parent / "results"
-    results_dir.mkdir(exist_ok=True)
-    json_path = results_dir / f"exposure_comparison_{config.name.replace(' ', '_')}.json"
-    result.save(json_path)
-    click.echo(f"Saved result: {json_path}")
-    click.echo()
-
-    # Format and display output
-    formatted = format_exposure_result(
-        result,
-        format=output_format,
+    # Save, format, and display output
+    save_and_display_result(
+        result=result,
+        formatter=format_exposure_result,
+        output_format=output_format,
+        config_file=config_file,
+        config_name=config.name,
+        result_prefix="exposure",
+        output_path=output_path,
     )
-    click.echo(formatted)
-
-    # Save formatted output if requested
-    if output_path:
-        output_path = Path(output_path)
-        output_path.write_text(formatted)
-        click.echo(f"Saved output: {output_path}")
 
 
 @compare.command("run")
@@ -1495,20 +1345,13 @@ def binding_free_energy(
             traceback.print_exc()
         sys.exit(1)
 
-    # Save JSON result
-    results_dir = config_file.parent / "results"
-    results_dir.mkdir(exist_ok=True)
-    json_path = results_dir / f"binding_free_energy_comparison_{config.name.replace(' ', '_')}.json"
-    result.save(json_path)
-    click.echo(f"Saved result: {json_path}")
-    click.echo()
-
-    # Format and display output
-    formatted = format_bfe_result(result, format=output_format)
-    click.echo(formatted)
-
-    # Save formatted output if requested
-    if output_path:
-        output_path = Path(output_path)
-        output_path.write_text(formatted)
-        click.echo(f"Saved output: {output_path}")
+    # Save, format, and display output
+    save_and_display_result(
+        result=result,
+        formatter=format_bfe_result,
+        output_format=output_format,
+        config_file=config_file,
+        config_name=config.name,
+        result_prefix="binding_free_energy",
+        output_path=output_path,
+    )
