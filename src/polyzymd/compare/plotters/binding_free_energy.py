@@ -52,12 +52,17 @@ def _find_bfe_result(
 
     The BFE result is saved at ``results/bfe_comparison_{name}.json`` adjacent
     to ``comparison.yaml``, not inside per-condition analysis directories.
-    We navigate from any condition's config path to find the project root.
+
+    The orchestrator provides a ``__meta__`` entry in *data* with the
+    ``results_dir`` path (derived from ``comparison.yaml``'s location).
+    This is the primary lookup.  If ``__meta__`` is absent we fall back
+    to heuristic navigation from condition config paths.
 
     Parameters
     ----------
     data : dict
-        Mapping of condition_label -> condition data dict.
+        Mapping of condition_label -> condition data dict, plus an optional
+        ``"__meta__"`` key with ``results_dir``.
     labels : sequence of str
         Condition labels in display order.
 
@@ -68,7 +73,33 @@ def _find_bfe_result(
     """
     from polyzymd.compare.results.binding_free_energy import BindingFreeEnergyResult
 
-    # Collect candidate results directories by navigating from condition configs
+    def _try_load_from_dir(results_dir: Path) -> "BindingFreeEnergyResult | None":
+        """Try loading the most recent bfe_comparison_*.json from a directory."""
+        if not results_dir.is_dir():
+            return None
+        bfe_files = sorted(results_dir.glob("bfe_comparison_*.json"))
+        if not bfe_files:
+            return None
+        bfe_file = max(bfe_files, key=lambda p: p.stat().st_mtime)
+        try:
+            result = BindingFreeEnergyResult.load(bfe_file)
+            logger.debug(f"Loaded BFE result from {bfe_file}")
+            return result
+        except Exception as e:
+            logger.warning(f"Failed to load BFE result {bfe_file}: {e}")
+            return None
+
+    # --- Primary path: use __meta__.results_dir from the orchestrator ---
+    meta = data.get("__meta__")
+    if meta is not None:
+        results_dir = meta.get("results_dir")
+        if results_dir is not None:
+            result = _try_load_from_dir(Path(results_dir))
+            if result is not None:
+                return result
+            logger.debug(f"No bfe_comparison_*.json in {results_dir} — falling back to heuristic")
+
+    # --- Fallback: navigate from condition config paths ---
     candidate_dirs: list[Path] = []
 
     for label in labels:
@@ -90,17 +121,9 @@ def _find_bfe_result(
                 candidate_dirs.append(results_dir)
 
     for results_dir in candidate_dirs:
-        bfe_files = sorted(results_dir.glob("bfe_comparison_*.json"))
-        if not bfe_files:
-            continue
-        # Use most recently modified
-        bfe_file = max(bfe_files, key=lambda p: p.stat().st_mtime)
-        try:
-            result = BindingFreeEnergyResult.load(bfe_file)
-            logger.debug(f"Loaded BFE result from {bfe_file}")
+        result = _try_load_from_dir(results_dir)
+        if result is not None:
             return result
-        except Exception as e:
-            logger.warning(f"Failed to load BFE result {bfe_file}: {e}")
 
     logger.info("No BFE result JSON found in any results/ directory - skipping BFE plots")
     return None
@@ -492,7 +515,7 @@ class BFEBarPlotter(BasePlotter):
                 ax.text(
                     n_groups - 0.5,
                     kt,
-                    f"+k_BT",
+                    "+k_BT",
                     color="gray",
                     fontsize=7,
                     va="bottom",
@@ -501,7 +524,7 @@ class BFEBarPlotter(BasePlotter):
                 ax.text(
                     n_groups - 0.5,
                     -kt,
-                    f"−k_BT",
+                    "−k_BT",
                     color="gray",
                     fontsize=7,
                     va="top",

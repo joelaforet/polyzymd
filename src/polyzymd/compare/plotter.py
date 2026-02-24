@@ -554,12 +554,32 @@ class ComparisonPlotter:
         Returns
         -------
         dict[str, Any]
-            Mapping of condition_label -> loaded data
-            The exact structure depends on the analysis type.
+            Mapping of condition_label -> loaded data, plus a special
+            ``"__meta__"`` key with comparison-level metadata.
+
+            Per-condition entries contain:
+            - ``condition``: ConditionConfig object
+            - ``sim_config``: SimulationConfig object
+            - ``analysis_dir``: Path to analysis/{analysis_type}/ directory
+            - ``aggregated_dir``: Path to analysis/{analysis_type}/aggregated/
+            - ``replicates``: list[int] of replicate numbers
+
+            The ``__meta__`` entry contains:
+            - ``comparison_source_path``: Path to comparison.yaml (or None)
+            - ``results_dir``: Path to results/ adjacent to comparison.yaml (or None)
         """
         from polyzymd.config.schema import SimulationConfig
 
-        data = {}
+        data: dict[str, Any] = {}
+
+        # Provide comparison-level metadata so cross-condition plotters
+        # (e.g., BFE) can locate results/ without heuristic path guessing.
+        source_path = self.config.source_path
+        results_dir = source_path.parent / "results" if source_path is not None else None
+        data["__meta__"] = {
+            "comparison_source_path": source_path,
+            "results_dir": results_dir,
+        }
 
         for condition in self.config.conditions:
             try:
