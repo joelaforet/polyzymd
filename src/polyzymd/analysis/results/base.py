@@ -30,27 +30,83 @@ class BaseAnalysisResult(BaseModel, ABC):
     All analysis results should inherit from this class to ensure
     consistent serialization, metadata tracking, and config validation.
 
+    Serialization Contract
+    ----------------------
+    Subclasses get ``save()`` and ``load()`` for free.  ``save()`` writes
+    the Pydantic model to JSON via ``model_dump(mode="json")``, and
+    ``load()`` reconstructs it via ``model_validate()``.  This means:
+
+    - All fields must be JSON-serializable (Pydantic handles ``datetime``,
+      ``Path``, enums, and nested ``BaseModel`` objects automatically).
+    - For NumPy arrays, convert to ``list`` in a ``field_serializer`` or
+      store as a plain list field and convert at access time.
+    - For large binary data (e.g., per-frame SASA arrays), use a separate
+      NPZ + JSON sidecar pattern instead of inheriting from this class.
+
+    Adding a New Result Type
+    ------------------------
+    1. **Inherit from** ``BaseAnalysisResult`` and set ``analysis_type``
+       as a ``ClassVar[str]``:
+
+       .. code-block:: python
+
+           from typing import ClassVar
+           from polyzymd.analysis.results.base import BaseAnalysisResult
+
+           class MyResult(BaseAnalysisResult):
+               analysis_type: ClassVar[str] = "my_analysis"
+               # your fields here
+               score: float
+               labels: list[str]
+
+               def summary(self) -> str:
+                   return f"MyResult: score={self.score:.3f}"
+
+    2. **Implement** ``summary()`` — a human-readable one-liner for logs
+       and CLI output.
+
+    3. **Do NOT reimplement** ``save()`` or ``load()`` — the inherited
+       versions handle JSON serialization automatically.
+
+    4. **Nested data objects** should inherit from ``pydantic.BaseModel``
+       (not ``BaseAnalysisResult``).  Only top-level result containers
+       need the full ``BaseAnalysisResult`` machinery.
+
+    5. **Metadata fields are optional** — ``config_hash``, ``equilibration_time``,
+       and ``selection_string`` have sensible defaults for analyzers that
+       operate without full config context (e.g., low-level ``ContactAnalyzer``).
+
+    6. **Backward compatibility** — if migrating from a legacy format, use a
+       ``model_validator(mode="before")`` to remap old field names.  See
+       ``ContactResult`` for an example mapping ``analysis_timestamp`` →
+       ``created_at``.
+
     Attributes
     ----------
     analysis_type : str
-        Type of analysis (e.g., "rmsf", "distances")
+        Type of analysis (e.g., "rmsf", "distances").
     config_hash : str
         Hash of config at time of analysis for validation.
         Defaults to ``"unknown"`` for contexts without config access.
     created_at : datetime
-        Timestamp when result was created
+        Timestamp when result was created.
     polyzymd_version : str
-        Version of PolyzyMD used for analysis
+        Version of PolyzyMD used for analysis.
     replicate : int | None
-        Replicate number (None for aggregated results)
+        Replicate number (None for aggregated results).
     equilibration_time : float
         Time skipped for equilibration. Defaults to ``0.0`` for
         low-level analyzers that operate without config context.
     equilibration_unit : str
-        Unit of equilibration time (e.g., "ns", "ps")
+        Unit of equilibration time (e.g., "ns", "ps").
     selection_string : str
         MDAnalysis selection string used. Defaults to ``""`` for
         contexts where selections are implicit.
+
+    See Also
+    --------
+    BaseAnalyzer : Base class for analyzer implementations.
+    AggregatedResultMixin : Mixin for multi-replicate aggregated results.
     """
 
     # Class variable - subclasses should override

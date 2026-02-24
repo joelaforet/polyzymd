@@ -60,6 +60,28 @@ src/polyzymd/
 - **Registry pattern:** `ComparatorRegistry`, `PlotterRegistry` for extensibility
 - **Config:** Pydantic v2 `BaseModel` subclasses with `model_validator`
 
+### Contributor Entry Points for Analysis
+
+When adding a new analysis type or result class, start with these two base
+class docstrings — they contain step-by-step instructions:
+
+| Base Class | Location | What It Documents |
+|------------|----------|-------------------|
+| `BaseAnalyzer` | `analysis/core/registry.py` | How to add a new analyzer (compute, aggregate, register, CLI) |
+| `BaseAnalysisResult` | `analysis/results/base.py` | Serialization contract (save/load, field conventions, migration) |
+
+Key rules from those docstrings:
+
+- **Results**: Inherit `BaseAnalysisResult`, set `analysis_type` as `ClassVar[str]`,
+  implement `summary()`. Do NOT reimplement `save()`/`load()`.
+- **Analyzers**: Implement `analysis_type()`, `from_config()`, `compute()`,
+  `compute_aggregated()`, and a `label` property. Register settings with
+  `@AnalysisSettingsRegistry.register()`.
+- **Nested data objects** (e.g., per-residue stats) inherit `BaseModel`, not
+  `BaseAnalysisResult`.
+- **Large binary data** (e.g., per-frame SASA) uses NPZ + JSON sidecar instead
+  of `BaseAnalysisResult`.
+
 ## Design Principles (Critical for Contributors)
 
 This project prioritizes **extensibility** so users can contribute new analyses,
