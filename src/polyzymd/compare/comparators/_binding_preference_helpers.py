@@ -23,6 +23,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from polyzymd.analysis.core.constants import DEFAULT_SURFACE_EXPOSURE_THRESHOLD
+
 if TYPE_CHECKING:
     from polyzymd.analysis.contacts.binding_preference import (
         AggregatedBindingPreferenceResult,
@@ -117,7 +119,7 @@ def compute_condition_binding_preference(
     analysis_dir: Path,
     *,
     enzyme_pdb: Path,
-    threshold: float = 0.2,
+    threshold: float = DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
     include_default_aa_groups: bool = True,
     custom_protein_groups: dict[str, list[int]] | None = None,
     protein_partitions: dict[str, list[str]] | None = None,

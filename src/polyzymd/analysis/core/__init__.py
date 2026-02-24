@@ -88,6 +88,11 @@ from polyzymd.analysis.core.alignment import (
     align_trajectory,
     get_alignment_description,
 )
+from polyzymd.analysis.core.constants import (
+    DEFAULT_CONTACT_CUTOFF,
+    DEFAULT_DISTANCE_THRESHOLD,
+    DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
+)
 
 __all__ = [
     # Config hashing
@@ -156,4 +161,8 @@ __all__ = [
     "AlignmentConfig",
     "align_trajectory",
     "get_alignment_description",
+    # Shared constants
+    "DEFAULT_CONTACT_CUTOFF",
+    "DEFAULT_DISTANCE_THRESHOLD",
+    "DEFAULT_SURFACE_EXPOSURE_THRESHOLD",
 ]

@@ -24,6 +24,11 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from pydantic import Field, field_validator, model_validator
 
+from polyzymd.analysis.core.constants import (
+    DEFAULT_CONTACT_CUTOFF,
+    DEFAULT_DISTANCE_THRESHOLD,
+    DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
+)
 from polyzymd.analysis.core.registry import (
     AnalysisSettingsRegistry,
     BaseAnalysisSettings,
@@ -103,8 +108,11 @@ class RMSFAnalysisSettings(BaseAnalysisSettings):
 class RMSFComparisonSettings(BaseComparisonSettings):
     """Comparison settings for RMSF analysis.
 
-    Currently no comparison-specific parameters. This class exists to
-    enforce the pattern: analysis_settings.rmsf + comparison_settings.rmsf.
+    Currently empty — all RMSF comparison behavior uses defaults from
+    ``BaseComparisonSettings``.  This class exists as an extension point:
+    add fields here when RMSF-specific comparison parameters are needed
+    (e.g., a per-residue significance threshold) without modifying the
+    orchestrator or other comparison types.
     """
 
     @classmethod
@@ -186,7 +194,8 @@ class DistancesAnalysisSettings(BaseAnalysisSettings):
     """
 
     threshold: Optional[float] = Field(
-        default=3.5, description="Distance threshold for contact analysis (Angstroms)"
+        default=DEFAULT_DISTANCE_THRESHOLD,
+        description="Distance threshold for contact analysis (Angstroms)",
     )
     pairs: list[DistancePairSettings] = Field(
         default_factory=list, description="Distance pairs to monitor"
@@ -308,7 +317,11 @@ class DistancesAnalysisSettings(BaseAnalysisSettings):
 class DistancesComparisonSettings(BaseComparisonSettings):
     """Comparison settings for distance analysis.
 
-    Currently no comparison-specific parameters beyond analysis settings.
+    Currently empty — all distance comparison behavior uses defaults from
+    ``BaseComparisonSettings``.  This class exists as an extension point:
+    add fields here when distance-specific comparison parameters are needed
+    (e.g., per-pair significance thresholds) without modifying the
+    orchestrator or other comparison types.
     """
 
     @classmethod
@@ -372,7 +385,8 @@ class CatalyticTriadAnalysisSettings(BaseAnalysisSettings):
     name: str = Field(..., description="Name of the catalytic triad/active site")
     pairs: list[TriadPairSettings] = Field(..., description="Distance pairs to monitor")
     threshold: float = Field(
-        default=3.5, description="Distance threshold for contact analysis (Angstroms)"
+        default=DEFAULT_DISTANCE_THRESHOLD,
+        description="Distance threshold for contact analysis (Angstroms)",
     )
     description: Optional[str] = Field(default=None, description="Description of the active site")
 
@@ -419,7 +433,11 @@ class CatalyticTriadAnalysisSettings(BaseAnalysisSettings):
 class CatalyticTriadComparisonSettings(BaseComparisonSettings):
     """Comparison settings for catalytic triad analysis.
 
-    Currently no comparison-specific parameters beyond analysis settings.
+    Currently empty — all triad comparison behavior uses defaults from
+    ``BaseComparisonSettings``.  This class exists as an extension point:
+    add fields here when triad-specific comparison parameters are needed
+    (e.g., functional distance thresholds) without modifying the
+    orchestrator or other comparison types.
     """
 
     @classmethod
@@ -433,69 +451,31 @@ class CatalyticTriadComparisonSettings(BaseComparisonSettings):
 # ============================================================================
 
 
-@AnalysisSettingsRegistry.register("contacts")
-class ContactsAnalysisSettings(BaseAnalysisSettings):
-    """Polymer-protein contact analysis settings.
+class BindingPreferenceFieldsMixin(BaseAnalysisSettings):
+    """Shared fields for binding preference analysis.
+
+    Both ``ContactsAnalysisSettings`` and ``BindingFreeEnergyAnalysisSettings``
+    need identical fields for surface exposure, protein grouping, and polymer
+    type selection. This mixin provides them once, keeping defaults in sync.
 
     Attributes
     ----------
-    polymer_selection : str
-        MDAnalysis selection for polymer atoms.
-    protein_selection : str
-        MDAnalysis selection for protein atoms.
-    cutoff : float
-        Distance cutoff for contacts in Angstroms.
-    polymer_types : list[str], optional
-        Filter contacts by polymer residue names.
-    grouping : str
-        How to group protein residues: aa_class, secondary_structure, or none.
-    compute_residence_times : bool
-        If True, compute residence time statistics.
-    compute_binding_preference : bool
-        If True, compute binding preference enrichment analysis.
     surface_exposure_threshold : float
         Relative SASA threshold for surface exposure (0.0-1.0).
     enzyme_pdb_for_sasa : str, optional
-        Path to enzyme PDB for SASA calculation. If not provided,
-        uses the first PDB found in the condition directory.
+        Path to enzyme PDB for SASA calculation.
     include_default_aa_groups : bool
-        If True, include default AA class groupings (aromatic, polar, etc.)
+        Include default AA class groupings (aromatic, polar, etc.).
     protein_groups : dict[str, list[int]], optional
         Custom protein groups as {name: [resid1, resid2, ...]}.
-        Overrides default AA class groups if names conflict.
-    enrichment_normalization : str
-        **DEPRECATED** (kept for backward compatibility).
-        Enrichment is now always normalized by protein surface availability.
-        This field is ignored.
+    protein_partitions : dict[str, list[str]], optional
+        Custom partitions for system coverage comparison.
     polymer_type_selections : dict[str, str], optional
-        Custom polymer type definitions as {name: "MDAnalysis selection"}.
-        If not provided, polymer types are auto-detected from unique
-        residue names in the polymer selection.
+        Custom polymer type selections as {name: "MDAnalysis selection"}.
     """
 
-    polymer_selection: str = Field(
-        default="chainID C", description="MDAnalysis selection for polymer atoms"
-    )
-    protein_selection: str = Field(
-        default="protein", description="MDAnalysis selection for protein atoms"
-    )
-    cutoff: float = Field(default=4.5, description="Contact distance cutoff in Angstroms")
-    polymer_types: Optional[list[str]] = Field(
-        default=None, description="Filter by polymer residue names"
-    )
-    grouping: str = Field(
-        default="aa_class", description="Group by: aa_class, secondary_structure, or none"
-    )
-    compute_residence_times: bool = Field(
-        default=True, description="Compute residence time statistics"
-    )
-
-    # Binding preference settings
-    compute_binding_preference: bool = Field(
-        default=False, description="Compute binding preference enrichment analysis"
-    )
     surface_exposure_threshold: float = Field(
-        default=0.2,
+        default=DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
         ge=0.0,
         le=1.0,
         description="Relative SASA threshold for surface exposure (0.2 = 20%)",
@@ -522,13 +502,74 @@ class ContactsAnalysisSettings(BaseAnalysisSettings):
             "'rest_of_protein' is auto-added. Overlapping groups within a partition cause validation error."
         ),
     )
-    enrichment_normalization: str = Field(
-        default="residue",
-        description="DEPRECATED: Enrichment is now always normalized by protein surface availability. This field is ignored.",
-    )
     polymer_type_selections: Optional[dict[str, str]] = Field(
         default=None,
         description="Custom polymer type selections as {name: 'MDAnalysis selection'}",
+    )
+
+    @classmethod
+    def analysis_type(cls) -> str:
+        """Return the analysis type identifier (override in subclass)."""
+        raise NotImplementedError
+
+
+@AnalysisSettingsRegistry.register("contacts")
+class ContactsAnalysisSettings(BindingPreferenceFieldsMixin):
+    """Polymer-protein contact analysis settings.
+
+    Inherits binding preference fields (surface_exposure_threshold,
+    enzyme_pdb_for_sasa, include_default_aa_groups, protein_groups,
+    protein_partitions, polymer_type_selections) from
+    ``BindingPreferenceFieldsMixin``.
+
+    Attributes
+    ----------
+    polymer_selection : str
+        MDAnalysis selection for polymer atoms.
+    protein_selection : str
+        MDAnalysis selection for protein atoms.
+    cutoff : float
+        Distance cutoff for contacts in Angstroms.
+    polymer_types : list[str], optional
+        Filter contacts by polymer residue names.
+    grouping : str
+        How to group protein residues: aa_class, secondary_structure, or none.
+    compute_residence_times : bool
+        If True, compute residence time statistics.
+    compute_binding_preference : bool
+        If True, compute binding preference enrichment analysis.
+    enrichment_normalization : str
+        **DEPRECATED** (kept for backward compatibility).
+        Enrichment is now always normalized by protein surface availability.
+        This field is ignored.
+    """
+
+    polymer_selection: str = Field(
+        default="chainID C", description="MDAnalysis selection for polymer atoms"
+    )
+    protein_selection: str = Field(
+        default="protein", description="MDAnalysis selection for protein atoms"
+    )
+    cutoff: float = Field(
+        default=DEFAULT_CONTACT_CUTOFF, description="Contact distance cutoff in Angstroms"
+    )
+    polymer_types: Optional[list[str]] = Field(
+        default=None, description="Filter by polymer residue names"
+    )
+    grouping: str = Field(
+        default="aa_class", description="Group by: aa_class, secondary_structure, or none"
+    )
+    compute_residence_times: bool = Field(
+        default=True, description="Compute residence time statistics"
+    )
+
+    # Binding preference settings
+    compute_binding_preference: bool = Field(
+        default=False, description="Compute binding preference enrichment analysis"
+    )
+    enrichment_normalization: str = Field(
+        default="residue",
+        description="DEPRECATED: Enrichment is now always normalized by protein surface availability. This field is ignored.",
     )
 
     @classmethod
@@ -720,7 +761,7 @@ class ExposureAnalysisSettings(BaseAnalysisSettings):
         default="chainID C", description="MDAnalysis selection for polymer"
     )
     exposure_threshold: float = Field(
-        default=0.2,
+        default=DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
         ge=0.0,
         le=1.0,
         description="Relative SASA threshold for exposed classification",
@@ -776,7 +817,11 @@ class ExposureAnalysisSettings(BaseAnalysisSettings):
 class ExposureComparisonSettings(BaseComparisonSettings):
     """Comparison settings for exposure dynamics analysis.
 
-    Currently no comparison-specific parameters beyond the defaults.
+    Currently empty — all exposure comparison behavior uses defaults from
+    ``BaseComparisonSettings``.  This class exists as an extension point:
+    add fields here when exposure-specific comparison parameters are needed
+    (e.g., transient classification thresholds) without modifying the
+    orchestrator or other comparison types.
     """
 
     @classmethod
@@ -791,7 +836,7 @@ class ExposureComparisonSettings(BaseComparisonSettings):
 
 
 @AnalysisSettingsRegistry.register("binding_free_energy")
-class BindingFreeEnergyAnalysisSettings(BaseAnalysisSettings):
+class BindingFreeEnergyAnalysisSettings(BindingPreferenceFieldsMixin):
     """Settings for binding free energy analysis via Boltzmann inversion.
 
     Computes the selectivity free energy difference:
@@ -806,16 +851,18 @@ class BindingFreeEnergyAnalysisSettings(BaseAnalysisSettings):
     This is a post-processing analysis that consumes binding preference results
     from the contacts analysis layer (no new per-frame computation is needed).
 
+    Inherits binding preference fields (surface_exposure_threshold,
+    enzyme_pdb_for_sasa, include_default_aa_groups, protein_groups,
+    protein_partitions, polymer_type_selections) from
+    ``BindingPreferenceFieldsMixin``.
+
     Attributes
     ----------
     units : str
         Energy units for output. One of "kcal/mol" or "kJ/mol".
-    surface_exposure_threshold : float
-        SASA threshold used when computing binding preference. Must match
-        the value used in the contacts analysis to find correct cache files.
-    protein_partitions : dict[str, list[str]], optional
-        User-defined partition groups (same format as contacts settings).
-        If None, only the default AA-class partition is used.
+    compute_binding_preference : bool
+        Compute binding preference from contacts data when cached results
+        are not found.
     """
 
     units: str = Field(
@@ -828,35 +875,6 @@ class BindingFreeEnergyAnalysisSettings(BaseAnalysisSettings):
             "Compute binding preference from contacts data when cached results "
             "are not found. Set to False to only load pre-existing results."
         ),
-    )
-    surface_exposure_threshold: float = Field(
-        default=0.2,
-        ge=0.0,
-        le=1.0,
-        description="SASA threshold for surface-exposed residues (must match contacts settings)",
-    )
-    enzyme_pdb_for_sasa: Optional[str] = Field(
-        default=None,
-        description=(
-            "Path to enzyme PDB for SASA calculation (relative to comparison.yaml). "
-            "If not provided, falls back to the contacts settings or auto-discovery."
-        ),
-    )
-    include_default_aa_groups: bool = Field(
-        default=True,
-        description="Include default AA class groupings (aromatic, polar, nonpolar, charged)",
-    )
-    protein_groups: Optional[dict[str, list[int]]] = Field(
-        default=None,
-        description="Custom protein groups as {name: [resid1, resid2, ...]}",
-    )
-    protein_partitions: Optional[dict[str, list[str]]] = Field(
-        default=None,
-        description="User-defined protein partitions (same format as contacts settings)",
-    )
-    polymer_type_selections: Optional[dict[str, str]] = Field(
-        default=None,
-        description="Custom polymer type selections as {name: 'MDAnalysis selection'}",
     )
 
     @field_validator("units")

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from polyzymd.analysis.common.aa_classification import MAX_ASA_TABLE, get_aa_class
+from polyzymd.analysis.core.constants import DEFAULT_SURFACE_EXPOSURE_THRESHOLD
 
 if TYPE_CHECKING:
     pass
@@ -93,7 +94,7 @@ class SurfaceExposureResult:
     """
 
     residue_exposures: list[ResidueExposure] = field(default_factory=list)
-    threshold: float = 0.2
+    threshold: float = DEFAULT_SURFACE_EXPOSURE_THRESHOLD
     pdb_path: str = ""
     probe_radius: float = 1.4
     n_points: int = 1000
@@ -224,7 +225,7 @@ class SurfaceExposureResult:
         ]
         return cls(
             residue_exposures=exposures,
-            threshold=data.get("threshold", 0.2),
+            threshold=data.get("threshold", DEFAULT_SURFACE_EXPOSURE_THRESHOLD),
             pdb_path=data.get("pdb_path", ""),
             probe_radius=data.get("probe_radius", 1.4),
             n_points=data.get("n_points", 1000),
@@ -266,7 +267,7 @@ class SurfaceExposureFilter:
 
     def __init__(
         self,
-        threshold: float = 0.2,
+        threshold: float = DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
         probe_radius: float = 1.4,
         n_points: int = 1000,
     ):

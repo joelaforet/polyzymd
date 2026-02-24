@@ -15,6 +15,12 @@ from typing import Optional
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
+from polyzymd.analysis.core.constants import (
+    DEFAULT_CONTACT_CUTOFF,
+    DEFAULT_DISTANCE_THRESHOLD,
+    DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
+)
+
 
 # =============================================================================
 # Individual Analysis Configurations
@@ -110,7 +116,7 @@ class CatalyticTriadConfig(BaseModel):
 
     enabled: bool = False
     name: str = "catalytic_triad"
-    threshold: float = 3.5
+    threshold: float = DEFAULT_DISTANCE_THRESHOLD
     pairs: list[TriadPairConfig] = Field(default_factory=list)
 
     @field_validator("pairs", mode="after")
@@ -177,7 +183,7 @@ class ContactsConfig(BaseModel):
     enabled: bool = False
     polymer_selection: str = "chainID C"
     protein_selection: str = "protein"
-    cutoff: float = 4.5
+    cutoff: float = DEFAULT_CONTACT_CUTOFF
     polymer_types: Optional[list[str]] = None
     grouping: str = "aa_class"
     compute_residence_times: bool = True
@@ -186,7 +192,7 @@ class ContactsConfig(BaseModel):
     compute_binding_preference: bool = False
     polymer_type_selections: Optional[dict[str, str]] = None
     protein_group_selections: Optional[dict[str, str]] = None
-    surface_exposure_threshold: float = 0.2
+    surface_exposure_threshold: float = DEFAULT_SURFACE_EXPOSURE_THRESHOLD
     enzyme_pdb_for_sasa: Optional[str] = None
 
 
