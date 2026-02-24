@@ -54,6 +54,7 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 import numpy as np
 
+from polyzymd.analysis.common.aa_classification import CANONICAL_AA_CLASS_ORDER
 from polyzymd.compare.plotter import BasePlotter, PlotterRegistry
 
 if TYPE_CHECKING:
@@ -107,8 +108,7 @@ def _get_polymer_types_and_aa_classes(
     polymer_types = sorted(all_polymer_types)
 
     # Use canonical AA class order
-    canonical_order = ["aromatic", "polar", "nonpolar", "charged_positive", "charged_negative"]
-    aa_classes = [aa for aa in canonical_order if aa in all_aa_classes]
+    aa_classes = [aa for aa in CANONICAL_AA_CLASS_ORDER if aa in all_aa_classes]
     # Add any non-canonical groups at the end
     for aa in sorted(all_aa_classes):
         if aa not in aa_classes:

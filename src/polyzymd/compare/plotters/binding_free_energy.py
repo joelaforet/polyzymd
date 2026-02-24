@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 import numpy as np
 
+from polyzymd.analysis.common.aa_classification import CANONICAL_AA_CLASS_ORDER
 from polyzymd.compare.plotter import BasePlotter, PlotterRegistry
 
 if TYPE_CHECKING:
@@ -53,9 +54,6 @@ if TYPE_CHECKING:
     from polyzymd.compare.results.binding_free_energy import BindingFreeEnergyResult
 
 logger = logging.getLogger(__name__)
-
-# Canonical order for AA groups (matches contacts plotters)
-_CANONICAL_ORDER = ["aromatic", "polar", "nonpolar", "charged_positive", "charged_negative"]
 
 
 def _find_bfe_result(
@@ -157,7 +155,7 @@ def _find_bfe_result(
 
 def _sorted_groups(groups: list[str]) -> list[str]:
     """Sort AA groups in canonical order, with non-canonical groups appended."""
-    ordered = [g for g in _CANONICAL_ORDER if g in groups]
+    ordered = [g for g in CANONICAL_AA_CLASS_ORDER if g in groups]
     for g in sorted(groups):
         if g not in ordered:
             ordered.append(g)
