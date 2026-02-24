@@ -10,20 +10,20 @@ contact analysis results:
 Key design decisions:
 - Contacts stored as compressed events (start_frame, duration) for efficiency
 - Frame-by-frame data preserved for autocorrelation analysis
-- JSON serialization via Pydantic for interoperability
+- JSON serialization via BaseAnalysisResult for interoperability
 - Separation of data storage from visualization/aggregation
 """
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.analysis.common.groupings import ResidueGrouping
+from polyzymd.analysis.results.base import BaseAnalysisResult
 
 
 class ContactEvent(BaseModel):
@@ -340,10 +340,12 @@ class ResidueContactData(BaseModel):
         return statistical_inefficiency(binary_ts, mintime=mintime)
 
 
-class ContactResult(BaseModel):
+class ContactResult(BaseAnalysisResult):
     """Complete contact analysis results for a single trajectory.
 
-    This is the primary output of ContactAnalyzer.run().
+    This is the primary output of ContactAnalyzer.run(). Inherits from
+    BaseAnalysisResult, which provides JSON serialization (save/load),
+    config hash tracking, and standard metadata fields.
 
     Attributes
     ----------
@@ -358,14 +360,14 @@ class ContactResult(BaseModel):
         Label of the contact criteria used
     criteria_cutoff : float
         Cutoff distance used
-    analysis_timestamp : str
-        When the analysis was performed
     schema_version : int
         Schema version for backward compatibility detection.
         Version 2 includes per-residue statistical inefficiency.
     metadata : dict
         Additional metadata (selectors used, etc.)
     """
+
+    analysis_type: ClassVar[str] = "contacts"
 
     residue_contacts: list[ResidueContactData] = Field(
         default_factory=list, description="Contact data for each protein residue"
@@ -375,14 +377,21 @@ class ContactResult(BaseModel):
     criteria_label: str = Field(..., description="Contact criteria used")
     criteria_cutoff: float = Field(..., description="Cutoff distance in Angstroms")
     start_frame: int = Field(default=0, ge=0, description="First frame analyzed")
-    analysis_timestamp: str = Field(
-        default_factory=lambda: datetime.now().isoformat(), description="Analysis timestamp"
-    )
     schema_version: int = Field(
         default=2,
         description="Schema version. V2 includes per-residue statistical inefficiency.",
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_fields(cls, data: Any) -> Any:
+        """Handle old JSON files that have ``analysis_timestamp`` instead of ``created_at``."""
+        if isinstance(data, dict):
+            ts = data.pop("analysis_timestamp", None)
+            if ts is not None and "created_at" not in data:
+                data["created_at"] = ts
+        return data
 
     @field_validator("residue_contacts", mode="before")
     @classmethod
@@ -727,21 +736,25 @@ class ContactResult(BaseModel):
 
         return result
 
-    def save(self, path: str) -> None:
-        """Save results to JSON file."""
-        import json
-        from pathlib import Path
+    def summary(self) -> str:
+        """Return a human-readable summary of the contact analysis result.
 
-        Path(path).write_text(json.dumps(self.model_dump(), indent=2))
-
-    @classmethod
-    def load(cls, path: str) -> "ContactResult":
-        """Load results from JSON file."""
-        import json
-        from pathlib import Path
-
-        data = json.loads(Path(path).read_text())
-        return cls.model_validate(data)
+        Returns
+        -------
+        str
+            Multi-line summary including frame counts, coverage, and
+            mean contact fraction.
+        """
+        lines = [
+            f"Contact Analysis ({self.criteria_label})",
+            f"  Cutoff: {self.criteria_cutoff:.1f} A",
+            f"  Frames: {self.n_frames} (start={self.start_frame})",
+            f"  Protein residues: {self.n_protein_residues}",
+            f"  Contacted residues: {self.n_contacted_residues}",
+            f"  Coverage: {self.coverage_fraction():.1%}",
+            f"  Mean contact fraction: {self.mean_contact_fraction():.4f}",
+        ]
+        return "\n".join(lines)
 
 
 def compress_contact_array(contacts: NDArray[np.bool_]) -> list[ContactEvent]:
