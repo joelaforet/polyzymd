@@ -11,9 +11,10 @@ Both comparators follow the same contract:
 4. For each replicate: load contacts_rep{N}.json → compute_binding_preference
 5. Aggregate across replicates → save aggregated result
 
-This module provides two public functions:
+This module provides three public functions:
 - compute_condition_binding_preference()
 - find_enzyme_pdb()
+- try_load_cached_binding_preference()
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from polyzymd.analysis.contacts.binding_preference import (
         AggregatedBindingPreferenceResult,
+        BindingPreferenceResult,
     )
     from polyzymd.compare.config import ConditionConfig
 
@@ -265,3 +267,74 @@ def compute_condition_binding_preference(
     )
 
     return agg_result
+
+
+def try_load_cached_binding_preference(
+    cond: "ConditionConfig",
+    analysis_dir: Path,
+) -> "AggregatedBindingPreferenceResult | BindingPreferenceResult | None":
+    """Try to load cached binding preference results for a condition.
+
+    Searches for binding preference files in order of preference:
+    1. binding_preference_aggregated.json
+    2. binding_preference_aggregated_reps*.json (glob pattern)
+    3. binding_preference.json (single replicate)
+    4. Per-replicate files (binding_preference_rep{N}.json)
+
+    Parameters
+    ----------
+    cond : ConditionConfig
+        Condition to load.
+    analysis_dir : Path
+        Analysis directory for this condition.
+
+    Returns
+    -------
+    AggregatedBindingPreferenceResult | BindingPreferenceResult | None
+        Loaded result, or None if not found.
+    """
+    import glob as glob_module
+
+    from polyzymd.analysis.contacts.binding_preference import (
+        AggregatedBindingPreferenceResult,
+        BindingPreferenceResult,
+        aggregate_binding_preference,
+    )
+
+    # Try aggregated result first (multi-replicate)
+    agg_path = analysis_dir / "binding_preference_aggregated.json"
+    if agg_path.exists():
+        result = AggregatedBindingPreferenceResult.load(agg_path)
+        logger.debug(f"Loaded aggregated binding preference for {cond.label}")
+        return result
+
+    # Try aggregated result with rep range in name (e.g., _reps1-3.json)
+    agg_pattern = str(analysis_dir / "binding_preference_aggregated_reps*.json")
+    agg_matches = sorted(glob_module.glob(agg_pattern))
+    if agg_matches:
+        result = AggregatedBindingPreferenceResult.load(agg_matches[-1])
+        logger.debug(f"Loaded aggregated binding preference for {cond.label}")
+        return result
+
+    # Try single replicate result
+    single_path = analysis_dir / "binding_preference.json"
+    if single_path.exists():
+        result = BindingPreferenceResult.load(single_path)
+        logger.debug(f"Loaded single binding preference for {cond.label}")
+        return result
+
+    # Try per-replicate results and aggregate them
+    rep_results = []
+    for rep in cond.replicates:
+        rep_path = analysis_dir / f"binding_preference_rep{rep}.json"
+        if rep_path.exists():
+            rep_results.append(BindingPreferenceResult.load(rep_path))
+
+    if rep_results:
+        agg_result = aggregate_binding_preference(rep_results)
+        logger.debug(
+            f"Aggregated {len(rep_results)} replicate binding preference results for {cond.label}"
+        )
+        return agg_result
+
+    return None

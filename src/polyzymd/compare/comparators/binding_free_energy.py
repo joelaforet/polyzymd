@@ -900,44 +900,8 @@ class BindingFreeEnergyComparator(
         AggregatedBindingPreferenceResult | BindingPreferenceResult | None
             Loaded result, or None if not found.
         """
-        import glob as glob_module
-
-        from polyzymd.analysis.contacts.binding_preference import (
-            AggregatedBindingPreferenceResult,
-            BindingPreferenceResult,
-            aggregate_binding_preference,
+        from polyzymd.compare.comparators._binding_preference_helpers import (
+            try_load_cached_binding_preference,
         )
 
-        # 1. Aggregated (multi-rep)
-        agg_path = analysis_dir / "binding_preference_aggregated.json"
-        if agg_path.exists():
-            logger.debug(f"  Loading aggregated binding preference: {agg_path}")
-            return AggregatedBindingPreferenceResult.load(agg_path)
-
-        # 2. Aggregated with rep range suffix
-        for match in sorted(
-            glob_module.glob(str(analysis_dir / "binding_preference_aggregated_reps*.json"))
-        ):
-            logger.debug(f"  Loading aggregated binding preference: {match}")
-            return AggregatedBindingPreferenceResult.load(match)
-
-        # 3. Single-replicate
-        single_path = analysis_dir / "binding_preference.json"
-        if single_path.exists():
-            logger.debug(f"  Loading single binding preference: {single_path}")
-            return BindingPreferenceResult.load(single_path)
-
-        # 4. Per-replicate files → aggregate
-        rep_results = []
-        for rep in cond.replicates:
-            rep_path = analysis_dir / f"binding_preference_rep{rep}.json"
-            if rep_path.exists():
-                rep_results.append(BindingPreferenceResult.load(rep_path))
-
-        if rep_results:
-            logger.debug(
-                f"  Aggregating {len(rep_results)} per-replicate binding preference results"
-            )
-            return aggregate_binding_preference(rep_results)
-
-        return None
+        return try_load_cached_binding_preference(cond, analysis_dir)

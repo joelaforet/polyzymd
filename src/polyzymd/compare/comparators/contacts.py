@@ -1152,52 +1152,11 @@ class ContactsComparator(
         AggregatedBindingPreferenceResult | BindingPreferenceResult | None
             Loaded result, or None if not found.
         """
-        import glob as glob_module
-
-        from polyzymd.analysis.contacts.binding_preference import (
-            AggregatedBindingPreferenceResult,
-            BindingPreferenceResult,
-            aggregate_binding_preference,
+        from polyzymd.compare.comparators._binding_preference_helpers import (
+            try_load_cached_binding_preference,
         )
 
-        # Try aggregated result first (multi-replicate)
-        agg_path = analysis_dir / "binding_preference_aggregated.json"
-        if agg_path.exists():
-            result = AggregatedBindingPreferenceResult.load(agg_path)
-            logger.debug(f"Loaded aggregated binding preference for {cond.label}")
-            return result
-
-        # Try aggregated result with rep range in name (e.g., _reps1-3.json)
-        agg_pattern = str(analysis_dir / "binding_preference_aggregated_reps*.json")
-        agg_matches = sorted(glob_module.glob(agg_pattern))
-        if agg_matches:
-            result = AggregatedBindingPreferenceResult.load(agg_matches[-1])
-            logger.debug(f"Loaded aggregated binding preference for {cond.label}")
-            return result
-
-        # Try single replicate result
-        single_path = analysis_dir / "binding_preference.json"
-        if single_path.exists():
-            result = BindingPreferenceResult.load(single_path)
-            logger.debug(f"Loaded single binding preference for {cond.label}")
-            return result
-
-        # Try per-replicate results and aggregate them
-        rep_results = []
-        for rep in cond.replicates:
-            rep_path = analysis_dir / f"binding_preference_rep{rep}.json"
-            if rep_path.exists():
-                rep_results.append(BindingPreferenceResult.load(rep_path))
-
-        if rep_results:
-            agg_result = aggregate_binding_preference(rep_results)
-            logger.debug(
-                f"Aggregated {len(rep_results)} replicate binding preference "
-                f"results for {cond.label}"
-            )
-            return agg_result
-
-        return None
+        return try_load_cached_binding_preference(cond, analysis_dir)
 
     def _compute_condition_binding_preference(
         self,
@@ -1285,115 +1244,6 @@ class ContactsComparator(
         from polyzymd.compare.comparators._binding_preference_helpers import find_enzyme_pdb
 
         return find_enzyme_pdb(sim_config)
-
-    def _load_binding_preference_comparison(
-        self,
-        conditions: list["ConditionConfig"],
-    ) -> BindingPreferenceComparisonSummary | None:
-        """Load and compare binding preference results across conditions.
-
-        .. deprecated::
-            Use _load_or_compute_binding_preference instead.
-            This method is kept for backwards compatibility.
-
-        Looks for binding_preference.json files in each condition's analysis
-        directory and builds a cross-condition comparison summary.
-
-        Parameters
-        ----------
-        conditions : list[ConditionConfig]
-            Conditions to compare.
-
-        Returns
-        -------
-        BindingPreferenceComparisonSummary or None
-            Comparison summary, or None if no binding preference data found.
-        """
-        from polyzymd.analysis.contacts.binding_preference import (
-            AggregatedBindingPreferenceResult,
-            BindingPreferenceResult,
-        )
-        from polyzymd.config.schema import SimulationConfig
-
-        # Collect binding preference results per condition
-        condition_results: dict[
-            str, AggregatedBindingPreferenceResult | BindingPreferenceResult
-        ] = {}
-        surface_threshold: float | None = None
-
-        for cond in conditions:
-            try:
-                sim_config = SimulationConfig.from_yaml(cond.config)
-                analysis_dir = self._get_analysis_dir(sim_config, cond_config_path=cond.config)
-
-                # Try aggregated result first (multi-replicate)
-                agg_path = analysis_dir / "binding_preference_aggregated.json"
-                if agg_path.exists():
-                    result = AggregatedBindingPreferenceResult.load(agg_path)
-                    condition_results[cond.label] = result
-                    if surface_threshold is None:
-                        surface_threshold = result.surface_exposure_threshold
-                    logger.debug(f"Loaded aggregated binding preference for {cond.label}")
-                    continue
-
-                # Try aggregated result with rep range in name (e.g., _reps1-3.json)
-                import glob
-
-                agg_pattern = str(analysis_dir / "binding_preference_aggregated_reps*.json")
-                agg_matches = sorted(glob.glob(agg_pattern))
-                if agg_matches:
-                    result = AggregatedBindingPreferenceResult.load(agg_matches[-1])
-                    condition_results[cond.label] = result
-                    if surface_threshold is None:
-                        surface_threshold = result.surface_exposure_threshold
-                    logger.debug(f"Loaded aggregated binding preference for {cond.label}")
-                    continue
-
-                # Try single replicate result
-                single_path = analysis_dir / "binding_preference.json"
-                if single_path.exists():
-                    result = BindingPreferenceResult.load(single_path)
-                    condition_results[cond.label] = result
-                    if surface_threshold is None:
-                        surface_threshold = result.surface_exposure_threshold
-                    logger.debug(f"Loaded single binding preference for {cond.label}")
-                    continue
-
-                # Try per-replicate results and aggregate them
-                rep_results = []
-                for rep in cond.replicates:
-                    rep_path = analysis_dir / f"binding_preference_rep{rep}.json"
-                    if rep_path.exists():
-                        rep_results.append(BindingPreferenceResult.load(rep_path))
-
-                if rep_results:
-                    from polyzymd.analysis.contacts.binding_preference import (
-                        aggregate_binding_preference,
-                    )
-
-                    agg_result = aggregate_binding_preference(rep_results)
-                    condition_results[cond.label] = agg_result
-                    if surface_threshold is None:
-                        surface_threshold = agg_result.surface_exposure_threshold
-                    logger.debug(
-                        f"Aggregated {len(rep_results)} replicate binding preference "
-                        f"results for {cond.label}"
-                    )
-
-            except Exception as e:
-                logger.warning(f"Could not load binding preference for {cond.label}: {e}")
-                continue
-
-        if not condition_results:
-            logger.info("No binding preference results found for any condition")
-            return None
-
-        if len(condition_results) < len(conditions):
-            missing = [c.label for c in conditions if c.label not in condition_results]
-            logger.warning(f"Binding preference missing for conditions: {missing}")
-
-        # Build comparison summary
-        return self._build_binding_preference_summary(condition_results, surface_threshold)
 
     def _build_binding_preference_summary(
         self,
