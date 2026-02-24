@@ -134,7 +134,7 @@ class CatalyticTriadAnalyzer:
             config,
             pairs=triad_config.get_pair_selections(),
             equilibration=equilibration,
-            threshold=triad_config.threshold,
+            thresholds=triad_config.threshold,
         )
 
     def validate_selections(self, replicate: int = 1) -> None:
