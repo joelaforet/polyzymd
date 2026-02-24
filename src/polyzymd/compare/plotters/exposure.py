@@ -28,6 +28,58 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Shared helper for locating saved ExposureComparisonResult JSON
+# ---------------------------------------------------------------------------
+
+
+def _find_comparison_result(
+    data: dict[str, Any],
+    labels: Sequence[str],
+    log: logging.Logger = logger,
+) -> Any | None:
+    """Try to locate a saved ExposureComparisonResult JSON.
+
+    Searches ``comparison/`` directories relative to analysis paths for
+    ``exposure_comparison.json`` or ``comparison_result.json``.
+
+    Parameters
+    ----------
+    data : dict
+        Mapping of condition_label -> condition data dict with
+        ``"analysis_dir"`` key.
+    labels : sequence of str
+        Condition labels to search.
+    log : logging.Logger, optional
+        Logger instance to use, by default module logger.
+
+    Returns
+    -------
+    ExposureComparisonResult or None
+        Loaded result, or None if not found.
+    """
+    from polyzymd.compare.results.exposure import ExposureComparisonResult
+
+    for label in labels:
+        cond_data = data.get(label)
+        if cond_data is None:
+            continue
+        analysis_dir = cond_data.get("analysis_dir")
+        if analysis_dir is None:
+            continue
+        project_root = Path(analysis_dir).parent.parent
+        for candidate in [
+            project_root / "comparison" / "exposure_comparison.json",
+            project_root / "comparison" / "comparison_result.json",
+        ]:
+            if candidate.exists():
+                try:
+                    return ExposureComparisonResult.load(candidate)
+                except Exception as e:
+                    log.debug(f"Could not load {candidate}: {e}")
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Chaperone fraction bar chart
 # ---------------------------------------------------------------------------
 
@@ -90,26 +142,7 @@ class ExposureChaperoneFractionPlotter(BasePlotter):
         labels: Sequence[str],
     ) -> Any | None:
         """Try to locate a saved ExposureComparisonResult JSON."""
-        from polyzymd.compare.results.exposure import ExposureComparisonResult
-
-        for label in labels:
-            cond_data = data.get(label)
-            if cond_data is None:
-                continue
-            analysis_dir = cond_data.get("analysis_dir")
-            if analysis_dir is None:
-                continue
-            project_root = Path(analysis_dir).parent.parent
-            for candidate in [
-                project_root / "comparison" / "exposure_comparison.json",
-                project_root / "comparison" / "comparison_result.json",
-            ]:
-                if candidate.exists():
-                    try:
-                        return ExposureComparisonResult.load(candidate)
-                    except Exception as e:
-                        logger.debug(f"Could not load {candidate}: {e}")
-        return None
+        return _find_comparison_result(data, labels, logger)
 
     def _plot_from_result(self, result: Any, output_dir: Path) -> list[Path]:
         """Plot using a loaded ExposureComparisonResult."""
@@ -222,26 +255,7 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
         labels: Sequence[str],
     ) -> Any | None:
         """Try to locate a saved ExposureComparisonResult JSON."""
-        from polyzymd.compare.results.exposure import ExposureComparisonResult
-
-        for label in labels:
-            cond_data = data.get(label)
-            if cond_data is None:
-                continue
-            analysis_dir = cond_data.get("analysis_dir")
-            if analysis_dir is None:
-                continue
-            project_root = Path(analysis_dir).parent.parent
-            for candidate in [
-                project_root / "comparison" / "exposure_comparison.json",
-                project_root / "comparison" / "comparison_result.json",
-            ]:
-                if candidate.exists():
-                    try:
-                        return ExposureComparisonResult.load(candidate)
-                    except Exception as e:
-                        logger.debug(f"Could not load {candidate}: {e}")
-        return None
+        return _find_comparison_result(data, labels, logger)
 
     def _plot_heatmaps(self, result: Any, output_dir: Path) -> list[Path]:
         """Generate enrichment heatmaps for all conditions."""
