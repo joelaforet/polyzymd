@@ -69,9 +69,11 @@ from polyzymd.analysis.core.registry import (
     BaseAnalysisSettings,
     BaseComparisonSettings,
     BaseAnalyzer,
+    BasePlotSettings,
     AnalysisSettingsRegistry,
     ComparisonSettingsRegistry,
     AnalyzerRegistry,
+    PlotSettingsRegistry,
 )
 from polyzymd.analysis.core.metric_type import (
     MetricType,
@@ -147,9 +149,11 @@ __all__ = [
     "BaseAnalysisSettings",
     "BaseComparisonSettings",
     "BaseAnalyzer",
+    "BasePlotSettings",
     "AnalysisSettingsRegistry",
     "ComparisonSettingsRegistry",
     "AnalyzerRegistry",
+    "PlotSettingsRegistry",
     # Metric type for autocorrelation handling
     "MetricType",
     "AutocorrelationStrategy",

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -26,7 +26,9 @@ from polyzymd.analysis.core.registry import (
     AnalysisSettingsRegistry,
     BaseAnalysisSettings,
     BaseComparisonSettings,
+    BasePlotSettings,
     ComparisonSettingsRegistry,
+    PlotSettingsRegistry,
 )
 
 # Import settings to trigger registration
@@ -265,7 +267,8 @@ class ComparisonSettingsContainer(BaseModel):
 # ============================================================================
 
 
-class RMSFPlotSettings(BaseModel):
+@PlotSettingsRegistry.register("rmsf")
+class RMSFPlotSettings(BasePlotSettings):
     """RMSF-specific plot customization.
 
     Attributes
@@ -286,7 +289,8 @@ class RMSFPlotSettings(BaseModel):
     figsize_comparison: tuple[float, float] = (8, 6)
 
 
-class TriadPlotSettings(BaseModel):
+@PlotSettingsRegistry.register("triad")
+class TriadPlotSettings(BasePlotSettings):
     """Triad-specific plot customization.
 
     Attributes
@@ -316,7 +320,8 @@ class TriadPlotSettings(BaseModel):
     figsize_bars: tuple[float, float] = (10, 6)
 
 
-class DistancesPlotSettings(BaseModel):
+@PlotSettingsRegistry.register("distances")
+class DistancesPlotSettings(BasePlotSettings):
     """Distance analysis plot customization.
 
     Attributes
@@ -334,7 +339,8 @@ class DistancesPlotSettings(BaseModel):
     figsize: tuple[float, float] = (10, 6)
 
 
-class ContactsPlotSettings(BaseModel):
+@PlotSettingsRegistry.register("contacts")
+class ContactsPlotSettings(BasePlotSettings):
     """Contacts analysis plot customization.
 
     Attributes
@@ -392,7 +398,8 @@ class ContactsPlotSettings(BaseModel):
     show_user_partition_error: bool = True
 
 
-class BFEPlotSettings(BaseModel):
+@PlotSettingsRegistry.register("binding_free_energy")
+class BFEPlotSettings(BasePlotSettings):
     """Binding free energy plot customization.
 
     Attributes
@@ -425,8 +432,11 @@ class BFEPlotSettings(BaseModel):
 class PlotSettings(BaseModel):
     """Global plot settings for comparison.yaml.
 
-    Controls plot generation for all analyses. Can be customized
-    per-analysis type using nested settings.
+    Controls plot generation for all analyses. Per-analysis plot settings
+    are discovered via ``PlotSettingsRegistry`` — any key in the YAML that
+    matches a registered analysis type is parsed into the corresponding
+    settings class.  Unrecognised keys that are not global fields are
+    logged and skipped.
 
     Attributes
     ----------
@@ -440,6 +450,13 @@ class PlotSettings(BaseModel):
         Plot style preset: "publication", "presentation", or "minimal"
     color_palette : str
         Seaborn/matplotlib color palette name
+
+    Notes
+    -----
+    Attribute access for any registered analysis type always succeeds:
+    if the user did not provide that section in YAML, a default-constructed
+    settings instance is returned.  This means ``self.settings.rmsf.show_error``
+    is always safe, even when the YAML has no ``rmsf:`` block.
 
     Examples
     --------
@@ -460,18 +477,79 @@ class PlotSettings(BaseModel):
             generate_2d_kde: true
     """
 
+    model_config = {"extra": "allow"}
+
+    _GLOBAL_FIELDS: ClassVar[set[str]] = {
+        "output_dir",
+        "format",
+        "dpi",
+        "style",
+        "color_palette",
+    }
+
     output_dir: Path = Field(default=Path("figures/"))
     format: str = Field(default="png", pattern="^(png|pdf|svg)$")
     dpi: int = Field(default=300, ge=50, le=600)
     style: str = Field(default="publication", pattern="^(publication|presentation|minimal)$")
     color_palette: str = "tab10"
 
-    # Per-analysis plot settings
-    rmsf: RMSFPlotSettings = Field(default_factory=RMSFPlotSettings)
-    triad: TriadPlotSettings = Field(default_factory=TriadPlotSettings)
-    distances: DistancesPlotSettings = Field(default_factory=DistancesPlotSettings)
-    contacts: ContactsPlotSettings = Field(default_factory=ContactsPlotSettings)
-    binding_free_energy: BFEPlotSettings = Field(default_factory=BFEPlotSettings)
+    def __init__(self, **data: Any):
+        """Initialize with global fields and registry-discovered per-analysis settings.
+
+        Parameters
+        ----------
+        **data : Any
+            Plot settings from YAML.  Keys matching registered analysis
+            types are parsed into their settings classes; global keys are
+            handled by Pydantic; unknown keys are logged and skipped.
+        """
+        global_data: dict[str, Any] = {}
+        per_analysis: dict[str, BasePlotSettings] = {}
+
+        for key, value in data.items():
+            if key in PlotSettings._GLOBAL_FIELDS:
+                global_data[key] = value
+            elif PlotSettingsRegistry.is_registered(key):
+                settings_class = PlotSettingsRegistry.get(key)
+                if isinstance(value, dict):
+                    per_analysis[key] = settings_class(**value)
+                elif isinstance(value, BasePlotSettings):
+                    per_analysis[key] = value
+                else:
+                    raise ValueError(
+                        f"Invalid value for plot settings '{key}': "
+                        f"expected dict or {settings_class.__name__}"
+                    )
+            else:
+                logger.warning(f"Unknown plot settings key '{key}' — skipping")
+
+        super().__init__(**global_data, **per_analysis)
+
+    def __getattr__(self, name: str) -> Any:
+        """Fall back to default-constructed settings for registered types.
+
+        This ensures ``self.settings.rmsf.show_error`` works even when
+        the user omitted the ``rmsf:`` block from their YAML.
+
+        Parameters
+        ----------
+        name : str
+            Attribute name.
+
+        Returns
+        -------
+        BasePlotSettings
+            Default-constructed settings if *name* is a registered type.
+
+        Raises
+        ------
+        AttributeError
+            If *name* is not a registered plot settings type.
+        """
+        if PlotSettingsRegistry.is_registered(name):
+            settings_class = PlotSettingsRegistry.get(name)
+            return settings_class()
+        raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
 
     @field_validator("output_dir", mode="before")
     @classmethod
