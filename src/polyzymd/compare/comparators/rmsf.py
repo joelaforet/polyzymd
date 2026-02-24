@@ -250,17 +250,10 @@ class RMSFComparator(
         """Get the mean RMSF value."""
         return summary.mean_rmsf
 
-    def _interpret_direction(self, percent_change: float) -> str:
-        """Interpret direction of RMSF change.
-
-        For RMSF, negative change = lower flexibility = stabilizing.
-        """
-        if percent_change < 0:
-            return "stabilizing"
-        elif percent_change > 0:
-            return "destabilizing"
-        else:
-            return "unchanged"
+    @property
+    def _direction_labels(self) -> tuple[str, str, str]:
+        """Negative RMSF change = lower flexibility = stabilizing."""
+        return ("stabilizing", "unchanged", "destabilizing")
 
     def _rank_summaries(self, summaries: list[RMSFConditionSummary]) -> list[RMSFConditionSummary]:
         """Sort summaries by RMSF (lowest first = most stable)."""

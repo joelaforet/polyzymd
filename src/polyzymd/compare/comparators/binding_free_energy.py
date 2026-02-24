@@ -428,17 +428,10 @@ class BindingFreeEnergyComparator(
         """Return mean ΔΔG across all valid entries."""
         return summary.primary_metric_value
 
-    def _interpret_direction(self, pct_change: float) -> str:
-        """Interpret direction of ΔΔG change.
-
-        Negative ΔΔG → preferential binding. A decrease (more negative)
-        is more favorable.
-        """
-        if pct_change < 0:
-            return "more favorable"
-        elif pct_change > 0:
-            return "less favorable"
-        return "unchanged"
+    @property
+    def _direction_labels(self) -> tuple[str, str, str]:
+        """Negative DDG change = more favorable binding."""
+        return ("more favorable", "unchanged", "less favorable")
 
     def _rank_summaries(
         self, summaries: list[FreeEnergyConditionSummary]

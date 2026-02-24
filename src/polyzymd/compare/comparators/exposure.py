@@ -509,16 +509,10 @@ class ExposureDynamicsComparator(
         """Return mean chaperone fraction."""
         return summary.mean_chaperone_fraction
 
-    def _interpret_direction(self, pct_change: float) -> str:
-        """Interpret direction of chaperone fraction change.
-
-        Higher chaperone fraction means more polymer-assisted events.
-        """
-        if pct_change > 0:
-            return "increased"
-        elif pct_change < 0:
-            return "decreased"
-        return "unchanged"
+    @property
+    def _direction_labels(self) -> tuple[str, str, str]:
+        """Higher chaperone fraction = more polymer-assisted events."""
+        return ("decreased", "unchanged", "increased")
 
     def _rank_summaries(
         self, summaries: list[ExposureConditionSummary]

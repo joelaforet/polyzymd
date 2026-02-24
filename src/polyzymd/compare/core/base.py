@@ -569,9 +569,32 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
         """
         ...
 
-    @abstractmethod
+    @property
+    def _direction_labels(self) -> tuple[str, str, str]:
+        """Labels for (negative_change, unchanged, positive_change).
+
+        Override this property for simple 3-way direction labeling where
+        any negative percent change maps to one label and any positive maps
+        to another. The default implementation raises NotImplementedError;
+        subclasses must define this OR override ``_interpret_direction()``
+        directly for custom semantics (e.g., threshold-based dead zones).
+
+        Returns
+        -------
+        tuple[str, str, str]
+            ``(negative_label, unchanged_label, positive_label)``
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must define _direction_labels or "
+            "override _interpret_direction()"
+        )
+
     def _interpret_direction(self, percent_change: float) -> str:
         """Interpret the direction of change for this metric.
+
+        The default implementation uses ``_direction_labels`` with a zero
+        threshold. Override this method for custom semantics such as
+        threshold-based dead zones or inverted polarity logic.
 
         Parameters
         ----------
@@ -583,7 +606,12 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
         str
             Direction interpretation (e.g., "stabilizing", "improving").
         """
-        ...
+        neg, unchanged, pos = self._direction_labels
+        if percent_change < 0:
+            return neg
+        elif percent_change > 0:
+            return pos
+        return unchanged
 
     @abstractmethod
     def _rank_summaries(self, summaries: list[TConditionSummary]) -> list[TConditionSummary]:

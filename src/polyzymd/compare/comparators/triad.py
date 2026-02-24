@@ -286,18 +286,10 @@ class TriadComparator(
         """Get the mean simultaneous contact value."""
         return summary.mean_simultaneous_contact
 
-    def _interpret_direction(self, pct_change: float) -> str:
-        """Interpret direction of triad contact change.
-
-        For triad contact fraction, positive change = improving (more contact).
-        Negative change = worsening (less contact).
-        """
-        if pct_change > 0:
-            return "improving"
-        elif pct_change < 0:
-            return "worsening"
-        else:
-            return "unchanged"
+    @property
+    def _direction_labels(self) -> tuple[str, str, str]:
+        """Positive triad contact change = improving (more contact)."""
+        return ("worsening", "unchanged", "improving")
 
     def _rank_summaries(
         self, summaries: list[TriadConditionSummary]

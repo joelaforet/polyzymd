@@ -369,17 +369,10 @@ class ContactsComparator(
         """Get the mean contact fraction value (primary metric)."""
         return summary.mean_contact_fraction
 
-    def _interpret_direction(self, percent_change: float) -> str:
-        """Interpret direction of contact change.
-
-        For contacts, positive change = increased contact = potentially better.
-        """
-        if percent_change > 0:
-            return "increased"
-        elif percent_change < 0:
-            return "decreased"
-        else:
-            return "unchanged"
+    @property
+    def _direction_labels(self) -> tuple[str, str, str]:
+        """Positive contact change = increased contact."""
+        return ("decreased", "unchanged", "increased")
 
     def _rank_summaries(
         self, summaries: list[ContactsConditionSummary]
