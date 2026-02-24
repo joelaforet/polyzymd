@@ -503,7 +503,6 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
         """
         ...
 
-    @abstractmethod
     def _build_result(
         self,
         summaries: list[TConditionSummary],
@@ -514,6 +513,10 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
         excluded_conditions: list["ConditionConfig"],
     ) -> TResult:
         """Build the final comparison result.
+
+        Subclasses that use the base ``compare()`` template must implement
+        this method. Subclasses that override ``compare()`` entirely do
+        not need to.
 
         Parameters
         ----------
@@ -535,11 +538,16 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
         TResult
             Complete comparison result.
         """
-        ...
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement _build_result() or override compare() entirely."
+        )
 
-    @abstractmethod
     def _get_replicate_values(self, summary: TConditionSummary) -> list[float]:
         """Extract per-replicate values for statistical tests.
+
+        Subclasses that use the base ``_compute_pairwise_comparisons()``
+        must implement this. Subclasses with custom pairwise logic do
+        not need to.
 
         Parameters
         ----------
@@ -551,11 +559,17 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
         list[float]
             Per-replicate values of the primary metric.
         """
-        ...
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement _get_replicate_values() "
+            "or override _compute_pairwise_comparisons()."
+        )
 
-    @abstractmethod
     def _get_mean_value(self, summary: TConditionSummary) -> float:
         """Get the mean value of the primary metric.
+
+        Subclasses that use the base ``_compute_pairwise_comparisons()``
+        must implement this. Subclasses with custom pairwise logic do
+        not need to.
 
         Parameters
         ----------
@@ -567,7 +581,10 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
         float
             Mean value.
         """
-        ...
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement _get_mean_value() "
+            "or override _compute_pairwise_comparisons()."
+        )
 
     @property
     def _direction_labels(self) -> tuple[str, str, str]:
@@ -613,9 +630,12 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
             return pos
         return unchanged
 
-    @abstractmethod
     def _rank_summaries(self, summaries: list[TConditionSummary]) -> list[TConditionSummary]:
         """Sort summaries by the primary metric.
+
+        Subclasses that use the base ``compare()`` template must implement
+        this. Subclasses that override ``compare()`` entirely and compute
+        their own rankings do not need to.
 
         Parameters
         ----------
@@ -627,7 +647,10 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
         list[TConditionSummary]
             Sorted summaries (best first).
         """
-        ...
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement _rank_summaries() "
+            "or override compare() entirely."
+        )
 
     # ========================================================================
     # Hook Methods (can be overridden by subclasses)

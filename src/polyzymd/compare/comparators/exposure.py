@@ -484,23 +484,6 @@ class ExposureDynamicsComparator(
             aa_groups=aa_groups,
         )
 
-    def _build_result(
-        self,
-        summaries: list[ExposureConditionSummary],
-        comparisons: list[Any],
-        anova: ANOVASummary | list[ANOVASummary] | None,
-        ranking: list[str],
-        effective_control: str | None,
-        excluded_conditions: list["ConditionConfig"],
-    ) -> ExposureComparisonResult:
-        """Build the final exposure comparison result.
-
-        Note: Not used directly — compare() is fully overridden.
-        """
-        raise NotImplementedError(
-            "ExposureDynamicsComparator.compare() is fully overridden; _build_result is not called."
-        )
-
     def _get_replicate_values(self, summary: ExposureConditionSummary) -> list[float]:
         """Return per-replicate chaperone fractions for statistical tests."""
         return summary.replicate_values

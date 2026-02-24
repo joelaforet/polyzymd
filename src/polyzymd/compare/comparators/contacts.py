@@ -343,28 +343,6 @@ class ContactsComparator(
             residence_time_by_polymer_type=agg_result.residence_time_by_polymer_type,
         )
 
-    def _build_result(
-        self,
-        summaries: list[ContactsConditionSummary],
-        comparisons: list[Any],
-        anova: ANOVASummary | list[ANOVASummary] | None,
-        ranking: list[str],
-        effective_control: str | None,
-        excluded_conditions: list["ConditionConfig"],
-    ) -> ContactsComparisonResult:
-        """Build the final contacts comparison result.
-
-        Note: This method is not used directly because compare() is overridden.
-        It exists to satisfy the abstract method requirement.
-        """
-        raise NotImplementedError(
-            "ContactsComparator.compare() is fully overridden; _build_result is not called."
-        )
-
-    def _get_replicate_values(self, summary: ContactsConditionSummary) -> list[float]:
-        """Not used for contacts (dual metrics handled differently)."""
-        raise NotImplementedError("Contacts uses dual metrics; see _compute_contacts_pairwise")
-
     def _get_mean_value(self, summary: ContactsConditionSummary) -> float:
         """Get the mean contact fraction value (primary metric)."""
         return summary.mean_contact_fraction

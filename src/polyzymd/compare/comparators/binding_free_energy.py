@@ -46,7 +46,7 @@ import numpy as np
 
 from polyzymd import __version__
 from polyzymd.analysis.core.metric_type import MetricType
-from polyzymd.compare.core.base import ANOVASummary, BaseComparator
+from polyzymd.compare.core.base import BaseComparator
 from polyzymd.compare.core.registry import ComparatorRegistry
 from polyzymd.compare.results.binding_free_energy import (
     BindingFreeEnergyResult,
@@ -402,21 +402,6 @@ class BindingFreeEnergyComparator(
             entries=entries,
             polymer_types=polymer_types,
             protein_groups=protein_groups,
-        )
-
-    def _build_result(
-        self,
-        summaries: list[FreeEnergyConditionSummary],
-        comparisons: list[Any],
-        anova: ANOVASummary | list[ANOVASummary] | None,
-        ranking: list[str],
-        effective_control: str | None,
-        excluded_conditions: list["ConditionConfig"],
-    ) -> BindingFreeEnergyResult:
-        """Not used — compare() is fully overridden."""
-        raise NotImplementedError(
-            "BindingFreeEnergyComparator.compare() is fully overridden; "
-            "_build_result is not called."
         )
 
     def _get_replicate_values(self, summary: FreeEnergyConditionSummary) -> list[float]:
