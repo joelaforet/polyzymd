@@ -30,6 +30,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from polyzymd.analysis.contacts.results import ContactResult
+from polyzymd.analysis.core.statistics import compute_sem as _compute_sem_stat
 
 
 @dataclass
@@ -193,6 +194,11 @@ class AggregatedContactResult:
 def compute_sem(values: list[float]) -> tuple[float, float]:
     """Compute mean and standard error of the mean.
 
+    Thin wrapper around :func:`polyzymd.analysis.core.statistics.compute_sem`
+    that returns a ``(mean, sem)`` tuple for compatibility with
+    :func:`compute_mad` (both are used as interchangeable aggregation
+    functions via the ``use_median`` flag).
+
     Parameters
     ----------
     values : list[float]
@@ -206,16 +212,8 @@ def compute_sem(values: list[float]) -> tuple[float, float]:
     if not values:
         return 0.0, 0.0
 
-    arr = np.array(values, dtype=np.float64)
-    mean = float(np.mean(arr))
-
-    if len(arr) == 1:
-        return mean, 0.0
-
-    std = float(np.std(arr, ddof=1))
-    sem = std / np.sqrt(len(arr))
-
-    return mean, sem
+    result = _compute_sem_stat(values)
+    return result.mean, result.sem
 
 
 def compute_mad(values: list[float], scale: float = 1.4826) -> tuple[float, float]:
