@@ -241,7 +241,7 @@ class TriadAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
 
     def summary(self) -> str:
         """Return human-readable summary."""
-        rep_range = self._format_replicate_range()
+        rep_range = self.replicate_range
         lines = [
             f"Catalytic Triad Aggregated: {self.triad_name}",
             "=" * 60,
@@ -286,17 +286,6 @@ class TriadAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
             lines.append(f"    Rep {rep}: {frac * 100:.1f}%")
 
         return "\n".join(lines)
-
-    def _format_replicate_range(self) -> str:
-        """Format replicate list as range string."""
-        reps = sorted(self.replicates)
-        if len(reps) == 0:
-            return "none"
-        if len(reps) == 1:
-            return str(reps[0])
-        if reps == list(range(reps[0], reps[-1] + 1)):
-            return f"{reps[0]}-{reps[-1]}"
-        return ",".join(map(str, reps))
 
     @property
     def n_pairs(self) -> int:

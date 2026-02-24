@@ -19,7 +19,6 @@ from polyzymd.analysis.results.base import (
     BaseAnalysisResult,
 )
 
-
 # Type alias matching the centroid module
 ReferenceMode = Literal["centroid", "average", "frame"]
 
@@ -228,15 +227,3 @@ class RMSFAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     def n_residues(self) -> int:
         """Number of residues analyzed."""
         return len(self.residue_ids)
-
-    @property
-    def replicate_range(self) -> str:
-        """Format replicate list as range string."""
-        reps = sorted(self.replicates)
-        if len(reps) == 0:
-            return "none"
-        if len(reps) == 1:
-            return str(reps[0])
-        if reps == list(range(reps[0], reps[-1] + 1)):
-            return f"{reps[0]}-{reps[-1]}"
-        return ",".join(map(str, reps))

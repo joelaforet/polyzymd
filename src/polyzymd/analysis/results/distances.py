@@ -278,7 +278,7 @@ class DistancePairAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
 
     def summary(self) -> str:
         """Return human-readable summary."""
-        rep_range = self._format_replicate_range()
+        rep_range = self.replicate_range
         lines = [
             f"Distance Aggregated: {self.pair_label}",
             "=" * 50,
@@ -306,17 +306,6 @@ class DistancePairAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
 
         return "\n".join(lines)
 
-    def _format_replicate_range(self) -> str:
-        """Format replicate list as range string."""
-        reps = sorted(self.replicates)
-        if len(reps) == 0:
-            return "none"
-        if len(reps) == 1:
-            return str(reps[0])
-        if reps == list(range(reps[0], reps[-1] + 1)):
-            return f"{reps[0]}-{reps[-1]}"
-        return ",".join(map(str, reps))
-
 
 class DistanceAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     """Aggregated distance results for multiple pairs across replicates."""
@@ -339,9 +328,9 @@ class DistanceAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
 
     def summary(self) -> str:
         """Return human-readable summary."""
-        rep_range = self._format_replicate_range()
+        rep_range = self.replicate_range
         lines = [
-            f"Distance Aggregated Analysis",
+            "Distance Aggregated Analysis",
             "=" * 50,
             f"Replicates: {rep_range}",
             f"Pairs analyzed: {len(self.pair_results)}",
@@ -353,17 +342,6 @@ class DistanceAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
             lines.append(f"{pr.pair_label}: {pr.overall_mean:.2f} ± {pr.overall_sem:.2f} Å")
 
         return "\n".join(lines)
-
-    def _format_replicate_range(self) -> str:
-        """Format replicate list as range string."""
-        reps = sorted(self.replicates)
-        if len(reps) == 0:
-            return "none"
-        if len(reps) == 1:
-            return str(reps[0])
-        if reps == list(range(reps[0], reps[-1] + 1)):
-            return f"{reps[0]}-{reps[-1]}"
-        return ",".join(map(str, reps))
 
     @property
     def n_pairs(self) -> int:
