@@ -1208,9 +1208,8 @@ class ContactsComparator(
     ) -> "AggregatedBindingPreferenceResult | None":
         """Compute binding preference for a condition from contacts data.
 
-        Computes surface exposure from enzyme PDB, resolves protein groups,
-        extracts polymer composition, and calculates binding preference
-        enrichment for each replicate.
+        Delegates to the shared helper
+        :func:`~polyzymd.compare.comparators._binding_preference_helpers.compute_condition_binding_preference`.
 
         Parameters
         ----------
@@ -1221,23 +1220,17 @@ class ContactsComparator(
         analysis_dir : Path
             Analysis directory for saving results.
         cond_data : ContactsConditionData or None
-            Pre-loaded contacts data (contains per-replicate results).
+            Pre-loaded contacts data (unused — contacts are loaded from disk).
 
         Returns
         -------
         AggregatedBindingPreferenceResult or None
             Computed and aggregated result, or None on failure.
         """
-        import MDAnalysis as mda
-
-        from polyzymd.analysis.contacts.binding_preference import (
-            aggregate_binding_preference,
-            compute_binding_preference,
-            extract_polymer_composition,
-            resolve_protein_groups_from_surface_exposure,
+        from polyzymd.compare.comparators._binding_preference_helpers import (
+            compute_condition_binding_preference,
+            resolve_enzyme_pdb,
         )
-        from polyzymd.analysis.contacts.results import ContactResult
-        from polyzymd.analysis.contacts.surface_exposure import SurfaceExposureFilter
 
         # Get settings
         threshold = getattr(self.analysis_settings, "surface_exposure_threshold", 0.2)
@@ -1248,16 +1241,11 @@ class ContactsComparator(
         protein_partitions = getattr(self.analysis_settings, "protein_partitions", None)
 
         # Resolve enzyme PDB path
-        if enzyme_pdb_setting:
-            # Relative to comparison.yaml directory
-            if self.config.source_path:
-                enzyme_pdb = self.config.source_path.parent / enzyme_pdb_setting
-            else:
-                # Fallback: try relative to current working directory
-                enzyme_pdb = Path(enzyme_pdb_setting)
-        else:
-            # Try to find enzyme PDB in condition directory
-            enzyme_pdb = self._find_enzyme_pdb(sim_config)
+        enzyme_pdb = resolve_enzyme_pdb(
+            enzyme_pdb_setting=enzyme_pdb_setting,
+            source_path=self.config.source_path,
+            sim_config=sim_config,
+        )
 
         if enzyme_pdb is None or not enzyme_pdb.exists():
             logger.warning(
@@ -1266,112 +1254,23 @@ class ContactsComparator(
             )
             return None
 
-        # Compute surface exposure
-        try:
-            exposure_filter = SurfaceExposureFilter(threshold=threshold)
-            surface_exposure = exposure_filter.calculate(str(enzyme_pdb))
-            logger.debug(
-                f"Computed surface exposure for {cond.label}: "
-                f"{surface_exposure.exposed_count}/{surface_exposure.total_count} residues exposed"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to compute surface exposure for {cond.label}: {e}")
-            return None
-
-        # Resolve protein groups from surface exposure (no Universe needed)
-        protein_groups = resolve_protein_groups_from_surface_exposure(
-            surface_exposure,
+        return compute_condition_binding_preference(
+            cond=cond,
+            sim_config=sim_config,
+            analysis_dir=analysis_dir,
+            enzyme_pdb=enzyme_pdb,
+            threshold=threshold,
             include_default_aa_groups=include_defaults,
             custom_protein_groups=custom_groups,
+            protein_partitions=protein_partitions,
+            polymer_type_selections=polymer_type_selections,
         )
-
-        if not protein_groups:
-            logger.warning(f"No protein groups resolved for {cond.label}")
-            return None
-
-        # Extract polymer composition from first replicate's topology
-        # (polymer composition is the same across replicates)
-        polymer_composition = None
-        first_rep = cond.replicates[0] if cond.replicates else 1
-        run_dir = sim_config.get_working_directory(first_rep)
-        topology_path = run_dir / "solvated_system.pdb"
-
-        if topology_path.exists():
-            try:
-                universe = mda.Universe(str(topology_path))
-                polymer_composition = extract_polymer_composition(universe, polymer_type_selections)
-                logger.debug(
-                    f"Extracted polymer composition for {cond.label}: "
-                    f"{polymer_composition.total_residues} residues, "
-                    f"{polymer_composition.total_heavy_atoms} heavy atoms"
-                )
-            except Exception as e:
-                logger.warning(f"Failed to extract polymer composition for {cond.label}: {e}")
-        else:
-            logger.warning(
-                f"Cannot extract polymer composition for {cond.label}: "
-                f"topology not found at {topology_path}"
-            )
-
-        if polymer_composition is None:
-            # Create empty composition (will result in NaN enrichments)
-            from polyzymd.analysis.contacts.binding_preference import PolymerComposition
-
-            polymer_composition = PolymerComposition()
-            logger.warning(
-                f"Using empty polymer composition for {cond.label} - enrichment ratios will be NaN"
-            )
-
-        # Compute binding preference for each replicate
-        rep_results = []
-        for rep in cond.replicates:
-            contact_path = analysis_dir / f"contacts_rep{rep}.json"
-            if not contact_path.exists():
-                logger.warning(f"Contacts file not found: {contact_path}")
-                continue
-
-            try:
-                contact_result = ContactResult.load(contact_path)
-                bp_result = compute_binding_preference(
-                    contact_result=contact_result,
-                    surface_exposure=surface_exposure,
-                    protein_groups=protein_groups,
-                    polymer_composition=polymer_composition,
-                    protein_partitions=protein_partitions,
-                )
-                rep_results.append(bp_result)
-
-                # Save per-replicate result
-                rep_bp_path = analysis_dir / f"binding_preference_rep{rep}.json"
-                bp_result.save(rep_bp_path)
-                logger.debug(f"Computed and saved binding preference for {cond.label} rep{rep}")
-
-            except Exception as e:
-                logger.warning(
-                    f"Failed to compute binding preference for {cond.label} rep{rep}: {e}"
-                )
-                continue
-
-        if not rep_results:
-            logger.warning(f"No binding preference results computed for {cond.label}")
-            return None
-
-        # Aggregate and save
-        agg_result = aggregate_binding_preference(rep_results)
-        rep_range = f"{min(cond.replicates)}-{max(cond.replicates)}"
-        agg_path = analysis_dir / f"binding_preference_aggregated_reps{rep_range}.json"
-        agg_result.save(agg_path)
-        logger.info(
-            f"Computed binding preference for {cond.label}: "
-            f"{len(rep_results)} replicates, {len(protein_groups)} protein groups"
-        )
-
-        return agg_result
 
     def _find_enzyme_pdb(self, sim_config: Any) -> Path | None:
         """Find enzyme PDB file from simulation config.
 
-        Looks for PDB files in the structures or input directories.
+        Delegates to the shared helper
+        :func:`~polyzymd.compare.comparators._binding_preference_helpers.find_enzyme_pdb`.
 
         Parameters
         ----------
@@ -1383,32 +1282,9 @@ class ContactsComparator(
         Path or None
             Path to enzyme PDB, or None if not found.
         """
-        import glob as glob_module
+        from polyzymd.compare.comparators._binding_preference_helpers import find_enzyme_pdb
 
-        # Try common locations
-        project_dir = sim_config.output.projects_directory
-        possible_paths = [
-            project_dir / "structures" / "enzyme.pdb",
-            project_dir / "input" / "enzyme.pdb",
-            project_dir.parent / "structures" / "enzyme.pdb",
-            project_dir.parent / "enzyme.pdb",
-        ]
-
-        for path in possible_paths:
-            if path.exists():
-                return path
-
-        # Try glob for any PDB with "enzyme" in name
-        patterns = [
-            str(project_dir / "**" / "*enzyme*.pdb"),
-            str(project_dir.parent / "*enzyme*.pdb"),
-        ]
-        for pattern in patterns:
-            matches = glob_module.glob(pattern, recursive=True)
-            if matches:
-                return Path(matches[0])
-
-        return None
+        return find_enzyme_pdb(sim_config)
 
     def _load_binding_preference_comparison(
         self,

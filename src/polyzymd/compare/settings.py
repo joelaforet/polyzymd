@@ -822,15 +822,41 @@ class BindingFreeEnergyAnalysisSettings(BaseAnalysisSettings):
         default="kcal/mol",
         description="Energy units: 'kcal/mol' (default) or 'kJ/mol'",
     )
+    compute_binding_preference: bool = Field(
+        default=True,
+        description=(
+            "Compute binding preference from contacts data when cached results "
+            "are not found. Set to False to only load pre-existing results."
+        ),
+    )
     surface_exposure_threshold: float = Field(
         default=0.2,
         ge=0.0,
         le=1.0,
         description="SASA threshold for surface-exposed residues (must match contacts settings)",
     )
+    enzyme_pdb_for_sasa: Optional[str] = Field(
+        default=None,
+        description=(
+            "Path to enzyme PDB for SASA calculation (relative to comparison.yaml). "
+            "If not provided, falls back to the contacts settings or auto-discovery."
+        ),
+    )
+    include_default_aa_groups: bool = Field(
+        default=True,
+        description="Include default AA class groupings (aromatic, polar, nonpolar, charged)",
+    )
+    protein_groups: Optional[dict[str, list[int]]] = Field(
+        default=None,
+        description="Custom protein groups as {name: [resid1, resid2, ...]}",
+    )
     protein_partitions: Optional[dict[str, list[str]]] = Field(
         default=None,
         description="User-defined protein partitions (same format as contacts settings)",
+    )
+    polymer_type_selections: Optional[dict[str, str]] = Field(
+        default=None,
+        description="Custom polymer type selections as {name: 'MDAnalysis selection'}",
     )
 
     @field_validator("units")
@@ -870,10 +896,17 @@ class BindingFreeEnergyAnalysisSettings(BaseAnalysisSettings):
         result: dict = {
             "enabled": True,
             "units": self.units,
+            "compute_binding_preference": self.compute_binding_preference,
             "surface_exposure_threshold": self.surface_exposure_threshold,
         }
+        if self.enzyme_pdb_for_sasa is not None:
+            result["enzyme_pdb_for_sasa"] = self.enzyme_pdb_for_sasa
+        if self.protein_groups is not None:
+            result["protein_groups"] = self.protein_groups
         if self.protein_partitions is not None:
             result["protein_partitions"] = self.protein_partitions
+        if self.polymer_type_selections is not None:
+            result["polymer_type_selections"] = self.polymer_type_selections
         return result
 
 

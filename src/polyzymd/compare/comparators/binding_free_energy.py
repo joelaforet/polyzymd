@@ -26,8 +26,10 @@ statistics are suppressed between conditions at different simulation temperature
 
 Design
 ------
-- Post-processing only: no per-frame analysis; consumes cached binding preference
-  files produced by ContactsComparator / binding_preference.py.
+- Consumes cached binding preference files produced by ContactsComparator /
+  binding_preference.py. When cached data is missing, computes binding preference
+  on-demand from per-replicate contacts_rep{N}.json files (following the same
+  load-or-compute contract as every other comparator).
 - Inherits BaseComparator but overrides compare() (like ContactsComparator) because
   the result type (BindingFreeEnergyResult) does not conform to BaseComparisonResult.
 """
@@ -234,20 +236,35 @@ class BindingFreeEnergyComparator(
         cond: "ConditionConfig",
         recompute: bool,
     ) -> BFEConditionData:
-        """Load cached binding preference data for a condition.
+        """Load cached binding preference data, computing it if missing.
+
+        Follows the same load-or-compute contract as every other comparator:
+
+        1. Try to load cached binding preference results from disk.
+        2. If no cached data exists and ``compute_binding_preference`` is True
+           (the default), compute binding preference from per-replicate
+           ``contacts_rep{N}.json`` files via the shared helper.
+        3. If compute is disabled, warn and return empty data.
+
+        The compute step requires per-replicate contacts files to already
+        exist. It does **not** trigger contacts computation.
 
         Parameters
         ----------
         cond : ConditionConfig
-            Condition to load.
+            Condition to load or compute.
         recompute : bool
-            Unused (BFE is computed from cached binding preference only).
+            If True, skip cache and always recompute.
 
         Returns
         -------
         dict
             Raw binding preference data and temperature.
         """
+        from polyzymd.compare.comparators._binding_preference_helpers import (
+            compute_condition_binding_preference,
+            resolve_enzyme_pdb,
+        )
         from polyzymd.config.schema import SimulationConfig
 
         logger.info(f"Loading binding preference for: {cond.label}")
@@ -260,24 +277,75 @@ class BindingFreeEnergyComparator(
         # Find analysis directory (contacts layer)
         analysis_dir = self._find_contacts_analysis_dir(sim_config, cond)
 
-        # Load binding preference result
-        bp_result = self._try_load_cached_binding_preference(cond, analysis_dir)
+        # Step 1: Try to load cached binding preference (unless recompute)
+        bp_result = None
+        if not recompute:
+            bp_result = self._try_load_cached_binding_preference(cond, analysis_dir)
 
-        if bp_result is None:
-            logger.warning(
-                f"No binding preference data found for '{cond.label}'. "
-                f"Run contacts analysis with compute_binding_preference=true first."
-            )
+        if bp_result is not None:
+            logger.info(f"  Loaded binding preference for {cond.label} at {temperature_K} K")
             return {
-                "bp_result": None,
+                "bp_result": bp_result,
                 "temperature_K": temperature_K,
                 "cond_label": cond.label,
                 "config_path": str(cond.config),
             }
 
-        logger.info(f"  Loaded binding preference for {cond.label} at {temperature_K} K")
+        # Step 2: Compute if enabled
+        compute_enabled = getattr(self.analysis_settings, "compute_binding_preference", True)
+        if compute_enabled:
+            logger.info(f"  No cached data for {cond.label}, computing binding preference...")
+
+            # Resolve settings, falling back to contacts settings if needed
+            settings = self._resolve_compute_settings()
+
+            enzyme_pdb = resolve_enzyme_pdb(
+                enzyme_pdb_setting=settings["enzyme_pdb_for_sasa"],
+                source_path=self.config.source_path,
+                sim_config=sim_config,
+            )
+
+            if enzyme_pdb is None or not enzyme_pdb.exists():
+                logger.warning(
+                    f"Cannot compute binding preference for '{cond.label}': "
+                    f"enzyme PDB not found. Set enzyme_pdb_for_sasa in "
+                    f"binding_free_energy or contacts analysis settings."
+                )
+            else:
+                bp_result = compute_condition_binding_preference(
+                    cond=cond,
+                    sim_config=sim_config,
+                    analysis_dir=analysis_dir,
+                    enzyme_pdb=enzyme_pdb,
+                    threshold=settings["surface_exposure_threshold"],
+                    include_default_aa_groups=settings["include_default_aa_groups"],
+                    custom_protein_groups=settings["protein_groups"],
+                    protein_partitions=settings["protein_partitions"],
+                    polymer_type_selections=settings["polymer_type_selections"],
+                )
+
+            if bp_result is not None:
+                logger.info(f"  Computed binding preference for {cond.label} at {temperature_K} K")
+                return {
+                    "bp_result": bp_result,
+                    "temperature_K": temperature_K,
+                    "cond_label": cond.label,
+                    "config_path": str(cond.config),
+                }
+            else:
+                logger.warning(
+                    f"Failed to compute binding preference for '{cond.label}'. "
+                    f"Ensure contacts_rep{{N}}.json files exist in {analysis_dir}."
+                )
+        else:
+            logger.warning(
+                f"No binding preference data found for '{cond.label}'. "
+                f"Set compute_binding_preference=true or run contacts analysis "
+                f"with binding preference enabled first."
+            )
+
         return {
-            "bp_result": bp_result,
+            "bp_result": None,
             "temperature_K": temperature_K,
             "cond_label": cond.label,
             "config_path": str(cond.config),
@@ -726,6 +794,50 @@ class BindingFreeEnergyComparator(
             )
 
         return pairwise
+
+    # =========================================================================
+    # Settings resolution (BFE settings with fallback to contacts settings)
+    # =========================================================================
+
+    def _resolve_compute_settings(self) -> dict[str, Any]:
+        """Resolve compute settings, falling back to contacts analysis settings.
+
+        BFE settings may omit fields like ``enzyme_pdb_for_sasa`` that are
+        typically configured in the contacts analysis section. This method
+        returns a unified dict, preferring BFE settings and falling back to
+        contacts settings from the same comparison.yaml.
+
+        Returns
+        -------
+        dict
+            Resolved settings for compute_condition_binding_preference().
+        """
+        bfe = self.analysis_settings
+
+        # Try to get contacts settings for fallback
+        contacts_settings = None
+        if hasattr(self.config, "analysis_settings"):
+            contacts_settings = self.config.analysis_settings.get("contacts")
+
+        def _get(attr: str, default: Any = None) -> Any:
+            """Get from BFE settings first, then contacts settings, then default."""
+            val = getattr(bfe, attr, None)
+            if val is not None:
+                return val
+            if contacts_settings is not None:
+                val = getattr(contacts_settings, attr, None)
+                if val is not None:
+                    return val
+            return default
+
+        return {
+            "enzyme_pdb_for_sasa": _get("enzyme_pdb_for_sasa"),
+            "surface_exposure_threshold": _get("surface_exposure_threshold", 0.2),
+            "include_default_aa_groups": _get("include_default_aa_groups", True),
+            "protein_groups": _get("protein_groups"),
+            "protein_partitions": _get("protein_partitions"),
+            "polymer_type_selections": _get("polymer_type_selections"),
+        }
 
     # =========================================================================
     # Cache loading helpers (mirrors ContactsComparator pattern)
