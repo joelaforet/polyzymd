@@ -1846,7 +1846,7 @@ def binding_free_energy(
     # Save JSON result
     results_dir = config_file.parent / "results"
     results_dir.mkdir(exist_ok=True)
-    json_path = results_dir / f"bfe_comparison_{config.name.replace(' ', '_')}.json"
+    json_path = results_dir / f"binding_free_energy_comparison_{config.name.replace(' ', '_')}.json"
     result.save(json_path)
     click.echo(f"Saved result: {json_path}")
     click.echo()

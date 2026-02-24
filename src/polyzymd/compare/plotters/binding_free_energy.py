@@ -50,8 +50,13 @@ def _find_bfe_result(
 ) -> "BindingFreeEnergyResult | None":
     """Find and load BindingFreeEnergyResult from the results/ directory.
 
-    The BFE result is saved at ``results/bfe_comparison_{name}.json`` adjacent
-    to ``comparison.yaml``, not inside per-condition analysis directories.
+    The BFE result JSON lives adjacent to ``comparison.yaml`` under
+    ``results/``.  Two naming conventions exist:
+
+    - ``binding_free_energy_comparison_{name}.json`` (generic ``run_comparison``)
+    - ``bfe_comparison_{name}.json`` (dedicated ``compare binding-free-energy``)
+
+    Both are searched.  The most recently modified match wins.
 
     The orchestrator provides a ``__meta__`` entry in *data* with the
     ``results_dir`` path (derived from ``comparison.yaml``'s location).
@@ -73,11 +78,19 @@ def _find_bfe_result(
     """
     from polyzymd.compare.results.binding_free_energy import BindingFreeEnergyResult
 
+    # Both naming conventions that may exist on disk
+    _BFE_GLOBS = [
+        "binding_free_energy_comparison_*.json",
+        "bfe_comparison_*.json",
+    ]
+
     def _try_load_from_dir(results_dir: Path) -> "BindingFreeEnergyResult | None":
-        """Try loading the most recent bfe_comparison_*.json from a directory."""
+        """Try loading the most recent BFE result JSON from a directory."""
         if not results_dir.is_dir():
             return None
-        bfe_files = sorted(results_dir.glob("bfe_comparison_*.json"))
+        bfe_files: list[Path] = []
+        for pattern in _BFE_GLOBS:
+            bfe_files.extend(results_dir.glob(pattern))
         if not bfe_files:
             return None
         bfe_file = max(bfe_files, key=lambda p: p.stat().st_mtime)
@@ -97,7 +110,7 @@ def _find_bfe_result(
             result = _try_load_from_dir(Path(results_dir))
             if result is not None:
                 return result
-            logger.debug(f"No bfe_comparison_*.json in {results_dir} — falling back to heuristic")
+            logger.debug(f"No BFE result JSON in {results_dir} — falling back to heuristic")
 
     # --- Fallback: navigate from condition config paths ---
     candidate_dirs: list[Path] = []
@@ -165,8 +178,9 @@ class BFEHeatmapPlotter(BasePlotter):
     - Columns: Conditions (e.g., 0% SBMA, 25% SBMA, …)
     - Color: ΔΔG value with diverging colormap centered at 0
 
-    Loads ``BindingFreeEnergyResult`` from ``results/bfe_comparison_*.json``
-    adjacent to ``comparison.yaml``.
+    Loads ``BindingFreeEnergyResult`` from ``results/`` adjacent to
+    ``comparison.yaml`` (accepts both ``binding_free_energy_comparison_*.json``
+    and ``bfe_comparison_*.json`` naming conventions).
 
     Sign convention
     ---------------
@@ -362,8 +376,9 @@ class BFEBarPlotter(BasePlotter):
     - Error bars: between-replicate SEM on ΔΔG (delta-method fallback)
     - Reference line at ΔΔG = 0
 
-    Loads ``BindingFreeEnergyResult`` from ``results/bfe_comparison_*.json``
-    adjacent to ``comparison.yaml``.
+    Loads ``BindingFreeEnergyResult`` from ``results/`` adjacent to
+    ``comparison.yaml`` (accepts both ``binding_free_energy_comparison_*.json``
+    and ``bfe_comparison_*.json`` naming conventions).
     """
 
     @classmethod
