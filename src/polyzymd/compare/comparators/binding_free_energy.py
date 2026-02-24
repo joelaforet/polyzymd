@@ -865,15 +865,13 @@ class BindingFreeEnergyComparator(
         Path
             Analysis directory path.
         """
-        primary = sim_config.output.projects_directory / "analysis" / "contacts"
-        if primary.exists():
-            return primary
+        from polyzymd.compare.comparators._utils import find_analysis_dir
 
-        fallback = Path(cond.config).parent / "analysis" / "contacts"
-        if fallback.exists():
-            return fallback
-
-        return primary  # Return primary even if missing (for error messages)
+        return find_analysis_dir(
+            sim_config,
+            analysis_subdir="analysis/contacts",
+            cond_config_path=Path(cond.config),
+        )
 
     def _try_load_cached_binding_preference(
         self,

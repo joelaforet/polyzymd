@@ -635,13 +635,10 @@ class ExposureDynamicsComparator(
         Path
             Analysis directory path.
         """
-        primary = sim_config.output.projects_directory / "analysis"
-        if primary.exists():
-            return primary
+        from polyzymd.compare.comparators._utils import find_analysis_dir
 
-        if cond_config_path is not None:
-            fallback = cond_config_path.parent / "analysis"
-            if fallback.exists():
-                return fallback
-
-        return primary
+        return find_analysis_dir(
+            sim_config,
+            analysis_subdir="analysis",
+            cond_config_path=cond_config_path,
+        )

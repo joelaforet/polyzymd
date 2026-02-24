@@ -705,19 +705,13 @@ class ContactsComparator(
         Path
             Analysis directory path (primary location, or fallback if it exists).
         """
-        # Primary location: projects_directory
-        primary_dir = sim_config.output.projects_directory / "analysis" / "contacts"
-        if primary_dir.exists():
-            return primary_dir
+        from polyzymd.compare.comparators._utils import find_analysis_dir
 
-        # Fallback: config file's parent directory
-        if cond_config_path is not None:
-            fallback_dir = cond_config_path.parent / "analysis" / "contacts"
-            if fallback_dir.exists():
-                return fallback_dir
-
-        # Return primary path even if doesn't exist (for error messages)
-        return primary_dir
+        return find_analysis_dir(
+            sim_config,
+            analysis_subdir="analysis/contacts",
+            cond_config_path=cond_config_path,
+        )
 
     def _validate_residue_sets(
         self,
