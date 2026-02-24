@@ -205,7 +205,12 @@ class FreeEnergyConditionSummary(BaseModel):
         vals = [e.delta_G_uncertainty for e in self.entries if e.delta_G_uncertainty is not None]
         return float(sum(vals) / len(vals)) if vals else 0.0
 
-    def get_entry(self, polymer_type: str, protein_group: str) -> Optional[FreeEnergyEntry]:
+    def get_entry(
+        self,
+        polymer_type: str,
+        protein_group: str,
+        partition_name: str | None = None,
+    ) -> Optional[FreeEnergyEntry]:
         """Get the FreeEnergyEntry for a (polymer_type, protein_group) pair.
 
         Parameters
@@ -214,6 +219,11 @@ class FreeEnergyConditionSummary(BaseModel):
             Polymer type.
         protein_group : str
             AA group label.
+        partition_name : str or None, optional
+            If given, further restrict to entries belonging to this partition.
+            Necessary when the same ``protein_group`` label appears in multiple
+            partitions (e.g., "rest_of_protein" in several user-defined
+            partitions).
 
         Returns
         -------
@@ -221,6 +231,8 @@ class FreeEnergyConditionSummary(BaseModel):
         """
         for e in self.entries:
             if e.polymer_type == polymer_type and e.protein_group == protein_group:
+                if partition_name is not None and e.partition_name != partition_name:
+                    continue
                 return e
         return None
 

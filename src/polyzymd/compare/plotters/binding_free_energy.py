@@ -9,6 +9,19 @@ Both plotters load a ``BindingFreeEnergyResult`` JSON saved by the
 ``polyzymd compare binding-free-energy`` command (in ``results/`` adjacent to
 ``comparison.yaml``) rather than per-condition analysis directories.
 
+Partition-aware plotting
+------------------------
+Each ``FreeEnergyEntry`` carries a ``partition_name`` field (e.g., "aa_class",
+"lid_helices", "whole_lid_domain") that identifies which residue grouping
+scheme produced that entry.  Different partitions use different denominators
+(each partition's total exposed surface area), so mixing groups from different
+partitions on the same figure is scientifically misleading.
+
+Both plotters therefore produce one figure per (partition, polymer_type)
+combination.  When only a single partition is present (the common case for
+datasets that only use default AA-class grouping), filenames and titles omit
+the partition name to preserve backward compatibility.
+
 Physics interpretation
 ----------------------
 ΔΔG < 0  →  preferential contact (polymer contacts this group more than
@@ -151,6 +164,41 @@ def _sorted_groups(groups: list[str]) -> list[str]:
     return ordered
 
 
+def _get_partitions(result: "BindingFreeEnergyResult") -> dict[str, list[str]]:
+    """Build a mapping of partition_name -> sorted list of protein groups.
+
+    Scans all ``FreeEnergyEntry`` objects across every condition to discover
+    which protein groups belong to each partition.  This reconstructs the
+    partition→groups structure that is lost by the flat ``protein_groups``
+    list on ``BindingFreeEnergyResult``.
+
+    Parameters
+    ----------
+    result : BindingFreeEnergyResult
+        Loaded BFE comparison result.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Mapping of partition name to its sorted group list.  The sort order
+        uses ``_sorted_groups`` (canonical AA-class ordering first, then
+        alphabetical for non-canonical groups).
+    """
+    partition_groups: dict[str, set[str]] = {}
+    for cond in result.conditions:
+        for entry in cond.entries:
+            partition_groups.setdefault(entry.partition_name, set()).add(entry.protein_group)
+    # Stable ordering: aa_class first (most common), then alphabetical
+    ordered_partitions: dict[str, list[str]] = {}
+    partition_names = sorted(partition_groups.keys())
+    if "aa_class" in partition_names:
+        partition_names.remove("aa_class")
+        partition_names.insert(0, "aa_class")
+    for pname in partition_names:
+        ordered_partitions[pname] = _sorted_groups(list(partition_groups[pname]))
+    return ordered_partitions
+
+
 def _get_colors(settings: Any, n_colors: int) -> list:
     """Get colors from the configured palette."""
     import matplotlib.pyplot as plt
@@ -164,6 +212,14 @@ def _get_colors(settings: Any, n_colors: int) -> list:
         return [cmap(i / max(1, n_colors - 1)) for i in range(n_colors)]
 
 
+def _partition_display_name(partition_name: str) -> str:
+    """Convert a partition name to a human-readable display string.
+
+    Examples: "aa_class" → "AA Class", "lid_helices" → "Lid Helices".
+    """
+    return partition_name.replace("_", " ").title()
+
+
 # ---------------------------------------------------------------------------
 # Heatmap plotter
 # ---------------------------------------------------------------------------
@@ -173,10 +229,14 @@ def _get_colors(settings: Any, n_colors: int) -> list:
 class BFEHeatmapPlotter(BasePlotter):
     """Generate ΔΔG heatmap comparing binding free energy across conditions.
 
-    Creates one subplot per polymer type. In each subplot:
-    - Rows: AA groups (e.g., aromatic, polar, charged)
+    Creates one figure per (partition, polymer_type) combination:
+    - Rows: protein groups belonging to that partition
     - Columns: Conditions (e.g., 0% SBMA, 25% SBMA, …)
     - Color: ΔΔG value with diverging colormap centered at 0
+
+    When only a single partition exists (e.g., just "aa_class"), filenames
+    and titles match the previous single-partition behavior for backward
+    compatibility.
 
     Loads ``BindingFreeEnergyResult`` from ``results/`` adjacent to
     ``comparison.yaml`` (accepts both ``binding_free_energy_comparison_*.json``
@@ -205,7 +265,7 @@ class BFEHeatmapPlotter(BasePlotter):
         output_dir: Path,
         **kwargs: Any,
     ) -> list[Path]:
-        """Generate ΔΔG heatmap.
+        """Generate ΔΔG heatmaps, one per (partition, polymer_type).
 
         Parameters
         ----------
@@ -222,7 +282,7 @@ class BFEHeatmapPlotter(BasePlotter):
         Returns
         -------
         list[Path]
-            Paths to generated plot files (one per polymer type, or empty).
+            Paths to generated plot files, or empty list.
         """
         import matplotlib.pyplot as plt
 
@@ -233,132 +293,199 @@ class BFEHeatmapPlotter(BasePlotter):
         bfe_settings = self.settings.binding_free_energy
         units = result.units
 
-        # Determine display labels: use conditions order from result if labels don't match
+        # Determine display labels
         cond_labels = [c.label for c in result.conditions]
         display_labels = [lbl for lbl in labels if lbl in cond_labels]
         if not display_labels:
             display_labels = cond_labels
 
         polymer_types = result.polymer_types
-        protein_groups = _sorted_groups(result.protein_groups)
+        partitions = _get_partitions(result)
 
-        if not polymer_types or not protein_groups:
+        if not polymer_types or not partitions:
             logger.warning("BFE result has no polymer types or protein groups - skipping heatmap")
             return []
 
-        # Collect all ΔΔG values to determine symmetric color range
-        all_vals: list[float] = []
-        for cond_summary in result.conditions:
-            for entry in cond_summary.entries:
-                if entry.delta_G is not None:
-                    all_vals.append(entry.delta_G)
-
-        if not all_vals:
-            logger.warning("No ΔΔG values found - skipping heatmap")
-            return []
-
-        max_abs = max(abs(min(all_vals)), abs(max(all_vals)))
-        vmin = -(max_abs + 0.05)
-        vmax = max_abs + 0.05
-
         n_conds = len(display_labels)
-        n_groups = len(protein_groups)
         n_poly = len(polymer_types)
+        n_partitions = len(partitions)
+        multi_partition = n_partitions > 1
+
+        # Temperature string (shared across all figures)
+        temp_str = ""
+        if result.conditions:
+            temps = {c.temperature_K for c in result.conditions}
+            if len(temps) == 1:
+                temp_str = f" at {next(iter(temps)):.0f} K"
 
         output_paths: list[Path] = []
 
-        for poly_type in polymer_types:
-            # Auto-size: ~1.4 per condition column, ~0.8 per AA row, min reasonable size
-            if bfe_settings.figsize_heatmap is not None:
-                figsize = bfe_settings.figsize_heatmap
-            else:
-                figsize = (max(6, 1.5 * n_conds + 1.5), max(4, 0.9 * n_groups + 1.5))
+        for partition_name, protein_groups in partitions.items():
+            n_groups = len(protein_groups)
 
-            fig, ax = plt.subplots(figsize=figsize, dpi=self.settings.dpi)
+            # Compute per-partition color range from entries in this partition only
+            partition_vals: list[float] = []
+            for cond_summary in result.conditions:
+                for entry in cond_summary.entries:
+                    if entry.partition_name == partition_name and entry.delta_G is not None:
+                        partition_vals.append(entry.delta_G)
 
-            # Build matrix: rows = AA groups, columns = conditions
-            matrix = np.full((n_groups, n_conds), np.nan)
-            sem_matrix = np.full((n_groups, n_conds), np.nan)
-
-            for col_idx, cond_label in enumerate(display_labels):
-                try:
-                    cond_summary = result.get_condition(cond_label)
-                except KeyError:
-                    continue
-                for row_idx, group in enumerate(protein_groups):
-                    entry = cond_summary.get_entry(poly_type, group)
-                    if entry is not None and entry.delta_G is not None:
-                        matrix[row_idx, col_idx] = entry.delta_G
-                        if entry.delta_G_uncertainty is not None:
-                            sem_matrix[row_idx, col_idx] = entry.delta_G_uncertainty
-
-            valid = matrix[~np.isnan(matrix)]
-            if len(valid) == 0:
-                logger.debug(f"No ΔΔG data for polymer type {poly_type} - skipping subplot")
-                plt.close(fig)
+            if not partition_vals:
+                logger.debug(f"No ΔΔG values for partition '{partition_name}' - skipping")
                 continue
 
-            im = ax.imshow(
-                matrix,
-                cmap=bfe_settings.colormap,
-                vmin=vmin,
-                vmax=vmax,
-                aspect="auto",
-            )
+            max_abs = max(abs(min(partition_vals)), abs(max(partition_vals)))
+            vmin = -(max_abs + 0.05)
+            vmax = max_abs + 0.05
 
-            # Annotate cells with ΔΔG ± σ
-            if bfe_settings.annotate_heatmap:
-                for i in range(n_groups):
-                    for j in range(n_conds):
-                        val = matrix[i, j]
-                        if np.isnan(val):
-                            continue
-                        sem = sem_matrix[i, j]
-                        text_color = "white" if abs(val) > 0.35 * max_abs else "black"
-                        sign = "+" if val > 0 else ""
-                        if not np.isnan(sem):
-                            label_str = f"{sign}{val:.2f}\n±{sem:.2f}"
-                        else:
-                            label_str = f"{sign}{val:.2f}"
-                        ax.text(
-                            j,
-                            i,
-                            label_str,
-                            ha="center",
-                            va="center",
-                            color=text_color,
-                            fontsize=8,
-                            linespacing=1.2,
+            for poly_type in polymer_types:
+                # Auto-size
+                if bfe_settings.figsize_heatmap is not None:
+                    figsize = bfe_settings.figsize_heatmap
+                else:
+                    figsize = (
+                        max(6, 1.5 * n_conds + 1.5),
+                        max(4, 0.9 * n_groups + 1.5),
+                    )
+
+                fig, ax = plt.subplots(figsize=figsize, dpi=self.settings.dpi)
+
+                # Build matrix: rows = protein groups, columns = conditions
+                matrix = np.full((n_groups, n_conds), np.nan)
+                sem_matrix = np.full((n_groups, n_conds), np.nan)
+
+                for col_idx, cond_label in enumerate(display_labels):
+                    try:
+                        cond_summary = result.get_condition(cond_label)
+                    except KeyError:
+                        continue
+                    for row_idx, group in enumerate(protein_groups):
+                        entry = cond_summary.get_entry(
+                            poly_type, group, partition_name=partition_name
                         )
+                        if entry is not None and entry.delta_G is not None:
+                            matrix[row_idx, col_idx] = entry.delta_G
+                            if entry.delta_G_uncertainty is not None:
+                                sem_matrix[row_idx, col_idx] = entry.delta_G_uncertainty
 
-            ax.set_xticks(range(n_conds))
-            ax.set_xticklabels(display_labels, rotation=35, ha="right", fontsize=9)
-            ax.set_yticks(range(n_groups))
-            ax.set_yticklabels(protein_groups, fontsize=9)
-            ax.set_xlabel("Condition", fontsize=10)
-            ax.set_ylabel("Amino Acid Group", fontsize=10)
+                valid = matrix[~np.isnan(matrix)]
+                if len(valid) == 0:
+                    logger.debug(
+                        f"No ΔΔG data for partition '{partition_name}', "
+                        f"polymer '{poly_type}' - skipping"
+                    )
+                    plt.close(fig)
+                    continue
 
-            temp_str = ""
-            if result.conditions:
-                temps = {c.temperature_K for c in result.conditions}
-                if len(temps) == 1:
-                    temp_str = f" at {next(iter(temps)):.0f} K"
+                im = ax.imshow(
+                    matrix,
+                    cmap=bfe_settings.colormap,
+                    vmin=vmin,
+                    vmax=vmax,
+                    aspect="auto",
+                )
 
-            poly_label = poly_type if n_poly > 1 else ""
-            title = f"ΔΔG {poly_label} {temp_str}".strip() or "ΔΔG Binding Selectivity"
-            ax.set_title(title, fontweight="bold", fontsize=11)
+                # Annotate cells with ΔΔG ± σ
+                if bfe_settings.annotate_heatmap:
+                    for i in range(n_groups):
+                        for j in range(n_conds):
+                            val = matrix[i, j]
+                            if np.isnan(val):
+                                continue
+                            sem = sem_matrix[i, j]
+                            text_color = "white" if abs(val) > 0.35 * max_abs else "black"
+                            sign = "+" if val > 0 else ""
+                            if not np.isnan(sem):
+                                label_str = f"{sign}{val:.2f}\n±{sem:.2f}"
+                            else:
+                                label_str = f"{sign}{val:.2f}"
+                            ax.text(
+                                j,
+                                i,
+                                label_str,
+                                ha="center",
+                                va="center",
+                                color=text_color,
+                                fontsize=8,
+                                linespacing=1.2,
+                            )
 
-            cbar = fig.colorbar(im, ax=ax, shrink=0.85)
-            cbar.set_label(f"ΔΔG ({units})", rotation=270, labelpad=14, fontsize=9)
-            cbar.ax.axhline(y=0.0, color="black", linewidth=1.5, linestyle="--")
+                ax.set_xticks(range(n_conds))
+                ax.set_xticklabels(display_labels, rotation=35, ha="right", fontsize=9)
+                ax.set_yticks(range(n_groups))
+                ax.set_yticklabels(protein_groups, fontsize=9)
+                ax.set_xlabel("Condition", fontsize=10)
 
-            plt.tight_layout()
+                # Y-axis label includes partition name when multiple partitions
+                if multi_partition:
+                    ylabel = f"Protein Group ({_partition_display_name(partition_name)})"
+                else:
+                    ylabel = "Amino Acid Group"
+                ax.set_ylabel(ylabel, fontsize=10)
 
-            stem = f"bfe_heatmap_{poly_type.lower()}" if n_poly > 1 else "bfe_heatmap"
-            output_path = self._get_output_path(output_dir, stem)
-            output_paths.append(self._save_figure(fig, output_path))
+                # Title: include partition and polymer info as needed
+                poly_label = poly_type if n_poly > 1 else ""
+                if multi_partition:
+                    part_label = _partition_display_name(partition_name)
+                    title_parts = ["ΔΔG", part_label]
+                    if poly_label:
+                        title_parts.append(poly_label)
+                    if temp_str:
+                        title_parts.append(temp_str.strip())
+                    title = " — ".join(title_parts[:2])
+                    if poly_label:
+                        title += f" ({poly_label})"
+                    if temp_str:
+                        title += temp_str
+                else:
+                    parts = ["ΔΔG"]
+                    if poly_label:
+                        parts.append(poly_label)
+                    if temp_str:
+                        parts.append(temp_str.strip())
+                    title = " ".join(parts) if len(parts) > 1 else "ΔΔG Binding Selectivity"
+                ax.set_title(title, fontweight="bold", fontsize=11)
+
+                cbar = fig.colorbar(im, ax=ax, shrink=0.85)
+                cbar.set_label(f"ΔΔG ({units})", rotation=270, labelpad=14, fontsize=9)
+                cbar.ax.axhline(y=0.0, color="black", linewidth=1.5, linestyle="--")
+
+                plt.tight_layout()
+
+                # Filename: include partition when multiple, polymer when multiple
+                stem = self._build_stem(
+                    "bfe_heatmap",
+                    partition_name,
+                    poly_type,
+                    multi_partition,
+                    n_poly > 1,
+                )
+                output_path = self._get_output_path(output_dir, stem)
+                output_paths.append(self._save_figure(fig, output_path))
 
         return output_paths
+
+    @staticmethod
+    def _build_stem(
+        prefix: str,
+        partition_name: str,
+        poly_type: str,
+        multi_partition: bool,
+        multi_poly: bool,
+    ) -> str:
+        """Build output filename stem from partition and polymer type.
+
+        Single partition + single polymer → ``prefix``
+        Single partition + multi polymer  → ``prefix_{poly}``
+        Multi partition  + single polymer → ``prefix_{partition}``
+        Multi partition  + multi polymer  → ``prefix_{partition}_{poly}``
+        """
+        parts = [prefix]
+        if multi_partition:
+            parts.append(partition_name.lower())
+        if multi_poly:
+            parts.append(poly_type.lower())
+        return "_".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -370,11 +497,14 @@ class BFEHeatmapPlotter(BasePlotter):
 class BFEBarPlotter(BasePlotter):
     """Generate ΔΔG grouped bar charts comparing binding free energy across conditions.
 
-    Creates one figure per polymer type with:
-    - Groups on x-axis: AA groups (aromatic, polar, …)
+    Creates one figure per (partition, polymer_type) combination with:
+    - Groups on x-axis: protein groups from that partition
     - Bars within each group: one per condition
     - Error bars: between-replicate SEM on ΔΔG (delta-method fallback)
     - Reference line at ΔΔG = 0
+
+    When only a single partition exists, filenames and titles match the
+    previous single-partition behavior for backward compatibility.
 
     Loads ``BindingFreeEnergyResult`` from ``results/`` adjacent to
     ``comparison.yaml`` (accepts both ``binding_free_energy_comparison_*.json``
@@ -398,7 +528,7 @@ class BFEBarPlotter(BasePlotter):
         output_dir: Path,
         **kwargs: Any,
     ) -> list[Path]:
-        """Generate ΔΔG grouped bar charts.
+        """Generate ΔΔG grouped bar charts, one per (partition, polymer_type).
 
         Parameters
         ----------
@@ -415,7 +545,7 @@ class BFEBarPlotter(BasePlotter):
         Returns
         -------
         list[Path]
-            Paths to generated plot files (one per polymer type, or empty).
+            Paths to generated plot files, or empty list.
         """
         import matplotlib.pyplot as plt
 
@@ -443,113 +573,146 @@ class BFEBarPlotter(BasePlotter):
             return []
 
         polymer_types = result.polymer_types
-        protein_groups = _sorted_groups(result.protein_groups)
+        partitions = _get_partitions(result)
 
-        if not polymer_types or not protein_groups:
+        if not polymer_types or not partitions:
             return []
 
         n_conds = len(valid_labels)
-        n_groups = len(protein_groups)
         colors = _get_colors(self.settings, n_conds)
+        n_poly = len(polymer_types)
+        n_partitions = len(partitions)
+        multi_partition = n_partitions > 1
+
+        # Temperature string (shared)
+        temp_str = ""
+        if result.conditions:
+            temps = {c.temperature_K for c in result.conditions}
+            if len(temps) == 1:
+                temp_str = f" ({next(iter(temps)):.0f} K)"
+
+        # kT guide lines (shared across all figures)
+        temps_list = [c.temperature_K for c in result.conditions]
+        kt: float | None = None
+        if temps_list:
+            t_med = float(np.median(temps_list))
+            from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
+
+            tmp_settings = BindingFreeEnergyAnalysisSettings(units=units)
+            kt = tmp_settings.k_b() * t_med
 
         output_paths: list[Path] = []
-        n_poly = len(polymer_types)
 
-        for poly_type in polymer_types:
-            figsize = bfe_settings.figsize_bars
-            fig, ax = plt.subplots(figsize=figsize, dpi=self.settings.dpi)
+        for partition_name, protein_groups in partitions.items():
+            n_groups = len(protein_groups)
 
-            bar_width = 0.8 / n_conds
-            x = np.arange(n_groups)
+            for poly_type in polymer_types:
+                figsize = bfe_settings.figsize_bars
+                fig, ax = plt.subplots(figsize=figsize, dpi=self.settings.dpi)
 
-            for i, cond_label in enumerate(valid_labels):
-                cond_summary = result.get_condition(cond_label)
-                means: list[float] = []
-                sems: list[float] = []
+                bar_width = 0.8 / n_conds
+                x = np.arange(n_groups)
 
-                for group in protein_groups:
-                    entry = cond_summary.get_entry(poly_type, group)
-                    if entry is not None and entry.delta_G is not None:
-                        means.append(entry.delta_G)
-                        # Prefer between-replicate SEM (from per_replicate ΔΔG values),
-                        # fall back to delta-method uncertainty
-                        per_rep = entry.delta_G_per_replicate
-                        if len(per_rep) >= 2:
-                            sem = float(np.std(per_rep, ddof=1) / np.sqrt(len(per_rep)))
-                        elif entry.delta_G_uncertainty is not None:
-                            sem = entry.delta_G_uncertainty
+                for i, cond_label in enumerate(valid_labels):
+                    cond_summary = result.get_condition(cond_label)
+                    means: list[float] = []
+                    sems: list[float] = []
+
+                    for group in protein_groups:
+                        entry = cond_summary.get_entry(
+                            poly_type, group, partition_name=partition_name
+                        )
+                        if entry is not None and entry.delta_G is not None:
+                            means.append(entry.delta_G)
+                            # Prefer between-replicate SEM, fall back to delta-method
+                            per_rep = entry.delta_G_per_replicate
+                            if len(per_rep) >= 2:
+                                sem = float(np.std(per_rep, ddof=1) / np.sqrt(len(per_rep)))
+                            elif entry.delta_G_uncertainty is not None:
+                                sem = entry.delta_G_uncertainty
+                            else:
+                                sem = 0.0
+                            sems.append(sem)
                         else:
-                            sem = 0.0
-                        sems.append(sem)
-                    else:
-                        means.append(0.0)
-                        sems.append(0.0)
+                            means.append(0.0)
+                            sems.append(0.0)
 
-                offset = (i - n_conds / 2 + 0.5) * bar_width
-                ax.bar(
-                    x + offset,
-                    means,
-                    bar_width,
-                    yerr=sems if bfe_settings.show_error_bars else None,
-                    label=cond_label,
-                    color=colors[i],
-                    capsize=3,
-                    alpha=0.85,
-                    edgecolor="none",
+                    offset = (i - n_conds / 2 + 0.5) * bar_width
+                    ax.bar(
+                        x + offset,
+                        means,
+                        bar_width,
+                        yerr=sems if bfe_settings.show_error_bars else None,
+                        label=cond_label,
+                        color=colors[i],
+                        capsize=3,
+                        alpha=0.85,
+                        edgecolor="none",
+                    )
+
+                # Reference line at ΔΔG = 0 (no selectivity)
+                ax.axhline(
+                    y=0.0,
+                    color="black",
+                    linestyle="--",
+                    linewidth=1.5,
+                    label="ΔΔG = 0 (neutral)",
                 )
 
-            # Reference line at ΔΔG = 0 (no selectivity)
-            ax.axhline(
-                y=0.0, color="black", linestyle="--", linewidth=1.5, label="ΔΔG = 0 (neutral)"
-            )
+                # Title: include partition and polymer info as needed
+                poly_label = f": {poly_type}" if n_poly > 1 else ""
+                if multi_partition:
+                    part_label = _partition_display_name(partition_name)
+                    title = f"ΔΔG — {part_label}{poly_label}{temp_str}"
+                else:
+                    title = f"ΔΔG{poly_label}{temp_str}"
+                ax.set_title(title, fontweight="bold", fontsize=11)
 
-            temp_str = ""
-            if result.conditions:
-                temps = {c.temperature_K for c in result.conditions}
-                if len(temps) == 1:
-                    temp_str = f" ({next(iter(temps)):.0f} K)"
+                # X-axis label
+                if multi_partition:
+                    xlabel = f"Protein Group ({_partition_display_name(partition_name)})"
+                else:
+                    xlabel = "Amino Acid Group"
+                ax.set_xlabel(xlabel, fontsize=10)
+                ax.set_ylabel(f"ΔΔG ({units})", fontsize=10)
+                ax.set_xticks(x)
+                ax.set_xticklabels(protein_groups, rotation=35, ha="right", fontsize=9)
+                ax.legend(loc="best", fontsize=8, framealpha=0.7)
 
-            poly_label = f": {poly_type}" if n_poly > 1 else ""
-            ax.set_title(f"ΔΔG{poly_label}{temp_str}", fontweight="bold", fontsize=11)
-            ax.set_xlabel("Amino Acid Group", fontsize=10)
-            ax.set_ylabel(f"ΔΔG ({units})", fontsize=10)
-            ax.set_xticks(x)
-            ax.set_xticklabels(protein_groups, rotation=35, ha="right", fontsize=9)
-            ax.legend(loc="best", fontsize=8, framealpha=0.7)
+                # Horizontal guide lines at ±kT
+                if kt is not None:
+                    ax.axhline(y=kt, color="gray", linestyle=":", linewidth=1.0, alpha=0.6)
+                    ax.axhline(y=-kt, color="gray", linestyle=":", linewidth=1.0, alpha=0.6)
+                    ax.text(
+                        n_groups - 0.5,
+                        kt,
+                        "+k_BT",
+                        color="gray",
+                        fontsize=7,
+                        va="bottom",
+                        ha="right",
+                    )
+                    ax.text(
+                        n_groups - 0.5,
+                        -kt,
+                        "\u2212k_BT",
+                        color="gray",
+                        fontsize=7,
+                        va="top",
+                        ha="right",
+                    )
 
-            # Horizontal guide lines at ±kT for the most common temperature
-            temps_list = [c.temperature_K for c in result.conditions]
-            if temps_list:
-                t_med = np.median(temps_list)
-                from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
+                plt.tight_layout()
 
-                tmp_settings = BindingFreeEnergyAnalysisSettings(units=units)
-                kt = tmp_settings.k_b() * t_med
-                ax.axhline(y=kt, color="gray", linestyle=":", linewidth=1.0, alpha=0.6)
-                ax.axhline(y=-kt, color="gray", linestyle=":", linewidth=1.0, alpha=0.6)
-                ax.text(
-                    n_groups - 0.5,
-                    kt,
-                    "+k_BT",
-                    color="gray",
-                    fontsize=7,
-                    va="bottom",
-                    ha="right",
+                # Filename: reuse _build_stem from heatmap plotter
+                stem = BFEHeatmapPlotter._build_stem(
+                    "bfe_bars",
+                    partition_name,
+                    poly_type,
+                    multi_partition,
+                    n_poly > 1,
                 )
-                ax.text(
-                    n_groups - 0.5,
-                    -kt,
-                    "−k_BT",
-                    color="gray",
-                    fontsize=7,
-                    va="top",
-                    ha="right",
-                )
-
-            plt.tight_layout()
-
-            stem = f"bfe_bars_{poly_type.lower()}" if n_poly > 1 else "bfe_bars"
-            output_path = self._get_output_path(output_dir, stem)
-            output_paths.append(self._save_figure(fig, output_path))
+                output_path = self._get_output_path(output_dir, stem)
+                output_paths.append(self._save_figure(fig, output_path))
 
         return output_paths
