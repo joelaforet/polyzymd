@@ -705,31 +705,6 @@ class BindingPreferenceBarPlotter(BasePlotter):
         """Load aggregated binding preference results for each condition."""
         return _load_binding_preference_results(data, labels, logger)
 
-    def _get_colors(self, n_colors: int) -> list:
-        """Get colors from the configured palette.
-
-        Parameters
-        ----------
-        n_colors : int
-            Number of colors needed
-
-        Returns
-        -------
-        list
-            List of color values (RGB tuples or color strings)
-        """
-        import matplotlib.pyplot as plt
-
-        # Try to use seaborn palette if available
-        try:
-            import seaborn as sns
-
-            return list(sns.color_palette(self.settings.color_palette, n_colors))
-        except ImportError:
-            # Fall back to matplotlib
-            cmap = plt.cm.get_cmap(self.settings.color_palette)
-            return [cmap(i / max(1, n_colors - 1)) for i in range(n_colors)]
-
 
 @PlotterRegistry.register("system_coverage_heatmap")
 class SystemCoverageHeatmapPlotter(BasePlotter):
@@ -1070,29 +1045,6 @@ class SystemCoverageBarPlotter(BasePlotter):
         """Load system coverage results for each condition."""
         return _load_system_coverage_results(data, labels, logger)
 
-    def _get_colors(self, n_colors: int) -> list:
-        """Get colors from the configured palette.
-
-        Parameters
-        ----------
-        n_colors : int
-            Number of colors needed
-
-        Returns
-        -------
-        list
-            List of color values (RGB tuples or color strings)
-        """
-        import matplotlib.pyplot as plt
-
-        try:
-            import seaborn as sns
-
-            return list(sns.color_palette(self.settings.color_palette, n_colors))
-        except ImportError:
-            cmap = plt.cm.get_cmap(self.settings.color_palette)
-            return [cmap(i / max(1, n_colors - 1)) for i in range(n_colors)]
-
 
 @PlotterRegistry.register("user_partition_bars")
 class UserPartitionBarPlotter(BasePlotter):
@@ -1317,26 +1269,3 @@ class UserPartitionBarPlotter(BasePlotter):
     ) -> dict[str, "AggregatedSystemCoverageResult"]:
         """Load system coverage results for each condition."""
         return _load_system_coverage_results(data, labels, logger)
-
-    def _get_colors(self, n_colors: int) -> list:
-        """Get colors from the configured palette.
-
-        Parameters
-        ----------
-        n_colors : int
-            Number of colors needed
-
-        Returns
-        -------
-        list
-            List of color values (RGB tuples or color strings)
-        """
-        import matplotlib.pyplot as plt
-
-        try:
-            import seaborn as sns
-
-            return list(sns.color_palette(self.settings.color_palette, n_colors))
-        except ImportError:
-            cmap = plt.cm.get_cmap(self.settings.color_palette)
-            return [cmap(i / max(1, n_colors - 1)) for i in range(n_colors)]

@@ -214,7 +214,7 @@ class RMSFComparisonPlotter(BasePlotter):
         fig, ax = plt.subplots(figsize=self.settings.rmsf.figsize_comparison)
 
         positions = np.arange(len(plot_labels))
-        colors = plt.cm.get_cmap(self.settings.color_palette)(np.linspace(0, 1, len(plot_labels)))
+        colors = self._get_colors(len(plot_labels))
 
         ax.barh(
             positions,
@@ -286,12 +286,7 @@ class RMSFProfilePlotter(BasePlotter):
         import matplotlib.pyplot as plt
         import numpy as np
 
-        try:
-            import seaborn as sns
-
-            colors = sns.color_palette(self.settings.color_palette, len(labels))
-        except ImportError:
-            colors = plt.cm.get_cmap(self.settings.color_palette)(np.linspace(0, 1, len(labels)))
+        colors = self._get_colors(len(labels))
 
         # Load per-residue RMSF data for each condition
         profiles: dict[str, dict] = {}

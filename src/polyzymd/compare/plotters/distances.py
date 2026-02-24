@@ -93,12 +93,7 @@ class DistanceKDEPlotter(BasePlotter):
             fig, ax = plt.subplots(figsize=self.settings.distances.figsize)
 
             n_conditions = len(condition_distances)
-            if has_seaborn:
-                colors = sns.color_palette(self.settings.color_palette, n_conditions)
-            else:
-                colors = plt.cm.get_cmap(self.settings.color_palette)(
-                    np.linspace(0, 1, n_conditions)
-                )
+            colors = self._get_colors(n_conditions)
 
             threshold = None
 
@@ -326,12 +321,7 @@ class DistanceThresholdBarsPlotter(BasePlotter):
         n_conditions = len(aggregated)
         n_pairs = len(pair_labels)
 
-        try:
-            import seaborn as sns
-
-            colors = sns.color_palette(self.settings.color_palette, n_conditions)
-        except ImportError:
-            colors = plt.cm.get_cmap(self.settings.color_palette)(np.linspace(0, 1, n_conditions))
+        colors = self._get_colors(n_conditions)
 
         # Extract data
         fractions = np.zeros((n_conditions, n_pairs))

@@ -197,19 +197,6 @@ def _get_partitions(result: "BindingFreeEnergyResult") -> dict[str, list[str]]:
     return ordered_partitions
 
 
-def _get_colors(settings: Any, n_colors: int) -> list:
-    """Get colors from the configured palette."""
-    import matplotlib.pyplot as plt
-
-    try:
-        import seaborn as sns
-
-        return list(sns.color_palette(settings.color_palette, n_colors))
-    except ImportError:
-        cmap = plt.cm.get_cmap(settings.color_palette)
-        return [cmap(i / max(1, n_colors - 1)) for i in range(n_colors)]
-
-
 def _partition_display_name(partition_name: str) -> str:
     """Convert a partition name to a human-readable display string.
 
@@ -577,7 +564,7 @@ class BFEBarPlotter(BasePlotter):
             return []
 
         n_conds = len(valid_labels)
-        colors = _get_colors(self.settings, n_conds)
+        colors = self._get_colors(n_conds)
         n_poly = len(polymer_types)
         n_partitions = len(partitions)
         multi_partition = n_partitions > 1

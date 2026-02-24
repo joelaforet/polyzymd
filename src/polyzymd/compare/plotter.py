@@ -214,6 +214,64 @@ class BasePlotter(ABC):
         logger.info(f"Saved plot: {output_path}")
         return output_path
 
+    def _get_colors(self, n: int) -> list:
+        """Get *n* distinct colors from the configured palette.
+
+        Tries seaborn first (richer palette support), falls back to a
+        matplotlib colormap sampled at evenly-spaced intervals.
+
+        Parameters
+        ----------
+        n : int
+            Number of colors needed.
+
+        Returns
+        -------
+        list
+            List of color values (RGB tuples or matplotlib color specs).
+        """
+        import matplotlib.pyplot as plt
+
+        try:
+            import seaborn as sns
+
+            return list(sns.color_palette(self.settings.color_palette, n))
+        except ImportError:
+            cmap = plt.cm.get_cmap(self.settings.color_palette)
+            return [cmap(i / max(1, n - 1)) for i in range(n)]
+
+    def _find_json(
+        self,
+        directory: Path,
+        preferred: str,
+        glob_pattern: str = "*.json",
+    ) -> Path | None:
+        """Locate a JSON result file inside *directory*.
+
+        Tries the *preferred* filename first; if it does not exist, falls
+        back to the first file matching *glob_pattern* (sorted
+        lexicographically so results are deterministic).
+
+        Parameters
+        ----------
+        directory : Path
+            Directory to search.
+        preferred : str
+            Exact filename to try first (e.g. ``"rmsf_aggregated.json"``).
+        glob_pattern : str, optional
+            Glob to use as fallback, by default ``"*.json"``.
+
+        Returns
+        -------
+        Path | None
+            Path to the located file, or ``None`` if nothing was found.
+        """
+        exact = directory / preferred
+        if exact.is_file():
+            return exact
+        candidates = sorted(directory.glob(glob_pattern))
+        return candidates[0] if candidates else None
+
 
 # ============================================================================
 # Plotter Registry
