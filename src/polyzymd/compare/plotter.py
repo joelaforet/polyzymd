@@ -300,6 +300,88 @@ class BasePlotter(ABC):
         max_abs = float(max(abs(arr.min()), abs(arr.max())))
         return (-(max_abs + pad), max_abs + pad)
 
+    def _grouped_bars(
+        self,
+        ax: "Axes",
+        x: "np.ndarray",
+        series: "Sequence[tuple[str, Sequence[float], Sequence[float]]]",
+        colors: "Sequence",
+        *,
+        bar_width: float | None = None,
+        show_error: bool = True,
+        reference_line: float | None = 0.0,
+        reference_label: str = "Neutral (0)",
+        alpha: float = 0.85,
+        capsize: int = 3,
+        edgecolor: str | None = None,
+        linewidth: float | None = None,
+    ) -> None:
+        """Render grouped bars with optional error bars and reference line.
+
+        Each entry in *series* is rendered as one group of bars offset
+        symmetrically around the integer positions in *x*.
+
+        Parameters
+        ----------
+        ax : matplotlib Axes
+            Target axes.
+        x : np.ndarray
+            1-D array of group centre positions (e.g. ``np.arange(n_groups)``).
+        series : sequence of (label, means, errors)
+            One tuple per condition.  *means* and *errors* must have the same
+            length as *x*.
+        colors : sequence
+            One colour per condition (same length as *series*).
+        bar_width : float | None, optional
+            Width of each individual bar.  When ``None`` (default) the width
+            is computed as ``0.8 / len(series)``.
+        show_error : bool, optional
+            If ``False``, error bars are suppressed, by default ``True``.
+        reference_line : float | None, optional
+            Y-value for a horizontal reference line.  Set to ``None`` to
+            skip, by default ``0.0``.
+        reference_label : str, optional
+            Legend label for the reference line, by default ``"Neutral (0)"``.
+        alpha : float, optional
+            Bar opacity, by default ``0.85``.
+        capsize : int, optional
+            Error-bar cap size in points, by default ``3``.
+        edgecolor : str | None, optional
+            Bar edge colour.  ``None`` uses the matplotlib default.
+        linewidth : float | None, optional
+            Bar edge line width.  ``None`` uses the matplotlib default.
+        """
+        import numpy as np
+
+        n = len(series)
+        w = bar_width if bar_width is not None else 0.8 / max(n, 1)
+
+        for i, (label, means, errors) in enumerate(series):
+            offset = (i - n / 2 + 0.5) * w
+            bar_kwargs: dict = {
+                "width": w,
+                "label": label,
+                "color": colors[i],
+                "alpha": alpha,
+                "capsize": capsize,
+            }
+            if show_error:
+                bar_kwargs["yerr"] = errors
+            if edgecolor is not None:
+                bar_kwargs["edgecolor"] = edgecolor
+            if linewidth is not None:
+                bar_kwargs["linewidth"] = linewidth
+            ax.bar(np.asarray(x) + offset, means, **bar_kwargs)
+
+        if reference_line is not None:
+            ax.axhline(
+                y=reference_line,
+                color="black",
+                linestyle="--",
+                linewidth=1.5,
+                label=reference_label,
+            )
+
     def _annotate_cells(
         self,
         ax: "Axes",

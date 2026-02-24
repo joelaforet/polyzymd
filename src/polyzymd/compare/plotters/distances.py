@@ -346,22 +346,21 @@ class DistanceThresholdBarsPlotter(BasePlotter):
         fig, ax = plt.subplots(figsize=self.settings.distances.figsize)
 
         x = np.arange(n_pairs)
-        width = 0.8 / n_conditions
-        offsets = np.linspace(-(n_conditions - 1) / 2, (n_conditions - 1) / 2, n_conditions) * width
 
-        for cond_idx, (label, color, offset) in enumerate(zip(valid_labels, colors, offsets)):
-            ax.bar(
-                x + offset,
-                fractions[cond_idx],
-                width,
-                yerr=errors[cond_idx],
-                label=label,
-                color=color,
-                edgecolor="black",
-                linewidth=0.5,
-                capsize=3,
-                alpha=0.85,
-            )
+        series = [
+            (label, fractions[cond_idx].tolist(), errors[cond_idx].tolist())
+            for cond_idx, label in enumerate(valid_labels)
+        ]
+
+        self._grouped_bars(
+            ax,
+            x,
+            series,
+            colors,
+            reference_line=None,
+            edgecolor="black",
+            linewidth=0.5,
+        )
 
         ax.set_ylabel("Fraction Below Threshold (%)", fontsize=11)
         ax.set_xticks(x)

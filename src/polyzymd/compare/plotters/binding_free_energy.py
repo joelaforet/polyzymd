@@ -580,10 +580,10 @@ class BFEBarPlotter(BasePlotter):
                 figsize = bfe_settings.figsize_bars
                 fig, ax = plt.subplots(figsize=figsize, dpi=self.settings.dpi)
 
-                bar_width = 0.8 / n_conds
                 x = np.arange(n_groups)
 
-                for i, cond_label in enumerate(valid_labels):
+                series: list[tuple[str, list[float], list[float]]] = []
+                for cond_label in valid_labels:
                     cond_summary = result.get_condition(cond_label)
                     means: list[float] = []
                     sems: list[float] = []
@@ -607,26 +607,16 @@ class BFEBarPlotter(BasePlotter):
                             means.append(0.0)
                             sems.append(0.0)
 
-                    offset = (i - n_conds / 2 + 0.5) * bar_width
-                    ax.bar(
-                        x + offset,
-                        means,
-                        bar_width,
-                        yerr=sems if bfe_settings.show_error_bars else None,
-                        label=cond_label,
-                        color=colors[i],
-                        capsize=3,
-                        alpha=0.85,
-                        edgecolor="none",
-                    )
+                    series.append((cond_label, means, sems))
 
-                # Reference line at ΔΔG = 0 (no selectivity)
-                ax.axhline(
-                    y=0.0,
-                    color="black",
-                    linestyle="--",
-                    linewidth=1.5,
-                    label="ΔΔG = 0 (neutral)",
+                self._grouped_bars(
+                    ax,
+                    x,
+                    series,
+                    colors,
+                    show_error=bfe_settings.show_error_bars,
+                    reference_label="ΔΔG = 0 (neutral)",
+                    edgecolor="none",
                 )
 
                 # Title: include partition and polymer info as needed

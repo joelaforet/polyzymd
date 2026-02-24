@@ -629,13 +629,13 @@ class BindingPreferenceBarPlotter(BasePlotter):
 
             n_groups = len(protein_groups)
             n_conditions = len(valid_labels)
-            bar_width = 0.8 / n_conditions
             x = np.arange(n_groups)
 
             # Get colors from palette
             colors = self._get_colors(n_conditions)
 
-            for i, cond_label in enumerate(valid_labels):
+            series = []
+            for cond_label in valid_labels:
                 result = binding_results[cond_label]
                 means = []
                 sems = []
@@ -646,20 +646,15 @@ class BindingPreferenceBarPlotter(BasePlotter):
                     means.append(mean_val)
                     sems.append(sem_val)
 
-                offset = (i - n_conditions / 2 + 0.5) * bar_width
-                ax.bar(
-                    x + offset,
-                    means,
-                    bar_width,
-                    yerr=sems if self.settings.contacts.show_enrichment_error else None,
-                    label=cond_label,
-                    color=colors[i],
-                    capsize=3,
-                    alpha=0.85,
-                )
+                series.append((cond_label, means, sems))
 
-            # Reference line at 0.0 (neutral, zero-centered enrichment)
-            ax.axhline(y=0.0, color="black", linestyle="--", linewidth=1.5, label="Neutral (0)")
+            self._grouped_bars(
+                ax,
+                x,
+                series,
+                colors,
+                show_error=self.settings.contacts.show_enrichment_error,
+            )
 
             # Labels and formatting
             ax.set_xlabel("Protein Group")
@@ -954,13 +949,13 @@ class SystemCoverageBarPlotter(BasePlotter):
 
         n_groups = len(aa_classes)
         n_conditions = len(valid_labels)
-        bar_width = 0.8 / n_conditions
         x = np.arange(n_groups)
 
         # Get colors from palette
         colors = self._get_colors(n_conditions)
 
-        for i, cond_label in enumerate(valid_labels):
+        series = []
+        for cond_label in valid_labels:
             result = coverage_results[cond_label]
             means = []
             sems = []
@@ -974,20 +969,15 @@ class SystemCoverageBarPlotter(BasePlotter):
                     means.append(0.0)
                     sems.append(0.0)
 
-            offset = (i - n_conditions / 2 + 0.5) * bar_width
-            ax.bar(
-                x + offset,
-                means,
-                bar_width,
-                yerr=sems if self.settings.contacts.show_system_coverage_error else None,
-                label=cond_label,
-                color=colors[i],
-                capsize=3,
-                alpha=0.85,
-            )
+            series.append((cond_label, means, sems))
 
-        # Reference line at 0.0 (neutral)
-        ax.axhline(y=0.0, color="black", linestyle="--", linewidth=1.5, label="Neutral (0)")
+        self._grouped_bars(
+            ax,
+            x,
+            series,
+            colors,
+            show_error=self.settings.contacts.show_system_coverage_error,
+        )
 
         # Labels and formatting
         ax.set_xlabel("Amino Acid Class")
@@ -1166,8 +1156,6 @@ class UserPartitionBarPlotter(BasePlotter):
             return []
 
         n_groups = len(element_names)
-        n_conditions = len(valid_labels)
-        bar_width = 0.8 / n_conditions
         x = np.arange(n_groups)
 
         fig, ax = plt.subplots(
@@ -1175,7 +1163,8 @@ class UserPartitionBarPlotter(BasePlotter):
             dpi=self.settings.dpi,
         )
 
-        for i, cond_label in enumerate(valid_labels):
+        series: list[tuple[str, list[float], list[float]]] = []
+        for cond_label in valid_labels:
             result = coverage_results[cond_label]
             agg_partition = result.user_defined_partitions.get(partition_name)
 
@@ -1193,20 +1182,15 @@ class UserPartitionBarPlotter(BasePlotter):
                 means.append(0.0)
                 sems.append(0.0)
 
-            offset = (i - n_conditions / 2 + 0.5) * bar_width
-            ax.bar(
-                x + offset,
-                means,
-                bar_width,
-                yerr=sems if self.settings.contacts.show_user_partition_error else None,
-                label=cond_label,
-                color=colors[i],
-                capsize=3,
-                alpha=0.85,
-            )
+            series.append((cond_label, means, sems))
 
-        # Reference line at 0.0 (neutral)
-        ax.axhline(y=0.0, color="black", linestyle="--", linewidth=1.5, label="Neutral (0)")
+        self._grouped_bars(
+            ax,
+            x,
+            series,
+            colors,
+            show_error=self.settings.contacts.show_user_partition_error,
+        )
 
         # Labels and formatting
         ax.set_xlabel("Protein Group")
