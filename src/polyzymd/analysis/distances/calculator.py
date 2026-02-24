@@ -24,6 +24,10 @@ from typing import TYPE_CHECKING, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+from polyzymd.analysis.core.aggregation import (
+    aggregate_distance_pair_stats,
+    collect_replicate_results,
+)
 from polyzymd.analysis.core.alignment import AlignmentConfig, align_trajectory
 from polyzymd.analysis.core.autocorrelation import (
     compute_acf,
@@ -43,7 +47,6 @@ from polyzymd.analysis.core.selections import (
     get_position,
     parse_selection_string,
 )
-from polyzymd.analysis.core.statistics import compute_sem
 from polyzymd.analysis.results.base import get_polyzymd_version
 from polyzymd.analysis.results.distances import (
     DistanceAggregatedResult,
@@ -420,51 +423,21 @@ class DistanceCalculator:
         Missing or problematic replicates are skipped with a warning.
         At least 2 successful replicates are required for aggregation.
         """
-        requested_replicates = list(replicates)
-
         if output_dir is None:
             output_dir = (
                 self.config.output.projects_directory / "analysis" / "distances" / "aggregated"
             )
 
         # Compute individual replicates with error handling
-        individual_results = []
-        successful_replicates: list[int] = []
-        failed_replicates: list[int] = []
-
-        for rep in requested_replicates:
-            try:
-                result = self.compute(
-                    replicate=rep,
-                    save=save,
-                    recompute=recompute,
-                    store_distributions=True,  # Store for threshold recomputation
-                )
-                individual_results.append(result)
-                successful_replicates.append(rep)
-            except FileNotFoundError as e:
-                LOGGER.warning(f"Skipping replicate {rep}: trajectory data not found. {e}")
-                failed_replicates.append(rep)
-            except Exception as e:
-                LOGGER.warning(f"Skipping replicate {rep}: analysis failed with error: {e}")
-                failed_replicates.append(rep)
-
-        # Check we have enough replicates
-        if len(individual_results) < 2:
-            raise ValueError(
-                f"Aggregation requires at least 2 successful replicates, but only "
-                f"{len(individual_results)} succeeded. Failed replicates: {failed_replicates}"
-            )
-
-        # Warn if some replicates were skipped
-        if failed_replicates:
-            LOGGER.warning(
-                f"Aggregating {len(successful_replicates)} of {len(requested_replicates)} "
-                f"requested replicates. Skipped: {failed_replicates}"
-            )
-
-        # Use successful_replicates for the rest of the method
-        replicates = successful_replicates
+        collection = collect_replicate_results(
+            self.compute,
+            replicates,
+            save=save,
+            recompute=recompute,
+            store_distributions=True,
+        )
+        individual_results = collection.results
+        replicates = collection.successful_replicates
 
         # Aggregate each pair
         n_pairs = len(self.pairs)
@@ -474,34 +447,7 @@ class DistanceCalculator:
             sel1, sel2 = self.pairs[pair_idx]
             pair_label = _make_pair_label(sel1, sel2)
 
-            # Collect per-replicate statistics
-            per_rep_means = []
-            per_rep_stds = []
-            per_rep_medians = []
-            per_rep_fractions = []
-            per_rep_kde_peaks = []
-
-            for result in individual_results:
-                pr = result.pair_results[pair_idx]
-                per_rep_means.append(pr.mean_distance)
-                per_rep_stds.append(pr.std_distance)
-                per_rep_medians.append(pr.median_distance)
-                if pr.fraction_below_threshold is not None:
-                    per_rep_fractions.append(pr.fraction_below_threshold)
-                if pr.kde_peak is not None:
-                    per_rep_kde_peaks.append(pr.kde_peak)
-
-            # Compute aggregated statistics
-            mean_stats = compute_sem(per_rep_means)
-            median_stats = compute_sem(per_rep_medians)
-
-            fraction_stats = None
-            if per_rep_fractions:
-                fraction_stats = compute_sem(per_rep_fractions)
-
-            kde_peak_stats = None
-            if per_rep_kde_peaks:
-                kde_peak_stats = compute_sem(per_rep_kde_peaks)
+            stats = aggregate_distance_pair_stats(individual_results, pair_idx)
 
             agg_pair = DistancePairAggregatedResult(
                 config_hash=self._config_hash,
@@ -515,20 +461,26 @@ class DistanceCalculator:
                 pair_label=pair_label,
                 selection1=sel1,
                 selection2=sel2,
-                overall_mean=mean_stats.mean,
-                overall_sem=mean_stats.sem,
-                overall_median=median_stats.mean,
-                per_replicate_means=per_rep_means,
-                per_replicate_stds=per_rep_stds,
-                per_replicate_medians=per_rep_medians,
+                overall_mean=stats.mean_stats.mean,
+                overall_sem=stats.mean_stats.sem,
+                overall_median=stats.median_stats.mean,
+                per_replicate_means=stats.per_rep_means,
+                per_replicate_stds=stats.per_rep_stds,
+                per_replicate_medians=stats.per_rep_medians,
                 threshold=self.thresholds[pair_idx],
-                overall_fraction_below=(fraction_stats.mean if fraction_stats else None),
-                sem_fraction_below=(fraction_stats.sem if fraction_stats else None),
-                per_replicate_fractions_below=(per_rep_fractions if per_rep_fractions else None),
+                overall_fraction_below=(
+                    stats.fraction_stats.mean if stats.fraction_stats else None
+                ),
+                sem_fraction_below=(stats.fraction_stats.sem if stats.fraction_stats else None),
+                per_replicate_fractions_below=(
+                    stats.per_rep_fractions if stats.per_rep_fractions else None
+                ),
                 # KDE aggregation
-                overall_kde_peak=(kde_peak_stats.mean if kde_peak_stats else None),
-                sem_kde_peak=(kde_peak_stats.sem if kde_peak_stats else None),
-                per_replicate_kde_peaks=(per_rep_kde_peaks if per_rep_kde_peaks else None),
+                overall_kde_peak=(stats.kde_peak_stats.mean if stats.kde_peak_stats else None),
+                sem_kde_peak=(stats.kde_peak_stats.sem if stats.kde_peak_stats else None),
+                per_replicate_kde_peaks=(
+                    stats.per_rep_kde_peaks if stats.per_rep_kde_peaks else None
+                ),
             )
             aggregated_pairs.append(agg_pair)
 
