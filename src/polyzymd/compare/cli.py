@@ -14,6 +14,7 @@ from typing import Optional
 import click
 import yaml
 
+from polyzymd.compare.cli_utils import common_compare_options
 from polyzymd.compare.comparators.rmsf import RMSFComparator
 from polyzymd.compare.config import (
     ComparisonConfig,
@@ -293,19 +294,7 @@ def _output_validation_result(result: dict, output_format: str) -> None:
 
 
 @compare.command()
-@click.option(
-    "-f",
-    "--file",
-    "config_file",
-    type=click.Path(exists=True, path_type=Path),
-    default="comparison.yaml",
-    help="Path to comparison.yaml config file.",
-)
-@click.option(
-    "--eq-time",
-    default=None,
-    help="Override equilibration time (e.g., '10ns', '5000ps').",
-)
+@common_compare_options
 @click.option(
     "--override",
     is_flag=True,
@@ -332,32 +321,6 @@ def _output_validation_result(result: dict, output_format: str) -> None:
     "--recompute",
     is_flag=True,
     help="Force recompute RMSF even if cached results exist.",
-)
-@click.option(
-    "--format",
-    "output_format",
-    type=click.Choice(["table", "markdown", "json"]),
-    default="table",
-    help="Output format: table (default), markdown, or json.",
-)
-@click.option(
-    "-o",
-    "--output",
-    "output_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Save output to file. Also saves JSON result to results/ directory.",
-)
-@click.option(
-    "-q",
-    "--quiet",
-    is_flag=True,
-    help="Suppress INFO messages, show warnings/errors only.",
-)
-@click.option(
-    "--debug",
-    is_flag=True,
-    help="Enable DEBUG logging for troubleshooting.",
 )
 def rmsf(
     config_file: Path,
@@ -619,49 +582,11 @@ def plot(
 
 
 @compare.command()
-@click.option(
-    "-f",
-    "--file",
-    "config_file",
-    type=click.Path(exists=True, path_type=Path),
-    default="comparison.yaml",
-    help="Path to comparison.yaml config file.",
-)
-@click.option(
-    "--eq-time",
-    default=None,
-    help="Override equilibration time (e.g., '10ns', '5000ps').",
-)
+@common_compare_options
 @click.option(
     "--recompute",
     is_flag=True,
     help="Force recompute triad analysis even if cached results exist.",
-)
-@click.option(
-    "--format",
-    "output_format",
-    type=click.Choice(["table", "markdown", "json"]),
-    default="table",
-    help="Output format: table (default), markdown, or json.",
-)
-@click.option(
-    "-o",
-    "--output",
-    "output_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Save output to file. Also saves JSON result to results/ directory.",
-)
-@click.option(
-    "-q",
-    "--quiet",
-    is_flag=True,
-    help="Suppress INFO messages, show warnings/errors only.",
-)
-@click.option(
-    "--debug",
-    is_flag=True,
-    help="Enable DEBUG logging for troubleshooting.",
 )
 def triad(
     config_file: Path,
@@ -794,19 +719,7 @@ def triad(
 
 
 @compare.command()
-@click.option(
-    "-f",
-    "--file",
-    "config_file",
-    type=click.Path(exists=True, path_type=Path),
-    default="comparison.yaml",
-    help="Path to comparison.yaml config file.",
-)
-@click.option(
-    "--eq-time",
-    default=None,
-    help="Override equilibration time (e.g., '10ns', '5000ps').",
-)
+@common_compare_options
 @click.option(
     "--polymer-selection",
     default=None,
@@ -828,32 +741,6 @@ def triad(
     "--recompute",
     is_flag=True,
     help="Force recompute contacts analysis even if cached results exist.",
-)
-@click.option(
-    "--format",
-    "output_format",
-    type=click.Choice(["table", "markdown", "json"]),
-    default="table",
-    help="Output format: table (default), markdown, or json.",
-)
-@click.option(
-    "-o",
-    "--output",
-    "output_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Save output to file. Also saves JSON result to results/ directory.",
-)
-@click.option(
-    "-q",
-    "--quiet",
-    is_flag=True,
-    help="Suppress INFO messages, show warnings/errors only.",
-)
-@click.option(
-    "--debug",
-    is_flag=True,
-    help="Enable DEBUG logging for troubleshooting.",
 )
 def contacts(
     config_file: Path,
@@ -1034,19 +921,7 @@ def contacts(
 
 
 @compare.command()
-@click.option(
-    "-f",
-    "--file",
-    "config_file",
-    type=click.Path(exists=True, path_type=Path),
-    default="comparison.yaml",
-    help="Path to comparison.yaml config file.",
-)
-@click.option(
-    "--eq-time",
-    default=None,
-    help="Override equilibration time (e.g., '10ns', '5000ps').",
-)
+@common_compare_options
 @click.option(
     "--exposure-threshold",
     default=None,
@@ -1067,32 +942,6 @@ def contacts(
     "--recompute-exposure",
     is_flag=True,
     help="Force recompute exposure dynamics even if cached results exist.",
-)
-@click.option(
-    "--format",
-    "output_format",
-    type=click.Choice(["table", "markdown", "json"]),
-    default="table",
-    help="Output format: table (default), markdown, or json.",
-)
-@click.option(
-    "-o",
-    "--output",
-    "output_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Save output to file. Also saves JSON result to results/ directory.",
-)
-@click.option(
-    "-q",
-    "--quiet",
-    is_flag=True,
-    help="Suppress INFO messages, show warnings/errors only.",
-)
-@click.option(
-    "--debug",
-    is_flag=True,
-    help="Enable DEBUG logging for troubleshooting.",
 )
 def exposure(
     config_file: Path,
@@ -1264,49 +1113,11 @@ def exposure(
     required=False,
     default=None,
 )
-@click.option(
-    "-f",
-    "--file",
-    "config_file",
-    type=click.Path(path_type=Path),
-    default="comparison.yaml",
-    help="Path to comparison.yaml config file.",
-)
-@click.option(
-    "--eq-time",
-    default=None,
-    help="Override equilibration time (e.g., '10ns', '5000ps').",
-)
+@common_compare_options
 @click.option(
     "--recompute",
     is_flag=True,
     help="Force recompute even if cached results exist.",
-)
-@click.option(
-    "--format",
-    "output_format",
-    type=click.Choice(["table", "markdown", "json"]),
-    default="table",
-    help="Output format: table (default), markdown, or json.",
-)
-@click.option(
-    "-o",
-    "--output",
-    "output_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Save output to file.",
-)
-@click.option(
-    "-q",
-    "--quiet",
-    is_flag=True,
-    help="Suppress INFO messages, show warnings/errors only.",
-)
-@click.option(
-    "--debug",
-    is_flag=True,
-    help="Enable DEBUG logging for troubleshooting.",
 )
 @click.option(
     "--list",
@@ -1655,19 +1466,7 @@ def plot_all(
 
 
 @compare.command(name="binding-free-energy")
-@click.option(
-    "-f",
-    "--file",
-    "config_file",
-    type=click.Path(exists=True, path_type=Path),
-    default="comparison.yaml",
-    help="Path to comparison.yaml config file.",
-)
-@click.option(
-    "--eq-time",
-    default=None,
-    help="Override equilibration time (e.g., '10ns', '5000ps').",
-)
+@common_compare_options
 @click.option(
     "--units",
     type=click.Choice(["kcal/mol", "kJ/mol"]),
@@ -1684,32 +1483,6 @@ def plot_all(
     "--recompute",
     is_flag=True,
     help="Force recompute binding preference analysis even if cached results exist.",
-)
-@click.option(
-    "--format",
-    "output_format",
-    type=click.Choice(["table", "markdown", "json"]),
-    default="table",
-    help="Output format: table (default), markdown, or json.",
-)
-@click.option(
-    "-o",
-    "--output",
-    "output_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Save output to file. Also saves JSON result to results/ directory.",
-)
-@click.option(
-    "-q",
-    "--quiet",
-    is_flag=True,
-    help="Suppress INFO messages, show warnings/errors only.",
-)
-@click.option(
-    "--debug",
-    is_flag=True,
-    help="Enable DEBUG logging for troubleshooting.",
 )
 def binding_free_energy(
     config_file: Path,
