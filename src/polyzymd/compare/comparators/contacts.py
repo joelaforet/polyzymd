@@ -657,26 +657,15 @@ class ContactsComparator(
         Path or None
             Path to the result file if found, None otherwise.
         """
-        # Primary location: projects_directory
-        result_path = (
-            sim_config.output.projects_directory
-            / "analysis"
-            / "contacts"
-            / f"contacts_rep{replicate}.json"
+        from polyzymd.compare.comparators._utils import find_replicate_result
+
+        return find_replicate_result(
+            sim_config,
+            replicate,
+            result_filename=f"contacts_rep{replicate}.json",
+            analysis_subdir="analysis/contacts",
+            cond_config_path=cond_config_path,
         )
-        if result_path.exists():
-            return result_path
-
-        # Fallback: config file's parent directory
-        if cond_config_path is not None:
-            fallback_path = (
-                cond_config_path.parent / "analysis" / "contacts" / f"contacts_rep{replicate}.json"
-            )
-            if fallback_path.exists():
-                return fallback_path
-
-        # Return primary path even if doesn't exist (for error messages)
-        return result_path
 
     def _get_analysis_dir(
         self,

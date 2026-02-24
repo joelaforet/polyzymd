@@ -600,21 +600,15 @@ class ExposureDynamicsComparator(
         Path or None
             Path to the JSON file, or None if not resolvable.
         """
-        filename = f"contacts_rep{replicate}.json"
+        from polyzymd.compare.comparators._utils import find_replicate_result
 
-        # Primary location
-        primary = sim_config.output.projects_directory / "analysis" / "contacts" / filename
-        if primary.exists():
-            return primary
-
-        # Fallback: config file's parent directory
-        if cond_config_path is not None:
-            fallback = cond_config_path.parent / "analysis" / "contacts" / filename
-            if fallback.exists():
-                return fallback
-
-        # Return primary path for error messages
-        return primary
+        return find_replicate_result(
+            sim_config,
+            replicate,
+            result_filename=f"contacts_rep{replicate}.json",
+            analysis_subdir="analysis/contacts",
+            cond_config_path=cond_config_path,
+        )
 
     def _get_analysis_dir(
         self,
