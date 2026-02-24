@@ -25,6 +25,7 @@ import numpy as np
 
 from polyzymd import __version__
 from polyzymd.analysis.core.metric_type import MetricType
+from polyzymd.analysis.core.statistics import compute_sem
 from polyzymd.compare.core.base import ANOVASummary, BaseComparator, PairwiseComparison
 from polyzymd.compare.core.registry import ComparatorRegistry
 from polyzymd.compare.results.exposure import ExposureComparisonResult, ExposureConditionSummary
@@ -436,13 +437,11 @@ class ExposureDynamicsComparator(
             total_unassisted.append(float(dyn.total_unassisted_events()))
 
         mean_chap = float(np.mean(chap_fractions))
-        sem_chap = (
-            float(np.std(chap_fractions) / np.sqrt(n_replicates)) if n_replicates > 1 else 0.0
-        )
+        _chap_stats = compute_sem(chap_fractions) if n_replicates > 1 else None
+        sem_chap = _chap_stats.sem if _chap_stats else 0.0
         mean_transient = float(np.mean(transient_fractions))
-        sem_transient = (
-            float(np.std(transient_fractions) / np.sqrt(n_replicates)) if n_replicates > 1 else 0.0
-        )
+        _transient_stats = compute_sem(transient_fractions) if n_replicates > 1 else None
+        sem_transient = _transient_stats.sem if _transient_stats else 0.0
 
         # Aggregate enrichment: mean residue-based enrichment per (polymer_type, aa_group)
         enrichment_by_ptype: dict[str, dict[str, float]] = {}
