@@ -238,20 +238,12 @@ class ContactAnalyzer:
 
         Returns list of chains, where each chain is a list of
         (chain_idx, resname, residue) tuples.
+
+        Delegates to :func:`polyzymd.analysis.contacts._utils.identify_polymer_chains`.
         """
-        # Group residues by fragment (connected component)
-        all_atoms = query_residues.atoms
-        fragments = all_atoms.fragments if all_atoms.fragments else [all_atoms]
+        from polyzymd.analysis.contacts._utils import identify_polymer_chains
 
-        chains = []
-        for chain_idx, frag in enumerate(fragments):
-            chain_residues = []
-            for res in frag.residues:
-                chain_residues.append((chain_idx, res.resname, res))
-            if chain_residues:
-                chains.append(chain_residues)
-
-        return chains
+        return identify_polymer_chains(query_residues)
 
     def _initialize_contact_data(
         self,

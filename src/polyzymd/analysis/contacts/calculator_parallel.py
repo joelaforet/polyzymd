@@ -300,19 +300,13 @@ class ParallelContactAnalyzer:
     def _identify_polymer_chains(
         self, query_residues: "AtomGroup"
     ) -> list[list[tuple[int, str, "Residue"]]]:
-        """Identify polymer chains and their segments."""
-        all_atoms = query_residues.atoms
-        fragments = all_atoms.fragments if all_atoms.fragments else [all_atoms]
+        """Identify polymer chains and their segments.
 
-        chains = []
-        for chain_idx, frag in enumerate(fragments):
-            chain_residues = []
-            for res in frag.residues:
-                chain_residues.append((chain_idx, res.resname, res))
-            if chain_residues:
-                chains.append(chain_residues)
+        Delegates to :func:`polyzymd.analysis.contacts._utils.identify_polymer_chains`.
+        """
+        from polyzymd.analysis.contacts._utils import identify_polymer_chains
 
-        return chains
+        return identify_polymer_chains(query_residues)
 
     def _build_result(
         self,
