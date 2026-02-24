@@ -21,6 +21,7 @@ import numpy as np
 
 from polyzymd import __version__
 from polyzymd.analysis.core.metric_type import MetricType
+from polyzymd.compare.core.base import BaseComparator
 from polyzymd.compare.core.registry import ComparatorRegistry
 from polyzymd.compare.results.distances import (
     DistanceComparisonResult,
@@ -53,7 +54,14 @@ DistanceConditionData = dict[str, Any]
 
 
 @ComparatorRegistry.register("distances")
-class DistancesComparator:
+class DistancesComparator(
+    BaseComparator[
+        DistancesAnalysisSettings,
+        DistanceConditionData,
+        DistanceConditionSummary,
+        DistanceComparisonResult,
+    ]
+):
     """Compare distance metrics across multiple simulation conditions.
 
     This class loads distance analysis results for each condition (computing them
@@ -98,15 +106,12 @@ class DistancesComparator:
         analysis_settings: DistancesAnalysisSettings | Any,
         equilibration: str | None = None,
     ):
-        self.config = config
-        # Cast to concrete type if needed
+        # Cast to concrete type if needed (before super().__init__)
         if not isinstance(analysis_settings, DistancesAnalysisSettings):
-            self.analysis_settings = DistancesAnalysisSettings.model_validate(
+            analysis_settings = DistancesAnalysisSettings.model_validate(
                 analysis_settings.model_dump()
             )
-        else:
-            self.analysis_settings = analysis_settings
-        self.equilibration = equilibration or config.defaults.equilibration_time
+        super().__init__(config, analysis_settings, equilibration)
 
     @classmethod
     def comparison_type_name(cls) -> str:
@@ -128,6 +133,25 @@ class DistancesComparator:
             MetricType.MEAN_BASED
         """
         return MetricType.MEAN_BASED
+
+    @property
+    def _direction_labels(self) -> tuple[str, str, str]:
+        """Direction labels for distance comparisons.
+
+        Returns
+        -------
+        tuple[str, str, str]
+            (improving, unchanged, worsening) labels.
+
+        Notes
+        -----
+        Distances uses inline direction logic in ``_compare_pair_data``
+        rather than the base ``_interpret_direction`` method, because it
+        has two independent metrics (distance and fraction) with opposite
+        directions. This property satisfies the BaseComparator contract
+        for interface consistency.
+        """
+        return ("closer", "unchanged", "farther")
 
     def compare(self, recompute: bool = False) -> DistanceComparisonResult:
         """Run the comparison across all conditions.
@@ -171,7 +195,7 @@ class DistancesComparator:
         summaries = [self._build_condition_summary(cond, data) for cond, data in condition_data]
 
         # Determine control
-        effective_control = self._get_effective_control(summaries)
+        effective_control = self._resolve_effective_control(summaries)
 
         # Compute per-pair rankings
         # For each pair, rank conditions by mean distance (ascending = lowest first)
@@ -200,12 +224,14 @@ class DistancesComparator:
                 fraction_ranking_by_pair[pair_label] = [label for label, _ in sorted_by_fraction]
 
         # Pairwise comparisons (now per-pair)
-        comparisons = self._compute_pairwise_comparisons(summaries, effective_control, pair_labels)
+        comparisons = self._compute_distance_pairwise_comparisons(
+            summaries, effective_control, pair_labels
+        )
 
         # ANOVA (if 3+ conditions) - now per-pair
         anova_by_pair: list[DistancePairANOVA] | None = None
         if len(summaries) >= 3:
-            anova_by_pair = self._compute_anova(summaries, pair_labels)
+            anova_by_pair = self._compute_distance_anova(summaries, pair_labels)
 
         # Build result
         result = DistanceComparisonResult(
@@ -353,7 +379,7 @@ class DistancesComparator:
             pair_summaries=data["pair_summaries"],
         )
 
-    def _get_effective_control(self, summaries: list[DistanceConditionSummary]) -> str | None:
+    def _resolve_effective_control(self, summaries: list[DistanceConditionSummary]) -> str | None:
         """Determine the effective control condition.
 
         Parameters
@@ -377,7 +403,7 @@ class DistancesComparator:
                 )
         return None
 
-    def _compute_pairwise_comparisons(
+    def _compute_distance_pairwise_comparisons(
         self,
         summaries: list[DistanceConditionSummary],
         control_label: str | None,
@@ -539,7 +565,7 @@ class DistancesComparator:
             fraction_percent_change=fraction_pct,
         )
 
-    def _compute_anova(
+    def _compute_distance_anova(
         self,
         summaries: list[DistanceConditionSummary],
         pair_labels: list[str],

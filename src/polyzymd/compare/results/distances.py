@@ -15,12 +15,12 @@ For each pair:
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from polyzymd import __version__
+from polyzymd.compare.core.base import BaseComparisonResult, BaseConditionSummary
 
 
 class DistancePairSummary(BaseModel):
@@ -62,12 +62,18 @@ class DistancePairSummary(BaseModel):
     per_replicate_fractions: Optional[list[float]] = None
 
 
-class DistanceConditionSummary(BaseModel):
+class DistanceConditionSummary(BaseConditionSummary):
     """Summary statistics for one condition in a distance comparison.
 
     Note: There is no "overall" distance metric across pairs, since averaging
     unrelated distances (e.g., H-bond + lid-opening) is not meaningful.
     Each pair is compared independently.
+
+    Inherits from BaseConditionSummary for interface consistency. The
+    ``replicate_values`` field defaults to an empty list because distances
+    has no single primary metric — each pair is compared independently.
+    The ``primary_metric_value`` and ``primary_metric_sem`` properties
+    return 0.0 stubs for the same reason.
 
     Attributes
     ----------
@@ -77,14 +83,24 @@ class DistanceConditionSummary(BaseModel):
         Path to the simulation config file.
     n_replicates : int
         Number of replicates included.
+    replicate_values : list[float]
+        Empty by default (no single primary metric for distances).
     pair_summaries : list[DistancePairSummary]
         Summary for each distance pair.
     """
 
-    label: str
-    config_path: str
-    n_replicates: int
+    replicate_values: list[float] = Field(default_factory=list)
     pair_summaries: list[DistancePairSummary]
+
+    @property
+    def primary_metric_value(self) -> float:
+        """Return 0.0 — distances has no single primary metric across pairs."""
+        return 0.0
+
+    @property
+    def primary_metric_sem(self) -> float:
+        """Return 0.0 — distances has no single primary metric across pairs."""
+        return 0.0
 
     def get_pair(self, label: str) -> DistancePairSummary:
         """Get a pair summary by label.
@@ -206,10 +222,12 @@ class DistancePairANOVA(BaseModel):
     fraction_significant: Optional[bool] = None
 
 
-class DistanceComparisonResult(BaseModel):
+class DistanceComparisonResult(
+    BaseComparisonResult[DistanceConditionSummary, DistancePairwiseComparison]
+):
     """Complete distance comparison analysis result.
 
-    This is the main output from DistancesComparator.compare().
+    Inherits save/load/get_condition from BaseComparisonResult.
 
     Each distance pair is compared independently - rankings and statistics
     are computed per-pair since averaging unrelated distances is not meaningful.
@@ -238,6 +256,8 @@ class DistanceComparisonResult(BaseModel):
     fraction_ranking_by_pair : dict[str, list[str]], optional
         Condition labels sorted by fraction below threshold, keyed by pair.
         Higher fraction = better = earlier in list.
+    ranking : list[str]
+        Empty by default (distances ranks per-pair via ranking_by_pair).
     equilibration_time : str
         Equilibration time used.
     created_at : datetime
@@ -256,62 +276,12 @@ class DistanceComparisonResult(BaseModel):
     anova_by_pair: Optional[list[DistancePairANOVA]] = None
     ranking_by_pair: dict[str, list[str]]
     fraction_ranking_by_pair: Optional[dict[str, list[str]]] = None
+    ranking: list[str] = Field(default_factory=list)
     equilibration_time: str
     created_at: datetime
     polyzymd_version: str = __version__
 
-    def save(self, path: Path | str) -> Path:
-        """Save result to JSON file.
-
-        Parameters
-        ----------
-        path : Path or str
-            Output path.
-
-        Returns
-        -------
-        Path
-            Path to saved file.
-        """
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self.model_dump_json(indent=2))
-        return path
-
-    @classmethod
-    def load(cls, path: Path | str) -> "DistanceComparisonResult":
-        """Load result from JSON file.
-
-        Parameters
-        ----------
-        path : Path or str
-            Path to JSON file.
-
-        Returns
-        -------
-        DistanceComparisonResult
-            Loaded result.
-        """
-        path = Path(path)
-        return cls.model_validate_json(path.read_text())
-
-    def get_condition(self, label: str) -> DistanceConditionSummary:
-        """Get a condition by label.
-
-        Parameters
-        ----------
-        label : str
-            Condition label.
-
-        Returns
-        -------
-        DistanceConditionSummary
-            The matching condition.
-        """
-        for cond in self.conditions:
-            if cond.label == label:
-                return cond
-        raise KeyError(f"Condition '{label}' not found")
+    # save(), load(), and get_condition() are inherited from BaseComparisonResult.
 
     def get_comparisons_for_pair(self, pair_label: str) -> list[DistancePairwiseComparison]:
         """Get all pairwise comparisons for a specific pair.
