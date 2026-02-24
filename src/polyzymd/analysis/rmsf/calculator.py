@@ -40,24 +40,25 @@ from typing import TYPE_CHECKING, Literal, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+from polyzymd.analysis.core.alignment import (
+    AlignmentConfig,
+    align_trajectory,
+)
 from polyzymd.analysis.core.autocorrelation import (
     compute_acf,
     estimate_correlation_time,
     get_independent_indices,
 )
 from polyzymd.analysis.core.centroid import ReferenceMode
-from polyzymd.analysis.core.alignment import (
-    AlignmentConfig,
-    align_trajectory,
-)
 from polyzymd.analysis.core.config_hash import compute_config_hash, validate_config_hash
+from polyzymd.analysis.core.diagnostics import validate_equilibration_time
 from polyzymd.analysis.core.loader import (
     TrajectoryLoader,
+    _require_mdanalysis,
     convert_time,
     parse_time_string,
     time_to_frame,
 )
-from polyzymd.analysis.core.diagnostics import validate_equilibration_time
 from polyzymd.analysis.core.statistics import (
     aggregate_per_residue_stats,
     aggregate_region_stats,
@@ -68,27 +69,17 @@ from polyzymd.analysis.results.rmsf import RMSFAggregatedResult, RMSFResult
 
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
+
     from polyzymd.config.schema import SimulationConfig
 
 # MDAnalysis is optional
 try:
     import MDAnalysis as mda
     from MDAnalysis.analysis.rms import RMSF
-
-    HAS_MDANALYSIS = True
 except ImportError:
-    HAS_MDANALYSIS = False
+    pass
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _require_mdanalysis() -> None:
-    """Raise ImportError if MDAnalysis is not available."""
-    if not HAS_MDANALYSIS:
-        raise ImportError(
-            "MDAnalysis is required for RMSF analysis.\n"
-            "Install with: pip install polyzymd[analysis]"
-        )
 
 
 class RMSFCalculator:
@@ -174,7 +165,7 @@ class RMSFCalculator:
         alignment_selection: str = "protein and name CA",
         centroid_selection: str = "protein",
     ) -> None:
-        _require_mdanalysis()
+        _require_mdanalysis("RMSF analysis")
 
         self.config = config
         self.selection = selection

@@ -33,6 +33,7 @@ from polyzymd.analysis.core.config_hash import compute_config_hash, validate_con
 from polyzymd.analysis.core.diagnostics import validate_equilibration_time
 from polyzymd.analysis.core.loader import (
     TrajectoryLoader,
+    _require_mdanalysis,
     convert_time,
     parse_time_string,
     time_to_frame,
@@ -60,10 +61,8 @@ if TYPE_CHECKING:
 try:
     import MDAnalysis as mda
     from MDAnalysis.analysis.distances import distance_array
-
-    HAS_MDANALYSIS = True
 except ImportError:
-    HAS_MDANALYSIS = False
+    pass
 
 # scipy for KDE
 try:
@@ -74,15 +73,6 @@ except ImportError:
     HAS_SCIPY = False
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _require_mdanalysis() -> None:
-    """Raise ImportError if MDAnalysis is not available."""
-    if not HAS_MDANALYSIS:
-        raise ImportError(
-            "MDAnalysis is required for distance analysis.\n"
-            "Install with: pip install polyzymd[analysis]"
-        )
 
 
 def _selection_to_label(selection: str) -> str:
@@ -230,7 +220,7 @@ class DistanceCalculator:
         use_pbc: bool = True,
         alignment: AlignmentConfig | None = None,
     ) -> None:
-        _require_mdanalysis()
+        _require_mdanalysis("distance analysis")
 
         self.config = config
         self.pairs = list(pairs)

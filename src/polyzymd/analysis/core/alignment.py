@@ -53,6 +53,8 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from polyzymd.analysis.core.loader import _require_mdanalysis
+
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
@@ -147,17 +149,6 @@ class AlignmentConfig(BaseModel):
         }
 
 
-def _require_mdanalysis() -> None:
-    """Raise ImportError if MDAnalysis is not available."""
-    try:
-        import MDAnalysis  # noqa: F401
-    except ImportError:
-        raise ImportError(
-            "MDAnalysis is required for trajectory alignment.\n"
-            "Install with: mamba install -c conda-forge mdanalysis"
-        ) from None
-
-
 def align_trajectory(
     universe: "Universe",
     config: AlignmentConfig,
@@ -213,7 +204,7 @@ def align_trajectory(
         LOGGER.debug("Alignment disabled by configuration")
         return None
 
-    _require_mdanalysis()
+    _require_mdanalysis("trajectory alignment")
 
     from MDAnalysis.analysis import align
 

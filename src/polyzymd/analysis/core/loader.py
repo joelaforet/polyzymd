@@ -38,11 +38,11 @@ except ImportError:
     Universe = None  # type: ignore
 
 
-def _require_mdanalysis() -> None:
+def _require_mdanalysis(feature_name: str = "trajectory analysis") -> None:
     """Raise ImportError if MDAnalysis is not available."""
     if not HAS_MDANALYSIS:
         raise ImportError(
-            "MDAnalysis is required for trajectory analysis.\n"
+            f"MDAnalysis is required for {feature_name}.\n"
             "Install with: pip install polyzymd[analysis]"
         )
 
