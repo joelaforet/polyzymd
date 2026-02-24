@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 
+from polyzymd.analysis.core.loader import _require_matplotlib
+
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
@@ -25,18 +27,8 @@ if TYPE_CHECKING:
 # Matplotlib is optional
 try:
     import matplotlib.pyplot as plt
-
-    HAS_MATPLOTLIB = True
 except ImportError:
-    HAS_MATPLOTLIB = False
-
-
-def _require_matplotlib() -> None:
-    """Raise ImportError if matplotlib is not available."""
-    if not HAS_MATPLOTLIB:
-        raise ImportError(
-            "matplotlib is required for plotting.\nInstall with: pip install polyzymd[analysis]"
-        )
+    pass
 
 
 def plot_distance_histogram(

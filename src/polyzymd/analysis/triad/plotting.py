@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 
+from polyzymd.analysis.core.loader import _require_matplotlib
+
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
@@ -24,10 +26,8 @@ if TYPE_CHECKING:
 # Matplotlib/seaborn are optional
 try:
     import matplotlib.pyplot as plt
-
-    HAS_MATPLOTLIB = True
 except ImportError:
-    HAS_MATPLOTLIB = False
+    pass
 
 try:
     import seaborn as sns
@@ -37,14 +37,6 @@ except ImportError:
     HAS_SEABORN = False
 
 logger = logging.getLogger(__name__)
-
-
-def _require_matplotlib() -> None:
-    """Raise ImportError if matplotlib is not available."""
-    if not HAS_MATPLOTLIB:
-        raise ImportError(
-            "matplotlib is required for plotting.\nInstall with: pip install matplotlib"
-        )
 
 
 def _require_seaborn() -> None:

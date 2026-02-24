@@ -47,6 +47,17 @@ def _require_mdanalysis(feature_name: str = "trajectory analysis") -> None:
         )
 
 
+def _require_matplotlib(feature_name: str = "plotting") -> None:
+    """Raise ImportError if matplotlib is not available."""
+    try:
+        import matplotlib  # noqa: F401
+    except ImportError:
+        raise ImportError(
+            f"matplotlib is required for {feature_name}.\n"
+            "Install with: pip install polyzymd[analysis]"
+        ) from None
+
+
 @dataclass
 class TrajectoryInfo:
     """Information about discovered trajectory files.
