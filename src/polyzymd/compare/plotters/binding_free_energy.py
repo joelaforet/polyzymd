@@ -319,9 +319,8 @@ class BFEHeatmapPlotter(BasePlotter):
                 logger.debug(f"No ΔΔG values for partition '{partition_name}' - skipping")
                 continue
 
-            max_abs = max(abs(min(partition_vals)), abs(max(partition_vals)))
-            vmin = -(max_abs + 0.05)
-            vmax = max_abs + 0.05
+            vmin, vmax = self._symmetric_clim(partition_vals, pad=0.05)
+            max_abs = vmax - 0.05  # needed for annotation threshold below
 
             for poly_type in polymer_types:
                 # Auto-size
@@ -372,28 +371,14 @@ class BFEHeatmapPlotter(BasePlotter):
 
                 # Annotate cells with ΔΔG ± σ
                 if bfe_settings.annotate_heatmap:
-                    for i in range(n_groups):
-                        for j in range(n_conds):
-                            val = matrix[i, j]
-                            if np.isnan(val):
-                                continue
-                            sem = sem_matrix[i, j]
-                            text_color = "white" if abs(val) > 0.35 * max_abs else "black"
-                            sign = "+" if val > 0 else ""
-                            if not np.isnan(sem):
-                                label_str = f"{sign}{val:.2f}\n±{sem:.2f}"
-                            else:
-                                label_str = f"{sign}{val:.2f}"
-                            ax.text(
-                                j,
-                                i,
-                                label_str,
-                                ha="center",
-                                va="center",
-                                color=text_color,
-                                fontsize=8,
-                                linespacing=1.2,
-                            )
+                    self._annotate_cells(
+                        ax,
+                        matrix,
+                        fontsize=8,
+                        threshold=0.35 * max_abs,
+                        sem_matrix=sem_matrix,
+                        linespacing=1.2,
+                    )
 
                 ax.set_xticks(range(n_conds))
                 ax.set_xticklabels(display_labels, rotation=35, ha="right", fontsize=9)

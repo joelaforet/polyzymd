@@ -457,9 +457,7 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
             return []
 
         # Symmetric around 0.0 for diverging colormap (zero-centered enrichment)
-        max_abs = max(abs(min(all_values)), abs(max(all_values)))
-        vmin = -max_abs - 0.1
-        vmax = max_abs + 0.1
+        vmin, vmax = self._symmetric_clim(all_values)
 
         im = None  # Track last imshow for colorbar
 
@@ -485,23 +483,7 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
             )
 
             # Add value annotations
-            for i in range(n_rows):
-                for j in range(n_cols):
-                    val = matrix[i, j]
-                    if not np.isnan(val):
-                        # Use black or white text based on background intensity
-                        text_color = "white" if abs(val) > 0.3 else "black"
-                        # Format with +/- sign for clarity
-                        sign = "+" if val > 0 else ""
-                        ax.text(
-                            j,
-                            i,
-                            f"{sign}{val:.2f}",
-                            ha="center",
-                            va="center",
-                            color=text_color,
-                            fontsize=9,
-                        )
+            self._annotate_cells(ax, matrix)
 
             # Labels
             ax.set_xticks(range(n_cols))
@@ -828,9 +810,7 @@ class SystemCoverageHeatmapPlotter(BasePlotter):
             return []
 
         # Symmetric around 0.0 for diverging colormap
-        max_abs = max(abs(valid_values.min()), abs(valid_values.max()))
-        vmin = -max_abs - 0.1
-        vmax = max_abs + 0.1
+        vmin, vmax = self._symmetric_clim(valid_values)
 
         # Plot heatmap
         im = ax.imshow(
@@ -842,21 +822,7 @@ class SystemCoverageHeatmapPlotter(BasePlotter):
         )
 
         # Add value annotations
-        for i in range(n_groups):
-            for j in range(n_conditions):
-                val = matrix[i, j]
-                if not np.isnan(val):
-                    text_color = "white" if abs(val) > 0.3 else "black"
-                    sign = "+" if val > 0 else ""
-                    ax.text(
-                        j,
-                        i,
-                        f"{sign}{val:.2f}",
-                        ha="center",
-                        va="center",
-                        color=text_color,
-                        fontsize=9,
-                    )
+        self._annotate_cells(ax, matrix)
 
         # Labels
         ax.set_xticks(range(n_conditions))

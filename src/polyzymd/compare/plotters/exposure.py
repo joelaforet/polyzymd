@@ -290,8 +290,9 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
         if len(finite_vals) == 0:
             logger.warning("All enrichment values are NaN; skipping heatmap")
             return []
-        vmax = max(abs(finite_vals.min()), abs(finite_vals.max()), 0.1)
-        vmin = -vmax
+        floor = 0.1
+        vmax_raw = max(abs(finite_vals.min()), abs(finite_vals.max()), floor)
+        vmin, vmax = -vmax_raw, vmax_raw
 
         fig_width = max(8, n_groups * 1.2 + 2)
         fig_height = max(4, n_ptypes * 0.8 * n_conds + 1)
@@ -313,19 +314,9 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
                 ax.set_yticks([])
 
             # Annotate cells
-            for pi in range(n_ptypes):
-                for gi in range(n_groups):
-                    val = mat[pi, gi]
-                    if np.isfinite(val):
-                        ax.text(
-                            gi,
-                            pi,
-                            f"{val:+.2f}",
-                            ha="center",
-                            va="center",
-                            fontsize=6,
-                            color="white" if abs(val) > vmax * 0.6 else "black",
-                        )
+            self._annotate_cells(
+                ax, mat, fmt="+.2f", fontsize=6, threshold=vmax * 0.6, show_sign=False
+            )
 
         # Shared colorbar
         if im is not None:

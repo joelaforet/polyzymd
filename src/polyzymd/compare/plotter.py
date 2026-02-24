@@ -272,6 +272,99 @@ class BasePlotter(ABC):
         candidates = sorted(directory.glob(glob_pattern))
         return candidates[0] if candidates else None
 
+    @staticmethod
+    def _symmetric_clim(
+        values: "Sequence[float] | np.ndarray",
+        pad: float = 0.1,
+    ) -> tuple[float, float]:
+        """Compute symmetric colour limits centred on zero.
+
+        Parameters
+        ----------
+        values : sequence of float or ndarray
+            Finite data values to derive limits from.
+        pad : float, optional
+            Extra padding added to both sides, by default ``0.1``.
+
+        Returns
+        -------
+        tuple[float, float]
+            ``(vmin, vmax)`` with ``vmin == -vmax`` (before padding).
+        """
+        import numpy as np
+
+        arr = np.asarray(values, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        if len(arr) == 0:
+            return (-pad, pad)
+        max_abs = float(max(abs(arr.min()), abs(arr.max())))
+        return (-(max_abs + pad), max_abs + pad)
+
+    def _annotate_cells(
+        self,
+        ax: "Axes",
+        matrix: "np.ndarray",
+        *,
+        fmt: str = ".2f",
+        fontsize: int = 9,
+        threshold: float = 0.3,
+        sem_matrix: "np.ndarray | None" = None,
+        show_sign: bool = True,
+        linespacing: float | None = None,
+    ) -> None:
+        """Annotate heatmap cells with formatted values.
+
+        Iterates over every element of *matrix* and places a text label
+        at the corresponding (col, row) position on *ax*.  NaN cells are
+        skipped.  Text colour flips between black and white depending on
+        the background intensity (controlled by *threshold*).
+
+        Parameters
+        ----------
+        ax : matplotlib Axes
+            The axes containing the heatmap image.
+        matrix : np.ndarray
+            2-D array of values (rows × cols) matching the heatmap.
+        fmt : str, optional
+            Format spec for the value, by default ``".2f"``.
+        fontsize : int, optional
+            Annotation font size, by default ``9``.
+        threshold : float, optional
+            Absolute-value threshold above which text turns white.
+            For relative thresholds pass e.g. ``0.35 * max_abs``.
+        sem_matrix : np.ndarray | None, optional
+            If provided, a second line ``±{sem}`` is appended when the
+            SEM value is finite.
+        show_sign : bool, optional
+            Prefix positive values with ``"+"`` , by default ``True``.
+        linespacing : float | None, optional
+            Passed to ``ax.text(linespacing=...)`` when SEM is shown.
+        """
+        import numpy as np
+
+        n_rows, n_cols = matrix.shape
+        for i in range(n_rows):
+            for j in range(n_cols):
+                val = matrix[i, j]
+                if not np.isfinite(val):
+                    continue
+                text_color = "white" if abs(val) > threshold else "black"
+                sign = "+" if show_sign and val > 0 else ""
+                label_str = f"{sign}{val:{fmt}}"
+                if sem_matrix is not None:
+                    sem = sem_matrix[i, j]
+                    if not np.isnan(sem):
+                        label_str = f"{label_str}\n\u00b1{sem:{fmt}}"
+                kwargs: dict = {
+                    "ha": "center",
+                    "va": "center",
+                    "color": text_color,
+                    "fontsize": fontsize,
+                }
+                if linespacing is not None:
+                    kwargs["linespacing"] = linespacing
+                ax.text(j, i, label_str, **kwargs)
+
 
 # ============================================================================
 # Plotter Registry
