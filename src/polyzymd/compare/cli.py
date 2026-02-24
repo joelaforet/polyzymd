@@ -14,7 +14,7 @@ from typing import Optional
 import click
 import yaml
 
-from polyzymd.compare.cli_utils import common_compare_options
+from polyzymd.compare.cli_utils import common_compare_options, load_comparison_config
 from polyzymd.compare.comparators.rmsf import RMSFComparator
 from polyzymd.compare.config import (
     ComparisonConfig,
@@ -362,21 +362,7 @@ def rmsf(
         click.echo("  2. Set values in comparison.yaml (recommended)", err=True)
         sys.exit(1)
 
-    config_file = Path(config_file).resolve()
-
-    # Load and validate config
-    click.echo(f"Loading config: {config_file}")
-    try:
-        config = ComparisonConfig.from_yaml(config_file)
-    except FileNotFoundError as e:
-        click.echo(f"Error: {e}", err=True)
-        click.echo(
-            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
-        )
-        sys.exit(1)
-    except Exception as e:
-        click.echo(f"Error loading config: {e}", err=True)
-        sys.exit(1)
+    config = load_comparison_config(config_file)
 
     # Get RMSF settings from analysis_settings
     rmsf_settings = config.analysis_settings.get("rmsf")
@@ -621,21 +607,7 @@ def triad(
     # Set up logging with colored output
     setup_logging(quiet=quiet, debug=debug)
 
-    config_file = Path(config_file).resolve()
-
-    # Load and validate config
-    click.echo(f"Loading config: {config_file}")
-    try:
-        config = ComparisonConfig.from_yaml(config_file)
-    except FileNotFoundError as e:
-        click.echo(f"Error: {e}", err=True)
-        click.echo(
-            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
-        )
-        sys.exit(1)
-    except Exception as e:
-        click.echo(f"Error loading config: {e}", err=True)
-        sys.exit(1)
+    config = load_comparison_config(config_file)
 
     # Check for catalytic_triad section in analysis_settings
     triad_settings = config.analysis_settings.get("catalytic_triad")
@@ -781,21 +753,7 @@ def contacts(
     # Set up logging with colored output
     setup_logging(quiet=quiet, debug=debug)
 
-    config_file = Path(config_file).resolve()
-
-    # Load and validate config
-    click.echo(f"Loading config: {config_file}")
-    try:
-        config = ComparisonConfig.from_yaml(config_file)
-    except FileNotFoundError as e:
-        click.echo(f"Error: {e}", err=True)
-        click.echo(
-            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
-        )
-        sys.exit(1)
-    except Exception as e:
-        click.echo(f"Error loading config: {e}", err=True)
-        sys.exit(1)
+    config = load_comparison_config(config_file)
 
     # Validate config
     errors = config.validate_config()
@@ -985,21 +943,7 @@ def exposure(
     # Set up logging with colored output
     setup_logging(quiet=quiet, debug=debug)
 
-    config_file = Path(config_file).resolve()
-
-    # Load and validate config
-    click.echo(f"Loading config: {config_file}")
-    try:
-        config = ComparisonConfig.from_yaml(config_file)
-    except FileNotFoundError as e:
-        click.echo(f"Error: {e}", err=True)
-        click.echo(
-            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
-        )
-        sys.exit(1)
-    except Exception as e:
-        click.echo(f"Error loading config: {e}", err=True)
-        sys.exit(1)
+    config = load_comparison_config(config_file)
 
     # Validate config
     errors = config.validate_config()
@@ -1177,14 +1121,6 @@ def run_comparison(
     # Set up logging
     setup_logging(quiet=quiet, debug=debug)
 
-    config_file = Path(config_file).resolve()
-    if not config_file.exists():
-        click.echo(f"Error: Config file not found: {config_file}", err=True)
-        click.echo(
-            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
-        )
-        sys.exit(1)
-
     # Check if comparison type is registered
     available = ComparatorRegistry.list_available()
     if comparison_type not in available:
@@ -1194,19 +1130,7 @@ def run_comparison(
         click.echo("Use 'polyzymd compare run --list' to see all available types.", err=True)
         sys.exit(1)
 
-    # Load config
-    click.echo(f"Loading config: {config_file}")
-    try:
-        config = ComparisonConfig.from_yaml(config_file)
-    except FileNotFoundError as e:
-        click.echo(f"Error: {e}", err=True)
-        click.echo(
-            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
-        )
-        sys.exit(1)
-    except Exception as e:
-        click.echo(f"Error loading config: {e}", err=True)
-        sys.exit(1)
+    config = load_comparison_config(config_file)
 
     # Validate config
     errors = config.validate_config()
@@ -1521,21 +1445,7 @@ def binding_free_energy(
 
     setup_logging(quiet=quiet, debug=debug)
 
-    config_file = Path(config_file).resolve()
-
-    # Load and validate config
-    click.echo(f"Loading config: {config_file}")
-    try:
-        config = ComparisonConfig.from_yaml(config_file)
-    except FileNotFoundError as e:
-        click.echo(f"Error: {e}", err=True)
-        click.echo(
-            "Run 'polyzymd compare init -n <name>' to create a comparison project.", err=True
-        )
-        sys.exit(1)
-    except Exception as e:
-        click.echo(f"Error loading config: {e}", err=True)
-        sys.exit(1)
+    config = load_comparison_config(config_file)
 
     errors = config.validate_config()
     if errors:

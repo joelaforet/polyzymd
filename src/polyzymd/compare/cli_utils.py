@@ -8,6 +8,7 @@ run, binding-free-energy).
 from __future__ import annotations
 
 import functools
+import sys
 from pathlib import Path
 
 import click
@@ -66,3 +67,47 @@ def common_compare_options(func):
         return func(*args, **kwargs)
 
     return wrapper
+
+
+def load_comparison_config(config_file: Path) -> ComparisonConfig:
+    """Load and return a ComparisonConfig, exiting on error.
+
+    Checks file existence with a friendly error message, then loads
+    via ComparisonConfig.from_yaml(). Exits with sys.exit(1) on any error.
+
+    Parameters
+    ----------
+    config_file : Path
+        Path to the comparison.yaml config file.
+
+    Returns
+    -------
+    ComparisonConfig
+        The loaded configuration object.
+    """
+    from polyzymd.compare.config import ComparisonConfig
+
+    config_file = Path(config_file).resolve()
+    if not config_file.exists():
+        click.echo(f"Error: Config file not found: {config_file}", err=True)
+        click.echo(
+            "Run 'polyzymd compare init -n <name>' to create a comparison project.",
+            err=True,
+        )
+        sys.exit(1)
+
+    click.echo(f"Loading config: {config_file}")
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        click.echo(
+            "Run 'polyzymd compare init -n <name>' to create a comparison project.",
+            err=True,
+        )
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error loading config: {e}", err=True)
+        sys.exit(1)
+
+    return config
