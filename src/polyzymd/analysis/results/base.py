@@ -35,7 +35,8 @@ class BaseAnalysisResult(BaseModel, ABC):
     analysis_type : str
         Type of analysis (e.g., "rmsf", "distances")
     config_hash : str
-        Hash of config at time of analysis for validation
+        Hash of config at time of analysis for validation.
+        Defaults to ``"unknown"`` for contexts without config access.
     created_at : datetime
         Timestamp when result was created
     polyzymd_version : str
@@ -43,16 +44,23 @@ class BaseAnalysisResult(BaseModel, ABC):
     replicate : int | None
         Replicate number (None for aggregated results)
     equilibration_time : float
-        Time skipped for equilibration
+        Time skipped for equilibration. Defaults to ``0.0`` for
+        low-level analyzers that operate without config context.
     equilibration_unit : str
         Unit of equilibration time (e.g., "ns", "ps")
+    selection_string : str
+        MDAnalysis selection string used. Defaults to ``""`` for
+        contexts where selections are implicit.
     """
 
     # Class variable - subclasses should override
     analysis_type: ClassVar[str] = "base"
 
     # Metadata
-    config_hash: str = Field(..., description="SHA-256 hash of config for cache validation")
+    config_hash: str = Field(
+        default="unknown",
+        description="SHA-256 hash of config for cache validation",
+    )
     created_at: datetime = Field(
         default_factory=datetime.now, description="Timestamp of result creation"
     )
@@ -64,9 +72,15 @@ class BaseAnalysisResult(BaseModel, ABC):
     replicate: int | None = Field(
         default=None, description="Replicate number (1-indexed), None for aggregated"
     )
-    equilibration_time: float = Field(..., description="Time skipped for equilibration")
+    equilibration_time: float = Field(
+        default=0.0,
+        description="Time skipped for equilibration",
+    )
     equilibration_unit: str = Field(default="ns", description="Unit of equilibration time")
-    selection_string: str = Field(..., description="MDAnalysis selection string used")
+    selection_string: str = Field(
+        default="",
+        description="MDAnalysis selection string used",
+    )
 
     # Correlation time info (if autocorrelation was computed)
     correlation_time: float | None = Field(default=None, description="Estimated correlation time τ")
