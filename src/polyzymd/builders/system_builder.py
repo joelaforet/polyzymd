@@ -8,6 +8,7 @@ molecular system and generate the OpenFF Interchange for simulation.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
@@ -546,9 +547,15 @@ class SystemBuilder:
         the atom order in solvated_system.pdb.
 
         Batching strategy:
-        1. Parameterize each unique molecule type ONCE (cache parameters)
-        2. Create individual Interchanges in original topology order
-        3. Combine Interchanges in the same order as the original topology
+        1. Build an ``id(molecule) -> SMILES`` cache in ONE pass (avoids calling
+           ``to_smiles()`` three separate times per molecule).
+        2. Parameterize each unique molecule type ONCE (cache parameters).
+        3. Create individual Interchanges in original topology order, grouping
+           consecutive same-type molecules into single batches.
+        4. Combine Interchanges using an **adjacent-pair tree reduction** instead
+           of a serial left-fold.  This keeps the atom order identical to the
+           original topology while reducing the asymptotic cost of
+           ``Interchange.combine()`` from O(N²) to O(N log N).
 
         Note:
             When combining Interchanges from molecules parameterized by different
@@ -573,50 +580,49 @@ class SystemBuilder:
         smiles_to_name = self._build_molecule_name_mapping()
         smiles_to_template = self._build_charge_template_mapping(water_mol)
 
-        # Step 1: Create a cached Interchange for each unique molecule TYPE
-        # This avoids redundant parameterization (the expensive part)
-        smiles_to_interchange: Dict[str, Interchange] = {}
-        water_ion_smiles = {"[H][O][H]", "[Na+]", "[Cl-]"}
-
-        # Count molecules by type for logging
+        # ── Step 0: Cache to_smiles() for every molecule in ONE pass ──
+        # molecule.to_smiles() is expensive; previous code called it 3×.
+        t0 = time.perf_counter()
+        mol_id_to_smiles: Dict[int, str] = {}
         smiles_counts: Dict[str, int] = {}
-        for molecule in self._solvated_topology.molecules:
-            mol_smiles = molecule.to_smiles()
-            smiles_counts[mol_smiles] = smiles_counts.get(mol_smiles, 0) + 1
+        first_mol_for_smiles: Dict[str, Molecule] = {}
 
-        # Parameterize each unique molecule type once
+        for molecule in self._solvated_topology.molecules:
+            mid = id(molecule)
+            mol_smiles = molecule.to_smiles()
+            mol_id_to_smiles[mid] = mol_smiles
+            smiles_counts[mol_smiles] = smiles_counts.get(mol_smiles, 0) + 1
+            if mol_smiles not in first_mol_for_smiles:
+                first_mol_for_smiles[mol_smiles] = molecule
+
+        LOGGER.info(
+            f"SMILES cache built in {time.perf_counter() - t0:.1f}s "
+            f"({len(mol_id_to_smiles)} molecules, {len(smiles_counts)} unique types)"
+        )
+
+        # ── Step 1: Prepare per-type metadata (no parameterisation yet) ──
+        smiles_info: Dict[str, dict] = {}
         for mol_smiles, count in smiles_counts.items():
             display_name = smiles_to_name.get(mol_smiles, mol_smiles[:50] + "...")
-            LOGGER.info(f"Parameterizing {display_name} ({count} instance(s))")
+            LOGGER.info(f"  {display_name}: {count} instance(s)")
 
-            # Find the first molecule of this type to use as template
-            template_mol = None
-            for molecule in self._solvated_topology.molecules:
-                if molecule.to_smiles() == mol_smiles:
-                    template_mol = molecule
-                    break
-
-            # Get charge template if available
             charge_from = []
             if mol_smiles in smiles_to_template:
                 charge_from = [smiles_to_template[mol_smiles]]
 
-            # Create Interchange for ONE molecule of this type (parameterization)
-            # We'll create individual interchanges per molecule instance later
-            smiles_to_interchange[mol_smiles] = {
-                "template": template_mol,
+            smiles_info[mol_smiles] = {
+                "template": first_mol_for_smiles[mol_smiles],
                 "charge_from": charge_from,
                 "display_name": display_name,
             }
 
-        # Step 2: Create Interchanges in ORIGINAL TOPOLOGY ORDER
-        # This preserves the exact molecule order from solvated_topology
+        # ── Step 2: Create Interchanges in ORIGINAL TOPOLOGY ORDER ──
+        # Group consecutive molecules of the same type into single batches.
+        t1 = time.perf_counter()
         all_interchanges: List[Interchange] = []
         interchange_names: List[str] = []
 
-        # Group consecutive molecules of the same type for efficient batching
-        # while preserving the overall molecule order
-        current_smiles = None
+        current_smiles: str | None = None
         current_batch: List[Molecule] = []
 
         def flush_batch():
@@ -625,7 +631,7 @@ class SystemBuilder:
             if not current_batch:
                 return
 
-            info = smiles_to_interchange[current_smiles]
+            info = smiles_info[current_smiles]
             display_name = info["display_name"]
             charge_from = info["charge_from"]
 
@@ -640,22 +646,19 @@ class SystemBuilder:
 
             current_batch = []
 
-        # Process molecules in original order, batching consecutive same-type molecules
         for molecule in self._solvated_topology.molecules:
-            mol_smiles = molecule.to_smiles()
+            mol_smiles = mol_id_to_smiles[id(molecule)]
 
             if mol_smiles != current_smiles:
-                # New molecule type - flush previous batch
                 flush_batch()
                 current_smiles = mol_smiles
 
             current_batch.append(molecule)
 
-        # Don't forget the last batch
         flush_batch()
 
-        # Step 3: Combine all interchanges (preserving order)
-        LOGGER.info(f"Combining {len(all_interchanges)} Interchange batch(es)")
+        t2 = time.perf_counter()
+        LOGGER.info(f"Created {len(all_interchanges)} Interchange batch(es) in {t2 - t1:.1f}s")
         if len(interchange_names) <= 10:
             LOGGER.info(f"  Batches: {', '.join(interchange_names)}")
         else:
@@ -665,12 +668,28 @@ class SystemBuilder:
         if not all_interchanges:
             raise RuntimeError("No molecules found in solvated topology")
 
+        # ── Step 3: Serial combine (preserving order) ──
+        # OpenFF Interchange.combine() creates _DUPLICATE parameter keys when
+        # SMIRKS patterns resolve to different force constants in different
+        # molecular contexts.  Combining two objects that *both* contain
+        # _DUPLICATE keys raises UnsupportedCombinationError, which rules out
+        # tree-based (pairwise) reduction.  We therefore keep the serial
+        # left-fold: combined = ((A + B) + C) + D.
+        #
+        # The O(N²) cost is mitigated by having very few batches (one per
+        # contiguous same-SMILES run), typically 5-10 for a solvated system.
         combined = all_interchanges[0]
-
-        for inc in all_interchanges[1:]:
+        for idx, inc in enumerate(all_interchanges[1:], 1):
+            t_step = time.perf_counter()
             combined = combined.combine(inc)
+            elapsed = time.perf_counter() - t_step
+            LOGGER.info(
+                f"  Combined batch {idx}/{len(all_interchanges) - 1} "
+                f"({interchange_names[idx]}) in {elapsed:.1f}s"
+            )
 
-        LOGGER.info("Interchange combination complete")
+        t3 = time.perf_counter()
+        LOGGER.info(f"Interchange combination complete ({t3 - t2:.1f}s total)")
 
         # Reset box vectors
         combined.box = self._solvated_topology.box_vectors

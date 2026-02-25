@@ -79,7 +79,7 @@ class PolymerBuilder:
 
     1. Cached mode (legacy): Load pre-built SDF files from disk
        - Requires sdf_directory with pre-built polymer files
-       - Filenames: {type_prefix}_{sequence}_{length}-mer_charged.sdf
+        - Filenames: {type_prefix}_seq={sequence}_{length}-mer_charged.sdf
 
     2. Dynamic mode: Generate polymers on-the-fly using Polymerist
        - Requires monomer SMILES and ATRP reaction templates
@@ -354,20 +354,20 @@ class PolymerBuilder:
         if sequence in self._loaded_molecules:
             return self._loaded_molecules[sequence]
 
-        # Dynamic mode: Generate polymers using FragmentGenerator and PolymerGenerator
-        if self._generation_mode == "dynamic":
-            return self._generate_polymer(sequence)
-
-        # Cached mode: Try to load from SDF directory
+        # Try to load from SDF directory (checked first in ALL modes)
         if self._sdf_directory:
             sdf_path = self._get_sdf_path(sequence, self._sdf_directory)
             if sdf_path.exists():
                 return self._load_from_sdf(sdf_path)
 
-        # Try to load from cache directory
+        # Try to load from cache directory (checked in ALL modes)
         cache_path = self._get_sdf_path(sequence, self._cache_directory)
         if cache_path.exists():
             return self._load_from_sdf(cache_path)
+
+        # Dynamic mode: Generate polymers using FragmentGenerator and PolymerGenerator
+        if self._generation_mode == "dynamic":
+            return self._generate_polymer(sequence)
 
         # Generate if allowed (cached mode fallback)
         if self._allow_generation:
@@ -395,8 +395,8 @@ class PolymerBuilder:
         Returns:
             Path to the expected SDF file.
         """
-        # Format: {type_prefix}_{sequence}_{length}-mer_charged.sdf
-        filename = f"{self._type_prefix}_{sequence}_{self._length}-mer_charged.sdf"
+        # Format: {type_prefix}_seq={sequence}_{length}-mer_charged.sdf
+        filename = f"{self._type_prefix}_seq={sequence}_{self._length}-mer_charged.sdf"
         return directory / filename
 
     def _load_from_sdf(self, sdf_path: Path) -> Molecule:

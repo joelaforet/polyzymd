@@ -291,6 +291,19 @@ def pack_polymers(
     from openff.toolkit import Topology
     from openff.units import Quantity
 
+    # --- sort molecule types by count descending ---
+    # Higher-count molecules first improves Packmol convergence (fewer
+    # restarts when the most-replicated species is placed first).
+    paired = list(zip(molecules, number_of_copies))
+    paired.sort(key=lambda pair: pair[1], reverse=True)
+    molecules = [p[0] for p in paired]
+    number_of_copies = [p[1] for p in paired]
+
+    logger.info(
+        "Packmol molecule order (count-descending): %s",
+        ", ".join(f"{n}x" for n in number_of_copies),
+    )
+
     # --- resolve working directory ---
     _temporary = False
     if working_directory is None:
