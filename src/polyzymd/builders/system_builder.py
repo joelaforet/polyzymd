@@ -1047,7 +1047,7 @@ class SystemBuilder:
         LOGGER.info("  to_openmm_topology: %.1fs", t_topo)
 
         t0 = time.perf_counter()
-        omm_system = self._interchange.to_openmm(combine_nonbonded_forces=False)
+        omm_system = self._interchange.to_openmm(combine_nonbonded_forces=True)
         t_sys = time.perf_counter() - t0
         LOGGER.info("  to_openmm (system): %.1fs", t_sys)
 
