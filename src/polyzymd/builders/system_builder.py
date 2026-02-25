@@ -363,19 +363,28 @@ class SystemBuilder:
     def create_interchange(
         self,
         use_optimized_combining: bool = True,
+        use_batched_combining: bool = False,
     ) -> Interchange:
         """Create the OpenFF Interchange for simulation.
 
-        When polymers are present and use_optimized_combining is True,
-        uses the Interchange.combine() optimization which is significantly
-        faster for systems with many unique molecules.
+        By default, passes the entire solvated topology to a single
+        ``ForceField.create_interchange()`` call.  OpenFF's internal
+        ``identical_molecule_groups`` mechanism deduplicates SMIRKS
+        matching and charge assignment so that work scales with the
+        number of *unique* molecule types, not total molecules.
 
-        This method uses pre-computed charges from PolyzyMD's solvent cache
-        to ensure all copies of water and co-solvent molecules have identical
-        parameters, avoiding per-molecule AM1BCC calculations.
+        Pre-computed charges are supplied via ``charge_from_molecules``
+        for water, polymers, substrate, and co-solvents so that no
+        AM1BCC calculations are triggered at runtime.
+
+        The legacy batched approach (multiple ``create_interchange()``
+        calls joined by ``Interchange.combine()``) is available via
+        ``use_batched_combining=True`` for A/B benchmarking.
 
         Args:
-            use_optimized_combining: Use optimized combining for polymers.
+            use_optimized_combining: Unused, kept for backward compat.
+            use_batched_combining: If True, use the legacy batched +
+                serial-combine code path instead of a single call.
 
         Returns:
             OpenFF Interchange object.
@@ -399,15 +408,12 @@ class SystemBuilder:
             water_model = self._solvent_builder._composition.water_model
         water_mol = get_solvent_molecule(water_model)
 
-        # Decide whether to use optimized combining
-        use_combining = (
-            use_optimized_combining and self._polymer_molecules and len(self._polymer_molecules) > 0
-        )
-
-        if use_combining:
-            self._interchange = self._create_interchange_optimized(ff, water_mol)
+        if use_batched_combining:
+            LOGGER.info("Using BATCHED approach (multiple create + serial combine)")
+            self._interchange = self._create_interchange_batched(ff, water_mol)
         else:
-            self._interchange = self._create_interchange_simple(ff, water_mol)
+            LOGGER.info("Using SINGLE-CALL approach (one create_interchange, no combine)")
+            self._interchange = self._create_interchange_single_call(ff, water_mol)
 
         LOGGER.info("Interchange created successfully")
 
@@ -499,44 +505,78 @@ class SystemBuilder:
 
         return smiles_to_template
 
-    def _create_interchange_simple(self, ff: ForceField, water_mol: Molecule) -> Interchange:
-        """Create Interchange using batched molecule processing.
+    def _create_interchange_single_call(self, ff: ForceField, water_mol: Molecule) -> Interchange:
+        """Create Interchange with a single ``ForceField.create_interchange()`` call.
 
-        Groups molecules by type (SMILES) and creates one Interchange per
-        unique molecule type, then combines them. This is much more efficient
-        than creating one Interchange per molecule instance.
+        Passes the entire solvated topology at once.  OpenFF internally
+        groups identical molecules (``Topology.identical_molecule_groups``)
+        so SMIRKS matching and charge assignment scale with the number of
+        *unique* molecule types, not total molecules.
 
-        Args:
-            ff: OpenFF ForceField.
-            water_mol: Water molecule with pre-computed charges.
-
-        Returns:
-            Interchange object.
-        """
-        # Use the same optimized batching logic
-        return self._create_interchange_batched(ff, water_mol)
-
-    def _create_interchange_optimized(self, ff: ForceField, water_mol: Molecule) -> Interchange:
-        """Create Interchange using optimized batched combining.
-
-        Groups molecules by type (SMILES) and creates one Interchange per
-        unique molecule type, then combines them. This dramatically reduces
-        the number of Interchange.combine() calls needed.
-
-        For a system with 1133 DMSO molecules, this creates ~7 Interchanges
-        instead of ~1140, providing ~160x fewer combine operations.
-
-        Uses pre-computed charges for water and co-solvents to avoid running
-        AM1BCC charge calculation for every solvent molecule.
+        This avoids ``Interchange.combine()`` entirely — previously the
+        dominant bottleneck (84 min for a 308 K-atom system).
 
         Args:
             ff: OpenFF ForceField.
             water_mol: Water molecule with pre-computed charges.
 
         Returns:
-            Combined Interchange object.
+            Interchange object with box vectors set.
         """
-        return self._create_interchange_batched(ff, water_mol)
+        # Build charge templates: one per unique species
+        t0 = time.perf_counter()
+        charge_from: List[Molecule] = [water_mol]
+
+        seen_smiles: set = set()
+        for mol in self._polymer_molecules:
+            smi = mol.to_smiles()
+            if smi not in seen_smiles:
+                charge_from.append(mol)
+                seen_smiles.add(smi)
+
+        if self._substrate_molecule:
+            charge_from.append(self._substrate_molecule)
+
+        if self._solvent_builder._composition:
+            for cosolvent in self._solvent_builder._composition.co_solvents:
+                if cosolvent.molecule is not None:
+                    charge_from.append(cosolvent.molecule)
+
+        LOGGER.info(
+            f"Charge templates: {len(charge_from)} "
+            f"(water + {len(seen_smiles)} polymer type(s) + substrate + co-solvents)"
+        )
+        LOGGER.info(f"  Template prep took {time.perf_counter() - t0:.1f}s")
+
+        # Single parameterization call
+        t1 = time.perf_counter()
+        LOGGER.info(
+            f"Calling ff.create_interchange() on full topology "
+            f"({self._solvated_topology.n_molecules} molecules, "
+            f"{self._solvated_topology.n_atoms} atoms) ..."
+        )
+
+        # Suppress per-atom INFO logging from OpenFF's LibraryCharges handler.
+        # It emits one line per atom during charge assignment (~200K lines for
+        # a typical solvated system), which floods logs without adding value.
+        _nonbonded_logger = logging.getLogger("openff.interchange.smirnoff._nonbonded")
+        _prev_level = _nonbonded_logger.level
+        _nonbonded_logger.setLevel(logging.WARNING)
+        try:
+            interchange = ff.create_interchange(
+                self._solvated_topology,
+                charge_from_molecules=charge_from,
+            )
+        finally:
+            _nonbonded_logger.setLevel(_prev_level)
+
+        t2 = time.perf_counter()
+        LOGGER.info(f"  create_interchange() completed in {t2 - t1:.1f}s")
+
+        # Set box vectors
+        interchange.box = self._solvated_topology.box_vectors
+
+        return interchange
 
     def _create_interchange_batched(self, ff: ForceField, water_mol: Molecule) -> Interchange:
         """Create Interchange using batched molecule processing with preserved order.
