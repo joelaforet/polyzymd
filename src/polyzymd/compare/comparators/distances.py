@@ -331,11 +331,22 @@ class DistancesComparator(
         # Note: We do NOT compute cross-pair averages here. Each pair is compared
         # independently since averaging unrelated distances (e.g., H-bond distance
         # + lid-opening distance) is not semantically meaningful.
+
+        # Map auto-generated pair labels to user-defined labels from settings.
+        # The DistanceCalculator auto-generates labels from selection strings
+        # (e.g., "resid77_OG-RBY"), but comparison.yaml defines human-readable
+        # labels (e.g., "Ser77-Substrate"). We match by selection strings.
+        selection_to_label: dict[tuple[str, str], str] = {
+            (p.selection_a, p.selection_b): p.label for p in self.analysis_settings.pairs
+        }
+
         pair_summaries = []
 
         for pr in agg_result.pair_results:
+            # Use the user-defined label if selections match, else keep auto-generated
+            user_label = selection_to_label.get((pr.selection1, pr.selection2), pr.pair_label)
             pair_summary = DistancePairSummary(
-                label=pr.pair_label,
+                label=user_label,
                 selection_a=pr.selection1,
                 selection_b=pr.selection2,
                 threshold=pr.threshold,
