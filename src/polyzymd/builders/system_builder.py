@@ -1020,6 +1020,11 @@ class SystemBuilder:
     def get_openmm_components(self) -> Tuple[Any, Any, Any]:
         """Extract OpenMM components from the Interchange.
 
+        Applies the list-to-set monkey-patch for 1-4 pair lookups in
+        ``to_openmm()`` (Interchange 0.5.x only) before extracting
+        components. This fixes an O(N^2) bottleneck that otherwise
+        dominates conversion time for large systems.
+
         Returns:
             Tuple of (topology, system, positions).
 
@@ -1031,9 +1036,33 @@ class SystemBuilder:
 
         from openff.interchange.interop.openmm._positions import to_openmm_positions
 
+        from polyzymd.utils.openmm_patches import patch_interchange_to_openmm_14_pairs
+
+        # Apply the list-to-set patch for 1-4 pair lookups (idempotent)
+        patch_interchange_to_openmm_14_pairs()
+
+        t0 = time.perf_counter()
         omm_topology = self._interchange.to_openmm_topology()
+        t_topo = time.perf_counter() - t0
+        LOGGER.info("  to_openmm_topology: %.1fs", t_topo)
+
+        t0 = time.perf_counter()
         omm_system = self._interchange.to_openmm(combine_nonbonded_forces=False)
+        t_sys = time.perf_counter() - t0
+        LOGGER.info("  to_openmm (system): %.1fs", t_sys)
+
+        t0 = time.perf_counter()
         omm_positions = to_openmm_positions(self._interchange, include_virtual_sites=True)
+        t_pos = time.perf_counter() - t0
+        LOGGER.info("  to_openmm_positions: %.1fs", t_pos)
+
+        LOGGER.info(
+            "  OpenMM extraction total: %.1fs (topo=%.1f, sys=%.1f, pos=%.1f)",
+            t_topo + t_sys + t_pos,
+            t_topo,
+            t_sys,
+            t_pos,
+        )
 
         return omm_topology, omm_system, omm_positions
 
