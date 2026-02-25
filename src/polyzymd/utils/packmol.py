@@ -52,6 +52,7 @@ def build_packmol_input(
     solute_pdb_path: str | None = None,
     use_pbc: bool = False,
     movebadrandom: bool = False,
+    ignore_conect: bool = False,
 ) -> str:
     """Build the text content of a Packmol input file.
 
@@ -79,6 +80,11 @@ def build_packmol_input(
         near well-packed neighbours. This improves convergence when the
         restraints are complex (many unique chain types, dense packing).
         Default is ``False``.
+    ignore_conect : bool, optional
+        If ``True``, add the ``ignore_conect`` Packmol keyword so that
+        CONECT records in PDB input files are not parsed.  This prevents
+        failures when atom indices exceed the 5-digit PDB fixed-width
+        field limit (>99,999 atoms).  Default is ``False``.
 
     Returns
     -------
@@ -98,6 +104,10 @@ def build_packmol_input(
         f"output {_PACKMOL_OUTPUT_FILE}",
         "",
     ]
+
+    if ignore_conect:
+        lines.append("ignore_conect")
+        lines.append("")
 
     if movebadrandom:
         lines.append("movebadrandom")
@@ -374,8 +384,201 @@ def pack_polymers(
 
 
 # ---------------------------------------------------------------------------
+# High-level solvation helper
+# ---------------------------------------------------------------------------
+
+
+def solvate_with_packmol(
+    molecules: list,
+    number_of_copies: list[int],
+    solute,
+    box_vectors,
+    *,
+    tolerance_angstrom: float = 2.0,
+    movebadrandom: bool = False,
+    working_directory: str | Path | None = None,
+    retain_working_files: bool = True,
+):
+    """Solvate a system using Packmol, replacing OpenFF's ``pack_box()``.
+
+    This is a drop-in replacement for
+    ``openff.interchange.components._packmol.pack_box()`` that handles the
+    PDB CONECT-record overflow affecting systems with >99,999 atoms.
+    OpenMM's PDB writer hex-encodes atom indices beyond 5 digits, which
+    Packmol's fixed-width Fortran parser cannot read.
+
+    The fix has two layers:
+
+    1. **Strip CONECT records** from the solute PDB after writing.
+       Packmol only needs atomic coordinates; bond topology is already
+       captured in the OpenFF ``Topology`` object.
+    2. **``ignore_conect`` keyword** in the Packmol input file as a
+       belt-and-suspenders safeguard.
+
+    Parameters
+    ----------
+    molecules : list[openff.toolkit.Molecule]
+        Solvent molecule types (water, ions, co-solvents).
+    number_of_copies : list[int]
+        Number of copies of each molecule type (parallel to *molecules*).
+    solute : openff.toolkit.Topology
+        Topology to solvate (protein + polymers + substrate).
+    box_vectors : openff.units.Quantity
+        Box vectors with shape (3, 3) and length units (e.g. nanometers).
+    tolerance_angstrom : float, optional
+        Packmol tolerance in Angstrom (default 2.0).
+    movebadrandom : bool, optional
+        Pass the ``movebadrandom`` keyword to Packmol (default ``False``).
+    working_directory : str, Path, or None, optional
+        Directory for Packmol input/output files.  A temporary directory is
+        created when ``None``.
+    retain_working_files : bool, optional
+        Keep working files after the run (default ``True``).
+
+    Returns
+    -------
+    openff.toolkit.Topology
+        Solvated topology with solute + solvent and box vectors set.
+    """
+    import numpy as np
+    from openff.interchange.components._packmol import (
+        _center_topology_at,
+        _compute_brick_from_box_vectors,
+        _create_molecule_pdbs,
+        _create_solute_pdb,
+        _load_positions,
+    )
+    from openff.toolkit import Topology
+    from openff.units import Quantity
+
+    # --- resolve working directory ---
+    _temporary = False
+    if working_directory is None:
+        working_directory = Path(tempfile.mkdtemp())
+        _temporary = True
+    else:
+        working_directory = Path(working_directory)
+        working_directory.mkdir(parents=True, exist_ok=True)
+
+    # --- compute brick dimensions ---
+    brick_size = _compute_brick_from_box_vectors(box_vectors)
+    box_size_angstrom = np.asarray(brick_size.m_as("angstrom"), dtype=float)
+
+    # --- center solute in the brick ---
+    centered_solute = _center_topology_at("BRICK", solute, box_vectors, brick_size)
+
+    # detect whether PBC is usable (rectangular box + packmol >= 20.15.0)
+    _use_pbc = _check_pbc_available(box_vectors)
+
+    original_cwd = Path.cwd()
+    try:
+        os.chdir(working_directory)
+
+        # write PDB files
+        solute_pdb = _create_solute_pdb(centered_solute, box_vectors)
+        molecule_pdbs = _create_molecule_pdbs(molecules)
+
+        # Strip CONECT records from the solute PDB.
+        # OpenMM hex-encodes atom indices > 99999, which Packmol cannot parse.
+        if solute_pdb is not None:
+            n_stripped = _strip_conect_records(solute_pdb)
+            if n_stripped > 0:
+                logger.info(
+                    "Stripped %d CONECT records from solute PDB (%d atoms)",
+                    n_stripped,
+                    centered_solute.n_atoms,
+                )
+
+        # build and run packmol
+        _ignore_conect = _check_ignore_conect_supported()
+        input_text = build_packmol_input(
+            molecule_pdb_paths=molecule_pdbs,
+            molecule_counts=number_of_copies,
+            box_size_angstrom=box_size_angstrom,
+            tolerance_angstrom=tolerance_angstrom,
+            solute_pdb_path=solute_pdb,
+            use_pbc=_use_pbc,
+            movebadrandom=movebadrandom,
+            ignore_conect=_ignore_conect,
+        )
+
+        output_path = run_packmol(
+            input_text=input_text,
+            working_directory=working_directory,
+            retain_working_files=True,  # always keep; we clean up below
+        )
+
+        positions = _load_positions(str(output_path.name))
+
+    finally:
+        os.chdir(original_cwd)
+
+    # --- assemble output topology ---
+    added_molecules = []
+    for mol, n in zip(molecules, number_of_copies):
+        added_molecules.extend([mol] * n)
+    solvent_topology = Topology.from_molecules(added_molecules)
+
+    n_solute_atoms = len(positions) - solvent_topology.n_atoms
+    solvent_topology.set_positions(Quantity(positions[n_solute_atoms:], "angstrom"))
+
+    # Prepend the original (un-centered) solute so that positions match
+    # the caller's topology.  OpenFF's pack_box() does the same thing:
+    # it uses the *original* solute positions, not the centered copy.
+    if solute is not None:
+        solvated_topology = solute + solvent_topology
+    else:
+        solvated_topology = solvent_topology
+
+    solvated_topology.box_vectors = box_vectors
+
+    if _temporary and not retain_working_files:
+        shutil.rmtree(working_directory, ignore_errors=True)
+
+    return solvated_topology
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _strip_conect_records(pdb_path: str | Path) -> int:
+    """Remove CONECT lines from a PDB file in-place.
+
+    Parameters
+    ----------
+    pdb_path : str or Path
+        Path to the PDB file to modify.
+
+    Returns
+    -------
+    int
+        Number of CONECT lines removed.
+    """
+    pdb_path = Path(pdb_path)
+    lines = pdb_path.read_text().splitlines(keepends=True)
+    filtered = [line for line in lines if not line.startswith("CONECT")]
+    n_removed = len(lines) - len(filtered)
+    if n_removed > 0:
+        pdb_path.write_text("".join(filtered))
+    return n_removed
+
+
+def _check_ignore_conect_supported() -> bool:
+    """Return True if the installed Packmol supports ``ignore_conect``.
+
+    The ``ignore_conect`` keyword was added after version 21.1.3.
+    We check for version > 21.1.3.  If the version cannot be determined,
+    return False (safe default — CONECT stripping handles the issue).
+    """
+    try:
+        from openff.interchange.components._packmol import _get_packmol_version
+        from packaging.version import Version
+
+        return _get_packmol_version() > Version("21.1.3")
+    except Exception:
+        return False
 
 
 def _check_pbc_available(box_vectors) -> bool:
