@@ -263,18 +263,24 @@ class SystemBuilder:
         tolerance: float = 2.0,
         movebadrandom: bool = False,
         working_directory: Optional[Union[str, Path]] = None,
+        box_vectors_nm: Optional[List[float]] = None,
     ) -> Topology:
         """Pack polymers around the combined solute topology.
 
         Args:
             padding: Box padding in nm. Larger values give polymers more room
-                and can significantly speed up PACKMOL convergence.
+                and can significantly speed up PACKMOL convergence.  Ignored
+                when *box_vectors_nm* is provided.
             tolerance: PACKMOL tolerance in Angstrom.
             movebadrandom: When True, pass the ``movebadrandom`` keyword to
                 PACKMOL. Improves convergence for dense or heterogeneous
                 polymer systems (many unique chain types) by placing
                 badly-packed molecules at random positions in the box.
             working_directory: Directory for PACKMOL files.
+            box_vectors_nm: Optional explicit box dimensions ``[Lx, Ly, Lz]``
+                in nanometers.  When provided, overrides the auto-computed
+                bounding box + *padding*.  The protein is centered at the
+                midpoint of this box.
 
         Returns:
             Topology with polymers packed.
@@ -289,22 +295,30 @@ class SystemBuilder:
             LOGGER.info("No polymers to pack, returning combined topology")
             return self._combined_topology
 
+        import numpy as np
         from openff.units import Quantity
 
         from polyzymd.utils import boxvectors
         from polyzymd.utils.packmol import pack_polymers as _pack_polymers
 
+        # Calculate box vectors — explicit override or auto from bbox + padding
+        if box_vectors_nm is not None:
+            LOGGER.info(
+                f"Using explicit box vectors: "
+                f"[{box_vectors_nm[0]:.2f}, {box_vectors_nm[1]:.2f}, "
+                f"{box_vectors_nm[2]:.2f}] nm"
+            )
+            box_vecs = Quantity(np.diag(box_vectors_nm), "nanometer")
+        else:
+            padding_qty = Quantity(padding, "nanometer")
+            min_box_vecs = boxvectors.get_topology_bbox(self._combined_topology)
+            box_vecs = boxvectors.pad_box_vectors_uniform(min_box_vecs, padding_qty)
+
         LOGGER.info(
             f"Packing {sum(self._polymer_counts)} polymer chains "
             f"({len(self._polymer_molecules)} unique types), "
-            f"padding={padding} nm, tolerance={tolerance} A"
-            + (" [movebadrandom]" if movebadrandom else "")
+            f"tolerance={tolerance} A" + (" [movebadrandom]" if movebadrandom else "")
         )
-
-        # Calculate box vectors
-        padding_qty = Quantity(padding, "nanometer")
-        min_box_vecs = boxvectors.get_topology_bbox(self._combined_topology)
-        box_vecs = boxvectors.pad_box_vectors_uniform(min_box_vecs, padding_qty)
 
         # Pack polymers using our custom PACKMOL runner (supports movebadrandom)
         packed_top = _pack_polymers(

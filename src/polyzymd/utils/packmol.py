@@ -53,6 +53,8 @@ def build_packmol_input(
     use_pbc: bool = False,
     movebadrandom: bool = False,
     ignore_conect: bool = False,
+    inner_exclusion_box_angstrom: "NDArray | None" = None,
+    nloop: int | None = None,
 ) -> str:
     """Build the text content of a Packmol input file.
 
@@ -85,6 +87,19 @@ def build_packmol_input(
         CONECT records in PDB input files are not parsed.  This prevents
         failures when atom indices exceed the 5-digit PDB fixed-width
         field limit (>99,999 atoms).  Default is ``False``.
+    inner_exclusion_box_angstrom : NDArray or None, optional
+        When provided, a 1-D array of 6 floats
+        ``[xmin, ymin, zmin, xmax, ymax, zmax]`` in Angstrom defining a
+        rectangular region that packed molecules must avoid.  An
+        ``outside box`` constraint is added to every non-fixed structure
+        block, creating a rectangular *shell* between the inner exclusion
+        zone and the outer packing box.  Ignored when *use_pbc* is
+        ``True``.  Default is ``None`` (no exclusion zone).
+    nloop : int or None, optional
+        Maximum number of GENCAN optimisation loops *per molecule type*.
+        Packmol's default is 50; for dense shell-packing with many
+        molecules, higher values (200–500) improve convergence.
+        Default is ``None`` (use Packmol's built-in default).
 
     Returns
     -------
@@ -97,6 +112,18 @@ def build_packmol_input(
         effective_box = np.asarray(box_size_angstrom, dtype=float)
     else:
         effective_box = np.asarray(box_size_angstrom, dtype=float) - tolerance_angstrom
+
+    # Pre-format the exclusion constraint line (if requested and not PBC)
+    _exclusion_line: str | None = None
+    if inner_exclusion_box_angstrom is not None and not use_pbc:
+        ebox = np.asarray(inner_exclusion_box_angstrom, dtype=float)
+        if ebox.shape != (6,):
+            raise ValueError(f"inner_exclusion_box_angstrom must have shape (6,), got {ebox.shape}")
+        _exclusion_line = (
+            f"  outside box"
+            f" {ebox[0]:.6f} {ebox[1]:.6f} {ebox[2]:.6f}"
+            f" {ebox[3]:.6f} {ebox[4]:.6f} {ebox[5]:.6f}"
+        )
 
     lines: list[str] = [
         f"tolerance {tolerance_angstrom:f}",
@@ -111,6 +138,10 @@ def build_packmol_input(
 
     if movebadrandom:
         lines.append("movebadrandom")
+        lines.append("")
+
+    if nloop is not None:
+        lines.append(f"nloop {nloop}")
         lines.append("")
 
     if use_pbc:
@@ -144,6 +175,8 @@ def build_packmol_input(
                 f"  inside box 0. 0. 0."
                 f" {effective_box[0]:.6f} {effective_box[1]:.6f} {effective_box[2]:.6f}"
             )
+        if _exclusion_line is not None:
+            block.append(_exclusion_line)
         block.append("end structure")
         block.append("")
         lines.extend(block)
@@ -214,23 +247,41 @@ def run_packmol(
     try:
         os.chdir(working_directory)
         with input_path.open() as fh:
-            try:
-                result = subprocess.check_output(
-                    packmol_binary,
-                    stdin=fh,
-                    stderr=subprocess.STDOUT,
-                )
-            except subprocess.CalledProcessError as exc:
-                error_log_path.write_bytes(exc.output)
-                raise RuntimeError(
-                    f"Packmol exited with return code {exc.returncode}. "
-                    f"See {error_log_path} for details."
-                ) from exc
+            result = subprocess.run(
+                packmol_binary,
+                stdin=fh,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
     finally:
         os.chdir(original_cwd)
 
-    stdout = result.decode("utf-8", errors="replace")
-    if "Success!" not in stdout:
+    stdout = result.stdout.decode("utf-8", errors="replace")
+
+    # Exit code 173 means "ended without perfect packing".  Packmol still
+    # writes its best solution to the output file.  Since systems are
+    # energy-minimised before MD, minor steric violations are acceptable.
+    # Treat 173 as a warning rather than a fatal error.
+    _PACKMOL_EXIT_IMPERFECT = 173
+
+    if result.returncode == _PACKMOL_EXIT_IMPERFECT:
+        error_log_path.write_text(stdout)
+        logger.warning(
+            "Packmol exited with code %d (imperfect packing). "
+            "The best solution was written to %s and will be used. "
+            "Minor steric clashes will be resolved during energy minimisation. "
+            "See %s for details.",
+            _PACKMOL_EXIT_IMPERFECT,
+            output_path.name,
+            error_log_path,
+        )
+    elif result.returncode != 0:
+        error_log_path.write_text(stdout)
+        raise RuntimeError(
+            f"Packmol exited with return code {result.returncode}. "
+            f"See {error_log_path} for details."
+        )
+    elif "Success!" not in stdout:
         raise RuntimeError(
             "Packmol did not raise an error code but 'Success!' was not found "
             "in its output. The packing may not have converged. "
@@ -256,6 +307,7 @@ def pack_polymers(
     *,
     tolerance_angstrom: float = 2.0,
     movebadrandom: bool = False,
+    nloop: int | None = 200,
     working_directory: str | Path | None = None,
     retain_working_files: bool = True,
 ):
@@ -263,7 +315,9 @@ def pack_polymers(
 
     This is a drop-in replacement for the OpenFF ``pack_box()`` call in
     :meth:`~polyzymd.builders.system_builder.SystemBuilder.pack_polymers`.
-    It adds support for the ``movebadrandom`` Packmol keyword.
+    It adds support for the ``movebadrandom`` Packmol keyword and packs
+    polymers in a rectangular shell around the protein (via ``outside box``
+    + ``inside box`` constraints).
 
     Parameters
     ----------
@@ -279,6 +333,10 @@ def pack_polymers(
         Packmol tolerance in Angstrom (default 2.0).
     movebadrandom : bool, optional
         Pass the ``movebadrandom`` keyword to Packmol (default ``False``).
+    nloop : int or None, optional
+        Maximum GENCAN optimisation loops per molecule type.  Packmol's
+        default is 50; for dense shell-packing with many molecules, higher
+        values (200-500) improve convergence.  Default is ``200``.
     working_directory : str, Path, or None, optional
         Directory for Packmol input/output files.  A temporary directory is
         created when ``None``.
@@ -330,8 +388,72 @@ def pack_polymers(
     # --- center solute in the brick ---
     centered_solute = _center_topology_at("BRICK", solute, box_vectors, brick_size)
 
-    # detect whether PBC is usable (rectangular box + packmol >= 20.15.0)
-    _use_pbc = _check_pbc_available(box_vectors)
+    # --- compute inner exclusion box (polymer shell constraint) ---
+    # Polymers must pack in a *shell* around the protein, not throughout
+    # the entire box volume.  We use Packmol's ``outside box`` constraint
+    # with a rectangular exclusion zone equal to the centered solute's
+    # bounding box inflated by the Packmol tolerance on each side.
+    #
+    # The shell thickness is controlled entirely by the caller's
+    # ``packing.padding`` parameter.  If the shell is too thin for the
+    # polymers being packed, a warning is logged with a recommended
+    # padding value.
+    from polyzymd.utils.boxvectors import get_topology_bbox_bounds
+
+    min_coords, max_coords = get_topology_bbox_bounds(centered_solute)
+    inner_exclusion_box = np.array(
+        [
+            min_coords[0] - tolerance_angstrom,
+            min_coords[1] - tolerance_angstrom,
+            min_coords[2] - tolerance_angstrom,
+            max_coords[0] + tolerance_angstrom,
+            max_coords[1] + tolerance_angstrom,
+            max_coords[2] + tolerance_angstrom,
+        ]
+    )
+
+    # Compute shell thicknesses for diagnostics.  The effective packing
+    # box (non-PBC) runs from 0 to ``box_size - tolerance``.
+    effective_box = box_size_angstrom - tolerance_angstrom
+    shell_lo = inner_exclusion_box[:3]  # distance from origin to exclusion face
+    shell_hi = effective_box - inner_exclusion_box[3:]  # exclusion face to box edge
+    min_shell = float(min(np.min(shell_lo), np.min(shell_hi)))
+
+    logger.info(
+        "Protein bbox (A): [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]",
+        *min_coords,
+        *max_coords,
+    )
+    logger.info(
+        "Exclusion box (A): [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]",
+        *inner_exclusion_box,
+    )
+    logger.info(
+        "Shell thickness lo (A): [%.1f, %.1f, %.1f]  hi: [%.1f, %.1f, %.1f]  min: %.1f",
+        *shell_lo,
+        *shell_hi,
+        min_shell,
+    )
+
+    # Warn if the shell is thinner than the largest polymer diameter.
+    max_diameter = max(_max_molecule_diameter_angstrom(mol) for mol in molecules)
+    if min_shell < max_diameter:
+        deficit_nm = (max_diameter - min_shell) / 10.0
+        logger.warning(
+            "Polymer shell thickness (%.1f A) is less than the largest "
+            "polymer diameter (%.1f A). Packing may fail or produce poor "
+            "results. Consider increasing packing.padding by at least "
+            "%.1f nm.",
+            min_shell,
+            max_diameter,
+            deficit_nm,
+        )
+
+    # Force PBC off for polymer packing — we need per-structure ``inside box``
+    # + ``outside box`` constraints to create the polymer shell.  PBC mode
+    # removes per-structure spatial constraints.  (Solvation can still use PBC
+    # since it doesn't need shell constraints.)
+    _use_pbc = False
 
     original_cwd = Path.cwd()
     try:
@@ -350,6 +472,8 @@ def pack_polymers(
             solute_pdb_path=solute_pdb,
             use_pbc=_use_pbc,
             movebadrandom=movebadrandom,
+            inner_exclusion_box_angstrom=inner_exclusion_box,
+            nloop=nloop,
         )
 
         output_path = run_packmol(
@@ -364,6 +488,10 @@ def pack_polymers(
         os.chdir(original_cwd)
 
     # --- assemble output topology ---
+    # Use the *centered* solute so that protein coordinates match the
+    # Packmol frame of reference (polymers were packed around the centered
+    # copy).  Previous code incorrectly used the original un-centered
+    # solute, creating a spatial mismatch between protein and polymers.
     added_molecules = []
     for mol, n in zip(molecules, number_of_copies):
         added_molecules.extend([mol] * n)
@@ -373,7 +501,7 @@ def pack_polymers(
     packed_topology.set_positions(Quantity(positions[n_solute_atoms:], "angstrom"))
 
     if solute is not None:
-        packed_topology = solute + packed_topology
+        packed_topology = centered_solute + packed_topology
 
     packed_topology.box_vectors = box_vectors
 
@@ -541,6 +669,35 @@ def solvate_with_packmol(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _max_molecule_diameter_angstrom(mol) -> float:
+    """Return the maximum internal distance of a molecule in Angstrom.
+
+    This is the largest pairwise distance between any two atoms in the
+    molecule's first conformer — effectively the molecule's "diameter".
+    Used to check whether the polymer shell is thick enough to contain
+    the molecule.
+
+    Parameters
+    ----------
+    mol : openff.toolkit.Molecule
+        Molecule with at least one conformer.
+
+    Returns
+    -------
+    float
+        Maximum pairwise distance in Angstrom, or 0.0 if the molecule
+        has fewer than 2 atoms.
+    """
+    import numpy as np
+
+    coords = mol.conformers[0].m_as("angstrom")
+    if len(coords) <= 1:
+        return 0.0
+    diffs = coords[:, np.newaxis, :] - coords[np.newaxis, :, :]
+    dists_sq = np.sum(diffs**2, axis=-1)
+    return float(np.sqrt(np.max(dists_sq)))
 
 
 def _strip_conect_records(pdb_path: str | Path) -> int:
