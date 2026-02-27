@@ -23,9 +23,15 @@ The choice of reference structure affects the interpretation of RMSF:
 - "average": Aligns to the mathematical average structure. Provides a pure
   measure of thermal fluctuations but the average may have unphysical geometry.
 
-- "frame": Aligns to a specific user-specified frame. Useful for measuring
-  fluctuations relative to a known functional state (e.g., catalytically
-  competent conformation with proper hydrogen bonding).
+    - "frame": Aligns to a specific user-specified frame. Useful for measuring
+      fluctuations relative to a known functional state (e.g., catalytically
+      competent conformation with proper hydrogen bonding).
+
+    - "external": Aligns to an external PDB structure (e.g., crystal structure).
+      RMSF is computed as deviations from the external reference positions,
+      providing a condition-independent baseline. Best for comparing how
+      different conditions affect deviations from a catalytically competent
+      geometry.
 
 See the documentation at docs/analysis/reference_selection.md for detailed
 guidance on choosing the appropriate reference mode.
@@ -103,7 +109,7 @@ class RMSFCalculator:
     equilibration : str, optional
         Equilibration time to skip (e.g., "100ns", "5000ps").
         Default is "0ns" (no equilibration skip).
-    reference_mode : {"centroid", "average", "frame"}, optional
+    reference_mode : {"centroid", "average", "frame", "external"}, optional
         Method for selecting the alignment reference. Default is "centroid".
 
         - "centroid": Most populated state via K-Means clustering on all
@@ -111,10 +117,15 @@ class RMSFCalculator:
         - "average": Mathematical average structure. Pure thermal fluctuations
           but may have unphysical geometry.
         - "frame": User-specified frame. Best for functional state analysis.
+        - "external": External PDB structure. RMSF measures deviations from
+          the external reference positions (e.g., crystal structure).
 
     reference_frame : int | None, optional
         Frame to use as reference when reference_mode="frame" (1-indexed,
         PyMOL convention). Ignored for other modes.
+    reference_file : str | Path | None, optional
+        Path to external PDB file when reference_mode="external".
+        Required for "external" mode, ignored for other modes.
     alignment_selection : str, optional
         MDAnalysis selection for trajectory alignment.
         Default is "protein and name CA" (backbone alignment).
@@ -162,6 +173,7 @@ class RMSFCalculator:
         equilibration: str = "0ns",
         reference_mode: ReferenceMode = "centroid",
         reference_frame: int | None = None,
+        reference_file: str | Path | None = None,
         alignment_selection: str = "protein and name CA",
         centroid_selection: str = "protein",
     ) -> None:
@@ -171,12 +183,27 @@ class RMSFCalculator:
         self.selection = selection
         self.reference_mode = reference_mode
         self.reference_frame = reference_frame
+        self.reference_file = reference_file
         self.alignment_selection = alignment_selection
         self.centroid_selection = centroid_selection
 
         # Validate reference_mode and reference_frame combination
         if reference_mode == "frame" and reference_frame is None:
             raise ValueError("reference_frame is required when reference_mode='frame'")
+
+        # Validate reference_mode and reference_file combination
+        if reference_mode == "external" and reference_file is None:
+            raise ValueError(
+                "reference_file is required when reference_mode='external'. "
+                "Provide a path to the external PDB reference structure."
+            )
+        if reference_mode == "external" and reference_file is not None:
+            ref_path = Path(reference_file)
+            if not ref_path.exists():
+                raise ValueError(
+                    f"reference_file does not exist: {ref_path}. "
+                    "Provide a valid path to the external PDB reference structure."
+                )
 
         # Parse equilibration time
         eq_value, eq_unit = parse_time_string(equilibration)
@@ -323,8 +350,33 @@ class RMSFCalculator:
         LOGGER.info(f"Using {n_frames_used} frames for RMSF calculation")
 
         # ===== RMSF CALCULATION =====
-        # Compute RMSF on aligned trajectory using MDAnalysis
-        rmsf_values = self._compute_rmsf(u, atoms, frame_indices)
+        # Load external reference positions if using external mode
+        external_ref_positions: NDArray[np.float64] | None = None
+        if self.reference_mode == "external" and self.reference_file is not None:
+            import MDAnalysis as mda_ext
+
+            ref_path = Path(self.reference_file)
+            LOGGER.info(f"Loading external reference positions from: {ref_path}")
+            ref_universe = mda_ext.Universe(str(ref_path))
+            ref_atoms = ref_universe.select_atoms(self.selection)
+
+            if len(ref_atoms) != len(atoms):
+                raise ValueError(
+                    f"External PDB atom count ({len(ref_atoms)}) does not match "
+                    f"trajectory selection ({len(atoms)}) for '{self.selection}'. "
+                    f"Cannot use external PDB positions as RMSF reference."
+                )
+
+            external_ref_positions = ref_atoms.positions.copy().astype(np.float64)
+            LOGGER.info(
+                f"Using external PDB positions as RMSF reference "
+                f"({len(ref_atoms)} atoms from '{self.selection}')"
+            )
+
+        # Compute RMSF on aligned trajectory
+        rmsf_values = self._compute_rmsf(
+            u, atoms, frame_indices, reference_positions=external_ref_positions
+        )
 
         # Get residue information
         residue_ids = [int(r.resid) for r in atoms.residues]
@@ -368,6 +420,7 @@ class RMSFCalculator:
             reference_mode=self.reference_mode,
             reference_frame=ref_frame_1indexed,
             alignment_selection=self.alignment_selection,
+            reference_file=(str(self.reference_file) if self.reference_file is not None else None),
             n_frames_total=n_frames_total,
             n_frames_used=n_frames_used,
             trajectory_files=[str(f) for f in traj_info.trajectory_files],
@@ -411,6 +464,7 @@ class RMSFCalculator:
             reference_frame=self.reference_frame,
             selection=self.alignment_selection,
             centroid_selection=self.centroid_selection,
+            reference_file=(Path(self.reference_file) if self.reference_file is not None else None),
         )
 
         # Use the shared alignment utility
@@ -584,19 +638,43 @@ class RMSFCalculator:
         u: "Universe",
         atoms: "mda.AtomGroup",
         frame_indices: NDArray[np.int64],
+        reference_positions: NDArray[np.float64] | None = None,
     ) -> NDArray[np.float64]:
-        """Compute RMSF using selected frames."""
-        # Compute average position
-        positions_sum = np.zeros_like(atoms.positions)
+        """Compute RMSF using selected frames.
+
+        Parameters
+        ----------
+        u : Universe
+            Aligned MDAnalysis Universe.
+        atoms : AtomGroup
+            Atom selection for RMSF calculation.
+        frame_indices : NDArray[np.int64]
+            Frame indices to use for the calculation.
+        reference_positions : NDArray[np.float64] or None, optional
+            External reference positions (n_atoms, 3) to use instead of
+            the trajectory average. When provided (e.g., from an external
+            PDB), RMSF is computed as deviations from these fixed positions
+            rather than from the trajectory's own average.
+
+        Returns
+        -------
+        NDArray[np.float64]
+            Per-atom RMSF values in Angstroms.
+        """
         n_frames = len(frame_indices)
 
-        for idx in frame_indices:
-            u.trajectory[int(idx)]
-            positions_sum += atoms.positions
+        if reference_positions is not None:
+            # External reference mode: use provided positions directly
+            avg_positions = reference_positions
+        else:
+            # Standard mode: compute average position from trajectory frames
+            positions_sum = np.zeros_like(atoms.positions)
+            for idx in frame_indices:
+                u.trajectory[int(idx)]
+                positions_sum += atoms.positions
+            avg_positions = positions_sum / n_frames
 
-        avg_positions = positions_sum / n_frames
-
-        # Compute RMSF
+        # Compute RMSF as sqrt(mean squared deviation from reference)
         sq_diff_sum = np.zeros(len(atoms), dtype=np.float64)
         for idx in frame_indices:
             u.trajectory[int(idx)]
