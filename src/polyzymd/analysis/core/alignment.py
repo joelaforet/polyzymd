@@ -14,6 +14,9 @@ Reference Modes
   unphysical geometry).
 - **frame**: Align to a specific user-specified frame number.
   Best for comparing to a known functional conformation.
+- **external**: Align to an external PDB structure (e.g., crystal structure).
+  Best for measuring deviations from a catalytically competent reference
+  geometry that is independent of the simulation conditions.
 
 Usage
 -----
@@ -49,6 +52,7 @@ References
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -61,7 +65,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 # Type alias for reference modes (re-export from centroid for consistency)
-ReferenceMode = Literal["centroid", "average", "frame"]
+ReferenceMode = Literal["centroid", "average", "frame", "external"]
 
 
 class AlignmentConfig(BaseModel):
@@ -127,26 +131,51 @@ class AlignmentConfig(BaseModel):
         default="protein",
         description="Selection for K-Means clustering (centroid mode only)",
     )
+    reference_file: Path | None = Field(
+        default=None,
+        description=(
+            "Path to an external PDB file to use as the alignment reference "
+            "(required when reference_mode='external'). The external PDB "
+            "must contain protein atoms that match the simulation topology."
+        ),
+    )
 
     @model_validator(mode="after")
-    def validate_frame_required(self) -> "AlignmentConfig":
-        """Ensure reference_frame is provided when mode='frame'."""
-        if self.enabled and self.reference_mode == "frame" and self.reference_frame is None:
+    def validate_reference_params(self) -> "AlignmentConfig":
+        """Validate reference_frame and reference_file for their modes."""
+        if not self.enabled:
+            return self
+        if self.reference_mode == "frame" and self.reference_frame is None:
             raise ValueError(
                 "reference_frame is required when reference_mode='frame'. "
                 "Provide a 1-indexed frame number."
             )
+        if self.reference_mode == "external":
+            if self.reference_file is None:
+                raise ValueError(
+                    "reference_file is required when reference_mode='external'. "
+                    "Provide a path to the external PDB reference structure."
+                )
+            ref_path = Path(self.reference_file)
+            if not ref_path.exists():
+                raise ValueError(
+                    f"reference_file does not exist: {ref_path}. "
+                    "Provide a valid path to the external PDB reference structure."
+                )
         return self
 
     def to_dict(self) -> dict:
         """Convert to dictionary for cache key hashing."""
-        return {
+        d = {
             "enabled": self.enabled,
             "reference_mode": self.reference_mode,
             "reference_frame": self.reference_frame,
             "selection": self.selection,
             "centroid_selection": self.centroid_selection,
         }
+        if self.reference_file is not None:
+            d["reference_file"] = str(self.reference_file)
+        return d
 
 
 def align_trajectory(
@@ -268,7 +297,7 @@ def align_trajectory(
 
     elif config.reference_mode == "frame":
         # Use user-specified frame (convert from 1-indexed to 0-indexed)
-        ref_frame_idx = config.reference_frame - 1
+        ref_frame_idx = config.reference_frame - 1  # type: ignore[operator]
 
         # Validate frame number
         if ref_frame_idx < 0 or ref_frame_idx >= n_frames:
@@ -290,6 +319,66 @@ def align_trajectory(
             in_memory=True,
         ).run()
         del aligner
+
+    elif config.reference_mode == "external":
+        # Align to an external PDB structure (e.g., catalytically competent crystal)
+        import MDAnalysis as mda
+
+        ref_path = Path(config.reference_file)  # type: ignore[arg-type]
+        LOGGER.info(
+            f"Aligning trajectory to external PDB: {ref_path} (selection: '{config.selection}')"
+        )
+
+        # Load external reference as a separate Universe
+        ref_universe = mda.Universe(str(ref_path))
+
+        # Validate atom counts match for the alignment selection
+        traj_atoms = universe.select_atoms(config.selection)
+        ref_atoms = ref_universe.select_atoms(config.selection)
+
+        if len(ref_atoms) == 0:
+            raise ValueError(
+                f"External PDB '{ref_path.name}' has no atoms matching "
+                f"selection '{config.selection}'. Check that the PDB contains "
+                f"protein atoms with matching names/residues."
+            )
+
+        if len(traj_atoms) != len(ref_atoms):
+            raise ValueError(
+                f"Atom count mismatch between trajectory ({len(traj_atoms)}) "
+                f"and external PDB ({len(ref_atoms)}) for selection "
+                f"'{config.selection}'. The external PDB must contain "
+                f"the same protein atoms as the simulation topology."
+            )
+
+        # Warn if residue names don't match
+        traj_resnames = [r.resname for r in traj_atoms.residues]
+        ref_resnames = [r.resname for r in ref_atoms.residues]
+        if traj_resnames != ref_resnames:
+            mismatches = [
+                (i, t, r) for i, (t, r) in enumerate(zip(traj_resnames, ref_resnames)) if t != r
+            ]
+            LOGGER.warning(
+                f"Residue name mismatches between trajectory and external PDB "
+                f"({len(mismatches)} residues differ). First 5: "
+                f"{mismatches[:5]}. Proceeding with alignment anyway."
+            )
+
+        LOGGER.info(
+            f"External PDB matched: {len(ref_atoms)} atoms, {len(ref_atoms.residues)} residues"
+        )
+
+        # Align trajectory to external reference
+        aligner = align.AlignTraj(
+            universe,
+            ref_universe,
+            select=config.selection,
+            in_memory=True,
+        ).run()
+        del aligner
+
+        ref_frame_idx = None  # External reference is not a trajectory frame
+        LOGGER.info("Aligned to external PDB reference structure")
 
     else:
         raise ValueError(f"Unknown reference_mode: {config.reference_mode}")
@@ -322,5 +411,7 @@ def get_alignment_description(config: AlignmentConfig) -> str:
         return (
             f"Alignment: frame {config.reference_frame} (1-indexed), selection='{config.selection}'"
         )
+    elif config.reference_mode == "external":
+        return f"Alignment: external PDB '{config.reference_file}', selection='{config.selection}'"
     else:
         return f"Alignment: {config.reference_mode}"

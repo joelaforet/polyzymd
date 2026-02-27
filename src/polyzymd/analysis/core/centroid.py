@@ -209,7 +209,7 @@ def find_reference_frame(
     ----------
     universe : MDAnalysis.Universe
         Universe containing the trajectory.
-    mode : {"centroid", "average", "frame"}, optional
+    mode : {"centroid", "average", "frame", "external"}, optional
         Method for selecting the reference. Default is "centroid".
 
         - "centroid": K-Means clustering to find most populated state.
@@ -218,6 +218,8 @@ def find_reference_frame(
           Returns None (caller should use AverageStructure).
         - "frame": Use a specific frame specified by `specific_frame`.
           Returns the specified frame index (converted to 0-indexed).
+        - "external": Use an external PDB file as reference.
+          Returns None (alignment handled by align_trajectory).
 
     selection : str, optional
         MDAnalysis selection string for atoms to use. Default is "protein".
@@ -294,8 +296,17 @@ def find_reference_frame(
 
         return frame_idx
 
+    elif mode == "external":
+        # External PDB reference — no trajectory frame to return.
+        # Alignment to external PDB is handled by align_trajectory() in alignment.py.
+        if verbose:
+            LOGGER.info("Using external PDB as reference (alignment handled by align_trajectory)")
+        return None
+
     else:
-        raise ValueError(f"Unknown mode: {mode}. Must be 'centroid', 'average', or 'frame'")
+        raise ValueError(
+            f"Unknown mode: {mode}. Must be 'centroid', 'average', 'frame', or 'external'"
+        )
 
 
 def get_reference_mode_description(mode: ReferenceMode) -> str:
@@ -303,7 +314,7 @@ def get_reference_mode_description(mode: ReferenceMode) -> str:
 
     Parameters
     ----------
-    mode : {"centroid", "average", "frame"}
+    mode : {"centroid", "average", "frame", "external"}
         The reference mode.
 
     Returns
@@ -320,6 +331,11 @@ def get_reference_mode_description(mode: ReferenceMode) -> str:
         "frame": (
             "Specific frame - "
             "fluctuations relative to a user-defined reference (e.g., functional state)"
+        ),
+        "external": (
+            "External PDB structure - "
+            "deviations from a condition-independent reference geometry "
+            "(e.g., catalytically competent crystal structure)"
         ),
     }
     return descriptions.get(mode, f"Unknown mode: {mode}")
