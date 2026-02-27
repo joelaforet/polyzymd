@@ -27,7 +27,7 @@ Note:
 """
 
 __version__ = "1.0.1"
-__author__ = "Joe Laforet Jr."
+__author__ = "Joseph R. Laforet Jr."
 __email__ = "jola3134@colorado.edu"
 
 # Define what's available for lazy import
