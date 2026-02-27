@@ -18,6 +18,7 @@ The choice of reference structure determines *what* you're measuring:
 | `centroid` | Fluctuations around the equilibrium (most visited) conformation |
 | `average` | Pure thermal fluctuations around the mathematical mean |
 | `frame` | Fluctuations relative to a specific functional state |
+| `external` | Deviations from a condition-independent external structure (e.g., crystal structure) |
 
 ## Reference Modes
 
@@ -115,6 +116,112 @@ result = calc.compute(replicate=1)
 # from the catalytically competent geometry
 ```
 
+### External PDB
+
+`````{tab-set}
+
+````{tab-item} Python
+```python
+calc = RMSFCalculator(
+    config,
+    reference_mode="external",
+    reference_file="/path/to/crystal_structure.pdb",
+    equilibration="100ns",
+)
+result = calc.compute(replicate=1)
+```
+````
+
+````{tab-item} YAML (analysis.yaml)
+```yaml
+rmsf:
+  enabled: true
+  selection: "protein and name CA"
+  reference_mode: "external"
+  reference_file: "/path/to/crystal_structure.pdb"
+```
+````
+
+````{tab-item} CLI
+```bash
+polyzymd analyze rmsf -c config.yaml -r 1 \
+    --reference-mode external \
+    --reference-file /path/to/crystal_structure.pdb \
+    --eq-time 100ns
+```
+````
+
+`````
+
+The **external mode** uses an external PDB file — typically a crystal
+structure — as both the alignment target and the reference for RMSF
+computation. Unlike the other modes, the reference is **not derived from
+the trajectory itself**, making it condition-independent.
+
+RMSF then measures how much each residue deviates from the external
+structure's geometry during the simulation:
+
+$$
+\text{RMSF}_i = \sqrt{\frac{1}{T} \sum_{t=1}^{T} \left( \mathbf{r}_i(t) - \mathbf{r}_i^{\text{ext}} \right)^2}
+$$
+
+where $\mathbf{r}_i^{\text{ext}}$ is the position of atom $i$ in the external
+PDB, rather than the trajectory average $\langle \mathbf{r}_i \rangle$.
+
+**When to use:**
+- Enzyme catalysis studies where a crystal structure represents the
+  catalytically competent geometry
+- Comparing how different conditions (polymer baths, temperatures, mutants)
+  affect deviation from a known functional conformation
+- You need a **condition-independent** reference so RMSF values are directly
+  comparable across conditions
+- Comparing to experimental B-factors derived from the same crystal structure
+
+**Validation:**
+PolyzyMD validates that the external PDB's protein atoms match the
+simulation topology exactly (same atom count for the selected atoms).
+If there is a mismatch, a clear error message reports the expected vs.
+actual atom counts.
+
+```{note}
+The external PDB must contain the same protein with the same residue
+numbering as your simulation. It does **not** need to contain solvent,
+ions, or polymer — only the protein atoms that match your selection
+string are compared.
+```
+
+**Example: Catalytic Competence Analysis**
+
+For enzyme-polymer studies, a crystal structure provides a physically
+grounded reference for measuring how well each condition maintains the
+catalytically competent geometry:
+
+```python
+# Use the crystal structure as the "gold standard" reference
+calc = RMSFCalculator(
+    config,
+    reference_mode="external",
+    reference_file="/path/to/enzyme_crystal.pdb",
+    selection="protein and name CA and resid 5:175",  # Trim flexible termini
+    equilibration="100ns",
+)
+result = calc.compute(replicate=1)
+
+# Lower RMSF = closer to crystal structure = more catalytically competent
+# Compare active site residues across conditions
+for resid, rmsf in zip(result.residue_ids, result.rmsf_per_residue):
+    if resid in [77, 133, 156]:  # Catalytic triad (e.g., LipA)
+        print(f"Residue {resid}: {rmsf:.2f} Å from crystal")
+```
+
+```{tip}
+**Residue range truncation:** Flexible N/C-terminal loops often dominate
+RMSF statistics and obscure active-site signals. Use a residue range
+selection (e.g., `"protein and name CA and resid 5:175"`) to exclude
+terminal residues. No code changes are needed — MDAnalysis handles the
+selection natively.
+```
+
 ## Alignment Selection
 
 Independently of the reference mode, you can control which atoms are used
@@ -154,14 +261,24 @@ usually what you want for comparing flexibility across conditions or mutants.
 
 ### For Enzyme Mechanism Studies
 
-Consider using frame mode with a catalytically relevant structure:
+Consider using **external mode** with a crystal structure, or **frame mode**
+with a catalytically relevant frame from the trajectory:
 
 ```python
-# 1. Run initial analysis to find catalytically competent frames
-# 2. Analyze hydrogen bonds, active site geometry, etc.
-# 3. Select the best frame
-# 4. Re-run RMSF with that frame as reference
+# Option 1 (Recommended): External crystal structure as reference
+# Best when you have a high-resolution crystal structure and want
+# condition-independent comparison
+calc = RMSFCalculator(
+    config,
+    reference_mode="external",
+    reference_file="/path/to/crystal_structure.pdb",
+    selection="protein and name CA and resid 5:175",
+    equilibration="100ns",
+)
 
+# Option 2: Specific trajectory frame as reference
+# Useful when the relevant conformation differs from the crystal structure
+# (e.g., ligand-induced conformational change during simulation)
 calc = RMSFCalculator(
     config,
     reference_mode="frame",
@@ -178,6 +295,8 @@ conformation, potentially disrupting catalysis.
 Check what reference the published study used:
 - Many older studies use average structures
 - Some use the first frame or crystal structure
+- If the study compares to crystallographic B-factors, use `external` mode
+  with the same crystal structure PDB
 - Match the methodology for fair comparison
 
 ## Technical Notes
@@ -206,6 +325,7 @@ For very long trajectories, this may require significant RAM. Consider:
 The result files store all alignment metadata:
 - `reference_mode`: Which method was used
 - `reference_frame`: The specific frame (1-indexed, or None for average)
+- `reference_file`: Path to the external PDB (when using `external` mode)
 - `alignment_selection`: Which atoms were used for superposition
 
 This ensures your analysis is fully reproducible.
