@@ -81,7 +81,6 @@ if TYPE_CHECKING:
 # MDAnalysis is optional
 try:
     import MDAnalysis as mda
-    from MDAnalysis.analysis.rms import RMSF
 except ImportError:
     pass
 
@@ -618,8 +617,6 @@ class RMSFCalculator:
         start_frame: int,
     ) -> NDArray[np.float64]:
         """Compute RMSD timeseries for autocorrelation analysis."""
-        from MDAnalysis.analysis.rms import RMSD
-
         # Use first frame after equilibration as reference
         u.trajectory[start_frame]
         ref_pos = atoms.positions.copy()
