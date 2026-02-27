@@ -529,37 +529,27 @@ class ContactsComparator(
         ContactResult or None
             Contact result, or None if data doesn't exist.
         """
-        import glob
-
         import MDAnalysis as mda
 
         from polyzymd.analysis.common.selectors import MDAnalysisSelector
         from polyzymd.analysis.contacts.calculator_parallel import ParallelContactAnalyzer
+        from polyzymd.analysis.core.loader import TrajectoryLoader, convert_time, parse_time_string
 
         logger.info(f"  Computing contacts for replicate {replicate}...")
 
-        # Find topology and trajectory files
-        run_dir = sim_config.get_working_directory(replicate)
-        topology_path = run_dir / "solvated_system.pdb"
-
-        if not topology_path.exists():
-            logger.warning(f"  Replicate {replicate} not found: {topology_path}")
+        # Use TrajectoryLoader for consistent path resolution (DRY)
+        loader = TrajectoryLoader(sim_config)
+        try:
+            traj_info = loader.get_trajectory_info(replicate)
+        except FileNotFoundError as e:
+            logger.warning(f"  Replicate {replicate} not found: {e}")
             return None
 
-        # Find trajectory files
-        traj_pattern = run_dir / "production_*" / "production_*_trajectory.dcd"
-        traj_files = sorted(glob.glob(str(traj_pattern)))
-
-        if not traj_files:
-            logger.warning(f"  Replicate {replicate} has no trajectory files: {traj_pattern}")
-            return None
-
-        # Create universe
-        universe = mda.Universe(str(topology_path), traj_files)
+        # Create universe from resolved paths
+        traj_files = [str(p) for p in traj_info.trajectory_files]
+        universe = mda.Universe(str(traj_info.topology_file), traj_files)
 
         # Convert equilibration time to start frame
-        from polyzymd.analysis.core.loader import convert_time, parse_time_string
-
         eq_value, eq_unit = parse_time_string(self.equilibration)
         eq_time_ps = convert_time(eq_value, eq_unit, "ps")
 

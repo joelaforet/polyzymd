@@ -232,7 +232,7 @@ class SASATrajectoryResult:
 
 def compute_trajectory_sasa(
     topology_path: Path | str,
-    trajectory_path: Path | str,
+    trajectory_path: Path | str | list[Path] | list[str],
     config: "SASAConfig | None" = None,
     analysis_dir: Path | str | None = None,
     recompute: bool = False,
@@ -245,8 +245,11 @@ def compute_trajectory_sasa(
     ----------
     topology_path : Path or str
         Path to the topology PDB file.
-    trajectory_path : Path or str
-        Path to the trajectory (DCD, XTC, etc.).
+    trajectory_path : Path, str, or list thereof
+        Path(s) to the trajectory file(s) (DCD, XTC, etc.).
+        Accepts a single path or a list of paths for multi-segment
+        (daisy-chain) trajectories. MDTraj concatenates segments
+        automatically when given a list.
     config : SASAConfig, optional
         SASA configuration.  Uses defaults if None.
     analysis_dir : Path or str, optional
@@ -269,7 +272,13 @@ def compute_trajectory_sasa(
         config = _SASAConfig()
 
     topology_path = Path(topology_path)
-    trajectory_path = Path(trajectory_path)
+
+    # Normalize trajectory_path to a list of strings for mdtraj
+    if isinstance(trajectory_path, (str, Path)):
+        traj_paths = [Path(trajectory_path)]
+    else:
+        traj_paths = [Path(p) for p in trajectory_path]
+    traj_files_str = [str(p) for p in traj_paths]
 
     # Check cache
     cache_dir = SASATrajectoryResult.cache_path(analysis_dir) if analysis_dir is not None else None
@@ -286,13 +295,19 @@ def compute_trajectory_sasa(
             )
         return result
 
+    n_segments = len(traj_paths)
+    traj_label = (
+        traj_paths[0].name
+        if n_segments == 1
+        else f"{traj_paths[0].name} + {n_segments - 1} more segment(s)"
+    )
     logger.info(
-        f"Computing SASA for {trajectory_path.name} "
+        f"Computing SASA for {traj_label} "
         f"(threshold={config.exposure_threshold}, chain={config.chain_id})"
     )
 
-    # Load full trajectory
-    traj = md.load(str(trajectory_path), top=str(topology_path))
+    # Load full trajectory (mdtraj natively concatenates a list of files)
+    traj = md.load(traj_files_str, top=str(topology_path))
     logger.info(f"Loaded trajectory: {traj.n_frames} frames, {traj.n_atoms} atoms")
 
     # Select protein chain only
@@ -354,7 +369,7 @@ def compute_trajectory_sasa(
         n_frames=n_frames,
         n_residues=n_residues,
         exposure_threshold=config.exposure_threshold,
-        trajectory_path=str(trajectory_path),
+        trajectory_path="; ".join(traj_files_str),
         topology_path=str(topology_path),
     )
 

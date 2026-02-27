@@ -288,6 +288,7 @@ class ExposureDynamicsComparator(
         tuple[ExposureDynamicsResult, ChaperoneEnrichmentResult] or None
         """
         from polyzymd.analysis.contacts.results import ContactResult
+        from polyzymd.analysis.core.loader import TrajectoryLoader
         from polyzymd.analysis.exposure.dynamics import (
             ExposureDynamicsResult,
             analyze_exposure_dynamics,
@@ -310,18 +311,16 @@ class ExposureDynamicsComparator(
         contact_result = ContactResult.load(contact_result_path)
         logger.info(f"  Loaded contacts for rep {replicate}: {contact_result_path}")
 
-        # Locate trajectory files
-        run_dir = sim_config.get_working_directory(replicate)
-        production_dir = run_dir / "production_0"
-        topology_path = production_dir / "production_0_topology.pdb"
-        trajectory_path = production_dir / "production_0_trajectory.dcd"
-
-        if not topology_path.exists() or not trajectory_path.exists():
-            logger.warning(
-                f"  Trajectory not found for rep {replicate}: "
-                f"topology={topology_path.exists()}, traj={trajectory_path.exists()}"
-            )
+        # Use TrajectoryLoader for consistent path resolution (DRY)
+        loader = TrajectoryLoader(sim_config)
+        try:
+            traj_info = loader.get_trajectory_info(replicate)
+        except FileNotFoundError as e:
+            logger.warning(f"  Trajectory not found for rep {replicate}: {e}")
             return None
+
+        topology_path = traj_info.topology_file
+        trajectory_paths = traj_info.trajectory_files  # list[Path] — multi-segment support
 
         # Analysis directory for this replicate
         analysis_dir = self._get_analysis_dir(sim_config, cond_config_path) / f"rep{replicate}"
@@ -343,7 +342,7 @@ class ExposureDynamicsComparator(
             # Still need to compute enrichment (not cached separately)
             sasa_result = compute_trajectory_sasa(
                 topology_path=topology_path,
-                trajectory_path=trajectory_path,
+                trajectory_path=trajectory_paths,
                 config=sasa_config,
                 analysis_dir=analysis_dir,
                 recompute=False,  # Use SASA cache if available
@@ -359,7 +358,7 @@ class ExposureDynamicsComparator(
         logger.info(f"  Computing SASA for rep {replicate}...")
         sasa_result = compute_trajectory_sasa(
             topology_path=topology_path,
-            trajectory_path=trajectory_path,
+            trajectory_path=trajectory_paths,
             config=sasa_config,
             analysis_dir=analysis_dir,
             recompute=recompute,
