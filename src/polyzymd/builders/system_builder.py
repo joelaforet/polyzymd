@@ -770,11 +770,16 @@ class SystemBuilder:
         tracked during the build process. The config YAML serves as the single
         source of truth for what each molecule represents.
 
-        Chain assignment:
-        - Protein: First chain (A), preserves original residue numbers from input PDB
-        - Substrate: Next chain (B if present), residue 1
-        - Polymers: Next chain (C if present), preserves per-monomer residue numbers
-        - Solvent: Remaining chains with overflow at 9999 residues per chain
+        Chain assignment uses FIXED letters regardless of component presence:
+        - Chain A: Protein (preserves original residue numbers from input PDB)
+        - Chain B: Substrate (residue 1; letter reserved even if no substrate)
+        - Chain C: Polymers (preserves per-monomer residue numbers)
+        - Chain D+: Solvent (overflow at 9999 residues per chain)
+
+        Using fixed letters ensures consistency with SystemComponentInfo and
+        AtomGroupResolver, which hardcode A=protein, B=substrate, C=polymer.
+        Without this, absent components (e.g., no substrate) would shift later
+        chain letters, causing restraints to target wrong atoms.
 
         This ensures every atom can be uniquely identified by the tuple
         (chain_id, residue_number, residue_name, atom_name) for downstream
@@ -787,42 +792,47 @@ class SystemBuilder:
             raise RuntimeError("No solvated topology. Call solvate() first.")
 
         CHAIN_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        chain_idx = 0
         mol_idx = 0
 
-        # 1. Protein: Assign chain letter, preserve original residue numbers
+        # Fixed chain letter assignments per component type.
+        # A=protein, B=substrate, C=polymer, D+=solvent — regardless of whether
+        # a component is present. This ensures downstream code (SystemComponentInfo,
+        # AtomGroupResolver, from_topology()) always sees the expected chain IDs.
+        PROTEIN_CHAIN = "A"
+        SUBSTRATE_CHAIN = "B"
+        POLYMER_CHAIN = "C"
+        SOLVENT_START_IDX = 3  # index of 'D' in CHAIN_LETTERS
+
+        # 1. Protein: Always chain A, preserve original residue numbers
         if self._n_enzyme_molecules > 0:
-            chain_id = CHAIN_LETTERS[chain_idx]
-            LOGGER.debug(f"Assigning chain {chain_id} to protein")
+            LOGGER.debug(f"Assigning chain {PROTEIN_CHAIN} to protein")
 
             for _ in range(self._n_enzyme_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
                 for atom in mol.atoms:
-                    atom.metadata["chain_id"] = chain_id
+                    atom.metadata["chain_id"] = PROTEIN_CHAIN
                     # Ensure residue_number is a string (PDB loader may store as int)
                     # OpenMM's addResidue(id=...) expects a string
                     if "residue_number" in atom.metadata:
                         atom.metadata["residue_number"] = str(atom.metadata["residue_number"])
                 mol_idx += 1
-            chain_idx += 1
 
-        # 2. Substrate: Assign next chain letter, residue 1
+        # 2. Substrate: Always chain B, residue 1
         if self._n_substrate_molecules > 0:
-            chain_id = CHAIN_LETTERS[chain_idx]
-            LOGGER.debug(f"Assigning chain {chain_id} to substrate")
+            LOGGER.debug(f"Assigning chain {SUBSTRATE_CHAIN} to substrate")
 
             for _ in range(self._n_substrate_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
                 for atom in mol.atoms:
-                    atom.metadata["chain_id"] = chain_id
+                    atom.metadata["chain_id"] = SUBSTRATE_CHAIN
                     atom.metadata["residue_number"] = "1"
                 mol_idx += 1
-            chain_idx += 1
 
-        # 3. Polymers: Assign next chain letter, continue residue numbering across chains
+        # 3. Polymers: Always chain C, continue residue numbering across chains
         if self._n_polymer_chains > 0:
-            chain_id = CHAIN_LETTERS[chain_idx]
-            LOGGER.debug(f"Assigning chain {chain_id} to {self._n_polymer_chains} polymer chain(s)")
+            LOGGER.debug(
+                f"Assigning chain {POLYMER_CHAIN} to {self._n_polymer_chains} polymer chain(s)"
+            )
 
             # Track residue number across all polymer chains (continue, don't restart)
             polymer_residue_num = 1
@@ -835,7 +845,7 @@ class SystemBuilder:
                 current_monomer_residue = None
 
                 for atom in mol.atoms:
-                    atom.metadata["chain_id"] = chain_id
+                    atom.metadata["chain_id"] = POLYMER_CHAIN
 
                     # Check if this atom belongs to a new monomer
                     atom_residue = atom.metadata.get("residue_number", "0")
@@ -852,19 +862,17 @@ class SystemBuilder:
                 polymer_residue_num += 1
                 mol_idx += 1
 
-            chain_idx += 1
-
-        # 4. Solvent: Assign remaining chains with overflow at 9999
+        # 4. Solvent: Always starts at chain D (index 3)
         self._assign_solvent_identifiers(
             start_mol_idx=mol_idx,
-            start_chain_idx=chain_idx,
+            start_chain_idx=SOLVENT_START_IDX,
             chain_letters=CHAIN_LETTERS,
         )
 
         LOGGER.info(
             f"PDB identifiers assigned: protein={self._n_enzyme_molecules}, "
             f"substrate={self._n_substrate_molecules}, polymers={self._n_polymer_chains}, "
-            f"solvent molecules start at chain {CHAIN_LETTERS[chain_idx]}"
+            f"solvent molecules start at chain {CHAIN_LETTERS[SOLVENT_START_IDX]}"
         )
 
     def _assign_solvent_identifiers(
