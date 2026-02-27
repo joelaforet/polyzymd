@@ -26,7 +26,7 @@ Note:
     modules require a full conda environment with OpenMM and OpenFF installed.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __author__ = "Joe Laforet Jr."
 __email__ = "jola3134@colorado.edu"
 
