@@ -239,10 +239,9 @@ class SolventBuilder:
         Returns:
             Solvated OpenFF Topology.
         """
-        from openff.interchange.components import _packmol as packmol
-
         from polyzymd.data.solvent_molecules import get_solvent_molecule
         from polyzymd.utils import boxvectors
+        from polyzymd.utils.packmol import solvate_with_packmol
 
         if composition is None:
             composition = SolventComposition()
@@ -395,14 +394,13 @@ class SolventBuilder:
             solvent_counts.append(n_cosolvent)
             cosolvent_counts_list.append((cosolvent.name, n_cosolvent))
 
-        # Pack the box using PACKMOL
-        tolerance_qty = Quantity(tolerance, "angstrom")
-        solvated_top = packmol.pack_box(
+        # Pack the box using PACKMOL (with CONECT-record overflow protection)
+        solvated_top = solvate_with_packmol(
             molecules=solvent_molecules,
             number_of_copies=solvent_counts,
             solute=topology,
-            tolerance=tolerance_qty,
             box_vectors=box_vecs,
+            tolerance_angstrom=tolerance,
         )
 
         # Set residue names

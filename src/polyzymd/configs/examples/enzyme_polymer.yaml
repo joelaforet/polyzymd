@@ -62,6 +62,7 @@ polymers:
   packing:
     padding: 2.0  # nm padding around solute for polymer box
     tolerance: 2.0  # PACKMOL tolerance (Angstrom)
+    # movebadrandom: true  # uncomment for dense/heterogeneous polymer systems
 
 # ============================================================================
 # Solvent Configuration

@@ -8,6 +8,7 @@ molecular system and generate the OpenFF Interchange for simulation.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
@@ -260,15 +261,26 @@ class SystemBuilder:
         self,
         padding: float = 2.0,
         tolerance: float = 2.0,
+        movebadrandom: bool = False,
         working_directory: Optional[Union[str, Path]] = None,
+        box_vectors_nm: Optional[List[float]] = None,
     ) -> Topology:
         """Pack polymers around the combined solute topology.
 
         Args:
             padding: Box padding in nm. Larger values give polymers more room
-                and can significantly speed up PACKMOL convergence.
+                and can significantly speed up PACKMOL convergence.  Ignored
+                when *box_vectors_nm* is provided.
             tolerance: PACKMOL tolerance in Angstrom.
+            movebadrandom: When True, pass the ``movebadrandom`` keyword to
+                PACKMOL. Improves convergence for dense or heterogeneous
+                polymer systems (many unique chain types) by placing
+                badly-packed molecules at random positions in the box.
             working_directory: Directory for PACKMOL files.
+            box_vectors_nm: Optional explicit box dimensions ``[Lx, Ly, Lz]``
+                in nanometers.  When provided, overrides the auto-computed
+                bounding box + *padding*.  The protein is centered at the
+                midpoint of this box.
 
         Returns:
             Topology with polymers packed.
@@ -283,32 +295,39 @@ class SystemBuilder:
             LOGGER.info("No polymers to pack, returning combined topology")
             return self._combined_topology
 
-        from openff.interchange.components import _packmol as packmol
+        import numpy as np
         from openff.units import Quantity
 
         from polyzymd.utils import boxvectors
+        from polyzymd.utils.packmol import pack_polymers as _pack_polymers
+
+        # Calculate box vectors — explicit override or auto from bbox + padding
+        if box_vectors_nm is not None:
+            LOGGER.info(
+                f"Using explicit box vectors: "
+                f"[{box_vectors_nm[0]:.2f}, {box_vectors_nm[1]:.2f}, "
+                f"{box_vectors_nm[2]:.2f}] nm"
+            )
+            box_vecs = Quantity(np.diag(box_vectors_nm), "nanometer")
+        else:
+            padding_qty = Quantity(padding, "nanometer")
+            min_box_vecs = boxvectors.get_topology_bbox(self._combined_topology)
+            box_vecs = boxvectors.pad_box_vectors_uniform(min_box_vecs, padding_qty)
 
         LOGGER.info(
             f"Packing {sum(self._polymer_counts)} polymer chains "
             f"({len(self._polymer_molecules)} unique types), "
-            f"padding={padding} nm, tolerance={tolerance} A"
+            f"tolerance={tolerance} A" + (" [movebadrandom]" if movebadrandom else "")
         )
 
-        # Calculate box vectors
-        padding_qty = Quantity(padding, "nanometer")
-        min_box_vecs = boxvectors.get_topology_bbox(self._combined_topology)
-        box_vecs = boxvectors.pad_box_vectors_uniform(min_box_vecs, padding_qty)
-
-        # Pack polymers using OpenFF's PACKMOL wrapper
-        tolerance_qty = Quantity(tolerance, "angstrom")
-        packed_top = packmol.pack_box(
+        # Pack polymers using our custom PACKMOL runner (supports movebadrandom)
+        packed_top = _pack_polymers(
             molecules=self._polymer_molecules,
             number_of_copies=self._polymer_counts,
             solute=self._combined_topology,
-            tolerance=tolerance_qty,
             box_vectors=box_vecs,
-            box_shape=packmol.UNIT_CUBE,
-            center_solute="BRICK",
+            tolerance_angstrom=tolerance,
+            movebadrandom=movebadrandom,
             working_directory=str(working_directory) if working_directory else None,
             retain_working_files=True,
         )
@@ -358,19 +377,28 @@ class SystemBuilder:
     def create_interchange(
         self,
         use_optimized_combining: bool = True,
+        use_batched_combining: bool = False,
     ) -> Interchange:
         """Create the OpenFF Interchange for simulation.
 
-        When polymers are present and use_optimized_combining is True,
-        uses the Interchange.combine() optimization which is significantly
-        faster for systems with many unique molecules.
+        By default, passes the entire solvated topology to a single
+        ``ForceField.create_interchange()`` call.  OpenFF's internal
+        ``identical_molecule_groups`` mechanism deduplicates SMIRKS
+        matching and charge assignment so that work scales with the
+        number of *unique* molecule types, not total molecules.
 
-        This method uses pre-computed charges from PolyzyMD's solvent cache
-        to ensure all copies of water and co-solvent molecules have identical
-        parameters, avoiding per-molecule AM1BCC calculations.
+        Pre-computed charges are supplied via ``charge_from_molecules``
+        for water, polymers, substrate, and co-solvents so that no
+        AM1BCC calculations are triggered at runtime.
+
+        The legacy batched approach (multiple ``create_interchange()``
+        calls joined by ``Interchange.combine()``) is available via
+        ``use_batched_combining=True`` for A/B benchmarking.
 
         Args:
-            use_optimized_combining: Use optimized combining for polymers.
+            use_optimized_combining: Unused, kept for backward compat.
+            use_batched_combining: If True, use the legacy batched +
+                serial-combine code path instead of a single call.
 
         Returns:
             OpenFF Interchange object.
@@ -394,15 +422,12 @@ class SystemBuilder:
             water_model = self._solvent_builder._composition.water_model
         water_mol = get_solvent_molecule(water_model)
 
-        # Decide whether to use optimized combining
-        use_combining = (
-            use_optimized_combining and self._polymer_molecules and len(self._polymer_molecules) > 0
-        )
-
-        if use_combining:
-            self._interchange = self._create_interchange_optimized(ff, water_mol)
+        if use_batched_combining:
+            LOGGER.info("Using BATCHED approach (multiple create + serial combine)")
+            self._interchange = self._create_interchange_batched(ff, water_mol)
         else:
-            self._interchange = self._create_interchange_simple(ff, water_mol)
+            LOGGER.info("Using SINGLE-CALL approach (one create_interchange, no combine)")
+            self._interchange = self._create_interchange_single_call(ff, water_mol)
 
         LOGGER.info("Interchange created successfully")
 
@@ -494,44 +519,78 @@ class SystemBuilder:
 
         return smiles_to_template
 
-    def _create_interchange_simple(self, ff: ForceField, water_mol: Molecule) -> Interchange:
-        """Create Interchange using batched molecule processing.
+    def _create_interchange_single_call(self, ff: ForceField, water_mol: Molecule) -> Interchange:
+        """Create Interchange with a single ``ForceField.create_interchange()`` call.
 
-        Groups molecules by type (SMILES) and creates one Interchange per
-        unique molecule type, then combines them. This is much more efficient
-        than creating one Interchange per molecule instance.
+        Passes the entire solvated topology at once.  OpenFF internally
+        groups identical molecules (``Topology.identical_molecule_groups``)
+        so SMIRKS matching and charge assignment scale with the number of
+        *unique* molecule types, not total molecules.
 
-        Args:
-            ff: OpenFF ForceField.
-            water_mol: Water molecule with pre-computed charges.
-
-        Returns:
-            Interchange object.
-        """
-        # Use the same optimized batching logic
-        return self._create_interchange_batched(ff, water_mol)
-
-    def _create_interchange_optimized(self, ff: ForceField, water_mol: Molecule) -> Interchange:
-        """Create Interchange using optimized batched combining.
-
-        Groups molecules by type (SMILES) and creates one Interchange per
-        unique molecule type, then combines them. This dramatically reduces
-        the number of Interchange.combine() calls needed.
-
-        For a system with 1133 DMSO molecules, this creates ~7 Interchanges
-        instead of ~1140, providing ~160x fewer combine operations.
-
-        Uses pre-computed charges for water and co-solvents to avoid running
-        AM1BCC charge calculation for every solvent molecule.
+        This avoids ``Interchange.combine()`` entirely — previously the
+        dominant bottleneck (84 min for a 308 K-atom system).
 
         Args:
             ff: OpenFF ForceField.
             water_mol: Water molecule with pre-computed charges.
 
         Returns:
-            Combined Interchange object.
+            Interchange object with box vectors set.
         """
-        return self._create_interchange_batched(ff, water_mol)
+        # Build charge templates: one per unique species
+        t0 = time.perf_counter()
+        charge_from: List[Molecule] = [water_mol]
+
+        seen_smiles: set = set()
+        for mol in self._polymer_molecules:
+            smi = mol.to_smiles()
+            if smi not in seen_smiles:
+                charge_from.append(mol)
+                seen_smiles.add(smi)
+
+        if self._substrate_molecule:
+            charge_from.append(self._substrate_molecule)
+
+        if self._solvent_builder._composition:
+            for cosolvent in self._solvent_builder._composition.co_solvents:
+                if cosolvent.molecule is not None:
+                    charge_from.append(cosolvent.molecule)
+
+        LOGGER.info(
+            f"Charge templates: {len(charge_from)} "
+            f"(water + {len(seen_smiles)} polymer type(s) + substrate + co-solvents)"
+        )
+        LOGGER.info(f"  Template prep took {time.perf_counter() - t0:.1f}s")
+
+        # Single parameterization call
+        t1 = time.perf_counter()
+        LOGGER.info(
+            f"Calling ff.create_interchange() on full topology "
+            f"({self._solvated_topology.n_molecules} molecules, "
+            f"{self._solvated_topology.n_atoms} atoms) ..."
+        )
+
+        # Suppress per-atom INFO logging from OpenFF's LibraryCharges handler.
+        # It emits one line per atom during charge assignment (~200K lines for
+        # a typical solvated system), which floods logs without adding value.
+        _nonbonded_logger = logging.getLogger("openff.interchange.smirnoff._nonbonded")
+        _prev_level = _nonbonded_logger.level
+        _nonbonded_logger.setLevel(logging.WARNING)
+        try:
+            interchange = ff.create_interchange(
+                self._solvated_topology,
+                charge_from_molecules=charge_from,
+            )
+        finally:
+            _nonbonded_logger.setLevel(_prev_level)
+
+        t2 = time.perf_counter()
+        LOGGER.info(f"  create_interchange() completed in {t2 - t1:.1f}s")
+
+        # Set box vectors
+        interchange.box = self._solvated_topology.box_vectors
+
+        return interchange
 
     def _create_interchange_batched(self, ff: ForceField, water_mol: Molecule) -> Interchange:
         """Create Interchange using batched molecule processing with preserved order.
@@ -542,9 +601,15 @@ class SystemBuilder:
         the atom order in solvated_system.pdb.
 
         Batching strategy:
-        1. Parameterize each unique molecule type ONCE (cache parameters)
-        2. Create individual Interchanges in original topology order
-        3. Combine Interchanges in the same order as the original topology
+        1. Build an ``id(molecule) -> SMILES`` cache in ONE pass (avoids calling
+           ``to_smiles()`` three separate times per molecule).
+        2. Parameterize each unique molecule type ONCE (cache parameters).
+        3. Create individual Interchanges in original topology order, grouping
+           consecutive same-type molecules into single batches.
+        4. Combine Interchanges using an **adjacent-pair tree reduction** instead
+           of a serial left-fold.  This keeps the atom order identical to the
+           original topology while reducing the asymptotic cost of
+           ``Interchange.combine()`` from O(N²) to O(N log N).
 
         Note:
             When combining Interchanges from molecules parameterized by different
@@ -569,50 +634,49 @@ class SystemBuilder:
         smiles_to_name = self._build_molecule_name_mapping()
         smiles_to_template = self._build_charge_template_mapping(water_mol)
 
-        # Step 1: Create a cached Interchange for each unique molecule TYPE
-        # This avoids redundant parameterization (the expensive part)
-        smiles_to_interchange: Dict[str, Interchange] = {}
-        water_ion_smiles = {"[H][O][H]", "[Na+]", "[Cl-]"}
-
-        # Count molecules by type for logging
+        # ── Step 0: Cache to_smiles() for every molecule in ONE pass ──
+        # molecule.to_smiles() is expensive; previous code called it 3×.
+        t0 = time.perf_counter()
+        mol_id_to_smiles: Dict[int, str] = {}
         smiles_counts: Dict[str, int] = {}
-        for molecule in self._solvated_topology.molecules:
-            mol_smiles = molecule.to_smiles()
-            smiles_counts[mol_smiles] = smiles_counts.get(mol_smiles, 0) + 1
+        first_mol_for_smiles: Dict[str, Molecule] = {}
 
-        # Parameterize each unique molecule type once
+        for molecule in self._solvated_topology.molecules:
+            mid = id(molecule)
+            mol_smiles = molecule.to_smiles()
+            mol_id_to_smiles[mid] = mol_smiles
+            smiles_counts[mol_smiles] = smiles_counts.get(mol_smiles, 0) + 1
+            if mol_smiles not in first_mol_for_smiles:
+                first_mol_for_smiles[mol_smiles] = molecule
+
+        LOGGER.info(
+            f"SMILES cache built in {time.perf_counter() - t0:.1f}s "
+            f"({len(mol_id_to_smiles)} molecules, {len(smiles_counts)} unique types)"
+        )
+
+        # ── Step 1: Prepare per-type metadata (no parameterisation yet) ──
+        smiles_info: Dict[str, dict] = {}
         for mol_smiles, count in smiles_counts.items():
             display_name = smiles_to_name.get(mol_smiles, mol_smiles[:50] + "...")
-            LOGGER.info(f"Parameterizing {display_name} ({count} instance(s))")
+            LOGGER.info(f"  {display_name}: {count} instance(s)")
 
-            # Find the first molecule of this type to use as template
-            template_mol = None
-            for molecule in self._solvated_topology.molecules:
-                if molecule.to_smiles() == mol_smiles:
-                    template_mol = molecule
-                    break
-
-            # Get charge template if available
             charge_from = []
             if mol_smiles in smiles_to_template:
                 charge_from = [smiles_to_template[mol_smiles]]
 
-            # Create Interchange for ONE molecule of this type (parameterization)
-            # We'll create individual interchanges per molecule instance later
-            smiles_to_interchange[mol_smiles] = {
-                "template": template_mol,
+            smiles_info[mol_smiles] = {
+                "template": first_mol_for_smiles[mol_smiles],
                 "charge_from": charge_from,
                 "display_name": display_name,
             }
 
-        # Step 2: Create Interchanges in ORIGINAL TOPOLOGY ORDER
-        # This preserves the exact molecule order from solvated_topology
+        # ── Step 2: Create Interchanges in ORIGINAL TOPOLOGY ORDER ──
+        # Group consecutive molecules of the same type into single batches.
+        t1 = time.perf_counter()
         all_interchanges: List[Interchange] = []
         interchange_names: List[str] = []
 
-        # Group consecutive molecules of the same type for efficient batching
-        # while preserving the overall molecule order
-        current_smiles = None
+        current_smiles: str | None = None
         current_batch: List[Molecule] = []
 
         def flush_batch():
@@ -621,7 +685,7 @@ class SystemBuilder:
             if not current_batch:
                 return
 
-            info = smiles_to_interchange[current_smiles]
+            info = smiles_info[current_smiles]
             display_name = info["display_name"]
             charge_from = info["charge_from"]
 
@@ -636,22 +700,19 @@ class SystemBuilder:
 
             current_batch = []
 
-        # Process molecules in original order, batching consecutive same-type molecules
         for molecule in self._solvated_topology.molecules:
-            mol_smiles = molecule.to_smiles()
+            mol_smiles = mol_id_to_smiles[id(molecule)]
 
             if mol_smiles != current_smiles:
-                # New molecule type - flush previous batch
                 flush_batch()
                 current_smiles = mol_smiles
 
             current_batch.append(molecule)
 
-        # Don't forget the last batch
         flush_batch()
 
-        # Step 3: Combine all interchanges (preserving order)
-        LOGGER.info(f"Combining {len(all_interchanges)} Interchange batch(es)")
+        t2 = time.perf_counter()
+        LOGGER.info(f"Created {len(all_interchanges)} Interchange batch(es) in {t2 - t1:.1f}s")
         if len(interchange_names) <= 10:
             LOGGER.info(f"  Batches: {', '.join(interchange_names)}")
         else:
@@ -661,12 +722,28 @@ class SystemBuilder:
         if not all_interchanges:
             raise RuntimeError("No molecules found in solvated topology")
 
+        # ── Step 3: Serial combine (preserving order) ──
+        # OpenFF Interchange.combine() creates _DUPLICATE parameter keys when
+        # SMIRKS patterns resolve to different force constants in different
+        # molecular contexts.  Combining two objects that *both* contain
+        # _DUPLICATE keys raises UnsupportedCombinationError, which rules out
+        # tree-based (pairwise) reduction.  We therefore keep the serial
+        # left-fold: combined = ((A + B) + C) + D.
+        #
+        # The O(N²) cost is mitigated by having very few batches (one per
+        # contiguous same-SMILES run), typically 5-10 for a solvated system.
         combined = all_interchanges[0]
-
-        for inc in all_interchanges[1:]:
+        for idx, inc in enumerate(all_interchanges[1:], 1):
+            t_step = time.perf_counter()
             combined = combined.combine(inc)
+            elapsed = time.perf_counter() - t_step
+            LOGGER.info(
+                f"  Combined batch {idx}/{len(all_interchanges) - 1} "
+                f"({interchange_names[idx]}) in {elapsed:.1f}s"
+            )
 
-        LOGGER.info("Interchange combination complete")
+        t3 = time.perf_counter()
+        LOGGER.info(f"Interchange combination complete ({t3 - t2:.1f}s total)")
 
         # Reset box vectors
         combined.box = self._solvated_topology.box_vectors
@@ -693,11 +770,16 @@ class SystemBuilder:
         tracked during the build process. The config YAML serves as the single
         source of truth for what each molecule represents.
 
-        Chain assignment:
-        - Protein: First chain (A), preserves original residue numbers from input PDB
-        - Substrate: Next chain (B if present), residue 1
-        - Polymers: Next chain (C if present), preserves per-monomer residue numbers
-        - Solvent: Remaining chains with overflow at 9999 residues per chain
+        Chain assignment uses FIXED letters regardless of component presence:
+        - Chain A: Protein (preserves original residue numbers from input PDB)
+        - Chain B: Substrate (residue 1; letter reserved even if no substrate)
+        - Chain C: Polymers (preserves per-monomer residue numbers)
+        - Chain D+: Solvent (overflow at 9999 residues per chain)
+
+        Using fixed letters ensures consistency with SystemComponentInfo and
+        AtomGroupResolver, which hardcode A=protein, B=substrate, C=polymer.
+        Without this, absent components (e.g., no substrate) would shift later
+        chain letters, causing restraints to target wrong atoms.
 
         This ensures every atom can be uniquely identified by the tuple
         (chain_id, residue_number, residue_name, atom_name) for downstream
@@ -710,42 +792,47 @@ class SystemBuilder:
             raise RuntimeError("No solvated topology. Call solvate() first.")
 
         CHAIN_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        chain_idx = 0
         mol_idx = 0
 
-        # 1. Protein: Assign chain letter, preserve original residue numbers
+        # Fixed chain letter assignments per component type.
+        # A=protein, B=substrate, C=polymer, D+=solvent — regardless of whether
+        # a component is present. This ensures downstream code (SystemComponentInfo,
+        # AtomGroupResolver, from_topology()) always sees the expected chain IDs.
+        PROTEIN_CHAIN = "A"
+        SUBSTRATE_CHAIN = "B"
+        POLYMER_CHAIN = "C"
+        SOLVENT_START_IDX = 3  # index of 'D' in CHAIN_LETTERS
+
+        # 1. Protein: Always chain A, preserve original residue numbers
         if self._n_enzyme_molecules > 0:
-            chain_id = CHAIN_LETTERS[chain_idx]
-            LOGGER.debug(f"Assigning chain {chain_id} to protein")
+            LOGGER.debug(f"Assigning chain {PROTEIN_CHAIN} to protein")
 
             for _ in range(self._n_enzyme_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
                 for atom in mol.atoms:
-                    atom.metadata["chain_id"] = chain_id
+                    atom.metadata["chain_id"] = PROTEIN_CHAIN
                     # Ensure residue_number is a string (PDB loader may store as int)
                     # OpenMM's addResidue(id=...) expects a string
                     if "residue_number" in atom.metadata:
                         atom.metadata["residue_number"] = str(atom.metadata["residue_number"])
                 mol_idx += 1
-            chain_idx += 1
 
-        # 2. Substrate: Assign next chain letter, residue 1
+        # 2. Substrate: Always chain B, residue 1
         if self._n_substrate_molecules > 0:
-            chain_id = CHAIN_LETTERS[chain_idx]
-            LOGGER.debug(f"Assigning chain {chain_id} to substrate")
+            LOGGER.debug(f"Assigning chain {SUBSTRATE_CHAIN} to substrate")
 
             for _ in range(self._n_substrate_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
                 for atom in mol.atoms:
-                    atom.metadata["chain_id"] = chain_id
+                    atom.metadata["chain_id"] = SUBSTRATE_CHAIN
                     atom.metadata["residue_number"] = "1"
                 mol_idx += 1
-            chain_idx += 1
 
-        # 3. Polymers: Assign next chain letter, continue residue numbering across chains
+        # 3. Polymers: Always chain C, continue residue numbering across chains
         if self._n_polymer_chains > 0:
-            chain_id = CHAIN_LETTERS[chain_idx]
-            LOGGER.debug(f"Assigning chain {chain_id} to {self._n_polymer_chains} polymer chain(s)")
+            LOGGER.debug(
+                f"Assigning chain {POLYMER_CHAIN} to {self._n_polymer_chains} polymer chain(s)"
+            )
 
             # Track residue number across all polymer chains (continue, don't restart)
             polymer_residue_num = 1
@@ -758,7 +845,7 @@ class SystemBuilder:
                 current_monomer_residue = None
 
                 for atom in mol.atoms:
-                    atom.metadata["chain_id"] = chain_id
+                    atom.metadata["chain_id"] = POLYMER_CHAIN
 
                     # Check if this atom belongs to a new monomer
                     atom_residue = atom.metadata.get("residue_number", "0")
@@ -775,19 +862,17 @@ class SystemBuilder:
                 polymer_residue_num += 1
                 mol_idx += 1
 
-            chain_idx += 1
-
-        # 4. Solvent: Assign remaining chains with overflow at 9999
+        # 4. Solvent: Always starts at chain D (index 3)
         self._assign_solvent_identifiers(
             start_mol_idx=mol_idx,
-            start_chain_idx=chain_idx,
+            start_chain_idx=SOLVENT_START_IDX,
             chain_letters=CHAIN_LETTERS,
         )
 
         LOGGER.info(
             f"PDB identifiers assigned: protein={self._n_enzyme_molecules}, "
             f"substrate={self._n_substrate_molecules}, polymers={self._n_polymer_chains}, "
-            f"solvent molecules start at chain {CHAIN_LETTERS[chain_idx]}"
+            f"solvent molecules start at chain {CHAIN_LETTERS[SOLVENT_START_IDX]}"
         )
 
     def _assign_solvent_identifiers(
@@ -973,6 +1058,7 @@ class SystemBuilder:
             self.pack_polymers(
                 padding=packing.padding,
                 tolerance=packing.tolerance,
+                movebadrandom=packing.movebadrandom,
                 working_directory=self._working_dir,
             )
 
@@ -1007,9 +1093,28 @@ class SystemBuilder:
 
         from openff.interchange.interop.openmm._positions import to_openmm_positions
 
+        t0 = time.perf_counter()
         omm_topology = self._interchange.to_openmm_topology()
-        omm_system = self._interchange.to_openmm(combine_nonbonded_forces=False)
+        t_topo = time.perf_counter() - t0
+        LOGGER.info("  to_openmm_topology: %.1fs", t_topo)
+
+        t0 = time.perf_counter()
+        omm_system = self._interchange.to_openmm(combine_nonbonded_forces=True)
+        t_sys = time.perf_counter() - t0
+        LOGGER.info("  to_openmm (system): %.1fs", t_sys)
+
+        t0 = time.perf_counter()
         omm_positions = to_openmm_positions(self._interchange, include_virtual_sites=True)
+        t_pos = time.perf_counter() - t0
+        LOGGER.info("  to_openmm_positions: %.1fs", t_pos)
+
+        LOGGER.info(
+            "  OpenMM extraction total: %.1fs (topo=%.1f, sys=%.1f, pos=%.1f)",
+            t_topo + t_sys + t_pos,
+            t_topo,
+            t_sys,
+            t_pos,
+        )
 
         return omm_topology, omm_system, omm_positions
 

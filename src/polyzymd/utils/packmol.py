@@ -1,0 +1,754 @@
+"""
+Custom Packmol input generation and execution utilities.
+
+This module provides a thin replacement for the OpenFF Interchange
+``pack_box()`` polymer-packing path, adding support for Packmol keywords
+that the OpenFF wrapper does not expose (currently: ``movebadrandom``).
+
+All heavy imports (openff.interchange, openff.units, numpy) are lazy so
+this module can be imported in environments without the full simulation
+stack.
+
+Typical usage
+-------------
+>>> from polyzymd.utils.packmol import build_packmol_input, run_packmol
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_PACKMOL_INPUT_FILE = "packmol_input.txt"
+_PACKMOL_OUTPUT_FILE = "packmol_output.pdb"
+_PACKMOL_SOLUTE_FILE = "_PACKING_SOLUTE.pdb"
+_PACKMOL_MOLECULE_PREFIX = "_PACKING_MOLECULE"
+
+
+# ---------------------------------------------------------------------------
+# Input-file builder
+# ---------------------------------------------------------------------------
+
+
+def build_packmol_input(
+    molecule_pdb_paths: list[str],
+    molecule_counts: list[int],
+    box_size_angstrom: "NDArray",
+    tolerance_angstrom: float,
+    solute_pdb_path: str | None = None,
+    use_pbc: bool = False,
+    movebadrandom: bool = False,
+    ignore_conect: bool = False,
+    inner_exclusion_box_angstrom: "NDArray | None" = None,
+    nloop: int | None = None,
+) -> str:
+    """Build the text content of a Packmol input file.
+
+    Parameters
+    ----------
+    molecule_pdb_paths : list[str]
+        Paths to PDB files for each unique molecule type to pack.
+    molecule_counts : list[int]
+        Number of copies of each molecule type. Entries of zero are skipped.
+    box_size_angstrom : NDArray
+        1-D array of length 3 giving the box edge lengths in Angstrom.
+        For non-PBC runs the effective packing box is shrunk by *tolerance*
+        (matching the OpenFF convention).
+    tolerance_angstrom : float
+        Minimum distance between atoms of different molecules, in Angstrom.
+    solute_pdb_path : str or None, optional
+        Path to a PDB file for the fixed solute (protein, substrate, …).
+        When provided a ``fixed`` section is emitted first.
+    use_pbc : bool, optional
+        If ``True``, emit a ``pbc`` global keyword instead of per-structure
+        ``inside box`` constraints (requires Packmol ≥ 20.15.0).
+    movebadrandom : bool, optional
+        If ``True``, add the ``movebadrandom`` global keyword, which places
+        badly-packed molecules at random positions in the box rather than
+        near well-packed neighbours. This improves convergence when the
+        restraints are complex (many unique chain types, dense packing).
+        Default is ``False``.
+    ignore_conect : bool, optional
+        If ``True``, add the ``ignore_conect`` Packmol keyword so that
+        CONECT records in PDB input files are not parsed.  This prevents
+        failures when atom indices exceed the 5-digit PDB fixed-width
+        field limit (>99,999 atoms).  Default is ``False``.
+    inner_exclusion_box_angstrom : NDArray or None, optional
+        When provided, a 1-D array of 6 floats
+        ``[xmin, ymin, zmin, xmax, ymax, zmax]`` in Angstrom defining a
+        rectangular region that packed molecules must avoid.  An
+        ``outside box`` constraint is added to every non-fixed structure
+        block, creating a rectangular *shell* between the inner exclusion
+        zone and the outer packing box.  Ignored when *use_pbc* is
+        ``True``.  Default is ``None`` (no exclusion zone).
+    nloop : int or None, optional
+        Maximum number of GENCAN optimisation loops *per molecule type*.
+        Packmol's default is 50; for dense shell-packing with many
+        molecules, higher values (200–500) improve convergence.
+        Default is ``None`` (use Packmol's built-in default).
+
+    Returns
+    -------
+    str
+        Complete Packmol input file text, ready to be written to disk.
+    """
+    import numpy as np
+
+    if use_pbc:
+        effective_box = np.asarray(box_size_angstrom, dtype=float)
+    else:
+        effective_box = np.asarray(box_size_angstrom, dtype=float) - tolerance_angstrom
+
+    # Pre-format the exclusion constraint line (if requested and not PBC)
+    _exclusion_line: str | None = None
+    if inner_exclusion_box_angstrom is not None and not use_pbc:
+        ebox = np.asarray(inner_exclusion_box_angstrom, dtype=float)
+        if ebox.shape != (6,):
+            raise ValueError(f"inner_exclusion_box_angstrom must have shape (6,), got {ebox.shape}")
+        _exclusion_line = (
+            f"  outside box"
+            f" {ebox[0]:.6f} {ebox[1]:.6f} {ebox[2]:.6f}"
+            f" {ebox[3]:.6f} {ebox[4]:.6f} {ebox[5]:.6f}"
+        )
+
+    lines: list[str] = [
+        f"tolerance {tolerance_angstrom:f}",
+        "filetype pdb",
+        f"output {_PACKMOL_OUTPUT_FILE}",
+        "",
+    ]
+
+    if ignore_conect:
+        lines.append("ignore_conect")
+        lines.append("")
+
+    if movebadrandom:
+        lines.append("movebadrandom")
+        lines.append("")
+
+    if nloop is not None:
+        lines.append(f"nloop {nloop}")
+        lines.append("")
+
+    if use_pbc:
+        lines.append(
+            f"pbc 0. 0. 0. {effective_box[0]:.6f} {effective_box[1]:.6f} {effective_box[2]:.6f}"
+        )
+        lines.append("")
+
+    # Fixed solute block
+    if solute_pdb_path is not None:
+        lines.extend(
+            [
+                f"structure {solute_pdb_path}",
+                "  number 1",
+                "  fixed 0. 0. 0. 0. 0. 0.",
+                "end structure",
+                "",
+            ]
+        )
+
+    # One block per unique molecule type
+    for pdb_path, count in zip(molecule_pdb_paths, molecule_counts):
+        if count == 0:
+            continue
+        block = [
+            f"structure {pdb_path}",
+            f"  number {count}",
+        ]
+        if not use_pbc:
+            block.append(
+                f"  inside box 0. 0. 0."
+                f" {effective_box[0]:.6f} {effective_box[1]:.6f} {effective_box[2]:.6f}"
+            )
+        if _exclusion_line is not None:
+            block.append(_exclusion_line)
+        block.append("end structure")
+        block.append("")
+        lines.extend(block)
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Packmol executor
+# ---------------------------------------------------------------------------
+
+
+def run_packmol(
+    input_text: str,
+    working_directory: str | Path,
+    retain_working_files: bool = True,
+) -> Path:
+    """Write a Packmol input file and execute Packmol.
+
+    Parameters
+    ----------
+    input_text : str
+        Complete Packmol input file content (from :func:`build_packmol_input`).
+    working_directory : str or Path
+        Directory in which to write working files and invoke Packmol.
+        The directory is created if it does not exist.
+    retain_working_files : bool, optional
+        When ``True`` (default), all files in *working_directory* are kept
+        after the run.  When ``False`` the directory is removed on success
+        (mimicking OpenFF behaviour for temporary directories).
+
+    Returns
+    -------
+    Path
+        Absolute path to the Packmol output PDB file.
+
+    Raises
+    ------
+    OSError
+        If the ``packmol`` binary cannot be found on ``PATH``.
+    RuntimeError
+        If Packmol exits with a non-zero return code or does not print
+        ``'Success!'`` in its output.
+    """
+    packmol_binary = shutil.which("packmol")
+    if packmol_binary is None:
+        raise OSError(
+            "Packmol binary not found on PATH. "
+            "Install Packmol and make sure it is accessible as 'packmol'."
+        )
+
+    working_directory = Path(working_directory)
+    working_directory.mkdir(parents=True, exist_ok=True)
+
+    _temporary = False
+    _actual_dir = working_directory
+
+    input_path = working_directory / _PACKMOL_INPUT_FILE
+    output_path = working_directory / _PACKMOL_OUTPUT_FILE
+    error_log_path = working_directory / "packmol_error.log"
+
+    input_path.write_text(input_text)
+
+    logger.debug("Running Packmol in %s", working_directory)
+    logger.debug("Input file:\n%s", input_text)
+
+    original_cwd = Path.cwd()
+    try:
+        os.chdir(working_directory)
+        with input_path.open() as fh:
+            result = subprocess.run(
+                packmol_binary,
+                stdin=fh,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+    finally:
+        os.chdir(original_cwd)
+
+    stdout = result.stdout.decode("utf-8", errors="replace")
+
+    # Exit code 173 means "ended without perfect packing".  Packmol still
+    # writes its best solution to the output file.  Since systems are
+    # energy-minimised before MD, minor steric violations are acceptable.
+    # Treat 173 as a warning rather than a fatal error.
+    _PACKMOL_EXIT_IMPERFECT = 173
+
+    if result.returncode == _PACKMOL_EXIT_IMPERFECT:
+        error_log_path.write_text(stdout)
+        logger.warning(
+            "Packmol exited with code %d (imperfect packing). "
+            "The best solution was written to %s and will be used. "
+            "Minor steric clashes will be resolved during energy minimisation. "
+            "See %s for details.",
+            _PACKMOL_EXIT_IMPERFECT,
+            output_path.name,
+            error_log_path,
+        )
+    elif result.returncode != 0:
+        error_log_path.write_text(stdout)
+        raise RuntimeError(
+            f"Packmol exited with return code {result.returncode}. "
+            f"See {error_log_path} for details."
+        )
+    elif "Success!" not in stdout:
+        raise RuntimeError(
+            "Packmol did not raise an error code but 'Success!' was not found "
+            "in its output. The packing may not have converged. "
+            f"Working directory: {working_directory}"
+        )
+
+    if not retain_working_files and _temporary:
+        shutil.rmtree(_actual_dir, ignore_errors=True)
+
+    return output_path.resolve()
+
+
+# ---------------------------------------------------------------------------
+# High-level polymer packing helper
+# ---------------------------------------------------------------------------
+
+
+def pack_polymers(
+    molecules: list,
+    number_of_copies: list[int],
+    solute,
+    box_vectors,
+    *,
+    tolerance_angstrom: float = 2.0,
+    movebadrandom: bool = False,
+    nloop: int | None = 200,
+    working_directory: str | Path | None = None,
+    retain_working_files: bool = True,
+):
+    """Pack polymer chains around a fixed solute using Packmol.
+
+    This is a drop-in replacement for the OpenFF ``pack_box()`` call in
+    :meth:`~polyzymd.builders.system_builder.SystemBuilder.pack_polymers`.
+    It adds support for the ``movebadrandom`` Packmol keyword and packs
+    polymers in a rectangular shell around the protein (via ``outside box``
+    + ``inside box`` constraints).
+
+    Parameters
+    ----------
+    molecules : list[openff.toolkit.Molecule]
+        Unique molecule types to pack.
+    number_of_copies : list[int]
+        Number of copies of each molecule type (parallel to *molecules*).
+    solute : openff.toolkit.Topology
+        Fixed topology (protein + substrate) placed at the origin.
+    box_vectors : openff.units.Quantity
+        Box vectors with shape (3, 3) and length units (e.g. nanometers).
+    tolerance_angstrom : float, optional
+        Packmol tolerance in Angstrom (default 2.0).
+    movebadrandom : bool, optional
+        Pass the ``movebadrandom`` keyword to Packmol (default ``False``).
+    nloop : int or None, optional
+        Maximum GENCAN optimisation loops per molecule type.  Packmol's
+        default is 50; for dense shell-packing with many molecules, higher
+        values (200-500) improve convergence.  Default is ``200``.
+    working_directory : str, Path, or None, optional
+        Directory for Packmol input/output files.  A temporary directory is
+        created when ``None``.
+    retain_working_files : bool, optional
+        Keep working files after the run (default ``True``).
+
+    Returns
+    -------
+    openff.toolkit.Topology
+        Packed topology with solute + all polymer chains and box vectors set.
+    """
+    import numpy as np
+    from openff.interchange.components._packmol import (
+        _center_topology_at,
+        _compute_brick_from_box_vectors,
+        _create_molecule_pdbs,
+        _create_solute_pdb,
+        _load_positions,
+    )
+    from openff.toolkit import Topology
+    from openff.units import Quantity
+
+    # --- sort molecule types by count descending ---
+    # Higher-count molecules first improves Packmol convergence (fewer
+    # restarts when the most-replicated species is placed first).
+    paired = list(zip(molecules, number_of_copies))
+    paired.sort(key=lambda pair: pair[1], reverse=True)
+    molecules = [p[0] for p in paired]
+    number_of_copies = [p[1] for p in paired]
+
+    logger.info(
+        "Packmol molecule order (count-descending): %s",
+        ", ".join(f"{n}x" for n in number_of_copies),
+    )
+
+    # --- resolve working directory ---
+    _temporary = False
+    if working_directory is None:
+        working_directory = Path(tempfile.mkdtemp())
+        _temporary = True
+    else:
+        working_directory = Path(working_directory)
+        working_directory.mkdir(parents=True, exist_ok=True)
+
+    # --- compute brick dimensions ---
+    brick_size = _compute_brick_from_box_vectors(box_vectors)
+    box_size_angstrom = np.asarray(brick_size.m_as("angstrom"), dtype=float)
+
+    # --- center solute in the brick ---
+    centered_solute = _center_topology_at("BRICK", solute, box_vectors, brick_size)
+
+    # --- compute inner exclusion box (polymer shell constraint) ---
+    # Polymers must pack in a *shell* around the protein, not throughout
+    # the entire box volume.  We use Packmol's ``outside box`` constraint
+    # with a rectangular exclusion zone equal to the centered solute's
+    # bounding box inflated by the Packmol tolerance on each side.
+    #
+    # The shell thickness is controlled entirely by the caller's
+    # ``packing.padding`` parameter.  If the shell is too thin for the
+    # polymers being packed, a warning is logged with a recommended
+    # padding value.
+    from polyzymd.utils.boxvectors import get_topology_bbox_bounds
+
+    min_coords, max_coords = get_topology_bbox_bounds(centered_solute)
+    inner_exclusion_box = np.array(
+        [
+            min_coords[0] - tolerance_angstrom,
+            min_coords[1] - tolerance_angstrom,
+            min_coords[2] - tolerance_angstrom,
+            max_coords[0] + tolerance_angstrom,
+            max_coords[1] + tolerance_angstrom,
+            max_coords[2] + tolerance_angstrom,
+        ]
+    )
+
+    # Compute shell thicknesses for diagnostics.  The effective packing
+    # box (non-PBC) runs from 0 to ``box_size - tolerance``.
+    effective_box = box_size_angstrom - tolerance_angstrom
+    shell_lo = inner_exclusion_box[:3]  # distance from origin to exclusion face
+    shell_hi = effective_box - inner_exclusion_box[3:]  # exclusion face to box edge
+    min_shell = float(min(np.min(shell_lo), np.min(shell_hi)))
+
+    logger.info(
+        "Protein bbox (A): [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]",
+        *min_coords,
+        *max_coords,
+    )
+    logger.info(
+        "Exclusion box (A): [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]",
+        *inner_exclusion_box,
+    )
+    logger.info(
+        "Shell thickness lo (A): [%.1f, %.1f, %.1f]  hi: [%.1f, %.1f, %.1f]  min: %.1f",
+        *shell_lo,
+        *shell_hi,
+        min_shell,
+    )
+
+    # Warn if the shell is thinner than the largest polymer diameter.
+    max_diameter = max(_max_molecule_diameter_angstrom(mol) for mol in molecules)
+    if min_shell < max_diameter:
+        deficit_nm = (max_diameter - min_shell) / 10.0
+        logger.warning(
+            "Polymer shell thickness (%.1f A) is less than the largest "
+            "polymer diameter (%.1f A). Packing may fail or produce poor "
+            "results. Consider increasing packing.padding by at least "
+            "%.1f nm.",
+            min_shell,
+            max_diameter,
+            deficit_nm,
+        )
+
+    # Force PBC off for polymer packing — we need per-structure ``inside box``
+    # + ``outside box`` constraints to create the polymer shell.  PBC mode
+    # removes per-structure spatial constraints.  (Solvation can still use PBC
+    # since it doesn't need shell constraints.)
+    _use_pbc = False
+
+    original_cwd = Path.cwd()
+    try:
+        os.chdir(working_directory)
+
+        # write PDB files
+        solute_pdb = _create_solute_pdb(centered_solute, box_vectors)
+        molecule_pdbs = _create_molecule_pdbs(molecules)
+
+        # build and run packmol
+        input_text = build_packmol_input(
+            molecule_pdb_paths=molecule_pdbs,
+            molecule_counts=number_of_copies,
+            box_size_angstrom=box_size_angstrom,
+            tolerance_angstrom=tolerance_angstrom,
+            solute_pdb_path=solute_pdb,
+            use_pbc=_use_pbc,
+            movebadrandom=movebadrandom,
+            inner_exclusion_box_angstrom=inner_exclusion_box,
+            nloop=nloop,
+        )
+
+        output_path = run_packmol(
+            input_text=input_text,
+            working_directory=working_directory,
+            retain_working_files=True,  # always keep; we clean up below
+        )
+
+        positions = _load_positions(str(output_path.name))
+
+    finally:
+        os.chdir(original_cwd)
+
+    # --- assemble output topology ---
+    # Use the *centered* solute so that protein coordinates match the
+    # Packmol frame of reference (polymers were packed around the centered
+    # copy).  Previous code incorrectly used the original un-centered
+    # solute, creating a spatial mismatch between protein and polymers.
+    added_molecules = []
+    for mol, n in zip(molecules, number_of_copies):
+        added_molecules.extend([mol] * n)
+    packed_topology = Topology.from_molecules(added_molecules)
+
+    n_solute_atoms = len(positions) - packed_topology.n_atoms
+    packed_topology.set_positions(Quantity(positions[n_solute_atoms:], "angstrom"))
+
+    if solute is not None:
+        packed_topology = centered_solute + packed_topology
+
+    packed_topology.box_vectors = box_vectors
+
+    if _temporary and not retain_working_files:
+        shutil.rmtree(working_directory, ignore_errors=True)
+
+    return packed_topology
+
+
+# ---------------------------------------------------------------------------
+# High-level solvation helper
+# ---------------------------------------------------------------------------
+
+
+def solvate_with_packmol(
+    molecules: list,
+    number_of_copies: list[int],
+    solute,
+    box_vectors,
+    *,
+    tolerance_angstrom: float = 2.0,
+    movebadrandom: bool = False,
+    working_directory: str | Path | None = None,
+    retain_working_files: bool = True,
+):
+    """Solvate a system using Packmol, replacing OpenFF's ``pack_box()``.
+
+    This is a drop-in replacement for
+    ``openff.interchange.components._packmol.pack_box()`` that handles the
+    PDB CONECT-record overflow affecting systems with >99,999 atoms.
+    OpenMM's PDB writer hex-encodes atom indices beyond 5 digits, which
+    Packmol's fixed-width Fortran parser cannot read.
+
+    The fix has two layers:
+
+    1. **Strip CONECT records** from the solute PDB after writing.
+       Packmol only needs atomic coordinates; bond topology is already
+       captured in the OpenFF ``Topology`` object.
+    2. **``ignore_conect`` keyword** in the Packmol input file as a
+       belt-and-suspenders safeguard.
+
+    Parameters
+    ----------
+    molecules : list[openff.toolkit.Molecule]
+        Solvent molecule types (water, ions, co-solvents).
+    number_of_copies : list[int]
+        Number of copies of each molecule type (parallel to *molecules*).
+    solute : openff.toolkit.Topology
+        Topology to solvate (protein + polymers + substrate).
+    box_vectors : openff.units.Quantity
+        Box vectors with shape (3, 3) and length units (e.g. nanometers).
+    tolerance_angstrom : float, optional
+        Packmol tolerance in Angstrom (default 2.0).
+    movebadrandom : bool, optional
+        Pass the ``movebadrandom`` keyword to Packmol (default ``False``).
+    working_directory : str, Path, or None, optional
+        Directory for Packmol input/output files.  A temporary directory is
+        created when ``None``.
+    retain_working_files : bool, optional
+        Keep working files after the run (default ``True``).
+
+    Returns
+    -------
+    openff.toolkit.Topology
+        Solvated topology with solute + solvent and box vectors set.
+    """
+    import numpy as np
+    from openff.interchange.components._packmol import (
+        _center_topology_at,
+        _compute_brick_from_box_vectors,
+        _create_molecule_pdbs,
+        _create_solute_pdb,
+        _load_positions,
+    )
+    from openff.toolkit import Topology
+    from openff.units import Quantity
+
+    # --- resolve working directory ---
+    _temporary = False
+    if working_directory is None:
+        working_directory = Path(tempfile.mkdtemp())
+        _temporary = True
+    else:
+        working_directory = Path(working_directory)
+        working_directory.mkdir(parents=True, exist_ok=True)
+
+    # --- compute brick dimensions ---
+    brick_size = _compute_brick_from_box_vectors(box_vectors)
+    box_size_angstrom = np.asarray(brick_size.m_as("angstrom"), dtype=float)
+
+    # --- center solute in the brick ---
+    centered_solute = _center_topology_at("BRICK", solute, box_vectors, brick_size)
+
+    # detect whether PBC is usable (rectangular box + packmol >= 20.15.0)
+    _use_pbc = _check_pbc_available(box_vectors)
+
+    original_cwd = Path.cwd()
+    try:
+        os.chdir(working_directory)
+
+        # write PDB files
+        solute_pdb = _create_solute_pdb(centered_solute, box_vectors)
+        molecule_pdbs = _create_molecule_pdbs(molecules)
+
+        # Strip CONECT records from the solute PDB.
+        # OpenMM hex-encodes atom indices > 99999, which Packmol cannot parse.
+        if solute_pdb is not None:
+            n_stripped = _strip_conect_records(solute_pdb)
+            if n_stripped > 0:
+                logger.info(
+                    "Stripped %d CONECT records from solute PDB (%d atoms)",
+                    n_stripped,
+                    centered_solute.n_atoms,
+                )
+
+        # build and run packmol
+        _ignore_conect = _check_ignore_conect_supported()
+        input_text = build_packmol_input(
+            molecule_pdb_paths=molecule_pdbs,
+            molecule_counts=number_of_copies,
+            box_size_angstrom=box_size_angstrom,
+            tolerance_angstrom=tolerance_angstrom,
+            solute_pdb_path=solute_pdb,
+            use_pbc=_use_pbc,
+            movebadrandom=movebadrandom,
+            ignore_conect=_ignore_conect,
+        )
+
+        output_path = run_packmol(
+            input_text=input_text,
+            working_directory=working_directory,
+            retain_working_files=True,  # always keep; we clean up below
+        )
+
+        positions = _load_positions(str(output_path.name))
+
+    finally:
+        os.chdir(original_cwd)
+
+    # --- assemble output topology ---
+    added_molecules = []
+    for mol, n in zip(molecules, number_of_copies):
+        added_molecules.extend([mol] * n)
+    solvent_topology = Topology.from_molecules(added_molecules)
+
+    n_solute_atoms = len(positions) - solvent_topology.n_atoms
+    solvent_topology.set_positions(Quantity(positions[n_solute_atoms:], "angstrom"))
+
+    # Prepend the original (un-centered) solute so that positions match
+    # the caller's topology.  OpenFF's pack_box() does the same thing:
+    # it uses the *original* solute positions, not the centered copy.
+    if solute is not None:
+        solvated_topology = solute + solvent_topology
+    else:
+        solvated_topology = solvent_topology
+
+    solvated_topology.box_vectors = box_vectors
+
+    if _temporary and not retain_working_files:
+        shutil.rmtree(working_directory, ignore_errors=True)
+
+    return solvated_topology
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _max_molecule_diameter_angstrom(mol) -> float:
+    """Return the maximum internal distance of a molecule in Angstrom.
+
+    This is the largest pairwise distance between any two atoms in the
+    molecule's first conformer — effectively the molecule's "diameter".
+    Used to check whether the polymer shell is thick enough to contain
+    the molecule.
+
+    Parameters
+    ----------
+    mol : openff.toolkit.Molecule
+        Molecule with at least one conformer.
+
+    Returns
+    -------
+    float
+        Maximum pairwise distance in Angstrom, or 0.0 if the molecule
+        has fewer than 2 atoms.
+    """
+    import numpy as np
+
+    coords = mol.conformers[0].m_as("angstrom")
+    if len(coords) <= 1:
+        return 0.0
+    diffs = coords[:, np.newaxis, :] - coords[np.newaxis, :, :]
+    dists_sq = np.sum(diffs**2, axis=-1)
+    return float(np.sqrt(np.max(dists_sq)))
+
+
+def _strip_conect_records(pdb_path: str | Path) -> int:
+    """Remove CONECT lines from a PDB file in-place.
+
+    Parameters
+    ----------
+    pdb_path : str or Path
+        Path to the PDB file to modify.
+
+    Returns
+    -------
+    int
+        Number of CONECT lines removed.
+    """
+    pdb_path = Path(pdb_path)
+    lines = pdb_path.read_text().splitlines(keepends=True)
+    filtered = [line for line in lines if not line.startswith("CONECT")]
+    n_removed = len(lines) - len(filtered)
+    if n_removed > 0:
+        pdb_path.write_text("".join(filtered))
+    return n_removed
+
+
+def _check_ignore_conect_supported() -> bool:
+    """Return True if the installed Packmol supports ``ignore_conect``.
+
+    The ``ignore_conect`` keyword was added after version 21.1.3.
+    We check for version > 21.1.3.  If the version cannot be determined,
+    return False (safe default — CONECT stripping handles the issue).
+    """
+    try:
+        from openff.interchange.components._packmol import _get_packmol_version
+        from packaging.version import Version
+
+        return _get_packmol_version() > Version("21.1.3")
+    except Exception:
+        return False
+
+
+def _check_pbc_available(box_vectors) -> bool:
+    """Return True if the box is rectangular and Packmol supports PBC."""
+    try:
+        import numpy as np
+        from openff.interchange.components._packmol import _get_packmol_version
+        from packaging.version import Version
+
+        box_arr = np.asarray(box_vectors.m)
+        is_rectangular = bool(np.all(box_arr == np.diag(np.diagonal(box_arr))))
+        if not is_rectangular:
+            return False
+        return _get_packmol_version() >= Version("20.15.0")
+    except Exception:
+        return False

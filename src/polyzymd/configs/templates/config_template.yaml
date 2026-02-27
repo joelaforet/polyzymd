@@ -103,6 +103,7 @@ description: "Description of your simulation system"
 #   packing:
 #     padding: 2.0                        # nm padding around solute for polymer box
 #     tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
+#     movebadrandom: false                # set true for dense/heterogeneous polymer systems
 
 # ============================================================================
 # Solvent Configuration (REQUIRED)

@@ -126,10 +126,11 @@ PolyzyMD includes presets for common HPC configurations:
 
 | Preset | Partition | GPUs | Time Limit | Memory | Description |
 |--------|-----------|------|------------|--------|-------------|
-| `aa100` | aa100 | 1x A100 | 24h | 3GB | NVIDIA A100 (recommended) |
-| `al40` | al40 | 1x L40 | 24h | 3GB | NVIDIA L40 |
-| `blanca-shirts` | blanca-shirts | 1x | 24h | 3GB | Shirts lab partition |
-| `testing` | atesting_a100 | 1x | 6min | 3GB | Quick tests |
+| `aa100` | aa100 | 1x A100 | 24h | 3GB | CU Boulder Alpine — NVIDIA A100 |
+| `al40` | al40 | 1x L40 | 24h | 3GB | CU Boulder Alpine — NVIDIA L40 |
+| `blanca-shirts` | blanca-shirts | 1x | 24h | 3GB | CU Boulder Blanca — Shirts lab partition |
+| `testing` | atesting_a100 | 1x | 6min | 3GB | CU Boulder Alpine — quick tests |
+| `bridges2` | GPU-shared | 1x V100-32 | 24h | (per-GPU) | PSC Bridges2 — NVIDIA V100 32GB |
 
 ### Using Presets
 
@@ -166,6 +167,137 @@ This is especially useful for:
 ### Custom SLURM Settings
 
 For custom configurations, edit the generated scripts in `job_scripts/` before submitting.
+
+---
+
+## Bridges2 (PSC)
+
+[Bridges2](https://www.psc.edu/resources/bridges-2/) is the Pittsburgh Supercomputing Center (PSC) GPU cluster. It uses slightly different SLURM conventions than CU Boulder Alpine, and polyzymd handles these differences automatically via the `bridges2` preset.
+
+### Key Differences from Alpine
+
+| Feature | Alpine (`aa100`) | Bridges2 (`bridges2`) |
+|---------|-----------------|----------------------|
+| GPU directive | `--gres=gpu:N` | `--gpus=<type>:N` |
+| Nodes/tasks | `--nodes=1` + `--ntasks=1` | `-N 1` (single line) |
+| QoS | `--qos=normal` | *(omitted — not used)* |
+| Memory | `--mem=3G` | *(omitted — per-GPU allocation)* |
+| Account | ucb-group (in preset) | *(omitted — inferred from login)* |
+| Module load | `ml miniforge` | `ml anaconda3/2024.10-1` |
+| Conda frontend | `mamba activate` | `conda activate` |
+| Default time limit | 24h | 24h |
+
+### Account
+
+Bridges2 infers the billing allocation from your login session, so **no `--account` directive is emitted by default**. If you have multiple allocations and need to charge a specific one, pass `--account`:
+
+```bash
+polyzymd submit -c config.yaml \
+    --preset bridges2 \
+    --account chm250017p \
+    --replicates 1-3 \
+    --email collaborator@pitt.edu
+```
+
+```{note}
+Unlike Alpine presets, Bridges2 scripts omit the `#SBATCH --account=` line
+entirely when no account is specified. The `--account` CLI flag is optional
+for Bridges2 (it is required on Alpine where the preset always sets a
+group account).
+```
+
+### GPU Type Selection
+
+Bridges2 has multiple GPU types available. Use `--gpu-type` to select:
+
+| Flag value | GPU | VRAM |
+|------------|-----|------|
+| `v100-32` *(default)* | NVIDIA V100 | 32 GB |
+| `v100-16` | NVIDIA V100 | 16 GB |
+| `l40s-48` | NVIDIA L40S | 48 GB |
+| `h100-80` | NVIDIA H100 | 80 GB |
+
+```bash
+# Default (V100 32GB) — good balance of availability and memory
+polyzymd submit -c config.yaml \
+    --preset bridges2 \
+    --account abc123_gpu
+
+# High-memory GPU for large systems
+polyzymd submit -c config.yaml \
+    --preset bridges2 \
+    --account abc123_gpu \
+    --gpu-type h100-80
+```
+
+### Full Bridges2 Workflow
+
+```bash
+# 1. Dry run — inspect scripts before submitting
+polyzymd submit -c config.yaml \
+    --preset bridges2 \
+    --account abc123_gpu \
+    --replicates 1-3 \
+    --dry-run
+
+# 2. Inspect the generated SBATCH directives
+cat job_scripts/initial_seg0_rep1.sh | head -20
+# You should see:
+#   #SBATCH --partition=GPU-shared
+#   #SBATCH -N 1                    ← single-line nodes directive
+#   #SBATCH --gpus=v100-32:1        ← type-specific GPU directive
+#   (no --qos line)
+#   (no --mem line)
+#   (no --account line — inferred from login)
+
+# 3. Submit for real
+polyzymd submit -c config.yaml \
+    --preset bridges2 \
+    --account abc123_gpu \
+    --replicates 1-3 \
+    --email collaborator@pitt.edu
+```
+
+### Bridges2 Directory Structure
+
+On Bridges2, use Ocean storage for long-term data and local scratch for active simulations:
+
+```
+/ocean/projects/abc123_gpu/$USER/polyzymd/   # Long-term storage
+├── my_simulation/
+│   ├── config.yaml
+│   ├── structures/
+│   │   ├── enzyme.pdb
+│   │   └── substrate.sdf
+│   ├── job_scripts/
+│   │   ├── initial_seg0_rep1.sh
+│   │   └── ...
+│   └── slurm_logs/
+
+/local/scratch/$USER/polyzymd_sims/          # High-performance local scratch
+├── LipA_Substrate_300K_run1/
+│   ├── system.pdb
+│   ├── equilibration/
+│   └── production_seg0/
+```
+
+Set these paths in your `config.yaml`:
+
+```yaml
+output:
+  projects_directory: "/ocean/projects/abc123_gpu/$USER/polyzymd/my_simulation"
+  scratch_directory: "/local/scratch/$USER/polyzymd_sims"
+```
+
+Or override on the CLI:
+
+```bash
+polyzymd submit -c config.yaml \
+    --preset bridges2 \
+    --account abc123_gpu \
+    --projects-dir "/ocean/projects/abc123_gpu/$USER/polyzymd/my_simulation" \
+    --scratch-dir "/local/scratch/$USER/polyzymd_sims"
+```
 
 ---
 
@@ -343,12 +475,16 @@ The initial job script (segment 0) builds the system, runs equilibration, and ru
 #SBATCH --mail-user=your@email.edu
 #SBATCH --account=ucb625_asc1
 
-# Exit immediately if any command fails
+module purge 2>/dev/null || true
+ml miniforge 2>/dev/null || true
+
+eval "$(conda shell.bash hook)"
+mamba activate polymerist-env
+
 set -e
 
-module purge
-module load miniforge
-mamba activate polymerist-env
+# Required for OpenFF Interchange.combine() functionality
+export INTERCHANGE_EXPERIMENTAL=1
 
 # Projects directory (scripts, configs, logs)
 PROJECTS_DIR="/projects/$USER/polyzymd/my_simulation"
@@ -398,12 +534,16 @@ Continuation scripts load the checkpoint from the previous segment and continue 
 #SBATCH --mail-user=your@email.edu
 #SBATCH --account=ucb625_asc1
 
-# Exit immediately if any command fails
+module purge 2>/dev/null || true
+ml miniforge 2>/dev/null || true
+
+eval "$(conda shell.bash hook)"
+mamba activate polymerist-env
+
 set -e
 
-module purge
-module load miniforge
-mamba activate polymerist-env
+# Required for OpenFF Interchange.combine() functionality
+export INTERCHANGE_EXPERIMENTAL=1
 
 # Projects directory (scripts, configs, logs)
 PROJECTS_DIR="/projects/$USER/polyzymd/my_simulation"
@@ -504,13 +644,15 @@ polyzymd submit -c CONFIG [OPTIONS]
 
 **Options:**
 - `-r, --replicates RANGE` - Replicate range (e.g., "1-5", "1,3,5"). Default: "1"
-- `--preset PRESET` - SLURM preset: aa100, al40, blanca-shirts, testing. Default: aa100
+- `--preset PRESET` - SLURM preset: aa100, al40, blanca-shirts, testing, bridges2. Default: aa100
+- `--account ACCOUNT` - HPC allocation account ID (required for Bridges2)
+- `--gpu-type TYPE` - GPU type for Bridges2: v100-16, v100-32, l40s-48, h100-80. Default: v100-32
 - `--scratch-dir PATH` - Override scratch directory for simulation output
 - `--projects-dir PATH` - Override projects directory for scripts/logs
 - `--output-dir PATH` - Directory for job scripts. Default: {projects_dir}/job_scripts
 - `--email EMAIL` - Email for job notifications
 - `--time-limit TIME` - Override SLURM time limit (HH:MM:SS)
-- `--memory SIZE` - Override SLURM memory allocation (e.g., "4G", "8G"). Default: 3G
+- `--memory SIZE` - Override SLURM memory allocation (e.g., "4G"). Bridges2 omits --mem by default (per-GPU allocation)
 - `--openff-logs` - Enable verbose OpenFF logs in generated job scripts (for debugging)
 - `--dry-run` - Generate scripts without submitting
 
@@ -627,7 +769,9 @@ Check:
 nvidia-smi  # In job script
 ```
 
-Make sure `#SBATCH --gres=gpu:1` is present.
+Make sure the GPU directive is present in the generated script:
+- Alpine presets: `#SBATCH --gres=gpu:1`
+- Bridges2 preset: `#SBATCH --gpus=v100-32:1` (or your selected GPU type)
 
 ### "config.yaml not found"
 

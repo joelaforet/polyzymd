@@ -239,11 +239,18 @@ class FragmentGenerator:
 
         logger.info(f"Generated {len(activated_fragments)} fragment types")
 
-        # Step 5: Name fragments by parent and functionality
+        # Step 5: Name fragments by parent and functionality.
+        # For 1-site fragments we collect ALL isomers per monomer so that the
+        # termination reactor has the best chance of firing on at least one of them.
+        # (Two structural isomers are generated: one where the Cl-bearing carbon is
+        # directly bonded to the port, and one where it is one carbon further away.
+        # Only the latter isomer is compatible with the β-elimination termination
+        # reaction, and which isomer comes first is non-deterministic.)
         from collections import Counter, defaultdict
         from string import ascii_lowercase
 
         named_fragments: Dict[str, Smiles] = {}
+        one_site_candidates: Dict[str, List[Smiles]] = defaultdict(list)
         fragment_name_modifiers: Dict[str, Counter] = defaultdict(Counter)
 
         for canon_smiles, fragment_mol in activated_fragments.items():
@@ -256,11 +263,13 @@ class FragmentGenerator:
             if parent_name is None or parent_name == "Cl2":
                 continue
 
-            # Generate fragment name following Polymerist convention
-            # Use underscore separator and descriptive suffix like the notebook
             if functionality == 1:
-                fragment_name = f"{parent_name}_1-site"
-            elif functionality == 2:
+                # Collect every 1-site isomer; we'll pick the terminable one later.
+                one_site_candidates[parent_name].append(canon_smiles)
+                continue
+
+            # Generate fragment name following Polymerist convention
+            if functionality == 2:
                 fragment_name = f"{parent_name}_2-site"
             else:
                 # For higher functionality fragments, use numbered suffix
@@ -275,104 +284,99 @@ class FragmentGenerator:
             fragment_name_modifiers[parent_name][functionality] += 1
             logger.debug(f"Named fragment: {fragment_name}")
 
-        # Step 6: Terminate 1-site fragments
+        # Step 6: Terminate 1-site fragments.
+        # Try ALL collected isomers for each monomer; the termination reactor will
+        # only produce a product for the compatible isomer.
         logger.info("Running termination reactions on 1-site fragments...")
         terminated_fragments = self._terminate_one_site_fragments(
-            named_fragments, activated_fragments, monomers, match_threshold
+            one_site_candidates, monomers, match_threshold
         )
 
-        # Step 7: Build final fragment dictionary
-        final_fragments = self._build_final_fragments(
-            named_fragments, terminated_fragments, monomers, match_threshold
-        )
+        # Populate named_fragments with the canonical 1-site SMILES produced
+        # by termination (one per monomer).
+        for parent_name, term_smiles in terminated_fragments.items():
+            fragment_name = f"{parent_name}_1-site"
+            named_fragments[fragment_name] = term_smiles
+            logger.debug(f"Named terminated fragment: {fragment_name}")
 
-        # Create MonomerGroup
-        monogrp = MonomerGroup(sort_dict_by_keys(final_fragments, reverse=True))
-        logger.info(f"Created MonomerGroup with {len(final_fragments)} named fragments")
+        # Create MonomerGroup directly from named_fragments (already complete)
+        monogrp = MonomerGroup(sort_dict_by_keys(named_fragments, reverse=True))
+        logger.info(f"Created MonomerGroup with {len(named_fragments)} named fragments")
 
         return monogrp
 
     def _terminate_one_site_fragments(
         self,
-        named_fragments: Dict[str, Smiles],
-        activated_fragments: Dict[str, Chem.Mol],
-        monomers: Dict[str, Chem.Mol],
-        match_threshold: float,
-    ) -> Dict[str, Chem.Mol]:
-        """Terminate 1-site fragments to restore the terminal alkene.
-
-        Args:
-            named_fragments: Dictionary of fragment name -> SMILES
-            activated_fragments: Dictionary of SMILES -> RDKit Mol
-            monomers: Original monomer dictionary
-            match_threshold: Threshold for parent matching
-
-        Returns:
-            Dictionary of terminated fragment SMILES -> RDKit Mol
-        """
-        # Build activated named fragments dict for termination
-        activated_named_fragments: Dict[str, Chem.Mol] = {
-            name: explicit_mol_from_SMILES(smiles) for name, smiles in named_fragments.items()
-        }
-
-        # Add HCl for termination reaction
-        activated_named_fragments["HCl"] = Chem.MolFromSmarts("[H]-[Cl]")
-
-        # Run termination
-        termination_reactor = PolymerizationReactor(self.termination_rxn)
-        terminated_fragments = termination_reactor.propagate_pooled(
-            activated_named_fragments.values(),
-            clear_dummy_labels=True,
-        )
-
-        # Remove non-terminated fragments
-        for smiles in list(activated_fragments.keys()):
-            terminated_fragments.pop(smiles, None)
-        terminated_fragments.pop("Cl", None)
-
-        return terminated_fragments
-
-    def _build_final_fragments(
-        self,
-        named_fragments: Dict[str, Smiles],
-        terminated_fragments: Dict[str, Chem.Mol],
+        one_site_candidates: Dict[str, List[Smiles]],
         monomers: Dict[str, Chem.Mol],
         match_threshold: float,
     ) -> Dict[str, Smiles]:
-        """Build the final fragment dictionary with terminated 1-sites.
+        """Terminate 1-site fragment candidates to restore the terminal alkene.
 
-        For 1-site fragments, use the terminated versions.
-        For 2-site fragments, use the original activated versions.
+        Each monomer may produce two structural isomers of its 1-site fragment
+        (depending on which carbon the Cl ends up on after polymerization). Only
+        one isomer is compatible with the β-elimination termination reaction. This
+        method tries all collected isomers so the compatible one is always found.
 
-        Args:
-            named_fragments: Original named fragments
-            terminated_fragments: Terminated fragment molecules
-            monomers: Original monomer dictionary
-            match_threshold: Threshold for parent matching
+        Parameters
+        ----------
+        one_site_candidates : Dict[str, List[Smiles]]
+            Mapping of parent monomer name → list of all 1-site SMILES isomers
+            collected from the polymerization step.
+        monomers : Dict[str, Chem.Mol]
+            Original monomer molecules (used for parent matching).
+        match_threshold : float
+            MCS threshold for assigning a terminated product to its parent.
 
-        Returns:
-            Final dictionary of fragment name -> SMILES
+        Returns
+        -------
+        Dict[str, Smiles]
+            Mapping of parent monomer name → terminated 1-site SMILES.
+            Only monomers for which termination produced a product are included.
         """
-        final_fragments: Dict[str, Smiles] = {}
+        # Build the pool: one molecule per isomer + HCl
+        pool: Dict[str, Chem.Mol] = {}
+        for parent_name, smiles_list in one_site_candidates.items():
+            for smiles in smiles_list:
+                pool[smiles] = explicit_mol_from_SMILES(smiles)
+        pool["HCl"] = Chem.MolFromSmarts("[H]-[Cl]")
 
-        # Add 2-site fragments as-is
-        for name, smiles in named_fragments.items():
-            if "_2-site" in name:  # 2-site fragment
-                final_fragments[name] = smiles
+        if not pool:
+            return {}
 
-        # Add terminated 1-site fragments
-        for canon_smiles, fragment_mol in terminated_fragments.items():
-            functionality = get_num_ports(fragment_mol)
-            if functionality != 1:
+        # Run termination on all isomers at once
+        termination_reactor = PolymerizationReactor(self.termination_rxn)
+        raw_output = termination_reactor.propagate_pooled(
+            pool.values(),
+            clear_dummy_labels=True,
+        )
+
+        # Remove the unreacted inputs and HCl by-product
+        input_smiles = {smi for candidates in one_site_candidates.values() for smi in candidates}
+        for smiles in input_smiles:
+            raw_output.pop(smiles, None)
+        raw_output.pop("Cl", None)
+
+        # Match each surviving product back to its parent monomer
+        result: Dict[str, Smiles] = {}
+        for canon_smiles, fragment_mol in raw_output.items():
+            if get_num_ports(fragment_mol) != 1:
                 continue
-
             query_mol = Chem.MolFromSmarts(canon_smiles)
             parent_name = self._find_parent_monomer(monomers, query_mol, threshold=match_threshold)
-            if parent_name and parent_name != "Cl2":
-                fragment_name = f"{parent_name}_1-site"  # Terminated 1-site
-                final_fragments[fragment_name] = canon_smiles
+            if parent_name and parent_name != "Cl2" and parent_name not in result:
+                result[parent_name] = canon_smiles
+                logger.debug(f"Terminated {parent_name}_1-site: {canon_smiles}")
 
-        return final_fragments
+        # Warn for any monomers with candidates that produced no terminated product
+        for parent_name in one_site_candidates:
+            if parent_name not in result:
+                logger.warning(
+                    f"Termination produced no 1-site fragment for monomer: {parent_name}. "
+                    f"Tried {len(one_site_candidates[parent_name])} isomer(s)."
+                )
+
+        return result
 
     def get_cache_path(self, type_prefix: str) -> Path:
         """Get the path for caching MonomerGroup JSON.
