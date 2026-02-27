@@ -566,8 +566,9 @@ polyzymd analyze rmsf -c <path> -r 1-5 --eq-time 100ns
 | `--replicates` | `-r` | No | "1" | Replicate specification: "1-5", "1,3,5", or "1" |
 | `--eq-time` | - | No | "0ns" | Equilibration time to skip: "100ns", "5000ps" |
 | `--selection` | - | No | "protein and name CA" | MDAnalysis selection for RMSF atoms |
-| `--reference-mode` | - | No | "centroid" | Reference structure: "centroid", "average", or "frame" |
+| `--reference-mode` | - | No | "centroid" | Reference structure: "centroid", "average", "frame", or "external" |
 | `--reference-frame` | - | No | - | Frame index when --reference-mode=frame (1-indexed) |
+| `--reference-file` | - | No | - | Path to external PDB when --reference-mode=external |
 | `--alignment-selection` | - | No | "protein and name CA" | Selection for trajectory alignment |
 | `--centroid-selection` | - | No | "protein" | Selection for centroid finding |
 | `--plot` | - | No | false | Generate plot after analysis |
@@ -581,6 +582,7 @@ polyzymd analyze rmsf -c <path> -r 1-5 --eq-time 100ns
 | `centroid` | Most populated conformational state (K-Means) | Equilibrium flexibility analysis |
 | `average` | Mathematical mean structure | Pure thermal fluctuations |
 | `frame` | User-specified frame number | Functional state analysis |
+| `external` | External PDB file (e.g., crystal structure) | Catalytic competence, condition-independent comparison |
 
 #### Example
 
@@ -596,6 +598,10 @@ polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode average
 
 # Specific frame as reference (e.g., catalytically competent)
 polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode frame --reference-frame 500
+
+# External crystal structure as reference (condition-independent)
+polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode external \
+    --reference-file /path/to/crystal_structure.pdb
 ```
 
 #### Output
@@ -672,6 +678,7 @@ corresponding `comparison_settings.rmsf` entry (can be empty `{}`).
 | `--selection` | - | from config | Override atom selection (requires --override) |
 | `--reference-mode` | - | from config | Override reference mode (requires --override) |
 | `--reference-frame` | - | from config | Override reference frame (requires --override) |
+| `--reference-file` | - | from config | Override external PDB path (requires --override) |
 | `--recompute` | - | false | Force recompute RMSF |
 | `--format` | - | table | Output format: table, markdown, json |
 | `--output` | `-o` | - | Save formatted output to file |
