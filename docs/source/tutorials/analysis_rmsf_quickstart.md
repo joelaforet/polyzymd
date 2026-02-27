@@ -118,8 +118,9 @@ defaults:
 rmsf:
   enabled: true
   selection: "protein and name CA"    # MDAnalysis selection
-  reference_mode: "centroid"          # centroid | average | frame
+  reference_mode: "centroid"          # centroid | average | frame | external
   reference_frame: null               # Required if reference_mode: frame
+  # reference_file: "/path/to/crystal.pdb"  # Required if reference_mode: external
 ```
 
 ### Run All Enabled Analyses
@@ -141,8 +142,9 @@ polyzymd analyze run --recompute
 |-------|------|---------|-------------|
 | `enabled` | bool | `true` | Whether to run RMSF analysis |
 | `selection` | str | `"protein and name CA"` | MDAnalysis selection for RMSF calculation |
-| `reference_mode` | str | `"centroid"` | Alignment reference: `centroid`, `average`, or `frame` |
+| `reference_mode` | str | `"centroid"` | Alignment reference: `centroid`, `average`, `frame`, or `external` |
 | `reference_frame` | int | `null` | Frame number when `reference_mode: frame` (1-indexed) |
+| `reference_file` | str | `null` | Path to external PDB when `reference_mode: external` |
 
 ```{tip}
 **When to use analysis.yaml vs CLI:** Use `analysis.yaml` for standard, 
@@ -183,6 +185,9 @@ defaults:
 rmsf:
   selection: "protein and name CA"
   reference_mode: "centroid"
+  # For external reference mode, use:
+  # reference_mode: "external"
+  # reference_file: "/path/to/crystal_structure.pdb"
 ```
 
 ```bash
@@ -321,7 +326,8 @@ Results are saved in your project's analysis directory:
 | `-r, --replicates` | (required) | Which replicates to analyze |
 | `--eq-time` | `0ns` | Equilibration time to skip |
 | `--selection` | `protein and name CA` | Atoms for RMSF calculation |
-| `--reference-mode` | `centroid` | Reference structure type |
+| `--reference-mode` | `centroid` | Reference structure type (`centroid`, `average`, `frame`, `external`) |
+| `--reference-file` | (none) | Path to external PDB (required when `--reference-mode external`) |
 | `--plot` | off | Generate matplotlib figure |
 | `--recompute` | off | Ignore cached results |
 | `-o, --output-dir` | (auto) | Custom output location |
@@ -358,6 +364,15 @@ polyzymd analyze rmsf -c config.yaml -r 1 --selection "protein and name CA and r
 polyzymd analyze rmsf -c config.yaml -r 1 --selection "(protein and name CA) or resname LIG"
 ```
 
+```{tip}
+**Trimming flexible termini:** N- and C-terminal loops often have very high
+RMSF that dominates summary statistics and obscures active-site signals. Use a
+residue range selection to exclude them:
+`--selection "protein and name CA and resid 5:175"`
+This is especially useful with `external` reference mode for catalytic
+competence analysis.
+```
+
 ### Reference Mode
 
 Choose how the trajectory is aligned before RMSF calculation:
@@ -371,6 +386,10 @@ polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode average
 
 # Align to specific frame (e.g., catalytically competent)
 polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode frame --reference-frame 500
+
+# Align to external crystal structure (condition-independent reference)
+polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode external \
+    --reference-file /path/to/crystal_structure.pdb
 ```
 
 See [Reference Structure Selection](analysis_reference_selection.md) for details
