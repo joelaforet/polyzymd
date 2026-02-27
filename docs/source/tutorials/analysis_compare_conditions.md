@@ -221,8 +221,9 @@ analysis_settings:
   # RMSF Analysis
   rmsf:
     selection: "protein and name CA"  # Atoms for RMSF calculation
-    reference_mode: "centroid"        # centroid, average, or frame
+    reference_mode: "centroid"        # centroid, average, frame, or external
     # reference_frame: 500            # Required if reference_mode is "frame"
+    # reference_file: "/path/to/crystal.pdb"  # Required if reference_mode is "external"
 
   # Catalytic triad comparison (required for `polyzymd compare triad`)
   #
