@@ -94,6 +94,7 @@ Trajectory Analysis
    tutorials/analysis_statistics_best_practices
    tutorials/analysis_rmsf_quickstart
    tutorials/analysis_rmsf_best_practices
+   tutorials/analysis_rmsf_verification
    tutorials/analysis_reference_selection
    tutorials/analysis_distances_quickstart
    tutorials/analysis_contacts_quickstart

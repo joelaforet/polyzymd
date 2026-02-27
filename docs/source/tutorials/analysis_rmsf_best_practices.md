@@ -725,6 +725,7 @@ Discussion of RMSD-based convergence assessment.
 ## See Also
 
 - [Quick Start Guide](analysis_rmsf_quickstart.md) — Get results fast
+- [Implementation Verification](analysis_rmsf_verification.md) — 3-way benchmark against MDAnalysis and GROMACS
 - [Statistics Best Practices](analysis_statistics_best_practices.md) — Foundational statistics for MD
 - [Reference Structure Selection](analysis_reference_selection.md) — Choose alignment reference
 - [LiveCoMS Best Practices](https://livecomsjournal.org/index.php/livecoms/article/view/v1i1e5067) — Full methodology paper
