@@ -476,6 +476,52 @@ For enzyme studies, active site RMSF is particularly relevant:
 The "optimal" flexibility depends on the enzyme mechanism and should be
 interpreted in context of experimental activity data.
 
+### External Reference for Catalytic Competence
+
+When studying enzyme catalysis across multiple conditions (polymer baths,
+temperatures, mutants), the standard RMSF modes (`centroid`, `average`) use
+a **condition-specific** reference — each condition's trajectory determines
+its own reference structure. This makes direct comparison difficult: a low
+RMSF might mean the enzyme is rigid in a *non-functional* conformation.
+
+The `external` reference mode solves this by using a **condition-independent**
+reference, typically a crystal structure that represents the catalytically
+competent geometry. RMSF then measures deviation from the functional state:
+
+$$
+\text{RMSF}_i^{\text{ext}} = \sqrt{\frac{1}{T} \sum_{t=1}^{T} \left( \mathbf{r}_i(t) - \mathbf{r}_i^{\text{crystal}} \right)^2}
+$$
+
+**Interpretation changes with external reference:**
+
+| Metric | Standard RMSF (centroid/average) | External Reference RMSF |
+|--------|----------------------------------|------------------------|
+| Low value | Residue is rigid | Residue stays near crystal geometry |
+| High value | Residue is flexible | Residue deviates from functional state |
+| Condition comparison | Which condition is more flexible? | Which condition best maintains catalytic geometry? |
+
+**Practical guidance:**
+
+- Focus on **catalytic residues** (triad, oxyanion hole) rather than overall
+  protein RMSF — these are the residues whose geometry directly affects activity
+- Use **residue range truncation** (`resid 5:175`) to exclude flexible termini
+  that dominate statistics and obscure active-site signals
+- Report both overall protein and active-site RMSF separately — polymer effects
+  may stabilize the active site without affecting overall flexibility
+
+```{tip}
+**Which reference mode for enzymes?** Use `centroid` or `average` to answer
+"how flexible is the protein?" Use `external` to answer "how well does the
+protein maintain its catalytically competent geometry?" These are complementary
+questions — consider running both analyses.
+```
+
+```{seealso}
+For detailed setup instructions (Python, YAML, CLI), see the
+[External PDB section](analysis_reference_selection.md#external-pdb) of the
+Reference Selection Guide.
+```
+
 ## Common Pitfalls
 
 ### Pitfall 1: Using Unaligned Trajectories
