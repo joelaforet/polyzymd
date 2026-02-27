@@ -53,9 +53,11 @@ class RMSFAnalysisSettings(BaseAnalysisSettings):
     selection : str
         MDAnalysis selection string for RMSF calculation.
     reference_mode : str
-        Reference structure mode: centroid, average, or frame.
+        Reference structure mode: centroid, average, frame, or external.
     reference_frame : int, optional
         Frame number if reference_mode is 'frame' (1-indexed).
+    reference_file : str, optional
+        Path to external PDB file if reference_mode is 'external'.
     """
 
     selection: str = Field(
@@ -64,11 +66,18 @@ class RMSFAnalysisSettings(BaseAnalysisSettings):
     )
     reference_mode: str = Field(
         default="centroid",
-        description="Reference structure mode: centroid, average, or frame",
+        description="Reference structure mode: centroid, average, frame, or external",
     )
     reference_frame: Optional[int] = Field(
         default=None,
         description="Frame number if reference_mode is 'frame' (1-indexed)",
+    )
+    reference_file: Optional[str] = Field(
+        default=None,
+        description=(
+            "Path to external PDB file if reference_mode is 'external'. "
+            "The PDB must contain protein atoms matching the simulation topology."
+        ),
     )
 
     @classmethod
@@ -80,16 +89,21 @@ class RMSFAnalysisSettings(BaseAnalysisSettings):
     @classmethod
     def validate_reference_mode(cls, v: str) -> str:
         """Validate reference mode is one of the allowed values."""
-        valid = {"centroid", "average", "frame"}
+        valid = {"centroid", "average", "frame", "external"}
         if v not in valid:
             raise ValueError(f"reference_mode must be one of {valid}, got '{v}'")
         return v
 
     @model_validator(mode="after")
-    def validate_reference_frame_required(self) -> "RMSFAnalysisSettings":
-        """Ensure reference_frame is provided when reference_mode is 'frame'."""
+    def validate_reference_params(self) -> "RMSFAnalysisSettings":
+        """Validate reference_frame and reference_file for their modes."""
         if self.reference_mode == "frame" and self.reference_frame is None:
             raise ValueError("reference_frame is required when reference_mode is 'frame'")
+        if self.reference_mode == "external" and self.reference_file is None:
+            raise ValueError(
+                "reference_file is required when reference_mode is 'external'. "
+                "Provide a path to the external PDB reference structure."
+            )
         return self
 
     def to_analysis_yaml_dict(self) -> dict[str, Any]:
@@ -101,6 +115,8 @@ class RMSFAnalysisSettings(BaseAnalysisSettings):
         }
         if self.reference_frame is not None:
             result["reference_frame"] = self.reference_frame
+        if self.reference_file is not None:
+            result["reference_file"] = self.reference_file
         return result
 
 

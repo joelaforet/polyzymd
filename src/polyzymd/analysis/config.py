@@ -37,15 +37,18 @@ class RMSFConfig(BaseModel):
     selection : str
         MDAnalysis selection string for atoms to analyze
     reference_mode : str
-        Reference structure mode: 'centroid', 'average', or 'frame'
+        Reference structure mode: 'centroid', 'average', 'frame', or 'external'
     reference_frame : int, optional
         Frame number if reference_mode is 'frame'
+    reference_file : str, optional
+        Path to external PDB file if reference_mode is 'external'
     """
 
     enabled: bool = False
     selection: str = "protein and name CA"
     reference_mode: str = "centroid"
     reference_frame: Optional[int] = None
+    reference_file: Optional[str] = None
 
 
 class DistancePairConfig(BaseModel):
@@ -393,7 +396,8 @@ defaults:
 rmsf:
   enabled: true
   selection: "protein and name CA"
-  reference_mode: "centroid"  # centroid, average, or frame
+  reference_mode: "centroid"  # centroid, average, frame, or external
+  # reference_file: "/path/to/reference.pdb"  # required if reference_mode is "external"
 
 # ============================================================================
 # Distance Analysis

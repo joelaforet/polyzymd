@@ -58,6 +58,9 @@ class RMSFComparator(
         Override for reference mode (requires --override flag on CLI).
     reference_frame_override : int, optional
         Override for reference frame (requires --override flag on CLI).
+    reference_file_override : str, optional
+        Override for external reference PDB file path (requires --override
+        flag on CLI). Used when reference_mode is "external".
 
     Examples
     --------
@@ -79,6 +82,7 @@ class RMSFComparator(
         selection_override: str | None = None,
         reference_mode_override: str | None = None,
         reference_frame_override: int | None = None,
+        reference_file_override: str | None = None,
     ):
         super().__init__(config, analysis_settings, equilibration)
 
@@ -86,6 +90,7 @@ class RMSFComparator(
         self.selection = selection_override or analysis_settings.selection
         self.reference_mode = reference_mode_override or analysis_settings.reference_mode
         self.reference_frame = reference_frame_override or analysis_settings.reference_frame
+        self.reference_file = reference_file_override or analysis_settings.reference_file
 
     @classmethod
     def comparison_type_name(cls) -> str:
@@ -155,6 +160,7 @@ class RMSFComparator(
                 equilibration=self.equilibration,
                 reference_mode=self.reference_mode,
                 reference_frame=self.reference_frame,
+                reference_file=self.reference_file,
             )
             agg_result = calc.compute_aggregated(
                 replicates=cond.replicates,
