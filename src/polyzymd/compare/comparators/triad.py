@@ -151,8 +151,13 @@ class TriadComparator(
         # Load simulation config
         sim_config = SimulationConfig.from_yaml(cond.config)
 
+        # Resolve condition-specific output directory (None in standalone mode)
+        condition_output_dir = self._resolve_condition_output_dir(cond.label, "catalytic_triad")
+
         # Try to find existing aggregated result
-        result_path = self._find_aggregated_result(sim_config, cond.replicates)
+        result_path = self._find_aggregated_result(
+            sim_config, cond.replicates, condition_output_dir=condition_output_dir
+        )
 
         if result_path and result_path.exists() and not recompute:
             logger.info(f"  Loading cached result: {result_path}")
@@ -165,9 +170,11 @@ class TriadComparator(
                 triad_config=self.analysis_settings,
                 equilibration=self.equilibration,
             )
+            agg_output_dir = condition_output_dir / "aggregated" if condition_output_dir else None
             agg_result = analyzer.compute_aggregated(
                 replicates=cond.replicates,
                 save=True,
+                output_dir=agg_output_dir,
                 recompute=recompute,
             )
 
@@ -361,6 +368,7 @@ class TriadComparator(
         self,
         sim_config: Any,
         replicates: list[int],
+        condition_output_dir: Path | None = None,
     ) -> Path | None:
         """Find path to existing aggregated triad result.
 
@@ -370,6 +378,9 @@ class TriadComparator(
             Simulation configuration.
         replicates : list[int]
             Replicate numbers.
+        condition_output_dir : Path, optional
+            Condition-specific output directory (from comparison mode).
+            Checked first before falling back to ``projects_directory``.
 
         Returns
         -------
@@ -390,6 +401,13 @@ class TriadComparator(
         name_safe = self.analysis_settings.name.replace(" ", "_").replace("/", "-")
         filename = f"triad_{name_safe}_{rep_str}_eq{eq_value:.0f}{eq_unit}.json"
 
+        # Check condition-specific path first (comparison mode)
+        if condition_output_dir is not None:
+            cond_path = condition_output_dir / "aggregated" / filename
+            if cond_path.exists():
+                return cond_path
+
+        # Fallback to projects_directory
         result_path = (
             sim_config.output.projects_directory
             / "analysis"

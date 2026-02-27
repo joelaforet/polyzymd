@@ -713,6 +713,40 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
         """
         return False
 
+    def _resolve_condition_output_dir(self, label: str, analysis_subdir: str) -> Path | None:
+        """Resolve a condition-specific output directory for analysis results.
+
+        When running in comparison mode (config loaded from a YAML file with
+        ``source_path`` set), returns a condition-specific path under the
+        comparison project directory.  This prevents cache collisions when
+        multiple conditions share the same ``projects_directory``.
+
+        When ``source_path`` is ``None`` (standalone / programmatic usage),
+        returns ``None``, which tells downstream calculators to use their
+        default output directory (``projects_directory``).
+
+        Parameters
+        ----------
+        label : str
+            Condition label (e.g. ``"SBMA-EGMA 25%"``).
+        analysis_subdir : str
+            Analysis-type subdirectory name (e.g. ``"rmsf"``,
+            ``"catalytic_triad"``, ``"contacts"``, ``"distances"``).
+
+        Returns
+        -------
+        Path or None
+            Condition-specific output directory, or ``None`` for default
+            behaviour.
+        """
+        if self.config.source_path is None:
+            return None
+
+        from polyzymd.compare.comparators._utils import sanitize_label
+
+        comparison_dir = self.config.source_path.parent
+        return comparison_dir / "analysis" / sanitize_label(label) / analysis_subdir
+
     # ========================================================================
     # Shared Implementation Methods (DRY)
     # ========================================================================

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Sequence, TypeVar
 
 from polyzymd.analysis.core.statistics import StatResult, compute_sem
@@ -85,6 +86,7 @@ def collect_replicate_results(
     compute_fn: Callable[..., T],
     replicates: Sequence[int],
     min_replicates: int = 2,
+    output_dir_base: Path | None = None,
     **compute_kwargs: Any,
 ) -> ReplicateCollection:
     """Run analysis across replicates with resilient error handling.
@@ -102,6 +104,11 @@ def collect_replicate_results(
         Replicate numbers to process.
     min_replicates : int, optional
         Minimum number of successful replicates required. Default 2.
+    output_dir_base : Path, optional
+        Base directory for per-replicate output. When provided, each
+        replicate call receives ``output_dir=output_dir_base / f"run_{rep}"``.
+        When ``None`` (default), no ``output_dir`` kwarg is added and the
+        compute function uses its own default.
     **compute_kwargs
         Additional keyword arguments passed to ``compute_fn``.
 
@@ -123,7 +130,10 @@ def collect_replicate_results(
 
     for rep in requested:
         try:
-            result = compute_fn(replicate=rep, **compute_kwargs)
+            call_kwargs = dict(compute_kwargs)
+            if output_dir_base is not None:
+                call_kwargs["output_dir"] = output_dir_base / f"run_{rep}"
+            result = compute_fn(replicate=rep, **call_kwargs)
             results.append(result)
             successful.append(rep)
         except FileNotFoundError as e:

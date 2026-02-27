@@ -429,9 +429,12 @@ class DistanceCalculator:
             )
 
         # Compute individual replicates with error handling
+        # Derive per-replicate output base from aggregated output_dir
+        per_rep_base = output_dir.parent  # e.g. .../distances/
         collection = collect_replicate_results(
             self.compute,
             replicates,
+            output_dir_base=per_rep_base,
             save=save,
             recompute=recompute,
             store_distributions=True,
@@ -499,13 +502,7 @@ class DistanceCalculator:
             n_replicates=len(replicates),
             pair_results=aggregated_pairs,
             source_result_files=[
-                str(
-                    self.config.output.projects_directory
-                    / "analysis"
-                    / "distances"
-                    / f"run_{r.replicate}"
-                    / self._make_result_filename()
-                )
+                str(per_rep_base / f"run_{r.replicate}" / self._make_result_filename())
                 for r in individual_results
             ],
         )

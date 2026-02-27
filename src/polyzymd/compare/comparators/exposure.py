@@ -234,13 +234,20 @@ class ExposureDynamicsComparator(
         logger.info(f"Processing condition: {cond.label}")
         sim_config = SimulationConfig.from_yaml(cond.config)
 
+        # Resolve condition-specific output directory (None in standalone mode)
+        condition_output_dir = self._resolve_condition_output_dir(cond.label, "exposure")
+
         dynamics_per_rep: list["ExposureDynamicsResult"] = []
         enrichment_per_rep: list["ChaperoneEnrichmentResult"] = []
         successful_reps: list[int] = []
 
         for rep in cond.replicates:
             result = self._load_or_compute_replicate(
-                sim_config, rep, recompute, cond_config_path=Path(cond.config)
+                sim_config,
+                rep,
+                recompute,
+                cond_config_path=Path(cond.config),
+                condition_output_dir=condition_output_dir,
             )
             if result is not None:
                 dynamics, enrichment = result
@@ -269,6 +276,7 @@ class ExposureDynamicsComparator(
         replicate: int,
         recompute: bool,
         cond_config_path: Path | None = None,
+        condition_output_dir: Path | None = None,
     ) -> tuple["ExposureDynamicsResult", "ChaperoneEnrichmentResult"] | None:
         """Load or compute exposure dynamics for a single replicate.
 
@@ -282,6 +290,9 @@ class ExposureDynamicsComparator(
             Force recompute.
         cond_config_path : Path, optional
             Condition config path for fallback result location.
+        condition_output_dir : Path, optional
+            Condition-specific output directory (from comparison mode).
+            Checked first before falling back to ``projects_directory``.
 
         Returns
         -------
@@ -297,9 +308,18 @@ class ExposureDynamicsComparator(
         from polyzymd.analysis.sasa.config import SASAConfig
         from polyzymd.analysis.sasa.trajectory import compute_trajectory_sasa
 
-        # Locate cached ContactResult
+        # Locate cached ContactResult — check condition-specific contacts dir first
+        # Since condition_output_dir is .../analysis/<label>/exposure,
+        # contacts is at the sibling path .../analysis/<label>/contacts
+        contacts_cond_dir: Path | None = None
+        if condition_output_dir is not None:
+            contacts_cond_dir = condition_output_dir.parent / "contacts"
+
         contact_result_path = self._find_contact_result(
-            sim_config, replicate, cond_config_path=cond_config_path
+            sim_config,
+            replicate,
+            cond_config_path=cond_config_path,
+            condition_output_dir=contacts_cond_dir,
         )
         if contact_result_path is None or not contact_result_path.exists():
             logger.warning(
@@ -322,8 +342,11 @@ class ExposureDynamicsComparator(
         topology_path = traj_info.topology_file
         trajectory_paths = traj_info.trajectory_files  # list[Path] — multi-segment support
 
-        # Analysis directory for this replicate
-        analysis_dir = self._get_analysis_dir(sim_config, cond_config_path) / f"rep{replicate}"
+        # Analysis directory for this replicate — use condition-specific dir if available
+        if condition_output_dir is not None:
+            analysis_dir = condition_output_dir / f"rep{replicate}"
+        else:
+            analysis_dir = self._get_analysis_dir(sim_config, cond_config_path) / f"rep{replicate}"
 
         # SASA config
         sasa_config = SASAConfig(
@@ -526,10 +549,19 @@ class ExposureDynamicsComparator(
         for cond in self.config.conditions:
             try:
                 sim_config = SimulationConfig.from_yaml(cond.config)
+                # Resolve condition-specific contacts dir for lookup
+                exposure_cond_dir = self._resolve_condition_output_dir(cond.label, "exposure")
+                contacts_cond_dir: Path | None = None
+                if exposure_cond_dir is not None:
+                    contacts_cond_dir = exposure_cond_dir.parent / "contacts"
+
                 has_contacts = False
                 for rep in cond.replicates:
                     result_path = self._find_contact_result(
-                        sim_config, rep, cond_config_path=Path(cond.config)
+                        sim_config,
+                        rep,
+                        cond_config_path=Path(cond.config),
+                        condition_output_dir=contacts_cond_dir,
                     )
                     if result_path and result_path.exists():
                         has_contacts = True
@@ -555,11 +587,14 @@ class ExposureDynamicsComparator(
         sim_config: Any,
         replicate: int,
         cond_config_path: Path | None = None,
+        condition_output_dir: Path | None = None,
     ) -> Path | None:
         """Find the cached contact result JSON for a replicate.
 
-        Checks primary location (projects_directory/analysis/contacts/)
-        then falls back to cond_config_path.parent/analysis/contacts/.
+        Checks locations in order:
+        1. condition_output_dir (condition-specific, comparison mode)
+        2. sim_config.output.projects_directory / analysis / contacts /
+        3. cond_config_path.parent / analysis / contacts / (if provided)
 
         Parameters
         ----------
@@ -569,18 +604,31 @@ class ExposureDynamicsComparator(
             Replicate number.
         cond_config_path : Path, optional
             Condition config path for fallback lookup.
+        condition_output_dir : Path, optional
+            Condition-specific contacts output directory (from comparison
+            mode).  Checked first before falling back to
+            ``projects_directory``.
 
         Returns
         -------
         Path or None
             Path to the JSON file, or None if not resolvable.
         """
+        result_filename = f"contacts_rep{replicate}.json"
+
+        # Check condition-specific path first (comparison mode)
+        if condition_output_dir is not None:
+            cond_path = condition_output_dir / result_filename
+            if cond_path.exists():
+                return cond_path
+
+        # Fallback to shared helper for projects_directory and config parent
         from polyzymd.compare.comparators._utils import find_replicate_result
 
         return find_replicate_result(
             sim_config,
             replicate,
-            result_filename=f"contacts_rep{replicate}.json",
+            result_filename=result_filename,
             analysis_subdir="analysis/contacts",
             cond_config_path=cond_config_path,
         )

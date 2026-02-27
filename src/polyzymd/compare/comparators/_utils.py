@@ -153,3 +153,34 @@ def format_replicate_range(replicates: list[int]) -> str:
     if reps == list(range(reps[0], reps[-1] + 1)):
         return f"reps{reps[0]}-{reps[-1]}"
     return "reps" + "_".join(map(str, reps))
+
+
+def sanitize_label(label: str) -> str:
+    """Convert a condition label to a filesystem-safe directory name.
+
+    Replaces ``%`` with ``pct``, spaces with underscores, and strips any
+    remaining characters that are not alphanumeric, hyphens, underscores,
+    or dots.  Consecutive underscores are collapsed.
+
+    Parameters
+    ----------
+    label : str
+        Condition label, e.g. ``"SBMA-EGMA 25%"`` or
+        ``"No Polymer (Control)"``.
+
+    Returns
+    -------
+    str
+        Sanitized string safe for use as a directory name,
+        e.g. ``"SBMA-EGMA_25pct"`` or ``"No_Polymer_Control"``.
+    """
+    import re
+
+    s = label.strip()
+    s = s.replace("%", "pct")
+    s = s.replace(" ", "_")
+    # Keep only word chars (alphanumeric + underscore), hyphens, and dots
+    s = re.sub(r"[^\w\-.]", "_", s)
+    # Collapse consecutive underscores
+    s = re.sub(r"_+", "_", s)
+    return s.strip("_")

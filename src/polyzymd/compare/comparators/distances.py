@@ -286,11 +286,16 @@ class DistancesComparator(
         # Load simulation config
         sim_config = SimulationConfig.from_yaml(cond.config)
 
+        # Resolve condition-specific output directory (None in standalone mode)
+        condition_output_dir = self._resolve_condition_output_dir(cond.label, "distances")
+
         # Get per-pair thresholds
         pair_thresholds = self.analysis_settings.get_pair_thresholds()
 
         # Try to find existing aggregated result
-        result_path = self._find_aggregated_result(sim_config, cond.replicates)
+        result_path = self._find_aggregated_result(
+            sim_config, cond.replicates, condition_output_dir=condition_output_dir
+        )
 
         agg_result: DistanceAggregatedResult | None = None
 
@@ -321,9 +326,11 @@ class DistancesComparator(
                 use_pbc=self.analysis_settings.use_pbc,
                 alignment=self.analysis_settings.get_alignment_config(),
             )
+            agg_output_dir = condition_output_dir / "aggregated" if condition_output_dir else None
             agg_result = calculator.compute_aggregated(
                 replicates=cond.replicates,
                 save=True,
+                output_dir=agg_output_dir,
                 recompute=recompute,
             )
 
@@ -842,6 +849,7 @@ class DistancesComparator(
         self,
         sim_config: Any,
         replicates: list[int],
+        condition_output_dir: Path | None = None,
     ) -> Path | None:
         """Find path to existing aggregated distance result.
 
@@ -851,6 +859,9 @@ class DistancesComparator(
             Simulation configuration.
         replicates : list[int]
             Replicate numbers.
+        condition_output_dir : Path, optional
+            Condition-specific output directory (from comparison mode).
+            Checked first before falling back to ``projects_directory``.
 
         Returns
         -------
@@ -889,6 +900,13 @@ class DistancesComparator(
         # distances_reps1-3_eq100ns_pbc_align-centroid.json
         filename = f"distances_{rep_str}_eq{eq_value:.0f}{eq_unit}_{settings_suffix}.json"
 
+        # Check condition-specific path first (comparison mode)
+        if condition_output_dir is not None:
+            cond_path = condition_output_dir / "aggregated" / filename
+            if cond_path.exists():
+                return cond_path
+
+        # Fallback to projects_directory
         result_path = (
             sim_config.output.projects_directory
             / "analysis"

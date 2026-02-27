@@ -514,12 +514,22 @@ class RMSFCalculator:
         individual_results: list[RMSFResult] = []
         successful_replicates: list[int] = []
         failed_replicates: list[int] = []
+        # Track actual save paths for source_result_files
+        replicate_result_paths: list[str] = []
+
+        # Derive per-replicate output base from aggregated output_dir:
+        # output_dir is e.g. .../rmsf/aggregated/, go up one level for .../rmsf/
+        per_rep_base = output_dir.parent
 
         for rep in requested_replicates:
             try:
-                result = self.compute(replicate=rep, save=save, recompute=recompute)
+                rep_output_dir = per_rep_base / f"run_{rep}"
+                result = self.compute(
+                    replicate=rep, save=save, output_dir=rep_output_dir, recompute=recompute
+                )
                 individual_results.append(result)
                 successful_replicates.append(rep)
+                replicate_result_paths.append(str(rep_output_dir / self._make_result_filename()))
             except FileNotFoundError as e:
                 LOGGER.warning(f"Skipping replicate {rep}: trajectory data not found. {e}")
                 failed_replicates.append(rep)
@@ -576,16 +586,7 @@ class RMSFCalculator:
             overall_sem_rmsf=overall_stats.sem,
             overall_min_rmsf=float(np.min(per_residue_stats.means)),
             overall_max_rmsf=float(np.max(per_residue_stats.means)),
-            source_result_files=[
-                str(
-                    self.config.output.projects_directory
-                    / "analysis"
-                    / "rmsf"
-                    / f"run_{r.replicate}"
-                    / self._make_result_filename()
-                )
-                for r in individual_results
-            ],
+            source_result_files=replicate_result_paths,
         )
 
         if save:

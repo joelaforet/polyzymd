@@ -145,8 +145,13 @@ class RMSFComparator(
         # Load simulation config
         sim_config = SimulationConfig.from_yaml(cond.config)
 
+        # Resolve condition-specific output directory (None in standalone mode)
+        condition_output_dir = self._resolve_condition_output_dir(cond.label, "rmsf")
+
         # Try to find existing aggregated result
-        result_path = self._find_aggregated_result(sim_config, cond.replicates)
+        result_path = self._find_aggregated_result(
+            sim_config, cond.replicates, condition_output_dir=condition_output_dir
+        )
 
         if result_path and result_path.exists() and not recompute:
             logger.info(f"  Loading cached result: {result_path}")
@@ -162,9 +167,11 @@ class RMSFComparator(
                 reference_frame=self.reference_frame,
                 reference_file=self.reference_file,
             )
+            agg_output_dir = condition_output_dir / "aggregated" if condition_output_dir else None
             agg_result = calc.compute_aggregated(
                 replicates=cond.replicates,
                 save=True,
+                output_dir=agg_output_dir,
                 recompute=recompute,
             )
 
@@ -277,6 +284,7 @@ class RMSFComparator(
         self,
         sim_config: Any,
         replicates: list[int],
+        condition_output_dir: Path | None = None,
     ) -> Path | None:
         """Find path to existing aggregated RMSF result.
 
@@ -286,6 +294,9 @@ class RMSFComparator(
             Simulation configuration.
         replicates : list[int]
             Replicate numbers.
+        condition_output_dir : Path, optional
+            Condition-specific output directory (from comparison mode).
+            Checked first before falling back to ``projects_directory``.
 
         Returns
         -------
@@ -308,6 +319,13 @@ class RMSFComparator(
 
         filename = f"rmsf_{rep_str}_eq{eq_value:.0f}ns.json"
 
+        # Check condition-specific path first (comparison mode)
+        if condition_output_dir is not None:
+            cond_path = condition_output_dir / "aggregated" / filename
+            if cond_path.exists():
+                return cond_path
+
+        # Fallback to projects_directory
         result_path = (
             sim_config.output.projects_directory / "analysis" / "rmsf" / "aggregated" / filename
         )

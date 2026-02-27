@@ -31,15 +31,15 @@ from polyzymd.analysis.core.aggregation import (
 )
 from polyzymd.analysis.core.autocorrelation import estimate_correlation_time
 from polyzymd.analysis.core.config_hash import compute_config_hash, validate_config_hash
+from polyzymd.analysis.core.diagnostics import (
+    get_selection_diagnostics,
+    validate_equilibration_time,
+)
 from polyzymd.analysis.core.loader import (
     TrajectoryLoader,
     convert_time,
     parse_time_string,
     time_to_frame,
-)
-from polyzymd.analysis.core.diagnostics import (
-    get_selection_diagnostics,
-    validate_equilibration_time,
 )
 from polyzymd.analysis.core.statistics import compute_sem
 from polyzymd.analysis.distances.calculator import DistanceCalculator
@@ -405,9 +405,12 @@ class CatalyticTriadAnalyzer:
             )
 
         # Compute individual replicates with error handling
+        # Derive per-replicate output base from aggregated output_dir
+        per_rep_base = output_dir.parent  # e.g. .../catalytic_triad/
         collection = collect_replicate_results(
             self.compute,
             replicates,
+            output_dir_base=per_rep_base,
             save=save,
             recompute=recompute,
             store_timeseries=False,
@@ -482,13 +485,7 @@ class CatalyticTriadAnalyzer:
             sem_simultaneous_contact=sim_stats.sem,
             per_replicate_simultaneous=per_rep_simultaneous,
             source_result_files=[
-                str(
-                    self.config.output.projects_directory
-                    / "analysis"
-                    / "catalytic_triad"
-                    / f"run_{r.replicate}"
-                    / self._make_result_filename()
-                )
+                str(per_rep_base / f"run_{r.replicate}" / self._make_result_filename())
                 for r in individual_results
             ],
         )

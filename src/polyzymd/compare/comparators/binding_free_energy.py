@@ -274,8 +274,13 @@ class BindingFreeEnergyComparator(
         # Get temperature
         temperature_K = float(sim_config.thermodynamics.temperature)
 
-        # Find analysis directory (contacts layer)
-        analysis_dir = self._find_contacts_analysis_dir(sim_config, cond)
+        # Resolve condition-specific output directory (None in standalone mode)
+        condition_output_dir = self._resolve_condition_output_dir(cond.label, "contacts")
+
+        # Find analysis directory (contacts layer) — check condition dir first
+        analysis_dir = self._find_contacts_analysis_dir(
+            sim_config, cond, condition_output_dir=condition_output_dir
+        )
 
         # Step 1: Try to load cached binding preference (unless recompute)
         bp_result = None
@@ -825,11 +830,14 @@ class BindingFreeEnergyComparator(
         self,
         sim_config: Any,
         cond: "ConditionConfig",
+        condition_output_dir: Path | None = None,
     ) -> Path:
         """Find the contacts analysis directory for a condition.
 
-        Checks primary location (projects_directory/analysis/contacts) then
-        falls back to cond.config parent directory.
+        Checks locations in order:
+        1. condition_output_dir (condition-specific, comparison mode)
+        2. sim_config.output.projects_directory / analysis / contacts /
+        3. cond.config parent directory / analysis / contacts /
 
         Parameters
         ----------
@@ -837,12 +845,21 @@ class BindingFreeEnergyComparator(
             Simulation configuration.
         cond : ConditionConfig
             Condition configuration.
+        condition_output_dir : Path, optional
+            Condition-specific contacts output directory (from comparison
+            mode).  Checked first before falling back to
+            ``projects_directory``.
 
         Returns
         -------
         Path
             Analysis directory path.
         """
+        # Check condition-specific path first (comparison mode)
+        if condition_output_dir is not None:
+            if condition_output_dir.exists():
+                return condition_output_dir
+
         from polyzymd.compare.comparators._utils import find_analysis_dir
 
         return find_analysis_dir(

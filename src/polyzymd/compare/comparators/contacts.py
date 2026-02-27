@@ -275,12 +275,19 @@ class ContactsComparator(
         # Load simulation config
         sim_config = SimulationConfig.from_yaml(cond.config)
 
+        # Resolve condition-specific output directory (None in standalone mode)
+        condition_output_dir = self._resolve_condition_output_dir(cond.label, "contacts")
+
         # Load or compute individual replicate results
         results: list[ContactResult] = []
         successful_reps: list[int] = []
         for rep in cond.replicates:
             result = self._load_or_compute_replicate(
-                sim_config, rep, recompute, cond_config_path=cond.config
+                sim_config,
+                rep,
+                recompute,
+                cond_config_path=cond.config,
+                condition_output_dir=condition_output_dir,
             )
             if result is not None:
                 results.append(result)
@@ -395,9 +402,13 @@ class ContactsComparator(
                 # First check: do cached contact results exist?
                 # If so, trust them - the condition must have had polymer
                 has_cached_results = False
+                condition_output_dir = self._resolve_condition_output_dir(cond.label, "contacts")
                 for rep in cond.replicates:
                     result_path = self._find_replicate_result(
-                        sim_config, rep, cond_config_path=cond.config
+                        sim_config,
+                        rep,
+                        cond_config_path=cond.config,
+                        condition_output_dir=condition_output_dir,
                     )
                     if result_path and result_path.exists():
                         has_cached_results = True
@@ -469,6 +480,7 @@ class ContactsComparator(
         replicate: int,
         recompute: bool,
         cond_config_path: Path | None = None,
+        condition_output_dir: Path | None = None,
     ) -> Any | None:
         """Load or compute contacts for a single replicate.
 
@@ -482,6 +494,9 @@ class ContactsComparator(
             Force recompute.
         cond_config_path : Path, optional
             Path to condition's config.yaml for fallback result location.
+        condition_output_dir : Path, optional
+            Condition-specific output directory (from comparison mode).
+            Checked first before falling back to ``projects_directory``.
 
         Returns
         -------
@@ -492,7 +507,10 @@ class ContactsComparator(
 
         # Try to find existing result
         result_path = self._find_replicate_result(
-            sim_config, replicate, cond_config_path=cond_config_path
+            sim_config,
+            replicate,
+            cond_config_path=cond_config_path,
+            condition_output_dir=condition_output_dir,
         )
 
         if result_path and result_path.exists() and not recompute:
@@ -504,16 +522,25 @@ class ContactsComparator(
                 logger.warning(
                     f"  Cached result for rep {replicate} missing per-residue stats, recomputing..."
                 )
-                return self._compute_replicate(sim_config, replicate)
+                return self._compute_replicate(
+                    sim_config,
+                    replicate,
+                    condition_output_dir=condition_output_dir,
+                )
 
             return result
 
-        return self._compute_replicate(sim_config, replicate)
+        return self._compute_replicate(
+            sim_config,
+            replicate,
+            condition_output_dir=condition_output_dir,
+        )
 
     def _compute_replicate(
         self,
         sim_config: Any,
         replicate: int,
+        condition_output_dir: Path | None = None,
     ) -> Any | None:
         """Compute contacts analysis for a single replicate.
 
@@ -523,6 +550,9 @@ class ContactsComparator(
             Simulation configuration.
         replicate : int
             Replicate number.
+        condition_output_dir : Path, optional
+            Condition-specific output directory (from comparison mode).
+            If provided, results are saved here instead of ``projects_directory``.
 
         Returns
         -------
@@ -579,8 +609,11 @@ class ContactsComparator(
             start=start_frame,
         )
 
-        # Save result
-        output_dir = sim_config.output.projects_directory / "analysis" / "contacts"
+        # Save result — use condition-specific dir if available
+        if condition_output_dir is not None:
+            output_dir = condition_output_dir
+        else:
+            output_dir = sim_config.output.projects_directory / "analysis" / "contacts"
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / f"contacts_rep{replicate}.json"
         result.save(output_file)
@@ -593,12 +626,14 @@ class ContactsComparator(
         sim_config: Any,
         replicate: int,
         cond_config_path: Path | None = None,
+        condition_output_dir: Path | None = None,
     ) -> Path | None:
         """Find path to existing replicate contacts result.
 
         Checks multiple locations in order:
-        1. sim_config.output.projects_directory / analysis / contacts /
-        2. cond_config_path.parent / analysis / contacts / (if provided)
+        1. condition_output_dir (condition-specific, comparison mode)
+        2. sim_config.output.projects_directory / analysis / contacts /
+        3. cond_config_path.parent / analysis / contacts / (if provided)
 
         This allows cached results to be found even when the original
         projects_directory points to a remote/unavailable location.
@@ -612,18 +647,30 @@ class ContactsComparator(
         cond_config_path : Path, optional
             Path to the condition's config.yaml file. Used as fallback
             location for finding cached results.
+        condition_output_dir : Path, optional
+            Condition-specific output directory (from comparison mode).
+            Checked first before falling back to ``projects_directory``.
 
         Returns
         -------
         Path or None
             Path to the result file if found, None otherwise.
         """
+        result_filename = f"contacts_rep{replicate}.json"
+
+        # Check condition-specific path first (comparison mode)
+        if condition_output_dir is not None:
+            cond_path = condition_output_dir / result_filename
+            if cond_path.exists():
+                return cond_path
+
+        # Fallback to shared helper for projects_directory and config parent
         from polyzymd.compare.comparators._utils import find_replicate_result
 
         return find_replicate_result(
             sim_config,
             replicate,
-            result_filename=f"contacts_rep{replicate}.json",
+            result_filename=result_filename,
             analysis_subdir="analysis/contacts",
             cond_config_path=cond_config_path,
         )
@@ -632,12 +679,14 @@ class ContactsComparator(
         self,
         sim_config: Any,
         cond_config_path: Path | None = None,
+        condition_output_dir: Path | None = None,
     ) -> Path:
         """Get analysis directory with fallback to condition config parent.
 
         Checks multiple locations in order:
-        1. sim_config.output.projects_directory / analysis / contacts /
-        2. cond_config_path.parent / analysis / contacts / (if provided and exists)
+        1. condition_output_dir (condition-specific, comparison mode)
+        2. sim_config.output.projects_directory / analysis / contacts /
+        3. cond_config_path.parent / analysis / contacts / (if provided and exists)
 
         This allows cached results to be found even when the original
         projects_directory points to a remote/unavailable location.
@@ -649,12 +698,20 @@ class ContactsComparator(
         cond_config_path : Path, optional
             Path to the condition's config.yaml file. Used as fallback
             location for finding cached results.
+        condition_output_dir : Path, optional
+            Condition-specific output directory (from comparison mode).
+            Checked first before falling back to ``projects_directory``.
 
         Returns
         -------
         Path
             Analysis directory path (primary location, or fallback if it exists).
         """
+        # Check condition-specific path first (comparison mode)
+        if condition_output_dir is not None:
+            if condition_output_dir.exists():
+                return condition_output_dir
+
         from polyzymd.compare.comparators._utils import find_analysis_dir
 
         return find_analysis_dir(
@@ -1016,7 +1073,13 @@ class ContactsComparator(
         for cond in conditions:
             try:
                 sim_config = SimulationConfig.from_yaml(cond.config)
-                analysis_dir = self._get_analysis_dir(sim_config, cond_config_path=cond.config)
+                # Resolve condition-specific output dir for binding preference
+                condition_output_dir = self._resolve_condition_output_dir(cond.label, "contacts")
+                analysis_dir = self._get_analysis_dir(
+                    sim_config,
+                    cond_config_path=cond.config,
+                    condition_output_dir=condition_output_dir,
+                )
                 logger.debug(f"Binding preference for {cond.label}: analysis_dir={analysis_dir}")
 
                 # If not recomputing, try to load existing results
