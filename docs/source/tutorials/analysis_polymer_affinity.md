@@ -63,6 +63,106 @@ Per condition (headline score):
 S_\text{total} = \sum_\text{polymer\_types} S_\text{polymer}
 ```
 
+### How N_contacts Is Computed
+
+N_contacts is the **mean number of exposed residues in a protein group that are
+simultaneously in contact with a given polymer type, averaged across all
+trajectory frames after equilibration**. It is not a total count of contact
+events over the simulation, and it is not a binary flag for whether any contact
+occurred.
+
+#### From Raw Frames to N
+
+The computation proceeds in four stages:
+
+**Stage 1 — Per residue, per frame (binary).** For each protein residue and
+each trajectory frame, a contact is recorded if any heavy atom of a polymer
+residue of a given type is within the cutoff distance (default 4.5 A) of any
+heavy atom of the protein residue. Multiple polymer segments of the same type
+contacting the same protein residue in the same frame count as **one** contact
+(unique frame counting via set operations).
+
+**Stage 2 — Per residue, per polymer type (fraction).** For each exposed
+protein residue, the number of frames with at least one contact from polymer
+type *P* is divided by the total number of analyzed frames. This gives a
+per-residue contact fraction in [0, 1].
+
+**Stage 3 — Per (polymer_type, protein_group) (mean fraction).** The
+per-residue contact fractions are averaged across all surface-exposed residues
+in the protein group:
+
+```{math}
+\text{mean\_contact\_fraction} = \frac{\sum_{r \in \text{group}} \text{frames\_contacted}_r}{n_\text{frames} \times n_\text{exposed\_in\_group}}
+```
+
+This is mathematically equivalent to the arithmetic mean of the per-residue
+fractions, computed as a single division for efficiency. The value answers:
+"on average, what fraction of frames is each exposed residue in this group
+contacted by this polymer type?"
+
+**Stage 4 — N_contacts.** Multiplying by the group size recovers the mean
+number of simultaneously contacted residues per frame:
+
+```{math}
+N = \text{mean\_contact\_fraction} \times n_\text{exposed\_in\_group} = \frac{\sum_{r \in \text{group}} \text{frames\_contacted}_r}{n_\text{frames}}
+```
+
+The algebra cancels `n_exposed_in_group` from numerator and denominator,
+revealing that **N is simply the total contact-frames divided by the number of
+frames** — i.e., the average number of contacted residues per frame.
+
+#### Worked Example
+
+Consider a polymer type SBM contacting the "aromatic" protein group (5 exposed
+residues) over 1000 analyzed frames:
+
+| Residue | Frames contacted | Per-residue fraction |
+|---------|-----------------|---------------------|
+| Trp23   | 800             | 0.80                |
+| Phe45   | 200             | 0.20                |
+| Tyr67   | 150             | 0.15                |
+| Phe89   | 50              | 0.05                |
+| Trp112  | 0               | 0.00                |
+
+- `total_contact_frames = 800 + 200 + 150 + 50 + 0 = 1200`
+- `mean_contact_fraction = 1200 / (1000 × 5) = 0.24`
+- **`N = 0.24 × 5 = 1.2`**
+
+Interpretation: on average, **1.2 aromatic residues are simultaneously in
+contact with SBM in any given frame**. Some frames have 0 contacts, some have
+3 or 4 — but the time-averaged expectation is 1.2 simultaneous contacts.
+
+If this group's ΔΔG is -0.22 kT, the group contribution to the affinity score
+is `1.2 × (-0.22) = -0.26 kT`.
+
+#### Why This Quantity (and Not Alternatives)
+
+| Alternative definition of N | Why it would be wrong |
+|-----------------------------|-----------------------|
+| **Total contact count over the simulation** | Conflates simulation length with interaction strength. A 1 μs trajectory would score 10× higher than a 100 ns trajectory for identical binding. |
+| **Fraction of frames with any contact in the group** | Loses polyvalency information. Cannot distinguish 1 residue contacted vs 15 residues contacted simultaneously — the entire point of this analysis. |
+| **Number of unique residues ever contacted** | Loses temporal information. A residue contacted once in 10,000 frames contributes equally to one contacted every frame. |
+| **Peak (maximum) simultaneous contacts** | Sensitive to outlier frames. Not representative of the sustained interaction. |
+
+```{note}
+**What N does not capture.** Two polymers can have identical N = 10 but differ
+in binding mode: one contacts the same 10 residues every frame (stable binding),
+while the other contacts different residues each frame (transient surface
+scanning). For ranking total adhesion strength, this distinction does not
+matter — both have 10 simultaneous contacts contributing to the score. To
+distinguish binding modes, use
+[residence time analysis](analysis_contacts_quickstart.md#residence-time-analysis).
+```
+
+#### Cross-Replicate Aggregation
+
+When multiple replicates are available, `mean_contact_fraction` is
+**arithmetically averaged** across replicates with standard error of the mean
+(SEM). `n_exposed_in_group` is determined from the SASA calculation on the
+crystal structure PDB and is therefore **identical across replicates** — it is
+a property of the protein, not the trajectory. The resulting N inherits the
+cross-replicate mean and uncertainty from `mean_contact_fraction` alone.
+
 ### Sign Convention
 
 | Score | Meaning |
