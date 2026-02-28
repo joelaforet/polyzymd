@@ -960,7 +960,7 @@ analysis_settings:
   # Run: polyzymd compare binding-free-energy
   #
   # binding_free_energy:
-  #   units: kcal/mol              # energy units: kcal/mol or kJ/mol
+  #   units: kT                    # energy units: kT (default), kcal/mol, or kJ/mol
   #   surface_exposure_threshold: 0.2  # minimum relative SASA to be considered surface-exposed
   #   # protein_partitions: null   # optional: restrict to user-defined AA partitions
 

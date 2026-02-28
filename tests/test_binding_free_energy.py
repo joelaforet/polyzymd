@@ -17,13 +17,13 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 KB_KCAL = 0.0019872041  # kcal mol⁻¹ K⁻¹
 KB_KJ = 0.0083144626  # kJ mol⁻¹ K⁻¹
+KT_KT = 1.0  # dimensionless (kT units)
 T_REF = 300.0  # K
 KT_KCAL = KB_KCAL * T_REF  # 0.5962 kcal/mol
 
@@ -33,7 +33,7 @@ def _make_entry(
     protein_group: str = "aromatic",
     contact_share: float = 0.25,
     expected_share: float = 0.10,
-    units: str = "kcal/mol",
+    units: str = "kT",
     temperature_K: float = T_REF,
     n_replicates: int = 3,
     delta_G_per_replicate: list[float] | None = None,
@@ -43,7 +43,12 @@ def _make_entry(
     from polyzymd.compare.results.binding_free_energy import FreeEnergyEntry
 
     enrichment_ratio = contact_share / expected_share
-    kT = KB_KCAL * temperature_K if units == "kcal/mol" else KB_KJ * temperature_K
+    if units == "kT":
+        kT = KT_KT
+    elif units == "kcal/mol":
+        kT = KB_KCAL * temperature_K
+    else:
+        kT = KB_KJ * temperature_K
     delta_G = -kT * math.log(enrichment_ratio)
 
     if delta_G_per_replicate is None:
@@ -69,7 +74,7 @@ def _make_condition_summary(
     label: str = "Cond A",
     temperature_K: float = T_REF,
     entries: list | None = None,
-    units: str = "kcal/mol",
+    units: str = "kT",
 ):
     """Construct a FreeEnergyConditionSummary."""
     from polyzymd.compare.results.binding_free_energy import FreeEnergyConditionSummary
@@ -154,6 +159,20 @@ class TestBoltzmannInversion:
         ddg_kj = -(KB_KJ * T_REF) * math.log(cs / es)
         assert abs(ddg_kj / ddg_kcal - 4.184) < 0.01
 
+    def test_kT_units_ddg_equals_negative_log(self):
+        """In kT units, ΔΔG = -ln(contact_share / expected_share) exactly."""
+        cs, es = 0.30, 0.10
+        ddg_kT = -KT_KT * math.log(cs / es)
+        expected = -math.log(cs / es)
+        assert abs(ddg_kT - expected) < 1e-12
+
+    def test_kT_units_temperature_independent(self):
+        """kT-unit ΔΔG should be the same at any temperature."""
+        cs, es = 0.30, 0.10
+        ddg_300 = -KT_KT * math.log(cs / es)  # T=300K
+        ddg_400 = -KT_KT * math.log(cs / es)  # T=400K — same formula
+        assert abs(ddg_300 - ddg_400) < 1e-15
+
 
 # ---------------------------------------------------------------------------
 # Settings Tests
@@ -163,11 +182,17 @@ class TestBoltzmannInversion:
 class TestBindingFreeEnergySettings:
     """Test BindingFreeEnergyAnalysisSettings and ComparisonSettings."""
 
-    def test_default_units_kcal(self):
+    def test_default_units_kT(self):
         from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
 
         s = BindingFreeEnergyAnalysisSettings()
-        assert s.units == "kcal/mol"
+        assert s.units == "kT"
+
+    def test_k_b_kT_returns_zero(self):
+        from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
+
+        s = BindingFreeEnergyAnalysisSettings(units="kT")
+        assert s.k_b() == 0.0
 
     def test_k_b_kcal(self):
         from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
@@ -221,7 +246,7 @@ class TestFreeEnergyEntry:
 
     def test_delta_G_value_correct(self):
         cs, es = 0.25, 0.10
-        kT = KB_KCAL * T_REF
+        kT = KT_KT  # default units are now "kT" → kT = 1.0
         expected = -kT * math.log(cs / es)
         entry = _make_entry(contact_share=cs, expected_share=es)
         assert abs(entry.delta_G - expected) < 1e-10
@@ -297,7 +322,7 @@ class TestFreeEnergyConditionSummary:
 class TestBindingFreeEnergyResult:
     """Test BindingFreeEnergyResult serialization."""
 
-    def _build_result(self, units: str = "kcal/mol"):
+    def _build_result(self, units: str = "kT"):
         from polyzymd.compare.results.binding_free_energy import BindingFreeEnergyResult
 
         cond = _make_condition_summary(label="Cond A")
@@ -335,7 +360,7 @@ class TestBindingFreeEnergyResult:
             path = result.save(Path(tmpdir) / "result.json")
             data = json.loads(path.read_text())
             assert data["name"] == "test_comparison"
-            assert data["units"] == "kcal/mol"
+            assert data["units"] == "kT"
 
     def test_get_condition_found(self):
         result = self._build_result()
@@ -406,7 +431,7 @@ class TestFreeEnergyPairwiseEntry:
 class TestBindingFreeEnergyComparatorHelpers:
     """Test comparator helper methods using synthetic data."""
 
-    def _make_comparator(self, units: str = "kcal/mol"):
+    def _make_comparator(self, units: str = "kT"):
         """Build a comparator without requiring real config files."""
         from unittest.mock import MagicMock
 
@@ -601,7 +626,7 @@ class TestBindingFreeEnergyFormatters:
 
         return BindingFreeEnergyResult(
             name="test",
-            units="kcal/mol",
+            units="kT",
             conditions=conditions,
             pairwise_comparisons=pairwise,
             polymer_types=["SBM"],
@@ -616,7 +641,7 @@ class TestBindingFreeEnergyFormatters:
         output = format_bfe_result(result, format="json")
         data = json.loads(output)
         assert data["name"] == "test"
-        assert data["units"] == "kcal/mol"
+        assert data["units"] == "kT"
 
     def test_table_format_contains_condition_labels(self):
         from polyzymd.compare.binding_free_energy_formatters import format_bfe_result

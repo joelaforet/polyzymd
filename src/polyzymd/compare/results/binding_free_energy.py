@@ -31,6 +31,14 @@ where:
     k_B              = Boltzmann constant (0.0019872041 kcal mol⁻¹ K⁻¹)
     T                = simulation temperature in Kelvin
 
+When units='kT' (default), the formula simplifies to:
+
+    ΔΔG_j / k_BT = -ln(contact_share_j / expected_share_j)
+
+yielding a dimensionless value directly comparable to the thermal energy
+scale. A value of -1.0 means the binding preference is exactly 1 k_bT
+favorable relative to the surface-availability reference.
+
 Note: contact_share / expected_share = enrichment_ratio = enrichment + 1
 (where enrichment is the existing dimensionless enrichment score from binding
 preference analysis). So ΔΔG = -kT·ln(enrichment + 1), and the two
@@ -58,10 +66,12 @@ are reported:
    Bevington & Robinson 2003, ch. 3):
 
        σ(ΔΔG) ≈ k_B·T · √[(σ_cs / cs)² + (σ_es / es)²]
+       (or simply √[...] when units='kT')
 
    where σ_cs = SEM of contact_share across replicates, and σ_es ≈ 0 because
    expected_share is computed from a single static PDB structure (no replicate
-   variance). This simplifies to σ(ΔΔG) ≈ k_B·T · (σ_cs / cs).
+   variance). This simplifies to σ(ΔΔG) ≈ k_B·T · (σ_cs / cs)
+   (or σ_cs / cs when units='kT').
 
    References:
    - Taylor, J. R. (1997). *An Introduction to Error Analysis*, 2nd ed.
@@ -73,11 +83,14 @@ are reported:
      https://en.wikipedia.org/wiki/Delta_method
 
 Temperature handling:
-    ΔΔG computed at temperature T is NOT directly comparable to ΔΔG at
-    temperature T'. The probability ratios and kT scale factors both differ.
-    Pairwise statistical comparisons are only computed between conditions
-    sharing the same simulation temperature. Cross-temperature ΔΔG values
-    are displayed with their respective temperatures labeled clearly.
+    When units='kT', ΔΔG = -ln(ratio) is temperature-independent (the same
+    ratio at any temperature gives the same dimensionless value). However,
+    the underlying contact probabilities ARE temperature-dependent, so cross-
+    temperature comparisons still require caution.
+    When units='kcal/mol' or 'kJ/mol', ΔΔG computed at temperature T is NOT
+    directly comparable to ΔΔG at temperature T'. Pairwise statistical
+    comparisons are only computed between conditions sharing the same
+    simulation temperature.
 """
 
 from __future__ import annotations
@@ -123,7 +136,7 @@ class FreeEnergyEntry(BaseModel):
     delta_G_per_replicate : list[float]
         Per-replicate ΔΔG values used for cross-condition statistics.
     units : str
-        Energy units ("kcal/mol" or "kJ/mol").
+        Energy units ("kT", "kcal/mol", or "kJ/mol").
     temperature_K : float
         Simulation temperature in Kelvin (used as kT denominator).
     n_replicates : int
@@ -152,7 +165,7 @@ class FreeEnergyEntry(BaseModel):
         default_factory=list,
         description="Per-replicate ΔΔG values for statistical testing",
     )
-    units: str = "kcal/mol"
+    units: str = "kT"
     temperature_K: float
     n_replicates: int = 0
     n_exposed_in_group: int = 0
@@ -175,7 +188,7 @@ class FreeEnergyConditionSummary(BaseModel):
     n_replicates : int
         Number of replicates in this condition.
     units : str
-        Energy units ("kcal/mol" or "kJ/mol").
+        Energy units ("kT", "kcal/mol", or "kJ/mol").
     entries : list[FreeEnergyEntry]
         All (polymer_type, protein_group) ΔΔG entries.
     polymer_types : list[str]
@@ -188,7 +201,7 @@ class FreeEnergyConditionSummary(BaseModel):
     config_path: str
     temperature_K: float
     n_replicates: int
-    units: str = "kcal/mol"
+    units: str = "kT"
     entries: list[FreeEnergyEntry] = Field(default_factory=list)
     polymer_types: list[str] = Field(default_factory=list)
     protein_groups: list[str] = Field(default_factory=list)
@@ -306,7 +319,7 @@ class BindingFreeEnergyResult(BaseModel):
     name : str
         Name of the comparison project.
     units : str
-        Energy units ("kcal/mol" or "kJ/mol").
+        Energy units ("kT", "kcal/mol", or "kJ/mol").
     formula : str
         Human-readable formula string (for documentation/output).
     mixed_temperatures : bool
@@ -332,8 +345,8 @@ class BindingFreeEnergyResult(BaseModel):
     """
 
     name: str
-    units: str = "kcal/mol"
-    formula: str = "ΔΔG = -k_B·T · ln(contact_share / expected_share)"
+    units: str = "kT"
+    formula: str = "ΔΔG = -ln(contact_share / expected_share)  [units: k_bT]"
     mixed_temperatures: bool = False
     temperature_groups: dict[str, list[str]] = Field(
         default_factory=dict,

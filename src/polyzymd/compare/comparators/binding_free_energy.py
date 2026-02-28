@@ -210,11 +210,15 @@ class BindingFreeEnergyComparator(
 
         # Step 5: Build result
         surface_threshold = self.analysis_settings.surface_exposure_threshold
+        if self.analysis_settings.units == "kT":
+            formula = "ΔΔG = -ln(contact_share / expected_share)  [units: k_bT]"
+        else:
+            formula = "ΔΔG = -k_B·T · ln(contact_share / expected_share)"
 
         return BindingFreeEnergyResult(
             name=self.config.name,
             units=self.analysis_settings.units,
-            formula="ΔΔG = -k_B·T · ln(contact_share / expected_share)",
+            formula=formula,
             mixed_temperatures=mixed_temperatures,
             temperature_groups=temp_groups_str,
             conditions=condition_summaries,
@@ -377,9 +381,11 @@ class BindingFreeEnergyComparator(
         """
         temperature_K = data["temperature_K"]
         bp_result = data["bp_result"]
-        k_b = self.analysis_settings.k_b()
-        kT = k_b * temperature_K
         units = self.analysis_settings.units
+        if units == "kT":
+            kT = 1.0  # ΔΔG = -ln(ratio), dimensionless in units of k_bT
+        else:
+            kT = self.analysis_settings.k_b() * temperature_K
 
         if bp_result is None:
             return FreeEnergyConditionSummary(

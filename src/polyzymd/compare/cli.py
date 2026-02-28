@@ -1217,9 +1217,9 @@ def plot_all(
 @common_compare_options
 @click.option(
     "--units",
-    type=click.Choice(["kcal/mol", "kJ/mol"]),
+    type=click.Choice(["kT", "kcal/mol", "kJ/mol"]),
     default=None,
-    help="Override energy units (default: kcal/mol).",
+    help="Override energy units (default: kT, dimensionless in units of k_bT).",
 )
 @click.option(
     "--fdr-alpha",
@@ -1246,13 +1246,14 @@ def binding_free_energy(
     """Compute ΔΔG (Gibbs free energy differences) from binding preference data.
 
     Converts existing binding preference probability data into physically grounded
-    Gibbs free energy differences via Boltzmann inversion:
+    free energy differences via Boltzmann inversion:
 
     \b
-        ΔΔG = -k_B·T · ln(contact_share / expected_share)
+        ΔΔG = -ln(contact_share / expected_share)       [default: kT units]
+        ΔΔG = -k_B·T · ln(contact_share / expected_share)  [kcal/mol or kJ/mol]
 
-    This answers: which residue groups does each polymer condition preferentially
-    contact, and by how much in real energy units?
+    By default, results are in dimensionless k_bT units for direct comparison
+    with thermal fluctuations. Use --units to switch to kcal/mol or kJ/mol.
 
     Requires a 'binding_free_energy' section in analysis_settings (comparison.yaml),
     with contacts analysis already cached for each condition.
@@ -1260,7 +1261,7 @@ def binding_free_energy(
     \b
     Example:
         polyzymd compare binding-free-energy
-        polyzymd compare binding-free-energy --units kJ/mol --format markdown
+        polyzymd compare binding-free-energy --units kcal/mol --format markdown
         polyzymd compare binding-free-energy --fdr-alpha 0.01 -o bfe_report.md
     """
     from polyzymd.analysis.core.logging_utils import setup_logging
@@ -1286,7 +1287,7 @@ def binding_free_energy(
         click.echo("", err=True)
         click.echo("  analysis_settings:", err=True)
         click.echo("    binding_free_energy:", err=True)
-        click.echo("      units: kcal/mol", err=True)
+        click.echo("      units: kT", err=True)
         click.echo("      surface_exposure_threshold: 0.2", err=True)
         click.echo("", err=True)
         click.echo("And a corresponding comparison_settings entry:", err=True)

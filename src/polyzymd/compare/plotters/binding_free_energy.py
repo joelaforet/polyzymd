@@ -35,7 +35,7 @@ Diverging colormap (RdBu_r by default) is centered at 0.0:
 - Red  (positive)  → avoidance
 
 Units are whatever was specified in analysis_settings.binding_free_energy.units
-(kcal/mol by default).
+(kT by default — dimensionless, in units of k_bT).
 """
 
 from __future__ import annotations
@@ -54,6 +54,25 @@ if TYPE_CHECKING:
     from polyzymd.compare.results.binding_free_energy import BindingFreeEnergyResult
 
 logger = logging.getLogger(__name__)
+
+
+def _unit_label_mpl(units: str) -> str:
+    """Return matplotlib-compatible unit label with subscript for kT.
+
+    Parameters
+    ----------
+    units : str
+        Energy unit string ("kT", "kcal/mol", or "kJ/mol").
+
+    Returns
+    -------
+    str
+        Label suitable for matplotlib axes/colorbars. For "kT" this returns
+        the mathtext ``$k_\\mathrm{b}T$`` to render a subscript "b".
+    """
+    if units == "kT":
+        return r"$k_\mathrm{b}T$"
+    return units
 
 
 def _find_bfe_result(
@@ -417,7 +436,8 @@ class BFEHeatmapPlotter(BasePlotter):
                 ax.set_title(title, fontweight="bold", fontsize=11)
 
                 cbar = fig.colorbar(im, ax=ax, shrink=0.85)
-                cbar.set_label(f"ΔΔG ({units})", rotation=270, labelpad=14, fontsize=9)
+                unit_lbl = _unit_label_mpl(units)
+                cbar.set_label(f"ΔΔG ({unit_lbl})", rotation=270, labelpad=14, fontsize=9)
                 cbar.ax.axhline(y=0.0, color="black", linewidth=1.5, linestyle="--")
 
                 plt.tight_layout()
@@ -562,14 +582,17 @@ class BFEBarPlotter(BasePlotter):
                 temp_str = f" ({next(iter(temps)):.0f} K)"
 
         # kT guide lines (shared across all figures)
-        temps_list = [c.temperature_K for c in result.conditions]
-        kt: float | None = None
-        if temps_list:
-            t_med = float(np.median(temps_list))
-            from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
+        if units == "kT":
+            kt: float | None = 1.0  # Already in k_bT units; guide lines at ±1.0
+        else:
+            temps_list = [c.temperature_K for c in result.conditions]
+            kt = None
+            if temps_list:
+                t_med = float(np.median(temps_list))
+                from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
 
-            tmp_settings = BindingFreeEnergyAnalysisSettings(units=units)
-            kt = tmp_settings.k_b() * t_med
+                tmp_settings = BindingFreeEnergyAnalysisSettings(units=units)
+                kt = tmp_settings.k_b() * t_med
 
         output_paths: list[Path] = []
 
@@ -634,7 +657,8 @@ class BFEBarPlotter(BasePlotter):
                 else:
                     xlabel = "Amino Acid Group"
                 ax.set_xlabel(xlabel, fontsize=10)
-                ax.set_ylabel(f"ΔΔG ({units})", fontsize=10)
+                unit_lbl = _unit_label_mpl(units)
+                ax.set_ylabel(f"ΔΔG ({unit_lbl})", fontsize=10)
                 ax.set_xticks(x)
                 ax.set_xticklabels(protein_groups, rotation=35, ha="right", fontsize=9)
                 ax.legend(loc="best", fontsize=8, framealpha=0.7)
@@ -643,10 +667,11 @@ class BFEBarPlotter(BasePlotter):
                 if kt is not None:
                     ax.axhline(y=kt, color="gray", linestyle=":", linewidth=1.0, alpha=0.6)
                     ax.axhline(y=-kt, color="gray", linestyle=":", linewidth=1.0, alpha=0.6)
+                    kt_label = r"$k_\mathrm{b}T$"
                     ax.text(
                         n_groups - 0.5,
                         kt,
-                        "+k_BT",
+                        f"+{kt_label}",
                         color="gray",
                         fontsize=7,
                         va="bottom",
@@ -655,7 +680,7 @@ class BFEBarPlotter(BasePlotter):
                     ax.text(
                         n_groups - 0.5,
                         -kt,
-                        "\u2212k_BT",
+                        f"\u2212{kt_label}",
                         color="gray",
                         fontsize=7,
                         va="top",

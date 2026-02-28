@@ -875,15 +875,16 @@ class BindingFreeEnergyAnalysisSettings(BindingPreferenceFieldsMixin):
     Attributes
     ----------
     units : str
-        Energy units for output. One of "kcal/mol" or "kJ/mol".
+        Energy units for output. One of "kT" (dimensionless, in units of
+        k_bT — the thermal energy), "kcal/mol", or "kJ/mol".
     compute_binding_preference : bool
         Compute binding preference from contacts data when cached results
         are not found.
     """
 
     units: str = Field(
-        default="kcal/mol",
-        description="Energy units: 'kcal/mol' (default) or 'kJ/mol'",
+        default="kT",
+        description="Energy units: 'kT' (default, dimensionless), 'kcal/mol', or 'kJ/mol'",
     )
     compute_binding_preference: bool = Field(
         default=True,
@@ -897,7 +898,7 @@ class BindingFreeEnergyAnalysisSettings(BindingPreferenceFieldsMixin):
     @classmethod
     def validate_units(cls, v: str) -> str:
         """Validate energy units."""
-        allowed = {"kcal/mol", "kJ/mol"}
+        allowed = {"kT", "kcal/mol", "kJ/mol"}
         if v not in allowed:
             raise ValueError(f"units must be one of {sorted(allowed)}, got '{v}'")
         return v
@@ -914,7 +915,11 @@ class BindingFreeEnergyAnalysisSettings(BindingPreferenceFieldsMixin):
         -------
         float
             Boltzmann constant in kcal/(mol·K) or kJ/(mol·K).
+            When units='kT', returns 0.0 — callers should use kT=1.0 directly
+            instead of k_b() * T.
         """
+        if self.units == "kT":
+            return 0.0  # Not used; comparator sets kT=1.0 directly
         if self.units == "kJ/mol":
             return 0.0083144626  # kJ/(mol·K)
         return 0.0019872041  # kcal/(mol·K)  [default]
