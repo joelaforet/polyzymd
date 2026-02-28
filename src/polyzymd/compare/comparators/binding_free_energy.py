@@ -865,6 +865,11 @@ class BindingFreeEnergyComparator(
         if condition_output_dir is not None:
             if condition_output_dir.exists():
                 return condition_output_dir
+            # In comparison mode, do NOT fall back to the shared
+            # projects_directory — all conditions share the same path.
+            # Return the condition-specific path (even if not yet created)
+            # so that downstream code computes and saves there.
+            return condition_output_dir
 
         from polyzymd.compare.comparators._utils import find_analysis_dir
 

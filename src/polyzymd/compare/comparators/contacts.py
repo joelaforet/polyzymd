@@ -663,8 +663,15 @@ class ContactsComparator(
             cond_path = condition_output_dir / result_filename
             if cond_path.exists():
                 return cond_path
+            # In comparison mode, do NOT fall back to the shared
+            # projects_directory — all conditions share the same path and
+            # the cached file would belong to whichever condition wrote it
+            # first.  Return None to trigger recomputation into the
+            # condition-specific directory.
+            return None
 
         # Fallback to shared helper for projects_directory and config parent
+        # (standalone mode only)
         from polyzymd.compare.comparators._utils import find_replicate_result
 
         return find_replicate_result(

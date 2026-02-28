@@ -905,8 +905,14 @@ class DistancesComparator(
             cond_path = condition_output_dir / "aggregated" / filename
             if cond_path.exists():
                 return cond_path
+            # In comparison mode, do NOT fall back to the shared
+            # projects_directory — all conditions share the same path and
+            # the cached file would belong to whichever condition wrote it
+            # first.  Return None to trigger recomputation into the
+            # condition-specific directory.
+            return None
 
-        # Fallback to projects_directory
+        # Fallback to projects_directory (standalone mode only)
         result_path = (
             sim_config.output.projects_directory
             / "analysis"
