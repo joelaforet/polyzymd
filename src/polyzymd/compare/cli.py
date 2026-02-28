@@ -976,6 +976,7 @@ def run_comparison(
         "distances": "distances",
         "exposure": "exposure",
         "binding_free_energy": "binding_free_energy",
+        "polymer_affinity": "polymer_affinity",
     }
     settings_key = settings_key_map.get(comparison_type, comparison_type)
 
@@ -1045,6 +1046,10 @@ def run_comparison(
             from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
 
             formatted = format_bfe_result(result, format=output_format)
+        elif comparison_type == "polymer_affinity":
+            from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
+
+            formatted = format_affinity_result(result, format=output_format)
         else:
             # Generic JSON output for unknown types
             formatted = result.model_dump_json(indent=2)
@@ -1354,5 +1359,127 @@ def binding_free_energy(
         config_file=config_file,
         config_name=config.name,
         result_prefix="binding_free_energy",
+        output_path=output_path,
+    )
+
+
+@compare.command(name="polymer-affinity")
+@common_compare_options
+@click.option(
+    "--recompute",
+    is_flag=True,
+    help="Force recompute binding preference analysis even if cached results exist.",
+)
+def polymer_affinity(
+    config_file: Path,
+    eq_time: Optional[str],
+    recompute: bool,
+    output_format: str,
+    output_path: Optional[Path],
+    quiet: bool,
+    debug: bool,
+):
+    """Compute polymer affinity scores from binding preference data.
+
+    The polymer affinity score quantifies total polymer-protein interaction
+    strength by summing per-contact selectivity free energies weighted by
+    the number of simultaneous contacts:
+
+    \b
+        S = Σ (N_contacts × ΔΔG_per_contact)   [kT units]
+
+    More negative = stronger net polymer-protein affinity.
+
+    Requires a 'polymer_affinity' section in analysis_settings (comparison.yaml),
+    with contacts analysis already cached for each condition.
+
+    \b
+    Example:
+        polyzymd compare polymer-affinity
+        polyzymd compare polymer-affinity --format markdown -o affinity_report.md
+    """
+    from polyzymd.analysis.core.logging_utils import setup_logging
+    from polyzymd.compare.comparators.polymer_affinity import PolymerAffinityScoreComparator
+    from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
+    from polyzymd.compare.settings import (
+        PolymerAffinityScoreComparisonSettings,
+        PolymerAffinityScoreSettings,
+    )
+
+    setup_logging(quiet=quiet, debug=debug)
+
+    config = load_comparison_config(config_file)
+
+    validate_and_report(config)
+
+    # Get polymer_affinity settings from analysis_settings
+    affinity_analysis_raw = config.analysis_settings.get("polymer_affinity")
+    if affinity_analysis_raw is None:
+        click.echo("Error: No 'polymer_affinity' in analysis_settings section", err=True)
+        click.echo("", err=True)
+        click.echo(
+            "Polymer affinity comparison requires an 'analysis_settings.polymer_affinity' section:",
+            err=True,
+        )
+        click.echo("", err=True)
+        click.echo("  analysis_settings:", err=True)
+        click.echo("    polymer_affinity:", err=True)
+        click.echo("      surface_exposure_threshold: 0.2", err=True)
+        click.echo("", err=True)
+        click.echo("And a corresponding comparison_settings entry:", err=True)
+        click.echo("", err=True)
+        click.echo("  comparison_settings:", err=True)
+        click.echo("    polymer_affinity:", err=True)
+        click.echo("      fdr_alpha: 0.05", err=True)
+        sys.exit(1)
+
+    affinity_analysis = PolymerAffinityScoreSettings.model_validate(
+        affinity_analysis_raw.model_dump()
+    )
+
+    affinity_comparison_raw = config.comparison_settings.get("polymer_affinity")
+    if affinity_comparison_raw is not None:
+        affinity_comparison = PolymerAffinityScoreComparisonSettings.model_validate(
+            affinity_comparison_raw.model_dump()
+        )
+    else:
+        affinity_comparison = PolymerAffinityScoreComparisonSettings()
+
+    equilibration = eq_time or config.defaults.equilibration_time
+
+    click.echo(f"Comparison: {config.name}")
+    click.echo(f"Conditions: {len(config.conditions)}")
+    click.echo(f"Equilibration: {equilibration}")
+    click.echo(f"Surface exposure threshold: {affinity_analysis.surface_exposure_threshold}")
+    click.echo(f"FDR alpha: {affinity_comparison.fdr_alpha}")
+    if config.control:
+        click.echo(f"Control: {config.control}")
+    click.echo()
+
+    # Run comparison
+    try:
+        comparator = PolymerAffinityScoreComparator(
+            config=config,
+            analysis_settings=affinity_analysis,
+            comparison_settings=affinity_comparison,
+            equilibration=equilibration,
+        )
+        result = comparator.compare(recompute=recompute)
+    except Exception as e:
+        click.echo(f"Error during comparison: {e}", err=True)
+        if debug:
+            import traceback
+
+            traceback.print_exc()
+        sys.exit(1)
+
+    # Save, format, and display output
+    save_and_display_result(
+        result=result,
+        formatter=format_affinity_result,
+        output_format=output_format,
+        config_file=config_file,
+        config_name=config.name,
+        result_prefix="polymer_affinity",
         output_path=output_path,
     )

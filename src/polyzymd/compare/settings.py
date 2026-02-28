@@ -971,6 +971,112 @@ class BindingFreeEnergyComparisonSettings(BaseComparisonSettings):
         return "binding_free_energy"
 
 
+# ============================================================================
+# Polymer Affinity Score Settings
+# ============================================================================
+
+
+@AnalysisSettingsRegistry.register("polymer_affinity")
+class PolymerAffinityScoreSettings(BindingPreferenceFieldsMixin):
+    """Settings for polymer affinity score analysis.
+
+    The polymer affinity score is a comparative metric that quantifies total
+    polymer-protein interaction strength:
+
+        S = Σ_{p,g} N_{p,g} × ΔΔG_{p,g}    [kT]
+
+    where:
+        N = mean_contact_fraction × n_exposed_in_group
+        ΔΔG = -ln(contact_share / expected_share)
+
+    This is a post-processing analysis that consumes binding preference results
+    from the contacts analysis layer — no new per-frame computation is needed.
+    All scores are in kT (dimensionless); the temperature factor cancels in the
+    Boltzmann inversion ratio.
+
+    .. important::
+
+       This metric assumes thermodynamic independence of contacts. The absolute
+       values are NOT rigorous binding free energies. Only relative differences
+       between polymer compositions are meaningful (comparative ranking).
+
+    Inherits binding preference fields (surface_exposure_threshold,
+    enzyme_pdb_for_sasa, include_default_aa_groups, protein_groups,
+    protein_partitions, polymer_type_selections) from
+    ``BindingPreferenceFieldsMixin``.
+
+    Attributes
+    ----------
+    compute_binding_preference : bool
+        Compute binding preference from contacts data when cached results
+        are not found.
+    """
+
+    compute_binding_preference: bool = Field(
+        default=True,
+        description=(
+            "Compute binding preference from contacts data when cached results "
+            "are not found. Set to False to only load pre-existing results."
+        ),
+    )
+
+    @classmethod
+    def analysis_type(cls) -> str:
+        """Return the analysis type identifier."""
+        return "polymer_affinity"
+
+    def to_analysis_yaml_dict(self) -> dict[str, Any]:
+        """Convert to analysis.yaml-compatible dictionary.
+
+        Returns
+        -------
+        dict
+            Dictionary suitable for writing to analysis.yaml.
+        """
+        result: dict[str, Any] = {
+            "enabled": True,
+            "compute_binding_preference": self.compute_binding_preference,
+            "surface_exposure_threshold": self.surface_exposure_threshold,
+            "include_default_aa_groups": self.include_default_aa_groups,
+        }
+        if self.enzyme_pdb_for_sasa is not None:
+            result["enzyme_pdb_for_sasa"] = self.enzyme_pdb_for_sasa
+        if self.protein_groups is not None:
+            result["protein_groups"] = self.protein_groups
+        if self.protein_partitions is not None:
+            result["protein_partitions"] = self.protein_partitions
+        if self.polymer_type_selections is not None:
+            result["polymer_type_selections"] = self.polymer_type_selections
+        return result
+
+
+@ComparisonSettingsRegistry.register("polymer_affinity")
+class PolymerAffinityScoreComparisonSettings(BaseComparisonSettings):
+    """Comparison settings for polymer affinity score analysis.
+
+    Attributes
+    ----------
+    fdr_alpha : float
+        False discovery rate alpha for Benjamini-Hochberg correction
+        of pairwise p-values across conditions.
+    """
+
+    fdr_alpha: float = Field(
+        default=0.05,
+        description="FDR alpha for Benjamini-Hochberg correction",
+    )
+
+    @classmethod
+    def analysis_type(cls) -> str:
+        """Return the analysis type identifier."""
+        return "polymer_affinity"
+
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
+
+
 def get_all_analysis_types() -> list[str]:
     """Get all registered analysis types.
 

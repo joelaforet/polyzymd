@@ -39,6 +39,7 @@ from polyzymd.compare.binding_free_energy_formatters import (
 )
 from polyzymd.compare.comparators.binding_free_energy import BindingFreeEnergyComparator
 from polyzymd.compare.comparators.contacts import ContactsComparator
+from polyzymd.compare.comparators.polymer_affinity import PolymerAffinityScoreComparator
 from polyzymd.compare.comparators.rmsf import RMSFComparator
 from polyzymd.compare.comparators.triad import TriadComparator
 from polyzymd.compare.config import (
@@ -71,7 +72,12 @@ from polyzymd.compare.plotting import (
     plot_rmsf_comparison,
     plot_summary_panel,
 )
+from polyzymd.compare.polymer_affinity_formatters import (
+    format_affinity_result,
+)
 from polyzymd.compare.results import (
+    AffinityScoreConditionSummary,
+    AffinityScorePairwiseEntry,
     AggregateComparisonResult,
     BindingFreeEnergyResult,
     ComparisonResult,
@@ -81,6 +87,7 @@ from polyzymd.compare.results import (
     FreeEnergyConditionSummary,
     FreeEnergyEntry,
     FreeEnergyPairwiseEntry,
+    PolymerAffinityScoreResult,
     TriadComparisonResult,
     TriadConditionSummary,
 )
@@ -91,6 +98,8 @@ from polyzymd.compare.settings import (
     CatalyticTriadComparisonSettings,
     ContactsAnalysisSettings,
     ContactsComparisonSettings,
+    PolymerAffinityScoreComparisonSettings,
+    PolymerAffinityScoreSettings,
     RMSFAnalysisSettings,
     RMSFComparisonSettings,
 )
@@ -153,6 +162,14 @@ __all__ = [
     "FreeEnergyEntry",
     "FreeEnergyPairwiseEntry",
     "format_bfe_result",
+    # Polymer affinity score comparison
+    "PolymerAffinityScoreComparator",
+    "PolymerAffinityScoreResult",
+    "AffinityScoreConditionSummary",
+    "AffinityScorePairwiseEntry",
+    "PolymerAffinityScoreSettings",
+    "PolymerAffinityScoreComparisonSettings",
+    "format_affinity_result",
     # Plotting functions
     "plot_rmsf_comparison",
     "plot_percent_change",

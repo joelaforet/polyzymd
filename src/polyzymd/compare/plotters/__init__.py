@@ -36,6 +36,7 @@ from polyzymd.compare.plotters import (
     contacts,
     distances,
     exposure,
+    polymer_affinity,
     rmsf,
     triad,
 )
@@ -47,4 +48,5 @@ __all__ = [
     "contacts",
     "exposure",
     "binding_free_energy",
+    "polymer_affinity",
 ]

@@ -10,6 +10,7 @@ rmsf_legacy : Legacy RMSF results (for backward compatibility)
 triad : Catalytic triad comparison results
 contacts : Polymer-protein contacts comparison results
 binding_free_energy : Binding free energy (ΔΔG) comparison results
+polymer_affinity : Polymer affinity score comparison results
 """
 
 # Binding free energy result classes
@@ -37,6 +38,15 @@ from polyzymd.compare.results.distances import (
     DistancePairANOVA,
     DistancePairSummary,
     DistancePairwiseComparison,
+)
+
+# Polymer affinity score result classes
+from polyzymd.compare.results.polymer_affinity import (
+    AffinityScoreConditionSummary,
+    AffinityScoreEntry,
+    AffinityScorePairwiseEntry,
+    PolymerAffinityScoreResult,
+    PolymerTypeScore,
 )
 from polyzymd.compare.results.rmsf import RMSFComparisonResult, RMSFConditionSummary
 
@@ -89,4 +99,10 @@ __all__ = [
     "FreeEnergyConditionSummary",
     "FreeEnergyEntry",
     "FreeEnergyPairwiseEntry",
+    # Polymer affinity score
+    "AffinityScoreConditionSummary",
+    "AffinityScoreEntry",
+    "AffinityScorePairwiseEntry",
+    "PolymerAffinityScoreResult",
+    "PolymerTypeScore",
 ]
