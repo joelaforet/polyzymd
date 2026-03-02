@@ -109,10 +109,9 @@ class DistanceKDEPlotter(BasePlotter):
                         distances,
                         ax=ax,
                         color=color,
-                        fill=True,
-                        alpha=0.5,
+                        fill=False,
                         label=cond_label,
-                        linewidth=1.5,
+                        linewidth=2.0,
                     )
                 else:
                     # Fallback to scipy KDE
@@ -121,8 +120,7 @@ class DistanceKDEPlotter(BasePlotter):
 
                         kde = stats.gaussian_kde(distances)
                         x = np.linspace(min(distances), max(distances), 200)
-                        ax.plot(x, kde(x), color=color, linewidth=1.5, label=cond_label)
-                        ax.fill_between(x, kde(x), alpha=0.3, color=color)
+                        ax.plot(x, kde(x), color=color, linewidth=2.0, label=cond_label)
                     except ImportError:
                         # Plot histogram instead
                         ax.hist(
