@@ -297,15 +297,14 @@ def plot_triad_kde_panel_pooled(
                 logger.warning(f"No distances for {cond_label}, pair {pair_label}")
                 continue
 
-            # Plot KDE
+            # Plot KDE (lines only — fill obscures overlapping conditions)
             sns.kdeplot(
                 distances,
                 ax=ax,
                 color=color,
-                fill=True,
-                alpha=kde_fill_alpha,
+                fill=False,
                 label=cond_label,
-                linewidth=1.5,
+                linewidth=2.0,
             )
 
         # Add threshold line

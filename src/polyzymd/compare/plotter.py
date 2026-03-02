@@ -841,13 +841,33 @@ class ComparisonPlotter:
                 sim_config = SimulationConfig.from_yaml(condition.config)
                 projects_dir = sim_config.output.projects_directory
 
-                # Build path to analysis results - with fallback to config parent
-                analysis_dir = projects_dir / "analysis" / analysis_type
-                if not analysis_dir.exists() and condition.config is not None:
-                    # Fallback: check relative to condition config file
-                    fallback_dir = condition.config.parent / "analysis" / analysis_type
-                    if fallback_dir.exists():
-                        analysis_dir = fallback_dir
+                # --- Primary: per-condition directory under comparison project ---
+                # When running in comparison mode, the comparators write results
+                # to isolated per-condition directories to avoid cache collisions
+                # when multiple conditions share the same projects_directory.
+                # Mirror _resolve_condition_output_dir() from BaseComparator.
+                analysis_dir: Path | None = None
+                if source_path is not None:
+                    from polyzymd.compare.comparators._utils import sanitize_label
+
+                    comparison_dir = source_path.parent
+                    candidate = (
+                        comparison_dir
+                        / "analysis"
+                        / sanitize_label(condition.label)
+                        / analysis_type
+                    )
+                    if candidate.exists():
+                        analysis_dir = candidate
+
+                # --- Fallback: shared projects_directory ---
+                if analysis_dir is None:
+                    analysis_dir = projects_dir / "analysis" / analysis_type
+                    if not analysis_dir.exists() and condition.config is not None:
+                        # Fallback: check relative to condition config file
+                        fallback_dir = condition.config.parent / "analysis" / analysis_type
+                        if fallback_dir.exists():
+                            analysis_dir = fallback_dir
 
                 # Load aggregated results if available
                 aggregated_dir = analysis_dir / "aggregated"

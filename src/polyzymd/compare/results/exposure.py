@@ -137,6 +137,8 @@ class ExposureComparisonResult(BaseComparisonResult[ExposureConditionSummary, Pa
     comparison_type: ClassVar[str] = "exposure"
 
     metric: str = "chaperone_fraction"
+    conditions: list[ExposureConditionSummary] = Field(default_factory=list)
+    pairwise_comparisons: list[PairwiseComparison] = Field(default_factory=list)
     ranking_by_transient_fraction: list[str] = Field(
         default_factory=list,
         description="Conditions ranked by transient fraction (highest first)",

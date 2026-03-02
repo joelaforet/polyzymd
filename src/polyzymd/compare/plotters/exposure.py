@@ -39,14 +39,16 @@ def _find_comparison_result(
 ) -> Any | None:
     """Try to locate a saved ExposureComparisonResult JSON.
 
-    Searches ``comparison/`` directories relative to analysis paths for
-    ``exposure_comparison.json`` or ``comparison_result.json``.
+    Primary lookup uses ``__meta__["results_dir"]`` (the ``results/``
+    directory adjacent to ``comparison.yaml``).  Falls back to searching
+    ``comparison/`` directories relative to per-condition analysis paths.
 
     Parameters
     ----------
     data : dict
         Mapping of condition_label -> condition data dict with
-        ``"analysis_dir"`` key.
+        ``"analysis_dir"`` key.  Must also contain the ``"__meta__"``
+        entry populated by the plotter orchestrator.
     labels : sequence of str
         Condition labels to search.
     log : logging.Logger, optional
@@ -59,6 +61,34 @@ def _find_comparison_result(
     """
     from polyzymd.compare.results.exposure import ExposureComparisonResult
 
+    def _try_load_from_dir(directory: Path) -> Any | None:
+        """Attempt to load from any exposure_comparison*.json in *directory*."""
+        if not directory.is_dir():
+            return None
+        files = sorted(directory.glob("exposure_comparison*.json"))
+        if not files:
+            return None
+        # Pick the most recently modified file if multiple exist
+        result_file = max(files, key=lambda p: p.stat().st_mtime)
+        try:
+            loaded = ExposureComparisonResult.load(result_file)
+            log.debug(f"Loaded ExposureComparisonResult from {result_file}")
+            return loaded
+        except Exception as e:
+            log.debug(f"Could not load {result_file}: {e}")
+        return None
+
+    # --- Primary: __meta__.results_dir from the orchestrator ---
+    meta = data.get("__meta__")
+    if meta is not None:
+        results_dir = meta.get("results_dir")
+        if results_dir is not None:
+            result = _try_load_from_dir(Path(results_dir))
+            if result is not None:
+                return result
+            log.debug(f"No exposure result JSON in {results_dir} — falling back to heuristic")
+
+    # --- Fallback: per-condition heuristic (legacy path resolution) ---
     for label in labels:
         cond_data = data.get(label)
         if cond_data is None:
