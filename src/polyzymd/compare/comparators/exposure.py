@@ -531,10 +531,16 @@ class ExposureDynamicsComparator(
     def _filter_conditions(
         self,
     ) -> tuple[list["ConditionConfig"], list["ConditionConfig"]]:
-        """Exclude conditions without pre-computed contact results.
+        """Exclude conditions that cannot have chaperone events.
 
-        If no contact JSON exists for any replicate, the condition is
-        excluded — there is no polymer to analyze.
+        A condition is excluded if:
+        1. Its ``SimulationConfig.polymers`` is ``None`` or disabled — no
+           polymer means no chaperone events are possible.
+        2. No pre-computed contact JSON exists for any replicate.
+
+        The polymer check (1) is the primary gate and prevents the fallback
+        file-search from accidentally matching contacts that belong to a
+        different simulation sharing the same ``projects_directory``.
 
         Returns
         -------
@@ -549,6 +555,16 @@ class ExposureDynamicsComparator(
         for cond in self.config.conditions:
             try:
                 sim_config = SimulationConfig.from_yaml(cond.config)
+
+                # Primary gate: conditions without polymer cannot have
+                # chaperone events — exclude before searching for contacts.
+                if sim_config.polymers is None or (
+                    hasattr(sim_config.polymers, "enabled") and not sim_config.polymers.enabled
+                ):
+                    excluded_conditions.append(cond)
+                    logger.info(f"  Excluding '{cond.label}': no polymer configured")
+                    continue
+
                 # Resolve condition-specific contacts dir for lookup
                 exposure_cond_dir = self._resolve_condition_output_dir(cond.label, "exposure")
                 contacts_cond_dir: Path | None = None
@@ -591,47 +607,40 @@ class ExposureDynamicsComparator(
     ) -> Path | None:
         """Find the cached contact result JSON for a replicate.
 
-        Checks locations in order:
-        1. condition_output_dir (condition-specific, comparison mode)
-        2. sim_config.output.projects_directory / analysis / contacts /
-        3. cond_config_path.parent / analysis / contacts / (if provided)
+        Only checks the condition-specific output directory (comparison
+        mode).  The ``projects_directory`` and ``cond_config_path``
+        fallbacks used by other comparators are intentionally **not**
+        consulted here because multiple conditions can share the same
+        ``projects_directory``.  Loading contacts from a shared parent
+        risks cross-contamination — e.g. a no-polymer control picking up
+        contacts that belong to a polymer simulation.
 
         Parameters
         ----------
         sim_config : SimulationConfig
-            Simulation configuration.
+            Simulation configuration (unused, kept for interface compat).
         replicate : int
             Replicate number.
         cond_config_path : Path, optional
-            Condition config path for fallback lookup.
+            Condition config path (unused, kept for interface compat).
         condition_output_dir : Path, optional
             Condition-specific contacts output directory (from comparison
-            mode).  Checked first before falling back to
-            ``projects_directory``.
+            mode).
 
         Returns
         -------
         Path or None
-            Path to the JSON file, or None if not resolvable.
+            Path to the JSON file, or None if not found.
         """
         result_filename = f"contacts_rep{replicate}.json"
 
-        # Check condition-specific path first (comparison mode)
+        # Only use condition-specific path (comparison mode)
         if condition_output_dir is not None:
             cond_path = condition_output_dir / result_filename
             if cond_path.exists():
                 return cond_path
 
-        # Fallback to shared helper for projects_directory and config parent
-        from polyzymd.compare.comparators._utils import find_replicate_result
-
-        return find_replicate_result(
-            sim_config,
-            replicate,
-            result_filename=result_filename,
-            analysis_subdir="analysis/contacts",
-            cond_config_path=cond_config_path,
-        )
+        return None
 
     def _get_analysis_dir(
         self,
