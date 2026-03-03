@@ -81,6 +81,15 @@
    :show-inheritance:
 ```
 
+### Exposure Dynamics
+
+```{eval-rst}
+.. automodule:: polyzymd.compare.comparators.exposure
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
 ### Binding Free Energy
 
 ```{eval-rst}
@@ -116,6 +125,13 @@
 ```
 
 ```{eval-rst}
+.. automodule:: polyzymd.compare.results.exposure
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+```{eval-rst}
 .. automodule:: polyzymd.compare.results.polymer_affinity
    :members:
    :undoc-members:
@@ -142,6 +158,13 @@
 
 ```{eval-rst}
 .. automodule:: polyzymd.compare.plotters.binding_free_energy
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+```{eval-rst}
+.. automodule:: polyzymd.compare.plotters.exposure
    :members:
    :undoc-members:
    :show-inheritance:

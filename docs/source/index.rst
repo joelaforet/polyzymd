@@ -122,6 +122,7 @@ API Reference
    api/simulation
    api/workflow
    api/core
+   api/analysis
    api/compare
 
 Indices and tables
