@@ -51,7 +51,7 @@ def format_bfe_console_table(result: BindingFreeEnergyResult) -> str:
     lines.append("")
 
     # Per-condition summary table
-    lines.append(f"ΔΔG Summary by Condition (sign: negative = preferential binding)")
+    lines.append(f"ΔG_sel Summary by Condition (sign: negative = preferential binding)")
     lines.append("-" * 80)
 
     for summary in result.conditions:
@@ -64,7 +64,7 @@ def format_bfe_console_table(result: BindingFreeEnergyResult) -> str:
 
         if same_t_pairs:
             lines.append("")
-            lines.append("Pairwise ΔΔG Differences (ΔΔG_B − ΔΔG_A)")
+            lines.append("Pairwise ΔΔG Differences (ΔG_sel,B − ΔG_sel,A)")
             lines.append("-" * 80)
             _format_pairwise_block(lines, same_t_pairs, u)
 
@@ -73,7 +73,7 @@ def format_bfe_console_table(result: BindingFreeEnergyResult) -> str:
             lines.append(
                 f"Cross-temperature pairs ({len(cross_t_pairs)} entries) — statistics suppressed"
             )
-            lines.append("(ΔΔG values are shown for reference but cannot be compared directly)")
+            lines.append("(ΔG_sel values are shown for reference but cannot be compared directly)")
 
     lines.append("")
     return "\n".join(lines)
@@ -84,11 +84,11 @@ def _format_condition_block(
     summary: FreeEnergyConditionSummary,
     units: str,
 ) -> None:
-    """Format one condition's ΔΔG entries as a sub-table."""
+    """Format one condition's ΔG_sel entries as a sub-table."""
     lines.append(
         f"\n  {summary.label}  (T = {summary.temperature_K} K, n = {summary.n_replicates})"
     )
-    lines.append(f"  {'Polymer':<12} {'AA Group':<22} {'ΔΔG':>10} {'±σ':>10}  {'N_rep':>5}")
+    lines.append(f"  {'Polymer':<12} {'AA Group':<22} {'ΔG_sel':>10} {'±σ':>10}  {'N_rep':>5}")
     lines.append("  " + "-" * 63)
 
     if not summary.entries:
@@ -130,7 +130,7 @@ def _format_pairwise_block(
     for (cond_a, cond_b), entries in sorted(pair_groups.items()):
         lines.append(f"\n  {cond_a}  →  {cond_b}")
         lines.append(
-            f"  {'Polymer':<12} {'AA Group':<22} {'ΔΔG_A':>10} {'ΔΔG_B':>10} "
+            f"  {'Polymer':<12} {'AA Group':<22} {'ΔG_sel,A':>10} {'ΔG_sel,B':>10} "
             f"{'ΔΔG_B−A':>10} {'p-value':>10}"
         )
         lines.append("  " + "-" * 77)
@@ -184,7 +184,7 @@ def format_bfe_markdown(result: BindingFreeEnergyResult) -> str:
             lines.append("")
             continue
 
-        lines.append(f"| Polymer | AA Group | ΔΔG ({u}) | ±σ | N |")
+        lines.append(f"| Polymer | AA Group | ΔG_sel ({u}) | ±σ | N |")
         lines.append("|---------|----------|----------:|---:|---|")
 
         for entry in sorted(summary.entries, key=lambda e: (e.polymer_type, e.protein_group)):
@@ -220,7 +220,7 @@ def format_bfe_markdown(result: BindingFreeEnergyResult) -> str:
             lines.append(f"### {cond_a} → {cond_b}")
             lines.append("")
             lines.append(
-                f"| Polymer | AA Group | ΔΔG_A ({u}) | ΔΔG_B ({u}) | ΔΔG_B−A ({u}) | p-value |"
+                f"| Polymer | AA Group | ΔG_sel,A ({u}) | ΔG_sel,B ({u}) | ΔΔG_B−A ({u}) | p-value |"
             )
             lines.append("|---------|----------|----------:|----------:|----------:|--------:|")
 

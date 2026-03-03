@@ -1,9 +1,9 @@
 """Binding free energy plotters for comparison workflow.
 
-This module provides registered plotters for ΔΔG (binding free energy)
+This module provides registered plotters for ΔG_sel (selectivity free energy)
 analysis:
-- BFEHeatmapPlotter: ΔΔG heatmap with rows = AA groups, columns = conditions
-- BFEBarPlotter: Grouped bar chart of ΔΔG by AA residue class
+- BFEHeatmapPlotter: ΔG_sel heatmap with rows = AA groups, columns = conditions
+- BFEBarPlotter: Grouped bar chart of ΔG_sel by AA residue class
 
 Both plotters load a ``BindingFreeEnergyResult`` JSON saved by the
 ``polyzymd compare binding-free-energy`` command (in ``results/`` adjacent to
@@ -24,10 +24,10 @@ the partition name to preserve backward compatibility.
 
 Physics interpretation
 ----------------------
-ΔΔG < 0  →  preferential contact (polymer contacts this group more than
+ΔG_sel < 0  →  preferential contact (polymer contacts this group more than
              expected from surface availability alone)
-ΔΔG > 0  →  contact avoidance (polymer contacts this group less than expected)
-ΔΔG = 0  →  contacts match surface-availability reference exactly
+ΔG_sel > 0  →  contact avoidance (polymer contacts this group less than expected)
+ΔG_sel = 0  →  contacts match surface-availability reference exactly
 
 Diverging colormap (RdBu_r by default) is centered at 0.0:
 - Blue (negative)  → preference
@@ -231,12 +231,12 @@ def _partition_display_name(partition_name: str) -> str:
 
 @PlotterRegistry.register("bfe_heatmap")
 class BFEHeatmapPlotter(BasePlotter):
-    """Generate ΔΔG heatmap comparing binding free energy across conditions.
+    """Generate ΔG_sel heatmap comparing binding free energy across conditions.
 
     Creates one figure per (partition, polymer_type) combination:
     - Rows: protein groups belonging to that partition
     - Columns: Conditions (e.g., 0% SBMA, 25% SBMA, …)
-    - Color: ΔΔG value with diverging colormap centered at 0
+    - Color: ΔG_sel value with diverging colormap centered at 0
 
     When only a single partition exists (e.g., just "aa_class"), filenames
     and titles match the previous single-partition behavior for backward
@@ -248,8 +248,8 @@ class BFEHeatmapPlotter(BasePlotter):
 
     Sign convention
     ---------------
-    Blue (negative ΔΔG) = preferential contact
-    Red  (positive ΔΔG) = contact avoidance
+    Blue (negative ΔG_sel) = preferential contact
+    Red  (positive ΔG_sel) = contact avoidance
     """
 
     @classmethod
@@ -269,7 +269,7 @@ class BFEHeatmapPlotter(BasePlotter):
         output_dir: Path,
         **kwargs: Any,
     ) -> list[Path]:
-        """Generate ΔΔG heatmaps, one per (partition, polymer_type).
+        """Generate ΔG_sel heatmaps, one per (partition, polymer_type).
 
         Parameters
         ----------
@@ -335,7 +335,7 @@ class BFEHeatmapPlotter(BasePlotter):
                         partition_vals.append(entry.delta_G)
 
             if not partition_vals:
-                logger.debug(f"No ΔΔG values for partition '{partition_name}' - skipping")
+                logger.debug(f"No ΔG_sel values for partition '{partition_name}' - skipping")
                 continue
 
             vmin, vmax = self._symmetric_clim(partition_vals, pad=0.05)
@@ -374,7 +374,7 @@ class BFEHeatmapPlotter(BasePlotter):
                 valid = matrix[~np.isnan(matrix)]
                 if len(valid) == 0:
                     logger.debug(
-                        f"No ΔΔG data for partition '{partition_name}', "
+                        f"No ΔG_sel data for partition '{partition_name}', "
                         f"polymer '{poly_type}' - skipping"
                     )
                     plt.close(fig)
@@ -388,7 +388,7 @@ class BFEHeatmapPlotter(BasePlotter):
                     aspect="auto",
                 )
 
-                # Annotate cells with ΔΔG ± σ
+                # Annotate cells with ΔG_sel ± σ
                 if bfe_settings.annotate_heatmap:
                     self._annotate_cells(
                         ax,
@@ -416,7 +416,7 @@ class BFEHeatmapPlotter(BasePlotter):
                 poly_label = poly_type if n_poly > 1 else ""
                 if multi_partition:
                     part_label = _partition_display_name(partition_name)
-                    title_parts = ["ΔΔG", part_label]
+                    title_parts = [r"$\Delta G_{\mathrm{sel}}$", part_label]
                     if poly_label:
                         title_parts.append(poly_label)
                     if temp_str:
@@ -427,17 +427,26 @@ class BFEHeatmapPlotter(BasePlotter):
                     if temp_str:
                         title += temp_str
                 else:
-                    parts = ["ΔΔG"]
+                    parts = [r"$\Delta G_{\mathrm{sel}}$"]
                     if poly_label:
                         parts.append(poly_label)
                     if temp_str:
                         parts.append(temp_str.strip())
-                    title = " ".join(parts) if len(parts) > 1 else "ΔΔG Binding Selectivity"
+                    title = (
+                        " ".join(parts)
+                        if len(parts) > 1
+                        else r"$\Delta G_{\mathrm{sel}}$ Binding Selectivity"
+                    )
                 ax.set_title(title, fontweight="bold", fontsize=11)
 
                 cbar = fig.colorbar(im, ax=ax, shrink=0.85)
                 unit_lbl = _unit_label_mpl(units)
-                cbar.set_label(f"ΔΔG ({unit_lbl})", rotation=270, labelpad=14, fontsize=9)
+                cbar.set_label(
+                    r"$\Delta G_{\mathrm{sel}}$" + f" ({unit_lbl})",
+                    rotation=270,
+                    labelpad=14,
+                    fontsize=9,
+                )
                 cbar.ax.axhline(y=0.0, color="black", linewidth=1.5, linestyle="--")
 
                 plt.tight_layout()
@@ -485,13 +494,13 @@ class BFEHeatmapPlotter(BasePlotter):
 
 @PlotterRegistry.register("bfe_bars")
 class BFEBarPlotter(BasePlotter):
-    """Generate ΔΔG grouped bar charts comparing binding free energy across conditions.
+    """Generate ΔG_sel grouped bar charts comparing binding free energy across conditions.
 
     Creates one figure per (partition, polymer_type) combination with:
     - Groups on x-axis: protein groups from that partition
     - Bars within each group: one per condition
-    - Error bars: between-replicate SEM on ΔΔG (delta-method fallback)
-    - Reference line at ΔΔG = 0
+    - Error bars: between-replicate SEM on ΔG_sel (delta-method fallback)
+    - Reference line at ΔG_sel = 0
 
     When only a single partition exists, filenames and titles match the
     previous single-partition behavior for backward compatibility.
@@ -518,7 +527,7 @@ class BFEBarPlotter(BasePlotter):
         output_dir: Path,
         **kwargs: Any,
     ) -> list[Path]:
-        """Generate ΔΔG grouped bar charts, one per (partition, polymer_type).
+        """Generate ΔG_sel grouped bar charts, one per (partition, polymer_type).
 
         Parameters
         ----------
@@ -559,7 +568,7 @@ class BFEBarPlotter(BasePlotter):
             if lbl in cond_labels
         ]
         if not valid_labels:
-            logger.info("No conditions with ΔΔG values - skipping bar charts")
+            logger.info("No conditions with ΔG_sel values - skipping bar charts")
             return []
 
         polymer_types = result.polymer_types
@@ -638,7 +647,7 @@ class BFEBarPlotter(BasePlotter):
                     series,
                     colors,
                     show_error=bfe_settings.show_error_bars,
-                    reference_label="ΔΔG = 0 (neutral)",
+                    reference_label=r"$\Delta G_{\mathrm{sel}}$ = 0 (neutral)",
                     edgecolor="none",
                 )
 
@@ -646,9 +655,9 @@ class BFEBarPlotter(BasePlotter):
                 poly_label = f": {poly_type}" if n_poly > 1 else ""
                 if multi_partition:
                     part_label = _partition_display_name(partition_name)
-                    title = f"ΔΔG — {part_label}{poly_label}{temp_str}"
+                    title = r"$\Delta G_{\mathrm{sel}}$" + f" — {part_label}{poly_label}{temp_str}"
                 else:
-                    title = f"ΔΔG{poly_label}{temp_str}"
+                    title = r"$\Delta G_{\mathrm{sel}}$" + f"{poly_label}{temp_str}"
                 ax.set_title(title, fontweight="bold", fontsize=11)
 
                 # X-axis label
@@ -658,7 +667,7 @@ class BFEBarPlotter(BasePlotter):
                     xlabel = "Amino Acid Group"
                 ax.set_xlabel(xlabel, fontsize=10)
                 unit_lbl = _unit_label_mpl(units)
-                ax.set_ylabel(f"ΔΔG ({unit_lbl})", fontsize=10)
+                ax.set_ylabel(r"$\Delta G_{\mathrm{sel}}$" + f" ({unit_lbl})", fontsize=10)
                 ax.set_xticks(x)
                 ax.set_xticklabels(protein_groups, rotation=35, ha="right", fontsize=9)
                 ax.legend(loc="best", fontsize=8, framealpha=0.7)
