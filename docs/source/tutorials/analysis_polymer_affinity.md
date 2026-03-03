@@ -28,12 +28,12 @@ may have a stronger total interaction than one with strong per-contact affinity
 but few contacts. The polymer affinity score captures this by summing:
 
 ```{math}
-\text{Score} = N \times \Delta\Delta G
+\text{Score} = N \times \Delta G_{\mathrm{sel}}
 ```
 
 where:
 - **N** = mean number of simultaneous contacts with a residue group
-- **ΔΔG** = per-contact free energy from Boltzmann inversion
+- **ΔG$_{\mathrm{sel}}$** = per-contact selectivity free energy from Boltzmann inversion
 
 ### The Formula
 
@@ -44,11 +44,11 @@ N_g = \text{mean\_contact\_fraction} \times n_\text{exposed\_in\_group}
 ```
 
 ```{math}
-\Delta\Delta G_g = -\ln\!\left(\frac{\text{contact\_share}}{\text{expected\_share}}\right) \quad [k_\mathrm{b}T]
+\Delta G_{\mathrm{sel},g} = -\ln\!\left(\frac{\text{contact\_share}}{\text{expected\_share}}\right) \quad [k_\mathrm{b}T]
 ```
 
 ```{math}
-S_g = N_g \times \Delta\Delta G_g
+S_g = N_g \times \Delta G_{\mathrm{sel},g}
 ```
 
 Per polymer type:
@@ -132,7 +132,7 @@ Interpretation: on average, **1.2 aromatic residues are simultaneously in
 contact with SBM in any given frame**. Some frames have 0 contacts, some have
 3 or 4 — but the time-averaged expectation is 1.2 simultaneous contacts.
 
-If this group's ΔΔG is -0.22 kT, the group contribution to the affinity score
+If this group's ΔG$_{\mathrm{sel}}$ is -0.22 kT, the group contribution to the affinity score
 is `1.2 × (-0.22) = -0.26 kT`.
 
 #### Why This Quantity (and Not Alternatives)
@@ -243,7 +243,7 @@ polyzymd compare polymer-affinity -f comparison.yaml
 ```
 Polymer Affinity Score: LipA 363K Comparison
 ================================================================================
-Formula : Score = N_contacts × ΔΔG, where ΔΔG = -ln(contact_share / expected_share)
+Formula : Score = N_contacts × ΔG_sel, where ΔG_sel = -ln(contact_share / expected_share)
 Units   : kT (dimensionless, in units of k_bT)
 Sign    : Negative = net attractive interaction
 Note    : Assumes thermodynamic independence of contacts (see docs for caveats)
@@ -252,7 +252,7 @@ Per-Condition Summary (sign: more negative = stronger adhesion)
 --------------------------------------------------------------------------------
 
   100% SBMA  (T = 363.0 K, n = 5)
-  Polymer  AA Group            N_contacts     ΔΔG/kT    Score/kT
+  Polymer  AA Group            N_contacts  ΔG_sel/kT    Score/kT
   ----------------------------------------------------------------
   SBM      aromatic                12.3      -0.19       -2.34
   SBM      charged_negative         8.7      +0.08       +0.70
@@ -263,7 +263,7 @@ Per-Condition Summary (sign: more negative = stronger adhesion)
   SBM      TOTAL                                         -1.09
 
   SBMA-EGPMA 5%  (T = 363.0 K, n = 5)
-  Polymer  AA Group            N_contacts     ΔΔG/kT    Score/kT
+  Polymer  AA Group            N_contacts  ΔG_sel/kT    Score/kT
   ----------------------------------------------------------------
   SBM      aromatic                14.1      -0.22       -3.10
   SBM      nonpolar                17.3      +0.02       +0.35
@@ -285,7 +285,7 @@ From the example:
   100% SBMA (-1.09 kT). The 5% EGPMA comonomer increases total polymer-protein
   binding through aromatic contacts.
 
-- **SBM aromatic N_contacts=14.1, ΔΔG=-0.22 kT** — each of ~14 simultaneous
+- **SBM aromatic N_contacts=14.1, ΔG$_{\mathrm{sel}}$=-0.22 kT** — each of ~14 simultaneous
   aromatic contacts contributes -0.22 kT, giving a group score of -3.10 kT.
 
 - **Pairwise ΔScore = -3.12 kT, p = 0.003** — the difference is statistically
@@ -354,11 +354,11 @@ N_{\text{rep}} = \text{contact\_fraction}_{\text{rep}} \times n_\text{exposed}
 ```
 
 ```{math}
-\Delta\Delta G_{\text{rep}} = -\ln(\text{enrichment}_{\text{rep}} + 1)
+\Delta G_{\mathrm{sel,rep}} = -\ln(\text{enrichment}_{\text{rep}} + 1)
 ```
 
 ```{math}
-S_{\text{rep}} = N_{\text{rep}} \times \Delta\Delta G_{\text{rep}}
+S_{\text{rep}} = N_{\text{rep}} \times \Delta G_{\mathrm{sel,rep}}
 ```
 
 Mean and SEM are computed across replicates. Pairwise t-tests use these
@@ -368,7 +368,7 @@ When per-replicate files are unavailable, the comparator falls back to
 analytical error propagation:
 
 ```{math}
-\sigma(S) = \sqrt{(N \cdot \sigma_{\Delta\Delta G})^2 + (\Delta\Delta G \cdot \sigma_N)^2}
+\sigma(S) = \sqrt{(N \cdot \sigma_{\Delta G_{\mathrm{sel}}})^2 + (\Delta G_{\mathrm{sel}} \cdot \sigma_N)^2}
 ```
 
 ## Multi-Temperature Studies
@@ -385,9 +385,9 @@ Per-condition scores are always shown — they are valid within each temperature
 | Analysis | What It Measures | Relation to Affinity Score |
 |----------|-----------------|--------------------------|
 | **Contacts** | Which residues are touched | Provides the raw contact data |
-| **Binding Preference** | Enrichment per residue group | Provides enrichment → ΔΔG |
-| **Binding Free Energy** | Per-contact ΔΔG | Component of the score (without N) |
-| **Polymer Affinity Score** | Total interaction strength | N × ΔΔG summed over all groups |
+| **Binding Preference** | Enrichment per residue group | Provides enrichment → ΔG_sel |
+| **Binding Free Energy** | Per-contact ΔG_sel | Component of the score (without N) |
+| **Polymer Affinity Score** | Total interaction strength | N × ΔG_sel summed over all groups |
 | **RMSF** | Structural flexibility | Complementary: stability metric |
 | **Triad** | Active site geometry | Complementary: function metric |
 
@@ -414,7 +414,7 @@ for summary in result.conditions:
     for entry in summary.entries:
         print(
             f"  {entry.polymer_type} × {entry.protein_group}: "
-            f"N={entry.n_contacts:.1f}, ΔΔG={entry.delta_G:+.3f}, "
+            f"N={entry.n_contacts:.1f}, ΔG_sel={entry.delta_G:+.3f}, "
             f"Score={entry.score:+.3f} kT"
         )
 
@@ -456,14 +456,14 @@ binding preference data for the affected condition.
 
 ### Different scores from BFE analysis
 
-The affinity score and BFE analysis use the same ΔΔG formula but different
-aggregation: BFE reports per-contact ΔΔG, while the affinity score multiplies
-by N_contacts. The per-contact ΔΔG values should match exactly; differences
+The affinity score and BFE analysis use the same ΔG$_{\mathrm{sel}}$ formula but different
+aggregation: BFE reports per-contact ΔG$_{\mathrm{sel}}$, while the affinity score multiplies
+by N_contacts. The per-contact ΔG$_{\mathrm{sel}}$ values should match exactly; differences
 indicate a cache or configuration mismatch.
 
 ## See Also
 
-- [Binding Free Energy Analysis](analysis_binding_free_energy.md) — per-contact ΔΔG (the component metric)
+- [Binding Free Energy Analysis](analysis_binding_free_energy.md) — per-contact ΔG_sel (the component metric)
 - [Binding Preference Analysis](analysis_binding_preference.md) — the prerequisite enrichment analysis
 - [Contacts Analysis Quick Start](analysis_contacts_quickstart.md) — basic contact computation
 - [Statistics Best Practices](analysis_statistics_best_practices.md) — replicate planning

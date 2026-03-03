@@ -30,38 +30,38 @@ Enrichment is intuitive (+0.5 means 50% more contacts than random) but has no
 units. It cannot answer: *"Is a +0.5 enrichment for aromatic residues
 thermodynamically significant?"*
 
-Binding free energy converts enrichment into **Gibbs free energy differences
-(ΔΔG)** via Boltzmann inversion. Because polyzymd simulations run in the NPT
+Binding free energy converts enrichment into **selectivity free energy
+(ΔG$_{\mathrm{sel}}$)** via Boltzmann inversion. Because polyzymd simulations run in the NPT
 ensemble, the correct thermodynamic potential is the Gibbs free energy.
 
 ### The Core Formula
 
 ```{math}
-\Delta\Delta G = -k_B T \ln\!\left(\frac{\text{contact\_share}}{\text{expected\_share}}\right)
+\Delta G_{\mathrm{sel}} = -k_B T \ln\!\left(\frac{\text{contact\_share}}{\text{expected\_share}}\right)
 ```
 
 Equivalently, since `contact_share / expected_share = enrichment + 1`:
 
 ```{math}
-\Delta\Delta G = -k_B T \ln(\text{enrichment} + 1)
+\Delta G_{\mathrm{sel}} = -k_B T \ln(\text{enrichment} + 1)
 ```
 
-| ΔΔG | Meaning |
-|-----|---------|
+| ΔG_sel | Meaning |
+|--------|---------|
 | **< 0** | Preferential binding — the polymer favors this residue group |
 | **= 0** | Neutral — contact frequency matches random |
 | **> 0** | Avoidance — the polymer contacts this group less than expected |
 
 ### Relation to Enrichment
 
-ΔΔG is the **exact** Boltzmann-inverted version of enrichment. The enrichment
-score is a first-order Taylor expansion (without units); ΔΔG is exact and
+ΔG$_{\mathrm{sel}}$ is the **exact** Boltzmann-inverted version of enrichment. The enrichment
+score is a first-order Taylor expansion (without units); ΔG$_{\mathrm{sel}}$ is exact and
 carries physical units.
 
 The relationship is:
 
 ```{math}
-\text{enrichment} = e^{-\Delta\Delta G / k_B T} - 1
+\text{enrichment} = e^{-\Delta G_{\mathrm{sel}} / k_B T} - 1
 ```
 
 ### Uncertainty (Delta Method)
@@ -69,7 +69,7 @@ The relationship is:
 Uncertainty is propagated analytically via the delta method:
 
 ```{math}
-\sigma(\Delta\Delta G) = k_B T \sqrt{\left(\frac{\sigma_\text{cs}}{\text{cs}}\right)^2 + \left(\frac{\sigma_\text{es}}{\text{es}}\right)^2}
+\sigma(\Delta G_{\mathrm{sel}}) = k_B T \sqrt{\left(\frac{\sigma_\text{cs}}{\text{cs}}\right)^2 + \left(\frac{\sigma_\text{es}}{\text{es}}\right)^2}
 ```
 
 where `σ_cs` is the SEM of the contact share across replicates, and
@@ -77,7 +77,7 @@ where `σ_cs` is the SEM of the contact share across replicates, and
 
 ### Temperature and Comparability
 
-ΔΔG computed at temperature *T* is **not directly comparable** to ΔΔG at
+ΔG$_{\mathrm{sel}}$ computed at temperature *T* is **not directly comparable** to ΔG$_{\mathrm{sel}}$ at
 temperature *T'* — the k_BT scale factor differs. When conditions span multiple
 simulation temperatures, pairwise statistics are automatically suppressed for
 cross-temperature pairs.
@@ -151,15 +151,15 @@ polyzymd compare binding-free-energy -f comparison.yaml
 ```
 Binding Free Energy Comparison: SBMA vs EGMA Free Energy Study
 ================================================================================
-Formula : ΔΔG = -k_B·T · ln(contact_share / expected_share)
+Formula : ΔG_sel = -k_B·T · ln(contact_share / expected_share)
 Units   : kcal/mol
 Equilibration: 10ns
 
-ΔΔG Summary by Condition (sign: negative = preferential binding)
+ΔG_sel Summary by Condition (sign: negative = preferential binding)
 --------------------------------------------------------------------------------
 
   100% SBMA  (T = 300.0 K, n = 3)
-  Polymer      AA Group               ΔΔG           ±σ    N_rep
+  Polymer      AA Group            ΔG_sel           ±σ    N_rep
   ---------------------------------------------------------------
   SBM          aromatic            -0.243       +0.031       3
   SBM          charged_negative    +0.091       +0.022       3
@@ -168,7 +168,7 @@ Equilibration: 10ns
   SBM          polar               -0.001       +0.001       3
 
   100% EGMA  (T = 300.0 K, n = 3)
-  Polymer      AA Group               ΔΔG           ±σ    N_rep
+  Polymer      AA Group            ΔG_sel           ±σ    N_rep
   ---------------------------------------------------------------
   EGM          aromatic            -0.523       +0.034       3
   EGM          charged_negative    +0.319       +0.028       3
@@ -176,11 +176,11 @@ Equilibration: 10ns
   EGM          nonpolar            -0.166       +0.021       3
   EGM          polar               +0.146       +0.010       3
 
-Pairwise ΔΔG Differences (ΔΔG_B − ΔΔG_A)
+Pairwise ΔΔG Differences (ΔG_sel,B − ΔG_sel,A)
 --------------------------------------------------------------------------------
 
   100% SBMA  →  100% EGMA
-  Polymer      AA Group               ΔΔG_A      ΔΔG_B    ΔΔG_B−A    p-value
+  Polymer      AA Group            ΔG_sel,A   ΔG_sel,B    ΔΔG_B−A    p-value
   -----------------------------------------------------------------------------
   EGM          aromatic              N/A       -0.523        N/A         --
   SBM          aromatic           -0.243          N/A        N/A         --
@@ -190,19 +190,19 @@ Pairwise ΔΔG Differences (ΔΔG_B − ΔΔG_A)
 
 From the example:
 
-- **EGMA (EGM) aromatic: ΔΔG = −0.52 kcal/mol** — strong preferential
+- **EGMA (EGM) aromatic: ΔG$_{\mathrm{sel}}$ = −0.52 kcal/mol** — strong preferential
   contact with aromatic residues (about half a kcal/mol more favorable than
   random). This is equivalent to the enrichment score of +0.90 from binding
   preference analysis.
 
-- **EGMA charged_negative: ΔΔG = +0.32 kcal/mol** — avoidance of charged
+- **EGMA charged_negative: ΔG$_{\mathrm{sel}}$ = +0.32 kcal/mol** — avoidance of charged
   negative residues.
 
-- **SBMA (SBM) charged_positive: ΔΔG = −0.01 kcal/mol** — near-neutral,
+- **SBMA (SBM) charged_positive: ΔG$_{\mathrm{sel}}$ = −0.01 kcal/mol** — near-neutral,
   consistent with SBMA's balanced zwitterionic character.
 
 ```{tip}
-A rule of thumb from protein biophysics: differences of **|ΔΔG| > 0.5 kcal/mol**
+A rule of thumb from protein biophysics: differences of **|ΔG$_{\mathrm{sel}}$| > 0.5 kcal/mol**
 are generally considered thermodynamically significant at room temperature. Smaller
 values may still be real but require larger replicate sets to distinguish from noise.
 ```
@@ -326,7 +326,7 @@ for a full explanation.
 ## Multi-Temperature Studies
 
 When conditions were simulated at different temperatures (e.g., a temperature
-stability study), ΔΔG values are reported per condition but **pairwise
+stability study), ΔG$_{\mathrm{sel}}$ values are reported per condition but **pairwise
 statistics are suppressed** between conditions at different temperatures:
 
 ```
@@ -334,7 +334,7 @@ Note: pairwise statistics suppressed for cross-temperature pairs.
 Temperatures: 300.0 K (100% SBMA, 100% EGMA), 320.0 K (High-T SBMA)
 ```
 
-Per-condition ΔΔG values are still shown — they are valid within each
+Per-condition ΔG$_{\mathrm{sel}}$ values are still shown — they are valid within each
 temperature group. Only the pairwise ΔΔG_B−A values and p-values are omitted
 for cross-temperature pairs, since k_BT differs.
 
@@ -365,7 +365,7 @@ for summary in result.conditions:
         if entry.delta_G is not None:
             print(
                 f"  {entry.polymer_type} × {entry.protein_group}: "
-                f"ΔΔG = {entry.delta_G:+.3f} ± {entry.delta_G_uncertainty:.3f} "
+                f"ΔG_sel = {entry.delta_G:+.3f} ± {entry.delta_G_uncertainty:.3f} "
                 f"{result.units}"
             )
 
@@ -385,7 +385,7 @@ for pair in result.pairwise_comparisons:
 
 For each shared (polymer_type, protein_group) pair between two conditions at
 the same temperature, an independent two-sample t-test is performed on the
-per-replicate ΔΔG distributions. Requires **at least 2 replicates per
+per-replicate ΔG$_{\mathrm{sel}}$ distributions. Requires **at least 2 replicates per
 condition**.
 
 ### FDR Correction
@@ -451,7 +451,7 @@ comparison_settings:
 # Step 1: Generate binding preference data
 polyzymd compare contacts -f comparison.yaml
 
-# Step 2: Compute ΔΔG
+# Step 2: Compute ΔG_sel
 polyzymd compare binding-free-energy -f comparison.yaml --format markdown -o bfe_report.md
 ```
 
@@ -459,10 +459,10 @@ polyzymd compare binding-free-energy -f comparison.yaml --format markdown -o bfe
 
 | Observation | Interpretation |
 |-------------|----------------|
-| EGMA aromatic: ΔΔG = −0.52 ± 0.03 kcal/mol | EGMA has a significant thermodynamic preference for aromatic surface residues |
-| SBMA aromatic: ΔΔG = −0.24 ± 0.03 kcal/mol | SBMA also preferentially contacts aromatics, but less strongly |
-| ΔΔG_EGMA − ΔΔG_SBMA = −0.28 kcal/mol, p < 0.01 | The difference is statistically significant with 5 replicates |
-| SBMA charged groups: ΔΔG ≈ 0 | SBMA's zwitterionic balance leads to near-neutral electrostatic preference |
+| EGMA aromatic: ΔG_sel = −0.52 ± 0.03 kcal/mol | EGMA has a significant thermodynamic preference for aromatic surface residues |
+| SBMA aromatic: ΔG_sel = −0.24 ± 0.03 kcal/mol | SBMA also preferentially contacts aromatics, but less strongly |
+| ΔΔG = ΔG_sel,EGMA − ΔG_sel,SBMA = −0.28 kcal/mol, p < 0.01 | The difference is statistically significant with 5 replicates |
+| SBMA charged groups: ΔG_sel ≈ 0 | SBMA's zwitterionic balance leads to near-neutral electrostatic preference |
 
 ## Troubleshooting
 
@@ -493,15 +493,15 @@ was set in the contacts analysis settings when you ran contacts.
 
 ### "N/A" entries in the output
 
-ΔΔG is undefined when `contact_share = 0` (no contacts observed) or
+ΔG$_{\mathrm{sel}}$ is undefined when `contact_share = 0` (no contacts observed) or
 `expected_share = 0` (no exposed residues in that group). These are shown as
 `N/A` and excluded from pairwise comparisons.
 
 ### "Pairwise statistics suppressed for cross-temperature pairs"
 
-Your conditions were simulated at different temperatures. ΔΔG at different
+Your conditions were simulated at different temperatures. ΔG$_{\mathrm{sel}}$ at different
 temperatures is not directly comparable — k_BT differs. You can still compare
-ΔΔG within a temperature group, but not across groups. Consider re-running all
+ΔG$_{\mathrm{sel}}$ within a temperature group, but not across groups. Consider re-running all
 conditions at the same temperature if cross-condition comparisons are needed.
 
 ### kJ/mol vs kcal/mol
