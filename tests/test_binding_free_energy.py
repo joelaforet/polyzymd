@@ -1,7 +1,7 @@
 """Unit tests for the binding free energy analysis module.
 
 Tests cover:
-- Physics / math correctness (ΔΔG formula, delta-method uncertainty)
+- Physics / math correctness (ΔG_sel formula, delta-method uncertainty)
 - FreeEnergyEntry, FreeEnergyConditionSummary, BindingFreeEnergyResult models
 - BindingFreeEnergyAnalysisSettings and BindingFreeEnergyComparisonSettings
 - BindingFreeEnergyComparator helpers (no I/O, uses synthetic data)
@@ -104,10 +104,10 @@ def _make_condition_summary(
 
 
 class TestBoltzmannInversion:
-    """Test ΔΔG formula correctness."""
+    """Test ΔG_sel formula correctness."""
 
     def test_random_binding_gives_zero_ddg(self):
-        """When contact_share == expected_share, ΔΔG = 0."""
+        """When contact_share == expected_share, ΔG_sel = 0."""
         cs = 0.20
         es = 0.20
         kT = KB_KCAL * T_REF
@@ -115,7 +115,7 @@ class TestBoltzmannInversion:
         assert abs(ddg) < 1e-12
 
     def test_enriched_contact_gives_negative_ddg(self):
-        """When contact_share > expected_share, ΔΔG < 0 (favorable)."""
+        """When contact_share > expected_share, ΔG_sel < 0 (favorable)."""
         cs = 0.40  # polymer prefers this group
         es = 0.10  # only 10% surface area
         kT = KB_KCAL * T_REF
@@ -123,7 +123,7 @@ class TestBoltzmannInversion:
         assert ddg < 0
 
     def test_depleted_contact_gives_positive_ddg(self):
-        """When contact_share < expected_share, ΔΔG > 0 (unfavorable)."""
+        """When contact_share < expected_share, ΔG_sel > 0 (unfavorable)."""
         cs = 0.05
         es = 0.30
         kT = KB_KCAL * T_REF
@@ -131,7 +131,7 @@ class TestBoltzmannInversion:
         assert ddg > 0
 
     def test_equivalence_with_enrichment(self):
-        """ΔΔG = -kT·ln(enrichment + 1) (exact, not approximation)."""
+        """ΔG_sel = -kT·ln(enrichment + 1) (exact, not approximation)."""
         cs = 0.30
         es = 0.10
         enrichment = (cs / es) - 1.0  # = 2.0
@@ -141,7 +141,7 @@ class TestBoltzmannInversion:
         assert abs(ddg_ratio - ddg_enrichment) < 1e-12
 
     def test_delta_method_uncertainty(self):
-        """σ(ΔΔG) = kT·√[(σ_cs/cs)² + (σ_es/es)²]."""
+        """σ(ΔG_sel) = kT·√[(σ_cs/cs)² + (σ_es/es)²]."""
         cs, es = 0.30, 0.10
         sem_cs, sem_es = 0.02, 0.005
         kT = KB_KCAL * T_REF
@@ -160,14 +160,14 @@ class TestBoltzmannInversion:
         assert abs(ddg_kj / ddg_kcal - 4.184) < 0.01
 
     def test_kT_units_ddg_equals_negative_log(self):
-        """In kT units, ΔΔG = -ln(contact_share / expected_share) exactly."""
+        """In kT units, ΔG_sel = -ln(contact_share / expected_share) exactly."""
         cs, es = 0.30, 0.10
         ddg_kT = -KT_KT * math.log(cs / es)
         expected = -math.log(cs / es)
         assert abs(ddg_kT - expected) < 1e-12
 
     def test_kT_units_temperature_independent(self):
-        """kT-unit ΔΔG should be the same at any temperature."""
+        """kT-unit ΔG_sel should be the same at any temperature."""
         cs, es = 0.30, 0.10
         ddg_300 = -KT_KT * math.log(cs / es)  # T=300K
         ddg_400 = -KT_KT * math.log(cs / es)  # T=400K — same formula
@@ -279,10 +279,10 @@ class TestFreeEnergyConditionSummary:
 
     def test_primary_metric_value_mean_of_entries(self):
         entries = [
-            _make_entry(contact_share=0.25, expected_share=0.10),  # negative ΔΔG
+            _make_entry(contact_share=0.25, expected_share=0.10),  # negative ΔG_sel
             _make_entry(
                 protein_group="polar", contact_share=0.10, expected_share=0.20
-            ),  # positive ΔΔG
+            ),  # positive ΔG_sel
         ]
         summary = _make_condition_summary(entries=entries)
         dg_vals = [e.delta_G for e in entries]
@@ -389,7 +389,7 @@ class TestFreeEnergyPairwiseEntry:
     """Test FreeEnergyPairwiseEntry."""
 
     def test_delta_delta_g_sign(self):
-        """ΔΔG_B - ΔΔG_A: positive means B less favorable than A."""
+        """ΔΔG = ΔG_sel,B - ΔG_sel,A: positive means B less favorable than A."""
         from polyzymd.compare.results.binding_free_energy import FreeEnergyPairwiseEntry
 
         entry = FreeEnergyPairwiseEntry(
@@ -658,13 +658,13 @@ class TestBindingFreeEnergyFormatters:
         output = format_bfe_result(result, format="table")
         assert "SBM" in output
 
-    def test_table_format_contains_ddg_symbol(self):
+    def test_table_format_contains_dg_symbol(self):
         from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
 
         result = self._build_result()
         output = format_bfe_result(result, format="table")
-        # The output should mention ΔΔG or dG somewhere
-        assert any(sym in output for sym in ["ΔΔG", "dG", "delta_G", "DDG", "ΔG"])
+        # The output should mention ΔG_sel or ΔG somewhere
+        assert any(sym in output for sym in ["ΔG_sel", "ΔG", "dG", "delta_G"])
 
     def test_markdown_format_has_headers(self):
         from polyzymd.compare.binding_free_energy_formatters import format_bfe_result

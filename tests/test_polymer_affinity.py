@@ -39,12 +39,12 @@ def _make_entry(
     """Construct an AffinityScoreEntry with sensible defaults."""
     from polyzymd.compare.results.polymer_affinity import AffinityScoreEntry
 
-    # ΔΔG per contact = -ln(contact_share / expected_share) [kT]
+    # ΔG_sel per contact = -ln(contact_share / expected_share) [kT]
     delta_g: float | None = None
     if contact_share > 0 and expected_share > 0:
         delta_g = -math.log(contact_share / expected_share)
 
-    # Affinity score = N × ΔΔG
+    # Affinity score = N × ΔG_sel
     score: float | None = None
     if delta_g is not None:
         score = n_contacts * delta_g
@@ -138,7 +138,7 @@ class TestAffinityScorePhysics:
     """Test affinity score formula correctness."""
 
     def test_random_binding_gives_zero_score(self):
-        """When contact_share == expected_share, ΔΔG = 0 → score = 0."""
+        """When contact_share == expected_share, ΔG_sel = 0 → score = 0."""
         cs = 0.20
         es = 0.20
         delta_g = -math.log(cs / es)
@@ -176,15 +176,15 @@ class TestAffinityScorePhysics:
         assert abs(score_6 / score_3 - 2.0) < 1e-12
 
     def test_kT_units_temperature_independent(self):
-        """kT-unit ΔΔG should be the same at any temperature."""
+        """kT-unit ΔG_sel should be the same at any temperature."""
         cs, es = 0.30, 0.10
-        # In kT units, ΔΔG = -ln(cs/es) — temperature doesn't appear
+        # In kT units, ΔG_sel = -ln(cs/es) — temperature doesn't appear
         delta_g_300 = -math.log(cs / es)
         delta_g_400 = -math.log(cs / es)
         assert abs(delta_g_300 - delta_g_400) < 1e-15
 
     def test_enrichment_equivalence(self):
-        """ΔΔG = -ln(cs/es) = -ln(enrichment + 1)."""
+        """ΔG_sel = -ln(cs/es) = -ln(enrichment + 1)."""
         cs, es = 0.30, 0.10
         enrichment = (cs / es) - 1.0
         delta_g_ratio = -math.log(cs / es)
@@ -192,7 +192,7 @@ class TestAffinityScorePhysics:
         assert abs(delta_g_ratio - delta_g_enrichment) < 1e-12
 
     def test_total_score_is_sum_of_group_scores(self):
-        """Total affinity score = Σ(N_g × ΔΔG_g) across groups."""
+        """Total affinity score = Σ(N_g × ΔG_sel,g) across groups."""
         entries = [
             _make_entry(
                 protein_group="aromatic", n_contacts=3.0, contact_share=0.30, expected_share=0.10
@@ -209,7 +209,7 @@ class TestAffinityScorePhysics:
         assert abs(total - expected_total) < 1e-10
 
     def test_analytical_error_propagation_formula(self):
-        """σ(S) = √[(N·σ_ΔΔG)² + (ΔΔG·σ_N)²]."""
+        """σ(S) = √[(N·σ_ΔG_sel)² + (ΔG_sel·σ_N)²]."""
         n_contacts = 5.0
         delta_g = -1.2  # kT
         sigma_n = 0.5
