@@ -1,28 +1,42 @@
 """Binding free energy comparator via Boltzmann inversion of binding preference.
 
 This module implements BindingFreeEnergyComparator, which converts the existing
-binding preference (enrichment) data into physically grounded Gibbs free energy
-differences (ΔΔG) in real units (kcal/mol or kJ/mol).
+binding preference (enrichment) data into a selectivity free energy ΔG_sel in
+real units (kT, kcal/mol, or kJ/mol).
 
 Physics
 -------
 In the NPT ensemble the correct thermodynamic potential is the Gibbs free energy G.
-The selectivity free energy difference for polymer binding to AA group j versus a
-reference distribution proportional to each residue group's share of the total
-solvent-exposed protein surface area is:
+The polymer distributes its contacts across protein surface groups. Both the
+observed contact distribution (contact_share) and the null reference distribution
+(expected_share, proportional to each group's solvent-exposed surface area) are
+proper probability distributions that sum to 1 over the partition. Boltzmann
+inversion of their ratio gives the selectivity free energy:
 
-    ΔΔG_j = -k_B·T · ln(contact_share_j / expected_share_j)
+    ΔG_sel(j) = -k_B·T · ln(contact_share_j / expected_share_j)
+
+Because both distributions are normalized over the same partition, there is no
+arbitrary constant — ΔG_sel(j) is fully determined by the data.
 
 Because contact_share / expected_share = enrichment + 1, per replicate:
 
-    ΔΔG_rep = -k_B·T · ln(enrichment_rep + 1)
+    ΔG_sel,rep = -k_B·T · ln(enrichment_rep + 1)
 
 This is the exact Boltzmann-inverted version of the dimensionless enrichment score.
 
+Sign convention:
+    ΔG_sel < 0  →  preferential contact (observed > surface-availability reference)
+    ΔG_sel > 0  →  contact avoidance (observed < surface-availability reference)
+    ΔG_sel = 0  →  contacts match the surface-availability reference exactly
+
+Differences between groups (ΔG_sel(i) - ΔG_sel(j)) give the relative selectivity.
+Differences between conditions (ΔG_sel,B(j) - ΔG_sel,A(j)) give a true ΔΔG.
+
 Temperature handling
 --------------------
-ΔΔG computed at temperature T is not comparable to ΔΔG at T'. Pairwise
-statistics are suppressed between conditions at different simulation temperatures.
+ΔG_sel computed at temperature T is not comparable to ΔG_sel at T' (in physical
+units). Pairwise statistics are suppressed between conditions at different
+simulation temperatures.
 
 Design
 ------
@@ -83,13 +97,13 @@ class BindingFreeEnergyComparator(
         BindingFreeEnergyResult,
     ]
 ):
-    """Compare binding free energy (ΔΔG) across simulation conditions.
+    """Compare selectivity free energy (ΔG_sel) across simulation conditions.
 
     Consumes cached binding preference results (produced by the contacts analysis
-    layer) and converts them to Gibbs free energy differences via Boltzmann
+    layer) and converts them to selectivity free energies via Boltzmann
     inversion:
 
-        ΔΔG = -k_B·T · ln(contact_share / expected_share)
+        ΔG_sel = -k_B·T · ln(contact_share / expected_share)
 
     Statistical comparisons are only computed between conditions that share the
     same simulation temperature. Cross-temperature pairs are flagged and their
@@ -165,7 +179,7 @@ class BindingFreeEnergyComparator(
         Returns
         -------
         BindingFreeEnergyResult
-            Complete ΔΔG comparison result.
+            Complete ΔG_sel comparison result.
         """
         logger.info(f"Starting binding free energy comparison: {self.config.name}")
         logger.info(f"Units: {self.analysis_settings.units}")
@@ -211,9 +225,9 @@ class BindingFreeEnergyComparator(
         # Step 5: Build result
         surface_threshold = self.analysis_settings.surface_exposure_threshold
         if self.analysis_settings.units == "kT":
-            formula = "ΔΔG = -ln(contact_share / expected_share)  [units: k_bT]"
+            formula = "ΔG_sel = -ln(contact_share / expected_share)  [units: k_bT]"
         else:
-            formula = "ΔΔG = -k_B·T · ln(contact_share / expected_share)"
+            formula = "ΔG_sel = -k_B·T · ln(contact_share / expected_share)"
 
         return BindingFreeEnergyResult(
             name=self.config.name,
@@ -365,7 +379,7 @@ class BindingFreeEnergyComparator(
         cond: "ConditionConfig",
         data: BFEConditionData,
     ) -> FreeEnergyConditionSummary:
-        """Build ΔΔG entries for all (polymer_type, protein_group) pairs.
+        """Build ΔG_sel entries for all (polymer_type, protein_group) pairs.
 
         Parameters
         ----------
@@ -377,13 +391,13 @@ class BindingFreeEnergyComparator(
         Returns
         -------
         FreeEnergyConditionSummary
-            All ΔΔG entries for this condition.
+            All ΔG_sel entries for this condition.
         """
         temperature_K = data["temperature_K"]
         bp_result = data["bp_result"]
         units = self.analysis_settings.units
         if units == "kT":
-            kT = 1.0  # ΔΔG = -ln(ratio), dimensionless in units of k_bT
+            kT = 1.0  # ΔG_sel = -ln(ratio), dimensionless in units of k_bT
         else:
             kT = self.analysis_settings.k_b() * temperature_K
 
@@ -421,22 +435,22 @@ class BindingFreeEnergyComparator(
         return vals if vals else [0.0]
 
     def _get_mean_value(self, summary: FreeEnergyConditionSummary) -> float:
-        """Return mean ΔΔG across all valid entries."""
+        """Return mean ΔG_sel across all valid entries."""
         return summary.primary_metric_value
 
     @property
     def _direction_labels(self) -> tuple[str, str, str]:
-        """Negative DDG change = more favorable binding."""
+        """Negative ΔG_sel change = more favorable binding."""
         return ("more favorable", "unchanged", "less favorable")
 
     def _rank_summaries(
         self, summaries: list[FreeEnergyConditionSummary]
     ) -> list[FreeEnergyConditionSummary]:
-        """Sort by mean ΔΔG (most negative = most favorable first)."""
+        """Sort by mean ΔG_sel (most negative = most favorable first)."""
         return sorted(summaries, key=lambda s: s.primary_metric_value)
 
     # =========================================================================
-    # ΔΔG computation helpers
+    # ΔG_sel computation helpers
     # =========================================================================
 
     def _compute_dg_entries(
@@ -446,7 +460,7 @@ class BindingFreeEnergyComparator(
         units: str,
         temperature_K: float,
     ) -> list[FreeEnergyEntry]:
-        """Compute ΔΔG entries from a binding preference result.
+        """Compute ΔG_sel entries from a binding preference result.
 
         Parameters
         ----------
@@ -484,7 +498,7 @@ class BindingFreeEnergyComparator(
         units: str,
         temperature_K: float,
     ) -> list[FreeEnergyEntry]:
-        """Extract ΔΔG entries from AggregatedBindingPreferenceResult."""
+        """Extract ΔG_sel entries from AggregatedBindingPreferenceResult."""
         entries: list[FreeEnergyEntry] = []
 
         bp = result.binding_preference
@@ -532,17 +546,17 @@ class BindingFreeEnergyComparator(
 
         enrichment_ratio = cs / es
 
-        # ΔΔG = -kT * ln(enrichment_ratio)
+        # ΔG_sel = -kT * ln(enrichment_ratio)
         delta_G = -kT * math.log(enrichment_ratio)
 
-        # σ(ΔΔG) = kT * sqrt[(σ_cs/cs)^2 + (σ_es/es)^2]
+        # σ(ΔG_sel) = kT * sqrt[(σ_cs/cs)^2 + (σ_es/es)^2]
         # expected_share uncertainty: treat as zero (single PDB SASA computation)
         sigma_es = 0.0
         delta_G_unc: float | None = None
         if sem_cs > 0:
             delta_G_unc = kT * math.sqrt((sem_cs / cs) ** 2 + (sigma_es / max(es, 1e-12)) ** 2)
 
-        # Per-replicate ΔΔG from per_replicate_enrichments
+        # Per-replicate ΔG_sel from per_replicate_enrichments
         dg_per_rep: list[float] = []
         for enrich_rep in entry.per_replicate_enrichments:
             ratio_rep = enrich_rep + 1.0
@@ -574,7 +588,7 @@ class BindingFreeEnergyComparator(
         units: str,
         temperature_K: float,
     ) -> list[FreeEnergyEntry]:
-        """Extract ΔΔG entries from a single-replicate BindingPreferenceResult."""
+        """Extract ΔG_sel entries from a single-replicate BindingPreferenceResult."""
         entries: list[FreeEnergyEntry] = []
 
         bp = result.binding_preference
@@ -651,7 +665,7 @@ class BindingFreeEnergyComparator(
         self,
         summaries: list[FreeEnergyConditionSummary],
     ) -> list[FreeEnergyPairwiseEntry]:
-        """Compute pairwise ΔΔG comparisons, respecting temperature grouping.
+        """Compute pairwise ΔΔG (= ΔG_sel,B − ΔG_sel,A) comparisons, respecting temperature grouping.
 
         Parameters
         ----------
@@ -690,10 +704,10 @@ class BindingFreeEnergyComparator(
                     continue
                 comparisons.extend(self._compare_condition_pair(summary_a, summary_b))
         else:
-            # Fall back to all-pairs among conditions that have valid ΔΔG data
+            # Fall back to all-pairs among conditions that have valid ΔG_sel data
             if control is not None and control in label_to_summary:
                 logger.info(
-                    f"Control '{control}' has no ΔΔG data (e.g. no polymer contacts). "
+                    f"Control '{control}' has no ΔG_sel data (e.g. no polymer contacts). "
                     "Falling back to all-pairs comparison among conditions with data."
                 )
             valid_labels = [
