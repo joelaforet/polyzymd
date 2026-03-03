@@ -17,7 +17,7 @@ contacts : BindingPreferenceHeatmapPlotter, BindingPreferenceBarPlotter
 exposure : ExposureChaperoneFractionPlotter, ExposureEnrichmentHeatmapPlotter
     Dynamic chaperone activity visualization
 binding_free_energy : BFEHeatmapPlotter, BFEBarPlotter
-    ΔΔG binding free energy visualization
+    ΔG_sel binding free energy visualization
 
 Adding New Plotters
 -------------------

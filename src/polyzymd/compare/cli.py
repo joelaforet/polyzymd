@@ -1135,8 +1135,8 @@ def plot_all(
       - rmsf_profile: Per-residue RMSF line plot
       - distance_kde: KDE distribution plots for distance pairs
       - distance_threshold_bars: Contact fraction bar chart
-      - bfe_heatmap: ΔΔG heatmap (AA groups × conditions, per polymer type)
-      - bfe_bars: ΔΔG grouped bar chart with ±k_BT reference lines
+      - bfe_heatmap: ΔG_sel heatmap (AA groups × conditions, per polymer type)
+      - bfe_bars: ΔG_sel grouped bar chart with ±k_BT reference lines
 
     \b
     Examples:
@@ -1248,14 +1248,14 @@ def binding_free_energy(
     quiet: bool,
     debug: bool,
 ):
-    """Compute ΔΔG (Gibbs free energy differences) from binding preference data.
+    """Compute ΔG_sel (selectivity free energies) from binding preference data.
 
     Converts existing binding preference probability data into physically grounded
-    free energy differences via Boltzmann inversion:
+    selectivity free energies via Boltzmann inversion:
 
     \b
-        ΔΔG = -ln(contact_share / expected_share)       [default: kT units]
-        ΔΔG = -k_B·T · ln(contact_share / expected_share)  [kcal/mol or kJ/mol]
+        ΔG_sel = -ln(contact_share / expected_share)       [default: kT units]
+        ΔG_sel = -k_B·T · ln(contact_share / expected_share)  [kcal/mol or kJ/mol]
 
     By default, results are in dimensionless k_bT units for direct comparison
     with thermal fluctuations. Use --units to switch to kcal/mol or kJ/mol.
@@ -1386,7 +1386,7 @@ def polymer_affinity(
     the number of simultaneous contacts:
 
     \b
-        S = Σ (N_contacts × ΔΔG_per_contact)   [kT units]
+        S = Σ (N_contacts × ΔG_sel_per_contact)   [kT units]
 
     More negative = stronger net polymer-protein affinity.
 

@@ -855,9 +855,9 @@ class ExposureComparisonSettings(BaseComparisonSettings):
 class BindingFreeEnergyAnalysisSettings(BindingPreferenceFieldsMixin):
     """Settings for binding free energy analysis via Boltzmann inversion.
 
-    Computes the selectivity free energy difference:
+    Computes the selectivity free energy:
 
-        ΔΔG = -k_B·T · ln(contact_share / expected_share)
+        ΔG_sel = -k_B·T · ln(contact_share / expected_share)
 
     where:
     - contact_share  = fraction of polymer contacts directed at an AA group
@@ -983,11 +983,11 @@ class PolymerAffinityScoreSettings(BindingPreferenceFieldsMixin):
     The polymer affinity score is a comparative metric that quantifies total
     polymer-protein interaction strength:
 
-        S = Σ_{p,g} N_{p,g} × ΔΔG_{p,g}    [kT]
+        S = Σ_{p,g} N_{p,g} × ΔG_sel_{p,g}    [kT]
 
     where:
         N = mean_contact_fraction × n_exposed_in_group
-        ΔΔG = -ln(contact_share / expected_share)
+        ΔG_sel = -ln(contact_share / expected_share)
 
     This is a post-processing analysis that consumes binding preference results
     from the contacts analysis layer — no new per-frame computation is needed.

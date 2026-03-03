@@ -9,7 +9,7 @@ rmsf : RMSF comparison results (new OOP-compliant)
 rmsf_legacy : Legacy RMSF results (for backward compatibility)
 triad : Catalytic triad comparison results
 contacts : Polymer-protein contacts comparison results
-binding_free_energy : Binding free energy (ΔΔG) comparison results
+binding_free_energy : Binding free energy (ΔG_sel) comparison results
 polymer_affinity : Polymer affinity score comparison results
 """
 

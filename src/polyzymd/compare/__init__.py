@@ -8,11 +8,11 @@ Main components:
 - RMSFComparator: Compare RMSF across conditions with statistical analysis
 - TriadComparator: Compare catalytic triad geometry across conditions
 - ContactsComparator: Compare polymer-protein contacts across conditions
-- BindingFreeEnergyComparator: Compare ΔΔG binding selectivity across conditions
+- BindingFreeEnergyComparator: Compare ΔG_sel binding selectivity across conditions
 - ComparisonResult: Structured results with statistics and rankings
 - TriadComparisonResult: Structured results for triad comparison
 - ContactsComparisonResult: Structured results for contacts comparison
-- BindingFreeEnergyResult: Structured results for ΔΔG comparison
+- BindingFreeEnergyResult: Structured results for ΔG_sel comparison
 - Formatters: Output formatting for console, markdown, and JSON
 
 Usage:

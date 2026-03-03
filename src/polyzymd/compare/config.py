@@ -405,19 +405,19 @@ class BFEPlotSettings(BasePlotSettings):
     Attributes
     ----------
     generate_heatmap : bool
-        Generate ΔΔG heatmap (rows = AA groups, columns = conditions). Default True.
+        Generate ΔG_sel heatmap (rows = AA groups, columns = conditions). Default True.
     generate_bars : bool
-        Generate ΔΔG grouped bar chart (one bar per condition per AA group). Default True.
+        Generate ΔG_sel grouped bar chart (one bar per condition per AA group). Default True.
     figsize_heatmap : tuple[float, float] | None
-        Figure size for ΔΔG heatmap (auto-calculated if None).
+        Figure size for ΔG_sel heatmap (auto-calculated if None).
     figsize_bars : tuple[float, float]
-        Figure size for ΔΔG bar charts.
+        Figure size for ΔG_sel bar charts.
     colormap : str
         Diverging colormap for heatmap (default "RdBu_r": red = avoidance, blue = preference).
     show_error_bars : bool
         Show SEM error bars on bar charts. Default True.
     annotate_heatmap : bool
-        Annotate each heatmap cell with its ΔΔG value. Default True.
+        Annotate each heatmap cell with its ΔG_sel value. Default True.
     """
 
     generate_heatmap: bool = True
@@ -981,9 +981,9 @@ analysis_settings:
   #   probe_radius_nm: 0.14        # SASA probe radius (nm)
   #   n_sphere_points: 960         # number of sphere points for SASA computation
 
-  # Binding Free Energy Analysis (ΔΔG via Boltzmann inversion)
+  # Binding Free Energy Analysis (ΔG_sel via Boltzmann inversion)
   # Requires contacts analysis with compute_binding_preference: true to be run first.
-  # Converts binding preference probabilities into ΔΔG = -k_B·T·ln(contact_share / expected_share).
+  # Converts binding preference probabilities into ΔG_sel = -k_B·T·ln(contact_share / expected_share).
   # Run: polyzymd compare binding-free-energy
   #
   # binding_free_energy:
