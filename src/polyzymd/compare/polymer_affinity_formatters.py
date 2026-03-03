@@ -150,7 +150,7 @@ def _format_condition_block(
     # Per-(polymer, group) detail
     if summary.entries:
         lines.append(
-            f"  {'Polymer':<10} {'AA Group':<20} {'ΔΔG/contact':>13} "
+            f"  {'Polymer':<10} {'AA Group':<20} {'ΔG_sel/contact':>13} "
             f"{'N_contacts':>12} {'Score (kT)':>12} {'±σ':>10}  {'N_rep':>5}"
         )
         lines.append("  " + "-" * 86)
@@ -296,7 +296,9 @@ def format_affinity_markdown(result: PolymerAffinityScoreResult) -> str:
         # Per-(polymer, group) detail
         lines.append("### Per-Group Breakdown")
         lines.append("")
-        lines.append("| Polymer | AA Group | ΔΔG/contact (kT) | N_contacts | Score (kT) | ±σ | N |")
+        lines.append(
+            "| Polymer | AA Group | ΔG_sel/contact (kT) | N_contacts | Score (kT) | ±σ | N |"
+        )
         lines.append("|---------|----------|----------------:|-----------:|----------:|---:|---|")
 
         for entry in sorted(summary.entries, key=lambda e: (e.polymer_type, e.protein_group)):

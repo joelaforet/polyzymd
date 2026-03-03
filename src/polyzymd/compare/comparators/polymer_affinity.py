@@ -8,15 +8,15 @@ Physics
 -------
 For each (polymer_type, protein_group) pair:
 
-    S_{p,g} = N_{p,g} × ΔΔG_{p,g}
+    S_{p,g} = N_{p,g} × ΔG_sel(p,g)
 
 where:
     N_{p,g}   = mean_contact_fraction × n_exposed_in_group
-    ΔΔG_{p,g} = -ln(contact_share / expected_share)  [kT]
+    ΔG_sel(p,g) = -ln(contact_share / expected_share)  [kT]
 
 Because contact_share / expected_share = enrichment + 1:
 
-    ΔΔG_rep = -ln(enrichment_rep + 1)
+    ΔG_sel,rep = -ln(enrichment_rep + 1)
 
 The total affinity score for a polymer type is:
 
@@ -114,7 +114,7 @@ class PolymerAffinityScoreComparator(
     protein_group) pair by multiplying the mean number of simultaneous
     contacts by the per-contact selectivity free energy:
 
-        S = N × ΔΔG   [kT]
+        S = N × ΔG_sel   [kT]
 
     The total score is summed across all polymer types and protein groups.
     More negative = stronger net polymer-protein affinity.
@@ -384,7 +384,7 @@ class PolymerAffinityScoreComparator(
         Data flow:
         1. Use ``bp_result.entries`` (``AggregatedBindingPreferenceEntry`` list)
            which has ``mean_contact_fraction`` and ``n_exposed_in_group``
-        2. Also try to load per-replicate files for per-replicate N×ΔΔG
+        2. Also try to load per-replicate files for per-replicate N×ΔG_sel
         3. Aggregate into per-polymer-type scores and total condition score
 
         Parameters
@@ -522,8 +522,8 @@ class PolymerAffinityScoreComparator(
         ``mean_contact_fraction`` and ``n_exposed_in_group``.
 
         For per-replicate scores:
-        - If per-replicate files were loaded, compute exact N_rep × ΔΔG_rep
-        - Otherwise, use mean N with per_replicate_enrichments for ΔΔG_rep
+        - If per-replicate files were loaded, compute exact N_rep × ΔG_sel,rep
+        - Otherwise, use mean N with per_replicate_enrichments for ΔG_sel,rep
 
         Parameters
         ----------
@@ -581,12 +581,12 @@ class PolymerAffinityScoreComparator(
         # N_contacts = mean_contact_fraction × n_exposed_in_group
         n_contacts = mcf * n_exposed
 
-        # ΔΔG per contact = -ln(contact_share / expected_share) [kT]
+        # ΔG_sel per contact = -ln(contact_share / expected_share) [kT]
         delta_g: float | None = None
         if cs > 0 and es > 0:
             delta_g = -math.log(cs / es)
 
-        # Affinity score = N × ΔΔG
+        # Affinity score = N × ΔG_sel
         score: float | None = None
         if delta_g is not None:
             score = n_contacts * delta_g
@@ -595,12 +595,12 @@ class PolymerAffinityScoreComparator(
         score_per_rep: list[float] = []
 
         if per_rep_data is not None:
-            # Use exact per-replicate N_rep × ΔΔG_rep
+            # Use exact per-replicate N_rep × ΔG_sel,rep
             score_per_rep = self._per_rep_scores_from_files(
                 per_rep_data, polymer_type, protein_group
             )
         elif agg_entry.per_replicate_enrichments:
-            # Approximate: use mean N with per-replicate ΔΔG
+            # Approximate: use mean N with per-replicate ΔG_sel
             for enrichment_rep in agg_entry.per_replicate_enrichments:
                 ratio_rep = enrichment_rep + 1.0
                 if ratio_rep > 0:
@@ -617,9 +617,9 @@ class PolymerAffinityScoreComparator(
         if len(valid_reps) >= 2:
             score_unc = float(np.std(valid_reps, ddof=1) / np.sqrt(len(valid_reps)))
         elif score is not None and agg_entry.sem_contact_fraction is not None:
-            # Analytical error propagation: σ(S) = √[(N·σ_ΔΔG)² + (ΔΔG·σ_N)²]
+            # Analytical error propagation: σ(S) = √[(N·σ_ΔG_sel)² + (ΔG_sel·σ_N)²]
             # σ_N = sem_contact_fraction × n_exposed
-            # σ_ΔΔG = sem_contact_share / contact_share (relative error on ratio)
+            # σ_ΔG_sel = sem_contact_share / contact_share (relative error on ratio)
             sem_cs = getattr(agg_entry, "sem_contact_share", None)
             if delta_g is not None and sem_cs and cs > 0:
                 sigma_n = agg_entry.sem_contact_fraction * n_exposed
@@ -754,7 +754,7 @@ class PolymerAffinityScoreComparator(
         polymer_type: str,
         protein_group: str,
     ) -> list[float]:
-        """Compute per-replicate N×ΔΔG from loaded per-replicate entries.
+        """Compute per-replicate N×ΔG_sel from loaded per-replicate entries.
 
         Parameters
         ----------

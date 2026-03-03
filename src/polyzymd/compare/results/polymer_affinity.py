@@ -8,12 +8,12 @@ Physics
 -------
 For each (polymer_type, protein_group) pair, the affinity score is:
 
-    S_{p,g} = N_{p,g} × ΔΔG_{p,g}
+    S_{p,g} = N_{p,g} × ΔG_sel(p,g)
 
 where:
     N_{p,g}   = mean number of simultaneous contacts per frame
               = mean_contact_fraction × n_exposed_in_group
-    ΔΔG_{p,g} = -ln(contact_share / expected_share)  [in units of k_bT]
+    ΔG_sel(p,g) = -ln(contact_share / expected_share)  [in units of k_bT]
 
 The total affinity score for a polymer type is:
 
@@ -51,15 +51,15 @@ Uncertainty propagation
 -----------------------
 Per-replicate scores are computed independently:
 
-    S_rep = N_rep × ΔΔG_rep
+    S_rep = N_rep × ΔG_sel,rep
 
 where N_rep = contact_fraction_rep × n_exposed_in_group, and
-ΔΔG_rep = -ln(enrichment_rep + 1). The mean and SEM are taken across
-replicates. This approach naturally captures the covariance between N and ΔΔG.
+ΔG_sel,rep = -ln(enrichment_rep + 1). The mean and SEM are taken across
+replicates. This approach naturally captures the covariance between N and ΔG_sel.
 
 When per-replicate data is unavailable, analytical error propagation is used:
 
-    σ(S) = √[(N·σ_ΔΔG)² + (ΔΔG·σ_N)²]
+    σ(S) = √[(N·σ_ΔG_sel)² + (ΔG_sel·σ_N)²]
 """
 
 from __future__ import annotations
@@ -121,11 +121,11 @@ class AffinityScoreEntry(BaseModel):
     n_contacts: float = Field(description="Mean simultaneous contacts per frame = mcf * n_exposed")
     delta_G_per_contact: Optional[float] = Field(
         default=None,
-        description="Per-contact ΔΔG = -ln(contact_share / expected_share) [kT]",
+        description="Per-contact ΔG_sel = -ln(contact_share / expected_share) [kT]",
     )
     affinity_score: Optional[float] = Field(
         default=None,
-        description="N_contacts × ΔΔG_per_contact [kT]; negative = favorable",
+        description="N_contacts × ΔG_sel_per_contact [kT]; negative = favorable",
     )
     affinity_score_uncertainty: Optional[float] = Field(
         default=None,
@@ -159,7 +159,7 @@ class PolymerTypeScore(BaseModel):
     """Aggregated affinity score for one polymer type across all protein groups.
 
     The score is the sum of per-group affinity scores:
-        S_p = Σ_g (N_g × ΔΔG_g)
+        S_p = Σ_g (N_g × ΔG_sel(g))
 
     Attributes
     ----------
@@ -179,7 +179,7 @@ class PolymerTypeScore(BaseModel):
 
     polymer_type: str
     total_score: float = Field(
-        description="Σ_g (N_g × ΔΔG_g) summed over protein groups [kT]",
+        description="Σ_g (N_g × ΔG_sel(g)) summed over protein groups [kT]",
     )
     total_score_uncertainty: Optional[float] = Field(
         default=None,
@@ -323,7 +323,7 @@ class PolymerAffinityScoreResult(BaseModel):
     strength as a comparative metric. It is computed by summing per-contact
     selectivity free energies weighted by the number of simultaneous contacts:
 
-        S = Σ_{p,g} N_{p,g} × ΔΔG_{p,g}
+        S = Σ_{p,g} N_{p,g} × ΔG_sel(p,g)
 
     where the sum runs over all (polymer_type, protein_group) pairs.
 
@@ -363,9 +363,9 @@ class PolymerAffinityScoreResult(BaseModel):
 
     name: str
     methodology: str = (
-        "Polymer Affinity Score: S = Σ (N_contacts × ΔΔG_per_contact) [kT]. "
+        "Polymer Affinity Score: S = Σ (N_contacts × ΔG_sel_per_contact) [kT]. "
         "N_contacts = mean_contact_fraction × n_exposed_in_group. "
-        "ΔΔG_per_contact = -ln(contact_share / expected_share). "
+        "ΔG_sel_per_contact = -ln(contact_share / expected_share). "
         "More negative = stronger net polymer-protein affinity. "
         "Assumes contact independence; interpret as comparative scoring metric."
     )
