@@ -123,6 +123,28 @@ def _get_polymer_types_and_aa_classes(
     return polymer_types, aa_classes
 
 
+def _is_no_polymer_sentinel(values: Sequence[float], sentinel: float = -1.0) -> bool:
+    """Check if all values are the no-polymer sentinel.
+
+    Conditions without polymer have coverage enrichment = -1.0 everywhere
+    (zero observed contacts ÷ expected surface share − 1 = −1).  These
+    should be excluded from enrichment plots to avoid visual clutter.
+
+    Parameters
+    ----------
+    values : sequence of float
+        Mean enrichment values for all groups in one condition.
+    sentinel : float, optional
+        Sentinel value indicating no-polymer, by default -1.0.
+
+    Returns
+    -------
+    bool
+        True if *every* value equals ``sentinel`` exactly.
+    """
+    return bool(values) and all(v == sentinel for v in values)
+
+
 def _get_enrichment_value(
     result: "AggregatedBindingPreferenceResult",
     polymer_type: str,
@@ -430,6 +452,23 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
         if not valid_labels:
             return []
 
+        # Exclude no-polymer conditions (all enrichments == -1 sentinel)
+        filtered_labels = []
+        for lbl in valid_labels:
+            result = binding_results[lbl]
+            values = []
+            for poly_type in polymer_types:
+                for prot_group in protein_groups:
+                    val = _get_enrichment_value(result, poly_type, prot_group)
+                    if val is not None:
+                        values.append(val)
+            if not _is_no_polymer_sentinel(values):
+                filtered_labels.append(lbl)
+        valid_labels = filtered_labels
+        if not valid_labels:
+            logger.info("All conditions are no-polymer sentinels — skipping heatmap")
+            return []
+
         n_conditions = len(valid_labels)
         n_rows = len(protein_groups)
         n_cols = len(polymer_types)
@@ -450,7 +489,8 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
         # Determine global min/max for consistent colorbar
         # Use helper method to support both old and new formats
         all_values = []
-        for result in binding_results.values():
+        for cond_label in valid_labels:
+            result = binding_results[cond_label]
             for poly_type in polymer_types:
                 for prot_group in protein_groups:
                     val = _get_enrichment_value(result, poly_type, prot_group)
@@ -654,6 +694,20 @@ class BindingPreferenceBarPlotter(BasePlotter):
 
                 series.append((cond_label, means, sems))
 
+            # Exclude no-polymer conditions (all enrichments == -1 sentinel)
+            series = [
+                (label, means, sems)
+                for label, means, sems in series
+                if not _is_no_polymer_sentinel(means)
+            ]
+            if not series:
+                logger.info(f"All conditions are no-polymer sentinels for {poly_type} — skipping")
+                plt.close(fig)
+                continue
+
+            # Recompute colors to match filtered conditions
+            colors = self._get_colors(len(series))
+
             self._grouped_bars(
                 ax,
                 x,
@@ -780,6 +834,22 @@ class SystemCoverageHeatmapPlotter(BasePlotter):
         # Filter to conditions with data
         valid_labels = [label for label in labels if label in coverage_results]
         if not valid_labels:
+            return []
+
+        # Exclude no-polymer conditions (all enrichments == -1 sentinel)
+        filtered_labels = []
+        for lbl in valid_labels:
+            result = coverage_results[lbl]
+            values = []
+            for aa_class in aa_classes:
+                entry = result.aa_class_coverage.get_entry(aa_class)
+                if entry and entry.mean_coverage_enrichment is not None:
+                    values.append(entry.mean_coverage_enrichment)
+            if not _is_no_polymer_sentinel(values):
+                filtered_labels.append(lbl)
+        valid_labels = filtered_labels
+        if not valid_labels:
+            logger.info("All conditions are no-polymer sentinels — skipping heatmap")
             return []
 
         n_conditions = len(valid_labels)
@@ -977,6 +1047,20 @@ class SystemCoverageBarPlotter(BasePlotter):
 
             series.append((cond_label, means, sems))
 
+        # Exclude no-polymer conditions (all enrichments == -1 sentinel)
+        series = [
+            (label, means, sems)
+            for label, means, sems in series
+            if not _is_no_polymer_sentinel(means)
+        ]
+        if not series:
+            logger.info("All conditions are no-polymer sentinels — skipping bar chart")
+            plt.close(fig)
+            return []
+
+        # Recompute colors to match filtered conditions
+        colors = self._get_colors(len(series))
+
         self._grouped_bars(
             ax,
             x,
@@ -1102,6 +1186,25 @@ class UserPartitionBarPlotter(BasePlotter):
         if not valid_labels:
             return []
 
+        # Exclude no-polymer conditions (all enrichments == -1 sentinel).
+        # Check against the first available partition for each condition; if a
+        # condition is a no-polymer sentinel its enrichment will be -1 across
+        # every partition element.
+        filtered_labels = []
+        for lbl in valid_labels:
+            result = coverage_results[lbl]
+            values = []
+            for aa_class in result.aa_class_names():
+                entry = result.aa_class_coverage.get_entry(aa_class)
+                if entry and entry.mean_coverage_enrichment is not None:
+                    values.append(entry.mean_coverage_enrichment)
+            if not _is_no_polymer_sentinel(values):
+                filtered_labels.append(lbl)
+        valid_labels = filtered_labels
+        if not valid_labels:
+            logger.info("All conditions are no-polymer sentinels — skipping user partition bars")
+            return []
+
         colors = self._get_colors(len(valid_labels))
 
         output_paths: list[Path] = []
@@ -1189,6 +1292,21 @@ class UserPartitionBarPlotter(BasePlotter):
                 sems.append(0.0)
 
             series.append((cond_label, means, sems))
+
+        # Defensive: exclude any remaining no-polymer sentinels
+        # (normally already filtered by the parent plot() method)
+        series = [
+            (label, means, sems)
+            for label, means, sems in series
+            if not _is_no_polymer_sentinel(means)
+        ]
+        if not series:
+            logger.info(
+                f"All conditions are no-polymer sentinels for partition "
+                f"'{partition_name}' — skipping"
+            )
+            plt.close(fig)
+            return []
 
         self._grouped_bars(
             ax,
