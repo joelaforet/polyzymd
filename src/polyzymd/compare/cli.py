@@ -1509,3 +1509,187 @@ def polymer_affinity(
         result_prefix="polymer_affinity",
         output_path=output_path,
     )
+
+
+# ---------------------------------------------------------------------------
+# run-all: batch runner for every comparison defined in comparison.yaml
+# ---------------------------------------------------------------------------
+
+
+@compare.command("run-all")
+@click.option(
+    "-f",
+    "--file",
+    "config_file",
+    type=click.Path(path_type=Path),
+    default="comparison.yaml",
+    help="Path to comparison.yaml config file.",
+)
+@click.option(
+    "--eq-time",
+    default=None,
+    help="Override equilibration time (e.g., '10ns', '5000ps').",
+)
+@click.option(
+    "--recompute",
+    is_flag=True,
+    help="Force recompute even if cached results exist.",
+)
+@click.option(
+    "--plot/--no-plot",
+    "run_plots",
+    default=False,
+    help="Run plot-all after all comparisons complete.",
+)
+@click.option(
+    "-q",
+    "--quiet",
+    is_flag=True,
+    help="Suppress INFO messages, show warnings/errors only.",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable DEBUG logging for troubleshooting.",
+)
+def run_all(
+    config_file: Path,
+    eq_time: str | None,
+    recompute: bool,
+    run_plots: bool,
+    quiet: bool,
+    debug: bool,
+):
+    """Run ALL comparisons defined in comparison.yaml.
+
+    Iterates over every enabled analysis in the config and runs the
+    corresponding comparator.  Results are saved as JSON to the
+    ``results/`` directory next to the config file.
+
+    \b
+    Workflow:
+        1. Edit comparison.yaml (enable the analyses you want)
+        2. polyzymd compare run-all -f comparison.yaml
+        3. (optional) polyzymd compare run-all --plot  # also generate plots
+
+    \b
+    Examples:
+        polyzymd compare run-all
+        polyzymd compare run-all -f comparison.yaml --eq-time 10ns
+        polyzymd compare run-all --recompute --plot
+    """
+    from polyzymd.analysis.core.logging_utils import setup_logging
+    from polyzymd.compare.core.registry import ComparatorRegistry
+
+    setup_logging(quiet=quiet, debug=debug)
+
+    # --- Load and validate config -------------------------------------------
+    config = load_comparison_config(config_file)
+    validate_and_report(config)
+
+    equilibration = eq_time or config.defaults.equilibration_time
+    results_dir = Path(config_file).resolve().parent / "results"
+    results_dir.mkdir(exist_ok=True)
+
+    # --- Discover enabled analyses ------------------------------------------
+    enabled_analyses = config.analysis_settings.get_enabled_analyses()
+    if not enabled_analyses:
+        click.echo("No analyses are enabled in comparison.yaml.", err=True)
+        sys.exit(1)
+
+    available_comparators = set(ComparatorRegistry.list_available())
+
+    click.echo(f"Comparison: {config.name}")
+    click.echo(f"Conditions: {len(config.conditions)}")
+    click.echo(f"Equilibration: {equilibration}")
+    click.echo(f"Enabled analyses: {', '.join(enabled_analyses)}")
+    click.echo()
+
+    # --- Run each comparator ------------------------------------------------
+    succeeded: list[str] = []
+    failed: list[tuple[str, str]] = []
+    skipped: list[str] = []
+
+    for settings_key in enabled_analyses:
+        comparator_name = ANALYSIS_TO_COMPARATOR.get(settings_key, settings_key)
+
+        if comparator_name not in available_comparators:
+            click.echo(f"  [{settings_key}] skipped — no registered comparator")
+            skipped.append(settings_key)
+            continue
+
+        click.echo(f"  [{settings_key}] running {comparator_name} comparison ...")
+
+        # Analysis settings (guaranteed non-None because get_enabled_analyses
+        # only returns keys with a value).
+        analysis_settings = config.analysis_settings.get(settings_key)
+
+        # Comparator class
+        comparator_cls = ComparatorRegistry.get(comparator_name)
+
+        # Build kwargs — pass comparison_settings only if accepted
+        kwargs: dict = {
+            "config": config,
+            "analysis_settings": analysis_settings,
+            "equilibration": equilibration,
+        }
+        comparison_settings = config.comparison_settings.get(settings_key)
+        if _comparator_accepts_comparison_settings(comparator_cls):
+            kwargs["comparison_settings"] = comparison_settings
+
+        try:
+            comparator = comparator_cls(**kwargs)
+            result = comparator.compare(recompute=recompute)
+        except Exception as e:
+            msg = str(e)
+            click.echo(f"  [{settings_key}] FAILED: {msg}", err=True)
+            if debug:
+                import traceback
+
+                traceback.print_exc()
+            failed.append((settings_key, msg))
+            continue
+
+        # Save JSON result
+        json_path = (
+            results_dir / f"{comparator_name}_comparison_{config.name.replace(' ', '_')}.json"
+        )
+        result.save(json_path)
+        click.echo(f"  [{settings_key}] saved → {json_path}")
+        succeeded.append(settings_key)
+
+    # --- Summary ------------------------------------------------------------
+    click.echo()
+    click.echo("=" * 60)
+    click.echo(f"  Succeeded: {len(succeeded)}")
+    if succeeded:
+        click.echo(f"    {', '.join(succeeded)}")
+    if skipped:
+        click.echo(f"  Skipped:   {len(skipped)}")
+        click.echo(f"    {', '.join(skipped)}")
+    if failed:
+        click.echo(f"  Failed:    {len(failed)}")
+        for name, msg in failed:
+            click.echo(f"    {name}: {msg}")
+    click.echo("=" * 60)
+
+    # --- Optional plotting --------------------------------------------------
+    if run_plots and succeeded:
+        click.echo()
+        click.echo("Generating plots ...")
+        from polyzymd.compare.plotter import ComparisonPlotter
+
+        try:
+            plotter = ComparisonPlotter(config)
+            generated = plotter.plot_all()
+            click.echo(f"Generated {len(generated)} plots.")
+        except Exception as e:
+            click.echo(f"Error generating plots: {e}", err=True)
+            if debug:
+                import traceback
+
+                traceback.print_exc()
+
+    # Exit with error code if any comparison failed
+    if failed:
+        sys.exit(1)
