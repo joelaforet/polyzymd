@@ -186,17 +186,38 @@ class ExposureChaperoneFractionPlotter(BasePlotter):
         import numpy as np
 
         conditions = result.conditions
+        n = len(conditions)
 
-        labels = [c.label for c in conditions]
-        means = [c.mean_chaperone_fraction for c in conditions]
-        sems = [c.sem_chaperone_fraction for c in conditions]
+        cond_labels = [c.label for c in conditions]
+        means = np.array([c.mean_chaperone_fraction for c in conditions])
+        sems = np.array([c.sem_chaperone_fraction for c in conditions])
 
-        fig, ax = plt.subplots(figsize=(max(6, len(labels) * 1.4), 5))
-        x = np.arange(len(labels))
-        bars = ax.bar(x, means, yerr=sems, capsize=4, color="steelblue", alpha=0.8)  # noqa: F841
+        colors = self._get_colors(n)
+
+        fig, ax = plt.subplots(figsize=(max(6, n * 1.4), 5))
+        x = np.arange(n)
+        ax.bar(x, means, yerr=sems, capsize=4, color=colors, alpha=0.85)
+
+        # Overlay jittered replicate dots
+        rng = np.random.default_rng(seed=42)
+        bar_width = 0.8  # default matplotlib bar width
+        for i, cond in enumerate(conditions):
+            rep_vals = getattr(cond, "replicate_values", None)
+            if rep_vals:
+                rep_arr = np.asarray(rep_vals, dtype=float)
+                jitter = rng.uniform(-bar_width * 0.25, bar_width * 0.25, size=len(rep_arr))
+                ax.scatter(
+                    np.full_like(rep_arr, float(x[i])) + jitter,
+                    rep_arr,
+                    color="black",
+                    s=14,
+                    zorder=5,
+                    alpha=0.7,
+                    edgecolors="none",
+                )
 
         ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=9)
+        ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=9)
         ax.set_ylabel("Mean chaperone fraction")
         ax.set_title("Chaperone fraction across conditions\n(transient residues only)")
         ax.set_ylim(bottom=0)
@@ -272,7 +293,11 @@ class ExposureAccelerationRatioPlotter(BasePlotter):
         return _find_comparison_result(data, labels, logger)
 
     def _plot_heatmaps(self, result: Any, output_dir: Path) -> list[Path]:
-        """Generate acceleration ratio heatmaps for all conditions."""
+        """Generate acceleration ratio heatmaps for all conditions.
+
+        Uses a faceted layout with one row per condition so each
+        heatmap (polymer_types × AA groups) gets adequate space.
+        """
         import matplotlib.pyplot as plt
         import numpy as np
 
@@ -307,35 +332,40 @@ class ExposureAccelerationRatioPlotter(BasePlotter):
         deviation = max(abs(finite_vals.min() - 1.0), abs(finite_vals.max() - 1.0), 0.1)
         vmin, vmax = 1.0 - deviation, 1.0 + deviation
 
-        fig_width = max(8, n_groups * 1.2 + 2)
-        fig_height = max(4, n_ptypes * 0.8 * n_conds + 1)
+        # Faceted layout: one row per condition, shared x-axis
+        row_height = max(1.0, n_ptypes * 0.6)
+        fig_width = max(8, n_groups * 1.5 + 3)
+        fig_height = n_conds * row_height + 2.0
         fig, axes = plt.subplots(
-            1, n_conds, figsize=(fig_width, fig_height), sharey=True, squeeze=False
+            n_conds, 1, figsize=(fig_width, fig_height), sharex=True, squeeze=False
         )
 
         im = None
-        for ci, (cond, ax) in enumerate(zip(conditions, axes[0])):
+        for ci, cond in enumerate(conditions):
+            ax = axes[ci, 0]
             mat = matrices[ci]
             im = ax.imshow(mat, vmin=vmin, vmax=vmax, cmap="RdBu_r", aspect="auto")
-            ax.set_xticks(range(n_groups))
-            ax.set_xticklabels(all_groups, rotation=45, ha="right", fontsize=8)
-            ax.set_title(cond.label, fontsize=9)
-            if ci == 0:
-                ax.set_yticks(range(n_ptypes))
-                ax.set_yticklabels(all_ptypes, fontsize=8)
+            ax.set_yticks(range(n_ptypes))
+            ax.set_yticklabels(all_ptypes, fontsize=9)
+            ax.set_ylabel(cond.label, fontsize=9, rotation=0, ha="right", labelpad=8)
+            # Only show x-tick labels on the bottom row
+            if ci == n_conds - 1:
+                ax.set_xticks(range(n_groups))
+                ax.set_xticklabels(all_groups, rotation=45, ha="right", fontsize=9)
             else:
-                ax.set_yticks([])
+                ax.set_xticks(range(n_groups))
+                ax.set_xticklabels([])
 
             self._annotate_cells(
-                ax, mat, fmt=".2f", fontsize=6, threshold=vmax * 0.6, show_sign=False
+                ax, mat, fmt=".2f", fontsize=8, threshold=vmax * 0.6, show_sign=False
             )
 
         if im is not None:
-            cbar = fig.colorbar(im, ax=axes[0, -1], fraction=0.04, pad=0.04)  # type: ignore[arg-type]
-            cbar.set_label("Acceleration ratio ρ (>1 = chaperoning)", fontsize=8)
+            cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.03, pad=0.02)
+            cbar.set_label("Acceleration ratio ρ  (>1 = chaperoning)", fontsize=9)
 
-        fig.suptitle("Refolding acceleration ratio ρ(P, G) by AA group", fontsize=11, y=1.01)
-        fig.tight_layout()
+        fig.suptitle("Refolding acceleration ratio ρ(P, G) by AA group", fontsize=12, y=0.99)
+        fig.tight_layout(rect=(0.0, 0.0, 0.92, 0.97))
 
         output_path = self._get_output_path(output_dir, "exposure_acceleration_ratio")
         return [self._save_figure(fig, output_path)]
@@ -407,7 +437,11 @@ class ExposureChaperoneSelectivityPlotter(BasePlotter):
         return _find_comparison_result(data, labels, logger)
 
     def _plot_heatmaps(self, result: Any, output_dir: Path) -> list[Path]:
-        """Generate chaperone selectivity heatmaps for all conditions."""
+        """Generate chaperone selectivity heatmaps for all conditions.
+
+        Uses a faceted layout with one row per condition so each
+        heatmap (polymer_types × AA groups) gets adequate space.
+        """
         import matplotlib.pyplot as plt
         import numpy as np
 
@@ -443,35 +477,40 @@ class ExposureChaperoneSelectivityPlotter(BasePlotter):
         vmax_raw = max(abs(finite_vals.min()), abs(finite_vals.max()), floor)
         vmin, vmax = -vmax_raw, vmax_raw
 
-        fig_width = max(8, n_groups * 1.2 + 2)
-        fig_height = max(4, n_ptypes * 0.8 * n_conds + 1)
+        # Faceted layout: one row per condition, shared x-axis
+        row_height = max(1.0, n_ptypes * 0.6)
+        fig_width = max(8, n_groups * 1.5 + 3)
+        fig_height = n_conds * row_height + 2.0
         fig, axes = plt.subplots(
-            1, n_conds, figsize=(fig_width, fig_height), sharey=True, squeeze=False
+            n_conds, 1, figsize=(fig_width, fig_height), sharex=True, squeeze=False
         )
 
         im = None
-        for ci, (cond, ax) in enumerate(zip(conditions, axes[0])):
+        for ci, cond in enumerate(conditions):
+            ax = axes[ci, 0]
             mat = matrices[ci]
             im = ax.imshow(mat, vmin=vmin, vmax=vmax, cmap="RdBu", aspect="auto")
-            ax.set_xticks(range(n_groups))
-            ax.set_xticklabels(all_groups, rotation=45, ha="right", fontsize=8)
-            ax.set_title(cond.label, fontsize=9)
-            if ci == 0:
-                ax.set_yticks(range(n_ptypes))
-                ax.set_yticklabels(all_ptypes, fontsize=8)
+            ax.set_yticks(range(n_ptypes))
+            ax.set_yticklabels(all_ptypes, fontsize=9)
+            ax.set_ylabel(cond.label, fontsize=9, rotation=0, ha="right", labelpad=8)
+            # Only show x-tick labels on the bottom row
+            if ci == n_conds - 1:
+                ax.set_xticks(range(n_groups))
+                ax.set_xticklabels(all_groups, rotation=45, ha="right", fontsize=9)
             else:
-                ax.set_yticks([])
+                ax.set_xticks(range(n_groups))
+                ax.set_xticklabels([])
 
             self._annotate_cells(
-                ax, mat, fmt="+.2f", fontsize=6, threshold=vmax * 0.6, show_sign=False
+                ax, mat, fmt="+.2f", fontsize=8, threshold=vmax * 0.6, show_sign=False
             )
 
         if im is not None:
-            cbar = fig.colorbar(im, ax=axes[0, -1], fraction=0.04, pad=0.04)  # type: ignore[arg-type]
-            cbar.set_label("ΔG_sel^chap (kT)  [<0 = preference]", fontsize=8)
+            cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.03, pad=0.02)
+            cbar.set_label("ΔG_sel^chap (kT)  [<0 = preference]", fontsize=9)
 
-        fig.suptitle("Chaperone selectivity ΔG_sel^chap(P, G) by AA group", fontsize=11, y=1.01)
-        fig.tight_layout()
+        fig.suptitle("Chaperone selectivity ΔG_sel^chap(P, G) by AA group", fontsize=12, y=0.99)
+        fig.tight_layout(rect=(0.0, 0.0, 0.92, 0.97))
 
         output_path = self._get_output_path(output_dir, "exposure_chaperone_selectivity")
         return [self._save_figure(fig, output_path)]
