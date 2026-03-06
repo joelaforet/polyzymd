@@ -98,6 +98,7 @@ class TriadKDEPanelPlotter(BasePlotter):
             color_palette=self.settings.color_palette,
             kde_fill_alpha=self.settings.triad.kde_fill_alpha,
             threshold_line_color=self.settings.triad.threshold_line_color,
+            xlim=self.settings.triad.kde_xlim,
             figsize=self.settings.triad.figsize_kde_panel,
             dpi=self.settings.dpi,
         )
