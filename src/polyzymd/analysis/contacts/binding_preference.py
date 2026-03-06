@@ -93,6 +93,7 @@ if TYPE_CHECKING:
     from polyzymd.analysis.config import ContactsConfig
     from polyzymd.analysis.contacts.results import ContactResult
     from polyzymd.analysis.contacts.surface_exposure import SurfaceExposureResult
+    from polyzymd.analysis.sasa.trajectory import SASATrajectoryResult
 
 logger = logging.getLogger(__name__)
 
@@ -562,6 +563,256 @@ def _compute_enrichment(coverage_share: float, expected_share: float) -> float |
         return None  # Cannot compute (no expected share)
 
 
+# =============================================================================
+# SASA-Weighted Expected Share Computation (Selectivity Free Energy Rewrite)
+# =============================================================================
+
+
+def _compute_sasa_surface_shares(
+    sasa_trajectory: "SASATrajectoryResult",
+    partition_groups: dict[str, set[int]],
+    contact_start_frame: int = 0,
+    contact_n_frames: int | None = None,
+) -> dict[str, np.ndarray]:
+    """Compute per-frame SASA surface shares σ_G(t) for each partition element.
+
+    For each group G in the partition, the surface share at frame t is:
+
+        σ_G(t) = A_G(t) / A_total(t)
+
+    where A_G(t) = Σ_{i ∈ G} SASA_i(t) and A_total(t) = Σ_i SASA_i(t).
+
+    The SASA trajectory may cover the full trajectory while contact analysis
+    was run with an equilibration skip (e.g., ``--eq-time 200ns``). To align
+    the SASA frames with the contact analysis window, ``contact_start_frame``
+    and ``contact_n_frames`` specify the slice of the SASA trajectory that
+    corresponds to the analyzed frames.
+
+    Parameters
+    ----------
+    sasa_trajectory : SASATrajectoryResult
+        Per-frame, per-residue SASA data. Shape of sasa_per_frame is
+        (n_frames_total, n_residues) in nm².
+    partition_groups : dict[str, set[int]]
+        Mapping of group name to 1-indexed residue IDs.
+    contact_start_frame : int, optional
+        The first frame index (0-based) in the SASA trajectory that
+        corresponds to frame 0 of the contact analysis. Default 0
+        (no equilibration skip).
+    contact_n_frames : int or None, optional
+        Number of frames in the contact analysis window. If None,
+        uses all frames from ``contact_start_frame`` to the end of the
+        SASA trajectory.
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Mapping of group name to array of shape (contact_n_frames,) with
+        σ_G(t). Values sum to ~1.0 across all groups at each frame (up to
+        rounding from residues not in any group).
+    """
+    resids = sasa_trajectory.resids  # 1-indexed, shape (n_residues,)
+    sasa_full = sasa_trajectory.sasa_per_frame  # shape (n_frames_total, n_residues)
+
+    # Slice SASA to match the contact analysis frame window
+    end_frame = contact_start_frame + contact_n_frames if contact_n_frames else None
+    sasa = sasa_full[contact_start_frame:end_frame]  # shape (contact_n_frames, n_residues)
+    n_frames = sasa.shape[0]
+
+    if contact_n_frames is not None and n_frames != contact_n_frames:
+        logger.warning(
+            f"SASA trajectory has {sasa_full.shape[0]} frames, but contact analysis "
+            f"expects frames [{contact_start_frame}:{contact_start_frame + contact_n_frames}] "
+            f"({contact_n_frames} frames). Only {n_frames} frames available after slicing. "
+            f"Results may be inaccurate."
+        )
+
+    # Build resid -> column index lookup
+    resid_to_idx: dict[int, int] = {}
+    for idx, rid in enumerate(resids):
+        resid_to_idx[int(rid)] = idx
+
+    # Compute A_total(t) — sum of SASA over ALL residues in the partition
+    # (not just the groups, to ensure shares sum to 1.0)
+    all_partition_resids: set[int] = set()
+    for resids_in_group in partition_groups.values():
+        all_partition_resids.update(resids_in_group)
+
+    all_partition_indices = [resid_to_idx[r] for r in all_partition_resids if r in resid_to_idx]
+    if not all_partition_indices:
+        return {g: np.zeros(n_frames) for g in partition_groups}
+
+    a_total = sasa[:, all_partition_indices].sum(axis=1)  # shape (n_frames,)
+
+    # Avoid division by zero — frames where total SASA is 0 get equal shares
+    safe_a_total = np.where(a_total > 0, a_total, 1.0)
+
+    surface_shares: dict[str, np.ndarray] = {}
+    for group_name, group_resids in partition_groups.items():
+        group_indices = [resid_to_idx[r] for r in group_resids if r in resid_to_idx]
+        if group_indices:
+            a_group = sasa[:, group_indices].sum(axis=1)  # shape (n_frames,)
+            surface_shares[group_name] = a_group / safe_a_total
+        else:
+            surface_shares[group_name] = np.zeros(n_frames)
+
+    return surface_shares
+
+
+def _build_per_frame_contact_counts(
+    contact_result: "ContactResult",
+    exposed_groups: dict[str, set[int]],
+    polymer_types: list[str] | None = None,
+) -> tuple[dict[str, dict[str, np.ndarray]], dict[str, np.ndarray]]:
+    """Build per-frame contact count arrays from ContactResult.
+
+    Reconstructs n_{P,G}(t) and n_P(t) from the per-residue contact events.
+
+    Parameters
+    ----------
+    contact_result : ContactResult
+        Raw contact analysis results with per-residue event data.
+    exposed_groups : dict[str, set[int]]
+        Mapping of group name to exposed residue IDs.
+    polymer_types : list[str] or None
+        If provided, only include these polymer types. If None, include all.
+
+    Returns
+    -------
+    n_pg : dict[str, dict[str, np.ndarray]]
+        Mapping {polymer_type: {group_name: array(n_frames)}} with
+        n_{P,G}(t) = number of residues in G contacted by P at frame t.
+    n_p : dict[str, np.ndarray]
+        Mapping {polymer_type: array(n_frames)} with
+        n_P(t) = total residue contacts by P at frame t.
+    """
+    n_frames = contact_result.n_frames
+
+    # Initialize accumulators
+    n_pg: dict[str, dict[str, np.ndarray]] = {}
+    n_p: dict[str, np.ndarray] = {}
+
+    # Build a reverse map: resid -> list of group names
+    resid_to_groups: dict[int, list[str]] = {}
+    for group_name, resids in exposed_groups.items():
+        for resid in resids:
+            if resid not in resid_to_groups:
+                resid_to_groups[resid] = []
+            resid_to_groups[resid].append(group_name)
+
+    # Iterate over residue contact data
+    for rc in contact_result.residue_contacts:
+        resid = rc.protein_resid
+        if resid not in resid_to_groups:
+            continue  # Not in any exposed group
+
+        groups_for_resid = resid_to_groups[resid]
+
+        # For each polymer segment contacting this residue, get its type
+        for sc in rc.segment_contacts:
+            poly_type = sc.polymer_resname
+            if polymer_types and poly_type not in polymer_types:
+                continue
+
+            # Initialize if needed
+            if poly_type not in n_pg:
+                n_pg[poly_type] = {g: np.zeros(n_frames, dtype=np.int32) for g in exposed_groups}
+                n_p[poly_type] = np.zeros(n_frames, dtype=np.int32)
+
+            # Convert events to binary array for this segment-residue pair
+            binary = sc.to_binary_array(n_frames)  # shape (n_frames,)
+
+            # Add to group counts and total
+            for gname in groups_for_resid:
+                n_pg[poly_type][gname] += binary
+            n_p[poly_type] += binary
+
+    return n_pg, n_p
+
+
+def _compute_contact_weighted_expected_shares(
+    surface_shares: dict[str, np.ndarray],
+    n_p: dict[str, np.ndarray],
+) -> dict[str, dict[str, float]]:
+    """Compute contact-weighted expected shares p_null(G|P) for each polymer.
+
+    The expected share for polymer P and group G is:
+
+        p_null(G|P) = Σ_t [n_P(t) · σ_G(t)] / Σ_t n_P(t)
+
+    This is the contact-weighted time average of the surface share σ_G(t),
+    where frames with more polymer contacts contribute proportionally more.
+
+    Parameters
+    ----------
+    surface_shares : dict[str, np.ndarray]
+        Per-frame surface shares σ_G(t) for each group, from
+        _compute_sasa_surface_shares(). Shape (n_frames,) per group.
+    n_p : dict[str, np.ndarray]
+        Per-frame total contact counts n_P(t) for each polymer type.
+        Shape (n_frames,) per polymer.
+
+    Returns
+    -------
+    dict[str, dict[str, float]]
+        Mapping {polymer_type: {group_name: p_null(G|P)}}.
+        Values sum to ~1.0 across groups for each polymer type.
+    """
+    expected_shares: dict[str, dict[str, float]] = {}
+
+    for poly_type, n_p_array in n_p.items():
+        total_contacts = float(n_p_array.sum())
+        expected_shares[poly_type] = {}
+
+        if total_contacts > 0:
+            for group_name, sigma_g in surface_shares.items():
+                weighted_sum = float(np.dot(n_p_array, sigma_g))
+                expected_shares[poly_type][group_name] = weighted_sum / total_contacts
+        else:
+            # No contacts — fall back to time-averaged surface share
+            for group_name, sigma_g in surface_shares.items():
+                expected_shares[poly_type][group_name] = float(np.mean(sigma_g))
+
+    return expected_shares
+
+
+def _compute_system_level_expected_shares(
+    surface_shares: dict[str, np.ndarray],
+    n_p: dict[str, np.ndarray],
+) -> dict[str, float]:
+    """Compute contact-weighted expected shares for system-level coverage.
+
+    Like _compute_contact_weighted_expected_shares but collapses across
+    all polymer types, using total contacts n(t) = Σ_P n_P(t) as weights.
+
+    Parameters
+    ----------
+    surface_shares : dict[str, np.ndarray]
+        Per-frame surface shares σ_G(t) for each group.
+    n_p : dict[str, np.ndarray]
+        Per-frame total contact counts n_P(t) for each polymer type.
+
+    Returns
+    -------
+    dict[str, float]
+        Mapping {group_name: p_null(G|system)}.
+    """
+    # Sum contact counts across all polymer types
+    if not n_p:
+        return {g: float(np.mean(sigma)) for g, sigma in surface_shares.items()}
+
+    n_total = sum(n_p.values())  # element-wise sum of arrays
+    total_contacts = float(n_total.sum())
+
+    if total_contacts > 0:
+        return {
+            group_name: float(np.dot(n_total, sigma_g)) / total_contacts
+            for group_name, sigma_g in surface_shares.items()
+        }
+    else:
+        return {g: float(np.mean(sigma)) for g, sigma in surface_shares.items()}
+
+
 def _compute_partition_binding(
     partition_name: str,
     partition_type: Literal["aa_class", "user_defined"],
@@ -571,6 +822,7 @@ def _compute_partition_binding(
     contact_data_for_polymer: dict[str, dict[str, Any]],
     total_exposed: int,
     total_contact_frames_for_polymer: int,
+    sasa_expected_shares: dict[str, float] | None = None,
 ) -> "PartitionBindingResult":
     """Compute binding preference for a single partition and single polymer type.
 
@@ -593,9 +845,14 @@ def _compute_partition_binding(
     contact_data_for_polymer : dict[str, dict[str, Any]]
         Contact data for this polymer: {element_name: {"total_frames": int, "residues_contacted": set}}
     total_exposed : int
-        Total number of exposed residues across all elements in the partition
+        Total number of exposed residues across all elements in the partition.
+        Used as fallback when sasa_expected_shares is not provided.
     total_contact_frames_for_polymer : int
         Total contact frames for this polymer type (for contact_share denominator)
+    sasa_expected_shares : dict[str, float] or None
+        Pre-computed SASA-weighted, contact-weighted expected shares
+        p_null(G|P) for each element in the partition. If provided, these
+        are used instead of the static residue-count-based expected shares.
 
     Returns
     -------
@@ -617,8 +874,11 @@ def _compute_partition_binding(
         n_total = len(partition_groups.get(element_name, set()))
         n_exposed = len(exposed_partition.get(element_name, set()))
 
-        # Calculate expected share based on surface availability
-        expected_share = n_exposed / total_exposed if total_exposed > 0 else 0.0
+        # Calculate expected share: SASA-weighted if available, else static fallback
+        if sasa_expected_shares is not None and element_name in sasa_expected_shares:
+            expected_share = sasa_expected_shares[element_name]
+        else:
+            expected_share = n_exposed / total_exposed if total_exposed > 0 else 0.0
         total_expected_share += expected_share
 
         # Get contact data for this element
@@ -675,6 +935,9 @@ def _compute_polymer_binding_preference(
     surface_exposure_threshold: float | None,
     polymer_composition: "PolymerComposition | None",
     protein_groups_used: dict[str, str] | None,
+    sasa_trajectory: "SASATrajectoryResult | None" = None,
+    n_p: dict[str, np.ndarray] | None = None,
+    contact_start_frame: int = 0,
 ) -> "PolymerBindingPreferenceResult":
     """Compute per-polymer binding preference using partition-based analysis.
 
@@ -700,6 +963,16 @@ def _compute_polymer_binding_preference(
         Polymer composition metadata
     protein_groups_used : dict[str, str] | None
         Selection strings used (for metadata)
+    sasa_trajectory : SASATrajectoryResult or None
+        Per-frame, per-residue SASA data. When provided (along with n_p),
+        SASA-weighted expected shares are computed per polymer type.
+    n_p : dict[str, np.ndarray] or None
+        Per-frame total contact counts n_P(t) for each polymer type.
+        Required when sasa_trajectory is provided.
+    contact_start_frame : int, optional
+        Absolute frame offset where the contact analysis window begins
+        in the full trajectory. Used to slice the SASA trajectory to
+        align with the contact analysis frames. Default 0.
 
     Returns
     -------
@@ -729,10 +1002,34 @@ def _compute_polymer_binding_preference(
     # Compute total exposed for AA class partition
     aa_class_total_exposed = sum(len(resids) for resids in aa_class_exposed.values())
 
+    # ------------------------------------------------------------------
+    # Helper: compute per-polymer SASA expected shares for any partition
+    # ------------------------------------------------------------------
+    def _sasa_shares_for_partition(
+        partition_groups_map: dict[str, set[int]],
+    ) -> dict[str, dict[str, float]] | None:
+        """Compute per-polymer SASA expected shares for a given partition.
+
+        Returns None if sasa_trajectory or n_p is not available.
+        Returns dict[poly_type, dict[group_name, p_null(G|P)]].
+        """
+        if sasa_trajectory is None or n_p is None:
+            return None
+        surface_shares = _compute_sasa_surface_shares(
+            sasa_trajectory,
+            partition_groups_map,
+            contact_start_frame=contact_start_frame,
+            contact_n_frames=n_frames,
+        )
+        return _compute_contact_weighted_expected_shares(surface_shares, n_p)
+
     # ---------------------------------------------------------------------
     # 1. Compute AA Class Partition for each polymer type
     # ---------------------------------------------------------------------
     aa_class_binding: dict[str, "PartitionBindingResult"] = {}
+
+    # Pre-compute per-polymer expected shares for AA class partition
+    aa_class_poly_shares = _sasa_shares_for_partition(aa_class_groups)
 
     for poly_type in all_polymer_types:
         poly_contact_data = contact_data.get(poly_type, {})
@@ -749,6 +1046,9 @@ def _compute_polymer_binding_preference(
         # Compute total contact frames for AA class groups only
         aa_total_frames = sum(d.get("total_frames", 0) for d in aa_contact_data.values())
 
+        # Extract this polymer's expected shares (if available)
+        poly_expected = aa_class_poly_shares.get(poly_type) if aa_class_poly_shares else None
+
         aa_class_binding[poly_type] = _compute_partition_binding(
             partition_name="aa_class",
             partition_type="aa_class",
@@ -758,6 +1058,7 @@ def _compute_polymer_binding_preference(
             contact_data_for_polymer=aa_contact_data,
             total_exposed=aa_class_total_exposed,
             total_contact_frames_for_polymer=aa_total_frames,
+            sasa_expected_shares=poly_expected,
         )
 
     # ---------------------------------------------------------------------
@@ -805,6 +1106,10 @@ def _compute_polymer_binding_preference(
 
             # Compute for each polymer type
             user_defined_partitions[partition_name] = {}
+
+            # Pre-compute per-polymer expected shares for this partition
+            user_partition_poly_shares = _sasa_shares_for_partition(partition_groups_map)
+
             for poly_type in all_polymer_types:
                 poly_contact_data = contact_data.get(poly_type, {})
 
@@ -836,6 +1141,13 @@ def _compute_polymer_binding_preference(
                     d.get("total_frames", 0) for d in partition_contact_data.values()
                 )
 
+                # Extract this polymer's expected shares (if available)
+                poly_expected = (
+                    user_partition_poly_shares.get(poly_type)
+                    if user_partition_poly_shares
+                    else None
+                )
+
                 user_defined_partitions[partition_name][poly_type] = _compute_partition_binding(
                     partition_name=partition_name,
                     partition_type="user_defined",
@@ -845,6 +1157,7 @@ def _compute_polymer_binding_preference(
                     contact_data_for_polymer=partition_contact_data,
                     total_exposed=user_partition_total_exposed,
                     total_contact_frames_for_polymer=partition_total_frames,
+                    sasa_expected_shares=poly_expected,
                 )
 
             logger.info(
@@ -872,6 +1185,7 @@ def _compute_partition_coverage(
     entries: list["BindingPreferenceEntry"],
     total_exposed: int,
     all_polymer_types: list[str],
+    sasa_expected_shares: dict[str, float] | None = None,
 ) -> PartitionCoverageResult:
     """Compute coverage for a single partition.
 
@@ -891,9 +1205,16 @@ def _compute_partition_coverage(
     entries : list[BindingPreferenceEntry]
         Binding preference entries to aggregate
     total_exposed : int
-        Total number of exposed residues across all elements
+        Total number of exposed residues across all elements.
+        Used as fallback when sasa_expected_shares is not provided.
     all_polymer_types : list[str]
         List of all polymer types
+    sasa_expected_shares : dict[str, float] or None
+        Pre-computed SASA-weighted, contact-weighted expected shares
+        p_null(G|system) for each element in the partition. If provided,
+        these are used instead of the static residue-count-based expected
+        shares. For system-level coverage, these are weighted by total
+        contacts n(t) = sum_P n_P(t) across all polymer types.
 
     Returns
     -------
@@ -935,8 +1256,11 @@ def _compute_partition_coverage(
         n_total = len(partition_groups.get(element_name, set()))
         n_exposed = len(exposed_partition.get(element_name, set()))
 
-        # Calculate expected share
-        expected_share = n_exposed / total_exposed if total_exposed > 0 else 0.0
+        # Calculate expected share: SASA-weighted if available, else static fallback
+        if sasa_expected_shares is not None and element_name in sasa_expected_shares:
+            expected_share = sasa_expected_shares[element_name]
+        else:
+            expected_share = n_exposed / total_exposed if total_exposed > 0 else 0.0
         total_expected_share += expected_share
 
         # Get contact data
@@ -991,6 +1315,9 @@ def _compute_system_coverage(
     surface_exposure_threshold: float | None,
     protein_group_selections: dict[str, str] | None,
     protein_partitions: dict[str, list[str]] | None = None,
+    sasa_trajectory: "SASATrajectoryResult | None" = None,
+    n_p: dict[str, np.ndarray] | None = None,
+    contact_start_frame: int = 0,
 ) -> SystemCoverageResult:
     """Compute system-level coverage using partition-based analysis.
 
@@ -1032,6 +1359,16 @@ def _compute_system_coverage(
     protein_partitions : dict[str, list[str]] | None
         User-defined partitions: {partition_name: [group1, group2, ...]}
         Groups must exist in protein_groups.
+    sasa_trajectory : SASATrajectoryResult or None
+        Per-frame, per-residue SASA data. When provided (along with n_p),
+        SASA-weighted expected shares are computed for each partition.
+    n_p : dict[str, np.ndarray] or None
+        Per-frame total contact counts n_P(t) for each polymer type.
+        Required when sasa_trajectory is provided.
+    contact_start_frame : int, optional
+        Absolute frame offset where the contact analysis window begins
+        in the full trajectory. Used to slice the SASA trajectory.
+        Default 0.
 
     Returns
     -------
@@ -1070,6 +1407,26 @@ def _compute_system_coverage(
     aa_class_entries = [e for e in entries if e.protein_group in aa_class_names]
     custom_entries = [e for e in entries if e.protein_group not in aa_class_names]
 
+    # ------------------------------------------------------------------
+    # Helper: compute SASA-weighted expected shares for any partition
+    # ------------------------------------------------------------------
+    def _sasa_shares_for_partition(
+        partition_groups_map: dict[str, set[int]],
+    ) -> dict[str, float] | None:
+        """Compute system-level SASA expected shares for a given partition.
+
+        Returns None if sasa_trajectory or n_p is not available.
+        """
+        if sasa_trajectory is None or n_p is None:
+            return None
+        surface_shares = _compute_sasa_surface_shares(
+            sasa_trajectory,
+            partition_groups_map,
+            contact_start_frame=contact_start_frame,
+            contact_n_frames=n_frames,
+        )
+        return _compute_system_level_expected_shares(surface_shares, n_p)
+
     # ---------------------------------------------------------------------
     # 1. Compute AA Class Partition (always)
     # ---------------------------------------------------------------------
@@ -1084,6 +1441,7 @@ def _compute_system_coverage(
         entries=aa_class_entries,
         total_exposed=aa_class_total_exposed,
         all_polymer_types=all_polymer_types,
+        sasa_expected_shares=_sasa_shares_for_partition(aa_class_groups),
     )
 
     # ---------------------------------------------------------------------
@@ -1164,6 +1522,7 @@ def _compute_system_coverage(
             entries=binary_entries,
             total_exposed=binary_total_exposed,
             all_polymer_types=all_polymer_types,
+            sasa_expected_shares=_sasa_shares_for_partition(binary_partition_groups),
         )
 
         custom_group_coverages[group_name] = binary_coverage
@@ -1244,6 +1603,7 @@ def _compute_system_coverage(
             entries=combined_entries,
             total_exposed=combined_total_exposed,
             all_polymer_types=all_polymer_types,
+            sasa_expected_shares=_sasa_shares_for_partition(combined_partition_groups),
         )
 
     # ---------------------------------------------------------------------
@@ -1339,6 +1699,7 @@ def _compute_system_coverage(
                 entries=partition_entries_list,
                 total_exposed=user_partition_total_exposed,
                 all_polymer_types=all_polymer_types,
+                sasa_expected_shares=_sasa_shares_for_partition(partition_groups_map),
             )
 
             user_defined_partitions[partition_name] = user_partition_coverage
@@ -1373,6 +1734,7 @@ def compute_binding_preference(
     surface_exposure: "SurfaceExposureResult",
     protein_groups: dict[str, set[int]],
     polymer_composition: PolymerComposition,
+    sasa_trajectory: "SASATrajectoryResult",
     polymer_types: list[str] | None = None,
     protein_group_selections: dict[str, str] | None = None,
     polymer_type_selections: dict[str, str] | None = None,
@@ -1384,10 +1746,13 @@ def compute_binding_preference(
     combination, answering: "Does this polymer type preferentially bind this
     protein group compared to random chance?"
 
-    The enrichment calculation accounts for:
-    1. Surface exposure (only exposed residues are considered)
-    2. Contact duration (contact frames are summed, not binary counts)
-    3. Polymer composition (normalization by residue count or heavy atom count)
+    The enrichment calculation uses SASA-weighted, contact-weighted expected
+    shares derived from the selectivity free energy formalism:
+
+        p_null(G|P) = Σ_t [n_P(t) · σ_G(t)] / Σ_t n_P(t)
+
+    where σ_G(t) = A_G(t) / A_total(t) is the SASA-weighted surface share
+    and n_P(t) is the total contacts by polymer P at frame t.
 
     Parameters
     ----------
@@ -1402,6 +1767,10 @@ def compute_binding_preference(
     polymer_composition : PolymerComposition
         Polymer composition data (residue and heavy atom counts per type).
         Used for dual normalization of enrichment ratios.
+    sasa_trajectory : SASATrajectoryResult
+        Per-frame, per-residue SASA trajectory data. Required for computing
+        SASA-weighted expected shares (the null model). Shape of
+        sasa_per_frame is (n_frames, n_residues) in nm².
     polymer_types : list[str], optional
         If provided, only compute for these polymer residue types.
         If None, all polymer types found in contacts are used.
@@ -1418,37 +1787,23 @@ def compute_binding_preference(
     Returns
     -------
     BindingPreferenceResult
-        Binding preference metrics with dual enrichment normalization
+        Binding preference metrics with SASA-weighted enrichment
 
     Notes
     -----
-    Enrichment Calculation (centered at zero)
-    -----------------------------------------
-    For each (polymer_type, protein_group) pair:
+    Enrichment Calculation
+    ----------------------
+    For each (polymer_type P, protein_group G) pair:
 
-        contact_share = polymer_contacts_to_group / polymer_total_contacts
+        contact_share (p_obs) = n_{P,G}(t) summed / n_P(t) summed
+        expected_share (p_null) = Σ_t [n_P(t) · σ_G(t)] / Σ_t n_P(t)
+        enrichment = (p_obs / p_null) - 1
 
-    Two normalization methods are computed:
-
-    1. **Residue-based** (matches experimental concentration ratios):
-
-        expected_by_residue = polymer_residue_count / total_polymer_residues
-        enrichment_by_residue = (contact_share / expected_by_residue) - 1
-
-    2. **Atom-based** (accounts for monomer size via heavy atoms):
-
-        expected_by_atoms = polymer_heavy_atoms / total_polymer_heavy_atoms
-        enrichment_by_atoms = (contact_share / expected_by_atoms) - 1
-
-    Interpretation (both methods):
+    Interpretation:
     - enrichment > 0: Preferential binding (more contacts than expected)
     - enrichment = 0: Neutral (matches random chance)
     - enrichment < 0: Avoidance (fewer contacts than expected)
     - enrichment = -1: Complete avoidance (no contacts at all)
-
-    When to use which metric:
-    - enrichment_by_residue: Direct comparison to experimental concentration ratios
-    - enrichment_by_atoms: Reveals true chemical affinity vs. geometric/steric effects
     """
     exposed_resids = surface_exposure.exposed_resids
     n_frames = contact_result.n_frames
@@ -1535,6 +1890,34 @@ def compute_binding_preference(
     total_poly_residues = polymer_composition.total_residues
     total_poly_atoms = polymer_composition.total_heavy_atoms
 
+    # ------------------------------------------------------------------
+    # Compute SASA-weighted expected shares (selectivity free energy null)
+    # ------------------------------------------------------------------
+    # Build per-frame contact count arrays n_{P,G}(t) and n_P(t)
+    n_pg, n_p = _build_per_frame_contact_counts(
+        contact_result=contact_result,
+        exposed_groups=exposed_groups,
+        polymer_types=list(contact_data.keys()),
+    )
+
+    # Compute per-polymer expected shares for the full protein_groups partition
+    # (used for the legacy entries below)
+    # Slice SASA trajectory to align with the contact analysis frame window
+    contact_start = contact_result.start_frame
+    contact_nframes = contact_result.n_frames
+    full_surface_shares = _compute_sasa_surface_shares(
+        sasa_trajectory,
+        protein_groups,
+        contact_start_frame=contact_start,
+        contact_n_frames=contact_nframes,
+    )
+    per_polymer_expected = _compute_contact_weighted_expected_shares(full_surface_shares, n_p)
+
+    logger.info(
+        f"SASA-weighted expected shares computed for {len(per_polymer_expected)} polymer types "
+        f"across {len(protein_groups)} protein groups"
+    )
+
     # Build result entries with enrichment calculations
     entries = []
 
@@ -1549,13 +1932,9 @@ def compute_binding_preference(
             n_total_in_group = len(protein_groups.get(group_name, set()))
             n_exposed_in_group = len(exposed_groups.get(group_name, set()))
 
-            # Calculate expected share based on PROTEIN SURFACE AVAILABILITY
-            # This is the correct normalization: how much of the exposed surface
-            # is this protein group?
-            if total_exposed > 0:
-                expected_share = n_exposed_in_group / total_exposed
-            else:
-                expected_share = 0.0
+            # Use SASA-weighted expected share p_null(G|P)
+            poly_shares = per_polymer_expected.get(poly_type, {})
+            expected_share = poly_shares.get(group_name, 0.0)
 
             # Get contact data for this (polymer, group) pair
             gdata = contact_data[poly_type].get(group_name, {})
@@ -1612,6 +1991,9 @@ def compute_binding_preference(
         surface_exposure_threshold=surface_exposure.threshold,
         protein_group_selections=protein_group_selections,
         protein_partitions=protein_partitions,
+        sasa_trajectory=sasa_trajectory,
+        n_p=n_p,
+        contact_start_frame=contact_start,
     )
 
     # Compute per-polymer partition-based binding preference (NEW in v5)
@@ -1627,6 +2009,9 @@ def compute_binding_preference(
         surface_exposure_threshold=surface_exposure.threshold,
         polymer_composition=polymer_composition,
         protein_groups_used=protein_group_selections,
+        sasa_trajectory=sasa_trajectory,
+        n_p=n_p,
+        contact_start_frame=contact_start,
     )
 
     result = BindingPreferenceResult(
@@ -3855,6 +4240,7 @@ def compute_binding_preference_from_config(
     universe: "Universe",
     enzyme_pdb_path: Path | str,
     config: "ContactsConfig",
+    sasa_trajectory: "SASATrajectoryResult | None" = None,
 ) -> BindingPreferenceResult:
     """Compute binding preference using ContactsConfig settings.
 
@@ -3863,7 +4249,8 @@ def compute_binding_preference_from_config(
     It:
     1. Calculates surface exposure from enzyme PDB
     2. Resolves protein group selections to residue IDs
-    3. Computes binding preference with enrichment ratios
+    3. Loads or requires SASA trajectory for expected share computation
+    4. Computes binding preference with enrichment ratios
 
     Parameters
     ----------
@@ -3875,34 +4262,29 @@ def compute_binding_preference_from_config(
         Path to enzyme PDB file for SASA calculation
     config : ContactsConfig
         Configuration from analysis.yaml with binding preference settings
+    sasa_trajectory : SASATrajectoryResult or None
+        Per-frame, per-residue SASA trajectory data. Required for the
+        SASA-weighted null model. If None, a ValueError is raised.
 
     Returns
     -------
     BindingPreferenceResult
         Binding preference with enrichment ratios
 
-    Notes
-    -----
-    This function requires rust_sasa_python to be installed for
-    surface exposure calculation. Install with:
-        pip install rust-sasa-python
-
-    Examples
-    --------
-    >>> from polyzymd.analysis.config import ContactsConfig
-    >>> config = ContactsConfig(
-    ...     compute_binding_preference=True,
-    ...     surface_exposure_threshold=0.2,
-    ... )
-    >>> result = compute_binding_preference_from_config(
-    ...     contact_result, universe, "enzyme.pdb", config
-    ... )
-    >>> print(result.enrichment_matrix())
-    {'SBM': {'aromatic': 1.45, 'polar': 0.82, ...}, ...}
+    Raises
+    ------
+    ValueError
+        If sasa_trajectory is None (SASA trajectory is required).
     """
     from polyzymd.analysis.contacts.surface_exposure import SurfaceExposureFilter
 
     logger.info("Computing binding preference from config...")
+
+    if sasa_trajectory is None:
+        raise ValueError(
+            "sasa_trajectory is required for computing SASA-weighted expected shares. "
+            "Run SASA trajectory analysis first, then pass the result here."
+        )
 
     # Step 1: Calculate surface exposure
     exposure_filter = SurfaceExposureFilter(threshold=config.surface_exposure_threshold)
@@ -3933,6 +4315,7 @@ def compute_binding_preference_from_config(
         surface_exposure=surface_exposure,
         protein_groups=protein_groups,
         polymer_composition=polymer_composition,
+        sasa_trajectory=sasa_trajectory,
         polymer_types=polymer_types if polymer_types else None,
         protein_group_selections=config.protein_group_selections,
         polymer_type_selections=config.polymer_type_selections,

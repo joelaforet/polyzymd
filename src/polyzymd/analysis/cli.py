@@ -633,6 +633,7 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
                         from polyzymd.analysis.contacts import (
                             compute_binding_preference_from_config,
                         )
+                        from polyzymd.analysis.sasa.trajectory import compute_trajectory_sasa
 
                         # Get enzyme PDB path
                         enzyme_pdb = config.contacts.enzyme_pdb_for_sasa
@@ -642,12 +643,28 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
                         if not enzyme_pdb.is_absolute():
                             enzyme_pdb = sim_config_path.parent / enzyme_pdb
 
+                        # Compute/load SASA trajectory for this replicate
+                        traj_info = loader.get_trajectory_info(rep)
+                        rep_analysis_dir = (
+                            sim_config.output.projects_directory
+                            / "analysis"
+                            / "contacts"
+                            / f"rep{rep}"
+                        )
+                        sasa_trajectory = compute_trajectory_sasa(
+                            topology_path=traj_info.topology_file,
+                            trajectory_path=traj_info.trajectory_files,
+                            analysis_dir=rep_analysis_dir,
+                            recompute=False,
+                        )
+
                         click.echo(f"    Computing binding preference...", nl=False)
                         bp_result = compute_binding_preference_from_config(
                             contact_result=result,
                             universe=universe,
                             enzyme_pdb_path=enzyme_pdb,
                             config=config.contacts,
+                            sasa_trajectory=sasa_trajectory,
                         )
                         binding_pref_results.append(bp_result)
                         n_entries = len(bp_result.entries)
@@ -1418,11 +1435,12 @@ def contacts(
 
             from polyzymd.analysis.contacts import (
                 SurfaceExposureFilter,
-                compute_binding_preference,
-                resolve_protein_group_selections,
                 aggregate_binding_preference,
+                compute_binding_preference,
                 extract_polymer_composition,
+                resolve_protein_group_selections,
             )
+            from polyzymd.analysis.sasa.trajectory import compute_trajectory_sasa
 
             # Determine enzyme PDB path
             if enzyme_pdb:
@@ -1468,11 +1486,31 @@ def contacts(
                 # Compute binding preference for each replicate
                 for i, (result, universe) in enumerate(zip(results, universes)):
                     try:
+                        # Load/compute SASA trajectory for this replicate
+                        rep = rep_list[i]
+                        traj_info = loader.get_trajectory_info(rep)
+                        if output_path:
+                            rep_analysis_dir = output_path / f"rep{rep}"
+                        else:
+                            rep_analysis_dir = (
+                                sim_config.output.projects_directory
+                                / "analysis"
+                                / "contacts"
+                                / f"rep{rep}"
+                            )
+                        sasa_trajectory = compute_trajectory_sasa(
+                            topology_path=traj_info.topology_file,
+                            trajectory_path=traj_info.trajectory_files,
+                            analysis_dir=rep_analysis_dir,
+                            recompute=False,
+                        )
+
                         bp_result = compute_binding_preference(
                             contact_result=result,
                             surface_exposure=surface_exposure,
                             protein_groups=protein_groups,
                             polymer_composition=polymer_composition,
+                            sasa_trajectory=sasa_trajectory,
                         )
                         binding_pref_results.append(bp_result)
 

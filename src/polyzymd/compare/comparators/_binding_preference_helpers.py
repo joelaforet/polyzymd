@@ -8,7 +8,8 @@ Both comparators follow the same contract:
 1. Resolve enzyme PDB → compute SASA-based surface exposure
 2. Resolve protein groups from surface exposure
 3. Extract polymer composition from topology
-4. For each replicate: load contacts_rep{N}.json → compute_binding_preference
+4. For each replicate: load contacts_rep{N}.json, load/compute SASA
+   trajectory, then compute_binding_preference with SASA-weighted null model
 5. Aggregate across replicates → save aggregated result
 
 This module provides three public functions:
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
         AggregatedBindingPreferenceResult,
         BindingPreferenceResult,
     )
+    from polyzymd.analysis.sasa.trajectory import SASATrajectoryResult
     from polyzymd.compare.config import ConditionConfig
 
 logger = logging.getLogger("polyzymd.compare")
@@ -111,6 +113,44 @@ def resolve_enzyme_pdb(
         return None
 
     return find_enzyme_pdb(sim_config)
+
+
+def _try_load_cached_sasa(
+    analysis_dir: Path,
+    replicate: int,
+) -> "SASATrajectoryResult | None":
+    """Try to load a cached SASA trajectory for a replicate.
+
+    Checks multiple possible cache locations:
+    1. ``{analysis_dir}/rep{N}/sasa/`` — per-replicate under contacts dir
+    2. ``{analysis_dir}/../exposure/rep{N}/sasa/`` — sibling exposure dir
+
+    Parameters
+    ----------
+    analysis_dir : Path
+        The contacts analysis directory for this condition.
+    replicate : int
+        Replicate number.
+
+    Returns
+    -------
+    SASATrajectoryResult or None
+        Loaded SASA trajectory, or None if not found.
+    """
+    from polyzymd.analysis.sasa.trajectory import SASATrajectoryResult
+
+    candidate_dirs = [
+        analysis_dir / f"rep{replicate}" / "sasa",
+        analysis_dir.parent / "exposure" / f"rep{replicate}" / "sasa",
+    ]
+
+    for sasa_dir in candidate_dirs:
+        npz_path = sasa_dir / "sasa_trajectory.npz"
+        if npz_path.exists():
+            logger.debug(f"Loading cached SASA from {sasa_dir}")
+            return SASATrajectoryResult.load(sasa_dir)
+
+    return None
 
 
 def compute_condition_binding_preference(
@@ -227,6 +267,12 @@ def compute_condition_binding_preference(
         )
 
     # --- Step 4: Compute binding preference per replicate ---
+    # Load/compute SASA trajectory per replicate for SASA-weighted null model
+    from polyzymd.analysis.core.loader import TrajectoryLoader
+    from polyzymd.analysis.sasa.trajectory import compute_trajectory_sasa
+
+    loader = TrajectoryLoader(sim_config)
+
     rep_results = []
     for rep in cond.replicates:
         contact_path = analysis_dir / f"contacts_rep{rep}.json"
@@ -236,11 +282,39 @@ def compute_condition_binding_preference(
 
         try:
             contact_result = ContactResult.load(contact_path)
+
+            # Load/compute SASA trajectory for this replicate
+            try:
+                traj_info = loader.get_trajectory_info(rep)
+                rep_analysis_dir = analysis_dir / f"rep{rep}"
+                sasa_trajectory = compute_trajectory_sasa(
+                    topology_path=traj_info.topology_file,
+                    trajectory_path=traj_info.trajectory_files,
+                    analysis_dir=rep_analysis_dir,
+                    recompute=False,
+                )
+            except FileNotFoundError as e:
+                logger.warning(
+                    f"Cannot load trajectory for SASA computation "
+                    f"({cond.label} rep{rep}): {e}. "
+                    f"Falling back to sibling sasa/ directory."
+                )
+                # Fallback: try loading pre-cached SASA from sibling directory
+                # (e.g., if exposure comparator already computed it)
+                sasa_trajectory = _try_load_cached_sasa(analysis_dir, rep)
+                if sasa_trajectory is None:
+                    logger.warning(
+                        f"No SASA trajectory available for {cond.label} rep{rep}. "
+                        f"Run SASA or exposure analysis first."
+                    )
+                    continue
+
             bp_result = compute_binding_preference(
                 contact_result=contact_result,
                 surface_exposure=surface_exposure,
                 protein_groups=protein_groups,
                 polymer_composition=polymer_composition,
+                sasa_trajectory=sasa_trajectory,
                 protein_partitions=protein_partitions,
             )
             rep_results.append(bp_result)
