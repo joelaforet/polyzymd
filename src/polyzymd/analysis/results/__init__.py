@@ -36,6 +36,10 @@ from polyzymd.analysis.results.triad import (
     TriadAggregatedResult,
     TriadResult,
 )
+from polyzymd.analysis.secondary_structure.results import (
+    SecondaryStructureAggregatedResult,
+    SecondaryStructureResult,
+)
 
 __all__ = [
     # Base
@@ -53,4 +57,7 @@ __all__ = [
     # Triad
     "TriadResult",
     "TriadAggregatedResult",
+    # Secondary structure
+    "SecondaryStructureResult",
+    "SecondaryStructureAggregatedResult",
 ]

@@ -18,6 +18,9 @@ exposure : ExposureChaperoneFractionPlotter, ExposureEnrichmentHeatmapPlotter
     Dynamic chaperone activity visualization
 binding_free_energy : BFEHeatmapPlotter, BFEBarPlotter
     ΔG_sel binding free energy visualization
+secondary_structure : SSTimelineHeatmapPlotter, SSContentBarsPlotter,
+    SSPersistenceDiffHeatmapPlotter
+    DSSP secondary structure visualization
 
 Adding New Plotters
 -------------------
@@ -38,6 +41,7 @@ from polyzymd.compare.plotters import (
     exposure,
     polymer_affinity,
     rmsf,
+    secondary_structure,
     triad,
 )
 
@@ -49,4 +53,5 @@ __all__ = [
     "exposure",
     "binding_free_energy",
     "polymer_affinity",
+    "secondary_structure",
 ]

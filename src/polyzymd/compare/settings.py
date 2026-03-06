@@ -1073,6 +1073,55 @@ class PolymerAffinityScoreComparisonSettings(BaseComparisonSettings):
 
 
 # ============================================================================
+# Secondary Structure Settings
+# ============================================================================
+
+
+@AnalysisSettingsRegistry.register("secondary_structure")
+class SecondaryStructureAnalysisSettings(BaseAnalysisSettings):
+    """Secondary structure (DSSP) analysis settings.
+
+    Attributes
+    ----------
+    chain_id : str
+        Chain letter for the protein to analyze (default "A").
+    """
+
+    chain_id: str = Field(
+        default="A",
+        description="Chain letter for the protein to analyze",
+    )
+
+    @classmethod
+    def analysis_type(cls) -> str:
+        """Return the analysis type identifier."""
+        return "secondary_structure"
+
+    def to_analysis_yaml_dict(self) -> dict[str, Any]:
+        """Convert to analysis.yaml-compatible dictionary."""
+        return {
+            "enabled": True,
+            "chain_id": self.chain_id,
+        }
+
+
+@ComparisonSettingsRegistry.register("secondary_structure")
+class SecondaryStructureComparisonSettings(BaseComparisonSettings):
+    """Comparison settings for secondary structure analysis.
+
+    Currently empty — all secondary structure comparison behavior uses
+    defaults from ``BaseComparisonSettings``.  This class exists as an
+    extension point: add fields here when SS-specific comparison
+    parameters are needed without modifying the orchestrator.
+    """
+
+    @classmethod
+    def analysis_type(cls) -> str:
+        """Return the analysis type identifier."""
+        return "secondary_structure"
+
+
+# ============================================================================
 # Utility Functions
 # ============================================================================
 
