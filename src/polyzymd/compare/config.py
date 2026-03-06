@@ -307,6 +307,8 @@ class TriadPlotSettings(BasePlotSettings):
         Color for threshold vertical line
     kde_fill_alpha : float
         Transparency for KDE fill (0-1)
+    kde_xlim : tuple[float, float]
+        X-axis limits for KDE panel in Angstroms (default ``(0, 7)``).
     figsize_kde_panel : tuple[float, float] | None
         Figure size for KDE panel (auto-calculated if None)
     figsize_bars : tuple[float, float]
@@ -318,6 +320,7 @@ class TriadPlotSettings(BasePlotSettings):
     generate_2d_kde: bool = False
     threshold_line_color: str = "red"
     kde_fill_alpha: float = 0.7
+    kde_xlim: tuple[float, float] = (0.0, 7.0)
     figsize_kde_panel: tuple[float, float] | None = None
     figsize_bars: tuple[float, float] = (10, 6)
 
@@ -1439,6 +1442,7 @@ plot_settings:
   #   generate_kde_panel: true     # multi-row KDE panel
   #   generate_bars: true          # threshold bar chart
   #   generate_2d_kde: false       # 2D joint KDE (specialized)
+  #   kde_xlim: [0, 7]             # x-axis range for KDE panel (Angstroms)
 
   # distances:
   #   show_threshold: true         # threshold line on distributions

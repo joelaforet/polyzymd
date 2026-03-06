@@ -223,6 +223,7 @@ def plot_triad_kde_panel_pooled(
     color_palette: str = "tab10",
     kde_fill_alpha: float = 0.7,
     threshold_line_color: str = "red",
+    xlim: tuple[float, float] | None = (0.0, 7.0),
     figsize: tuple[float, float] | None = None,
     title: str | None = None,
     save_path: Path | str | None = None,
@@ -250,6 +251,9 @@ def plot_triad_kde_panel_pooled(
         Transparency for KDE fill (default 0.7)
     threshold_line_color : str, optional
         Color for threshold line (default "red")
+    xlim : tuple of float or None, optional
+        X-axis limits in Angstroms (default ``(0, 7)``).
+        Set to ``None`` to auto-scale from data.
     figsize : tuple, optional
         Figure size. If None, auto-calculated.
     title : str, optional
@@ -321,6 +325,9 @@ def plot_triad_kde_panel_pooled(
         ax.set_title(pair_label, fontsize=11, fontweight="bold")
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
+
+        if xlim is not None:
+            ax.set_xlim(xlim)
 
         if pair_idx == 0:
             ax.legend(loc="upper right", fontsize=9)
