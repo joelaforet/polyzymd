@@ -336,6 +336,7 @@ class BasePlotter(ABC):
         capsize: int = 3,
         edgecolor: str | None = None,
         linewidth: float | None = None,
+        replicate_values: "Sequence[Sequence[Sequence[float]]] | None" = None,
     ) -> None:
         """Render grouped bars with optional error bars and reference line.
 
@@ -371,6 +372,11 @@ class BasePlotter(ABC):
             Bar edge colour.  ``None`` uses the matplotlib default.
         linewidth : float | None, optional
             Bar edge line width.  ``None`` uses the matplotlib default.
+        replicate_values : sequence or None, optional
+            Per-replicate values for jittered dot overlay.  Indexed as
+            ``replicate_values[condition_idx][group_idx]`` -> sequence of
+            floats (one per replicate).  When ``None`` (default), no dots
+            are drawn.
         """
         import numpy as np
 
@@ -393,6 +399,24 @@ class BasePlotter(ABC):
             if linewidth is not None:
                 bar_kwargs["linewidth"] = linewidth
             ax.bar(np.asarray(x) + offset, means, **bar_kwargs)
+
+            # Overlay jittered replicate dots
+            if replicate_values is not None and i < len(replicate_values):
+                rng = np.random.default_rng(seed=42 + i)
+                cond_reps = replicate_values[i]
+                for j in range(len(x)):
+                    if j < len(cond_reps) and cond_reps[j]:
+                        rep_vals = np.asarray(cond_reps[j], dtype=float)
+                        jitter = rng.uniform(-w * 0.3, w * 0.3, size=len(rep_vals))
+                        ax.scatter(
+                            np.full_like(rep_vals, float(x[j]) + offset) + jitter,
+                            rep_vals,
+                            color="black",
+                            s=12,
+                            zorder=5,
+                            alpha=0.7,
+                            edgecolors="none",
+                        )
 
         if reference_line is not None:
             ax.axhline(
