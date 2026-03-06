@@ -307,6 +307,16 @@ class ContactsComparator(
         logger.info(f"  Aggregating {len(results)} replicates...")
         agg_result = aggregate_contact_results(results)
 
+        # Persist aggregated result so downstream plotters can load it
+        output_dir = condition_output_dir or (
+            sim_config.output.projects_directory / "analysis" / "contacts"
+        )
+        output_dir.mkdir(parents=True, exist_ok=True)
+        rep_range = f"{min(successful_reps)}-{max(successful_reps)}"
+        agg_file = output_dir / f"contacts_aggregated_reps{rep_range}.json"
+        agg_result.save(agg_file)
+        logger.info(f"  Saved aggregated contacts: {agg_file}")
+
         # Compute per-replicate values for statistical tests
         coverage_per_rep = self._compute_coverage_per_replicate(agg_result)
         contact_fraction_per_rep = self._compute_contact_fraction_per_replicate(agg_result)
