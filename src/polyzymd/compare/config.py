@@ -544,6 +544,8 @@ class SSPlotSettings(BasePlotSettings):
         Generate per-condition residue x time SS heatmap. Default True.
     generate_content_bars : bool
         Generate grouped bar chart of helix/strand/coil fractions. Default True.
+    generate_individual_bars : bool
+        Generate one bar chart per SS type (helix, beta-sheet, no-SS). Default True.
     generate_diff_heatmap : bool
         Generate condition x residue persistence difference heatmap. Default True.
     figsize_timeline : tuple[float, float]
@@ -558,11 +560,159 @@ class SSPlotSettings(BasePlotSettings):
 
     generate_timeline: bool = True
     generate_content_bars: bool = True
+    generate_individual_bars: bool = True
     generate_diff_heatmap: bool = True
     figsize_timeline: tuple[float, float] = (14, 6)
     figsize_content_bars: tuple[float, float] = (10, 6)
     figsize_diff_heatmap: tuple[float, float] | None = None
     diff_colormap: str = "RdBu_r"
+
+
+class PlotTheme(BaseModel):
+    """Centralized visual defaults for all comparison plots.
+
+    Replaces ~219 hardcoded style values (font sizes, alphas, line widths,
+    marker sizes, spine visibility, etc.) across all plotter files with a
+    single configurable Pydantic model.
+
+    Three presets are available via class methods:
+
+    - ``PlotTheme.publication()`` — default; print-ready sizes and weights.
+    - ``PlotTheme.presentation()`` — ~1.3x larger fonts/dots/lines for slides.
+    - ``PlotTheme.minimal()`` — no dots, no bar edges, thinner lines.
+
+    Users can override individual values in ``comparison.yaml``::
+
+        plot_settings:
+          style: "publication"
+          theme:
+            title_fontsize: 16
+            dot_size: 24
+
+    Parameters
+    ----------
+    title_fontsize : int
+        Font size for axes titles.
+    suptitle_fontsize : int
+        Font size for figure suptitles.
+    label_fontsize : int
+        Font size for axis labels (xlabel/ylabel).
+    tick_fontsize : int
+        Font size for tick labels.
+    legend_fontsize : int
+        Font size for legend entries.
+    annotation_fontsize : int
+        Font size for heatmap cell annotations and inline text.
+    small_fontsize : int
+        Font size for secondary annotations (e.g. SEM ± labels).
+    tiny_fontsize : int
+        Font size for fine-grained annotations (e.g. residue IDs).
+    bar_alpha : float
+        Opacity for bar chart fill.
+    bar_edgecolor : str
+        Edge colour for bar outlines.
+    bar_linewidth : float
+        Edge line width for bars.
+    bar_capsize : int
+        Error bar cap size in points.
+    dot_size : int
+        Marker size for replicate dot overlays (``s=`` in ``scatter``).
+    dot_alpha : float
+        Opacity for replicate dots.
+    dot_color : str
+        Colour for replicate dots.
+    line_alpha : float
+        Opacity for line plots (e.g. RMSF profiles).
+    fill_alpha : float
+        Opacity for fill_between bands (e.g. SEM regions).
+    reference_line_color : str
+        Colour for horizontal/vertical reference lines.
+    reference_line_style : str
+        Linestyle for reference lines (e.g. ``"--"``).
+    reference_line_width : float
+        Line width for reference lines.
+    highlight_line_alpha : float
+        Opacity for highlight / vertical reference lines.
+    hide_top_spine : bool
+        Whether to hide the top axis spine.
+    hide_right_spine : bool
+        Whether to hide the right axis spine.
+    title_fontweight : str
+        Font weight for titles (e.g. ``"bold"``, ``"normal"``).
+    """
+
+    # Font sizes by semantic role
+    title_fontsize: int = 13
+    suptitle_fontsize: int = 14
+    label_fontsize: int = 11
+    tick_fontsize: int = 9
+    legend_fontsize: int = 9
+    annotation_fontsize: int = 9
+    small_fontsize: int = 8
+    tiny_fontsize: int = 7
+
+    # Bar chart defaults
+    bar_alpha: float = 0.85
+    bar_edgecolor: str = "black"
+    bar_linewidth: float = 0.5
+    bar_capsize: int = 4
+
+    # Replicate dot overlay
+    dot_size: int = 18
+    dot_alpha: float = 0.7
+    dot_color: str = "black"
+
+    # Line defaults
+    line_alpha: float = 0.8
+    fill_alpha: float = 0.25
+    reference_line_color: str = "black"
+    reference_line_style: str = "--"
+    reference_line_width: float = 1.5
+    highlight_line_alpha: float = 0.5
+
+    # Axes chrome
+    hide_top_spine: bool = True
+    hide_right_spine: bool = True
+
+    # Title style
+    title_fontweight: str = "bold"
+
+    @classmethod
+    def publication(cls) -> PlotTheme:
+        """Publication preset — default values, print-ready."""
+        return cls()
+
+    @classmethod
+    def presentation(cls) -> PlotTheme:
+        """Presentation preset — ~1.3x larger fonts/dots/lines for slides."""
+        return cls(
+            title_fontsize=18,
+            suptitle_fontsize=20,
+            label_fontsize=15,
+            tick_fontsize=12,
+            legend_fontsize=12,
+            annotation_fontsize=12,
+            small_fontsize=10,
+            tiny_fontsize=9,
+            dot_size=30,
+            bar_linewidth=0.8,
+            bar_capsize=5,
+            reference_line_width=2.0,
+            fill_alpha=0.3,
+        )
+
+    @classmethod
+    def minimal(cls) -> PlotTheme:
+        """Minimal preset — no dots, no bar edges, thinner lines."""
+        return cls(
+            dot_size=0,
+            dot_alpha=0.0,
+            bar_edgecolor="none",
+            bar_linewidth=0.0,
+            bar_capsize=3,
+            reference_line_width=1.0,
+            fill_alpha=0.15,
+        )
 
 
 class PlotSettings(BaseModel):
@@ -586,6 +736,9 @@ class PlotSettings(BaseModel):
         Plot style preset: "publication", "presentation", or "minimal"
     color_palette : str
         Seaborn/matplotlib color palette name
+    theme : PlotTheme
+        Resolved visual theme.  Built from the ``style`` preset and
+        any user overrides in the ``theme:`` YAML block.
 
     Notes
     -----
@@ -621,6 +774,7 @@ class PlotSettings(BaseModel):
         "dpi",
         "style",
         "color_palette",
+        "theme",
     }
 
     output_dir: Path = Field(default=Path("figures/"))
@@ -628,9 +782,16 @@ class PlotSettings(BaseModel):
     dpi: int = Field(default=300, ge=50, le=600)
     style: str = Field(default="publication", pattern="^(publication|presentation|minimal)$")
     color_palette: str = "tab10"
+    theme: PlotTheme = Field(default_factory=PlotTheme)
 
     def __init__(self, **data: Any):
         """Initialize with global fields and registry-discovered per-analysis settings.
+
+        Theme resolution: the ``style`` field selects a preset (publication,
+        presentation, or minimal) and then any user-supplied ``theme:``
+        overrides are merged on top.  This allows ``style: presentation``
+        with ``theme: {dot_size: 40}`` to use the presentation preset but
+        override just the dot size.
 
         Parameters
         ----------
@@ -658,6 +819,29 @@ class PlotSettings(BaseModel):
                     )
             else:
                 logger.warning(f"Unknown plot settings key '{key}' — skipping")
+
+        # ── Resolve theme from style preset + user overrides ──
+        style = global_data.get("style", "publication")
+        theme_overrides = global_data.pop("theme", None)
+
+        _THEME_PRESETS = {
+            "publication": PlotTheme.publication,
+            "presentation": PlotTheme.presentation,
+            "minimal": PlotTheme.minimal,
+        }
+        preset_factory = _THEME_PRESETS.get(style, PlotTheme.publication)
+
+        if theme_overrides is None or (isinstance(theme_overrides, dict) and not theme_overrides):
+            # No user overrides — use preset as-is
+            global_data["theme"] = preset_factory()
+        elif isinstance(theme_overrides, dict):
+            # Merge user overrides on top of preset defaults
+            preset = preset_factory()
+            merged = {**preset.model_dump(), **theme_overrides}
+            global_data["theme"] = PlotTheme(**merged)
+        elif isinstance(theme_overrides, PlotTheme):
+            # Already a PlotTheme instance (programmatic usage)
+            global_data["theme"] = theme_overrides
 
         super().__init__(**global_data, **per_analysis)
 
@@ -1164,6 +1348,45 @@ plot_settings:
   style: "publication"           # publication, presentation, or minimal
   color_palette: "tab10"         # seaborn/matplotlib color palette
 
+  # ── Visual theme (all fields optional — defaults come from style preset) ──
+  # Uncomment individual lines to override the preset values.
+  # theme:
+  #   # Font sizes by semantic role
+  #   title_fontsize: 13           # axes titles
+  #   suptitle_fontsize: 14        # figure suptitles
+  #   label_fontsize: 11           # axis labels (xlabel/ylabel)
+  #   tick_fontsize: 9             # tick labels
+  #   legend_fontsize: 9           # legend entries
+  #   annotation_fontsize: 9       # heatmap cell annotations
+  #   small_fontsize: 8            # secondary annotations (SEM labels)
+  #   tiny_fontsize: 7             # fine-grained annotations (residue IDs)
+  #
+  #   # Bar chart defaults
+  #   bar_alpha: 0.85              # bar fill opacity
+  #   bar_edgecolor: "black"       # bar edge colour
+  #   bar_linewidth: 0.5           # bar edge line width
+  #   bar_capsize: 4               # error bar cap size (points)
+  #
+  #   # Replicate dot overlay
+  #   dot_size: 18                 # scatter marker size (s=)
+  #   dot_alpha: 0.7               # dot opacity
+  #   dot_color: "black"           # dot colour
+  #
+  #   # Line defaults
+  #   line_alpha: 0.8              # line plot opacity
+  #   fill_alpha: 0.25             # fill_between band opacity
+  #   reference_line_color: "black"   # reference/threshold line colour
+  #   reference_line_style: "--"      # reference line style
+  #   reference_line_width: 1.5       # reference line width
+  #   highlight_line_alpha: 0.5       # vertical highlight line opacity
+  #
+  #   # Axes chrome
+  #   hide_top_spine: true         # hide top axis spine
+  #   hide_right_spine: true       # hide right axis spine
+  #
+  #   # Title style
+  #   title_fontweight: "bold"     # title font weight
+
   # Per-analysis plot customization (uncomment sections as needed):
 
   # rmsf:
@@ -1201,6 +1424,7 @@ plot_settings:
   # secondary_structure:
   #   generate_timeline: true      # per-condition residue × time SS heatmap
   #   generate_content_bars: true  # helix/strand/coil fraction bars
+  #   generate_individual_bars: true  # one bar chart per SS type
   #   generate_diff_heatmap: true  # Δ(helix persistence) vs control
   #   diff_colormap: "RdBu_r"     # diverging colormap for diff heatmap
 """

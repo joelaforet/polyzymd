@@ -68,7 +68,6 @@ def _find_comparison_result(
         files = sorted(directory.glob("exposure_comparison*.json"))
         if not files:
             return None
-        # Pick the most recently modified file if multiple exist
         result_file = max(files, key=lambda p: p.stat().st_mtime)
         try:
             loaded = ExposureComparisonResult.load(result_file)
@@ -78,7 +77,6 @@ def _find_comparison_result(
             log.debug(f"Could not load {result_file}: {e}")
         return None
 
-    # --- Primary: __meta__.results_dir from the orchestrator ---
     meta = data.get("__meta__")
     if meta is not None:
         results_dir = meta.get("results_dir")
@@ -86,9 +84,8 @@ def _find_comparison_result(
             result = _try_load_from_dir(Path(results_dir))
             if result is not None:
                 return result
-            log.debug(f"No exposure result JSON in {results_dir} — falling back to heuristic")
+            log.debug(f"No exposure result JSON in {results_dir} - falling back to heuristic")
 
-    # --- Fallback: per-condition heuristic (legacy path resolution) ---
     for label in labels:
         cond_data = data.get(label)
         if cond_data is None:
@@ -138,28 +135,7 @@ class ExposureChaperoneFractionPlotter(BasePlotter):
         output_dir: Path,
         **kwargs,
     ) -> list[Path]:
-        """Generate chaperone fraction bar chart.
-
-        Loads a saved ``ExposureComparisonResult`` from the filesystem
-        (searching ``comparison/`` directories adjacent to analysis paths).
-
-        Parameters
-        ----------
-        data : dict
-            Mapping of condition_label -> condition data dict with
-            ``"analysis_dir"`` key.
-        labels : sequence of str
-            Condition labels (order used for x-axis).
-        output_dir : Path
-            Directory to save plots.
-        **kwargs
-            Reserved for future use.
-
-        Returns
-        -------
-        list[Path]
-            Paths to generated plot files.
-        """
+        """Generate chaperone fraction bar chart."""
         result = self._find_comparison_result(data, labels)
         if result is not None:
             return self._plot_from_result(result, output_dir)
@@ -182,20 +158,53 @@ class ExposureChaperoneFractionPlotter(BasePlotter):
         import matplotlib.pyplot as plt
         import numpy as np
 
+        t = self.theme
         conditions = result.conditions
+        n = len(conditions)
 
-        labels = [c.label for c in conditions]
+        cond_labels = [c.label for c in conditions]
         means = [c.mean_chaperone_fraction for c in conditions]
         sems = [c.sem_chaperone_fraction for c in conditions]
+        colors = self._get_colors(n)
 
-        fig, ax = plt.subplots(figsize=(max(6, len(labels) * 1.4), 5))
-        x = np.arange(len(labels))
-        bars = ax.bar(x, means, yerr=sems, capsize=4, color="steelblue", alpha=0.8)  # noqa: F841
+        fig, ax = plt.subplots(figsize=(max(6, n * 1.4), 5))
+        x = np.arange(n)
+        ax.bar(
+            x,
+            means,
+            yerr=sems,
+            capsize=t.bar_capsize,
+            color=colors,
+            alpha=t.bar_alpha,
+            edgecolor=t.bar_edgecolor,
+            linewidth=t.bar_linewidth,
+        )
+
+        rng = np.random.default_rng(seed=42)
+        bar_width = 0.8
+        for i, cond in enumerate(conditions):
+            rep_vals = getattr(cond, "replicate_values", None)
+            if rep_vals:
+                rep_arr = np.asarray(rep_vals, dtype=float)
+                jitter = rng.uniform(-bar_width * 0.25, bar_width * 0.25, size=len(rep_arr))
+                ax.scatter(
+                    np.full_like(rep_arr, float(x[i])) + jitter,
+                    rep_arr,
+                    color=t.dot_color,
+                    s=t.dot_size,
+                    zorder=5,
+                    alpha=t.dot_alpha,
+                    edgecolors="none",
+                )
 
         ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=9)
-        ax.set_ylabel("Mean chaperone fraction")
-        ax.set_title("Chaperone fraction across conditions\n(transient residues only)")
+        ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=t.tick_fontsize)
+        self._apply_axis_style(
+            ax,
+            title="Chaperone fraction across conditions
+(transient residues only)",
+            ylabel="Mean chaperone fraction",
+        )
         ax.set_ylim(bottom=0)
         fig.tight_layout()
 
@@ -232,27 +241,7 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
         output_dir: Path,
         **kwargs,
     ) -> list[Path]:
-        """Generate enrichment heatmaps from cached ExposureComparisonResult.
-
-        Loads enrichment data from the per-condition summaries stored in the
-        comparison result JSON found on disk.
-
-        Parameters
-        ----------
-        data : dict
-            Mapping of condition_label -> condition data dict.
-        labels : sequence of str
-            Condition labels.
-        output_dir : Path
-            Output directory.
-        **kwargs
-            Reserved for future use.
-
-        Returns
-        -------
-        list[Path]
-            Paths to generated plot files.
-        """
+        """Generate enrichment heatmaps from cached ExposureComparisonResult."""
         result = self._find_comparison_result(data, labels)
         if result is None:
             logger.warning(
@@ -275,9 +264,9 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
         import matplotlib.pyplot as plt
         import numpy as np
 
+        t = self.theme
         conditions = result.conditions
 
-        # Collect all polymer types and AA groups across conditions
         all_ptypes: list[str] = sorted({pt for c in conditions for pt in c.polymer_types})
         all_groups: list[str] = sorted({ag for c in conditions for ag in c.aa_groups})
 
@@ -289,7 +278,6 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
         n_ptypes = len(all_ptypes)
         n_groups = len(all_groups)
 
-        # Build enrichment matrix: (n_conds, n_ptypes, n_groups)
         matrices = np.full((n_conds, n_ptypes, n_groups), np.nan)
         for ci, cond in enumerate(conditions):
             for pi, pt in enumerate(all_ptypes):
@@ -297,11 +285,11 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
                     val = cond.enrichment_by_polymer_type.get(pt, {}).get(ag, float("nan"))
                     matrices[ci, pi, gi] = val
 
-        # Determine symmetric colour scale
         finite_vals = matrices[np.isfinite(matrices)]
         if len(finite_vals) == 0:
             logger.warning("All enrichment values are NaN; skipping heatmap")
             return []
+
         floor = 0.1
         vmax_raw = max(abs(finite_vals.min()), abs(finite_vals.max()), floor)
         vmin, vmax = -vmax_raw, vmax_raw
@@ -314,28 +302,35 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
 
         im = None
         for ci, (cond, ax) in enumerate(zip(conditions, axes[0])):
-            mat = matrices[ci]  # (n_ptypes, n_groups)
+            mat = matrices[ci]
             im = ax.imshow(mat, vmin=vmin, vmax=vmax, cmap="RdBu_r", aspect="auto")
             ax.set_xticks(range(n_groups))
-            ax.set_xticklabels(all_groups, rotation=45, ha="right", fontsize=8)
-            ax.set_title(cond.label, fontsize=9)
+            ax.set_xticklabels(all_groups, rotation=45, ha="right", fontsize=t.tick_fontsize)
+            ax.set_title(cond.label, fontsize=t.title_fontsize, fontweight=t.title_fontweight)
             if ci == 0:
                 ax.set_yticks(range(n_ptypes))
-                ax.set_yticklabels(all_ptypes, fontsize=8)
+                ax.set_yticklabels(all_ptypes, fontsize=t.tick_fontsize)
             else:
                 ax.set_yticks([])
 
-            # Annotate cells
             self._annotate_cells(
-                ax, mat, fmt="+.2f", fontsize=6, threshold=vmax * 0.6, show_sign=False
+                ax,
+                mat,
+                fmt="+.2f",
+                fontsize=t.small_fontsize,
+                threshold=vmax * 0.6,
+                show_sign=False,
             )
 
-        # Shared colorbar
         if im is not None:
-            cbar = fig.colorbar(im, ax=axes[0, -1], fraction=0.04, pad=0.04)  # type: ignore[arg-type]
-            cbar.set_label("Chaperone enrichment (residue-based)", fontsize=8)
+            cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.04, pad=0.04)
+            cbar.set_label("Chaperone enrichment (residue-based)", fontsize=t.legend_fontsize)
 
-        fig.suptitle("Dynamic chaperone enrichment by AA group", fontsize=11, y=1.01)
+        fig.suptitle(
+            "Dynamic chaperone enrichment by AA group",
+            fontsize=t.suptitle_fontsize,
+            y=1.01,
+        )
         fig.tight_layout()
 
         output_path = self._get_output_path(output_dir, "exposure_enrichment_heatmap")

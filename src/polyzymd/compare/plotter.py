@@ -46,9 +46,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence, Type
 
 if TYPE_CHECKING:
+    from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
-    from polyzymd.compare.config import ComparisonConfig, PlotSettings
+    from polyzymd.compare.config import ComparisonConfig, PlotSettings, PlotTheme
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,56 @@ class BasePlotter(ABC):
             Global plot settings from comparison.yaml
         """
         self.settings = settings
+
+    @property
+    def theme(self) -> "PlotTheme":
+        """Resolved visual theme from ``self.settings``.
+
+        Returns
+        -------
+        PlotTheme
+            The centralized theme instance (publication/presentation/minimal
+            preset, potentially with user overrides).
+        """
+        return self.settings.theme
+
+    def _apply_axis_style(
+        self,
+        ax: "Axes",
+        *,
+        title: str | None = None,
+        xlabel: str | None = None,
+        ylabel: str | None = None,
+    ) -> None:
+        """Apply standard axis chrome from the theme.
+
+        Hides spines according to theme settings, sizes tick labels, and
+        optionally sets title/xlabel/ylabel with themed font sizes.
+
+        Parameters
+        ----------
+        ax : matplotlib Axes
+            Target axes to style.
+        title : str, optional
+            If provided, sets the axes title with ``theme.title_fontsize``
+            and ``theme.title_fontweight``.
+        xlabel : str, optional
+            If provided, sets the x-axis label with ``theme.label_fontsize``.
+        ylabel : str, optional
+            If provided, sets the y-axis label with ``theme.label_fontsize``.
+        """
+        t = self.theme
+        if t.hide_top_spine:
+            ax.spines["top"].set_visible(False)
+        if t.hide_right_spine:
+            ax.spines["right"].set_visible(False)
+        ax.tick_params(axis="both", labelsize=t.tick_fontsize)
+        if title is not None:
+            ax.set_title(title, fontsize=t.title_fontsize, fontweight=t.title_fontweight)
+        if xlabel is not None:
+            ax.set_xlabel(xlabel, fontsize=t.label_fontsize)
+        if ylabel is not None:
+            ax.set_ylabel(ylabel, fontsize=t.label_fontsize)
 
     @classmethod
     @abstractmethod
@@ -332,16 +383,14 @@ class BasePlotter(ABC):
         show_error: bool = True,
         reference_line: float | None = 0.0,
         reference_label: str = "Neutral (0)",
-        alpha: float = 0.85,
-        capsize: int = 3,
-        edgecolor: str | None = None,
-        linewidth: float | None = None,
         replicate_values: "Sequence[Sequence[Sequence[float]]] | None" = None,
+        **style_overrides,
     ) -> None:
         """Render grouped bars with optional error bars and reference line.
 
-        Each entry in *series* is rendered as one group of bars offset
-        symmetrically around the integer positions in *x*.
+        Style values (alpha, capsize, edgecolor, linewidth, dot_size, etc.)
+        are read from ``self.theme``.  Callers can override any of them via
+        ``**style_overrides`` using the theme field names as keys.
 
         Parameters
         ----------
@@ -364,21 +413,31 @@ class BasePlotter(ABC):
             skip, by default ``0.0``.
         reference_label : str, optional
             Legend label for the reference line, by default ``"Neutral (0)"``.
-        alpha : float, optional
-            Bar opacity, by default ``0.85``.
-        capsize : int, optional
-            Error-bar cap size in points, by default ``3``.
-        edgecolor : str | None, optional
-            Bar edge colour.  ``None`` uses the matplotlib default.
-        linewidth : float | None, optional
-            Bar edge line width.  ``None`` uses the matplotlib default.
         replicate_values : sequence or None, optional
             Per-replicate values for jittered dot overlay.  Indexed as
             ``replicate_values[condition_idx][group_idx]`` -> sequence of
             floats (one per replicate).  When ``None`` (default), no dots
             are drawn.
+        **style_overrides
+            Override any theme field for this call only.  Accepted keys:
+            ``bar_alpha``, ``bar_capsize``, ``bar_edgecolor``,
+            ``bar_linewidth``, ``dot_size``, ``dot_alpha``, ``dot_color``,
+            ``reference_line_color``, ``reference_line_style``,
+            ``reference_line_width``.
         """
         import numpy as np
+
+        t = self.theme
+        alpha = style_overrides.get("bar_alpha", t.bar_alpha)
+        capsize = style_overrides.get("bar_capsize", t.bar_capsize)
+        edgecolor = style_overrides.get("bar_edgecolor", t.bar_edgecolor)
+        linewidth = style_overrides.get("bar_linewidth", t.bar_linewidth)
+        dot_s = style_overrides.get("dot_size", t.dot_size)
+        dot_a = style_overrides.get("dot_alpha", t.dot_alpha)
+        dot_c = style_overrides.get("dot_color", t.dot_color)
+        ref_color = style_overrides.get("reference_line_color", t.reference_line_color)
+        ref_style = style_overrides.get("reference_line_style", t.reference_line_style)
+        ref_width = style_overrides.get("reference_line_width", t.reference_line_width)
 
         n = len(series)
         w = bar_width if bar_width is not None else 0.8 / max(n, 1)
@@ -391,13 +450,11 @@ class BasePlotter(ABC):
                 "color": colors[i],
                 "alpha": alpha,
                 "capsize": capsize,
+                "edgecolor": edgecolor,
+                "linewidth": linewidth,
             }
             if show_error:
                 bar_kwargs["yerr"] = errors
-            if edgecolor is not None:
-                bar_kwargs["edgecolor"] = edgecolor
-            if linewidth is not None:
-                bar_kwargs["linewidth"] = linewidth
             ax.bar(np.asarray(x) + offset, means, **bar_kwargs)
 
             # Overlay jittered replicate dots
@@ -411,19 +468,19 @@ class BasePlotter(ABC):
                         ax.scatter(
                             np.full_like(rep_vals, float(x[j]) + offset) + jitter,
                             rep_vals,
-                            color="black",
-                            s=12,
+                            color=dot_c,
+                            s=dot_s,
                             zorder=5,
-                            alpha=0.7,
+                            alpha=dot_a,
                             edgecolors="none",
                         )
 
         if reference_line is not None:
             ax.axhline(
                 y=reference_line,
-                color="black",
-                linestyle="--",
-                linewidth=1.5,
+                color=ref_color,
+                linestyle=ref_style,
+                linewidth=ref_width,
                 label=reference_label,
             )
 
@@ -433,7 +490,7 @@ class BasePlotter(ABC):
         matrix: "np.ndarray",
         *,
         fmt: str = ".2f",
-        fontsize: int = 9,
+        fontsize: int | None = None,
         threshold: float = 0.3,
         sem_matrix: "np.ndarray | None" = None,
         show_sign: bool = True,
@@ -451,16 +508,17 @@ class BasePlotter(ABC):
         ax : matplotlib Axes
             The axes containing the heatmap image.
         matrix : np.ndarray
-            2-D array of values (rows × cols) matching the heatmap.
+            2-D array of values (rows x cols) matching the heatmap.
         fmt : str, optional
             Format spec for the value, by default ``".2f"``.
-        fontsize : int, optional
-            Annotation font size, by default ``9``.
+        fontsize : int | None, optional
+            Annotation font size.  When ``None`` (default), uses
+            ``self.theme.annotation_fontsize``.
         threshold : float, optional
             Absolute-value threshold above which text turns white.
             For relative thresholds pass e.g. ``0.35 * max_abs``.
         sem_matrix : np.ndarray | None, optional
-            If provided, a second line ``±{sem}`` is appended when the
+            If provided, a second line ``+/-{sem}`` is appended when the
             SEM value is finite.
         show_sign : bool, optional
             Prefix positive values with ``"+"`` , by default ``True``.
@@ -468,6 +526,8 @@ class BasePlotter(ABC):
             Passed to ``ax.text(linespacing=...)`` when SEM is shown.
         """
         import numpy as np
+
+        fs = fontsize if fontsize is not None else self.theme.annotation_fontsize
 
         n_rows, n_cols = matrix.shape
         for i in range(n_rows):
@@ -486,7 +546,7 @@ class BasePlotter(ABC):
                     "ha": "center",
                     "va": "center",
                     "color": text_color,
-                    "fontsize": fontsize,
+                    "fontsize": fs,
                 }
                 if linespacing is not None:
                     kwargs["linespacing"] = linespacing

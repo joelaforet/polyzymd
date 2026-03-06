@@ -149,6 +149,8 @@ class RMSFComparisonPlotter(BasePlotter):
         import matplotlib.pyplot as plt
         import numpy as np
 
+        t = self.theme
+
         # Get conditions sorted by RMSF (lowest first)
         labels_sorted = (
             result.ranking if hasattr(result, "ranking") else [c.label for c in result.conditions]
@@ -178,9 +180,9 @@ class RMSFComparisonPlotter(BasePlotter):
             means_arr,
             xerr=sems_arr,
             color=colors,
-            edgecolor="black",
-            linewidth=0.5,
-            capsize=3,
+            edgecolor=t.bar_edgecolor,
+            linewidth=t.bar_linewidth,
+            capsize=t.bar_capsize,
             height=bar_height,
         )
 
@@ -193,20 +195,17 @@ class RMSFComparisonPlotter(BasePlotter):
                 ax.scatter(
                     rep_arr,
                     np.full_like(rep_arr, float(positions[i])) + jitter,
-                    color="black",
-                    s=14,
+                    color=t.dot_color,
+                    s=t.dot_size,
                     zorder=5,
-                    alpha=0.7,
+                    alpha=t.dot_alpha,
                     edgecolors="none",
                 )
 
         ax.set_yticks(positions)
         ax.set_yticklabels(labels_sorted)
-        ax.set_xlabel("Mean RMSF (Å)", fontsize=11)
-        ax.set_title("RMSF Comparison", fontsize=13, fontweight="bold")
+        self._apply_axis_style(ax, title="RMSF Comparison", xlabel="Mean RMSF (Å)")
         ax.invert_yaxis()
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
 
         plt.tight_layout()
 
@@ -282,6 +281,7 @@ class RMSFComparisonPlotter(BasePlotter):
         # Create simple bar chart
         fig, ax = plt.subplots(figsize=self.settings.rmsf.figsize_comparison)
 
+        t = self.theme
         positions = np.arange(len(plot_labels))
         colors = self._get_colors(len(plot_labels))
 
@@ -290,19 +290,16 @@ class RMSFComparisonPlotter(BasePlotter):
             means,
             xerr=sems,
             color=colors,
-            edgecolor="black",
-            linewidth=0.5,
-            capsize=3,
+            edgecolor=t.bar_edgecolor,
+            linewidth=t.bar_linewidth,
+            capsize=t.bar_capsize,
             height=0.7,
         )
 
         ax.set_yticks(positions)
         ax.set_yticklabels(plot_labels)
-        ax.set_xlabel("Mean RMSF (Å)", fontsize=11)
-        ax.set_title("RMSF Comparison", fontsize=13, fontweight="bold")
+        self._apply_axis_style(ax, title="RMSF Comparison", xlabel="Mean RMSF (Å)")
         ax.invert_yaxis()
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
 
         plt.tight_layout()
 
@@ -361,6 +358,7 @@ class RMSFProfilePlotter(BasePlotter):
         import matplotlib.pyplot as plt
         import numpy as np
 
+        t = self.theme
         colors = self._get_colors(len(labels))
 
         # Load per-residue RMSF data for each condition
@@ -416,7 +414,7 @@ class RMSFProfilePlotter(BasePlotter):
                     residues,
                     rmsf - sem,
                     rmsf + sem,
-                    alpha=0.3,
+                    alpha=t.fill_alpha,
                     color=color,
                 )
 
@@ -424,19 +422,18 @@ class RMSFProfilePlotter(BasePlotter):
 
         # Highlight residues if configured
         for resid in self.settings.rmsf.highlight_residues:
-            ax_rmsf.axvline(resid, color="red", linestyle="--", alpha=0.5, linewidth=1)
+            ax_rmsf.axvline(
+                resid, color="red", linestyle="--", alpha=t.highlight_line_alpha, linewidth=1
+            )
 
-        ax_rmsf.set_ylabel("RMSF (\u00c5)", fontsize=11)
-        ax_rmsf.set_title("Per-Residue RMSF Comparison", fontsize=13, fontweight="bold")
-        ax_rmsf.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
-        ax_rmsf.spines["top"].set_visible(False)
-        ax_rmsf.spines["right"].set_visible(False)
+        self._apply_axis_style(ax_rmsf, title="Per-Residue RMSF Comparison", ylabel="RMSF (\u00c5)")
+        ax_rmsf.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
 
         # Draw SS annotation bar if available
         if ax_ss is not None and ss_annotation is not None:
             self._draw_ss_bar(ax_ss, ss_annotation)
         else:
-            ax_rmsf.set_xlabel("Residue Number", fontsize=11)
+            ax_rmsf.set_xlabel("Residue Number", fontsize=t.label_fontsize)
 
         plt.tight_layout()
 
@@ -512,8 +509,7 @@ class RMSFProfilePlotter(BasePlotter):
             logger.debug(f"Failed to compute reference SS: {exc}")
             return None
 
-    @staticmethod
-    def _draw_ss_bar(ax, ss_annotation: dict) -> None:
+    def _draw_ss_bar(self, ax, ss_annotation: dict) -> None:
         """Draw a colored SS annotation bar on the given axes.
 
         Parameters
@@ -527,12 +523,14 @@ class RMSFProfilePlotter(BasePlotter):
         import numpy as np
         from matplotlib.patches import Patch
 
+        t = self.theme
+
         residue_ids = np.array(ss_annotation["residue_ids"])
         ss_codes = np.array(ss_annotation["ss_codes"])
 
         # SS colors: 0=coil(grey), 1=helix(red), 2=strand(blue)
         ss_colors = {0: "#CCCCCC", 1: "#E74C3C", 2: "#3498DB"}
-        ss_names = {0: "Coil", 1: "Helix", 2: "Strand"}
+        ss_names = {0: "No SS", 1: "Helix", 2: "\u03b2-Sheet"}
 
         cmap = mcolors.ListedColormap([ss_colors[0], ss_colors[1], ss_colors[2]])
         bounds = [-0.5, 0.5, 1.5, 2.5]
@@ -556,22 +554,32 @@ class RMSFProfilePlotter(BasePlotter):
         )
 
         ax.set_yticks([])
-        ax.set_ylabel("SS", fontsize=9, rotation=0, ha="right", va="center")
-        ax.set_xlabel("Residue Number", fontsize=11)
+        ax.set_ylabel(
+            "Ref.\nSS",
+            fontsize=t.small_fontsize,
+            rotation=0,
+            ha="right",
+            va="center",
+            fontstyle="italic",
+        )
+        ax.set_xlabel("Residue Number", fontsize=t.label_fontsize)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.spines["left"].set_visible(False)
 
-        # Compact legend inside the bar
+        # Place SS legend outside the bar, to the right (aligned with RMSF legend)
         legend_patches = [Patch(facecolor=ss_colors[i], label=ss_names[i]) for i in [1, 2, 0]]
         ax.legend(
             handles=legend_patches,
-            loc="upper right",
-            fontsize=6,
-            ncol=3,
-            framealpha=0.7,
-            borderpad=0.3,
+            loc="center left",
+            bbox_to_anchor=(1.02, 0.5),
+            fontsize=t.small_fontsize,
+            ncol=1,
+            framealpha=0.8,
+            borderpad=0.4,
             handlelength=1.0,
+            title="Reference SS",
+            title_fontsize=t.small_fontsize,
         )
 
     def _load_rmsf_profile(self, aggregated_dir: Path) -> dict | None:
