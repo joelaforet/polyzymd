@@ -692,77 +692,45 @@ polyzymd compare plot results/rmsf_comparison_my_study.json --show
 
 ````{tab-item} Python
 ```python
-from polyzymd.compare import (
-    ComparisonResult,
-    plot_rmsf_comparison,
-    plot_percent_change,
-    plot_effect_sizes,
-    plot_summary_panel,
-)
-import matplotlib.pyplot as plt
+from pathlib import Path
+from polyzymd.compare.config import ComparisonConfig
+from polyzymd.compare.plotter import ComparisonPlotter
 
-# Load result
-result = ComparisonResult.load("results/rmsf_comparison_my_study.json")
+# Load comparison config
+config = ComparisonConfig.from_yaml("comparison.yaml")
 
-# Generate individual plots
-fig1 = plot_rmsf_comparison(result, save_path="figures/rmsf.png", dpi=300)
-fig2 = plot_percent_change(result, save_path="figures/pct_change.png", dpi=300)
-fig3 = plot_effect_sizes(result, save_path="figures/effects.png", dpi=300)
-
-# Generate combined summary panel
-fig_summary = plot_summary_panel(
-    result,
-    title="Polymer Stabilization Study",
-    save_path="figures/summary.png",
-    dpi=300,
-)
-
-# Preview interactively
-plt.show()
+# Generate all plots via the plotter registry
+plotter = ComparisonPlotter(config)
+paths = plotter.plot_all()
+print(f"Generated {len(paths)} plots")
 ```
 ````
 `````
 
 ### Generated Plots
 
-| File | Description |
+The plotter registry automatically generates all applicable plots for each
+analysis type configured in `comparison.yaml`. For RMSF analysis, this includes:
+
+| Plot | Description |
 |------|-------------|
-| `rmsf_comparison.png` | Bar chart of mean RMSF by condition, sorted by stability |
-| `percent_change.png` | Bar chart of % change vs control |
-| `effect_sizes.png` | Forest plot of Cohen's d effect sizes |
-| `summary_panel.png` | Combined 3-panel figure for presentations |
+| `rmsf_comparison.png` | Bar chart of mean RMSF by condition with SEM error bars |
+| `rmsf_profile.png` | Per-residue RMSF line plot with optional SS annotation |
 
-### Color Coding
-
-Plots use consistent color coding to indicate statistical significance:
-
-| Color | Meaning |
-|-------|---------|
-| **Green** | Significant improvement (p < 0.05, RMSF decreased) |
-| **Blue** | Large effect (Cohen's d > 0.8) but not statistically significant |
-| **Gray** | Control condition, or no meaningful effect |
-| **Red** | Worse than control (RMSF increased) |
+Other analysis types (contacts, distances, secondary structure, etc.) generate
+their own plot sets. See the `plot_settings` section in `comparison.yaml` for
+per-analysis customization options.
 
 ### Example Output
 
 After running:
 
 ```bash
-polyzymd compare plot results/rmsf_comparison_polymer_study.json -o figures/
+polyzymd compare plot-all
 ```
 
-You get:
-
-```
-Generated plots:
-  - figures/rmsf_comparison.png
-  - figures/percent_change.png
-  - figures/effect_sizes.png
-  - figures/summary_panel.png
-```
-
-The **summary panel** is ideal for PowerPoint presentations, combining all
-three visualizations in a single figure with labeled panels (A, B, C).
+You get all configured plots saved to the `output_dir` specified in
+`plot_settings` (default: `figures/`).
 
 ## Python API
 
@@ -831,54 +799,43 @@ print(f"SBMA vs control: {comp.percent_change:+.1f}%, p={comp.p_value:.4f}")
 ### Plotting with Python
 
 ```python
-from polyzymd.compare import (
-    ComparisonResult,
-    plot_rmsf_comparison,
-    plot_percent_change,
-    plot_effect_sizes,
-    plot_summary_panel,
-)
-import matplotlib.pyplot as plt
+from pathlib import Path
+from polyzymd.compare.config import ComparisonConfig
+from polyzymd.compare.plotter import ComparisonPlotter
 
-# Load result
-result = ComparisonResult.load("results/rmsf_comparison_my_study.json")
+# Load config and generate all plots
+config = ComparisonConfig.from_yaml("comparison.yaml")
+plotter = ComparisonPlotter(config)
+paths = plotter.plot_all()
 
-# Generate individual plots
-fig1 = plot_rmsf_comparison(result, save_path="figures/rmsf.png", dpi=200)
-fig2 = plot_percent_change(result, save_path="figures/pct_change.png")
-fig3 = plot_effect_sizes(result, save_path="figures/effects.png")
-
-# Generate combined summary panel
-fig_summary = plot_summary_panel(
-    result,
-    title="Polymer Stabilization Study",
-    save_path="figures/summary.png",
-    dpi=300,
-)
-
-# Show interactively
-plt.show()
+for p in paths:
+    print(f"  {p}")
 ```
 
 ### Plot Customization
 
-Each plotting function accepts customization parameters:
+Plot appearance is controlled via the `plot_settings` section of
+`comparison.yaml`. You can set global options (DPI, format, color palette)
+and per-analysis overrides (figure sizes, which plot types to generate).
 
-```python
-# Custom figure size and title
-fig = plot_rmsf_comparison(
-    result,
-    figsize=(12, 8),
-    title="Effect of Polymer Coating on Enzyme Flexibility",
-    horizontal=True,      # Horizontal bars (default)
-    sort_by_rmsf=True,    # Sort by RMSF (default)
-    color_by_effect=True, # Color by statistical effect (default)
-    show_significance=True,  # Show * for p<0.05 (default)
-)
+```yaml
+plot_settings:
+  output_dir: "figures/"
+  format: "png"
+  dpi: 300
+  style: "publication"
+  color_palette: "tab10"
 
-# Vertical bars for fewer conditions
-fig = plot_rmsf_comparison(result, horizontal=False)
+  # Per-analysis overrides
+  rmsf:
+    show_error: true
+    highlight_residues: [77, 133, 156]
+    figsize_profile: [14, 4]
+    figsize_comparison: [8, 6]
 ```
+
+See the `theme:` block in `comparison.yaml` for fine-grained control over
+font sizes, bar styling, line widths, spine visibility, and legend placement.
 
 ## Troubleshooting
 

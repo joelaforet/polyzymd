@@ -2,9 +2,9 @@
 
 This module provides registered plotters for RMSF analysis:
 - RMSFComparisonPlotter: Bar chart comparing whole-protein mean RMSF
+- RMSFProfilePlotter: Per-residue RMSF profile with optional SS annotation
 
-The plotters wrap existing plotting functions from compare/plotting.py
-and are automatically registered with PlotterRegistry.
+Plotters are automatically registered with PlotterRegistry.
 """
 
 from __future__ import annotations
@@ -27,11 +27,8 @@ class RMSFComparisonPlotter(BasePlotter):
     """Generate bar chart comparing whole-protein RMSF across conditions.
 
     Creates a horizontal or vertical bar chart showing mean RMSF for each
-    condition, with error bars (SEM) and significance markers. Uses
+    condition, with error bars (SEM) and per-replicate dot overlays. Uses
     comparison result JSON or aggregated RMSF data.
-
-    This wraps the existing plot_rmsf_comparison() function from
-    compare/plotting.py.
     """
 
     @classmethod
