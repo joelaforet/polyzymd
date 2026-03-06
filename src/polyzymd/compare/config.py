@@ -651,6 +651,9 @@ class PlotTheme(BaseModel):
         ``bbox_to_anchor`` for legend placement, relative to axes.
         Default ``(1.02, 0.5)`` places it just outside the right edge,
         vertically centred.
+    show_watermark : bool
+        Whether to render a subtle "Made by PolyzyMD" watermark in the
+        bottom-right corner of every saved figure.  Default ``True``.
     """
 
     # Font sizes by semantic role
@@ -692,6 +695,9 @@ class PlotTheme(BaseModel):
     # Legend placement
     legend_loc: str = "center left"
     legend_bbox: tuple[float, float] = (1.02, 0.5)
+
+    # Watermark
+    show_watermark: bool = True
 
     @classmethod
     def publication(cls) -> PlotTheme:
