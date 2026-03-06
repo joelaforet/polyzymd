@@ -360,12 +360,12 @@ class ExposureAccelerationRatioPlotter(BasePlotter):
                 ax, mat, fmt=".2f", fontsize=8, threshold=vmax * 0.6, show_sign=False
             )
 
-        if im is not None:
-            cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.03, pad=0.02)
-            cbar.set_label("Acceleration ratio ρ  (>1 = chaperoning)", fontsize=9)
-
         fig.suptitle("Refolding acceleration ratio ρ(P, G) by AA group", fontsize=12, y=0.99)
-        fig.tight_layout(rect=(0.0, 0.0, 0.92, 0.97))
+        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
+
+        if im is not None:
+            cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.04, pad=0.05)
+            cbar.set_label("Acceleration ratio ρ  (>1 = chaperoning)", fontsize=9)
 
         output_path = self._get_output_path(output_dir, "exposure_acceleration_ratio")
         return [self._save_figure(fig, output_path)]
@@ -505,12 +505,12 @@ class ExposureChaperoneSelectivityPlotter(BasePlotter):
                 ax, mat, fmt="+.2f", fontsize=8, threshold=vmax * 0.6, show_sign=False
             )
 
-        if im is not None:
-            cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.03, pad=0.02)
-            cbar.set_label("ΔG_sel^chap (kT)  [<0 = preference]", fontsize=9)
-
         fig.suptitle("Chaperone selectivity ΔG_sel^chap(P, G) by AA group", fontsize=12, y=0.99)
-        fig.tight_layout(rect=(0.0, 0.0, 0.92, 0.97))
+        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
+
+        if im is not None:
+            cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.04, pad=0.05)
+            cbar.set_label("ΔG_sel^chap (kT)  [<0 = preference]", fontsize=9)
 
         output_path = self._get_output_path(output_dir, "exposure_chaperone_selectivity")
         return [self._save_figure(fig, output_path)]
