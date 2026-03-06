@@ -88,37 +88,52 @@ class RMSFComparisonPlotter(BasePlotter):
     ) -> Any | None:
         """Try to find a pre-computed RMSF comparison result.
 
-        Looks for rmsf_comparison.json in the comparison output directory.
+        Primary lookup uses ``__meta__["results_dir"]`` (populated by the
+        plotter orchestrator).  Falls back to searching per-condition
+        ``comparison/`` directories.
         """
         from polyzymd.compare.results.rmsf import RMSFComparisonResult
         from polyzymd.compare.results.rmsf_legacy import ComparisonResult
 
-        # Check if there's a comparison result in the typical location
+        def _try_load(result_file: Path) -> Any | None:
+            try:
+                return RMSFComparisonResult.load(result_file)
+            except Exception:
+                try:
+                    return ComparisonResult.load(result_file)
+                except Exception as e:
+                    logger.debug(f"Could not load {result_file}: {e}")
+            return None
+
+        # --- Primary: __meta__.results_dir from the orchestrator ---
+        meta = data.get("__meta__")
+        if meta is not None:
+            results_dir = meta.get("results_dir")
+            if results_dir is not None:
+                rdir = Path(results_dir)
+                if rdir.is_dir():
+                    for f in sorted(rdir.glob("rmsf_comparison*.json")):
+                        loaded = _try_load(f)
+                        if loaded is not None:
+                            return loaded
+
+        # --- Fallback: per-condition heuristic ---
         for label in labels:
             cond_data = data.get(label)
             if cond_data is None:
                 continue
 
-            # Look for comparison result in parent of analysis dir
             analysis_dir = cond_data.get("analysis_dir")
             if analysis_dir:
-                # Comparison results are typically in project root / comparison /
                 project_root = Path(analysis_dir).parent.parent
                 comparison_dir = project_root / "comparison"
 
-                # Try several possible filenames
                 for filename in ["rmsf_comparison.json", "comparison_result.json"]:
                     result_file = comparison_dir / filename
                     if result_file.exists():
-                        try:
-                            # Try new format first
-                            return RMSFComparisonResult.load(result_file)
-                        except Exception:
-                            try:
-                                # Fall back to legacy format
-                                return ComparisonResult.load(result_file)
-                            except Exception as e:
-                                logger.debug(f"Could not load {result_file}: {e}")
+                        loaded = _try_load(result_file)
+                        if loaded is not None:
+                            return loaded
 
         return None
 
@@ -127,21 +142,75 @@ class RMSFComparisonPlotter(BasePlotter):
         result: Any,
         output_dir: Path,
     ) -> list[Path]:
-        """Generate plot from pre-computed comparison result."""
-        from polyzymd.compare.plotting import plot_rmsf_comparison
+        """Generate horizontal bar chart from comparison result.
 
-        output_path = self._get_output_path(output_dir, "rmsf_comparison")
+        Uses Tab10 colors and overlays jittered per-replicate dots.
+        """
+        import matplotlib.pyplot as plt
+        import numpy as np
 
-        fig = plot_rmsf_comparison(
-            result=result,
-            figsize=self.settings.rmsf.figsize_comparison,
-            show_significance=True,
-            color_by_effect=True,
-            sort_by_rmsf=True,
-            horizontal=True,
-            dpi=self.settings.dpi,
+        # Get conditions sorted by RMSF (lowest first)
+        labels_sorted = (
+            result.ranking if hasattr(result, "ranking") else [c.label for c in result.conditions]
         )
 
+        means = []
+        sems = []
+        replicate_data: list[list[float]] = []
+
+        for label in labels_sorted:
+            cond = result.get_condition(label)
+            means.append(cond.mean_rmsf)
+            sems.append(cond.sem_rmsf)
+            replicate_data.append(getattr(cond, "replicate_values", None) or [])
+
+        n = len(labels_sorted)
+        means_arr = np.array(means)
+        sems_arr = np.array(sems)
+        positions = np.arange(n)
+        colors = self._get_colors(n)
+
+        fig, ax = plt.subplots(figsize=self.settings.rmsf.figsize_comparison)
+
+        bar_height = 0.7
+        ax.barh(
+            positions,
+            means_arr,
+            xerr=sems_arr,
+            color=colors,
+            edgecolor="black",
+            linewidth=0.5,
+            capsize=3,
+            height=bar_height,
+        )
+
+        # Overlay jittered replicate dots
+        rng = np.random.default_rng(seed=42)
+        for i, rep_vals in enumerate(replicate_data):
+            if rep_vals:
+                rep_arr = np.asarray(rep_vals, dtype=float)
+                jitter = rng.uniform(-bar_height * 0.25, bar_height * 0.25, size=len(rep_arr))
+                ax.scatter(
+                    rep_arr,
+                    np.full_like(rep_arr, float(positions[i])) + jitter,
+                    color="black",
+                    s=14,
+                    zorder=5,
+                    alpha=0.7,
+                    edgecolors="none",
+                )
+
+        ax.set_yticks(positions)
+        ax.set_yticklabels(labels_sorted)
+        ax.set_xlabel("Mean RMSF (Å)", fontsize=11)
+        ax.set_title("RMSF Comparison", fontsize=13, fontweight="bold")
+        ax.invert_yaxis()
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        plt.tight_layout()
+
+        output_path = self._get_output_path(output_dir, "rmsf_comparison")
         return [self._save_figure(fig, output_path)]
 
     def _plot_from_aggregated(
