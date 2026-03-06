@@ -305,7 +305,14 @@ class AffinityStackedBarPlotter(BasePlotter):
                 seen[lbl] = True
                 unique_handles.append(handle)
                 unique_labels.append(lbl)
-        ax.legend(unique_handles, unique_labels, loc="best", fontsize=8, framealpha=0.7)
+        ax.legend(
+            unique_handles,
+            unique_labels,
+            loc="center left",
+            bbox_to_anchor=(1.02, 0.5),
+            fontsize=8,
+            framealpha=0.7,
+        )
 
         plt.tight_layout()
 
@@ -474,7 +481,7 @@ class AffinityGroupBarPlotter(BasePlotter):
             ax.set_ylabel(r"Affinity Score ($k_\mathrm{b}T$)", fontsize=10)
             ax.set_xticks(x)
             ax.set_xticklabels(ordered_groups, rotation=35, ha="right", fontsize=9)
-            ax.legend(loc="best", fontsize=8, framealpha=0.7)
+            ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=8, framealpha=0.7)
 
             # Guide lines at ±1 kT
             ax.axhline(y=1.0, color="gray", linestyle=":", linewidth=1.0, alpha=0.6)

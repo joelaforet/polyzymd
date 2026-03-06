@@ -670,7 +670,7 @@ class BFEBarPlotter(BasePlotter):
                 ax.set_ylabel(r"$\Delta G_{\mathrm{sel}}$" + f" ({unit_lbl})", fontsize=10)
                 ax.set_xticks(x)
                 ax.set_xticklabels(protein_groups, rotation=35, ha="right", fontsize=9)
-                ax.legend(loc="best", fontsize=8, framealpha=0.7)
+                ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=8, framealpha=0.7)
 
                 # Horizontal guide lines at ±kT
                 if kt is not None:

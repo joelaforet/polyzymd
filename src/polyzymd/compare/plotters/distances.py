@@ -148,7 +148,7 @@ class DistanceKDEPlotter(BasePlotter):
             ax.set_xlabel("Distance (Å)", fontsize=11)
             ax.set_ylabel("Density", fontsize=11)
             ax.set_title(pair_label, fontsize=13, fontweight="bold")
-            ax.legend(loc="upper right", fontsize=9)
+            ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
 
@@ -364,7 +364,7 @@ class DistanceThresholdBarsPlotter(BasePlotter):
         ax.set_xticks(x)
         ax.set_xticklabels(pair_labels, fontsize=10)
         ax.set_ylim(0, 105)
-        ax.legend(loc="upper right", fontsize=9)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.set_title("Distance Contact Fractions", fontsize=13, fontweight="bold")

@@ -210,7 +210,12 @@ def plot_rmsf_comparison(
             mpatches.Patch(color=COLORS["neutral"], label="No significant effect"),
             mpatches.Patch(color=COLORS["control"], label="Control"),
         ]
-        ax.legend(handles=legend_elements, loc="lower right", fontsize=9)
+        ax.legend(
+            handles=legend_elements,
+            loc="center left",
+            bbox_to_anchor=(1.02, 0.5),
+            fontsize=9,
+        )
 
     # Style
     ax.spines["top"].set_visible(False)
@@ -415,7 +420,7 @@ def plot_effect_sizes(
         title = "Effect Sizes (Cohen's d) vs Control"
     ax.set_title(title, fontsize=14, fontweight="bold")
 
-    ax.legend(loc="lower right", fontsize=9)
+    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.invert_yaxis()
