@@ -675,9 +675,8 @@ class BFEBarPlotter(BasePlotter):
                 self._apply_axis_style(ax, title=title, xlabel=xlabel, ylabel=ylabel)
                 ax.set_xticks(x)
                 ax.set_xticklabels(protein_groups, rotation=35, ha="right")
-                ax.legend(
-                    loc="center left",
-                    bbox_to_anchor=(1.02, 0.5),
+                self._apply_legend(
+                    ax,
                     fontsize=t.small_fontsize,
                     framealpha=0.7,
                 )

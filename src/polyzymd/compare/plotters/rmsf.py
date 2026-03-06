@@ -427,7 +427,7 @@ class RMSFProfilePlotter(BasePlotter):
             )
 
         self._apply_axis_style(ax_rmsf, title="Per-Residue RMSF Comparison", ylabel="RMSF (\u00c5)")
-        ax_rmsf.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
+        self._apply_legend(ax_rmsf)
 
         # Draw SS annotation bar if available
         if ax_ss is not None and ss_annotation is not None:
@@ -569,11 +569,10 @@ class RMSFProfilePlotter(BasePlotter):
 
         # Place SS legend outside the bar, to the right (aligned with RMSF legend)
         legend_patches = [Patch(facecolor=ss_colors[i], label=ss_names[i]) for i in [1, 2, 0]]
-        ax.legend(
-            handles=legend_patches,
-            loc="center left",
-            bbox_to_anchor=(1.02, 0.5),
+        self._apply_legend(
+            ax,
             fontsize=t.small_fontsize,
+            handles=legend_patches,
             ncol=1,
             framealpha=0.8,
             borderpad=0.4,

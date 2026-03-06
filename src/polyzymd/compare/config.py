@@ -644,6 +644,13 @@ class PlotTheme(BaseModel):
         Whether to hide the right axis spine.
     title_fontweight : str
         Font weight for titles (e.g. ``"bold"``, ``"normal"``).
+    legend_loc : str
+        Matplotlib legend location string (e.g. ``"center left"``).
+        Used with ``legend_bbox`` to place the legend outside the axes.
+    legend_bbox : tuple of float
+        ``bbox_to_anchor`` for legend placement, relative to axes.
+        Default ``(1.02, 0.5)`` places it just outside the right edge,
+        vertically centred.
     """
 
     # Font sizes by semantic role
@@ -681,6 +688,10 @@ class PlotTheme(BaseModel):
 
     # Title style
     title_fontweight: str = "bold"
+
+    # Legend placement
+    legend_loc: str = "center left"
+    legend_bbox: tuple[float, float] = (1.02, 0.5)
 
     @classmethod
     def publication(cls) -> PlotTheme:
@@ -1405,6 +1416,10 @@ plot_settings:
   #
   #   # Title style
   #   title_fontweight: "bold"     # title font weight
+  #
+  #   # Legend placement
+  #   legend_loc: "center left"           # matplotlib legend loc string
+  #   legend_bbox: [1.02, 0.5]            # bbox_to_anchor (outside right)
 
   # Per-analysis plot customization (uncomment sections as needed):
 

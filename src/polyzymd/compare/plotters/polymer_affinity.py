@@ -305,12 +305,11 @@ class AffinityStackedBarPlotter(BasePlotter):
                 seen[lbl] = True
                 unique_handles.append(handle)
                 unique_labels.append(lbl)
-        ax.legend(
-            unique_handles,
-            unique_labels,
-            loc="center left",
-            bbox_to_anchor=(1.02, 0.5),
+        self._apply_legend(
+            ax,
             fontsize=t.small_fontsize,
+            handles=unique_handles,
+            labels=unique_labels,
             framealpha=0.7,
         )
 
@@ -482,9 +481,8 @@ class AffinityGroupBarPlotter(BasePlotter):
             )
             ax.set_xticks(x)
             ax.set_xticklabels(ordered_groups, rotation=35, ha="right", fontsize=t.tick_fontsize)
-            ax.legend(
-                loc="center left",
-                bbox_to_anchor=(1.02, 0.5),
+            self._apply_legend(
+                ax,
                 fontsize=t.small_fontsize,
                 framealpha=0.7,
             )

@@ -738,7 +738,7 @@ class BindingPreferenceBarPlotter(BasePlotter):
             )
             ax.set_xticks(x)
             ax.set_xticklabels(protein_groups, rotation=45, ha="right")
-            ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
+            self._apply_legend(ax)
 
             plt.tight_layout()
 
@@ -1103,7 +1103,7 @@ class SystemCoverageBarPlotter(BasePlotter):
         )
         ax.set_xticks(x)
         ax.set_xticklabels(aa_classes, rotation=45, ha="right")
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
+        self._apply_legend(ax)
 
         plt.tight_layout()
 
@@ -1355,7 +1355,7 @@ class UserPartitionBarPlotter(BasePlotter):
         )
         ax.set_xticks(x)
         ax.set_xticklabels(element_names, rotation=45, ha="right")
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
+        self._apply_legend(ax)
 
         plt.tight_layout()
 
@@ -1624,7 +1624,7 @@ class ContactFractionProfilePlotter(BasePlotter):
         self._apply_axis_style(ax, title=title, xlabel="Residue Number", ylabel="Contact Fraction")
 
         ax.set_ylim(bottom=0)
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
+        self._apply_legend(ax)
 
         plt.tight_layout()
 
@@ -1823,7 +1823,7 @@ class ResidenceTimeProfilePlotter(BasePlotter):
         )
 
         ax.set_ylim(bottom=0)
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
+        self._apply_legend(ax)
 
         plt.tight_layout()
 
@@ -2056,7 +2056,7 @@ class ContactFractionByAAClassBarPlotter(BasePlotter):
         ax.set_xticks(x)
         ax.set_xticklabels(aa_classes, rotation=45, ha="right")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
+        self._apply_legend(ax)
 
         plt.tight_layout()
 
@@ -2224,7 +2224,7 @@ class ContactFractionByPartitionBarPlotter(BasePlotter):
         ax.set_xticks(x)
         ax.set_xticklabels(elements, rotation=45, ha="right")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
+        self._apply_legend(ax)
 
         plt.tight_layout()
 
@@ -2369,7 +2369,7 @@ class ResidenceTimeByAAClassBarPlotter(BasePlotter):
         ax.set_xticks(x)
         ax.set_xticklabels(aa_classes, rotation=45, ha="right")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
+        self._apply_legend(ax)
 
         plt.tight_layout()
 
@@ -2546,7 +2546,7 @@ class ResidenceTimeByPartitionBarPlotter(BasePlotter):
         ax.set_xticks(x)
         ax.set_xticklabels(elements, rotation=45, ha="right")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
+        self._apply_legend(ax)
 
         plt.tight_layout()
 

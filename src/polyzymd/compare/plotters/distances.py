@@ -149,7 +149,7 @@ class DistanceKDEPlotter(BasePlotter):
                 )
 
             self._apply_axis_style(ax, title=pair_label, xlabel="Distance (Å)", ylabel="Density")
-            ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
+            self._apply_legend(ax)
 
             plt.tight_layout()
 
@@ -367,7 +367,7 @@ class DistanceThresholdBarsPlotter(BasePlotter):
             title="Distance Contact Fractions",
             ylabel="Fraction Below Threshold (%)",
         )
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
+        self._apply_legend(ax)
 
         plt.tight_layout()
 
@@ -632,7 +632,7 @@ class DistanceStateBarsPlotter(BasePlotter):
 
         title = f"{user_label} State by Condition"
         self._apply_axis_style(ax, title=title, ylabel="Fraction of Frames (%)")
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
+        self._apply_legend(ax)
 
         plt.tight_layout()
 
