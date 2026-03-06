@@ -5,6 +5,12 @@ This module provides registered plotters for polymer-protein contacts analysis:
 - BindingPreferenceBarPlotter: Grouped bar chart of enrichment by protein group
 - SystemCoverageHeatmapPlotter: Heatmap of aggregate coverage across conditions
 - SystemCoverageBarPlotter: Bar chart comparing coverage enrichment by protein group
+- ContactFractionProfilePlotter: Per-residue contact fraction line plot
+- ResidenceTimeProfilePlotter: Per-residue mean residence time line plot
+- ContactFractionByAAClassBarPlotter: Mean CF grouped by AA class
+- ContactFractionByPartitionBarPlotter: Mean CF grouped by user-defined partition
+- ResidenceTimeByAAClassBarPlotter: Mean RT grouped by AA class
+- ResidenceTimeByPartitionBarPlotter: Mean RT grouped by user-defined partition
 
 All plotters are automatically registered with PlotterRegistry and
 discovered by ComparisonPlotter.plot_all() when contacts analysis
@@ -662,7 +668,7 @@ class BindingPreferenceBarPlotter(BasePlotter):
             ax.set_title(f"Binding Preference: {poly_type}", fontweight="bold")
             ax.set_xticks(x)
             ax.set_xticklabels(protein_groups, rotation=45, ha="right")
-            ax.legend(loc="best", fontsize=9)
+            ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
 
             plt.tight_layout()
 
@@ -985,7 +991,7 @@ class SystemCoverageBarPlotter(BasePlotter):
         ax.set_title("AA Class Coverage by Condition", fontweight="bold")
         ax.set_xticks(x)
         ax.set_xticklabels(aa_classes, rotation=45, ha="right")
-        ax.legend(loc="best", fontsize=9)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
 
         plt.tight_layout()
 
@@ -1201,7 +1207,7 @@ class UserPartitionBarPlotter(BasePlotter):
         )
         ax.set_xticks(x)
         ax.set_xticklabels(element_names, rotation=45, ha="right")
-        ax.legend(loc="best", fontsize=9)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
 
         plt.tight_layout()
 
@@ -1219,3 +1225,1189 @@ class UserPartitionBarPlotter(BasePlotter):
     ) -> dict[str, "AggregatedSystemCoverageResult"]:
         """Load system coverage results for each condition."""
         return _load_system_coverage_results(data, labels, logger)
+
+
+# -----------------------------------------------------------------------------
+# Shared helper: load aggregated contact results
+# -----------------------------------------------------------------------------
+
+
+def _load_aggregated_contact_results(
+    data: dict[str, Any],
+    labels: Sequence[str],
+    log: logging.Logger = logger,
+) -> dict[str, "AggregatedContactResult"]:
+    """Load aggregated contact results for each condition.
+
+    Parameters
+    ----------
+    data : dict
+        Mapping of condition_label -> condition data dict
+    labels : sequence of str
+        Condition labels to load
+    log : logging.Logger, optional
+        Logger instance to use, by default module logger
+
+    Returns
+    -------
+    dict
+        Mapping of label -> AggregatedContactResult
+    """
+    from polyzymd.analysis.contacts.aggregator import AggregatedContactResult
+
+    results: dict[str, AggregatedContactResult] = {}
+
+    for label in labels:
+        cond_data = data.get(label)
+        if cond_data is None:
+            continue
+
+        analysis_dir = cond_data.get("analysis_dir")
+        if not analysis_dir:
+            continue
+
+        analysis_dir = Path(analysis_dir)
+
+        # Pattern: contacts_aggregated_reps*.json or contacts_aggregated.json
+        agg_files = list(analysis_dir.glob("contacts_aggregated*.json"))
+
+        if not agg_files:
+            log.debug(f"No aggregated contacts in {analysis_dir}")
+            continue
+
+        # Use the most recent aggregated file
+        result_file = sorted(agg_files)[-1]
+
+        try:
+            result = AggregatedContactResult.load(result_file)
+            results[label] = result
+            log.debug(f"Loaded aggregated contacts for {label} from {result_file}")
+        except Exception as e:
+            log.warning(f"Failed to load aggregated contacts {result_file}: {e}")
+
+    return results
+
+
+# -----------------------------------------------------------------------------
+# Per-Residue Profile Plotters
+# -----------------------------------------------------------------------------
+
+
+if TYPE_CHECKING:
+    from polyzymd.analysis.contacts.aggregator import AggregatedContactResult
+
+
+@PlotterRegistry.register("contact_fraction_profile")
+class ContactFractionProfilePlotter(BasePlotter):
+    """Generate per-residue contact fraction profile comparing conditions.
+
+    Creates a line plot with residue number on the x-axis and contact
+    fraction on the y-axis. One line per condition with optional SEM
+    fill_between bands. Supports per-polymer-type breakdown.
+
+    This plotter loads ``AggregatedContactResult`` from each condition's
+    ``analysis_dir`` and uses ``to_contact_fraction_arrays()`` for data
+    extraction.
+    """
+
+    @classmethod
+    def plot_type(cls) -> str:
+        return "contact_fraction_profile"
+
+    def can_plot(self, comparison_config: "ComparisonConfig", analysis_type: str) -> bool:
+        """Check if this plotter can handle the analysis type.
+
+        Returns True for "contacts" analysis when profile generation
+        is enabled in plot settings.
+        """
+        if analysis_type != "contacts":
+            return False
+        return self.settings.contacts.generate_contact_fraction_profile
+
+    def plot(
+        self,
+        data: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        **kwargs,
+    ) -> list[Path]:
+        """Generate per-residue contact fraction profile plot.
+
+        Parameters
+        ----------
+        data : dict
+            Mapping of condition_label -> condition data dict from
+            ``ComparisonPlotter._load_analysis_data()``.
+        labels : sequence of str
+            Condition labels in desired display order
+        output_dir : Path
+            Directory to save plot files
+        **kwargs
+            Additional keyword arguments (unused)
+
+        Returns
+        -------
+        list[Path]
+            Paths to generated plot files (empty if no data available)
+        """
+        import matplotlib.pyplot as plt
+
+        contact_results = _load_aggregated_contact_results(data, labels, logger)
+        if not contact_results:
+            logger.info("No aggregated contact data found — skipping contact fraction profile")
+            return []
+
+        # Determine polymer types across all conditions
+        all_polymer_types: set[str] = set()
+        for result in contact_results.values():
+            all_polymer_types.update(result.polymer_types())
+
+        saved: list[Path] = []
+
+        # Always generate overall (any-polymer) profile
+        saved.extend(
+            self._plot_profile(
+                contact_results,
+                labels,
+                output_dir,
+                polymer_type=None,
+                plt=plt,
+            )
+        )
+
+        # If multiple polymer types, generate per-type profiles
+        if len(all_polymer_types) > 1:
+            for ptype in sorted(all_polymer_types):
+                saved.extend(
+                    self._plot_profile(
+                        contact_results,
+                        labels,
+                        output_dir,
+                        polymer_type=ptype,
+                        plt=plt,
+                    )
+                )
+
+        return saved
+
+    def _plot_profile(
+        self,
+        contact_results: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        polymer_type: str | None,
+        plt: Any,
+    ) -> list[Path]:
+        """Generate a single contact fraction profile plot.
+
+        Parameters
+        ----------
+        contact_results : dict
+            Mapping of label -> AggregatedContactResult
+        labels : sequence of str
+            Condition labels
+        output_dir : Path
+            Output directory
+        polymer_type : str or None
+            Polymer type to plot, or None for overall
+        plt : module
+            matplotlib.pyplot (passed to avoid re-import)
+
+        Returns
+        -------
+        list[Path]
+            Saved file paths (0 or 1 element)
+        """
+        settings = self.settings.contacts
+        colors = self._get_colors(len(labels))
+
+        fig, ax = plt.subplots(figsize=settings.figsize_contact_fraction_profile)
+
+        has_data = False
+        for idx, label in enumerate(labels):
+            result = contact_results.get(label)
+            if result is None:
+                continue
+
+            resids, means, sems = result.to_contact_fraction_arrays(polymer_type)
+            if len(resids) == 0:
+                continue
+
+            color = colors[idx] if idx < len(colors) else f"C{idx}"
+
+            if settings.show_contact_fraction_profile_error and np.any(sems > 0):
+                ax.fill_between(
+                    resids,
+                    means - sems,
+                    means + sems,
+                    alpha=0.25,
+                    color=color,
+                )
+
+            ax.plot(resids, means, label=label, color=color, linewidth=1.2)
+            has_data = True
+
+        if not has_data:
+            plt.close(fig)
+            return []
+
+        # Optional threshold line
+        if settings.contact_fraction_profile_threshold is not None:
+            ax.axhline(
+                settings.contact_fraction_profile_threshold,
+                color="grey",
+                linestyle="--",
+                alpha=0.6,
+                linewidth=1,
+                label=f"threshold = {settings.contact_fraction_profile_threshold:.2f}",
+            )
+
+        # Highlight residues
+        for resid in settings.highlight_residues:
+            ax.axvline(resid, color="red", linestyle="--", alpha=0.5, linewidth=1)
+
+        ax.set_xlabel("Residue Number", fontsize=11)
+        ax.set_ylabel("Contact Fraction", fontsize=11)
+
+        title = "Per-Residue Contact Fraction"
+        if polymer_type is not None:
+            title += f" — {polymer_type}"
+        ax.set_title(title, fontsize=13, fontweight="bold")
+
+        ax.set_ylim(bottom=0)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        plt.tight_layout()
+
+        stem = "contact_fraction_profile"
+        if polymer_type is not None:
+            stem += f"_{polymer_type}"
+        output_path = self._get_output_path(output_dir, stem)
+        saved = self._save_figure(fig, output_path)
+        logger.info(f"Saved contact fraction profile: {saved}")
+        return [saved]
+
+
+@PlotterRegistry.register("residence_time_profile")
+class ResidenceTimeProfilePlotter(BasePlotter):
+    """Generate per-residue mean residence time profile comparing conditions.
+
+    Creates a line plot with residue number on the x-axis and mean residence
+    time (ns) on the y-axis. One line per condition with optional SEM
+    fill_between bands. Supports per-polymer-type breakdown.
+
+    This plotter loads ``AggregatedContactResult`` from each condition's
+    ``analysis_dir`` and uses ``to_residence_time_arrays()`` for data
+    extraction. Residence time data requires re-aggregation with the
+    extended aggregator that populates
+    ``AggregatedResidueStats.residence_time_by_polymer_type``.
+    """
+
+    @classmethod
+    def plot_type(cls) -> str:
+        return "residence_time_profile"
+
+    def can_plot(self, comparison_config: "ComparisonConfig", analysis_type: str) -> bool:
+        """Check if this plotter can handle the analysis type.
+
+        Returns True for "contacts" analysis when residence time profile
+        generation is enabled in plot settings.
+        """
+        if analysis_type != "contacts":
+            return False
+        return self.settings.contacts.generate_residence_time_profile
+
+    def plot(
+        self,
+        data: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        **kwargs,
+    ) -> list[Path]:
+        """Generate per-residue mean residence time profile plot.
+
+        Parameters
+        ----------
+        data : dict
+            Mapping of condition_label -> condition data dict from
+            ``ComparisonPlotter._load_analysis_data()``.
+        labels : sequence of str
+            Condition labels in desired display order
+        output_dir : Path
+            Directory to save plot files
+        **kwargs
+            Additional keyword arguments (unused)
+
+        Returns
+        -------
+        list[Path]
+            Paths to generated plot files (empty if no data available)
+        """
+        import matplotlib.pyplot as plt
+
+        contact_results = _load_aggregated_contact_results(data, labels, logger)
+        if not contact_results:
+            logger.info("No aggregated contact data found — skipping residence time profile")
+            return []
+
+        # Check that at least one result has per-residue residence time data
+        has_rt_data = any(
+            any(rs.residence_time_by_polymer_type for rs in result.residue_stats)
+            for result in contact_results.values()
+        )
+        if not has_rt_data:
+            logger.warning(
+                "No per-residue residence time data found. "
+                "Re-aggregate contacts to populate this field."
+            )
+            return []
+
+        # Determine polymer types across all conditions
+        all_polymer_types: set[str] = set()
+        for result in contact_results.values():
+            all_polymer_types.update(result.polymer_types())
+
+        saved: list[Path] = []
+
+        # Always generate overall (any-polymer) profile
+        saved.extend(
+            self._plot_profile(
+                contact_results,
+                labels,
+                output_dir,
+                polymer_type=None,
+                plt=plt,
+            )
+        )
+
+        # If multiple polymer types, generate per-type profiles
+        if len(all_polymer_types) > 1:
+            for ptype in sorted(all_polymer_types):
+                saved.extend(
+                    self._plot_profile(
+                        contact_results,
+                        labels,
+                        output_dir,
+                        polymer_type=ptype,
+                        plt=plt,
+                    )
+                )
+
+        return saved
+
+    def _plot_profile(
+        self,
+        contact_results: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        polymer_type: str | None,
+        plt: Any,
+    ) -> list[Path]:
+        """Generate a single residence time profile plot.
+
+        Parameters
+        ----------
+        contact_results : dict
+            Mapping of label -> AggregatedContactResult
+        labels : sequence of str
+            Condition labels
+        output_dir : Path
+            Output directory
+        polymer_type : str or None
+            Polymer type to plot, or None for average across types
+        plt : module
+            matplotlib.pyplot (passed to avoid re-import)
+
+        Returns
+        -------
+        list[Path]
+            Saved file paths (0 or 1 element)
+        """
+        settings = self.settings.contacts
+        colors = self._get_colors(len(labels))
+
+        fig, ax = plt.subplots(figsize=settings.figsize_residence_time_profile)
+
+        has_data = False
+        for idx, label in enumerate(labels):
+            result = contact_results.get(label)
+            if result is None:
+                continue
+
+            resids, means, sems = result.to_residence_time_arrays(
+                polymer_type=polymer_type, units="ns"
+            )
+            if len(resids) == 0 or not np.any(means > 0):
+                continue
+
+            color = colors[idx] if idx < len(colors) else f"C{idx}"
+
+            if settings.show_residence_time_profile_error and np.any(sems > 0):
+                ax.fill_between(
+                    resids,
+                    means - sems,
+                    means + sems,
+                    alpha=0.25,
+                    color=color,
+                )
+
+            ax.plot(resids, means, label=label, color=color, linewidth=1.2)
+            has_data = True
+
+        if not has_data:
+            plt.close(fig)
+            return []
+
+        # Highlight residues
+        for resid in settings.highlight_residues:
+            ax.axvline(resid, color="red", linestyle="--", alpha=0.5, linewidth=1)
+
+        ax.set_xlabel("Residue Number", fontsize=11)
+        ax.set_ylabel("Mean Residence Time (ns)", fontsize=11)
+
+        title = "Per-Residue Mean Residence Time"
+        if polymer_type is not None:
+            title += f" — {polymer_type}"
+        ax.set_title(title, fontsize=13, fontweight="bold")
+
+        ax.set_ylim(bottom=0)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        plt.tight_layout()
+
+        stem = "residence_time_profile"
+        if polymer_type is not None:
+            stem += f"_{polymer_type}"
+        output_path = self._get_output_path(output_dir, stem)
+        saved = self._save_figure(fig, output_path)
+        logger.info(f"Saved residence time profile: {saved}")
+        return [saved]
+
+
+# -----------------------------------------------------------------------------
+# Shared helper: load partition definitions from comparison config
+# -----------------------------------------------------------------------------
+
+
+def _load_partition_definitions(
+    data: dict[str, Any],
+    log: logging.Logger = logger,
+    all_resids: set[int] | None = None,
+) -> tuple[dict[str, list[int]], dict[str, list[str]]]:
+    """Load protein_groups and protein_partitions from the comparison config.
+
+    When *all_resids* is provided, incomplete partitions are automatically
+    completed: any residues not covered by the partition's explicit groups
+    are collected into a synthetic ``remaining_residues`` group that is
+    appended to the partition.  This lets users define partitions with only
+    the groups they care about — the "rest" is inferred.
+
+    Parameters
+    ----------
+    data : dict
+        The full data dict including ``__meta__`` from the orchestrator.
+    log : logging.Logger, optional
+        Logger instance.
+    all_resids : set[int] | None, optional
+        Complete set of 1-indexed protein residue IDs from the aggregated
+        contact results.  When supplied, partitions that do not cover all
+        residues get a ``remaining_residues`` group auto-appended.
+
+    Returns
+    -------
+    protein_groups : dict[str, list[int]]
+        Mapping of group_name -> list of 1-indexed residue IDs.
+        Empty dict if not defined.  May include the auto-generated
+        ``remaining_residues`` group.
+    protein_partitions : dict[str, list[str]]
+        Mapping of partition_name -> list of group names.
+        Empty dict if not defined.  May include ``remaining_residues``.
+    """
+    from polyzymd.compare.config import ComparisonConfig
+
+    meta = data.get("__meta__")
+    if meta is None:
+        log.debug("No __meta__ in data dict — cannot load partition definitions")
+        return {}, {}
+
+    source_path = meta.get("comparison_source_path")
+    if source_path is None:
+        log.debug("No comparison_source_path in __meta__")
+        return {}, {}
+
+    try:
+        config = ComparisonConfig.from_yaml(source_path)
+    except Exception as e:
+        log.warning(f"Failed to load comparison config from {source_path}: {e}")
+        return {}, {}
+
+    contacts_settings = config.analysis_settings.get("contacts")
+    if contacts_settings is None:
+        log.debug("No contacts analysis settings in comparison config")
+        return {}, {}
+
+    # Access via getattr to avoid LSP errors (BaseAnalysisSettings doesn't
+    # declare protein_groups/protein_partitions; ContactsAnalysisSettings does).
+    protein_groups: dict[str, list[int]] = getattr(contacts_settings, "protein_groups", None) or {}
+    protein_partitions: dict[str, list[str]] = (
+        getattr(contacts_settings, "protein_partitions", None) or {}
+    )
+
+    # --- Auto-fill incomplete partitions ---
+    if all_resids and protein_partitions:
+        for partition_name, group_names in protein_partitions.items():
+            covered: set[int] = set()
+            for gname in group_names:
+                if gname in protein_groups:
+                    covered.update(protein_groups[gname])
+            remaining = sorted(all_resids - covered)
+            if remaining:
+                auto_group = "rest_of_protein"
+                protein_groups[auto_group] = remaining
+                protein_partitions[partition_name] = list(group_names) + [auto_group]
+                log.info(
+                    f"Partition '{partition_name}': auto-filled {len(remaining)} "
+                    f"uncovered residues into '{auto_group}'"
+                )
+
+    return protein_groups, protein_partitions
+
+
+# -----------------------------------------------------------------------------
+# Group-Level Bar Chart Plotters
+# -----------------------------------------------------------------------------
+
+
+@PlotterRegistry.register("cf_by_aa_class_bars")
+class ContactFractionByAAClassBarPlotter(BasePlotter):
+    """Grouped bar chart of mean contact fraction by AA class.
+
+    X-axis: AA classes (aromatic, polar, nonpolar, charged_positive, charged_negative).
+    Bars: One per condition (or per polymer type within a condition).
+    Y-axis: Mean contact fraction averaged over residues in each AA class.
+
+    Supports "any polymer" (overall) and per-polymer-type breakdown. When
+    multiple polymer types are present, generates one plot per polymer type
+    plus one overall plot.
+    """
+
+    @classmethod
+    def plot_type(cls) -> str:
+        return "cf_by_aa_class_bars"
+
+    def can_plot(self, comparison_config: "ComparisonConfig", analysis_type: str) -> bool:
+        if analysis_type != "contacts":
+            return False
+        return self.settings.contacts.generate_cf_by_aa_class_bars
+
+    def plot(
+        self,
+        data: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        **kwargs,
+    ) -> list[Path]:
+        import matplotlib.pyplot as plt
+
+        contact_results = _load_aggregated_contact_results(data, labels, logger)
+        if not contact_results:
+            logger.info("No aggregated contact data — skipping CF by AA class bars")
+            return []
+
+        # Determine polymer types
+        all_polymer_types: set[str] = set()
+        for result in contact_results.values():
+            all_polymer_types.update(result.polymer_types())
+
+        saved: list[Path] = []
+
+        # Overall (any-polymer) plot
+        saved.extend(
+            self._plot_bars(contact_results, labels, output_dir, polymer_type=None, plt=plt)
+        )
+
+        # Per polymer type
+        if len(all_polymer_types) > 1:
+            for ptype in sorted(all_polymer_types):
+                saved.extend(
+                    self._plot_bars(
+                        contact_results, labels, output_dir, polymer_type=ptype, plt=plt
+                    )
+                )
+
+        return saved
+
+    def _plot_bars(
+        self,
+        contact_results: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        polymer_type: str | None,
+        plt: Any,
+    ) -> list[Path]:
+        settings = self.settings.contacts
+        valid_labels = [lbl for lbl in labels if lbl in contact_results]
+        if not valid_labels:
+            return []
+
+        colors = self._get_colors(len(valid_labels))
+
+        # Determine AA class order from first result's groups
+        aa_classes = [
+            c
+            for c in CANONICAL_AA_CLASS_ORDER
+            if any(
+                any(rs.protein_group == c for rs in contact_results[lbl].residue_stats)
+                for lbl in valid_labels
+            )
+        ]
+        if not aa_classes:
+            return []
+
+        x = np.arange(len(aa_classes))
+
+        fig, ax = plt.subplots(figsize=settings.figsize_cf_by_aa_class_bars, dpi=self.settings.dpi)
+
+        series: list[tuple[str, list[float], list[float]]] = []
+        replicate_values: list[list[list[float]]] = []
+        for label in valid_labels:
+            result = contact_results[label]
+            group_stats = result.group_contact_fraction(polymer_type=polymer_type)
+
+            means = [group_stats.get(c, (0.0, 0.0))[0] for c in aa_classes]
+            sems = [group_stats.get(c, (0.0, 0.0))[1] for c in aa_classes]
+            series.append((label, means, sems))
+
+            # Per-replicate values for dot overlay (always append to stay aligned
+            # with series — empty lists are safely skipped by _grouped_bars)
+            group_reps = result.group_contact_fraction_per_replicate(polymer_type=polymer_type)
+            replicate_values.append([group_reps.get(c, []) for c in aa_classes])
+
+        self._grouped_bars(
+            ax,
+            x,
+            series,
+            colors,
+            show_error=settings.show_cf_by_aa_class_error,
+            reference_line=None,
+            replicate_values=replicate_values if replicate_values else None,
+        )
+
+        ax.set_xlabel("AA Class", fontsize=11)
+        ax.set_ylabel("Mean Contact Fraction", fontsize=11)
+
+        title = "Contact Fraction by AA Class"
+        if polymer_type is not None:
+            title += f" — {polymer_type}"
+        ax.set_title(title, fontsize=13, fontweight="bold")
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(aa_classes, rotation=45, ha="right")
+        ax.set_ylim(bottom=0)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        plt.tight_layout()
+
+        stem = "cf_by_aa_class_bars"
+        if polymer_type is not None:
+            stem += f"_{polymer_type}"
+        output_path = self._get_output_path(output_dir, stem)
+        saved = self._save_figure(fig, output_path)
+        logger.info(f"Saved CF by AA class bars: {saved}")
+        return [saved]
+
+
+@PlotterRegistry.register("cf_by_partition_bars")
+class ContactFractionByPartitionBarPlotter(BasePlotter):
+    """Grouped bar chart of mean contact fraction by user-defined partition.
+
+    For each partition (e.g., "rmsf_vulnerability"), generates a bar chart
+    where x-axis groups are the partition elements (e.g., "high_rmsf",
+    "low_rmsf"), and bars within each group are conditions.
+
+    Partition definitions are loaded from the comparison config via
+    ``data["__meta__"]["comparison_source_path"]``.
+
+    Supports per-polymer-type breakdown.
+    """
+
+    @classmethod
+    def plot_type(cls) -> str:
+        return "cf_by_partition_bars"
+
+    def can_plot(self, comparison_config: "ComparisonConfig", analysis_type: str) -> bool:
+        if analysis_type != "contacts":
+            return False
+        return self.settings.contacts.generate_cf_by_partition_bars
+
+    def plot(
+        self,
+        data: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        **kwargs,
+    ) -> list[Path]:
+        import matplotlib.pyplot as plt
+
+        contact_results = _load_aggregated_contact_results(data, labels, logger)
+        if not contact_results:
+            logger.info("No aggregated contact data — skipping CF by partition bars")
+            return []
+
+        # Collect all protein residue IDs so incomplete partitions can be auto-filled.
+        all_resids: set[int] = set()
+        for result in contact_results.values():
+            all_resids.update(rs.protein_resid for rs in result.residue_stats)
+
+        protein_groups, protein_partitions = _load_partition_definitions(
+            data, logger, all_resids=all_resids
+        )
+        if not protein_partitions:
+            logger.info("No user-defined partitions — skipping CF by partition bars")
+            return []
+
+        all_polymer_types: set[str] = set()
+        for result in contact_results.values():
+            all_polymer_types.update(result.polymer_types())
+
+        saved: list[Path] = []
+        for partition_name, group_names in sorted(protein_partitions.items()):
+            saved.extend(
+                self._plot_partition(
+                    contact_results,
+                    labels,
+                    output_dir,
+                    partition_name,
+                    group_names,
+                    protein_groups,
+                    polymer_type=None,
+                    plt=plt,
+                )
+            )
+            if len(all_polymer_types) > 1:
+                for ptype in sorted(all_polymer_types):
+                    saved.extend(
+                        self._plot_partition(
+                            contact_results,
+                            labels,
+                            output_dir,
+                            partition_name,
+                            group_names,
+                            protein_groups,
+                            polymer_type=ptype,
+                            plt=plt,
+                        )
+                    )
+
+        return saved
+
+    def _plot_partition(
+        self,
+        contact_results: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        partition_name: str,
+        group_names: list[str],
+        protein_groups: dict[str, list[int]],
+        polymer_type: str | None,
+        plt: Any,
+    ) -> list[Path]:
+        settings = self.settings.contacts
+        valid_labels = [lbl for lbl in labels if lbl in contact_results]
+        if not valid_labels:
+            return []
+
+        colors = self._get_colors(len(valid_labels))
+
+        # Filter to groups that actually exist in protein_groups
+        elements = [g for g in group_names if g in protein_groups]
+        if not elements:
+            logger.debug(f"Partition '{partition_name}' has no matching groups — skipping")
+            return []
+
+        x = np.arange(len(elements))
+
+        fig, ax = plt.subplots(figsize=settings.figsize_cf_by_partition_bars, dpi=self.settings.dpi)
+
+        series: list[tuple[str, list[float], list[float]]] = []
+        replicate_values: list[list[list[float]]] = []
+        for label in valid_labels:
+            result = contact_results[label]
+            means: list[float] = []
+            sems: list[float] = []
+            cond_reps: list[list[float]] = []
+            for elem in elements:
+                resids = protein_groups[elem]
+                m, s = result.subset_contact_fraction(resids, polymer_type=polymer_type)
+                means.append(m)
+                sems.append(s)
+                cond_reps.append(
+                    result.subset_contact_fraction_per_replicate(resids, polymer_type=polymer_type)
+                )
+            series.append((label, means, sems))
+            # Always append to stay aligned with series — empty lists are
+            # safely skipped by _grouped_bars.
+            replicate_values.append(cond_reps)
+
+        self._grouped_bars(
+            ax,
+            x,
+            series,
+            colors,
+            show_error=settings.show_cf_by_partition_error,
+            reference_line=None,
+            replicate_values=replicate_values if replicate_values else None,
+        )
+
+        ax.set_xlabel("Protein Group", fontsize=11)
+        ax.set_ylabel("Mean Contact Fraction", fontsize=11)
+
+        title = f"Contact Fraction — {partition_name.replace('_', ' ').title()}"
+        if polymer_type is not None:
+            title += f" ({polymer_type})"
+        ax.set_title(title, fontsize=13, fontweight="bold")
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(elements, rotation=45, ha="right")
+        ax.set_ylim(bottom=0)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        plt.tight_layout()
+
+        stem = f"cf_by_partition_{partition_name}_bars"
+        if polymer_type is not None:
+            stem += f"_{polymer_type}"
+        output_path = self._get_output_path(output_dir, stem)
+        saved = self._save_figure(fig, output_path)
+        logger.info(f"Saved CF by partition bars: {saved}")
+        return [saved]
+
+
+@PlotterRegistry.register("rt_by_aa_class_bars")
+class ResidenceTimeByAAClassBarPlotter(BasePlotter):
+    """Grouped bar chart of mean residence time by AA class.
+
+    X-axis: AA classes (aromatic, polar, nonpolar, charged_positive, charged_negative).
+    Bars: One per condition.
+    Y-axis: Mean residence time (ns) averaged over residues in each AA class.
+
+    Supports per-polymer-type breakdown.
+    """
+
+    @classmethod
+    def plot_type(cls) -> str:
+        return "rt_by_aa_class_bars"
+
+    def can_plot(self, comparison_config: "ComparisonConfig", analysis_type: str) -> bool:
+        if analysis_type != "contacts":
+            return False
+        return self.settings.contacts.generate_rt_by_aa_class_bars
+
+    def plot(
+        self,
+        data: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        **kwargs,
+    ) -> list[Path]:
+        import matplotlib.pyplot as plt
+
+        contact_results = _load_aggregated_contact_results(data, labels, logger)
+        if not contact_results:
+            logger.info("No aggregated contact data — skipping RT by AA class bars")
+            return []
+
+        # Check RT data availability
+        has_rt = any(
+            any(rs.residence_time_by_polymer_type for rs in result.residue_stats)
+            for result in contact_results.values()
+        )
+        if not has_rt:
+            logger.warning("No per-residue RT data — skipping RT by AA class bars")
+            return []
+
+        all_polymer_types: set[str] = set()
+        for result in contact_results.values():
+            all_polymer_types.update(result.polymer_types())
+
+        saved: list[Path] = []
+
+        saved.extend(
+            self._plot_bars(contact_results, labels, output_dir, polymer_type=None, plt=plt)
+        )
+        if len(all_polymer_types) > 1:
+            for ptype in sorted(all_polymer_types):
+                saved.extend(
+                    self._plot_bars(
+                        contact_results, labels, output_dir, polymer_type=ptype, plt=plt
+                    )
+                )
+
+        return saved
+
+    def _plot_bars(
+        self,
+        contact_results: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        polymer_type: str | None,
+        plt: Any,
+    ) -> list[Path]:
+        settings = self.settings.contacts
+        valid_labels = [lbl for lbl in labels if lbl in contact_results]
+        if not valid_labels:
+            return []
+
+        colors = self._get_colors(len(valid_labels))
+
+        aa_classes = [
+            c
+            for c in CANONICAL_AA_CLASS_ORDER
+            if any(
+                any(rs.protein_group == c for rs in contact_results[lbl].residue_stats)
+                for lbl in valid_labels
+            )
+        ]
+        if not aa_classes:
+            return []
+
+        x = np.arange(len(aa_classes))
+
+        fig, ax = plt.subplots(figsize=settings.figsize_rt_by_aa_class_bars, dpi=self.settings.dpi)
+
+        series: list[tuple[str, list[float], list[float]]] = []
+        replicate_values: list[list[list[float]]] = []
+        for label in valid_labels:
+            result = contact_results[label]
+            group_stats = result.group_residence_time(polymer_type=polymer_type, units="ns")
+
+            means = [group_stats.get(c, (0.0, 0.0))[0] for c in aa_classes]
+            sems = [group_stats.get(c, (0.0, 0.0))[1] for c in aa_classes]
+            series.append((label, means, sems))
+
+            # Per-replicate values for dot overlay (always append to stay aligned
+            # with series — empty lists are safely skipped by _grouped_bars)
+            group_reps = result.group_residence_time_per_replicate(
+                polymer_type=polymer_type, units="ns"
+            )
+            replicate_values.append([group_reps.get(c, []) for c in aa_classes])
+
+        self._grouped_bars(
+            ax,
+            x,
+            series,
+            colors,
+            show_error=settings.show_rt_by_aa_class_error,
+            reference_line=None,
+            replicate_values=replicate_values if replicate_values else None,
+        )
+
+        ax.set_xlabel("AA Class", fontsize=11)
+        ax.set_ylabel("Mean Residence Time (ns)", fontsize=11)
+
+        title = "Residence Time by AA Class"
+        if polymer_type is not None:
+            title += f" — {polymer_type}"
+        ax.set_title(title, fontsize=13, fontweight="bold")
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(aa_classes, rotation=45, ha="right")
+        ax.set_ylim(bottom=0)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        plt.tight_layout()
+
+        stem = "rt_by_aa_class_bars"
+        if polymer_type is not None:
+            stem += f"_{polymer_type}"
+        output_path = self._get_output_path(output_dir, stem)
+        saved = self._save_figure(fig, output_path)
+        logger.info(f"Saved RT by AA class bars: {saved}")
+        return [saved]
+
+
+@PlotterRegistry.register("rt_by_partition_bars")
+class ResidenceTimeByPartitionBarPlotter(BasePlotter):
+    """Grouped bar chart of mean residence time by user-defined partition.
+
+    For each partition (e.g., "rmsf_vulnerability"), generates a bar chart
+    where x-axis groups are the partition elements (e.g., "high_rmsf",
+    "low_rmsf"), and bars within each group are conditions.
+
+    Partition definitions are loaded from the comparison config via
+    ``data["__meta__"]["comparison_source_path"]``.
+
+    Supports per-polymer-type breakdown.
+    """
+
+    @classmethod
+    def plot_type(cls) -> str:
+        return "rt_by_partition_bars"
+
+    def can_plot(self, comparison_config: "ComparisonConfig", analysis_type: str) -> bool:
+        if analysis_type != "contacts":
+            return False
+        return self.settings.contacts.generate_rt_by_partition_bars
+
+    def plot(
+        self,
+        data: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        **kwargs,
+    ) -> list[Path]:
+        import matplotlib.pyplot as plt
+
+        contact_results = _load_aggregated_contact_results(data, labels, logger)
+        if not contact_results:
+            logger.info("No aggregated contact data — skipping RT by partition bars")
+            return []
+
+        has_rt = any(
+            any(rs.residence_time_by_polymer_type for rs in result.residue_stats)
+            for result in contact_results.values()
+        )
+        if not has_rt:
+            logger.warning("No per-residue RT data — skipping RT by partition bars")
+            return []
+
+        # Collect all protein residue IDs so incomplete partitions can be auto-filled.
+        all_resids: set[int] = set()
+        for result in contact_results.values():
+            all_resids.update(rs.protein_resid for rs in result.residue_stats)
+
+        protein_groups, protein_partitions = _load_partition_definitions(
+            data, logger, all_resids=all_resids
+        )
+        if not protein_partitions:
+            logger.info("No user-defined partitions — skipping RT by partition bars")
+            return []
+
+        all_polymer_types: set[str] = set()
+        for result in contact_results.values():
+            all_polymer_types.update(result.polymer_types())
+
+        saved: list[Path] = []
+        for partition_name, group_names in sorted(protein_partitions.items()):
+            saved.extend(
+                self._plot_partition(
+                    contact_results,
+                    labels,
+                    output_dir,
+                    partition_name,
+                    group_names,
+                    protein_groups,
+                    polymer_type=None,
+                    plt=plt,
+                )
+            )
+            if len(all_polymer_types) > 1:
+                for ptype in sorted(all_polymer_types):
+                    saved.extend(
+                        self._plot_partition(
+                            contact_results,
+                            labels,
+                            output_dir,
+                            partition_name,
+                            group_names,
+                            protein_groups,
+                            polymer_type=ptype,
+                            plt=plt,
+                        )
+                    )
+
+        return saved
+
+    def _plot_partition(
+        self,
+        contact_results: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        partition_name: str,
+        group_names: list[str],
+        protein_groups: dict[str, list[int]],
+        polymer_type: str | None,
+        plt: Any,
+    ) -> list[Path]:
+        settings = self.settings.contacts
+        valid_labels = [lbl for lbl in labels if lbl in contact_results]
+        if not valid_labels:
+            return []
+
+        colors = self._get_colors(len(valid_labels))
+
+        elements = [g for g in group_names if g in protein_groups]
+        if not elements:
+            logger.debug(f"Partition '{partition_name}' has no matching groups — skipping")
+            return []
+
+        x = np.arange(len(elements))
+
+        fig, ax = plt.subplots(figsize=settings.figsize_rt_by_partition_bars, dpi=self.settings.dpi)
+
+        series: list[tuple[str, list[float], list[float]]] = []
+        replicate_values: list[list[list[float]]] = []
+        for label in valid_labels:
+            result = contact_results[label]
+            means: list[float] = []
+            sems: list[float] = []
+            cond_reps: list[list[float]] = []
+            for elem in elements:
+                resids = protein_groups[elem]
+                m, s = result.subset_residence_time(resids, polymer_type=polymer_type, units="ns")
+                means.append(m)
+                sems.append(s)
+                cond_reps.append(
+                    result.subset_residence_time_per_replicate(
+                        resids, polymer_type=polymer_type, units="ns"
+                    )
+                )
+            series.append((label, means, sems))
+            # Always append to stay aligned with series — empty lists are
+            # safely skipped by _grouped_bars.
+            replicate_values.append(cond_reps)
+
+        self._grouped_bars(
+            ax,
+            x,
+            series,
+            colors,
+            show_error=settings.show_rt_by_partition_error,
+            reference_line=None,
+            replicate_values=replicate_values if replicate_values else None,
+        )
+
+        ax.set_xlabel("Protein Group", fontsize=11)
+        ax.set_ylabel("Mean Residence Time (ns)", fontsize=11)
+
+        title = f"Residence Time — {partition_name.replace('_', ' ').title()}"
+        if polymer_type is not None:
+            title += f" ({polymer_type})"
+        ax.set_title(title, fontsize=13, fontweight="bold")
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(elements, rotation=45, ha="right")
+        ax.set_ylim(bottom=0)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        plt.tight_layout()
+
+        stem = f"rt_by_partition_{partition_name}_bars"
+        if polymer_type is not None:
+            stem += f"_{polymer_type}"
+        output_path = self._get_output_path(output_dir, stem)
+        saved = self._save_figure(fig, output_path)
+        logger.info(f"Saved RT by partition bars: {saved}")
+        return [saved]
