@@ -37,6 +37,32 @@ from polyzymd.compare.settings import (
 
 LOGGER = logging.getLogger("polyzymd.compare.cli")
 
+# ---------------------------------------------------------------------------
+# Mapping between comparator registry names and analysis_settings YAML keys.
+# Used by both `run` and `run-all` commands.
+# ---------------------------------------------------------------------------
+SETTINGS_KEY_MAP: dict[str, str] = {
+    "rmsf": "rmsf",
+    "triad": "catalytic_triad",
+    "contacts": "contacts",
+    "distances": "distances",
+    "exposure": "exposure",
+    "binding_free_energy": "binding_free_energy",
+    "polymer_affinity": "polymer_affinity",
+    "secondary_structure": "secondary_structure",
+}
+
+# Reverse map: analysis_settings key → comparator registry name
+ANALYSIS_TO_COMPARATOR: dict[str, str] = {v: k for k, v in SETTINGS_KEY_MAP.items()}
+
+
+def _comparator_accepts_comparison_settings(comparator_cls: type) -> bool:
+    """Check whether a comparator's __init__ accepts a comparison_settings kwarg."""
+    import inspect
+
+    sig = inspect.signature(comparator_cls.__init__)
+    return "comparison_settings" in sig.parameters
+
 
 @click.group()
 def compare():
@@ -972,17 +998,7 @@ def run_comparison(
     comparator_cls = ComparatorRegistry.get(comparison_type)
 
     # Get analysis settings for this comparison type
-    # Map comparison_type to analysis_settings key
-    settings_key_map = {
-        "rmsf": "rmsf",
-        "triad": "catalytic_triad",
-        "contacts": "contacts",
-        "distances": "distances",
-        "exposure": "exposure",
-        "binding_free_energy": "binding_free_energy",
-        "polymer_affinity": "polymer_affinity",
-    }
-    settings_key = settings_key_map.get(comparison_type, comparison_type)
+    settings_key = SETTINGS_KEY_MAP.get(comparison_type, comparison_type)
 
     analysis_settings = config.analysis_settings.get(settings_key)
     if analysis_settings is None:
@@ -1004,11 +1020,17 @@ def run_comparison(
 
     # Create comparator and run
     try:
-        comparator = comparator_cls(
-            config=config,
-            analysis_settings=analysis_settings,
-            equilibration=equilibration,
-        )
+        # Pass comparison_settings if the comparator accepts it
+        kwargs: dict = {
+            "config": config,
+            "analysis_settings": analysis_settings,
+            "equilibration": equilibration,
+        }
+        comparison_settings = config.comparison_settings.get(settings_key)
+        if _comparator_accepts_comparison_settings(comparator_cls):
+            kwargs["comparison_settings"] = comparison_settings
+
+        comparator = comparator_cls(**kwargs)
         result = comparator.compare(recompute=recompute)
     except Exception as e:
         click.echo(f"Error during comparison: {e}", err=True)
