@@ -315,7 +315,13 @@ class RMSFProfilePlotter(BasePlotter):
     """Generate per-residue RMSF profile plot comparing conditions.
 
     Creates a line plot showing RMSF vs residue number for each condition,
-    with optional error bands and highlighted residues (e.g., active site).
+    with optional error bands, highlighted residues (e.g., active site),
+    and a secondary structure annotation bar below the RMSF profile.
+
+    The SS annotation bar uses the reference PDB specified in
+    ``analysis_settings.rmsf.reference_file``.  If the reference PDB is
+    not available or mdtraj is not installed, the plot falls back to a
+    single-panel layout without the annotation bar.
     """
 
     @classmethod
@@ -377,8 +383,22 @@ class RMSFProfilePlotter(BasePlotter):
             logger.warning("No per-residue RMSF data found for profile plot")
             return []
 
-        # Create figure
-        fig, ax = plt.subplots(figsize=self.settings.rmsf.figsize_profile)
+        # Try to load SS annotation from reference PDB
+        ss_annotation = self._load_reference_ss(data)
+
+        # Create figure: 2-row if SS available, 1-row otherwise
+        figsize = self.settings.rmsf.figsize_profile
+        if ss_annotation is not None:
+            fig, (ax_rmsf, ax_ss) = plt.subplots(
+                2,
+                1,
+                figsize=figsize,
+                gridspec_kw={"height_ratios": [4, 1]},
+                sharex=True,
+            )
+        else:
+            fig, ax_rmsf = plt.subplots(figsize=figsize)
+            ax_ss = None
 
         for idx, label in enumerate(labels):
             if label not in profiles:
@@ -392,7 +412,7 @@ class RMSFProfilePlotter(BasePlotter):
 
             if self.settings.rmsf.show_error and "sem" in profile:
                 sem = np.array(profile["sem"])
-                ax.fill_between(
+                ax_rmsf.fill_between(
                     residues,
                     rmsf - sem,
                     rmsf + sem,
@@ -400,23 +420,159 @@ class RMSFProfilePlotter(BasePlotter):
                     color=color,
                 )
 
-            ax.plot(residues, rmsf, label=label, color=color, linewidth=1.5)
+            ax_rmsf.plot(residues, rmsf, label=label, color=color, linewidth=1.5)
 
         # Highlight residues if configured
         for resid in self.settings.rmsf.highlight_residues:
-            ax.axvline(resid, color="red", linestyle="--", alpha=0.5, linewidth=1)
+            ax_rmsf.axvline(resid, color="red", linestyle="--", alpha=0.5, linewidth=1)
 
-        ax.set_xlabel("Residue Number", fontsize=11)
-        ax.set_ylabel("RMSF (Å)", fontsize=11)
-        ax.set_title("Per-Residue RMSF Comparison", fontsize=13, fontweight="bold")
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+        ax_rmsf.set_ylabel("RMSF (\u00c5)", fontsize=11)
+        ax_rmsf.set_title("Per-Residue RMSF Comparison", fontsize=13, fontweight="bold")
+        ax_rmsf.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
+        ax_rmsf.spines["top"].set_visible(False)
+        ax_rmsf.spines["right"].set_visible(False)
+
+        # Draw SS annotation bar if available
+        if ax_ss is not None and ss_annotation is not None:
+            self._draw_ss_bar(ax_ss, ss_annotation)
+        else:
+            ax_rmsf.set_xlabel("Residue Number", fontsize=11)
 
         plt.tight_layout()
 
         output_path = self._get_output_path(output_dir, "rmsf_profile")
         return [self._save_figure(fig, output_path)]
+
+    def _load_reference_ss(self, data: dict[str, Any]) -> dict | None:
+        """Load reference SS assignment from the crystal/input PDB.
+
+        Reads ``analysis_settings.rmsf.reference_file`` from the comparison
+        config and runs mdtraj DSSP on it to get per-residue SS assignments.
+
+        Returns
+        -------
+        dict or None
+            ``{"residue_ids": [...], "ss_codes": [...]}`` where ss_codes
+            are integers (0=coil, 1=helix, 2=strand), or None on failure.
+        """
+        # Get reference_file from comparison config
+        meta = data.get("__meta__", {})
+        source_path = meta.get("comparison_source_path")
+        if source_path is None:
+            return None
+
+        try:
+            from polyzymd.compare.config import ComparisonConfig
+
+            comp_config = ComparisonConfig.from_yaml(source_path)
+            rmsf_settings = comp_config.analysis_settings.get("rmsf")
+            if rmsf_settings is None:
+                return None
+            reference_file = getattr(rmsf_settings, "reference_file", None)
+            if reference_file is None:
+                return None
+        except Exception as exc:
+            logger.debug(f"Could not load comparison config for SS bar: {exc}")
+            return None
+
+        ref_path = Path(reference_file)
+        if not ref_path.is_absolute():
+            ref_path = Path(source_path).parent / ref_path
+        if not ref_path.exists():
+            logger.debug(f"Reference PDB not found: {ref_path}")
+            return None
+
+        try:
+            import mdtraj as md
+
+            traj = md.load(str(ref_path))
+
+            # Select protein atoms only
+            protein_indices = traj.topology.select("protein")
+            if len(protein_indices) == 0:
+                return None
+            traj_protein = traj.atom_slice(protein_indices)
+
+            dssp = md.compute_dssp(traj_protein, simplified=True)
+            ss_string = dssp[0]  # Single frame -> 1D array of chars
+
+            # Map chars to integers
+            char_to_int = {"C": 0, "H": 1, "E": 2, "NA": 0}
+            ss_codes = [char_to_int.get(c, 0) for c in ss_string]
+
+            # Get residue IDs
+            residue_ids = [r.resSeq for r in traj_protein.topology.residues]
+
+            return {"residue_ids": residue_ids, "ss_codes": ss_codes}
+
+        except ImportError:
+            logger.debug("mdtraj not available; skipping SS annotation bar")
+            return None
+        except Exception as exc:
+            logger.debug(f"Failed to compute reference SS: {exc}")
+            return None
+
+    @staticmethod
+    def _draw_ss_bar(ax, ss_annotation: dict) -> None:
+        """Draw a colored SS annotation bar on the given axes.
+
+        Parameters
+        ----------
+        ax : matplotlib Axes
+            The bottom axes for the SS bar.
+        ss_annotation : dict
+            ``{"residue_ids": [...], "ss_codes": [...]}``.
+        """
+        import matplotlib.colors as mcolors
+        import numpy as np
+        from matplotlib.patches import Patch
+
+        residue_ids = np.array(ss_annotation["residue_ids"])
+        ss_codes = np.array(ss_annotation["ss_codes"])
+
+        # SS colors: 0=coil(grey), 1=helix(red), 2=strand(blue)
+        ss_colors = {0: "#CCCCCC", 1: "#E74C3C", 2: "#3498DB"}
+        ss_names = {0: "Coil", 1: "Helix", 2: "Strand"}
+
+        cmap = mcolors.ListedColormap([ss_colors[0], ss_colors[1], ss_colors[2]])
+        bounds = [-0.5, 0.5, 1.5, 2.5]
+        norm = mcolors.BoundaryNorm(bounds, cmap.N)
+
+        # Plot as a 1-row heatmap: reshape to (1, n_residues)
+        ss_row = ss_codes.reshape(1, -1)
+
+        ax.imshow(
+            ss_row,
+            aspect="auto",
+            cmap=cmap,
+            norm=norm,
+            interpolation="nearest",
+            extent=[
+                residue_ids[0] - 0.5,
+                residue_ids[-1] + 0.5,
+                0,
+                1,
+            ],
+        )
+
+        ax.set_yticks([])
+        ax.set_ylabel("SS", fontsize=9, rotation=0, ha="right", va="center")
+        ax.set_xlabel("Residue Number", fontsize=11)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_visible(False)
+
+        # Compact legend inside the bar
+        legend_patches = [Patch(facecolor=ss_colors[i], label=ss_names[i]) for i in [1, 2, 0]]
+        ax.legend(
+            handles=legend_patches,
+            loc="upper right",
+            fontsize=6,
+            ncol=3,
+            framealpha=0.7,
+            borderpad=0.3,
+            handlelength=1.0,
+        )
 
     def _load_rmsf_profile(self, aggregated_dir: Path) -> dict | None:
         """Load per-residue RMSF data from aggregated directory.

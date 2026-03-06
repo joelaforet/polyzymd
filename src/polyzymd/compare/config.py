@@ -44,6 +44,8 @@ from polyzymd.compare.settings import (  # noqa: F401
     DistancesComparisonSettings,
     RMSFAnalysisSettings,
     RMSFComparisonSettings,
+    SecondaryStructureAnalysisSettings,
+    SecondaryStructureComparisonSettings,
     TriadPairSettings,
 )
 
@@ -532,6 +534,37 @@ class AffinityPlotSettings(BasePlotSettings):
     show_error_bars: bool = True
 
 
+@PlotSettingsRegistry.register("secondary_structure")
+class SSPlotSettings(BasePlotSettings):
+    """Secondary structure plot customization.
+
+    Attributes
+    ----------
+    generate_timeline : bool
+        Generate per-condition residue x time SS heatmap. Default True.
+    generate_content_bars : bool
+        Generate grouped bar chart of helix/strand/coil fractions. Default True.
+    generate_diff_heatmap : bool
+        Generate condition x residue persistence difference heatmap. Default True.
+    figsize_timeline : tuple[float, float]
+        Figure size for timeline heatmap.
+    figsize_content_bars : tuple[float, float]
+        Figure size for content bar chart.
+    figsize_diff_heatmap : tuple[float, float] | None
+        Figure size for difference heatmap (auto-calculated if None).
+    diff_colormap : str
+        Diverging colormap for difference heatmap.
+    """
+
+    generate_timeline: bool = True
+    generate_content_bars: bool = True
+    generate_diff_heatmap: bool = True
+    figsize_timeline: tuple[float, float] = (14, 6)
+    figsize_content_bars: tuple[float, float] = (10, 6)
+    figsize_diff_heatmap: tuple[float, float] | None = None
+    diff_colormap: str = "RdBu_r"
+
+
 class PlotSettings(BaseModel):
     """Global plot settings for comparison.yaml.
 
@@ -972,6 +1005,14 @@ analysis_settings:
     selection: "protein and name CA"
     reference_mode: "centroid"  # centroid, average, or frame
     # reference_frame: 500      # Required if reference_mode is "frame"
+    # reference_file: "structures/enzyme.pdb"  # Crystal/input PDB for SS annotation bar
+
+  # Secondary Structure (DSSP) Analysis
+  # Per-residue and per-frame secondary structure via mdtraj DSSP.
+  # Produces timeline heatmaps, content bar charts, and persistence profiles.
+  #
+  # secondary_structure:
+  #   chain_id: "A"              # chain letter for the protein to analyze
 
   # Catalytic Triad / Active Site Distances
   #
@@ -1067,6 +1108,21 @@ analysis_settings:
   #   surface_exposure_threshold: 0.2  # minimum relative SASA to be considered surface-exposed
   #   # protein_partitions: null   # optional: restrict to user-defined AA partitions
 
+  # Polymer Affinity Score (composite selectivity metric)
+  # Requires contacts analysis with compute_binding_preference: true.
+  # Computes S = Σ N_pg × ΔG_sel_pg for each polymer composition.
+  # Run: polyzymd compare polymer-affinity
+  #
+  # polymer_affinity:
+  #   surface_exposure_threshold: 0.2
+  #   enzyme_pdb_for_sasa: "structures/enzyme.pdb"
+  #   include_default_aa_groups: true
+  #   # protein_groups:            # same format as contacts.protein_groups
+  #   #   catalytic_triad: [77, 133, 156]
+  #   # protein_partitions:        # same format as contacts.protein_partitions
+  #   #   lid_helices:
+  #   #     - lid_helix_5
+
 # ============================================================================
 # Comparison Settings (HOW to compare - statistical parameters)
 # ============================================================================
@@ -1075,6 +1131,8 @@ analysis_settings:
 
 comparison_settings:
   rmsf: {{}}  # No comparison-specific parameters
+
+  # secondary_structure: {{}}     # No comparison-specific parameters
 
   # catalytic_triad: {{}}
 
@@ -1089,4 +1147,60 @@ comparison_settings:
 
   # binding_free_energy:
   #   fdr_alpha: 0.05           # FDR for Benjamini-Hochberg correction
+
+  # polymer_affinity:
+  #   fdr_alpha: 0.05           # FDR for Benjamini-Hochberg correction
+
+# ============================================================================
+# Plot Settings (HOW to visualize - figure customization)
+# ============================================================================
+# Controls plot generation for all analyses. Per-analysis sections override
+# defaults. Run `polyzymd compare plot` to generate all configured plots.
+
+plot_settings:
+  output_dir: "figures/"         # relative to this file
+  format: "png"                  # png, pdf, or svg
+  dpi: 300                       # resolution for raster formats
+  style: "publication"           # publication, presentation, or minimal
+  color_palette: "tab10"         # seaborn/matplotlib color palette
+
+  # Per-analysis plot customization (uncomment sections as needed):
+
+  # rmsf:
+  #   show_error: true             # show SEM fill_between bands
+  #   highlight_residues: []       # residue IDs for vertical reference lines
+  #   figsize_profile: [14, 4]     # per-residue profile figure size
+  #   figsize_comparison: [8, 6]   # bar comparison figure size
+
+  # triad:
+  #   generate_kde_panel: true     # multi-row KDE panel
+  #   generate_bars: true          # threshold bar chart
+  #   generate_2d_kde: false       # 2D joint KDE (specialized)
+
+  # distances:
+  #   show_threshold: true         # threshold line on distributions
+  #   use_kde: true                # KDE vs histogram
+
+  # contacts:
+  #   generate_enrichment_heatmap: true
+  #   generate_enrichment_bars: true
+  #   generate_system_coverage_heatmap: true
+  #   generate_system_coverage_bars: true
+  #   generate_contact_fraction_profile: true
+  #   generate_residence_time_profile: true
+
+  # binding_free_energy:
+  #   generate_heatmap: true       # ΔG_sel heatmap (AA groups × conditions)
+  #   generate_bars: true          # ΔG_sel grouped bar chart
+  #   colormap: "RdBu_r"           # diverging colormap for heatmap
+
+  # polymer_affinity:
+  #   generate_stacked_bars: true  # total score by condition
+  #   generate_group_bars: true    # per-group contributions
+
+  # secondary_structure:
+  #   generate_timeline: true      # per-condition residue × time SS heatmap
+  #   generate_content_bars: true  # helix/strand/coil fraction bars
+  #   generate_diff_heatmap: true  # Δ(helix persistence) vs control
+  #   diff_colormap: "RdBu_r"     # diverging colormap for diff heatmap
 """

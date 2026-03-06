@@ -10,6 +10,7 @@ from polyzymd.compare.comparators.distances import DistancesComparator
 from polyzymd.compare.comparators.exposure import ExposureDynamicsComparator
 from polyzymd.compare.comparators.polymer_affinity import PolymerAffinityScoreComparator
 from polyzymd.compare.comparators.rmsf import RMSFComparator
+from polyzymd.compare.comparators.secondary_structure import SecondaryStructureComparator
 from polyzymd.compare.comparators.triad import TriadComparator
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "ExposureDynamicsComparator",
     "PolymerAffinityScoreComparator",
     "RMSFComparator",
+    "SecondaryStructureComparator",
     "TriadComparator",
 ]

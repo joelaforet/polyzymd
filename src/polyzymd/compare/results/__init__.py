@@ -58,6 +58,12 @@ from polyzymd.compare.results.rmsf_legacy import (
     PairwiseComparison,
 )
 
+# Secondary structure result classes
+from polyzymd.compare.results.secondary_structure import (
+    SSComparisonResult,
+    SSConditionSummary,
+)
+
 # Triad result classes
 from polyzymd.compare.results.triad import (
     TriadANOVASummary,
@@ -105,4 +111,7 @@ __all__ = [
     "AffinityScorePairwiseEntry",
     "PolymerAffinityScoreResult",
     "PolymerTypeScore",
+    # Secondary structure
+    "SSComparisonResult",
+    "SSConditionSummary",
 ]

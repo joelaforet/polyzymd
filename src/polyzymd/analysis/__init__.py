@@ -134,6 +134,10 @@ def __getattr__(name):
         from polyzymd.analysis.contacts.aggregator import aggregate_contact_results
 
         return aggregate_contact_results
+    elif name == "SecondaryStructureCalculator":
+        from polyzymd.analysis.secondary_structure import SecondaryStructureCalculator
+
+        return SecondaryStructureCalculator
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -170,4 +174,6 @@ __all__ = [
     "plot_distance_histogram",
     "plot_distance_comparison",
     "save_distance_plot",
+    # Secondary structure
+    "SecondaryStructureCalculator",
 ]
