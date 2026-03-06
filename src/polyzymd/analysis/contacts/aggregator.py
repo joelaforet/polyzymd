@@ -60,7 +60,18 @@ class AggregatedResidueStats(BaseModel):
     n_effective_sem : float
         SEM of effective sample size
     by_polymer_type : dict[str, tuple[float, float]]
-        Mean ± SEM for each polymer type
+        Contact fraction mean ± SEM for each polymer type
+    by_polymer_type_per_replicate : dict[str, list[float]]
+        Per-replicate contact fractions for each polymer type.
+        Empty for results aggregated before this field was introduced.
+    residence_time_by_polymer_type : dict[str, tuple[float, float]]
+        Mean residence time (frames) mean ± SEM for each polymer type.
+        Computed from per-residue ``ResidueContactData.residence_time_by_polymer_type()``.
+        Empty for residues with no contacts or for results aggregated before
+        this field was introduced.
+    residence_time_by_polymer_type_per_replicate : dict[str, list[float]]
+        Per-replicate mean residence times (frames) for each polymer type.
+        Empty for results aggregated before this field was introduced.
     """
 
     protein_resid: int
@@ -74,6 +85,11 @@ class AggregatedResidueStats(BaseModel):
     n_effective_mean: float = 0.0
     n_effective_sem: float = 0.0
     by_polymer_type: dict[str, tuple[float, float]] = Field(default_factory=dict)
+    by_polymer_type_per_replicate: dict[str, list[float]] = Field(default_factory=dict)
+    residence_time_by_polymer_type: dict[str, tuple[float, float]] = Field(default_factory=dict)
+    residence_time_by_polymer_type_per_replicate: dict[str, list[float]] = Field(
+        default_factory=dict
+    )
 
 
 class AggregatedContactResult(BaseAnalysisResult):
@@ -90,6 +106,9 @@ class AggregatedContactResult(BaseAnalysisResult):
         Number of replicates aggregated
     total_frames_per_replicate : list[int]
         Number of frames in each replicate
+    timestep_ps : float
+        Time between saved frames in picoseconds.  Used to convert
+        frame-based residence times to real time units.
     criteria_label : str
         Contact criteria used
     criteria_cutoff : float
@@ -105,7 +124,7 @@ class AggregatedContactResult(BaseAnalysisResult):
     group_stats : dict[str, tuple[float, float]]
         Mean ± SEM contact fraction per AA group
     residence_time_by_polymer_type : dict[str, tuple[float, float]]
-        Mean ± SEM residence time in frames for each polymer type
+        Mean ± SEM residence time in frames for each polymer type (global)
     """
 
     analysis_type: ClassVar[str] = "contacts_aggregated"
@@ -113,6 +132,7 @@ class AggregatedContactResult(BaseAnalysisResult):
     residue_stats: list[AggregatedResidueStats] = Field(default_factory=list)
     n_replicates: int = Field(default=0, ge=0)
     total_frames_per_replicate: list[int] = Field(default_factory=list)
+    timestep_ps: float = Field(default=1.0, gt=0)
     criteria_label: str = Field(default="")
     criteria_cutoff: float = Field(default=0.0)
     coverage_mean: float = Field(default=0.0)
@@ -138,6 +158,8 @@ class AggregatedContactResult(BaseAnalysisResult):
     def to_arrays(self) -> tuple[NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]]:
         """Convert to arrays of residue IDs, means, and SEMs.
 
+        Returns overall (all-polymer) contact fraction per residue.
+
         Returns
         -------
         residue_ids : NDArray[np.int64]
@@ -148,6 +170,504 @@ class AggregatedContactResult(BaseAnalysisResult):
         means = np.array([rs.contact_fraction_mean for rs in self.residue_stats], dtype=np.float64)
         sems = np.array([rs.contact_fraction_sem for rs in self.residue_stats], dtype=np.float64)
         return resids, means, sems
+
+    def to_contact_fraction_arrays(
+        self,
+        polymer_type: str | None = None,
+    ) -> tuple[NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]]:
+        """Convert to arrays of residue IDs, contact fraction means, and SEMs.
+
+        Parameters
+        ----------
+        polymer_type : str or None
+            If specified, return contact fraction for that polymer type only.
+            If None, return overall contact fraction (OR across all polymer
+            segments).
+
+        Returns
+        -------
+        residue_ids : NDArray[np.int64]
+        means : NDArray[np.float64]
+        sems : NDArray[np.float64]
+        """
+        if polymer_type is None:
+            return self.to_arrays()
+
+        resids = np.array([rs.protein_resid for rs in self.residue_stats], dtype=np.int64)
+        means = np.zeros(len(self.residue_stats), dtype=np.float64)
+        sems = np.zeros(len(self.residue_stats), dtype=np.float64)
+
+        for i, rs in enumerate(self.residue_stats):
+            if polymer_type in rs.by_polymer_type:
+                means[i], sems[i] = rs.by_polymer_type[polymer_type]
+
+        return resids, means, sems
+
+    def to_residence_time_arrays(
+        self,
+        polymer_type: str | None = None,
+        units: str = "ns",
+    ) -> tuple[NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]]:
+        """Convert to arrays of residue IDs, mean residence times, and SEMs.
+
+        Parameters
+        ----------
+        polymer_type : str or None
+            If specified, return residence time for that polymer type only.
+            If None, return the mean across all polymer types present at each
+            residue (simple average, weighted equally).
+        units : str
+            Time units for the returned values: ``"frames"``, ``"ps"``, or
+            ``"ns"`` (default).
+
+        Returns
+        -------
+        residue_ids : NDArray[np.int64]
+        means : NDArray[np.float64]
+            Mean residence time per residue in requested units.
+        sems : NDArray[np.float64]
+            SEM of residence time per residue in requested units.
+        """
+        scale = 1.0  # frames
+        if units == "ps":
+            scale = self.timestep_ps
+        elif units == "ns":
+            scale = self.timestep_ps / 1000.0
+
+        resids = np.array([rs.protein_resid for rs in self.residue_stats], dtype=np.int64)
+        means = np.zeros(len(self.residue_stats), dtype=np.float64)
+        sems = np.zeros(len(self.residue_stats), dtype=np.float64)
+
+        for i, rs in enumerate(self.residue_stats):
+            rt = rs.residence_time_by_polymer_type
+            if not rt:
+                continue
+
+            if polymer_type is not None:
+                if polymer_type in rt:
+                    means[i] = rt[polymer_type][0] * scale
+                    sems[i] = rt[polymer_type][1] * scale
+            else:
+                # Average across all polymer types at this residue
+                type_means = [v[0] for v in rt.values()]
+                type_sems = [v[1] for v in rt.values()]
+                if type_means:
+                    means[i] = float(np.mean(type_means)) * scale
+                    # Propagate SEM: sqrt(sum(sem^2)) / n
+                    sems[i] = (
+                        float(np.sqrt(np.sum(np.array(type_sems) ** 2))) / len(type_sems) * scale
+                    )
+
+        return resids, means, sems
+
+    def polymer_types(self) -> list[str]:
+        """Return sorted list of polymer types present in per-residue stats."""
+        ptypes: set[str] = set()
+        for rs in self.residue_stats:
+            ptypes.update(rs.by_polymer_type.keys())
+        return sorted(ptypes)
+
+    def group_contact_fraction(
+        self,
+        polymer_type: str | None = None,
+    ) -> dict[str, tuple[float, float]]:
+        """Compute mean contact fraction per AA class group.
+
+        Groups residues by ``AggregatedResidueStats.protein_group``, then
+        computes the mean and SEM of per-residue contact fractions within
+        each group.
+
+        Parameters
+        ----------
+        polymer_type : str or None
+            If specified, use per-polymer-type contact fraction.
+            If None, use overall contact fraction.
+
+        Returns
+        -------
+        dict[str, tuple[float, float]]
+            Mapping of group_name -> (mean_cf, sem_cf).
+        """
+        from collections import defaultdict
+
+        group_values: dict[str, list[float]] = defaultdict(list)
+        for rs in self.residue_stats:
+            if polymer_type is None:
+                group_values[rs.protein_group].append(rs.contact_fraction_mean)
+            else:
+                cf = rs.by_polymer_type.get(polymer_type, (0.0, 0.0))[0]
+                group_values[rs.protein_group].append(cf)
+
+        result: dict[str, tuple[float, float]] = {}
+        for grp, vals in group_values.items():
+            arr = np.array(vals, dtype=np.float64)
+            mean = float(np.mean(arr))
+            sem = float(np.std(arr, ddof=1) / np.sqrt(len(arr))) if len(arr) > 1 else 0.0
+            result[grp] = (mean, sem)
+        return result
+
+    def group_residence_time(
+        self,
+        polymer_type: str | None = None,
+        units: str = "ns",
+    ) -> dict[str, tuple[float, float]]:
+        """Compute mean residence time per AA class group.
+
+        Groups residues by ``AggregatedResidueStats.protein_group``, then
+        computes the mean and SEM of per-residue residence times within
+        each group.  Residues with no residence time data contribute 0.
+
+        Parameters
+        ----------
+        polymer_type : str or None
+            If specified, use per-polymer-type residence time.
+            If None, average across all polymer types at each residue.
+        units : str
+            Time units: ``"frames"``, ``"ps"``, or ``"ns"`` (default).
+
+        Returns
+        -------
+        dict[str, tuple[float, float]]
+            Mapping of group_name -> (mean_rt, sem_rt).
+        """
+        from collections import defaultdict
+
+        _, rt_means, _ = self.to_residence_time_arrays(polymer_type=polymer_type, units=units)
+        resid_to_rt = {rs.protein_resid: rt_means[i] for i, rs in enumerate(self.residue_stats)}
+
+        group_values: dict[str, list[float]] = defaultdict(list)
+        for rs in self.residue_stats:
+            group_values[rs.protein_group].append(resid_to_rt[rs.protein_resid])
+
+        result: dict[str, tuple[float, float]] = {}
+        for grp, vals in group_values.items():
+            arr = np.array(vals, dtype=np.float64)
+            mean = float(np.mean(arr))
+            sem = float(np.std(arr, ddof=1) / np.sqrt(len(arr))) if len(arr) > 1 else 0.0
+            result[grp] = (mean, sem)
+        return result
+
+    def subset_contact_fraction(
+        self,
+        resids: list[int],
+        polymer_type: str | None = None,
+    ) -> tuple[float, float]:
+        """Compute mean contact fraction for an arbitrary set of residues.
+
+        Parameters
+        ----------
+        resids : list[int]
+            1-indexed residue IDs to include.
+        polymer_type : str or None
+            If specified, use per-polymer-type contact fraction.
+            If None, use overall contact fraction.
+
+        Returns
+        -------
+        tuple[float, float]
+            (mean_cf, sem_cf) across the specified residues.
+        """
+        resid_set = set(resids)
+        vals: list[float] = []
+        for rs in self.residue_stats:
+            if rs.protein_resid not in resid_set:
+                continue
+            if polymer_type is None:
+                vals.append(rs.contact_fraction_mean)
+            else:
+                vals.append(rs.by_polymer_type.get(polymer_type, (0.0, 0.0))[0])
+
+        if not vals:
+            return 0.0, 0.0
+        arr = np.array(vals, dtype=np.float64)
+        mean = float(np.mean(arr))
+        sem = float(np.std(arr, ddof=1) / np.sqrt(len(arr))) if len(arr) > 1 else 0.0
+        return mean, sem
+
+    def subset_residence_time(
+        self,
+        resids: list[int],
+        polymer_type: str | None = None,
+        units: str = "ns",
+    ) -> tuple[float, float]:
+        """Compute mean residence time for an arbitrary set of residues.
+
+        Parameters
+        ----------
+        resids : list[int]
+            1-indexed residue IDs to include.
+        polymer_type : str or None
+            If specified, use per-polymer-type residence time.
+            If None, average across all polymer types at each residue.
+        units : str
+            Time units: ``"frames"``, ``"ps"``, or ``"ns"`` (default).
+
+        Returns
+        -------
+        tuple[float, float]
+            (mean_rt, sem_rt) across the specified residues.
+        """
+        resid_set = set(resids)
+        _, rt_means, _ = self.to_residence_time_arrays(polymer_type=polymer_type, units=units)
+
+        vals: list[float] = []
+        for i, rs in enumerate(self.residue_stats):
+            if rs.protein_resid in resid_set:
+                vals.append(float(rt_means[i]))
+
+        if not vals:
+            return 0.0, 0.0
+        arr = np.array(vals, dtype=np.float64)
+        mean = float(np.mean(arr))
+        sem = float(np.std(arr, ddof=1) / np.sqrt(len(arr))) if len(arr) > 1 else 0.0
+        return mean, sem
+
+    # ------------------------------------------------------------------
+    # Per-replicate helpers (for jittered dot overlays on bar charts)
+    # ------------------------------------------------------------------
+
+    def group_contact_fraction_per_replicate(
+        self,
+        polymer_type: str | None = None,
+    ) -> dict[str, list[float]]:
+        """Per-replicate mean contact fraction for each AA class group.
+
+        For each replicate, compute the mean CF across residues belonging
+        to the group.  Returns one float per replicate per group.
+
+        Parameters
+        ----------
+        polymer_type : str or None
+            If specified, use per-polymer-type contact fraction.
+            If None, use overall contact fraction.
+
+        Returns
+        -------
+        dict[str, list[float]]
+            Mapping of group_name -> list of per-replicate mean CFs.
+            Returns empty dict if per-replicate data is unavailable.
+        """
+        from collections import defaultdict
+
+        # Gather per-residue per-replicate values grouped by AA class
+        group_residue_reps: dict[str, list[list[float]]] = defaultdict(list)
+        for rs in self.residue_stats:
+            if polymer_type is None:
+                reps = rs.contact_fraction_per_replicate
+            else:
+                reps = rs.by_polymer_type_per_replicate.get(polymer_type, [])
+            if not reps:
+                return {}  # Per-replicate data not available
+            group_residue_reps[rs.protein_group].append(reps)
+
+        # For each group, average across residues within each replicate
+        result: dict[str, list[float]] = {}
+        for grp, residue_rep_lists in group_residue_reps.items():
+            n_reps = len(residue_rep_lists[0])
+            per_rep_means: list[float] = []
+            for rep_idx in range(n_reps):
+                vals = [r[rep_idx] for r in residue_rep_lists if rep_idx < len(r)]
+                per_rep_means.append(float(np.mean(vals)) if vals else 0.0)
+            result[grp] = per_rep_means
+        return result
+
+    def group_residence_time_per_replicate(
+        self,
+        polymer_type: str | None = None,
+        units: str = "ns",
+    ) -> dict[str, list[float]]:
+        """Per-replicate mean residence time for each AA class group.
+
+        For each replicate, compute the mean RT across residues belonging
+        to the group.  Residues without RT data for a given replicate
+        contribute 0 for that replicate.
+
+        Parameters
+        ----------
+        polymer_type : str or None
+            If specified, use per-polymer-type residence time.
+            If None, average across all polymer types at each residue.
+        units : str
+            Time units: ``"frames"``, ``"ps"``, or ``"ns"`` (default).
+
+        Returns
+        -------
+        dict[str, list[float]]
+            Mapping of group_name -> list of per-replicate mean RTs.
+            Returns empty dict if per-replicate data is unavailable.
+        """
+        from collections import defaultdict
+
+        scale = 1.0  # frames
+        if units == "ps":
+            scale = self.timestep_ps
+        elif units == "ns":
+            scale = self.timestep_ps / 1000.0
+
+        # Gather per-residue per-replicate RT values grouped by AA class
+        group_residue_reps: dict[str, list[list[float]]] = defaultdict(list)
+        has_data = False
+        for rs in self.residue_stats:
+            if polymer_type is not None:
+                reps = rs.residence_time_by_polymer_type_per_replicate.get(polymer_type, [])
+            else:
+                # Average across all polymer types for each replicate
+                all_type_reps = rs.residence_time_by_polymer_type_per_replicate
+                if not all_type_reps:
+                    group_residue_reps[rs.protein_group].append([])
+                    continue
+                # Find max replicate count across polymer types
+                n_reps = max(len(v) for v in all_type_reps.values()) if all_type_reps else 0
+                reps = []
+                for rep_idx in range(n_reps):
+                    vals = [v[rep_idx] for v in all_type_reps.values() if rep_idx < len(v)]
+                    reps.append(float(np.mean(vals)) if vals else 0.0)
+
+            if reps:
+                has_data = True
+            group_residue_reps[rs.protein_group].append(reps)
+
+        if not has_data:
+            return {}
+
+        # Determine replicate count from first non-empty list
+        n_reps = 0
+        for residue_rep_lists in group_residue_reps.values():
+            for reps in residue_rep_lists:
+                if reps:
+                    n_reps = len(reps)
+                    break
+            if n_reps:
+                break
+
+        if n_reps == 0:
+            return {}
+
+        result: dict[str, list[float]] = {}
+        for grp, residue_rep_lists in group_residue_reps.items():
+            per_rep_means: list[float] = []
+            for rep_idx in range(n_reps):
+                vals = []
+                for reps in residue_rep_lists:
+                    if reps and rep_idx < len(reps):
+                        vals.append(reps[rep_idx])
+                    else:
+                        vals.append(0.0)
+                per_rep_means.append(float(np.mean(vals)) * scale if vals else 0.0)
+            result[grp] = per_rep_means
+        return result
+
+    def subset_contact_fraction_per_replicate(
+        self,
+        resids: list[int],
+        polymer_type: str | None = None,
+    ) -> list[float]:
+        """Per-replicate mean contact fraction for an arbitrary residue set.
+
+        Parameters
+        ----------
+        resids : list[int]
+            1-indexed residue IDs to include.
+        polymer_type : str or None
+            If specified, use per-polymer-type contact fraction.
+            If None, use overall contact fraction.
+
+        Returns
+        -------
+        list[float]
+            One value per replicate (mean CF across the specified residues).
+            Returns empty list if per-replicate data is unavailable.
+        """
+        resid_set = set(resids)
+        residue_rep_lists: list[list[float]] = []
+        for rs in self.residue_stats:
+            if rs.protein_resid not in resid_set:
+                continue
+            if polymer_type is None:
+                reps = rs.contact_fraction_per_replicate
+            else:
+                reps = rs.by_polymer_type_per_replicate.get(polymer_type, [])
+            if not reps:
+                return []  # Per-replicate data not available
+            residue_rep_lists.append(reps)
+
+        if not residue_rep_lists:
+            return []
+
+        n_reps = len(residue_rep_lists[0])
+        per_rep_means: list[float] = []
+        for rep_idx in range(n_reps):
+            vals = [r[rep_idx] for r in residue_rep_lists if rep_idx < len(r)]
+            per_rep_means.append(float(np.mean(vals)) if vals else 0.0)
+        return per_rep_means
+
+    def subset_residence_time_per_replicate(
+        self,
+        resids: list[int],
+        polymer_type: str | None = None,
+        units: str = "ns",
+    ) -> list[float]:
+        """Per-replicate mean residence time for an arbitrary residue set.
+
+        Parameters
+        ----------
+        resids : list[int]
+            1-indexed residue IDs to include.
+        polymer_type : str or None
+            If specified, use per-polymer-type residence time.
+            If None, average across all polymer types at each residue.
+        units : str
+            Time units: ``"frames"``, ``"ps"``, or ``"ns"`` (default).
+
+        Returns
+        -------
+        list[float]
+            One value per replicate (mean RT across the specified residues).
+            Returns empty list if per-replicate data is unavailable.
+        """
+        resid_set = set(resids)
+
+        scale = 1.0  # frames
+        if units == "ps":
+            scale = self.timestep_ps
+        elif units == "ns":
+            scale = self.timestep_ps / 1000.0
+
+        residue_rep_lists: list[list[float]] = []
+        for rs in self.residue_stats:
+            if rs.protein_resid not in resid_set:
+                continue
+            if polymer_type is not None:
+                reps = rs.residence_time_by_polymer_type_per_replicate.get(polymer_type, [])
+            else:
+                all_type_reps = rs.residence_time_by_polymer_type_per_replicate
+                if not all_type_reps:
+                    residue_rep_lists.append([])
+                    continue
+                n_reps = max(len(v) for v in all_type_reps.values()) if all_type_reps else 0
+                reps = []
+                for rep_idx in range(n_reps):
+                    vals = [v[rep_idx] for v in all_type_reps.values() if rep_idx < len(v)]
+                    reps.append(float(np.mean(vals)) if vals else 0.0)
+
+            residue_rep_lists.append(reps)
+
+        # Filter to only residues with data
+        non_empty = [r for r in residue_rep_lists if r]
+        if not non_empty:
+            return []
+
+        n_reps = len(non_empty[0])
+        per_rep_means: list[float] = []
+        for rep_idx in range(n_reps):
+            vals = []
+            for reps in residue_rep_lists:
+                if reps and rep_idx < len(reps):
+                    vals.append(reps[rep_idx])
+                else:
+                    vals.append(0.0)
+            per_rep_means.append(float(np.mean(vals)) * scale if vals else 0.0)
+        return per_rep_means
 
     def summary(self) -> str:
         """Return a human-readable summary of the aggregated contact result."""
@@ -291,6 +811,7 @@ def aggregate_contact_results(
         g_per_rep = []
         n_eff_per_rep = []
         by_polymer_type_per_rep: dict[str, list[float]] = {}
+        rt_by_polymer_type_per_rep: dict[str, list[float]] = {}
 
         for i, r in enumerate(results):
             rc_rep = residue_lookups[i].get(resid)
@@ -314,6 +835,14 @@ def aggregate_contact_results(
                     by_polymer_type_per_rep[ptype] = []
                 by_polymer_type_per_rep[ptype].append(pfrac)
 
+            # Per-residue residence time by polymer type
+            rt_stats = rc_rep.residence_time_by_polymer_type()
+            for ptype, stats in rt_stats.items():
+                if stats["n_events"] > 0:
+                    if ptype not in rt_by_polymer_type_per_rep:
+                        rt_by_polymer_type_per_rep[ptype] = []
+                    rt_by_polymer_type_per_rep[ptype].append(stats["mean_frames"])
+
         mean, sem = agg_func(fractions_per_rep)
         g_mean, g_sem = agg_func(g_per_rep)
         n_eff_mean, n_eff_sem = agg_func(n_eff_per_rep)
@@ -323,6 +852,12 @@ def aggregate_contact_results(
         for ptype, pfracs in by_polymer_type_per_rep.items():
             pm, ps = agg_func(pfracs)
             by_polymer_type[ptype] = (pm, ps)
+
+        # Aggregate per-residue residence time by polymer type
+        rt_by_polymer_type: dict[str, tuple[float, float]] = {}
+        for ptype, rt_vals in rt_by_polymer_type_per_rep.items():
+            rt_m, rt_s = agg_func(rt_vals)
+            rt_by_polymer_type[ptype] = (rt_m, rt_s)
 
         residue_stats.append(
             AggregatedResidueStats(
@@ -337,6 +872,9 @@ def aggregate_contact_results(
                 n_effective_mean=n_eff_mean,
                 n_effective_sem=n_eff_sem,
                 by_polymer_type=by_polymer_type,
+                by_polymer_type_per_replicate=by_polymer_type_per_rep,
+                residence_time_by_polymer_type=rt_by_polymer_type,
+                residence_time_by_polymer_type_per_replicate=rt_by_polymer_type_per_rep,
             )
         )
 
@@ -381,6 +919,7 @@ def aggregate_contact_results(
         residue_stats=residue_stats,
         n_replicates=len(results),
         total_frames_per_replicate=[r.n_frames for r in results],
+        timestep_ps=first.timestep_ps,
         criteria_label=first.criteria_label,
         criteria_cutoff=first.criteria_cutoff,
         coverage_mean=coverage_mean,
