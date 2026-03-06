@@ -332,12 +332,17 @@ class DistancesPlotSettings(BasePlotSettings):
         Show threshold line on distribution plots
     use_kde : bool
         Use KDE instead of histogram for distributions
+    generate_state_bars : bool
+        Generate per-pair state bar charts (above/below threshold).
+        Each pair gets its own figure showing the fraction of frames
+        in each state per condition. Default True.
     figsize : tuple[float, float]
         Default figure size for distance plots
     """
 
     show_threshold: bool = True
     use_kde: bool = True
+    generate_state_bars: bool = True
     figsize: tuple[float, float] = (10, 6)
 
 
@@ -1220,12 +1225,26 @@ analysis_settings:
   # IMPORTANT: Always use "protein and resid X" for protein residues!
   # See warning above in catalytic_triad section.
   #
+  # Each pair can have its own threshold and display labels for above/below
+  # states.  If threshold is omitted, the global threshold (default 3.5 Å)
+  # is used.  If below_label / above_label are omitted, defaults are
+  # "Below {threshold}Å" / "Above {threshold}Å".
+  #
   # distances:
-  #   threshold: 3.5
+  #   threshold: 3.5                         # global default threshold
   #   pairs:
   #     - label: "Ser77-Substrate"
   #       selection_a: "protein and resid 77 and name OG"
   #       selection_b: "resname RBY and name C1"
+  #       threshold: 3.5                     # per-pair override (optional)
+  #       below_label: "Bound"               # d <= threshold
+  #       above_label: "Unbound"             # d > threshold
+  #     - label: "Lid Domain"
+  #       selection_a: "com(resid 141:148 and chainID A)"
+  #       selection_b: "com(resid 281:289 and chainID A)"
+  #       threshold: 15.0
+  #       below_label: "Closed"
+  #       above_label: "Open"
 
   # Polymer-Protein Contact Analysis
   # contacts:
@@ -1403,6 +1422,7 @@ plot_settings:
   # distances:
   #   show_threshold: true         # threshold line on distributions
   #   use_kde: true                # KDE vs histogram
+  #   generate_state_bars: true    # per-pair above/below threshold bars
 
   # contacts:
   #   generate_enrichment_heatmap: true

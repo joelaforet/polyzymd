@@ -156,6 +156,12 @@ class DistancePairSettings(BaseAnalysisSettings):
     threshold : float, optional
         Per-pair distance threshold (Angstroms). If None, uses the global
         threshold from DistancesAnalysisSettings.
+    below_label : str, optional
+        Display label for the "below threshold" state (e.g. ``"Bound"``,
+        ``"Closed"``).  When ``None``, defaults to ``"Below {threshold}Å"``.
+    above_label : str, optional
+        Display label for the "above threshold" state (e.g. ``"Unbound"``,
+        ``"Open"``).  When ``None``, defaults to ``"Above {threshold}Å"``.
     """
 
     label: str = Field(..., description="Human-readable label for this pair")
@@ -164,6 +170,20 @@ class DistancePairSettings(BaseAnalysisSettings):
     threshold: Optional[float] = Field(
         default=None,
         description="Per-pair distance threshold (Angstroms). If None, uses global threshold.",
+    )
+    below_label: Optional[str] = Field(
+        default=None,
+        description=(
+            'Display label for "below threshold" state (e.g. "Bound", "Closed"). '
+            'Defaults to "Below {threshold}Å".'
+        ),
+    )
+    above_label: Optional[str] = Field(
+        default=None,
+        description=(
+            'Display label for "above threshold" state (e.g. "Unbound", "Open"). '
+            'Defaults to "Above {threshold}Å".'
+        ),
     )
 
     @classmethod
@@ -180,6 +200,10 @@ class DistancePairSettings(BaseAnalysisSettings):
         }
         if self.threshold is not None:
             result["threshold"] = self.threshold
+        if self.below_label is not None:
+            result["below_label"] = self.below_label
+        if self.above_label is not None:
+            result["above_label"] = self.above_label
         return result
 
 
