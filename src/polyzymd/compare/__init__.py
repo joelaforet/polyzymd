@@ -66,12 +66,6 @@ from polyzymd.compare.formatters import (
     format_result,
     to_json,
 )
-from polyzymd.compare.plotting import (
-    plot_effect_sizes,
-    plot_percent_change,
-    plot_rmsf_comparison,
-    plot_summary_panel,
-)
 from polyzymd.compare.polymer_affinity_formatters import (
     format_affinity_result,
 )
@@ -170,9 +164,4 @@ __all__ = [
     "PolymerAffinityScoreSettings",
     "PolymerAffinityScoreComparisonSettings",
     "format_affinity_result",
-    # Plotting functions
-    "plot_rmsf_comparison",
-    "plot_percent_change",
-    "plot_effect_sizes",
-    "plot_summary_panel",
 ]
