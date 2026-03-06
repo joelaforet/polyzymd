@@ -207,10 +207,12 @@ class SSTimelineHeatmapPlotter(BasePlotter):
 
             # Legend
             legend_patches = [Patch(facecolor=SS_COLORS[i], label=SS_NAMES[i]) for i in [1, 2, 0]]
-            ax.legend(
-                handles=legend_patches,
+            self._apply_legend(
+                ax,
                 loc="upper right",
+                bbox_to_anchor=None,
                 fontsize=t.small_fontsize,
+                handles=legend_patches,
                 framealpha=0.8,
             )
 
@@ -394,7 +396,7 @@ class SSContentBarsPlotter(BasePlotter):
 
         ax.set_xticks(x)
         ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=t.tick_fontsize)
-        ax.legend(fontsize=t.legend_fontsize)
+        self._apply_legend(ax)
         ax.set_ylim(bottom=0)
 
         self._apply_axis_style(
@@ -497,7 +499,7 @@ class SSContentBarsPlotter(BasePlotter):
 
         ax.set_xticks(x)
         ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=t.tick_fontsize)
-        ax.legend(fontsize=t.legend_fontsize)
+        self._apply_legend(ax)
         ax.set_ylim(bottom=0)
 
         self._apply_axis_style(

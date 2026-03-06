@@ -59,6 +59,9 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 
+_UNSET = object()  # sentinel for _apply_legend defaults
+
+
 class BasePlotter(ABC):
     """Abstract base class for all plotters.
 
@@ -136,6 +139,50 @@ class BasePlotter(ABC):
             ax.set_xlabel(xlabel, fontsize=t.label_fontsize)
         if ylabel is not None:
             ax.set_ylabel(ylabel, fontsize=t.label_fontsize)
+
+    def _apply_legend(
+        self,
+        ax: "Axes",
+        *,
+        loc: str | None = None,
+        bbox_to_anchor: tuple[float, float] | None | object = _UNSET,
+        fontsize: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Apply legend with themed defaults.
+
+        Uses ``theme.legend_loc`` and ``theme.legend_bbox`` unless
+        overridden by the caller.  Extra *kwargs* are forwarded to
+        ``ax.legend()`` (e.g. ``handles``, ``framealpha``, ``ncol``).
+
+        Parameters
+        ----------
+        ax : matplotlib Axes
+            Target axes.
+        loc : str, optional
+            Override ``theme.legend_loc``.
+        bbox_to_anchor : tuple of float or None, optional
+            Override ``theme.legend_bbox``.  Pass ``None`` explicitly
+            to suppress the bbox (e.g. for inside-axes placement).
+        fontsize : int, optional
+            Override ``theme.legend_fontsize``.
+        **kwargs
+            Forwarded to ``ax.legend()``.
+        """
+        t = self.theme
+        resolved_loc = loc or t.legend_loc
+        resolved_fs = fontsize or t.legend_fontsize
+
+        legend_kwargs: dict[str, Any] = {"loc": resolved_loc, "fontsize": resolved_fs}
+
+        # Resolve bbox_to_anchor: _UNSET → theme default, None → omit
+        if bbox_to_anchor is _UNSET:
+            legend_kwargs["bbox_to_anchor"] = t.legend_bbox
+        elif bbox_to_anchor is not None:
+            legend_kwargs["bbox_to_anchor"] = bbox_to_anchor
+
+        legend_kwargs.update(kwargs)
+        ax.legend(**legend_kwargs)
 
     @classmethod
     @abstractmethod
