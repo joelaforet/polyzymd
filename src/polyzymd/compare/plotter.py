@@ -322,6 +322,21 @@ class BasePlotter(ABC):
         import matplotlib.pyplot as plt
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Add watermark if enabled
+        if self.theme.show_watermark:
+            fig.text(
+                0.99,
+                0.01,
+                "Made by PolyzyMD",
+                fontsize=7,
+                color="dimgray",
+                ha="right",
+                va="bottom",
+                alpha=0.85,
+                style="italic",
+            )
+
         fig.savefig(
             output_path,
             dpi=self.settings.dpi,
