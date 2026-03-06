@@ -26,10 +26,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import BaseModel, Field
+
+from polyzymd.analysis.results.base import BaseAnalysisResult
 
 if TYPE_CHECKING:
     from polyzymd.analysis.contacts.results import ContactResult
@@ -87,7 +91,7 @@ class ChaperoneEvent:
 class UnassistedRefoldingEvent:
     """An exposed → re-buried transition without any polymer contact.
 
-    Serves as the baseline / control category for chaperone enrichment.
+    Serves as the baseline / control category for chaperone kinetics.
 
     Attributes
     ----------
@@ -258,6 +262,225 @@ class ChaperoneDetectionResult:
         if total == 0:
             return 0.0
         return self.n_chaperone_events / total
+
+
+# ---------------------------------------------------------------------------
+# Pydantic serialization models for caching raw events
+# ---------------------------------------------------------------------------
+
+
+class ChaperoneEventEntry(BaseModel):
+    """Serializable representation of a single chaperone event.
+
+    Mirrors the frozen dataclass :class:`ChaperoneEvent` but uses Pydantic
+    ``BaseModel`` for JSON round-tripping via :class:`ChaperoneEventsResult`.
+    """
+
+    resid: int
+    exposed_start: int
+    exposed_end: int
+    contact_frames: list[int]
+    polymer_types_contacted: list[str]
+    duration_frames: int
+
+
+class UnassistedEventEntry(BaseModel):
+    """Serializable representation of a single unassisted refolding event."""
+
+    resid: int
+    exposed_start: int
+    exposed_end: int
+    duration_frames: int
+
+
+class ResidueEventsEntry(BaseModel):
+    """All detected events for one residue (serializable).
+
+    Stores the full per-event data that :class:`ResidueExposureSummary`
+    (in ``dynamics.py``) discards when it aggregates to summary statistics.
+    """
+
+    resid: int
+    resname: str
+    chaperone_events: list[ChaperoneEventEntry] = Field(default_factory=list)
+    unassisted_events: list[UnassistedEventEntry] = Field(default_factory=list)
+    n_exposed_windows: int = 0
+
+
+class ChaperoneEventsResult(BaseAnalysisResult):
+    """Cached raw chaperone event detection results.
+
+    Preserves per-event frame-level data (start/end frames, contact frames,
+    polymer types) that :class:`ExposureDynamicsResult` discards when it
+    aggregates to per-residue summary statistics.
+
+    This result is saved alongside the dynamics summary so that downstream
+    analyses (chaperone kinetics, chaperone selectivity) can consume the
+    raw events without re-running ``detect_events()``.
+
+    Attributes
+    ----------
+    residue_events : list[ResidueEventsEntry]
+        One entry per protein residue, preserving full event detail.
+    n_frames : int
+        Number of trajectory frames analyzed.
+    n_residues : int
+        Number of protein residues.
+    min_event_length : int
+        Minimum event duration (frames) used during detection.
+    trajectory_path : str
+        Source trajectory path for provenance.
+    topology_path : str
+        Source topology path for provenance.
+    """
+
+    analysis_type: ClassVar[str] = "chaperone_events"
+
+    residue_events: list[ResidueEventsEntry] = Field(default_factory=list)
+    n_frames: int = Field(default=0, ge=0)
+    n_residues: int = Field(default=0, ge=0)
+    min_event_length: int = Field(default=1, ge=1)
+    trajectory_path: str = ""
+    topology_path: str = ""
+
+    # ------------------------------------------------------------------ #
+    # Cache path                                                           #
+    # ------------------------------------------------------------------ #
+
+    @classmethod
+    def cache_path(cls, analysis_dir: Path | str) -> Path:
+        """Standard cache file path under analysis_dir."""
+        return Path(analysis_dir) / "exposure" / "chaperone_events.json"
+
+    # ------------------------------------------------------------------ #
+    # Conversion: dataclass ↔ Pydantic                                     #
+    # ------------------------------------------------------------------ #
+
+    @classmethod
+    def from_detections(
+        cls,
+        detections: list[ChaperoneDetectionResult],
+        n_frames: int,
+        min_event_length: int = 1,
+        trajectory_path: str = "",
+        topology_path: str = "",
+    ) -> ChaperoneEventsResult:
+        """Convert dataclass detection results to a serializable Pydantic model.
+
+        Parameters
+        ----------
+        detections : list[ChaperoneDetectionResult]
+            Output of :func:`detect_events`.
+        n_frames : int
+            Number of trajectory frames analyzed.
+        min_event_length : int
+            Minimum event duration used during detection.
+        trajectory_path, topology_path : str
+            Provenance paths.
+
+        Returns
+        -------
+        ChaperoneEventsResult
+        """
+        residue_entries: list[ResidueEventsEntry] = []
+
+        for det in detections:
+            chap_entries = [
+                ChaperoneEventEntry(
+                    resid=ev.resid,
+                    exposed_start=ev.exposed_start,
+                    exposed_end=ev.exposed_end,
+                    contact_frames=list(ev.contact_frames),
+                    polymer_types_contacted=list(ev.polymer_types_contacted),
+                    duration_frames=ev.duration_frames,
+                )
+                for ev in det.chaperone_events
+            ]
+            unassisted_entries = [
+                UnassistedEventEntry(
+                    resid=ev.resid,
+                    exposed_start=ev.exposed_start,
+                    exposed_end=ev.exposed_end,
+                    duration_frames=ev.duration_frames,
+                )
+                for ev in det.unassisted_events
+            ]
+            residue_entries.append(
+                ResidueEventsEntry(
+                    resid=det.resid,
+                    resname=det.resname,
+                    chaperone_events=chap_entries,
+                    unassisted_events=unassisted_entries,
+                    n_exposed_windows=det.n_exposed_windows,
+                )
+            )
+
+        return cls(
+            residue_events=residue_entries,
+            n_frames=n_frames,
+            n_residues=len(detections),
+            min_event_length=min_event_length,
+            trajectory_path=trajectory_path,
+            topology_path=topology_path,
+        )
+
+    def to_detections(self) -> list[ChaperoneDetectionResult]:
+        """Reconstruct frozen dataclass objects from serialized data.
+
+        Returns
+        -------
+        list[ChaperoneDetectionResult]
+            Same structure as ``detect_events()`` output, one per residue.
+        """
+        results: list[ChaperoneDetectionResult] = []
+
+        for entry in self.residue_events:
+            chap_events = [
+                ChaperoneEvent(
+                    resid=ev.resid,
+                    exposed_start=ev.exposed_start,
+                    exposed_end=ev.exposed_end,
+                    contact_frames=tuple(ev.contact_frames),
+                    polymer_types_contacted=tuple(ev.polymer_types_contacted),
+                )
+                for ev in entry.chaperone_events
+            ]
+            unassisted_events = [
+                UnassistedRefoldingEvent(
+                    resid=ev.resid,
+                    exposed_start=ev.exposed_start,
+                    exposed_end=ev.exposed_end,
+                )
+                for ev in entry.unassisted_events
+            ]
+            det = ChaperoneDetectionResult(
+                resid=entry.resid,
+                resname=entry.resname,
+                chaperone_events=chap_events,
+                unassisted_events=unassisted_events,
+                n_exposed_windows=entry.n_exposed_windows,
+            )
+            results.append(det)
+
+        return results
+
+    # ------------------------------------------------------------------ #
+    # Summary                                                              #
+    # ------------------------------------------------------------------ #
+
+    def summary(self) -> str:
+        """Return a human-readable summary."""
+        n_chap = sum(len(r.chaperone_events) for r in self.residue_events)
+        n_unassisted = sum(len(r.unassisted_events) for r in self.residue_events)
+        return (
+            f"Chaperone Events ({self.n_residues} residues, {self.n_frames} frames): "
+            f"{n_chap} chaperone, {n_unassisted} unassisted events"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Public API — event detection
+# ---------------------------------------------------------------------------
 
 
 def detect_events_for_residue(

@@ -53,8 +53,16 @@ class ExposureConditionSummary(BaseConditionSummary):
         Mean total chaperone event count across replicates.
     mean_total_unassisted_events : float
         Mean total unassisted event count across replicates.
-    enrichment_by_polymer_type : dict[str, dict[str, float]]
-        Nested dict: polymer_type → aa_group → mean enrichment_residue.
+    acceleration_ratios : dict[str, dict[str, float | None]]
+        Nested dict: polymer_type -> aa_group -> mean rho (refolding
+        acceleration ratio). None if undefined for that pair.
+    chaperone_selectivity : dict[str, dict[str, float | None]]
+        Nested dict: polymer_type -> aa_group -> mean DeltaG_sel^chap
+        in kT. None if undefined for that pair.
+    mean_n_chaperone_events_by_polymer : dict[str, dict[str, float]]
+        polymer_type -> aa_group -> mean event count across replicates.
+    mean_n_unassisted_events_by_group : dict[str, float]
+        aa_group -> mean unassisted event count across replicates.
     polymer_types : list[str]
         Polymer types present in this condition.
     aa_groups : list[str]
@@ -76,9 +84,21 @@ class ExposureConditionSummary(BaseConditionSummary):
     mean_total_unassisted_events: float = Field(
         default=0.0, description="Mean total unassisted event count"
     )
-    enrichment_by_polymer_type: dict[str, dict[str, float]] = Field(
+    acceleration_ratios: dict[str, dict[str, float | None]] = Field(
         default_factory=dict,
-        description="polymer_type → aa_group → mean residue-based enrichment",
+        description="polymer_type -> aa_group -> mean rho (refolding acceleration ratio)",
+    )
+    chaperone_selectivity: dict[str, dict[str, float | None]] = Field(
+        default_factory=dict,
+        description="polymer_type -> aa_group -> mean DeltaG_sel^chap (kT)",
+    )
+    mean_n_chaperone_events_by_polymer: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+        description="polymer_type -> aa_group -> mean chaperone event count",
+    )
+    mean_n_unassisted_events_by_group: dict[str, float] = Field(
+        default_factory=dict,
+        description="aa_group -> mean unassisted event count",
     )
     polymer_types: list[str] = Field(default_factory=list, description="Polymer types present")
     aa_groups: list[str] = Field(default_factory=list, description="Amino-acid groups present")

@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from polyzymd.analysis.exposure.chaperone import (
     ChaperoneDetectionResult,
+    ChaperoneEventsResult,
     detect_events,
 )
 from polyzymd.analysis.exposure.classification import (
@@ -305,6 +306,20 @@ def analyze_exposure_dynamics(
         contact_result=contact_result,
         min_event_length=config.min_event_length,
     )
+
+    # Cache raw events to disk so downstream analyses (chaperone kinetics,
+    # chaperone selectivity) can load them without re-running detect_events().
+    if analysis_dir is not None:
+        events_result = ChaperoneEventsResult.from_detections(
+            detections=detections,
+            n_frames=sasa_result.n_frames,
+            min_event_length=config.min_event_length,
+            trajectory_path=sasa_result.trajectory_path,
+            topology_path=sasa_result.topology_path,
+        )
+        events_cache = ChaperoneEventsResult.cache_path(analysis_dir)
+        events_result.save(events_cache)
+        logger.info(f"ChaperoneEventsResult saved to {events_cache}")
 
     # Compute per-residue exposure fractions
     exposure_fractions = sasa_result.exposure_fraction_all()

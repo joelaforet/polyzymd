@@ -1,14 +1,17 @@
 """Exposure dynamics plotters for comparison workflow.
 
-Provides two registered plotters:
+Provides three registered plotters:
 
 - ``ExposureChaperoneFractionPlotter`` (``"exposure_chaperone_fraction"``)
   Bar chart comparing mean chaperone fraction across conditions.
 
-- ``ExposureEnrichmentHeatmapPlotter`` (``"exposure_enrichment_heatmap"``)
-  Heatmap of residue-based chaperone enrichment per (polymer_type, aa_group).
+- ``ExposureAccelerationRatioPlotter`` (``"exposure_acceleration_ratio"``)
+  Heatmap of refolding acceleration ratio rho per (polymer_type, aa_group).
 
-Both plotters follow the established BasePlotter pattern: load data from
+- ``ExposureChaperoneSelectivityPlotter`` (``"exposure_chaperone_selectivity"``)
+  Heatmap of chaperone selectivity DeltaG_sel^chap per (polymer_type, aa_group).
+
+All plotters follow the established BasePlotter pattern: load data from
 ``data[label]["analysis_dir"]`` paths rather than expecting data to be
 passed via kwargs.
 """
@@ -204,23 +207,24 @@ class ExposureChaperoneFractionPlotter(BasePlotter):
 
 
 # ---------------------------------------------------------------------------
-# Enrichment heatmap
+# Acceleration ratio (rho) heatmap
 # ---------------------------------------------------------------------------
 
 
-@PlotterRegistry.register("exposure_enrichment_heatmap")
-class ExposureEnrichmentHeatmapPlotter(BasePlotter):
-    """Heatmap of chaperone enrichment per (polymer_type, aa_group).
+@PlotterRegistry.register("exposure_acceleration_ratio")
+class ExposureAccelerationRatioPlotter(BasePlotter):
+    """Heatmap of refolding acceleration ratio rho per (polymer_type, aa_group).
 
     One subplot per condition; rows = polymer types, columns = AA groups.
-    Color encodes residue-based enrichment (warm = enriched, cool = depleted).
+    Color encodes rho (warm = accelerated refolding, cool = slowed).
+    Values > 1 indicate chaperoning, < 1 indicate trapping.
 
     Compatible with analysis_type="exposure".
     """
 
     @classmethod
     def plot_type(cls) -> str:
-        return "exposure_enrichment_heatmap"
+        return "exposure_acceleration_ratio"
 
     def can_plot(self, comparison_config: "ComparisonConfig", analysis_type: str) -> bool:
         return analysis_type == "exposure"
@@ -232,10 +236,7 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
         output_dir: Path,
         **kwargs,
     ) -> list[Path]:
-        """Generate enrichment heatmaps from cached ExposureComparisonResult.
-
-        Loads enrichment data from the per-condition summaries stored in the
-        comparison result JSON found on disk.
+        """Generate acceleration ratio heatmaps from ExposureComparisonResult.
 
         Parameters
         ----------
@@ -256,7 +257,7 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
         result = self._find_comparison_result(data, labels)
         if result is None:
             logger.warning(
-                "No ExposureComparisonResult found; skipping enrichment heatmap. "
+                "No ExposureComparisonResult found; skipping acceleration ratio heatmap. "
                 "Run ExposureDynamicsComparator.compare() first."
             )
             return []
@@ -271,37 +272,173 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
         return _find_comparison_result(data, labels, logger)
 
     def _plot_heatmaps(self, result: Any, output_dir: Path) -> list[Path]:
-        """Generate enrichment heatmaps for all conditions."""
+        """Generate acceleration ratio heatmaps for all conditions."""
         import matplotlib.pyplot as plt
         import numpy as np
 
         conditions = result.conditions
 
-        # Collect all polymer types and AA groups across conditions
         all_ptypes: list[str] = sorted({pt for c in conditions for pt in c.polymer_types})
         all_groups: list[str] = sorted({ag for c in conditions for ag in c.aa_groups})
 
         if not all_ptypes or not all_groups:
-            logger.warning("No enrichment data to plot")
+            logger.warning("No acceleration ratio data to plot")
             return []
 
         n_conds = len(conditions)
         n_ptypes = len(all_ptypes)
         n_groups = len(all_groups)
 
-        # Build enrichment matrix: (n_conds, n_ptypes, n_groups)
+        # Build rho matrix: (n_conds, n_ptypes, n_groups)
         matrices = np.full((n_conds, n_ptypes, n_groups), np.nan)
         for ci, cond in enumerate(conditions):
             for pi, pt in enumerate(all_ptypes):
                 for gi, ag in enumerate(all_groups):
-                    val = cond.enrichment_by_polymer_type.get(pt, {}).get(ag, float("nan"))
-                    matrices[ci, pi, gi] = val
+                    val = cond.acceleration_ratios.get(pt, {}).get(ag)
+                    if val is not None:
+                        matrices[ci, pi, gi] = val
 
-        # Determine symmetric colour scale
         finite_vals = matrices[np.isfinite(matrices)]
         if len(finite_vals) == 0:
-            logger.warning("All enrichment values are NaN; skipping heatmap")
+            logger.warning("All acceleration ratio values are NaN; skipping heatmap")
             return []
+
+        # Color scale centered on 1.0 (no effect)
+        deviation = max(abs(finite_vals.min() - 1.0), abs(finite_vals.max() - 1.0), 0.1)
+        vmin, vmax = 1.0 - deviation, 1.0 + deviation
+
+        fig_width = max(8, n_groups * 1.2 + 2)
+        fig_height = max(4, n_ptypes * 0.8 * n_conds + 1)
+        fig, axes = plt.subplots(
+            1, n_conds, figsize=(fig_width, fig_height), sharey=True, squeeze=False
+        )
+
+        im = None
+        for ci, (cond, ax) in enumerate(zip(conditions, axes[0])):
+            mat = matrices[ci]
+            im = ax.imshow(mat, vmin=vmin, vmax=vmax, cmap="RdBu_r", aspect="auto")
+            ax.set_xticks(range(n_groups))
+            ax.set_xticklabels(all_groups, rotation=45, ha="right", fontsize=8)
+            ax.set_title(cond.label, fontsize=9)
+            if ci == 0:
+                ax.set_yticks(range(n_ptypes))
+                ax.set_yticklabels(all_ptypes, fontsize=8)
+            else:
+                ax.set_yticks([])
+
+            self._annotate_cells(
+                ax, mat, fmt=".2f", fontsize=6, threshold=vmax * 0.6, show_sign=False
+            )
+
+        if im is not None:
+            cbar = fig.colorbar(im, ax=axes[0, -1], fraction=0.04, pad=0.04)  # type: ignore[arg-type]
+            cbar.set_label("Acceleration ratio ρ (>1 = chaperoning)", fontsize=8)
+
+        fig.suptitle("Refolding acceleration ratio ρ(P, G) by AA group", fontsize=11, y=1.01)
+        fig.tight_layout()
+
+        output_path = self._get_output_path(output_dir, "exposure_acceleration_ratio")
+        return [self._save_figure(fig, output_path)]
+
+
+# ---------------------------------------------------------------------------
+# Chaperone selectivity (DeltaG) heatmap
+# ---------------------------------------------------------------------------
+
+
+@PlotterRegistry.register("exposure_chaperone_selectivity")
+class ExposureChaperoneSelectivityPlotter(BasePlotter):
+    """Heatmap of chaperone selectivity DeltaG_sel^chap per (polymer_type, aa_group).
+
+    One subplot per condition; rows = polymer types, columns = AA groups.
+    Color encodes DeltaG in kT (blue/negative = preferential contact,
+    red/positive = avoidance during chaperone events).
+
+    Compatible with analysis_type="exposure".
+    """
+
+    @classmethod
+    def plot_type(cls) -> str:
+        return "exposure_chaperone_selectivity"
+
+    def can_plot(self, comparison_config: "ComparisonConfig", analysis_type: str) -> bool:
+        return analysis_type == "exposure"
+
+    def plot(
+        self,
+        data: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        **kwargs,
+    ) -> list[Path]:
+        """Generate chaperone selectivity heatmaps from ExposureComparisonResult.
+
+        Parameters
+        ----------
+        data : dict
+            Mapping of condition_label -> condition data dict.
+        labels : sequence of str
+            Condition labels.
+        output_dir : Path
+            Output directory.
+        **kwargs
+            Reserved for future use.
+
+        Returns
+        -------
+        list[Path]
+            Paths to generated plot files.
+        """
+        result = self._find_comparison_result(data, labels)
+        if result is None:
+            logger.warning(
+                "No ExposureComparisonResult found; skipping chaperone selectivity heatmap. "
+                "Run ExposureDynamicsComparator.compare() first."
+            )
+            return []
+        return self._plot_heatmaps(result, output_dir)
+
+    def _find_comparison_result(
+        self,
+        data: dict[str, Any],
+        labels: Sequence[str],
+    ) -> Any | None:
+        """Try to locate a saved ExposureComparisonResult JSON."""
+        return _find_comparison_result(data, labels, logger)
+
+    def _plot_heatmaps(self, result: Any, output_dir: Path) -> list[Path]:
+        """Generate chaperone selectivity heatmaps for all conditions."""
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        conditions = result.conditions
+
+        all_ptypes: list[str] = sorted({pt for c in conditions for pt in c.polymer_types})
+        all_groups: list[str] = sorted({ag for c in conditions for ag in c.aa_groups})
+
+        if not all_ptypes or not all_groups:
+            logger.warning("No chaperone selectivity data to plot")
+            return []
+
+        n_conds = len(conditions)
+        n_ptypes = len(all_ptypes)
+        n_groups = len(all_groups)
+
+        # Build DeltaG matrix: (n_conds, n_ptypes, n_groups)
+        matrices = np.full((n_conds, n_ptypes, n_groups), np.nan)
+        for ci, cond in enumerate(conditions):
+            for pi, pt in enumerate(all_ptypes):
+                for gi, ag in enumerate(all_groups):
+                    val = cond.chaperone_selectivity.get(pt, {}).get(ag)
+                    if val is not None:
+                        matrices[ci, pi, gi] = val
+
+        finite_vals = matrices[np.isfinite(matrices)]
+        if len(finite_vals) == 0:
+            logger.warning("All chaperone selectivity values are NaN; skipping heatmap")
+            return []
+
+        # Symmetric colour scale centered on 0
         floor = 0.1
         vmax_raw = max(abs(finite_vals.min()), abs(finite_vals.max()), floor)
         vmin, vmax = -vmax_raw, vmax_raw
@@ -314,8 +451,8 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
 
         im = None
         for ci, (cond, ax) in enumerate(zip(conditions, axes[0])):
-            mat = matrices[ci]  # (n_ptypes, n_groups)
-            im = ax.imshow(mat, vmin=vmin, vmax=vmax, cmap="RdBu_r", aspect="auto")
+            mat = matrices[ci]
+            im = ax.imshow(mat, vmin=vmin, vmax=vmax, cmap="RdBu", aspect="auto")
             ax.set_xticks(range(n_groups))
             ax.set_xticklabels(all_groups, rotation=45, ha="right", fontsize=8)
             ax.set_title(cond.label, fontsize=9)
@@ -325,18 +462,16 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
             else:
                 ax.set_yticks([])
 
-            # Annotate cells
             self._annotate_cells(
                 ax, mat, fmt="+.2f", fontsize=6, threshold=vmax * 0.6, show_sign=False
             )
 
-        # Shared colorbar
         if im is not None:
             cbar = fig.colorbar(im, ax=axes[0, -1], fraction=0.04, pad=0.04)  # type: ignore[arg-type]
-            cbar.set_label("Chaperone enrichment (residue-based)", fontsize=8)
+            cbar.set_label("ΔG_sel^chap (kT)  [<0 = preference]", fontsize=8)
 
-        fig.suptitle("Dynamic chaperone enrichment by AA group", fontsize=11, y=1.01)
+        fig.suptitle("Chaperone selectivity ΔG_sel^chap(P, G) by AA group", fontsize=11, y=1.01)
         fig.tight_layout()
 
-        output_path = self._get_output_path(output_dir, "exposure_enrichment_heatmap")
+        output_path = self._get_output_path(output_dir, "exposure_chaperone_selectivity")
         return [self._save_figure(fig, output_path)]

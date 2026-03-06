@@ -103,7 +103,7 @@ def format_exposure_console_table(
     lines.append("-" * 80)
     lines.append("")
 
-    # Enrichment by polymer type (if present)
+    # Acceleration ratio by polymer type (if present)
     all_polymer_types: set[str] = set()
     for cond in result.conditions:
         all_polymer_types.update(cond.polymer_types)
@@ -114,7 +114,7 @@ def format_exposure_console_table(
             all_aa_groups.update(cond.aa_groups)
 
         for ptype in sorted(all_polymer_types):
-            lines.append(f"Enrichment by Amino Acid Group — Polymer: {ptype}")
+            lines.append(f"Acceleration Ratio rho(P, G) — Polymer: {ptype}")
             lines.append("-" * 80)
             header_parts = [f"{'Condition':<25}"]
             for ag in sorted(all_aa_groups):
@@ -125,8 +125,8 @@ def format_exposure_console_table(
             for cond in result.conditions:
                 row_parts = [f"{cond.label:<25}"]
                 for ag in sorted(all_aa_groups):
-                    val = cond.enrichment_by_polymer_type.get(ptype, {}).get(ag)
-                    if val is None or (val != val):  # nan check
+                    val = cond.acceleration_ratios.get(ptype, {}).get(ag)
+                    if val is None:
                         row_parts.append(f"{'--':>12}")
                     else:
                         marker = "+" if val > 1.0 else "-" if val < 1.0 else " "
@@ -134,7 +134,30 @@ def format_exposure_console_table(
                 lines.append("  ".join(row_parts))
 
             lines.append("-" * 80)
-            lines.append("  + = enriched (>1.0), - = depleted (<1.0)")
+            lines.append("  + = accelerated (rho>1), - = slowed (rho<1)")
+            lines.append("")
+
+        for ptype in sorted(all_polymer_types):
+            lines.append(f"Chaperone Selectivity DG_sel^chap(P, G) [kT] — Polymer: {ptype}")
+            lines.append("-" * 80)
+            header_parts = [f"{'Condition':<25}"]
+            for ag in sorted(all_aa_groups):
+                header_parts.append(f"{ag:>12}")
+            lines.append("  ".join(header_parts))
+            lines.append("-" * 80)
+
+            for cond in result.conditions:
+                row_parts = [f"{cond.label:<25}"]
+                for ag in sorted(all_aa_groups):
+                    val = cond.chaperone_selectivity.get(ptype, {}).get(ag)
+                    if val is None:
+                        row_parts.append(f"{'--':>12}")
+                    else:
+                        row_parts.append(f"{val:>+10.3f}  ")
+                lines.append("  ".join(row_parts))
+
+            lines.append("-" * 80)
+            lines.append("  Negative = preferential contact during chaperoning")
             lines.append("")
 
     # Pairwise comparisons
@@ -294,7 +317,7 @@ def format_exposure_markdown(
 
     lines.append("")
 
-    # Enrichment tables
+    # Acceleration ratio and chaperone selectivity tables
     all_polymer_types: set[str] = set()
     for cond in result.conditions:
         all_polymer_types.update(cond.polymer_types)
@@ -305,7 +328,12 @@ def format_exposure_markdown(
             all_aa_groups.update(cond.aa_groups)
         sorted_aa_groups = sorted(all_aa_groups)
 
-        lines.append("## Chaperone Enrichment by Amino Acid Group")
+        # --- Acceleration Ratio tables ---
+        lines.append("## Refolding Acceleration Ratio ρ(P, G)")
+        lines.append("")
+        lines.append(
+            "ρ > 1 means the polymer accelerates refolding; ρ < 1 means it slows refolding."
+        )
         lines.append("")
 
         for ptype in sorted(all_polymer_types):
@@ -323,8 +351,8 @@ def format_exposure_markdown(
             for cond in result.conditions:
                 row = f"| **{cond.label}** |"
                 for ag in sorted_aa_groups:
-                    val = cond.enrichment_by_polymer_type.get(ptype, {}).get(ag)
-                    if val is None or (val != val):
+                    val = cond.acceleration_ratios.get(ptype, {}).get(ag)
+                    if val is None:
                         row += " -- |"
                     else:
                         marker = "+" if val > 1.0 else "-" if val < 1.0 else ""
@@ -333,7 +361,40 @@ def format_exposure_markdown(
 
             lines.append("")
 
-        lines.append("> **Key:** + = enriched (>1.0), - = depleted (<1.0)")
+        lines.append("> **Key:** + = accelerated (ρ>1), - = slowed (ρ<1)")
+        lines.append("")
+
+        # --- Chaperone Selectivity tables ---
+        lines.append("## Chaperone Selectivity ΔG_sel^chap(P, G) [kT]")
+        lines.append("")
+        lines.append("Negative values indicate preferential polymer contact during chaperoning.")
+        lines.append("")
+
+        for ptype in sorted(all_polymer_types):
+            lines.append(f"### Polymer: {ptype}")
+            lines.append("")
+
+            header = "| Condition |"
+            divider = "|-----------|"
+            for ag in sorted_aa_groups:
+                header += f" {ag} |"
+                divider += "--------|"
+            lines.append(header)
+            lines.append(divider)
+
+            for cond in result.conditions:
+                row = f"| **{cond.label}** |"
+                for ag in sorted_aa_groups:
+                    val = cond.chaperone_selectivity.get(ptype, {}).get(ag)
+                    if val is None:
+                        row += " -- |"
+                    else:
+                        row += f" {val:+.3f} |"
+                lines.append(row)
+
+            lines.append("")
+
+        lines.append("> Negative = preferential contact during chaperoning")
         lines.append("")
 
     # Pairwise comparisons

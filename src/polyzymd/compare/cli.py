@@ -771,7 +771,7 @@ def exposure(
 
     Optionally define an exposure section in comparison.yaml for custom settings:
     - exposure_threshold: fraction SASA defining 'exposed' (default: 0.20)
-    - polymer_resnames: list of polymer residue names for enrichment
+    - polymer_resnames: list of polymer residue names for analysis
     - transient_lower / transient_upper: thresholds for classifying residues
 
     \b
@@ -822,8 +822,12 @@ def exposure(
             **{**exposure_analysis.model_dump(), **overrides}
         )
 
-    # Recompute flags: --recompute-sasa or --recompute-exposure both force a full recompute
-    recompute = recompute_sasa or recompute_exposure
+    # Recompute flags are passed separately to the comparator so that
+    # --recompute-exposure does NOT trigger expensive SASA recomputation.
+    recompute_flags = {
+        "recompute_sasa": recompute_sasa,
+        "recompute_exposure": recompute_exposure,
+    }
 
     click.echo(f"Comparison: {config.name}")
     click.echo(f"Conditions: {len(config.conditions)}")
@@ -850,7 +854,7 @@ def exposure(
             comparison_settings=exposure_comparison,
             equilibration=equilibration,
         )
-        result = comparator.compare(recompute=recompute)
+        result = comparator.compare(**recompute_flags)
     except Exception as e:
         click.echo(f"Error during comparison: {e}", err=True)
         if debug:

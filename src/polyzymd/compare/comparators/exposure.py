@@ -3,7 +3,8 @@
 This module provides ExposureDynamicsComparator, which orchestrates:
 1. SASA computation (MDTraj shrake_rupley, protein-only)
 2. Exposure dynamics analysis (classify residues, detect chaperone events)
-3. Chaperone enrichment (dual residue/atom normalization)
+3. Chaperone kinetics (refolding acceleration ratio rho) and
+   chaperone selectivity (DeltaG_sel^chap)
 4. Statistical comparison of chaperone fraction across conditions
 
 Design follows the ContactsComparator pattern:
@@ -34,8 +35,9 @@ from polyzymd.compare.statistics import cohens_d, independent_ttest, one_way_ano
 
 if TYPE_CHECKING:
     from polyzymd.analysis.contacts.results import ContactResult
+    from polyzymd.analysis.exposure.chaperone_kinetics import ChaperoneKineticsResult
+    from polyzymd.analysis.exposure.chaperone_selectivity import ChaperoneSelectivityResult
     from polyzymd.analysis.exposure.dynamics import ExposureDynamicsResult
-    from polyzymd.analysis.exposure.enrichment import ChaperoneEnrichmentResult
     from polyzymd.analysis.sasa.trajectory import SASATrajectoryResult
     from polyzymd.compare.config import ComparisonConfig, ConditionConfig
 
@@ -62,8 +64,8 @@ class ExposureDynamicsComparator(
        or transiently exposed.
     2. Detect "chaperone events" (buried → exposed → polymer contact →
        re-buried) and unassisted refolding events.
-    3. Compute dynamic chaperone enrichment per (polymer_type, aa_group) pair
-       with dual residue/atom normalization.
+    3. Compute chaperone kinetics (refolding acceleration ratio rho) and
+       chaperone selectivity (DeltaG_sel^chap) per (polymer_type, aa_group).
     4. Statistically compare chaperone_fraction across conditions.
 
     Parameters
@@ -124,20 +126,32 @@ class ExposureDynamicsComparator(
     # Override compare() — custom multi-metric flow
     # ========================================================================
 
-    def compare(self, recompute: bool = False) -> ExposureComparisonResult:
+    def compare(
+        self,
+        recompute: bool = False,
+        recompute_sasa: bool = False,
+        recompute_exposure: bool = False,
+    ) -> ExposureComparisonResult:
         """Run exposure dynamics comparison across all conditions.
 
         Parameters
         ----------
         recompute : bool, optional
-            If True, force recompute even if cached results exist.
+            If True, force recompute everything (SASA + exposure dynamics).
+        recompute_sasa : bool, optional
+            If True, force recompute SASA even if cached.
+        recompute_exposure : bool, optional
+            If True, force recompute exposure dynamics even if cached.
+            Does NOT recompute SASA.
 
         Returns
         -------
         ExposureComparisonResult
             Complete comparison with statistics and rankings.
         """
-        self._recompute = recompute
+        # recompute=True overrides both sub-flags
+        self._recompute_sasa = recompute or recompute_sasa
+        self._recompute_exposure = recompute or recompute_exposure
 
         logger.info(f"Starting exposure dynamics comparison: {self.config.name}")
         logger.info(f"Conditions: {len(self.config.conditions)}")
@@ -161,7 +175,7 @@ class ExposureDynamicsComparator(
         # Step 2: Load or compute for each condition
         condition_data: list[tuple["ConditionConfig", ExposureConditionData]] = []
         for cond in valid_conditions:
-            data = self._load_or_compute(cond, recompute)
+            data = self._load_or_compute(cond, self._recompute_exposure)
             condition_data.append((cond, data))
 
         # Step 3: Build condition summaries
@@ -215,7 +229,8 @@ class ExposureDynamicsComparator(
         1. Load ContactResult from cached JSON.
         2. Compute (or load cached) SASATrajectoryResult.
         3. Compute (or load cached) ExposureDynamicsResult.
-        4. Compute ChaperoneEnrichmentResult.
+        4. Load cached ChaperoneEventsResult.
+        5. Compute ChaperoneKineticsResult and ChaperoneSelectivityResult.
 
         Parameters
         ----------
@@ -227,7 +242,7 @@ class ExposureDynamicsComparator(
         Returns
         -------
         ExposureConditionData
-            Dict with per-replicate dynamics results and enrichment.
+            Dict with per-replicate dynamics, kinetics, and selectivity results.
         """
         from polyzymd.config.schema import SimulationConfig
 
@@ -237,8 +252,12 @@ class ExposureDynamicsComparator(
         # Resolve condition-specific output directory (None in standalone mode)
         condition_output_dir = self._resolve_condition_output_dir(cond.label, "exposure")
 
+        # Read temperature from simulation config for selectivity computation
+        temperature_kelvin = float(sim_config.thermodynamics.temperature)
+
         dynamics_per_rep: list["ExposureDynamicsResult"] = []
-        enrichment_per_rep: list["ChaperoneEnrichmentResult"] = []
+        kinetics_per_rep: list["ChaperoneKineticsResult"] = []
+        selectivity_per_rep: list["ChaperoneSelectivityResult"] = []
         successful_reps: list[int] = []
 
         for rep in cond.replicates:
@@ -248,11 +267,13 @@ class ExposureDynamicsComparator(
                 recompute,
                 cond_config_path=Path(cond.config),
                 condition_output_dir=condition_output_dir,
+                temperature_kelvin=temperature_kelvin,
             )
             if result is not None:
-                dynamics, enrichment = result
+                dynamics, kinetics, selectivity = result
                 dynamics_per_rep.append(dynamics)
-                enrichment_per_rep.append(enrichment)
+                kinetics_per_rep.append(kinetics)
+                selectivity_per_rep.append(selectivity)
                 successful_reps.append(rep)
 
         if not dynamics_per_rep:
@@ -267,7 +288,8 @@ class ExposureDynamicsComparator(
 
         return {
             "dynamics_per_rep": dynamics_per_rep,
-            "enrichment_per_rep": enrichment_per_rep,
+            "kinetics_per_rep": kinetics_per_rep,
+            "selectivity_per_rep": selectivity_per_rep,
         }
 
     def _load_or_compute_replicate(
@@ -277,7 +299,11 @@ class ExposureDynamicsComparator(
         recompute: bool,
         cond_config_path: Path | None = None,
         condition_output_dir: Path | None = None,
-    ) -> tuple["ExposureDynamicsResult", "ChaperoneEnrichmentResult"] | None:
+        temperature_kelvin: float = 363.0,
+    ) -> (
+        tuple["ExposureDynamicsResult", "ChaperoneKineticsResult", "ChaperoneSelectivityResult"]
+        | None
+    ):
         """Load or compute exposure dynamics for a single replicate.
 
         Parameters
@@ -293,18 +319,24 @@ class ExposureDynamicsComparator(
         condition_output_dir : Path, optional
             Condition-specific output directory (from comparison mode).
             Checked first before falling back to ``projects_directory``.
+        temperature_kelvin : float, optional
+            Simulation temperature for selectivity computation, by default 363.0.
 
         Returns
         -------
-        tuple[ExposureDynamicsResult, ChaperoneEnrichmentResult] or None
+        tuple[ExposureDynamicsResult, ChaperoneKineticsResult, ChaperoneSelectivityResult] or None
         """
         from polyzymd.analysis.contacts.results import ContactResult
         from polyzymd.analysis.core.loader import TrajectoryLoader
+        from polyzymd.analysis.exposure.chaperone import ChaperoneEventsResult
+        from polyzymd.analysis.exposure.chaperone_kinetics import compute_chaperone_kinetics
+        from polyzymd.analysis.exposure.chaperone_selectivity import (
+            compute_chaperone_selectivity,
+        )
         from polyzymd.analysis.exposure.dynamics import (
             ExposureDynamicsResult,
             analyze_exposure_dynamics,
         )
-        from polyzymd.analysis.exposure.enrichment import compute_chaperone_enrichment
         from polyzymd.analysis.sasa.config import SASAConfig
         from polyzymd.analysis.sasa.trajectory import compute_trajectory_sasa
 
@@ -357,83 +389,100 @@ class ExposureDynamicsComparator(
             cache_sasa=True,
         )
 
-        # Check cached ExposureDynamicsResult
-        dynamics_cache_path = ExposureDynamicsResult.cache_path(analysis_dir)
-        if not recompute and dynamics_cache_path.exists():
-            logger.info(f"  Loading cached exposure dynamics: {dynamics_cache_path}")
-            dynamics = ExposureDynamicsResult.load(dynamics_cache_path)
-            # Still need to compute enrichment (not cached separately)
-            sasa_result = compute_trajectory_sasa(
-                topology_path=topology_path,
-                trajectory_path=trajectory_paths,
-                config=sasa_config,
-                analysis_dir=analysis_dir,
-                recompute=False,  # Use SASA cache if available
-            )
-            enrichment = compute_chaperone_enrichment(
-                sasa_result=sasa_result,
-                contact_result=contact_result,
-                polymer_resnames=self.analysis_settings.polymer_resnames,
-            )
-            return dynamics, enrichment
-
-        # Compute SASA
-        logger.info(f"  Computing SASA for rep {replicate}...")
+        # Always need SASA for kinetics/selectivity.
+        # Use _recompute_sasa (not the exposure recompute flag) so that
+        # --recompute-exposure does NOT trigger expensive SASA recomputation.
         sasa_result = compute_trajectory_sasa(
             topology_path=topology_path,
             trajectory_path=trajectory_paths,
             config=sasa_config,
             analysis_dir=analysis_dir,
-            recompute=recompute,
+            recompute=getattr(self, "_recompute_sasa", False),
         )
 
-        # Compute exposure dynamics (with caching)
-        from polyzymd.analysis.exposure.config import ExposureConfig
+        # Check cached ExposureDynamicsResult
+        dynamics_cache_path = ExposureDynamicsResult.cache_path(analysis_dir)
+        if not recompute and dynamics_cache_path.exists():
+            logger.info(f"  Loading cached exposure dynamics: {dynamics_cache_path}")
+            dynamics = ExposureDynamicsResult.load(dynamics_cache_path)
+        else:
+            # Compute exposure dynamics (with caching + event serialization)
+            from polyzymd.analysis.exposure.config import ExposureConfig
 
-        exposure_config = ExposureConfig(
-            transient_lower=self.analysis_settings.transient_lower,
-            transient_upper=self.analysis_settings.transient_upper,
-            min_event_length=self.analysis_settings.min_event_length,
+            exposure_config = ExposureConfig(
+                transient_lower=self.analysis_settings.transient_lower,
+                transient_upper=self.analysis_settings.transient_upper,
+                min_event_length=self.analysis_settings.min_event_length,
+            )
+
+            logger.info(f"  Analyzing exposure dynamics for rep {replicate}...")
+            dynamics = analyze_exposure_dynamics(
+                sasa_result=sasa_result,
+                contact_result=contact_result,
+                config=exposure_config,
+                analysis_dir=analysis_dir,
+                recompute=recompute,
+            )
+
+        # Load cached chaperone events (saved by analyze_exposure_dynamics)
+        events_cache = ChaperoneEventsResult.cache_path(analysis_dir)
+        if not events_cache.exists():
+            logger.warning(
+                f"  Chaperone events cache not found at {events_cache}. "
+                "Cannot compute kinetics/selectivity."
+            )
+            return None
+
+        events_result = ChaperoneEventsResult.load(events_cache)
+        detections = events_result.to_detections()
+
+        # Compute chaperone kinetics (rho)
+        kinetics = compute_chaperone_kinetics(
+            chaperone_detections=detections,
+            aa_classes=sasa_result.aa_classes,
+            resids=sasa_result.resids,
         )
+        logger.info(f"  Chaperone kinetics for rep {replicate}: {kinetics.summary()}")
 
-        logger.info(f"  Analyzing exposure dynamics for rep {replicate}...")
-        dynamics = analyze_exposure_dynamics(
+        # Compute chaperone selectivity (DeltaG_sel^chap)
+        selectivity = compute_chaperone_selectivity(
+            chaperone_detections=detections,
             sasa_result=sasa_result,
             contact_result=contact_result,
-            config=exposure_config,
-            analysis_dir=analysis_dir,
-            recompute=recompute,
+            aa_classes=sasa_result.aa_classes,
+            resids=sasa_result.resids,
+            temperature_kelvin=temperature_kelvin,
         )
+        logger.info(f"  Chaperone selectivity for rep {replicate}: {selectivity.summary()}")
 
-        # Compute enrichment
-        enrichment = compute_chaperone_enrichment(
-            sasa_result=sasa_result,
-            contact_result=contact_result,
-            polymer_resnames=self.analysis_settings.polymer_resnames,
-        )
-
-        return dynamics, enrichment
+        return dynamics, kinetics, selectivity
 
     def _build_condition_summary(
         self,
         cond: "ConditionConfig",
         data: ExposureConditionData,
     ) -> ExposureConditionSummary:
-        """Build condition summary from per-replicate exposure dynamics results.
+        """Build condition summary from per-replicate results.
+
+        Aggregates dynamics (chaperone fraction, transient fraction),
+        chaperone kinetics (rho), and chaperone selectivity (DeltaG)
+        across replicates by computing per-(P,G) means.
 
         Parameters
         ----------
         cond : ConditionConfig
             Condition configuration.
         data : ExposureConditionData
-            Raw per-replicate data.
+            Raw per-replicate data with keys ``dynamics_per_rep``,
+            ``kinetics_per_rep``, ``selectivity_per_rep``.
 
         Returns
         -------
         ExposureConditionSummary
         """
         dynamics_per_rep: list["ExposureDynamicsResult"] = data["dynamics_per_rep"]
-        enrichment_per_rep: list["ChaperoneEnrichmentResult"] = data["enrichment_per_rep"]
+        kinetics_per_rep: list["ChaperoneKineticsResult"] = data["kinetics_per_rep"]
+        selectivity_per_rep: list["ChaperoneSelectivityResult"] = data["selectivity_per_rep"]
         n_replicates = len(dynamics_per_rep)
 
         # Per-replicate primary metric: mean chaperone_fraction over transient residues
@@ -465,28 +514,67 @@ class ExposureDynamicsComparator(
         _transient_stats = compute_sem(transient_fractions) if n_replicates > 1 else None
         sem_transient = _transient_stats.sem if _transient_stats else 0.0
 
-        # Aggregate enrichment: mean residue-based enrichment per (polymer_type, aa_group)
-        enrichment_by_ptype: dict[str, dict[str, float]] = {}
+        # Collect polymer types and AA groups from kinetics + selectivity results
         polymer_types_set: set[str] = set()
         aa_groups_set: set[str] = set()
 
-        for enr in enrichment_per_rep:
-            for e in enr.entries:
-                polymer_types_set.add(e.polymer_type)
-                aa_groups_set.add(e.aa_group)
+        for kin in kinetics_per_rep:
+            polymer_types_set.update(kin.polymer_types)
+            aa_groups_set.update(kin.aa_groups)
+        for sel in selectivity_per_rep:
+            polymer_types_set.update(sel.polymer_types)
+            aa_groups_set.update(sel.aa_groups)
 
         polymer_types = sorted(polymer_types_set)
         aa_groups = sorted(aa_groups_set)
 
+        # Aggregate acceleration ratios: mean rho per (P, G) across replicates
+        accel_ratios: dict[str, dict[str, float | None]] = {}
         for ptype in polymer_types:
-            enrichment_by_ptype[ptype] = {}
+            accel_ratios[ptype] = {}
             for ag in aa_groups:
-                vals = []
-                for enr in enrichment_per_rep:
-                    entry = enr.get(ptype, ag)
-                    if entry is not None:
-                        vals.append(entry.enrichment_residue)
-                enrichment_by_ptype[ptype][ag] = float(np.mean(vals)) if vals else float("nan")
+                rho_vals = []
+                for kin in kinetics_per_rep:
+                    entry = kin.get(ptype, ag)
+                    if entry is not None and entry.rho is not None:
+                        rho_vals.append(entry.rho)
+                accel_ratios[ptype][ag] = float(np.mean(rho_vals)) if rho_vals else None
+
+        # Aggregate chaperone selectivity: mean DeltaG per (P, G) across replicates
+        chap_selectivity: dict[str, dict[str, float | None]] = {}
+        for ptype in polymer_types:
+            chap_selectivity[ptype] = {}
+            for ag in aa_groups:
+                dg_vals = []
+                for sel in selectivity_per_rep:
+                    entry = sel.get(ptype, ag)
+                    if entry is not None and entry.dg_chap_kT is not None:
+                        dg_vals.append(entry.dg_chap_kT)
+                chap_selectivity[ptype][ag] = float(np.mean(dg_vals)) if dg_vals else None
+
+        # Aggregate event counts per (P, G) and per G
+        mean_n_chap_by_polymer: dict[str, dict[str, float]] = {}
+        for ptype in polymer_types:
+            mean_n_chap_by_polymer[ptype] = {}
+            for ag in aa_groups:
+                counts = []
+                for kin in kinetics_per_rep:
+                    entry = kin.get(ptype, ag)
+                    counts.append(entry.n_chaperone_events if entry is not None else 0)
+                mean_n_chap_by_polymer[ptype][ag] = float(np.mean(counts))
+
+        mean_n_unassisted_by_group: dict[str, float] = {}
+        for ag in aa_groups:
+            counts = []
+            for kin in kinetics_per_rep:
+                # Sum unassisted events for this group across all entries
+                n = 0
+                for entry in kin.acceleration_ratios:
+                    if entry.aa_group == ag:
+                        n = entry.n_unassisted_events
+                        break
+                counts.append(n)
+            mean_n_unassisted_by_group[ag] = float(np.mean(counts))
 
         return ExposureConditionSummary(
             label=cond.label,
@@ -500,7 +588,10 @@ class ExposureDynamicsComparator(
             mean_n_transient=float(np.mean(n_transient_per_rep)),
             mean_total_chaperone_events=float(np.mean(total_chap_events)),
             mean_total_unassisted_events=float(np.mean(total_unassisted)),
-            enrichment_by_polymer_type=enrichment_by_ptype,
+            acceleration_ratios=accel_ratios,
+            chaperone_selectivity=chap_selectivity,
+            mean_n_chaperone_events_by_polymer=mean_n_chap_by_polymer,
+            mean_n_unassisted_events_by_group=mean_n_unassisted_by_group,
             polymer_types=polymer_types,
             aa_groups=aa_groups,
         )
