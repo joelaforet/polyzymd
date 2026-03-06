@@ -340,7 +340,7 @@ class RMSFProfilePlotter(BasePlotter):
         ax.set_xlabel("Residue Number", fontsize=11)
         ax.set_ylabel("RMSF (Å)", fontsize=11)
         ax.set_title("Per-Residue RMSF Comparison", fontsize=13, fontweight="bold")
-        ax.legend(loc="upper right", fontsize=9)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
