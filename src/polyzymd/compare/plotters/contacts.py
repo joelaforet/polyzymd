@@ -505,6 +505,7 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
         # Symmetric around 0.0 for diverging colormap (zero-centered enrichment)
         vmin, vmax = self._symmetric_clim(all_values)
 
+        t = self.theme
         im = None  # Track last imshow for colorbar
 
         # Plot each condition
@@ -536,7 +537,7 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
             ax.set_xticklabels(polymer_types, rotation=45, ha="right")
             ax.set_yticks(range(n_rows))
             ax.set_yticklabels(protein_groups)
-            ax.set_title(cond_label, fontweight="bold")
+            ax.set_title(cond_label, fontweight=t.title_fontweight)
 
             if idx % n_plot_cols == 0:
                 ax.set_ylabel("Protein Group")
@@ -554,9 +555,19 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
             cbar.set_label("Enrichment (surface-normalized)", rotation=270, labelpad=15)
 
             # Add reference line at 0.0 (neutral enrichment)
-            cbar.ax.axhline(y=0.0, color="black", linewidth=1.5, linestyle="--")
+            cbar.ax.axhline(
+                y=0.0,
+                color=t.reference_line_color,
+                linewidth=t.reference_line_width,
+                linestyle=t.reference_line_style,
+            )
 
-        fig.suptitle("Binding Preference Enrichment", fontsize=14, fontweight="bold", y=0.98)
+        fig.suptitle(
+            "Binding Preference Enrichment",
+            fontsize=t.suptitle_fontsize,
+            fontweight=t.title_fontweight,
+            y=0.98,
+        )
         plt.tight_layout(rect=(0, 0, 0.9, 0.95))
 
         # Save
@@ -708,6 +719,8 @@ class BindingPreferenceBarPlotter(BasePlotter):
             # Recompute colors to match filtered conditions
             colors = self._get_colors(len(series))
 
+            t = self.theme
+
             self._grouped_bars(
                 ax,
                 x,
@@ -717,12 +730,15 @@ class BindingPreferenceBarPlotter(BasePlotter):
             )
 
             # Labels and formatting
-            ax.set_xlabel("Protein Group")
-            ax.set_ylabel("Enrichment (surface-normalized)")
-            ax.set_title(f"Binding Preference: {poly_type}", fontweight="bold")
+            self._apply_axis_style(
+                ax,
+                title=f"Binding Preference: {poly_type}",
+                xlabel="Protein Group",
+                ylabel="Enrichment (surface-normalized)",
+            )
             ax.set_xticks(x)
             ax.set_xticklabels(protein_groups, rotation=45, ha="right")
-            ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
+            ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
 
             plt.tight_layout()
 
@@ -895,6 +911,8 @@ class SystemCoverageHeatmapPlotter(BasePlotter):
         # Add value annotations
         self._annotate_cells(ax, matrix)
 
+        t = self.theme
+
         # Labels
         ax.set_xticks(range(n_conditions))
         ax.set_xticklabels(valid_labels, rotation=45, ha="right")
@@ -902,13 +920,18 @@ class SystemCoverageHeatmapPlotter(BasePlotter):
         ax.set_yticklabels(aa_classes)
         ax.set_xlabel("Condition")
         ax.set_ylabel("Amino Acid Class")
-        ax.set_title("AA Class Coverage Enrichment", fontweight="bold")
+        ax.set_title("AA Class Coverage Enrichment", fontweight=t.title_fontweight)
 
         # Add colorbar
         cbar = fig.colorbar(im, ax=ax, shrink=0.8)
         cbar.set_label("Coverage Enrichment (surface-normalized)", rotation=270, labelpad=15)
         # Add reference line at 0.0 (neutral)
-        cbar.ax.axhline(y=0.0, color="black", linewidth=1.5, linestyle="--")
+        cbar.ax.axhline(
+            y=0.0,
+            color=t.reference_line_color,
+            linewidth=t.reference_line_width,
+            linestyle=t.reference_line_style,
+        )
 
         plt.tight_layout()
 
@@ -1061,6 +1084,8 @@ class SystemCoverageBarPlotter(BasePlotter):
         # Recompute colors to match filtered conditions
         colors = self._get_colors(len(series))
 
+        t = self.theme
+
         self._grouped_bars(
             ax,
             x,
@@ -1070,12 +1095,15 @@ class SystemCoverageBarPlotter(BasePlotter):
         )
 
         # Labels and formatting
-        ax.set_xlabel("Amino Acid Class")
-        ax.set_ylabel("Coverage Enrichment (surface-normalized)")
-        ax.set_title("AA Class Coverage by Condition", fontweight="bold")
+        self._apply_axis_style(
+            ax,
+            title="AA Class Coverage by Condition",
+            xlabel="Amino Acid Class",
+            ylabel="Coverage Enrichment (surface-normalized)",
+        )
         ax.set_xticks(x)
         ax.set_xticklabels(aa_classes, rotation=45, ha="right")
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
 
         plt.tight_layout()
 
@@ -1316,16 +1344,18 @@ class UserPartitionBarPlotter(BasePlotter):
             show_error=self.settings.contacts.show_user_partition_error,
         )
 
+        t = self.theme
+
         # Labels and formatting
-        ax.set_xlabel("Protein Group")
-        ax.set_ylabel("Coverage Enrichment (surface-normalized)")
-        ax.set_title(
-            f"Coverage Enrichment — {partition_name.replace('_', ' ').title()}",
-            fontweight="bold",
+        self._apply_axis_style(
+            ax,
+            title=f"Coverage Enrichment — {partition_name.replace('_', ' ').title()}",
+            xlabel="Protein Group",
+            ylabel="Coverage Enrichment (surface-normalized)",
         )
         ax.set_xticks(x)
         ax.set_xticklabels(element_names, rotation=45, ha="right")
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
 
         plt.tight_layout()
 
@@ -1538,6 +1568,7 @@ class ContactFractionProfilePlotter(BasePlotter):
         """
         settings = self.settings.contacts
         colors = self._get_colors(len(labels))
+        t = self.theme
 
         fig, ax = plt.subplots(figsize=settings.figsize_contact_fraction_profile)
 
@@ -1558,7 +1589,7 @@ class ContactFractionProfilePlotter(BasePlotter):
                     resids,
                     means - sems,
                     means + sems,
-                    alpha=0.25,
+                    alpha=t.fill_alpha,
                     color=color,
                 )
 
@@ -1582,20 +1613,18 @@ class ContactFractionProfilePlotter(BasePlotter):
 
         # Highlight residues
         for resid in settings.highlight_residues:
-            ax.axvline(resid, color="red", linestyle="--", alpha=0.5, linewidth=1)
-
-        ax.set_xlabel("Residue Number", fontsize=11)
-        ax.set_ylabel("Contact Fraction", fontsize=11)
+            ax.axvline(
+                resid, color="red", linestyle="--", alpha=t.highlight_line_alpha, linewidth=1
+            )
 
         title = "Per-Residue Contact Fraction"
         if polymer_type is not None:
             title += f" — {polymer_type}"
-        ax.set_title(title, fontsize=13, fontweight="bold")
+
+        self._apply_axis_style(ax, title=title, xlabel="Residue Number", ylabel="Contact Fraction")
 
         ax.set_ylim(bottom=0)
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
 
         plt.tight_layout()
 
@@ -1745,6 +1774,7 @@ class ResidenceTimeProfilePlotter(BasePlotter):
         """
         settings = self.settings.contacts
         colors = self._get_colors(len(labels))
+        t = self.theme
 
         fig, ax = plt.subplots(figsize=settings.figsize_residence_time_profile)
 
@@ -1767,7 +1797,7 @@ class ResidenceTimeProfilePlotter(BasePlotter):
                     resids,
                     means - sems,
                     means + sems,
-                    alpha=0.25,
+                    alpha=t.fill_alpha,
                     color=color,
                 )
 
@@ -1780,20 +1810,20 @@ class ResidenceTimeProfilePlotter(BasePlotter):
 
         # Highlight residues
         for resid in settings.highlight_residues:
-            ax.axvline(resid, color="red", linestyle="--", alpha=0.5, linewidth=1)
-
-        ax.set_xlabel("Residue Number", fontsize=11)
-        ax.set_ylabel("Mean Residence Time (ns)", fontsize=11)
+            ax.axvline(
+                resid, color="red", linestyle="--", alpha=t.highlight_line_alpha, linewidth=1
+            )
 
         title = "Per-Residue Mean Residence Time"
         if polymer_type is not None:
             title += f" — {polymer_type}"
-        ax.set_title(title, fontsize=13, fontweight="bold")
+
+        self._apply_axis_style(
+            ax, title=title, xlabel="Residue Number", ylabel="Mean Residence Time (ns)"
+        )
 
         ax.set_ylim(bottom=0)
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
 
         plt.tight_layout()
 
@@ -2015,20 +2045,18 @@ class ContactFractionByAAClassBarPlotter(BasePlotter):
             replicate_values=replicate_values if replicate_values else None,
         )
 
-        ax.set_xlabel("AA Class", fontsize=11)
-        ax.set_ylabel("Mean Contact Fraction", fontsize=11)
+        t = self.theme
 
         title = "Contact Fraction by AA Class"
         if polymer_type is not None:
             title += f" — {polymer_type}"
-        ax.set_title(title, fontsize=13, fontweight="bold")
+
+        self._apply_axis_style(ax, title=title, xlabel="AA Class", ylabel="Mean Contact Fraction")
 
         ax.set_xticks(x)
         ax.set_xticklabels(aa_classes, rotation=45, ha="right")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
 
         plt.tight_layout()
 
@@ -2183,20 +2211,20 @@ class ContactFractionByPartitionBarPlotter(BasePlotter):
             replicate_values=replicate_values if replicate_values else None,
         )
 
-        ax.set_xlabel("Protein Group", fontsize=11)
-        ax.set_ylabel("Mean Contact Fraction", fontsize=11)
+        t = self.theme
 
         title = f"Contact Fraction — {partition_name.replace('_', ' ').title()}"
         if polymer_type is not None:
             title += f" ({polymer_type})"
-        ax.set_title(title, fontsize=13, fontweight="bold")
+
+        self._apply_axis_style(
+            ax, title=title, xlabel="Protein Group", ylabel="Mean Contact Fraction"
+        )
 
         ax.set_xticks(x)
         ax.set_xticklabels(elements, rotation=45, ha="right")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
 
         plt.tight_layout()
 
@@ -2328,20 +2356,20 @@ class ResidenceTimeByAAClassBarPlotter(BasePlotter):
             replicate_values=replicate_values if replicate_values else None,
         )
 
-        ax.set_xlabel("AA Class", fontsize=11)
-        ax.set_ylabel("Mean Residence Time (ns)", fontsize=11)
+        t = self.theme
 
         title = "Residence Time by AA Class"
         if polymer_type is not None:
             title += f" — {polymer_type}"
-        ax.set_title(title, fontsize=13, fontweight="bold")
+
+        self._apply_axis_style(
+            ax, title=title, xlabel="AA Class", ylabel="Mean Residence Time (ns)"
+        )
 
         ax.set_xticks(x)
         ax.set_xticklabels(aa_classes, rotation=45, ha="right")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
 
         plt.tight_layout()
 
@@ -2505,20 +2533,20 @@ class ResidenceTimeByPartitionBarPlotter(BasePlotter):
             replicate_values=replicate_values if replicate_values else None,
         )
 
-        ax.set_xlabel("Protein Group", fontsize=11)
-        ax.set_ylabel("Mean Residence Time (ns)", fontsize=11)
+        t = self.theme
 
         title = f"Residence Time — {partition_name.replace('_', ' ').title()}"
         if polymer_type is not None:
             title += f" ({polymer_type})"
-        ax.set_title(title, fontsize=13, fontweight="bold")
+
+        self._apply_axis_style(
+            ax, title=title, xlabel="Protein Group", ylabel="Mean Residence Time (ns)"
+        )
 
         ax.set_xticks(x)
         ax.set_xticklabels(elements, rotation=45, ha="right")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
 
         plt.tight_layout()
 

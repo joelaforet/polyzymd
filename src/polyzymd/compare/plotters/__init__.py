@@ -19,7 +19,7 @@ exposure : ExposureChaperoneFractionPlotter, ExposureEnrichmentHeatmapPlotter
 binding_free_energy : BFEHeatmapPlotter, BFEBarPlotter
     ΔG_sel binding free energy visualization
 secondary_structure : SSTimelineHeatmapPlotter, SSContentBarsPlotter,
-    SSPersistenceDiffHeatmapPlotter
+    SSIndividualBarsPlotter, SSPersistenceDiffHeatmapPlotter
     DSSP secondary structure visualization
 
 Adding New Plotters

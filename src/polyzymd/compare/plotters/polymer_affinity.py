@@ -176,6 +176,8 @@ class AffinityStackedBarPlotter(BasePlotter):
         """
         import matplotlib.pyplot as plt
 
+        t = self.theme
+
         result = _find_affinity_result(data, labels)
         if result is None:
             return []
@@ -231,9 +233,9 @@ class AffinityStackedBarPlotter(BasePlotter):
                     bottom=bottoms_neg,
                     color=colors[poly_idx],
                     label=poly_type,
-                    alpha=0.85,
+                    alpha=t.bar_alpha,
                     edgecolor="white",
-                    linewidth=0.5,
+                    linewidth=t.bar_linewidth,
                 )
                 bottoms_neg += neg_vals
 
@@ -244,9 +246,9 @@ class AffinityStackedBarPlotter(BasePlotter):
                     bottom=bottoms_pos,
                     color=colors[poly_idx],
                     label=poly_type if np.all(neg_vals == 0) else None,
-                    alpha=0.85,
+                    alpha=t.bar_alpha,
                     edgecolor="white",
-                    linewidth=0.5,
+                    linewidth=t.bar_linewidth,
                 )
                 bottoms_pos += pos_vals
 
@@ -269,7 +271,7 @@ class AffinityStackedBarPlotter(BasePlotter):
                 totals,
                 yerr=errors,
                 fmt="k_",
-                capsize=4,
+                capsize=t.bar_capsize,
                 capthick=1.5,
                 linewidth=0,
                 elinewidth=1.5,
@@ -279,9 +281,7 @@ class AffinityStackedBarPlotter(BasePlotter):
 
         ax.axhline(y=0, color="black", linewidth=1.0, linestyle="-")
         ax.set_xticks(x)
-        ax.set_xticklabels(display_labels, rotation=35, ha="right", fontsize=9)
-        ax.set_ylabel(r"Affinity Score ($k_\mathrm{b}T$)", fontsize=10)
-
+        ax.set_xticklabels(display_labels, rotation=35, ha="right", fontsize=t.tick_fontsize)
         # Temperature string
         temp_str = ""
         if result.conditions:
@@ -289,10 +289,10 @@ class AffinityStackedBarPlotter(BasePlotter):
             if len(temps) == 1:
                 temp_str = f" ({next(iter(temps)):.0f} K)"
 
-        ax.set_title(
-            f"Polymer Affinity Score by Condition{temp_str}",
-            fontweight="bold",
-            fontsize=11,
+        self._apply_axis_style(
+            ax,
+            title=f"Polymer Affinity Score by Condition{temp_str}",
+            ylabel=r"Affinity Score ($k_\mathrm{b}T$)",
         )
 
         # De-duplicate legend entries
@@ -310,7 +310,7 @@ class AffinityStackedBarPlotter(BasePlotter):
             unique_labels,
             loc="center left",
             bbox_to_anchor=(1.02, 0.5),
-            fontsize=8,
+            fontsize=t.small_fontsize,
             framealpha=0.7,
         )
 
@@ -373,6 +373,8 @@ class AffinityGroupBarPlotter(BasePlotter):
         import matplotlib.pyplot as plt
 
         from polyzymd.analysis.common.aa_classification import CANONICAL_AA_CLASS_ORDER
+
+        t = self.theme
 
         result = _find_affinity_result(data, labels)
         if result is None:
@@ -468,20 +470,24 @@ class AffinityGroupBarPlotter(BasePlotter):
                 colors,
                 show_error=affinity_settings.show_error_bars,
                 reference_label="Score = 0 (neutral)",
-                edgecolor="none",
+                bar_edgecolor="none",
             )
 
             poly_label = f": {poly_type}" if n_poly > 1 else ""
-            ax.set_title(
-                f"Per-Group Affinity Score{poly_label}{temp_str}",
-                fontweight="bold",
-                fontsize=11,
+            self._apply_axis_style(
+                ax,
+                title=f"Per-Group Affinity Score{poly_label}{temp_str}",
+                xlabel="Amino Acid Group",
+                ylabel=r"Affinity Score ($k_\mathrm{b}T$)",
             )
-            ax.set_xlabel("Amino Acid Group", fontsize=10)
-            ax.set_ylabel(r"Affinity Score ($k_\mathrm{b}T$)", fontsize=10)
             ax.set_xticks(x)
-            ax.set_xticklabels(ordered_groups, rotation=35, ha="right", fontsize=9)
-            ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=8, framealpha=0.7)
+            ax.set_xticklabels(ordered_groups, rotation=35, ha="right", fontsize=t.tick_fontsize)
+            ax.legend(
+                loc="center left",
+                bbox_to_anchor=(1.02, 0.5),
+                fontsize=t.small_fontsize,
+                framealpha=0.7,
+            )
 
             # Guide lines at ±1 kT
             ax.axhline(y=1.0, color="gray", linestyle=":", linewidth=1.0, alpha=0.6)

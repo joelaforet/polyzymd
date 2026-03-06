@@ -79,6 +79,8 @@ class DistanceKDEPlotter(BasePlotter):
         except ImportError:
             has_seaborn = False
 
+        t = self.theme
+
         # Collect distance data per pair across conditions
         pair_data = self._collect_distance_data(data, labels)
 
@@ -140,17 +142,13 @@ class DistanceKDEPlotter(BasePlotter):
                 ax.axvline(
                     threshold,
                     color="red",
-                    linestyle="--",
-                    linewidth=2,
+                    linestyle=t.reference_line_style,
+                    linewidth=t.reference_line_width,
                     label=f"Threshold ({threshold:.1f} Å)",
                 )
 
-            ax.set_xlabel("Distance (Å)", fontsize=11)
-            ax.set_ylabel("Density", fontsize=11)
-            ax.set_title(pair_label, fontsize=13, fontweight="bold")
-            ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
+            self._apply_axis_style(ax, title=pair_label, xlabel="Distance (Å)", ylabel="Density")
+            ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
 
             plt.tight_layout()
 
@@ -301,6 +299,8 @@ class DistanceThresholdBarsPlotter(BasePlotter):
         """
         import matplotlib.pyplot as plt
 
+        t = self.theme
+
         # Load aggregated results for each condition
         aggregated = self._load_aggregated_results(data, labels)
 
@@ -356,18 +356,17 @@ class DistanceThresholdBarsPlotter(BasePlotter):
             series,
             colors,
             reference_line=None,
-            edgecolor="black",
-            linewidth=0.5,
         )
 
-        ax.set_ylabel("Fraction Below Threshold (%)", fontsize=11)
         ax.set_xticks(x)
-        ax.set_xticklabels(pair_labels, fontsize=10)
+        ax.set_xticklabels(pair_labels, fontsize=t.tick_fontsize)
         ax.set_ylim(0, 105)
-        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.set_title("Distance Contact Fractions", fontsize=13, fontweight="bold")
+        self._apply_axis_style(
+            ax,
+            title="Distance Contact Fractions",
+            ylabel="Fraction Below Threshold (%)",
+        )
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=t.legend_fontsize)
 
         plt.tight_layout()
 

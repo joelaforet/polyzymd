@@ -185,6 +185,8 @@ class ExposureChaperoneFractionPlotter(BasePlotter):
         import matplotlib.pyplot as plt
         import numpy as np
 
+        t = self.theme
+
         conditions = result.conditions
         n = len(conditions)
 
@@ -196,7 +198,16 @@ class ExposureChaperoneFractionPlotter(BasePlotter):
 
         fig, ax = plt.subplots(figsize=(max(6, n * 1.4), 5))
         x = np.arange(n)
-        ax.bar(x, means, yerr=sems, capsize=4, color=colors, alpha=0.85)
+        ax.bar(
+            x,
+            means,
+            yerr=sems,
+            capsize=t.bar_capsize,
+            color=colors,
+            alpha=t.bar_alpha,
+            edgecolor=t.bar_edgecolor,
+            linewidth=t.bar_linewidth,
+        )
 
         # Overlay jittered replicate dots
         rng = np.random.default_rng(seed=42)
@@ -209,17 +220,20 @@ class ExposureChaperoneFractionPlotter(BasePlotter):
                 ax.scatter(
                     np.full_like(rep_arr, float(x[i])) + jitter,
                     rep_arr,
-                    color="black",
-                    s=14,
+                    color=t.dot_color,
+                    s=t.dot_size,
                     zorder=5,
-                    alpha=0.7,
+                    alpha=t.dot_alpha,
                     edgecolors="none",
                 )
 
         ax.set_xticks(x)
-        ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=9)
-        ax.set_ylabel("Mean chaperone fraction")
-        ax.set_title("Chaperone fraction across conditions\n(transient residues only)")
+        ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=t.tick_fontsize)
+        self._apply_axis_style(
+            ax,
+            title="Chaperone fraction across conditions\n(transient residues only)",
+            ylabel="Mean chaperone fraction",
+        )
         ax.set_ylim(bottom=0)
         fig.tight_layout()
 
@@ -301,6 +315,8 @@ class ExposureAccelerationRatioPlotter(BasePlotter):
         import matplotlib.pyplot as plt
         import numpy as np
 
+        t = self.theme
+
         conditions = result.conditions
 
         all_ptypes: list[str] = sorted({pt for c in conditions for pt in c.polymer_types})
@@ -346,26 +362,35 @@ class ExposureAccelerationRatioPlotter(BasePlotter):
             mat = matrices[ci]
             im = ax.imshow(mat, vmin=vmin, vmax=vmax, cmap="RdBu_r", aspect="auto")
             ax.set_yticks(range(n_ptypes))
-            ax.set_yticklabels(all_ptypes, fontsize=9)
-            ax.set_ylabel(cond.label, fontsize=9, rotation=0, ha="right", labelpad=8)
+            ax.set_yticklabels(all_ptypes, fontsize=t.tick_fontsize)
+            ax.set_ylabel(cond.label, fontsize=t.tick_fontsize, rotation=0, ha="right", labelpad=8)
             # Only show x-tick labels on the bottom row
             if ci == n_conds - 1:
                 ax.set_xticks(range(n_groups))
-                ax.set_xticklabels(all_groups, rotation=45, ha="right", fontsize=9)
+                ax.set_xticklabels(all_groups, rotation=45, ha="right", fontsize=t.tick_fontsize)
             else:
                 ax.set_xticks(range(n_groups))
                 ax.set_xticklabels([])
 
             self._annotate_cells(
-                ax, mat, fmt=".2f", fontsize=8, threshold=vmax * 0.6, show_sign=False
+                ax,
+                mat,
+                fmt=".2f",
+                fontsize=t.small_fontsize,
+                threshold=vmax * 0.6,
+                show_sign=False,
             )
 
-        fig.suptitle("Refolding acceleration ratio ρ(P, G) by AA group", fontsize=12, y=0.99)
+        fig.suptitle(
+            "Refolding acceleration ratio ρ(P, G) by AA group",
+            fontsize=t.suptitle_fontsize,
+            y=0.99,
+        )
         fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
 
         if im is not None:
             cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.04, pad=0.05)
-            cbar.set_label("Acceleration ratio ρ  (>1 = chaperoning)", fontsize=9)
+            cbar.set_label("Acceleration ratio ρ  (>1 = chaperoning)", fontsize=t.legend_fontsize)
 
         output_path = self._get_output_path(output_dir, "exposure_acceleration_ratio")
         return [self._save_figure(fig, output_path)]
@@ -445,6 +470,8 @@ class ExposureChaperoneSelectivityPlotter(BasePlotter):
         import matplotlib.pyplot as plt
         import numpy as np
 
+        t = self.theme
+
         conditions = result.conditions
 
         all_ptypes: list[str] = sorted({pt for c in conditions for pt in c.polymer_types})
@@ -491,26 +518,35 @@ class ExposureChaperoneSelectivityPlotter(BasePlotter):
             mat = matrices[ci]
             im = ax.imshow(mat, vmin=vmin, vmax=vmax, cmap="RdBu", aspect="auto")
             ax.set_yticks(range(n_ptypes))
-            ax.set_yticklabels(all_ptypes, fontsize=9)
-            ax.set_ylabel(cond.label, fontsize=9, rotation=0, ha="right", labelpad=8)
+            ax.set_yticklabels(all_ptypes, fontsize=t.tick_fontsize)
+            ax.set_ylabel(cond.label, fontsize=t.tick_fontsize, rotation=0, ha="right", labelpad=8)
             # Only show x-tick labels on the bottom row
             if ci == n_conds - 1:
                 ax.set_xticks(range(n_groups))
-                ax.set_xticklabels(all_groups, rotation=45, ha="right", fontsize=9)
+                ax.set_xticklabels(all_groups, rotation=45, ha="right", fontsize=t.tick_fontsize)
             else:
                 ax.set_xticks(range(n_groups))
                 ax.set_xticklabels([])
 
             self._annotate_cells(
-                ax, mat, fmt="+.2f", fontsize=8, threshold=vmax * 0.6, show_sign=False
+                ax,
+                mat,
+                fmt="+.2f",
+                fontsize=t.small_fontsize,
+                threshold=vmax * 0.6,
+                show_sign=False,
             )
 
-        fig.suptitle("Chaperone selectivity ΔG_sel^chap(P, G) by AA group", fontsize=12, y=0.99)
+        fig.suptitle(
+            "Chaperone selectivity ΔG_sel^chap(P, G) by AA group",
+            fontsize=t.suptitle_fontsize,
+            y=0.99,
+        )
         fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
 
         if im is not None:
             cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.04, pad=0.05)
-            cbar.set_label("ΔG_sel^chap (kT)  [<0 = preference]", fontsize=9)
+            cbar.set_label("ΔG_sel^chap (kT)  [<0 = preference]", fontsize=t.legend_fontsize)
 
         output_path = self._get_output_path(output_dir, "exposure_chaperone_selectivity")
         return [self._save_figure(fig, output_path)]

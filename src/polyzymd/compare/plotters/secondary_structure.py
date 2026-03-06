@@ -8,6 +8,10 @@ Provides three registered plotters:
 - ``SSContentBarsPlotter`` (``"ss_content_bars"``)
   Grouped bar chart of helix/strand/coil fractions per condition.
 
+- ``SSIndividualBarsPlotter`` (``"ss_individual_bars"``)
+  One bar chart per SS type (Helix, β-Sheet, No SS) showing fraction
+  per condition with SEM error bars and replicate dots.
+
 - ``SSPersistenceDiffHeatmapPlotter`` (``"ss_persistence_diff_heatmap"``)
   Condition x residue heatmap of Delta(helix persistence) vs control.
 
@@ -101,7 +105,7 @@ def _find_ss_comparison_result(
 
 # SS integer encoding colors (0=coil/grey, 1=helix/red, 2=strand/blue)
 SS_COLORS = {0: "#CCCCCC", 1: "#E74C3C", 2: "#3498DB"}
-SS_NAMES = {0: "Coil", 1: "Helix", 2: "Strand"}
+SS_NAMES = {0: "No SS", 1: "Helix", 2: "\u03b2-Sheet"}
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +157,7 @@ class SSTimelineHeatmapPlotter(BasePlotter):
         import matplotlib.pyplot as plt
         from matplotlib.patches import Patch
 
+        t = self.theme
         generated: list[Path] = []
 
         # Build a discrete colormap: 0=coil(grey), 1=helix(red), 2=strand(blue)
@@ -191,16 +196,13 @@ class SSTimelineHeatmapPlotter(BasePlotter):
             yticks = list(range(0, n_residues, tick_stride))
             yticklabels = [str(residue_ids[i]) for i in yticks]
             ax.set_yticks(yticks)
-            ax.set_yticklabels(yticklabels, fontsize=7)
-            ax.set_ylabel("Residue", fontsize=10)
+            ax.set_yticklabels(yticklabels, fontsize=t.tiny_fontsize)
 
-            # X-axis: frame number
-            ax.set_xlabel("Frame", fontsize=10)
-
-            ax.set_title(
-                f"Secondary Structure Timeline — {label}",
-                fontsize=12,
-                fontweight="bold",
+            self._apply_axis_style(
+                ax,
+                title=f"Secondary Structure Timeline — {label}",
+                xlabel="Frame",
+                ylabel="Residue",
             )
 
             # Legend
@@ -208,7 +210,7 @@ class SSTimelineHeatmapPlotter(BasePlotter):
             ax.legend(
                 handles=legend_patches,
                 loc="upper right",
-                fontsize=8,
+                fontsize=t.small_fontsize,
                 framealpha=0.8,
             )
 
@@ -342,6 +344,7 @@ class SSContentBarsPlotter(BasePlotter):
         """Generate grouped bar chart from SSComparisonResult."""
         import matplotlib.pyplot as plt
 
+        t = self.theme
         conditions = result.conditions
         n = len(conditions)
 
@@ -363,8 +366,8 @@ class SSContentBarsPlotter(BasePlotter):
         # Three series: helix, strand, coil
         series = [
             ("Helix", helix_means, helix_sems),
-            ("Strand", strand_means, strand_sems),
-            ("Coil", coil_means, coil_sems),
+            ("\u03b2-Sheet", strand_means, strand_sems),
+            ("No SS", coil_means, coil_sems),
         ]
 
         # Colors: red for helix, blue for strand, grey for coil
@@ -387,22 +390,19 @@ class SSContentBarsPlotter(BasePlotter):
             ss_bar_colors,
             reference_line=None,
             replicate_values=replicate_values,
-            edgecolor="black",
-            linewidth=0.5,
         )
 
         ax.set_xticks(x)
-        ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=9)
-        ax.set_ylabel("Fraction of (residue, frame) entries", fontsize=10)
-        ax.set_title(
-            "Secondary Structure Content Comparison",
-            fontsize=13,
-            fontweight="bold",
-        )
-        ax.legend(fontsize=9)
+        ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=t.tick_fontsize)
+        ax.legend(fontsize=t.legend_fontsize)
         ax.set_ylim(bottom=0)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+
+        self._apply_axis_style(
+            ax,
+            title="Secondary Structure Content Comparison",
+            xlabel=None,
+            ylabel="Fraction of (residue, frame) entries",
+        )
 
         plt.tight_layout()
 
@@ -420,6 +420,7 @@ class SSContentBarsPlotter(BasePlotter):
 
         import matplotlib.pyplot as plt
 
+        t = self.theme
         cond_labels: list[str] = []
         helix_means: list[float] = []
         helix_sems: list[float] = []
@@ -427,6 +428,9 @@ class SSContentBarsPlotter(BasePlotter):
         strand_sems: list[float] = []
         coil_means: list[float] = []
         coil_sems: list[float] = []
+        helix_reps: list[list[float]] = []
+        strand_reps: list[list[float]] = []
+        coil_reps: list[list[float]] = []
 
         for label in labels:
             cond_data = data.get(label)
@@ -456,6 +460,9 @@ class SSContentBarsPlotter(BasePlotter):
                 strand_sems.append(agg.get("sem_overall_strand", 0.0))
                 coil_means.append(agg.get("mean_overall_coil", 0.0))
                 coil_sems.append(agg.get("sem_overall_coil", 0.0))
+                helix_reps.append(agg.get("per_replicate_helix", []))
+                strand_reps.append(agg.get("per_replicate_strand", []))
+                coil_reps.append(agg.get("per_replicate_coil", []))
             except Exception as e:
                 logger.warning(f"Failed to load aggregated SS for {label}: {e}")
 
@@ -468,10 +475,14 @@ class SSContentBarsPlotter(BasePlotter):
 
         series = [
             ("Helix", helix_means, helix_sems),
-            ("Strand", strand_means, strand_sems),
-            ("Coil", coil_means, coil_sems),
+            ("\u03b2-Sheet", strand_means, strand_sems),
+            ("No SS", coil_means, coil_sems),
         ]
         ss_bar_colors = ["#E74C3C", "#3498DB", "#95A5A6"]
+
+        # Build replicate_values: [series_idx][condition_idx] -> list[float]
+        replicate_values = [helix_reps, strand_reps, coil_reps]
+        has_reps = any(any(r for r in reps) for reps in replicate_values)
 
         fig, ax = plt.subplots(figsize=(max(8, n * 1.6), 5))
 
@@ -481,22 +492,20 @@ class SSContentBarsPlotter(BasePlotter):
             series,
             ss_bar_colors,
             reference_line=None,
-            edgecolor="black",
-            linewidth=0.5,
+            replicate_values=replicate_values if has_reps else None,
         )
 
         ax.set_xticks(x)
-        ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=9)
-        ax.set_ylabel("Fraction of (residue, frame) entries", fontsize=10)
-        ax.set_title(
-            "Secondary Structure Content Comparison",
-            fontsize=13,
-            fontweight="bold",
-        )
-        ax.legend(fontsize=9)
+        ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=t.tick_fontsize)
+        ax.legend(fontsize=t.legend_fontsize)
         ax.set_ylim(bottom=0)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+
+        self._apply_axis_style(
+            ax,
+            title="Secondary Structure Content Comparison",
+            xlabel=None,
+            ylabel="Fraction of (residue, frame) entries",
+        )
 
         plt.tight_layout()
 
@@ -505,7 +514,249 @@ class SSContentBarsPlotter(BasePlotter):
 
 
 # ---------------------------------------------------------------------------
-# 3. SS Persistence Difference Heatmap
+# 3. SS Individual Bars (one plot per SS type)
+# ---------------------------------------------------------------------------
+
+
+# Per-SS-type metadata: (internal_key, display_name, bar_color)
+_SS_INDIVIDUAL_SPECS: list[tuple[str, str, str]] = [
+    ("helix", "Helix", "#E74C3C"),
+    ("strand", "\u03b2-Sheet", "#3498DB"),
+    ("coil", "No SS", "#95A5A6"),
+]
+
+
+@PlotterRegistry.register("ss_individual_bars")
+class SSIndividualBarsPlotter(BasePlotter):
+    """One bar chart per SS type showing fraction per condition.
+
+    Generates three separate figures (helix, beta-sheet, no-SS), each with
+    one bar per condition, SEM error bars, and jittered replicate dots.
+
+    Compatible with analysis_type="secondary_structure".
+    """
+
+    @classmethod
+    def plot_type(cls) -> str:
+        return "ss_individual_bars"
+
+    def can_plot(self, comparison_config: "ComparisonConfig", analysis_type: str) -> bool:
+        return analysis_type == "secondary_structure"
+
+    def plot(
+        self,
+        data: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+        **kwargs,
+    ) -> list[Path]:
+        """Generate per-SS-type bar charts.
+
+        Parameters
+        ----------
+        data : dict
+            Mapping of condition_label -> condition data dict.
+        labels : sequence of str
+            Condition labels.
+        output_dir : Path
+            Directory to save plots.
+
+        Returns
+        -------
+        list[Path]
+            Paths to generated plot files.
+        """
+        result = _find_ss_comparison_result(data, labels)
+        if result is not None:
+            return self._plot_from_comparison(result, output_dir)
+
+        return self._plot_from_aggregated(data, labels, output_dir)
+
+    def _plot_from_comparison(self, result: Any, output_dir: Path) -> list[Path]:
+        """Generate individual bar charts from SSComparisonResult."""
+        import matplotlib.pyplot as plt
+
+        conditions = result.conditions
+        n = len(conditions)
+        cond_labels = [c.label for c in conditions]
+
+        # Extract per-SS-type means, SEMs, and replicate values
+        ss_data = {
+            "helix": {
+                "means": [c.mean_helix for c in conditions],
+                "sems": [c.sem_helix for c in conditions],
+                "reps": [c.per_replicate_helix for c in conditions],
+            },
+            "strand": {
+                "means": [c.mean_strand for c in conditions],
+                "sems": [c.sem_strand for c in conditions],
+                "reps": [c.per_replicate_strand for c in conditions],
+            },
+            "coil": {
+                "means": [c.mean_coil for c in conditions],
+                "sems": [c.sem_coil for c in conditions],
+                "reps": [c.per_replicate_coil for c in conditions],
+            },
+        }
+
+        return self._render_individual_plots(cond_labels, n, ss_data, output_dir, has_reps=True)
+
+    def _plot_from_aggregated(
+        self,
+        data: dict[str, Any],
+        labels: Sequence[str],
+        output_dir: Path,
+    ) -> list[Path]:
+        """Fallback: build individual bar charts from aggregated SS results."""
+        import json as json_mod
+
+        cond_labels: list[str] = []
+        ss_data: dict[str, dict[str, list]] = {
+            "helix": {"means": [], "sems": [], "reps": []},
+            "strand": {"means": [], "sems": [], "reps": []},
+            "coil": {"means": [], "sems": [], "reps": []},
+        }
+
+        for label in labels:
+            cond_data = data.get(label)
+            if cond_data is None:
+                continue
+
+            aggregated_dir = cond_data.get("aggregated_dir")
+            if not aggregated_dir:
+                continue
+            aggregated_dir = Path(aggregated_dir)
+
+            result_file = self._find_json(aggregated_dir, "secondary_structure_aggregated.json")
+            if result_file is None:
+                result_file = self._find_json(aggregated_dir, "secondary_structure.json")
+            if result_file is None:
+                continue
+
+            try:
+                with open(result_file) as f:
+                    agg = json_mod.load(f)
+
+                cond_labels.append(label)
+                ss_data["helix"]["means"].append(agg.get("mean_overall_helix", 0.0))
+                ss_data["helix"]["sems"].append(agg.get("sem_overall_helix", 0.0))
+                ss_data["helix"]["reps"].append(agg.get("per_replicate_helix", []))
+                ss_data["strand"]["means"].append(agg.get("mean_overall_strand", 0.0))
+                ss_data["strand"]["sems"].append(agg.get("sem_overall_strand", 0.0))
+                ss_data["strand"]["reps"].append(agg.get("per_replicate_strand", []))
+                ss_data["coil"]["means"].append(agg.get("mean_overall_coil", 0.0))
+                ss_data["coil"]["sems"].append(agg.get("sem_overall_coil", 0.0))
+                ss_data["coil"]["reps"].append(agg.get("per_replicate_coil", []))
+            except Exception as e:
+                logger.warning(f"Failed to load aggregated SS for {label}: {e}")
+
+        if not cond_labels:
+            logger.warning("No aggregated SS data found for individual bars")
+            return []
+
+        has_reps = any(any(r for r in ss_data[key]["reps"]) for key in ("helix", "strand", "coil"))
+
+        return self._render_individual_plots(
+            cond_labels, len(cond_labels), ss_data, output_dir, has_reps=has_reps
+        )
+
+    def _render_individual_plots(
+        self,
+        cond_labels: list[str],
+        n: int,
+        ss_data: dict[str, dict[str, list]],
+        output_dir: Path,
+        *,
+        has_reps: bool,
+    ) -> list[Path]:
+        """Render one bar chart per SS type.
+
+        Parameters
+        ----------
+        cond_labels : list[str]
+            Condition labels for x-axis.
+        n : int
+            Number of conditions.
+        ss_data : dict
+            Keyed by ``"helix"``, ``"strand"``, ``"coil"``; each contains
+            ``"means"``, ``"sems"``, and optionally ``"reps"``.
+        output_dir : Path
+            Directory to save plots.
+        has_reps : bool
+            Whether replicate values are available for dot overlay.
+
+        Returns
+        -------
+        list[Path]
+            Paths to generated plot files.
+        """
+        import matplotlib.pyplot as plt
+
+        t = self.theme
+        generated: list[Path] = []
+        x = np.arange(n)
+
+        # Use Tab10 colormap: one color per condition across all SS plots
+        tab10 = plt.cm.get_cmap("tab10")
+        condition_colors = [tab10(i % 10) for i in range(n)]
+
+        for internal_key, display_name, _ss_color in _SS_INDIVIDUAL_SPECS:
+            means = ss_data[internal_key]["means"]
+            sems = ss_data[internal_key]["sems"]
+
+            fig, ax = plt.subplots(figsize=(max(8, n * 1.2), 5))
+
+            ax.bar(
+                x,
+                means,
+                yerr=sems,
+                color=condition_colors,
+                alpha=t.bar_alpha,
+                edgecolor=t.bar_edgecolor,
+                linewidth=t.bar_linewidth,
+                capsize=t.bar_capsize,
+            )
+
+            # Overlay jittered replicate dots if available
+            if has_reps and "reps" in ss_data[internal_key]:
+                rng = np.random.default_rng(seed=42)
+                reps = ss_data[internal_key]["reps"]
+                for j in range(n):
+                    if j < len(reps) and reps[j]:
+                        rep_vals = np.asarray(reps[j], dtype=float)
+                        jitter = rng.uniform(-0.2, 0.2, size=len(rep_vals))
+                        ax.scatter(
+                            np.full_like(rep_vals, float(j)) + jitter,
+                            rep_vals,
+                            color=t.dot_color,
+                            s=t.dot_size,
+                            zorder=5,
+                            alpha=t.dot_alpha,
+                            edgecolors="none",
+                        )
+
+            ax.set_xticks(x)
+            ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=t.tick_fontsize)
+            ax.set_ylim(bottom=0)
+
+            self._apply_axis_style(
+                ax,
+                title=f"{display_name} Content by Condition",
+                xlabel=None,
+                ylabel="Fraction of (residue, frame) entries",
+            )
+
+            plt.tight_layout()
+
+            safe_key = internal_key.replace("-", "_")
+            output_path = self._get_output_path(output_dir, f"ss_{safe_key}_bars")
+            generated.append(self._save_figure(fig, output_path))
+
+        return generated
+
+
+# ---------------------------------------------------------------------------
+# 4. SS Persistence Difference Heatmap
 # ---------------------------------------------------------------------------
 
 
@@ -553,6 +804,8 @@ class SSPersistenceDiffHeatmapPlotter(BasePlotter):
         import json as json_mod
 
         import matplotlib.pyplot as plt
+
+        t = self.theme
 
         # Load per-residue helix persistence for each condition
         persistence_data: dict[str, dict] = {}
@@ -657,26 +910,26 @@ class SSPersistenceDiffHeatmapPlotter(BasePlotter):
 
         # Y-axis: condition labels
         ax.set_yticks(range(n_conds))
-        ax.set_yticklabels(diff_labels, fontsize=9)
+        ax.set_yticklabels(diff_labels, fontsize=t.tick_fontsize)
 
         # X-axis: residue IDs (subsample)
         tick_stride = max(1, n_residues // 40)
         xticks = list(range(0, n_residues, tick_stride))
         xticklabels = [str(residue_ids[i]) for i in xticks]
         ax.set_xticks(xticks)
-        ax.set_xticklabels(xticklabels, fontsize=7, rotation=90)
-        ax.set_xlabel("Residue", fontsize=10)
+        ax.set_xticklabels(xticklabels, fontsize=t.tiny_fontsize, rotation=90)
 
-        ax.set_title(
-            f"Per-Residue Helix Persistence Change vs {control_label}",
-            fontsize=12,
-            fontweight="bold",
+        self._apply_axis_style(
+            ax,
+            title=f"Per-Residue Helix Persistence Change vs {control_label}",
+            xlabel="Residue",
+            ylabel=None,
         )
 
         cbar = fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02)
         cbar.set_label(
             r"$\Delta$ Helix Persistence (condition $-$ control)",
-            fontsize=9,
+            fontsize=t.tick_fontsize,
         )
 
         plt.tight_layout()

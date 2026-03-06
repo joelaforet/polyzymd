@@ -294,6 +294,7 @@ class BFEHeatmapPlotter(BasePlotter):
         if result is None:
             return []
 
+        t = self.theme
         bfe_settings = self.settings.binding_free_energy
         units = result.units
 
@@ -393,24 +394,22 @@ class BFEHeatmapPlotter(BasePlotter):
                     self._annotate_cells(
                         ax,
                         matrix,
-                        fontsize=8,
+                        fontsize=t.small_fontsize,
                         threshold=0.35 * max_abs,
                         sem_matrix=sem_matrix,
                         linespacing=1.2,
                     )
 
                 ax.set_xticks(range(n_conds))
-                ax.set_xticklabels(display_labels, rotation=35, ha="right", fontsize=9)
+                ax.set_xticklabels(display_labels, rotation=35, ha="right")
                 ax.set_yticks(range(n_groups))
-                ax.set_yticklabels(protein_groups, fontsize=9)
-                ax.set_xlabel("Condition", fontsize=10)
+                ax.set_yticklabels(protein_groups)
 
                 # Y-axis label includes partition name when multiple partitions
                 if multi_partition:
                     ylabel = f"Protein Group ({_partition_display_name(partition_name)})"
                 else:
                     ylabel = "Amino Acid Group"
-                ax.set_ylabel(ylabel, fontsize=10)
 
                 # Title: include partition and polymer info as needed
                 poly_label = poly_type if n_poly > 1 else ""
@@ -437,7 +436,7 @@ class BFEHeatmapPlotter(BasePlotter):
                         if len(parts) > 1
                         else r"$\Delta G_{\mathrm{sel}}$ Binding Selectivity"
                     )
-                ax.set_title(title, fontweight="bold", fontsize=11)
+                self._apply_axis_style(ax, title=title, xlabel="Condition", ylabel=ylabel)
 
                 cbar = fig.colorbar(im, ax=ax, shrink=0.85)
                 unit_lbl = _unit_label_mpl(units)
@@ -445,9 +444,14 @@ class BFEHeatmapPlotter(BasePlotter):
                     r"$\Delta G_{\mathrm{sel}}$" + f" ({unit_lbl})",
                     rotation=270,
                     labelpad=14,
-                    fontsize=9,
+                    fontsize=t.legend_fontsize,
                 )
-                cbar.ax.axhline(y=0.0, color="black", linewidth=1.5, linestyle="--")
+                cbar.ax.axhline(
+                    y=0.0,
+                    color=t.reference_line_color,
+                    linewidth=t.reference_line_width,
+                    linestyle=t.reference_line_style,
+                )
 
                 plt.tight_layout()
 
@@ -552,6 +556,7 @@ class BFEBarPlotter(BasePlotter):
         if result is None:
             return []
 
+        t = self.theme
         bfe_settings = self.settings.binding_free_energy
         units = result.units
 
@@ -648,7 +653,7 @@ class BFEBarPlotter(BasePlotter):
                     colors,
                     show_error=bfe_settings.show_error_bars,
                     reference_label=r"$\Delta G_{\mathrm{sel}}$ = 0 (neutral)",
-                    edgecolor="none",
+                    bar_edgecolor="none",
                 )
 
                 # Title: include partition and polymer info as needed
@@ -658,19 +663,24 @@ class BFEBarPlotter(BasePlotter):
                     title = r"$\Delta G_{\mathrm{sel}}$" + f" — {part_label}{poly_label}{temp_str}"
                 else:
                     title = r"$\Delta G_{\mathrm{sel}}$" + f"{poly_label}{temp_str}"
-                ax.set_title(title, fontweight="bold", fontsize=11)
 
                 # X-axis label
                 if multi_partition:
                     xlabel = f"Protein Group ({_partition_display_name(partition_name)})"
                 else:
                     xlabel = "Amino Acid Group"
-                ax.set_xlabel(xlabel, fontsize=10)
                 unit_lbl = _unit_label_mpl(units)
-                ax.set_ylabel(r"$\Delta G_{\mathrm{sel}}$" + f" ({unit_lbl})", fontsize=10)
+                ylabel = r"$\Delta G_{\mathrm{sel}}$" + f" ({unit_lbl})"
+
+                self._apply_axis_style(ax, title=title, xlabel=xlabel, ylabel=ylabel)
                 ax.set_xticks(x)
-                ax.set_xticklabels(protein_groups, rotation=35, ha="right", fontsize=9)
-                ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=8, framealpha=0.7)
+                ax.set_xticklabels(protein_groups, rotation=35, ha="right")
+                ax.legend(
+                    loc="center left",
+                    bbox_to_anchor=(1.02, 0.5),
+                    fontsize=t.small_fontsize,
+                    framealpha=0.7,
+                )
 
                 # Horizontal guide lines at ±kT
                 if kt is not None:
@@ -682,7 +692,7 @@ class BFEBarPlotter(BasePlotter):
                         kt,
                         f"+{kt_label}",
                         color="gray",
-                        fontsize=7,
+                        fontsize=t.tiny_fontsize,
                         va="bottom",
                         ha="right",
                     )
@@ -691,7 +701,7 @@ class BFEBarPlotter(BasePlotter):
                         -kt,
                         f"\u2212{kt_label}",
                         color="gray",
-                        fontsize=7,
+                        fontsize=t.tiny_fontsize,
                         va="top",
                         ha="right",
                     )
