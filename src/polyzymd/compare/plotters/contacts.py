@@ -2503,16 +2503,27 @@ class ResidenceTimeByPartitionBarPlotter(BasePlotter):
 
         series: list[tuple[str, list[float], list[float]]] = []
         replicate_values: list[list[list[float]]] = []
+
+        # Track contacting/total counts per element per condition for annotation.
+        # contacting_counts[elem_idx] collects n_contacting from each condition;
+        # total_counts[elem_idx] stores the shared n_total (same resid list).
+        contacting_counts: dict[int, list[int]] = {j: [] for j in range(len(elements))}
+        total_counts: dict[int, int] = {}
+
         for label in valid_labels:
             result = contact_results[label]
             means: list[float] = []
             sems: list[float] = []
             cond_reps: list[list[float]] = []
-            for elem in elements:
+            for j, elem in enumerate(elements):
                 resids = protein_groups[elem]
-                m, s = result.subset_residence_time(resids, polymer_type=polymer_type, units="ns")
+                m, s, n_cont, n_tot = result.subset_residence_time(
+                    resids, polymer_type=polymer_type, units="ns"
+                )
                 means.append(m)
                 sems.append(s)
+                contacting_counts[j].append(n_cont)
+                total_counts[j] = n_tot  # Same across conditions
                 cond_reps.append(
                     result.subset_residence_time_per_replicate(
                         resids, polymer_type=polymer_type, units="ns"
@@ -2547,6 +2558,45 @@ class ResidenceTimeByPartitionBarPlotter(BasePlotter):
         ax.set_xticklabels(elements, rotation=45, ha="right")
         ax.set_ylim(bottom=0)
         self._apply_legend(ax)
+
+        # Annotate each group with the number of contacting residues that
+        # contributed to the mean.  Shows "n/N contacted" when all conditions
+        # agree, or "min–max/N contacted" when they differ.  Placed above
+        # the tallest bar+error in each group so it doesn't overlap bars or
+        # tick labels.
+        for j in range(len(elements)):
+            n_tot = total_counts.get(j, 0)
+            counts = contacting_counts.get(j, [])
+            if not counts or n_tot == 0:
+                continue
+            lo, hi = min(counts), max(counts)
+            if lo == hi:
+                label_text = f"{lo}/{n_tot} contacted"
+            else:
+                label_text = f"{lo}\u2013{hi}/{n_tot} contacted"
+
+            # Find the tallest bar+error in this group across all conditions
+            group_top = 0.0
+            for _, cond_means, cond_sems in series:
+                bar_top = cond_means[j] + cond_sems[j]
+                if bar_top > group_top:
+                    group_top = bar_top
+            # Also check jittered replicate dots
+            for cond_reps_list in replicate_values:
+                if cond_reps_list and cond_reps_list[j]:
+                    rep_max = max(cond_reps_list[j])
+                    if rep_max > group_top:
+                        group_top = rep_max
+
+            ax.text(
+                x[j],
+                group_top,
+                label_text,
+                fontsize=6,
+                color="gray",
+                ha="center",
+                va="bottom",
+            )
 
         plt.tight_layout()
 

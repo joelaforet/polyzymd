@@ -389,8 +389,18 @@ class AggregatedContactResult(BaseAnalysisResult):
         resids: list[int],
         polymer_type: str | None = None,
         units: str = "ns",
-    ) -> tuple[float, float]:
+    ) -> tuple[float, float, int, int]:
         """Compute mean residence time for an arbitrary set of residues.
+
+        Only residues that actually have polymer contact events contribute
+        to the mean.  Residues in *resids* that were never contacted by the
+        polymer (i.e. ``residence_time_by_polymer_type`` is empty, or the
+        requested *polymer_type* is absent) are excluded from the average
+        so that they do not artificially deflate the result with default-zero
+        values.
+
+        The returned *n_contacting* / *n_total* counts let callers report
+        how many residues contributed to the mean (e.g. for plot annotations).
 
         Parameters
         ----------
@@ -404,23 +414,44 @@ class AggregatedContactResult(BaseAnalysisResult):
 
         Returns
         -------
-        tuple[float, float]
-            (mean_rt, sem_rt) across the specified residues.
+        mean_rt : float
+            Mean residence time across contacting residues.
+        sem_rt : float
+            SEM of residence time across contacting residues.
+        n_contacting : int
+            Number of residues in *resids* that had at least one contact
+            event (and therefore contribute to the mean).
+        n_total : int
+            Total number of residues in *resids* that were found in
+            ``residue_stats`` (contacting + non-contacting).
         """
         resid_set = set(resids)
         _, rt_means, _ = self.to_residence_time_arrays(polymer_type=polymer_type, units=units)
 
+        n_total = 0
         vals: list[float] = []
         for i, rs in enumerate(self.residue_stats):
-            if rs.protein_resid in resid_set:
-                vals.append(float(rt_means[i]))
+            if rs.protein_resid not in resid_set:
+                continue
+            n_total += 1
 
+            # Skip residues with no polymer contacts — their RT is a
+            # default zero, not a measured value.
+            rt = rs.residence_time_by_polymer_type
+            if not rt:
+                continue
+            if polymer_type is not None and polymer_type not in rt:
+                continue
+
+            vals.append(float(rt_means[i]))
+
+        n_contacting = len(vals)
         if not vals:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0, n_total
         arr = np.array(vals, dtype=np.float64)
         mean = float(np.mean(arr))
         sem = float(np.std(arr, ddof=1) / np.sqrt(len(arr))) if len(arr) > 1 else 0.0
-        return mean, sem
+        return mean, sem, n_contacting, n_total
 
     # ------------------------------------------------------------------
     # Per-replicate helpers (for jittered dot overlays on bar charts)
@@ -609,6 +640,13 @@ class AggregatedContactResult(BaseAnalysisResult):
     ) -> list[float]:
         """Per-replicate mean residence time for an arbitrary residue set.
 
+        Only residues that actually have polymer contact events contribute
+        to each replicate's mean.  Residues in *resids* that were never
+        contacted (empty ``residence_time_by_polymer_type_per_replicate``,
+        or the requested *polymer_type* absent) are excluded entirely so
+        they do not artificially deflate per-replicate averages with
+        default-zero values.
+
         Parameters
         ----------
         resids : list[int]
@@ -622,7 +660,7 @@ class AggregatedContactResult(BaseAnalysisResult):
         Returns
         -------
         list[float]
-            One value per replicate (mean RT across the specified residues).
+            One value per replicate (mean RT across the contacting residues).
             Returns empty list if per-replicate data is unavailable.
         """
         resid_set = set(resids)
@@ -637,14 +675,16 @@ class AggregatedContactResult(BaseAnalysisResult):
         for rs in self.residue_stats:
             if rs.protein_resid not in resid_set:
                 continue
+
             if polymer_type is not None:
                 reps = rs.residence_time_by_polymer_type_per_replicate.get(polymer_type, [])
+                if not reps:
+                    continue  # No contacts for this polymer type — skip
             else:
                 all_type_reps = rs.residence_time_by_polymer_type_per_replicate
                 if not all_type_reps:
-                    residue_rep_lists.append([])
-                    continue
-                n_reps = max(len(v) for v in all_type_reps.values()) if all_type_reps else 0
+                    continue  # No polymer contacts at all — skip
+                n_reps = max(len(v) for v in all_type_reps.values())
                 reps = []
                 for rep_idx in range(n_reps):
                     vals = [v[rep_idx] for v in all_type_reps.values() if rep_idx < len(v)]
@@ -652,20 +692,13 @@ class AggregatedContactResult(BaseAnalysisResult):
 
             residue_rep_lists.append(reps)
 
-        # Filter to only residues with data
-        non_empty = [r for r in residue_rep_lists if r]
-        if not non_empty:
+        if not residue_rep_lists:
             return []
 
-        n_reps = len(non_empty[0])
+        n_reps = len(residue_rep_lists[0])
         per_rep_means: list[float] = []
         for rep_idx in range(n_reps):
-            vals = []
-            for reps in residue_rep_lists:
-                if reps and rep_idx < len(reps):
-                    vals.append(reps[rep_idx])
-                else:
-                    vals.append(0.0)
+            vals = [reps[rep_idx] for reps in residue_rep_lists if rep_idx < len(reps)]
             per_rep_means.append(float(np.mean(vals)) * scale if vals else 0.0)
         return per_rep_means
 
