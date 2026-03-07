@@ -378,7 +378,8 @@ Job 1 (initial)  →  Job 2 (continue)  →  Job 3 (continue)  →  ...
    + segment 0
 ```
 
-Each job only starts after the previous one completes successfully.
+Each job depends on the previous one via `afterany`, so the chain continues
+even if a segment is interrupted.  See {doc}`hpc_slurm` for details.
 
 ---
 
@@ -412,6 +413,104 @@ polyzymd continue -w /scratch/user/sim/LipA_300K_run1 -s 2 -t 10.0 -n 250
 - This command is typically called by SLURM continuation scripts, not manually
 - It loads the checkpoint from the previous segment automatically
 - The segment index is 1-based (segment 1 continues from segment 0)
+
+---
+
+## polyzymd recover
+
+Recover an interrupted simulation segment.  Reads the `INTERRUPTED` marker
+and emergency state files from a previously interrupted segment, then runs
+the remaining steps in a `production_N_resume/` subdirectory.
+
+After recovery, normal end-of-segment files (`state.xml`, `system.xml`,
+`checkpoint.chk`) are written to the original `production_N/` directory so
+that the next `ContinuationManager` can pick up seamlessly.
+
+```bash
+polyzymd recover --working-dir <path> --segment <n> [--dry-run]
+polyzymd recover -w <path> -s <n>
+```
+
+### Options
+
+| Option | Short | Required | Default | Description |
+|--------|-------|----------|---------|-------------|
+| `--working-dir` | `-w` | Yes | - | Working directory containing simulation output |
+| `--segment` | `-s` | Yes | - | Segment index that was interrupted |
+| `--dry-run` | - | No | false | Show what would be recovered without running |
+
+### Example
+
+```bash
+# Preview recovery (no simulation)
+polyzymd recover -w /scratch/user/sim/LipA_300K_run1 -s 3 --dry-run
+
+# Run recovery
+polyzymd recover -w /scratch/user/sim/LipA_300K_run1 -s 3
+```
+
+### Notes
+
+- This command is typically called automatically by the recovery preamble in
+  SLURM continuation scripts.  Use it manually when the daisy chain has
+  already ended or you need to recover outside the normal workflow.
+- Recovery writes remaining trajectory frames to `production_N_resume/` to
+  avoid corrupting the partial DCD file from the interrupted run.
+- Recovery itself is signal-aware: if interrupted, it updates the `INTERRUPTED`
+  marker and subsequent attempts resume from there.
+- Removes the `INTERRUPTED` marker upon successful completion.
+
+---
+
+## polyzymd recover-chain
+
+Scan all `production_N/` directories in a working directory and report the
+status of each segment (COMPLETED, INTERRUPTED, or MISSING).
+
+Without `--dry-run`, also recovers any interrupted segments in-place.
+
+```bash
+polyzymd recover-chain --working-dir <path> [--dry-run]
+polyzymd recover-chain -w <path> --dry-run
+```
+
+### Options
+
+| Option | Short | Required | Default | Description |
+|--------|-------|----------|---------|-------------|
+| `--working-dir` | `-w` | Yes | - | Working directory containing simulation output |
+| `--dry-run` | - | No | false | Show chain status without taking action |
+
+### Example
+
+```bash
+# Status report only
+polyzymd recover-chain -w /scratch/user/sim/LipA_300K_run1 --dry-run
+
+# Scan and recover all interrupted segments
+polyzymd recover-chain -w /scratch/user/sim/LipA_300K_run1
+```
+
+### Example Output
+
+```
+Scanning /scratch/user/sim/LipA_300K_run1
+Found 10 segment(s):
+
+  segment   0: COMPLETED
+  segment   1: COMPLETED
+  segment   2: COMPLETED
+  segment   3: INTERRUPTED (50% done, 1250000 remaining)
+  segment   4: MISSING (no state.xml, no INTERRUPTED marker — likely crashed)
+
+Summary: 3 completed, 1 interrupted, 1 missing
+```
+
+### Notes
+
+- Segments marked MISSING have no recoverable state — they must be re-run
+  from the last completed segment.
+- Use `--dry-run` to safely inspect chain health without modifying anything.
 
 ---
 
@@ -473,6 +572,7 @@ output:
 |------|---------|
 | 0 | Success |
 | 1 | Error (validation failure, build failure, etc.) |
+| 99 | Graceful shutdown — simulation was interrupted but emergency state was saved (see {doc}`hpc_slurm`) |
 
 ---
 

@@ -307,16 +307,20 @@ polyzymd submit -c config.yaml \
 
 1. **Initial job**: Builds system, runs equilibration, runs first production segment
 2. **Continuation jobs**: Load checkpoint, run next segment
-3. **Dependencies**: Each job depends on the previous one completing successfully
+3. **Dependencies**: Each job depends on the previous one via `afterany` (not `afterok`), so the chain continues even if a segment is interrupted
+4. **Recovery**: Each continuation job checks whether the previous segment completed normally or was interrupted, and automatically recovers if needed
 
 ```
 Job 1 (initial)     Job 2 (continue)    Job 3 (continue)
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ Build       │     │ Load chkpt  │     │ Load chkpt  │
-│ Equilibrate │ --> │ Run seg 1   │ --> │ Run seg 2   │
-│ Run seg 0   │     │ Save chkpt  │     │ Save chkpt  │
+│ Build       │     │ Check prev  │     │ Check prev  │
+│ Equilibrate │ --> │ Recover?    │ --> │ Recover?    │
+│ Run seg 0   │     │ Run seg 1   │     │ Run seg 2   │
 └─────────────┘     └─────────────┘     └─────────────┘
+     afterany            afterany
 ```
+
+Using `afterany` instead of `afterok` means that if a segment exits with a non-zero code (e.g. 99 for graceful shutdown), the next segment still starts. The recovery preamble in each continuation script decides whether to proceed, recover, or abort. See {ref}`smart-restart` for details.
 
 ### Configuring Segments
 
@@ -333,6 +337,197 @@ simulation_phases:
 Choose segment duration to fit within your cluster's time limit with margin:
 - 24h limit → ~8-10 ns segments (2h GPU time + overhead)
 - 48h limit → ~20 ns segments
+```
+
+---
+
+(smart-restart)=
+## Smart Restart & Fault Tolerance
+
+When you run 60 daisy chains with 10 segments each, that is 600 SLURM jobs.
+With vanilla `afterok` dependencies, a single failed segment kills the entire
+downstream chain — SLURM marks every subsequent job as
+`DependencyNeverSatisfied` and you lose the remaining wall-time allocation.
+
+PolyzyMD's **smart restart** system handles this automatically.  The
+generated scripts already include everything described below — you do not
+need to configure anything.  This section explains what happens under the
+hood so you can debug issues or adapt the approach to other workflows.
+
+### What Happens Automatically
+
+Every generated SLURM script (both initial and continuation) includes three
+pieces of fault-tolerance infrastructure:
+
+1. **Signal handling** — Python-side handlers catch SIGUSR1 (wall-time
+   warning) and SIGTERM (preemption), save an emergency checkpoint, and
+   exit with code 99.
+2. **Signal forwarding** — Bash trap + background + wait pattern forwards
+   signals from the SLURM batch shell to the Python child process.
+3. **Recovery preamble** — Each continuation script checks whether the
+   previous segment completed, was interrupted (recoverable), or crashed
+   (unrecoverable), and takes the appropriate action before starting its
+   own segment.
+
+The dependency between segments is `afterany` (not `afterok`), so the
+chain continues even when a segment exits with a non-zero code.
+
+### The Three Scenarios
+
+| Scenario | Signal | What Happens | Outcome |
+|----------|--------|--------------|---------|
+| **Wall-time warning** | `SIGUSR1` (5 min before limit) | Emergency state saved, exit 99 | Next job recovers automatically |
+| **Preemption** | `SIGTERM` (120 s grace on Blanca) | Emergency state saved, exit 99 | Next job recovers automatically |
+| **Hard crash** | None (OOM, segfault, node failure) | No state saved | Next job detects missing state, exits with error |
+
+```{note}
+The wall-time signal is configured via `#SBATCH --signal=B:USR1@300`, which
+tells SLURM to send `SIGUSR1` to the batch shell 300 seconds (5 minutes)
+before the time limit expires.  This gives the simulation enough time to
+save a full OpenMM state (~10-30 seconds on GPU).
+```
+
+### Emergency Checkpoint Files
+
+When an interrupt is detected, the signal handler writes three files into
+the current segment's directory (e.g. `production_3/`):
+
+| File | Purpose |
+|------|---------|
+| `emergency_state.xml` | Portable OpenMM state (positions, velocities, forces) |
+| `emergency_system.xml` | Serialized OpenMM System (force field parameters) |
+| `INTERRUPTED` | Marker file with step-count metadata for recovery |
+
+The `INTERRUPTED` marker contains the information needed for recovery:
+
+```
+segment_index=3
+steps_completed=1250000
+total_steps=2500000
+remaining_steps=1250000
+```
+
+### Recovery and the Resume Subdirectory
+
+When a continuation job starts and finds an `INTERRUPTED` marker in the
+previous segment's directory, it runs `polyzymd recover` before starting
+its own segment.  Recovery works as follows:
+
+1. Parse the `INTERRUPTED` marker for step counts
+2. Load `emergency_state.xml` and `emergency_system.xml`
+3. Run the remaining steps, writing trajectory to a **resume subdirectory**
+   (`production_N_resume/`) to avoid corrupting the partial DCD file
+4. Write the normal end-of-segment files (`state.xml`, `system.xml`,
+   `checkpoint.chk`) to the original `production_N/` directory
+5. Remove the `INTERRUPTED` marker
+
+```{tip}
+The resume subdirectory strategy means that the partial trajectory from the
+interrupted run and the completion trajectory from recovery are in separate
+files.  During post-processing, concatenate them:
+
+    production_3/production_3_trajectory.dcd        # first half
+    production_3_resume/production_3_resume_trajectory.dcd  # second half
+```
+
+After recovery completes, the segment directory looks like any normally-
+completed segment to the `ContinuationManager`, so the next segment
+proceeds as usual.
+
+### Signal Forwarding: Why trap + background + wait?
+
+SLURM sends signals to the **batch shell process**, not to child processes.
+Bash ignores `SIGUSR1` by default, so without explicit forwarding, the
+Python simulation never sees the signal.  The generated scripts use a
+standard pattern to solve this:
+
+```bash
+# Background the Python process
+polyzymd continue -w "$SCRATCH_DIR" -s 3 -t 10.0 -n 250 &
+CHILD_PID=$!
+
+# Trap signals and forward them to the child
+trap 'kill -USR1 $CHILD_PID' USR1
+trap 'kill -TERM $CHILD_PID' TERM
+
+# Wait in a loop (wait is interrupted by trapped signals)
+wait "$CHILD_PID"
+RC=$?
+while kill -0 "$CHILD_PID" 2>/dev/null; do
+    wait "$CHILD_PID"
+    RC=$?
+done
+```
+
+```{warning}
+Do not remove the `trap`, backgrounding (`&`), or `wait` loop from the
+generated scripts.  Without them, signals will not reach the Python process
+and graceful shutdown will not work.
+```
+
+### Recovery Preamble Logic
+
+Each continuation script includes a recovery preamble that runs before
+the segment's own simulation.  The logic is:
+
+```bash
+PREV_DIR="${SCRATCH_DIR}/production_${PREV_SEG}"
+
+if [ -f "${PREV_DIR}/INTERRUPTED" ]; then
+    # Previous segment was interrupted — run recovery
+    polyzymd recover -w "$SCRATCH_DIR" -s "$PREV_SEG"
+elif [ -f "${PREV_DIR}/production_${PREV_SEG}_state.xml" ]; then
+    # Previous segment completed normally — proceed
+    :
+else
+    # No state and no marker — unrecoverable crash
+    exit 1
+fi
+```
+
+### Manually Triggering an Interrupt
+
+You can test graceful shutdown or manually stop a running segment by
+sending `SIGUSR1` via `scancel`:
+
+```bash
+# Send USR1 to a specific job
+scancel --signal=USR1 <job_id>
+
+# The job will save emergency state and exit with code 99
+# The next segment in the chain will recover automatically
+```
+
+This is useful when you realize a simulation has a problem and want to
+stop it cleanly without losing progress.
+
+### Manual Recovery Commands
+
+If you need to recover segments outside the automatic daisy-chain workflow
+(e.g. the chain has already ended), use the CLI commands directly:
+
+```bash
+# Recover a single interrupted segment
+polyzymd recover -w /scratch/user/sim/LipA_300K_run1 -s 3
+
+# Preview what would be recovered (no simulation)
+polyzymd recover -w /scratch/user/sim/LipA_300K_run1 -s 3 --dry-run
+
+# Scan an entire chain and report status
+polyzymd recover-chain -w /scratch/user/sim/LipA_300K_run1 --dry-run
+
+# Scan and recover all interrupted segments
+polyzymd recover-chain -w /scratch/user/sim/LipA_300K_run1
+```
+
+See the {ref}`CLI Reference <cli-recover>` section below for full option
+details.
+
+```{note}
+Recovery itself is signal-aware.  If a recovery run is interrupted (e.g.
+the recovery job also hits a wall-time limit), the `INTERRUPTED` marker is
+updated with the new step count and the next attempt picks up where recovery
+left off.
 ```
 
 ---
@@ -423,22 +618,52 @@ du -h /scratch/$USER/polyzymd_sims/*/production_*/*.dcd
 
 ## Handling Failures
 
-### Job Failed Mid-Segment
+Most failures are handled automatically by the {ref}`smart restart <smart-restart>`
+system.  This section covers the cases where manual intervention is needed.
 
-If a job fails, the dependent jobs won't start. To restart:
+### Wall-Time or Preemption Interrupts
+
+**No action needed.** The smart restart system saves an emergency checkpoint
+and the next segment in the chain recovers automatically.  Check the SLURM
+log to confirm:
+
+```bash
+# Look for the graceful shutdown message
+grep -i "interrupted\|graceful\|recovery" slurm_logs/s2_r1_300K_*.out
+```
+
+### Hard Crash (OOM, Segfault, Node Failure)
+
+If a job crashes without saving state, the next segment will detect the
+missing `state.xml` and exit with an error.  To diagnose and recover:
 
 1. **Check the error**:
    ```bash
    cat slurm_logs/s2_r1_300K_*.out
    ```
 
-2. **Fix the issue** (if possible)
+2. **Fix the issue** (e.g. increase memory with `--memory 8G`)
 
-3. **Manually continue**:
+3. **Re-run the failed segment manually**, then resubmit the rest of
+   the chain:
    ```bash
-   # Edit and resubmit the continuation script
-   sbatch job_scripts/continue_seg2_rep1.sh
+   # Re-run the failed segment
+   polyzymd continue -w /scratch/$USER/sim/LipA_300K_run1 -s 2 -t 10.0 -n 250
+
+   # Resubmit remaining continuation scripts
+   sbatch job_scripts/continue_seg3_rep1.sh
    ```
+
+### Checking Chain Health
+
+Use `recover-chain` to get a quick status report across all segments:
+
+```bash
+polyzymd recover-chain -w /scratch/$USER/sim/LipA_300K_run1 --dry-run
+```
+
+This prints each segment's status (COMPLETED, INTERRUPTED, or MISSING)
+without modifying anything.
 
 ### Start Fresh
 
@@ -458,7 +683,7 @@ polyzymd submit -c config.yaml --replicates 1 --preset aa100
 
 ### Initial Script
 
-The initial job script (segment 0) builds the system, runs equilibration, and runs the first production segment:
+The initial job script (segment 0) builds the system, runs equilibration, and runs the first production segment.  It includes signal forwarding and exit-code handling for the {ref}`smart restart <smart-restart>` system:
 
 ```bash
 #!/bin/bash
@@ -474,50 +699,70 @@ The initial job script (segment 0) builds the system, runs equilibration, and ru
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=your@email.edu
 #SBATCH --account=ucb625_asc1
+#SBATCH --signal=B:USR1@300
+#SBATCH --no-requeue
 
 module purge 2>/dev/null || true
 ml miniforge 2>/dev/null || true
 
 eval "$(conda shell.bash hook)"
-mamba activate polymerist-env
+conda activate polyzymd-env
 
 set -e
 
-# Required for OpenFF Interchange.combine() functionality
 export INTERCHANGE_EXPERIMENTAL=1
 
-# Projects directory (scripts, configs, logs)
 PROJECTS_DIR="/projects/$USER/polyzymd/my_simulation"
-
-# Scratch directory (simulation output)
 SCRATCH_DIR="/scratch/alpine/$USER/polyzymd_sims/LipA_300K_run1"
-
-# Ensure scratch directory exists
 mkdir -p "$SCRATCH_DIR"
-
-# Change to projects directory where config lives
 cd "$PROJECTS_DIR"
 
 echo "Starting initial simulation segment 0"
-echo "Projects dir: $PROJECTS_DIR"
-echo "Scratch dir: $SCRATCH_DIR"
-echo "Config: config.yaml"
-echo "Replicate: 1"
 echo "Timestamp: $(date)"
 
-# Run the initial simulation using polyzymd CLI
+# Signal forwarding (see Smart Restart docs)
+CHILD_PID=""
+forward_signal() {
+    if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+        echo "Forwarding $1 to Python process (PID $CHILD_PID)"
+        kill -"$1" "$CHILD_PID"
+    fi
+}
+trap 'forward_signal USR1' USR1
+trap 'forward_signal TERM' TERM
+
+# Run simulation in background for signal forwarding
 polyzymd run -c "config.yaml" \
     --replicate 1 \
     --scratch-dir "$SCRATCH_DIR" \
     --segment-time 10.0 \
-    --segment-frames 250
+    --segment-frames 250 &
+CHILD_PID=$!
+
+# Wait loop (handles signal interruption of wait)
+set +e
+wait "$CHILD_PID" 2>/dev/null
+RC=$?
+while kill -0 "$CHILD_PID" 2>/dev/null; do
+    wait "$CHILD_PID" 2>/dev/null
+    RC=$?
+done
+set -e
+
+if [ $RC -eq 99 ]; then
+    echo "Segment 0 interrupted (graceful shutdown) at $(date)"
+    exit 99
+elif [ $RC -ne 0 ]; then
+    echo "Segment 0 FAILED with exit code $RC at $(date)"
+    exit $RC
+fi
 
 echo "Segment 0 completed successfully at $(date)"
 ```
 
 ### Continuation Script
 
-Continuation scripts load the checkpoint from the previous segment and continue the simulation:
+Continuation scripts include a **recovery preamble** that checks the previous segment's status before starting.  If the previous segment was interrupted, `polyzymd recover` runs automatically:
 
 ```bash
 #!/bin/bash
@@ -533,38 +778,81 @@ Continuation scripts load the checkpoint from the previous segment and continue 
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=your@email.edu
 #SBATCH --account=ucb625_asc1
+#SBATCH --signal=B:USR1@300
+#SBATCH --no-requeue
 
 module purge 2>/dev/null || true
 ml miniforge 2>/dev/null || true
 
 eval "$(conda shell.bash hook)"
-mamba activate polymerist-env
+conda activate polyzymd-env
 
-set -e
-
-# Required for OpenFF Interchange.combine() functionality
 export INTERCHANGE_EXPERIMENTAL=1
 
-# Projects directory (scripts, configs, logs)
 PROJECTS_DIR="/projects/$USER/polyzymd/my_simulation"
-
-# Scratch directory (simulation output - where previous segment data lives)
 SCRATCH_DIR="/scratch/alpine/$USER/polyzymd_sims/LipA_300K_run1"
-
-# Change to projects directory
 cd "$PROJECTS_DIR"
 
 echo "Starting continuation segment 1"
-echo "Projects dir: $PROJECTS_DIR"
-echo "Scratch dir: $SCRATCH_DIR"
 echo "Timestamp: $(date)"
 
-# Continue simulation from previous segment using polyzymd CLI
+# Recovery preamble: check previous segment status
+PREV_SEG=$(( 1 - 1 ))
+PREV_DIR="${SCRATCH_DIR}/production_${PREV_SEG}"
+
+if [ -f "${PREV_DIR}/INTERRUPTED" ]; then
+    echo "Previous segment $PREV_SEG was interrupted — running recovery"
+    polyzymd recover -w "$SCRATCH_DIR" -s "$PREV_SEG"
+    RECOVER_RC=$?
+    if [ $RECOVER_RC -ne 0 ]; then
+        echo "Recovery of segment $PREV_SEG FAILED (exit code $RECOVER_RC)"
+        exit 1
+    fi
+    echo "Recovery of segment $PREV_SEG completed successfully"
+elif [ -f "${PREV_DIR}/production_${PREV_SEG}_state.xml" ]; then
+    echo "Previous segment $PREV_SEG completed normally — proceeding"
+else
+    echo "ERROR: Previous segment $PREV_SEG has no state.xml and no INTERRUPTED marker"
+    echo "This segment cannot continue — the previous job likely crashed."
+    exit 1
+fi
+
+set -e
+
+# Signal forwarding (same pattern as initial script)
+CHILD_PID=""
+forward_signal() {
+    if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+        echo "Forwarding $1 to Python process (PID $CHILD_PID)"
+        kill -"$1" "$CHILD_PID"
+    fi
+}
+trap 'forward_signal USR1' USR1
+trap 'forward_signal TERM' TERM
+
 polyzymd continue \
     -w "$SCRATCH_DIR" \
     -s 1 \
     -t 10.0 \
-    -n 250
+    -n 250 &
+CHILD_PID=$!
+
+set +e
+wait "$CHILD_PID" 2>/dev/null
+RC=$?
+while kill -0 "$CHILD_PID" 2>/dev/null; do
+    wait "$CHILD_PID" 2>/dev/null
+    RC=$?
+done
+set -e
+
+if [ $RC -eq 99 ]; then
+    echo "Segment 1 interrupted (graceful shutdown) at $(date)"
+    exit 99
+elif [ $RC -ne 0 ]; then
+    echo "Segment 1 FAILED with exit code $RC at $(date)"
+    exit $RC
+fi
 
 echo "Segment 1 completed successfully at $(date)"
 ```
@@ -690,6 +978,73 @@ polyzymd continue -w WORKING_DIR -s SEGMENT -t TIME [OPTIONS]
 
 **Options:**
 - `-n, --num-samples INT` - Number of frames to save. Default: 250
+
+(cli-recover)=
+### `polyzymd recover`
+
+Recover an interrupted simulation segment.  Reads the `INTERRUPTED` marker
+and emergency state files, runs the remaining steps in a
+`production_N_resume/` subdirectory, then writes end-of-segment files so
+the next `ContinuationManager` can proceed.
+
+```bash
+polyzymd recover -w WORKING_DIR -s SEGMENT [--dry-run]
+```
+
+**Required:**
+- `-w, --working-dir PATH` - Working directory containing simulation output
+- `-s, --segment INT` - Segment index that was interrupted
+
+**Options:**
+- `--dry-run` - Show what would be recovered without running the simulation
+
+**Example:**
+```bash
+# Preview recovery
+polyzymd recover -w /scratch/$USER/sim/LipA_300K_run1 -s 3 --dry-run
+
+# Run recovery
+polyzymd recover -w /scratch/$USER/sim/LipA_300K_run1 -s 3
+```
+
+### `polyzymd recover-chain`
+
+Scan all segments in a working directory and report their status.  Without
+`--dry-run`, also recovers any interrupted segments.
+
+```bash
+polyzymd recover-chain -w WORKING_DIR [--dry-run]
+```
+
+**Required:**
+- `-w, --working-dir PATH` - Working directory containing simulation output
+
+**Options:**
+- `--dry-run` - Show chain status without taking action
+
+**Example:**
+```bash
+# Status report only
+polyzymd recover-chain -w /scratch/$USER/sim/LipA_300K_run1 --dry-run
+
+# Recover all interrupted segments
+polyzymd recover-chain -w /scratch/$USER/sim/LipA_300K_run1
+```
+
+**Example output:**
+```
+Scanning /scratch/user/sim/LipA_300K_run1
+Found 10 segment(s):
+
+  segment   0: COMPLETED
+  segment   1: COMPLETED
+  segment   2: COMPLETED
+  segment   3: INTERRUPTED (50% done, 1250000 remaining)
+  segment   4: MISSING (no state.xml, no INTERRUPTED marker — likely crashed)
+  ...
+
+Summary: 3 completed, 1 interrupted, 1 missing
+```
 
 ---
 
