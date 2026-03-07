@@ -57,7 +57,7 @@ TIMESTEP_FS = 2.0
 FRICTION = 1.0  # 1/ps
 NUM_PRODUCTION_STEPS = 1000  # Very short segment 0
 NUM_SAMPLES = 10  # 10 frames for segment 0
-BOX_SIZE_NM = 2.0  # Tiny box
+BOX_SIZE_NM = 3.0  # Small box (must be > 2x nonbonded cutoff for NPT stability)
 
 
 def main():
