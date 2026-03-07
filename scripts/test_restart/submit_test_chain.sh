@@ -124,7 +124,7 @@ module purge 2>/dev/null || true
 ml miniforge 2>/dev/null || true
 
 eval "$(conda shell.bash hook)"
-mamba activate CONDA_ENV_PLACEHOLDER
+conda activate CONDA_ENV_PLACEHOLDER
 
 set -e
 
@@ -174,7 +174,7 @@ module purge 2>/dev/null || true
 ml miniforge 2>/dev/null || true
 
 eval "$(conda shell.bash hook)"
-mamba activate CONDA_ENV_PLACEHOLDER
+conda activate CONDA_ENV_PLACEHOLDER
 
 echo "===== Segment 1: Continuation from Segment 0 ====="
 echo "Hostname: $(hostname)"
@@ -267,7 +267,7 @@ module purge 2>/dev/null || true
 ml miniforge 2>/dev/null || true
 
 eval "$(conda shell.bash hook)"
-mamba activate CONDA_ENV_PLACEHOLDER
+conda activate CONDA_ENV_PLACEHOLDER
 
 echo "===== Segment 2: Continuation with Recovery Preamble ====="
 echo "Hostname: $(hostname)"
