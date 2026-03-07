@@ -57,7 +57,9 @@ QOS="preemptable"
 EXCLUDE="bgpu-bortz1"
 WALL_TIME="00:05:00"          # 5 minutes per segment
 CONDA_ENV="polyzymd-env"
-SEGMENT_TIME="0.001"          # 0.001 ns = 500 steps at 2fs timestep
+SEGMENT_TIME="0.001"          # 0.001 ns = 500 steps at 2fs (seg0 setup only)
+SEG1_TIME="0.1"               # 0.1 ns = 50000 steps (~100s on CPU, time to interrupt)
+SEG2_TIME="0.001"             # 0.001 ns = 500 steps (fast, just needs to complete)
 NUM_SAMPLES="10"              # 10 frames per segment
 
 # Resolve paths
@@ -93,7 +95,7 @@ echo "  QoS:          $QOS"
 echo "  Exclude:      $EXCLUDE"
 echo "  Wall time:    $WALL_TIME (per segment)"
 echo "  Conda env:    $CONDA_ENV"
-echo "  Segment time: $SEGMENT_TIME ns"
+echo "  Segment time: $SEGMENT_TIME ns (seg0), $SEG1_TIME ns (seg1), $SEG2_TIME ns (seg2)"
 echo "  Num samples:  $NUM_SAMPLES"
 echo "  Working dir:  $WORKDIR"
 echo ""
@@ -114,6 +116,8 @@ inject_vars() {
     sed -i "s|@@SCRIPT_DIR@@|${SCRIPT_DIR}|g"     "$file"
     sed -i "s|@@WORKDIR@@|${WORKDIR}|g"           "$file"
     sed -i "s|@@SEGMENT_TIME@@|${SEGMENT_TIME}|g" "$file"
+    sed -i "s|@@SEG1_TIME@@|${SEG1_TIME}|g"       "$file"
+    sed -i "s|@@SEG2_TIME@@|${SEG2_TIME}|g"       "$file"
     sed -i "s|@@NUM_SAMPLES@@|${NUM_SAMPLES}|g"   "$file"
 }
 
@@ -225,7 +229,7 @@ cd @@SCRIPT_DIR@@
 polyzymd continue \
     -w "@@WORKDIR@@" \
     -s 1 \
-    -t @@SEGMENT_TIME@@ \
+    -t @@SEG1_TIME@@ \
     -n @@NUM_SAMPLES@@
 RC=$?
 
@@ -319,7 +323,7 @@ cd @@SCRIPT_DIR@@
 polyzymd continue \
     -w "@@WORKDIR@@" \
     -s 2 \
-    -t @@SEGMENT_TIME@@ \
+    -t @@SEG2_TIME@@ \
     -n @@NUM_SAMPLES@@
 RC=$?
 
