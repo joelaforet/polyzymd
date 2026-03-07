@@ -847,6 +847,7 @@ class SimulationRunner:
         # Install signal handlers for graceful shutdown (SIGUSR1 / SIGTERM)
         from polyzymd.simulation.signals import (
             GracefulExit,
+            get_interrupt_signal,
             install_handlers,
             is_interrupted,
             save_emergency_state,
@@ -873,7 +874,9 @@ class SimulationRunner:
                         steps_completed=steps_done,
                         total_steps=total_steps,
                     )
-                    raise GracefulExit(signal_number=0, steps_completed=steps_done)
+                    raise GracefulExit(
+                        signal_number=get_interrupt_signal(), steps_completed=steps_done
+                    )
         except GracefulExit:
             raise  # Re-raise so caller can handle exit code
         except Exception:

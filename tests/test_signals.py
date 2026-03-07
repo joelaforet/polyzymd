@@ -22,6 +22,7 @@ from polyzymd.simulation.signals import (
     GracefulExit,
     _handler,
     _interrupted,
+    get_interrupt_signal,
     install_handlers,
     is_interrupted,
     reset,
@@ -49,6 +50,13 @@ class TestGracefulExit:
         exc = GracefulExit(signal_number=signal.SIGUSR1, steps_completed=100)
         assert "SIGUSR1" in str(exc)
         assert "100" in str(exc)
+
+    def test_invalid_signal_number_does_not_crash(self):
+        """GracefulExit should not raise ValueError for invalid signal numbers."""
+        exc = GracefulExit(signal_number=0, steps_completed=500)
+        assert exc.signal_number == 0
+        assert exc.steps_completed == 500
+        assert "signal(0)" in str(exc)
 
     def test_is_exception(self):
         assert issubclass(GracefulExit, Exception)
@@ -96,6 +104,27 @@ class TestInterruptFlag:
     def test_handler_with_sigterm(self):
         _handler(signal.SIGTERM, None)
         assert is_interrupted()
+
+    def test_get_interrupt_signal_default(self):
+        """Default interrupt signal is SIGUSR1 before any signal received."""
+        assert get_interrupt_signal() == signal.SIGUSR1
+
+    def test_get_interrupt_signal_after_usr1(self):
+        """After receiving USR1, get_interrupt_signal returns SIGUSR1."""
+        _handler(signal.SIGUSR1, None)
+        assert get_interrupt_signal() == signal.SIGUSR1
+
+    def test_get_interrupt_signal_after_term(self):
+        """After receiving SIGTERM, get_interrupt_signal returns SIGTERM."""
+        _handler(signal.SIGTERM, None)
+        assert get_interrupt_signal() == signal.SIGTERM
+
+    def test_reset_restores_default_signal(self):
+        """reset() restores default interrupt signal to SIGUSR1."""
+        _handler(signal.SIGTERM, None)
+        assert get_interrupt_signal() == signal.SIGTERM
+        reset()
+        assert get_interrupt_signal() == signal.SIGUSR1
 
 
 # ---------------------------------------------------------------------------

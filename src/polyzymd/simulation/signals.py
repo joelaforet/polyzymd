@@ -28,6 +28,10 @@ EXIT_CODE_INTERRUPTED = 99
 # Module-level flag checked by the simulation loop
 _interrupted = threading.Event()
 
+# Store the signal number that triggered the interrupt so GracefulExit can
+# report it accurately.  Defaults to SIGUSR1 as a safe fallback.
+_interrupt_signal: int = signal.SIGUSR1
+
 
 class GracefulExit(Exception):
     """Raised when a signal handler requests a clean shutdown.
@@ -43,7 +47,10 @@ class GracefulExit(Exception):
     def __init__(self, signal_number: int, steps_completed: int = 0) -> None:
         self.signal_number = signal_number
         self.steps_completed = steps_completed
-        sig_name = signal.Signals(signal_number).name
+        try:
+            sig_name = signal.Signals(signal_number).name
+        except ValueError:
+            sig_name = f"signal({signal_number})"
         super().__init__(f"Graceful exit requested by {sig_name} after {steps_completed} steps")
 
 
@@ -52,9 +59,19 @@ def is_interrupted() -> bool:
     return _interrupted.is_set()
 
 
+def get_interrupt_signal() -> int:
+    """Return the signal number that triggered the interrupt.
+
+    Returns ``signal.SIGUSR1`` as default if no signal has been received yet.
+    """
+    return _interrupt_signal
+
+
 def reset() -> None:
     """Clear the interrupted flag (useful for tests)."""
+    global _interrupt_signal
     _interrupted.clear()
+    _interrupt_signal = signal.SIGUSR1
 
 
 def _handler(signum: int, frame: Any) -> None:
@@ -67,8 +84,10 @@ def _handler(signum: int, frame: Any) -> None:
     frame : Any
         Current stack frame (unused).
     """
+    global _interrupt_signal
     sig_name = signal.Signals(signum).name
     LOGGER.warning(f"Received {sig_name} — requesting graceful shutdown")
+    _interrupt_signal = signum
     _interrupted.set()
 
 

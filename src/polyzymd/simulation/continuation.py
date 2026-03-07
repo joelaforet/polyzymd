@@ -385,6 +385,7 @@ class ContinuationManager:
         from polyzymd.simulation.signals import (
             EXIT_CODE_INTERRUPTED,
             GracefulExit,
+            get_interrupt_signal,
             install_handlers,
             is_interrupted,
             save_emergency_state,
@@ -412,7 +413,9 @@ class ContinuationManager:
                         steps_completed=steps_done,
                         total_steps=total_steps,
                     )
-                    raise GracefulExit(signal_number=0, steps_completed=steps_done)
+                    raise GracefulExit(
+                        signal_number=get_interrupt_signal(), steps_completed=steps_done
+                    )
         except GracefulExit:
             raise  # Re-raise so caller (main()) can set exit code
         except Exception:
