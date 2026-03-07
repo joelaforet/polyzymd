@@ -1240,8 +1240,8 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
         polyzymd clean-pdb -i structures/my_protein.pdb
         polyzymd clean-pdb -i raw.pdb -o cleaned.pdb --ph 7.0
     """
-    from pdbfixer import PDBFixer
     from openmm.app import PDBFile
+    from pdbfixer import PDBFixer
 
     input_file = Path(input_path)
     if output_path is None:
