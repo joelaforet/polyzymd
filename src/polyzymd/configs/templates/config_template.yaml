@@ -34,9 +34,12 @@ description: "Description of your simulation system"
 # Enzyme Configuration (REQUIRED)
 # ============================================================================
 # Your protein structure file. Must be:
-#   - Properly protonated (use PDB2PQR, Reduce, or similar)
+#   - Standard amino acid residue names (no nonstandard residues)
+#   - Properly protonated at your simulation pH
 #   - No missing heavy atoms in regions of interest
-#   - Standard amino acid residue names
+#
+# TIP: Run `polyzymd clean-pdb -i your_protein.pdb` or use another PDB
+#      preparation tool before building your system.
 #
 # enzyme:
 #   name: "protein_X"
@@ -67,9 +70,18 @@ description: "Description of your simulation system"
 # Random co-polymer chains to add around the enzyme.
 # Set to null or comment out if not using polymers.
 #
+# Two modes are available:
+#   MODE A - Pre-built: Supply SDF files of already-parameterized polymers
+#   MODE B - Dynamic:   Generate polymers on-the-fly from monomer SMILES
+#
 # polymers: null
 #
-# OR configure polymers:
+# ----------------------------------------------------------------------------
+# MODE A: Pre-built polymer SDFs
+# ----------------------------------------------------------------------------
+# Use this when you already have polymer structure files (e.g., from a
+# previous run or external tool). Place SDF files in a directory and
+# point sdf_directory to it.
 #
 # polymers:
 #   enabled: true
@@ -87,8 +99,8 @@ description: "Description of your simulation system"
 #   length: 10                            # Number of monomers per chain
 #   count: 4                              # Number of polymer chains
 #   
-#   # Optional: directory containing pre-built polymer SDF files
-#   # sdf_directory: "polymer_sdfs/my_polymer"
+#   # Directory containing pre-built polymer SDF files
+#   sdf_directory: "polymer_sdfs/my_polymer"
 #   
 #   # Cache directory for generated polymers
 #   cache_directory: ".polymer_cache"
@@ -99,11 +111,57 @@ description: "Description of your simulation system"
 #   # random_seed: 42
 #   
 #   # Packing settings for polymers around the protein
-#   # These control how PACKMOL packs polymers around your solute
 #   packing:
 #     padding: 2.0                        # nm padding around solute for polymer box
 #     tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
 #     movebadrandom: false                # set true for dense/heterogeneous polymer systems
+#
+# ----------------------------------------------------------------------------
+# MODE B: Dynamic polymer generation from monomer SMILES (RECOMMENDED)
+# ----------------------------------------------------------------------------
+# PolyzyMD generates random co-polymers on-the-fly using ATRP methacrylate
+# reaction templates that ship with the package. You supply monomer SMILES
+# and feed ratios; PolyzyMD handles fragment generation, polymerization,
+# charge assignment, and 3D embedding.
+#
+# polymers:
+#   enabled: true
+#   generation_mode: "dynamic"            # Key setting: generate from SMILES
+#   type_prefix: "<monomer1>-<monomer2>"   # Used in output directory names
+#   
+#   # Bundled ATRP methacrylate reaction templates
+#   # "default" uses the templates that ship with PolyzyMD
+#   reactions:
+#     initiation: "default"
+#     polymerization: "default"
+#     termination: "default"
+#   
+#   # Monomer composition with SMILES strings
+#   # Probabilities must sum to 1.0
+#   # SMILES must be fully explicit-hydrogen methacrylate monomers
+#   monomers:
+#     - label: "A"
+#       probability: 0.75
+#       name: "<monomer_1_name>"
+#       smiles: "<monomer_1_SMILES>"
+#     - label: "B"
+#       probability: 0.25
+#       name: "<monomer_2_name>"
+#       smiles: "<monomer_2_SMILES>"
+#   
+#   # Charge assignment for generated polymers
+#   charger: "nagl"                       # Options: nagl, espaloma, am1bcc
+#   max_retries: 10                       # Retries if ring-piercing occurs
+#   
+#   length: 10                            # Number of monomers per chain
+#   count: 4                              # Number of polymer chains
+#   
+#   cache_directory: ".polymer_cache"
+#   
+#   packing:
+#     padding: 2.0                        # nm padding around solute
+#     tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
+#     movebadrandom: false                # set true for dense/heterogeneous systems
 
 # ============================================================================
 # Solvent Configuration (REQUIRED)
