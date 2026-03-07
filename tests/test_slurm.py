@@ -59,7 +59,7 @@ class TestPresetLoading:
         assert cfg.gpu_directive_style == "gres"
         assert cfg.gpu_type is None
         assert cfg.module_load == "miniforge"
-        assert cfg.conda_command == "mamba"
+        assert cfg.conda_command == "conda"
 
     def test_al40_preset(self):
         cfg = SlurmConfig.from_preset("al40")
@@ -333,12 +333,11 @@ class TestAlpineScriptGeneration:
         assert "--mail-type" not in script
         assert "--mail-user" not in script
 
-    def test_initial_script_uses_miniforge_and_mamba(self):
-        """Alpine scripts load miniforge and use mamba to activate the env."""
+    def test_initial_script_uses_miniforge_and_conda(self):
+        """Alpine scripts load miniforge and use conda to activate the env."""
         script = self._gen_initial("aa100")
         assert "ml miniforge" in script
-        assert "mamba activate test-env" in script
-        assert "conda activate" not in script
+        assert "conda activate test-env" in script
 
     def test_initial_script_has_shebang(self):
         script = self._gen_initial("aa100")

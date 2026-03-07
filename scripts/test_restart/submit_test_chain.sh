@@ -226,12 +226,38 @@ echo "Running continuation for segment 1..."
 
 cd @@SCRIPT_DIR@@
 
+# =========================================================================
+# Signal forwarding: SLURM sends signals to the batch shell, not to child
+# processes.  We trap SIGUSR1 and SIGTERM and forward them to the Python
+# process running in the background.
+# =========================================================================
+CHILD_PID=""
+forward_signal() {
+    if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+        echo "Forwarding $1 to Python process (PID $CHILD_PID)"
+        kill -"$1" "$CHILD_PID"
+    fi
+}
+trap 'forward_signal USR1' USR1
+trap 'forward_signal TERM' TERM
+
 polyzymd continue \
     -w "@@WORKDIR@@" \
     -s 1 \
     -t @@SEG1_TIME@@ \
-    -n @@NUM_SAMPLES@@
+    -n @@NUM_SAMPLES@@ &
+CHILD_PID=$!
+
+# Wait for the child; temporarily disable 'set -e' so we can capture
+# non-zero exit codes (e.g. 99 for graceful shutdown).
+set +e
+wait "$CHILD_PID" 2>/dev/null
 RC=$?
+while kill -0 "$CHILD_PID" 2>/dev/null; do
+    wait "$CHILD_PID" 2>/dev/null
+    RC=$?
+done
+set -e
 
 # Exit code 99 = interrupted but state saved (graceful shutdown)
 if [ $RC -eq 99 ]; then
@@ -320,12 +346,38 @@ echo "Running continuation for segment 2..."
 
 cd @@SCRIPT_DIR@@
 
+# =========================================================================
+# Signal forwarding: SLURM sends signals to the batch shell, not to child
+# processes.  We trap SIGUSR1 and SIGTERM and forward them to the Python
+# process running in the background.
+# =========================================================================
+CHILD_PID=""
+forward_signal() {
+    if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+        echo "Forwarding $1 to Python process (PID $CHILD_PID)"
+        kill -"$1" "$CHILD_PID"
+    fi
+}
+trap 'forward_signal USR1' USR1
+trap 'forward_signal TERM' TERM
+
 polyzymd continue \
     -w "@@WORKDIR@@" \
     -s 2 \
     -t @@SEG2_TIME@@ \
-    -n @@NUM_SAMPLES@@
+    -n @@NUM_SAMPLES@@ &
+CHILD_PID=$!
+
+# Wait for the child; temporarily disable 'set -e' so we can capture
+# non-zero exit codes (e.g. 99 for graceful shutdown).
+set +e
+wait "$CHILD_PID" 2>/dev/null
 RC=$?
+while kill -0 "$CHILD_PID" 2>/dev/null; do
+    wait "$CHILD_PID" 2>/dev/null
+    RC=$?
+done
+set -e
 
 if [ $RC -eq 99 ]; then
     echo "Segment 2 interrupted (graceful shutdown) at $(date)"

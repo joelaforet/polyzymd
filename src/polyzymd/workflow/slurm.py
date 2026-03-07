@@ -53,7 +53,10 @@ class SlurmConfig:
             (e.g. ``"miniforge"`` for Alpine, ``"anaconda3/2024.10-1"`` for
             Bridges2).
         conda_command: Conda frontend used to activate the environment
-            (``"mamba"`` for Alpine, ``"conda"`` for Bridges2).
+            (``"conda"`` by default — works reliably in non-interactive
+            SLURM shells after ``eval "$(conda shell.bash hook)"``).
+            Set to ``"mamba"`` on clusters where mamba activation is
+            available in batch scripts.
     """
 
     partition: str = "aa100"
@@ -71,7 +74,7 @@ class SlurmConfig:
     gpu_directive_style: str = "gres"
     # --- Module / conda fields (new in v1.0.1) ---
     module_load: str = "miniforge"
-    conda_command: str = "mamba"
+    conda_command: str = "conda"
 
     @classmethod
     def from_preset(cls, preset: PresetType, email: str = "") -> "SlurmConfig":
@@ -248,14 +251,43 @@ echo "Config: {config_path}"
 echo "Replicate: {replicate}"
 echo "Timestamp: $(date)"
 
-# Run the initial simulation using polyzymd CLI
+# =========================================================================
+# Signal forwarding: SLURM sends signals to the batch shell, not to child
+# processes.  We trap SIGUSR1 (wall-time warning) and SIGTERM (preemption)
+# and forward them to the Python process running in the background.
+# =========================================================================
+CHILD_PID=""
+forward_signal() {{
+    if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+        echo "Forwarding $1 to Python process (PID $CHILD_PID)"
+        kill -"$1" "$CHILD_PID"
+    fi
+}}
+trap 'forward_signal USR1' USR1
+trap 'forward_signal TERM' TERM
+
+# Run the initial simulation using polyzymd CLI (backgrounded for signal forwarding)
 # This builds the system, runs equilibration, and runs the first production segment
 polyzymd{openff_logs_flag} run -c "{config_path}" \\
     --replicate {replicate} \\
     --scratch-dir "$SCRATCH_DIR" \\
     --segment-time {segment_time} \\
-    --segment-frames {segment_frames}{skip_build_flag}
+    --segment-frames {segment_frames}{skip_build_flag} &
+CHILD_PID=$!
+
+# Wait for the child; 'wait' is interrupted by trapped signals, so loop
+# until the child actually exits.  Temporarily disable 'set -e' so we can
+# capture non-zero exit codes (e.g. 99 for graceful shutdown) without the
+# shell exiting prematurely.
+set +e
+wait "$CHILD_PID" 2>/dev/null
 RC=$?
+# If wait was interrupted by a signal, wait again for the child to finish
+while kill -0 "$CHILD_PID" 2>/dev/null; do
+    wait "$CHILD_PID" 2>/dev/null
+    RC=$?
+done
+set -e
 
 # Exit code 99 = interrupted but state saved (graceful shutdown)
 # Exit code 0  = completed successfully
@@ -343,15 +375,44 @@ fi
 # Enable strict error handling after recovery preamble
 set -e
 
-# Continue simulation from previous segment using polyzymd CLI
+# =========================================================================
+# Signal forwarding: SLURM sends signals to the batch shell, not to child
+# processes.  We trap SIGUSR1 (wall-time warning) and SIGTERM (preemption)
+# and forward them to the Python process running in the background.
+# =========================================================================
+CHILD_PID=""
+forward_signal() {{
+    if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+        echo "Forwarding $1 to Python process (PID $CHILD_PID)"
+        kill -"$1" "$CHILD_PID"
+    fi
+}}
+trap 'forward_signal USR1' USR1
+trap 'forward_signal TERM' TERM
+
+# Continue simulation from previous segment using polyzymd CLI (backgrounded for signal forwarding)
 # Reads checkpoint from previous segment in SCRATCH_DIR
 # Writes new trajectory and checkpoint to SCRATCH_DIR
 polyzymd{openff_logs_flag} continue \\
     -w "$SCRATCH_DIR" \\
     -s {segment_index} \\
     -t {segment_time} \\
-    -n {num_samples}
+    -n {num_samples} &
+CHILD_PID=$!
+
+# Wait for the child; 'wait' is interrupted by trapped signals, so loop
+# until the child actually exits.  Temporarily disable 'set -e' so we can
+# capture non-zero exit codes (e.g. 99 for graceful shutdown) without the
+# shell exiting prematurely.
+set +e
+wait "$CHILD_PID" 2>/dev/null
 RC=$?
+# If wait was interrupted by a signal, wait again for the child to finish
+while kill -0 "$CHILD_PID" 2>/dev/null; do
+    wait "$CHILD_PID" 2>/dev/null
+    RC=$?
+done
+set -e
 
 # Exit code 99 = interrupted but state saved (graceful shutdown)
 # Exit code 0  = completed successfully
