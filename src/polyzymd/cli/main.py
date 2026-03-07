@@ -982,6 +982,12 @@ def continue_sim(
         click.echo(f"Error: Previous segment not found: {e}", err=True)
         sys.exit(1)
     except Exception as e:
+        # Check if this is a GracefulExit (signal-based interruption)
+        from polyzymd.simulation.signals import EXIT_CODE_INTERRUPTED, GracefulExit
+
+        if isinstance(e, GracefulExit):
+            click.echo(f"Segment {segment} interrupted (graceful shutdown): {e}", err=True)
+            sys.exit(EXIT_CODE_INTERRUPTED)
         click.echo(f"Continuation failed: {e}", err=True)
         if LOGGER.level == logging.DEBUG:
             import traceback
@@ -1268,6 +1274,386 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 
     click.echo()
     click.echo(click.style(f"Cleaned PDB written to: {output_file}", fg="green"))
+
+
+# =============================================================================
+# Recover Command — finish an interrupted segment
+# =============================================================================
+
+
+@cli.command()
+@click.option(
+    "-w",
+    "--working-dir",
+    required=True,
+    type=click.Path(exists=True),
+    help="Working directory containing simulation output",
+)
+@click.option(
+    "-s",
+    "--segment",
+    required=True,
+    type=int,
+    help="Segment index that was interrupted",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Show what would be recovered without running",
+)
+def recover(working_dir: str, segment: int, dry_run: bool) -> None:
+    """Recover an interrupted simulation segment.
+
+    Reads the INTERRUPTED marker and emergency state files from a
+    previously interrupted segment, then runs the remaining steps
+    in a ``production_N_resume/`` subdirectory.
+
+    After recovery, the normal end-of-segment files (state.xml,
+    system.xml, parameters.json) are written to the original
+    ``production_N/`` directory so that the next ContinuationManager
+    can pick up seamlessly.
+    """
+    import json
+
+    from openmm import XmlSerializer
+    from openmm.app import PDBFile, Simulation
+
+    from polyzymd.simulation.continuation import ContinuationManager, quantity_from_dict
+
+    work = Path(working_dir)
+    seg_dir = work / f"production_{segment}"
+    marker = seg_dir / "INTERRUPTED"
+
+    if not marker.exists():
+        click.echo(f"No INTERRUPTED marker found in {seg_dir}", err=True)
+        sys.exit(1)
+
+    # Parse INTERRUPTED marker
+    meta = {}
+    for line in marker.read_text().strip().splitlines():
+        key, val = line.split("=", 1)
+        meta[key.strip()] = int(val.strip())
+
+    steps_completed = meta["steps_completed"]
+    total_steps = meta["total_steps"]
+    remaining_steps = meta["remaining_steps"]
+
+    click.echo(f"Segment {segment}: {steps_completed}/{total_steps} steps completed")
+    click.echo(f"  Remaining: {remaining_steps} steps")
+
+    # Load parameters to get reporter settings
+    # Try segment's own parameters first, then look in the segment directory
+    param_path = seg_dir / f"production_{segment}_parameters.json"
+    if not param_path.exists():
+        click.echo(f"Parameters file not found: {param_path}", err=True)
+        sys.exit(1)
+
+    with open(param_path) as f:
+        param_dict = json.load(f)
+
+    integ_raw = param_dict["__values__"]["integ_params"]["__values__"]
+    num_samples = integ_raw.get("num_samples", 250)
+    report_interval = max(1, total_steps // num_samples)
+
+    # Calculate remaining frames
+    remaining_frames = remaining_steps // report_interval
+    click.echo(f"  Remaining frames: ~{remaining_frames}")
+
+    if dry_run:
+        click.echo()
+        click.echo("[DRY RUN] Would recover segment, no simulation run.")
+        return
+
+    # Verify emergency state files exist
+    emergency_state = seg_dir / "emergency_state.xml"
+    emergency_system = seg_dir / "emergency_system.xml"
+    if not emergency_state.exists():
+        click.echo(f"Emergency state not found: {emergency_state}", err=True)
+        sys.exit(1)
+    if not emergency_system.exists():
+        click.echo(f"Emergency system not found: {emergency_system}", err=True)
+        sys.exit(1)
+
+    # Create resume subdirectory
+    resume_dir = work / f"production_{segment}_resume"
+    resume_dir.mkdir(exist_ok=True)
+    click.echo(f"  Resume directory: {resume_dir}")
+
+    # Load system and state
+    click.echo("Loading emergency state...")
+    import openmm
+
+    with open(emergency_system) as f:
+        system = XmlSerializer.deserialize(f.read())
+
+    # Load topology (same as ContinuationManager)
+    pdb_path = _find_topology_pdb(work)
+    topology = PDBFile(str(pdb_path)).topology
+
+    # Create integrator from parameters
+    thermo_raw = param_dict["__values__"]["thermo_params"]["__values__"]
+    thermostat_raw = thermo_raw["thermostat_params"]["__values__"]
+    time_step = quantity_from_dict(integ_raw["time_step"])
+    temperature = quantity_from_dict(thermostat_raw["temperature"])
+    friction_coeff = quantity_from_dict(thermostat_raw["timescale"])
+
+    integrator = openmm.LangevinMiddleIntegrator(temperature, friction_coeff, time_step)
+
+    # Create simulation and load state
+    simulation = Simulation(topology, system, integrator)
+    simulation.loadState(str(emergency_state))
+
+    # Setup reporters for resume directory
+    from openmm.app import DCDReporter, StateDataReporter
+
+    resume_report_interval = max(1, remaining_steps // max(1, remaining_frames))
+
+    traj_path = resume_dir / f"production_{segment}_resume_trajectory.dcd"
+    state_data_path = resume_dir / f"production_{segment}_resume_state_data.csv"
+
+    simulation.reporters.append(DCDReporter(str(traj_path), resume_report_interval))
+    simulation.reporters.append(
+        StateDataReporter(
+            str(state_data_path),
+            resume_report_interval,
+            step=True,
+            time=True,
+            potentialEnergy=True,
+            kineticEnergy=True,
+            totalEnergy=True,
+            temperature=True,
+            volume=True,
+            density=True,
+            speed=True,
+        )
+    )
+
+    # Install signal handlers (recovery can itself be interrupted)
+    from polyzymd.simulation.signals import (
+        GracefulExit,
+        install_handlers,
+        is_interrupted,
+        save_emergency_state,
+    )
+
+    install_handlers()
+
+    # Run remaining steps (chunked for signal checking)
+    click.echo(f"Running {remaining_steps} remaining steps...")
+    chunk_size = min(resume_report_interval, remaining_steps)
+    steps_done = 0
+    try:
+        while steps_done < remaining_steps:
+            this_chunk = min(chunk_size, remaining_steps - steps_done)
+            simulation.step(this_chunk)
+            steps_done += this_chunk
+            if is_interrupted():
+                click.echo(
+                    f"Recovery interrupted at step {steps_done}/{remaining_steps}",
+                    err=True,
+                )
+                save_emergency_state(
+                    simulation=simulation,
+                    output_dir=seg_dir,
+                    segment_index=segment,
+                    steps_completed=steps_completed + steps_done,
+                    total_steps=total_steps,
+                )
+                sys.exit(99)
+    except GracefulExit:
+        sys.exit(99)
+
+    click.echo("Recovery simulation complete — writing end-of-segment files")
+
+    # Write normal end-of-segment files to the ORIGINAL segment directory
+    # so that ContinuationManager for segment+1 can find them
+    state = simulation.context.getState(
+        getPositions=True,
+        getVelocities=True,
+        getForces=True,
+        getEnergy=True,
+        getParameters=True,
+    )
+
+    state_xml_path = seg_dir / f"production_{segment}_state.xml"
+    with open(state_xml_path, "w") as f:
+        f.write(XmlSerializer.serialize(state))
+
+    system_xml_path = seg_dir / f"production_{segment}_system.xml"
+    with open(system_xml_path, "w") as f:
+        f.write(XmlSerializer.serialize(system))
+
+    # Copy parameters file (already exists, but confirm it's there)
+    # param_path already verified above
+
+    # Save checkpoint
+    chk_path = seg_dir / f"production_{segment}_checkpoint.chk"
+    simulation.saveCheckpoint(str(chk_path))
+
+    # Remove INTERRUPTED marker — segment is now complete
+    marker.unlink()
+    click.echo(f"Removed INTERRUPTED marker from {seg_dir}")
+
+    click.echo(click.style(f"Segment {segment} recovery complete!", fg="green"))
+
+
+def _find_topology_pdb(working_dir: Path) -> Path:
+    """Find a suitable topology PDB in the working directory.
+
+    Parameters
+    ----------
+    working_dir : Path
+        Working directory to search.
+
+    Returns
+    -------
+    Path
+        Path to the PDB file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no suitable PDB is found.
+    """
+    patterns = [
+        "*solvated*.pdb",
+        "*_solvated.pdb",
+        "solvated_*.pdb",
+        "equilibration/*_topology.pdb",
+        "production_0/*_topology.pdb",
+    ]
+    for pattern in patterns:
+        pdb_files = list(working_dir.glob(pattern))
+        if pdb_files:
+            return pdb_files[0]
+
+    pdb_files = list(working_dir.glob("**/*.pdb"))
+    if pdb_files:
+        return pdb_files[0]
+
+    raise FileNotFoundError(f"Could not find topology PDB in {working_dir}")
+
+
+# =============================================================================
+# Recover-chain Command — scan and resubmit a broken chain
+# =============================================================================
+
+
+@cli.command("recover-chain")
+@click.option(
+    "-w",
+    "--working-dir",
+    required=True,
+    type=click.Path(exists=True),
+    help="Working directory containing simulation output",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Show chain status without taking action",
+)
+def recover_chain(working_dir: str, dry_run: bool) -> None:
+    """Scan a daisy-chain working directory and report segment status.
+
+    For each ``production_N/`` directory, reports whether the segment
+    completed, was interrupted (recoverable), or is missing (crashed).
+
+    With ``--dry-run`` (default behavior), only prints the status report.
+    Without ``--dry-run``, recovers any interrupted segments in-place.
+    """
+    work = Path(working_dir)
+
+    # Find all production_N directories
+    seg_dirs = sorted(work.glob("production_*"))
+    seg_dirs = [d for d in seg_dirs if d.is_dir() and "_resume" not in d.name]
+
+    if not seg_dirs:
+        click.echo("No production segments found.")
+        return
+
+    click.echo(f"Scanning {work}")
+    click.echo(f"Found {len(seg_dirs)} segment(s):\n")
+
+    statuses = []
+    for seg_dir in seg_dirs:
+        seg_name = seg_dir.name
+        # Extract segment index from directory name
+        try:
+            seg_idx = int(seg_name.split("_")[1])
+        except (IndexError, ValueError):
+            continue
+
+        marker = seg_dir / "INTERRUPTED"
+        state_xml = seg_dir / f"production_{seg_idx}_state.xml"
+
+        if marker.exists():
+            # Parse marker for details
+            meta = {}
+            for line in marker.read_text().strip().splitlines():
+                k, v = line.split("=", 1)
+                meta[k.strip()] = int(v.strip())
+            pct = 100 * meta.get("steps_completed", 0) / max(meta.get("total_steps", 1), 1)
+            status = f"INTERRUPTED ({pct:.0f}% done, {meta.get('remaining_steps', '?')} remaining)"
+            statuses.append(("interrupted", seg_idx))
+        elif state_xml.exists():
+            status = "COMPLETED"
+            statuses.append(("completed", seg_idx))
+        else:
+            status = "MISSING (no state.xml, no INTERRUPTED marker — likely crashed)"
+            statuses.append(("missing", seg_idx))
+
+        # Check for resume directory
+        resume_dir = work / f"production_{seg_idx}_resume"
+        resume_note = " [has resume/]" if resume_dir.exists() else ""
+
+        click.echo(f"  segment {seg_idx:>3d}: {status}{resume_note}")
+
+    click.echo()
+
+    interrupted = [idx for st, idx in statuses if st == "interrupted"]
+    missing = [idx for st, idx in statuses if st == "missing"]
+    completed = [idx for st, idx in statuses if st == "completed"]
+
+    click.echo(
+        f"Summary: {len(completed)} completed, "
+        f"{len(interrupted)} interrupted, {len(missing)} missing"
+    )
+
+    if not interrupted and not missing:
+        click.echo(click.style("All segments healthy!", fg="green"))
+        return
+
+    if missing:
+        click.echo(
+            click.style(
+                f"\nSegments {missing} have no recoverable state — "
+                "these must be re-run from the last completed segment.",
+                fg="red",
+            )
+        )
+
+    if interrupted and not dry_run:
+        click.echo(f"\nRecovering {len(interrupted)} interrupted segment(s)...")
+        from click.testing import CliRunner
+
+        runner = CliRunner()
+        for seg_idx in interrupted:
+            click.echo(f"\n--- Recovering segment {seg_idx} ---")
+            result = runner.invoke(
+                recover,
+                ["-w", working_dir, "-s", str(seg_idx)],
+            )
+            click.echo(result.output)
+            if result.exit_code != 0:
+                click.echo(
+                    click.style(f"Recovery of segment {seg_idx} failed!", fg="red"),
+                    err=True,
+                )
+                sys.exit(1)
+
+        click.echo(click.style("\nAll interrupted segments recovered!", fg="green"))
+    elif interrupted and dry_run:
+        click.echo(f"\n[DRY RUN] Would recover segments: {interrupted}")
 
 
 # =============================================================================

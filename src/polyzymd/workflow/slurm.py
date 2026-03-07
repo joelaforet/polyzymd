@@ -207,6 +207,8 @@ class SlurmScriptGenerator:
 {mail_line}
 {account_line}
 {exclude_line}
+#SBATCH --signal=B:USR1@300
+#SBATCH --no-requeue
 
 # =============================================================================
 # PolyzyMD Initial Simulation Job
@@ -253,6 +255,18 @@ polyzymd{openff_logs_flag} run -c "{config_path}" \\
     --scratch-dir "$SCRATCH_DIR" \\
     --segment-time {segment_time} \\
     --segment-frames {segment_frames}{skip_build_flag}
+RC=$?
+
+# Exit code 99 = interrupted but state saved (graceful shutdown)
+# Exit code 0  = completed successfully
+# Any other    = unexpected failure
+if [ $RC -eq 99 ]; then
+    echo "Segment {segment_index} interrupted (graceful shutdown) at $(date)"
+    exit 99
+elif [ $RC -ne 0 ]; then
+    echo "Segment {segment_index} FAILED with exit code $RC at $(date)"
+    exit $RC
+fi
 
 echo "Segment {segment_index} completed successfully at $(date)"
 """
@@ -270,6 +284,8 @@ echo "Segment {segment_index} completed successfully at $(date)"
 {mail_line}
 {account_line}
 {exclude_line}
+#SBATCH --signal=B:USR1@300
+#SBATCH --no-requeue
 
 # =============================================================================
 # PolyzyMD Continuation Job
@@ -283,9 +299,6 @@ ml {module_load} 2>/dev/null || true
 # Initialize conda/mamba for non-interactive shell
 eval "$(conda shell.bash hook)"
 {conda_command} activate {conda_env}
-
-# Enable strict error handling after environment setup
-set -e
 
 # Required for OpenFF Interchange.combine() functionality
 export INTERCHANGE_EXPERIMENTAL=1
@@ -304,6 +317,32 @@ echo "Projects dir: $PROJECTS_DIR"
 echo "Scratch dir: $SCRATCH_DIR"
 echo "Timestamp: $(date)"
 
+# =========================================================================
+# Recovery preamble: check status of previous segment before continuing
+# =========================================================================
+PREV_SEG=$(( {segment_index} - 1 ))
+PREV_DIR="${{SCRATCH_DIR}}/production_${{PREV_SEG}}"
+
+if [ -f "${{PREV_DIR}}/INTERRUPTED" ]; then
+    echo "Previous segment $PREV_SEG was interrupted — running recovery"
+    polyzymd recover -w "$SCRATCH_DIR" -s "$PREV_SEG"
+    RECOVER_RC=$?
+    if [ $RECOVER_RC -ne 0 ]; then
+        echo "Recovery of segment $PREV_SEG FAILED (exit code $RECOVER_RC)"
+        exit 1
+    fi
+    echo "Recovery of segment $PREV_SEG completed successfully"
+elif [ -f "${{PREV_DIR}}/production_${{PREV_SEG}}_state.xml" ]; then
+    echo "Previous segment $PREV_SEG completed normally — proceeding"
+else
+    echo "ERROR: Previous segment $PREV_SEG has no state.xml and no INTERRUPTED marker"
+    echo "This segment cannot continue — the previous job likely crashed."
+    exit 1
+fi
+
+# Enable strict error handling after recovery preamble
+set -e
+
 # Continue simulation from previous segment using polyzymd CLI
 # Reads checkpoint from previous segment in SCRATCH_DIR
 # Writes new trajectory and checkpoint to SCRATCH_DIR
@@ -312,6 +351,18 @@ polyzymd{openff_logs_flag} continue \\
     -s {segment_index} \\
     -t {segment_time} \\
     -n {num_samples}
+RC=$?
+
+# Exit code 99 = interrupted but state saved (graceful shutdown)
+# Exit code 0  = completed successfully
+# Any other    = unexpected failure
+if [ $RC -eq 99 ]; then
+    echo "Segment {segment_index} interrupted (graceful shutdown) at $(date)"
+    exit 99
+elif [ $RC -ne 0 ]; then
+    echo "Segment {segment_index} FAILED with exit code $RC at $(date)"
+    exit $RC
+fi
 
 echo "Segment {segment_index} completed successfully at $(date)"
 """

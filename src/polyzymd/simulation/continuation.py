@@ -349,9 +349,9 @@ class ContinuationManager:
                 "__class__": "Quantity",
                 "__values__": {"value": duration_ns, "unit": "nanosecond"},
             }
-            self._param_dict["__values__"]["integ_params"]["__values__"]["num_samples"] = (
-                num_samples
-            )
+            self._param_dict["__values__"]["integ_params"]["__values__"][
+                "num_samples"
+            ] = num_samples
 
         # Add barostat if needed
         self._add_barostat_if_needed()
@@ -381,9 +381,53 @@ class ContinuationManager:
             with open(param_path, "w") as f:
                 json.dump(self._param_dict, f, indent=2)
 
-        # Run simulation
+        # Install signal handlers for graceful shutdown (SIGUSR1 / SIGTERM)
+        from polyzymd.simulation.signals import (
+            EXIT_CODE_INTERRUPTED,
+            GracefulExit,
+            install_handlers,
+            is_interrupted,
+            save_emergency_state,
+        )
+
+        install_handlers()
+
+        # Run simulation in chunks so we can check for interrupt signals
         LOGGER.info(f"Running {total_steps} steps...")
-        self._simulation.step(total_steps)
+        report_interval = max(1, total_steps // num_samples)
+        chunk_size = min(report_interval, total_steps)
+        steps_done = 0
+        try:
+            while steps_done < total_steps:
+                remaining = total_steps - steps_done
+                this_chunk = min(chunk_size, remaining)
+                self._simulation.step(this_chunk)
+                steps_done += this_chunk
+                if is_interrupted():
+                    LOGGER.warning(f"Interrupt detected at step {steps_done}/{total_steps}")
+                    save_emergency_state(
+                        simulation=self._simulation,
+                        output_dir=output_dir,
+                        segment_index=self._segment_index,
+                        steps_completed=steps_done,
+                        total_steps=total_steps,
+                    )
+                    raise GracefulExit(signal_number=0, steps_completed=steps_done)
+        except GracefulExit:
+            raise  # Re-raise so caller (main()) can set exit code
+        except Exception:
+            # On unexpected crash, still try to save emergency state
+            try:
+                save_emergency_state(
+                    simulation=self._simulation,
+                    output_dir=output_dir,
+                    segment_index=self._segment_index,
+                    steps_completed=steps_done,
+                    total_steps=total_steps,
+                )
+            except Exception:
+                LOGGER.error("Failed to save emergency state after crash")
+            raise
 
         # Save final state
         self._save_final_state(output_dir)
@@ -404,9 +448,11 @@ def main() -> int:
     """Main entry point for continuation script.
 
     Returns:
-        Exit code (0 for success, 1 for failure).
+        Exit code (0 for success, 1 for failure, 99 for graceful interrupt).
     """
     import argparse
+
+    from polyzymd.simulation.signals import EXIT_CODE_INTERRUPTED, GracefulExit
 
     parser = argparse.ArgumentParser(description="Continue MD simulation from previous segment")
     parser.add_argument(
@@ -463,6 +509,10 @@ def main() -> int:
             num_samples=args.num_samples,
         )
         return 0
+
+    except GracefulExit as e:
+        LOGGER.warning(f"Graceful exit: {e}")
+        return EXIT_CODE_INTERRUPTED
 
     except Exception as e:
         LOGGER.error(f"Error during simulation: {e}")

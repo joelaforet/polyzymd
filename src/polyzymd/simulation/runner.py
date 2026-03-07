@@ -844,9 +844,51 @@ class SimulationRunner:
                 f,
             )
 
-        # Run simulation
+        # Install signal handlers for graceful shutdown (SIGUSR1 / SIGTERM)
+        from polyzymd.simulation.signals import (
+            GracefulExit,
+            install_handlers,
+            is_interrupted,
+            save_emergency_state,
+        )
+
+        install_handlers()
+
+        # Run simulation in chunks so we can check for interrupt signals
         LOGGER.info(f"Running {total_steps} steps...")
-        self._simulation.step(total_steps)
+        chunk_size = min(report_interval, total_steps)
+        steps_done = 0
+        try:
+            while steps_done < total_steps:
+                remaining = total_steps - steps_done
+                this_chunk = min(chunk_size, remaining)
+                self._simulation.step(this_chunk)
+                steps_done += this_chunk
+                if is_interrupted():
+                    LOGGER.warning(f"Interrupt detected at step {steps_done}/{total_steps}")
+                    save_emergency_state(
+                        simulation=self._simulation,
+                        output_dir=phase_dir,
+                        segment_index=segment_index,
+                        steps_completed=steps_done,
+                        total_steps=total_steps,
+                    )
+                    raise GracefulExit(signal_number=0, steps_completed=steps_done)
+        except GracefulExit:
+            raise  # Re-raise so caller can handle exit code
+        except Exception:
+            # On unexpected crash, still try to save emergency state
+            try:
+                save_emergency_state(
+                    simulation=self._simulation,
+                    output_dir=phase_dir,
+                    segment_index=segment_index,
+                    steps_completed=steps_done,
+                    total_steps=total_steps,
+                )
+            except Exception:
+                LOGGER.error("Failed to save emergency state after crash")
+            raise
 
         # Get final state (no enforcePeriodicBox to preserve molecular continuity)
         state = self._simulation.context.getState(

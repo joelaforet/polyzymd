@@ -401,7 +401,7 @@ class DaisyChainSubmitter:
         cmd = ["sbatch", "--export=NONE"]
 
         if dependency_job_id:
-            cmd.extend(["--dependency", f"afterok:{dependency_job_id}"])
+            cmd.extend(["--dependency", f"afterany:{dependency_job_id}"])
 
         # Add exclude if configured
         if self._dc_config.slurm_config.exclude:
