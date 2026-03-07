@@ -1199,6 +1199,79 @@ def init(name: str) -> None:
 
 
 # =============================================================================
+# Clean-PDB Command
+# =============================================================================
+
+
+@cli.command("clean-pdb")
+@click.option(
+    "-i",
+    "--input",
+    "input_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the input PDB file.",
+)
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Path for the cleaned PDB file. Defaults to <name>_clean.pdb.",
+)
+@click.option(
+    "--ph",
+    default=7.4,
+    type=float,
+    show_default=True,
+    help="pH for hydrogen addition.",
+)
+def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
+    """Clean a PDB file for use with PolyzyMD.
+
+    Replaces nonstandard residues with their standard equivalents and adds
+    missing hydrogens at the specified pH.  Chain IDs and residue numbers
+    are preserved in the output.
+
+    Requires the ``pdbfixer`` package (available via conda-forge).
+
+    \b
+    Examples:
+        polyzymd clean-pdb -i structures/my_protein.pdb
+        polyzymd clean-pdb -i raw.pdb -o cleaned.pdb --ph 7.0
+    """
+    from pdbfixer import PDBFixer
+    from openmm.app import PDBFile
+
+    input_file = Path(input_path)
+    if output_path is None:
+        output_file = input_file.with_name(f"{input_file.stem}_clean.pdb")
+    else:
+        output_file = Path(output_path)
+
+    click.echo(f"Cleaning PDB: {input_file}")
+    click.echo(f"  pH: {ph}")
+
+    fixer = PDBFixer(filename=str(input_file))
+
+    fixer.findNonstandardResidues()
+    n_nonstandard = len(fixer.nonstandardResidues)
+    if n_nonstandard > 0:
+        click.echo(f"  Replacing {n_nonstandard} nonstandard residue(s)...")
+    fixer.replaceNonstandardResidues()
+
+    click.echo("  Adding missing hydrogens...")
+    fixer.addMissingHydrogens(ph)
+
+    with open(output_file, "w") as f:
+        PDBFile.writeFile(fixer.topology, fixer.positions, f, keepIds=True)
+
+    click.echo()
+    click.echo(click.style(f"Cleaned PDB written to: {output_file}", fg="green"))
+
+
+# =============================================================================
 # Info Command
 # =============================================================================
 
