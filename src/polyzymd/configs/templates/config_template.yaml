@@ -34,9 +34,12 @@ description: "Description of your simulation system"
 # Enzyme Configuration (REQUIRED)
 # ============================================================================
 # Your protein structure file. Must be:
-#   - Properly protonated (use PDB2PQR, Reduce, or similar)
+#   - Standard amino acid residue names (no nonstandard residues)
+#   - Properly protonated at your simulation pH
 #   - No missing heavy atoms in regions of interest
-#   - Standard amino acid residue names
+#
+# TIP: Run `polyzymd clean-pdb -i your_protein.pdb` or use another PDB
+#      preparation tool before building your system.
 #
 # enzyme:
 #   name: "protein_X"

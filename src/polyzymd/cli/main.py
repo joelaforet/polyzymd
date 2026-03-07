@@ -1130,16 +1130,15 @@ def init(name: str) -> None:
 # This directory should contain your input structure files.
 #
 # PROTEIN PDB FILE (required):
-#   - Properly protonated (use PDB2PQR, Reduce, or similar)
-#   - No missing residues in regions of interest
-#   - Standard amino acid residue names
+#   - Standard amino acid residue names (no nonstandard residues)
+#   - Properly protonated at your simulation pH
+#   - No missing heavy atoms in regions of interest
 #   - Rename to match your config.yaml enzyme.pdb_path setting
 #
-# PREPARATION TIPS:
-#   1. Download structure from PDB or use your own model
-#   2. Remove waters, ligands, and alternate conformations
-#   3. Add hydrogens at your simulation pH
-#   4. Check for missing loops/residues
+# PREPARATION:
+#   Use `polyzymd clean-pdb -i your_protein.pdb` or another PDB
+#   preparation tool to replace nonstandard residues and add
+#   missing hydrogens before building your system.
 #
 # Delete this placeholder file after adding your protein structure.
 # ============================================================================
