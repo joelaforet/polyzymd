@@ -55,7 +55,7 @@ PARTITION="blanca,blanca-shirts"
 ACCOUNT="blanca-shirts"
 QOS="preemptable"
 EXCLUDE="bgpu-bortz1"
-TIME_LIMIT="00:05:00"         # 5 minutes per segment
+WALL_TIME="00:05:00"          # 5 minutes per segment
 CONDA_ENV="polyzymd-env"
 SEGMENT_TIME="0.001"          # 0.001 ns = 500 steps at 2fs timestep
 NUM_SAMPLES="10"              # 10 frames per segment
@@ -91,7 +91,7 @@ echo "  Partition:    $PARTITION"
 echo "  Account:      $ACCOUNT"
 echo "  QoS:          $QOS"
 echo "  Exclude:      $EXCLUDE"
-echo "  Wall time:    $TIME_LIMIT (per segment)"
+echo "  Wall time:    $WALL_TIME (per segment)"
 echo "  Conda env:    $CONDA_ENV"
 echo "  Segment time: $SEGMENT_TIME ns"
 echo "  Num samples:  $NUM_SAMPLES"
@@ -99,19 +99,38 @@ echo "  Working dir:  $WORKDIR"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Generate SLURM scripts
+# Helper: replace @@PLACEHOLDER@@ tokens in a generated SLURM script.
+# Uses @@ delimiters to avoid substring collisions (e.g. @@WALL_TIME@@
+# won't collide with @@SEGMENT_TIME@@).
+# ---------------------------------------------------------------------------
+inject_vars() {
+    local file="$1"
+    sed -i "s|@@PARTITION@@|${PARTITION}|g"       "$file"
+    sed -i "s|@@ACCOUNT@@|${ACCOUNT}|g"           "$file"
+    sed -i "s|@@QOS@@|${QOS}|g"                   "$file"
+    sed -i "s|@@EXCLUDE@@|${EXCLUDE}|g"           "$file"
+    sed -i "s|@@WALL_TIME@@|${WALL_TIME}|g"       "$file"
+    sed -i "s|@@CONDA_ENV@@|${CONDA_ENV}|g"       "$file"
+    sed -i "s|@@SCRIPT_DIR@@|${SCRIPT_DIR}|g"     "$file"
+    sed -i "s|@@WORKDIR@@|${WORKDIR}|g"           "$file"
+    sed -i "s|@@SEGMENT_TIME@@|${SEGMENT_TIME}|g" "$file"
+    sed -i "s|@@NUM_SAMPLES@@|${NUM_SAMPLES}|g"   "$file"
+}
+
+# ---------------------------------------------------------------------------
+# Generate SLURM scripts (quoted heredocs preserve $ literals)
 # ---------------------------------------------------------------------------
 
 # --- Segment 0: Setup + initial production ---------------------------------
 cat > slurm_test_seg0.sh <<'SLURM_SEG0'
 #!/bin/bash
-#SBATCH --partition=PARTITION_PLACEHOLDER
-#SBATCH --account=ACCOUNT_PLACEHOLDER
-#SBATCH --qos=QOS_PLACEHOLDER
-#SBATCH --exclude=EXCLUDE_PLACEHOLDER
+#SBATCH --partition=@@PARTITION@@
+#SBATCH --account=@@ACCOUNT@@
+#SBATCH --qos=@@QOS@@
+#SBATCH --exclude=@@EXCLUDE@@
 #SBATCH --job-name=test_seg0
 #SBATCH --output=slurm-seg0-%j.out
-#SBATCH --time=TIME_PLACEHOLDER
+#SBATCH --time=@@WALL_TIME@@
 #SBATCH --ntasks=1
 #SBATCH --signal=B:USR1@120
 #SBATCH --no-requeue
@@ -124,7 +143,7 @@ module purge 2>/dev/null || true
 ml miniforge 2>/dev/null || true
 
 eval "$(conda shell.bash hook)"
-conda activate CONDA_ENV_PLACEHOLDER
+conda activate @@CONDA_ENV@@
 
 set -e
 
@@ -134,32 +153,24 @@ echo "Timestamp: $(date)"
 echo ""
 
 # Run setup script (creates workdir with waterbox + production_0)
-cd SCRIPT_DIR_PLACEHOLDER
+cd @@SCRIPT_DIR@@
 python setup_test_env.py
 
 echo ""
 echo "Segment 0 complete at $(date)"
 SLURM_SEG0
-
-# Replace placeholders
-sed -i "s|PARTITION_PLACEHOLDER|${PARTITION}|g" slurm_test_seg0.sh
-sed -i "s|ACCOUNT_PLACEHOLDER|${ACCOUNT}|g" slurm_test_seg0.sh
-sed -i "s|QOS_PLACEHOLDER|${QOS}|g" slurm_test_seg0.sh
-sed -i "s|EXCLUDE_PLACEHOLDER|${EXCLUDE}|g" slurm_test_seg0.sh
-sed -i "s|TIME_PLACEHOLDER|${TIME_LIMIT}|g" slurm_test_seg0.sh
-sed -i "s|CONDA_ENV_PLACEHOLDER|${CONDA_ENV}|g" slurm_test_seg0.sh
-sed -i "s|SCRIPT_DIR_PLACEHOLDER|${SCRIPT_DIR}|g" slurm_test_seg0.sh
+inject_vars slurm_test_seg0.sh
 
 # --- Segment 1: Continuation (user can scancel --signal=USR1 this one) ------
 cat > slurm_test_seg1.sh <<'SLURM_SEG1'
 #!/bin/bash
-#SBATCH --partition=PARTITION_PLACEHOLDER
-#SBATCH --account=ACCOUNT_PLACEHOLDER
-#SBATCH --qos=QOS_PLACEHOLDER
-#SBATCH --exclude=EXCLUDE_PLACEHOLDER
+#SBATCH --partition=@@PARTITION@@
+#SBATCH --account=@@ACCOUNT@@
+#SBATCH --qos=@@QOS@@
+#SBATCH --exclude=@@EXCLUDE@@
 #SBATCH --job-name=test_seg1
 #SBATCH --output=slurm-seg1-%j.out
-#SBATCH --time=TIME_PLACEHOLDER
+#SBATCH --time=@@WALL_TIME@@
 #SBATCH --ntasks=1
 #SBATCH --signal=B:USR1@120
 #SBATCH --no-requeue
@@ -174,7 +185,7 @@ module purge 2>/dev/null || true
 ml miniforge 2>/dev/null || true
 
 eval "$(conda shell.bash hook)"
-conda activate CONDA_ENV_PLACEHOLDER
+conda activate @@CONDA_ENV@@
 
 echo "===== Segment 1: Continuation from Segment 0 ====="
 echo "Hostname: $(hostname)"
@@ -185,11 +196,11 @@ echo ""
 # Recovery preamble: check previous segment status
 # ---------------------------------------------------
 PREV_SEG=0
-PREV_DIR="WORKDIR_PLACEHOLDER/production_${PREV_SEG}"
+PREV_DIR="@@WORKDIR@@/production_${PREV_SEG}"
 
 if [ -f "${PREV_DIR}/INTERRUPTED" ]; then
     echo "Previous segment $PREV_SEG was interrupted — running recovery"
-    polyzymd recover -w "WORKDIR_PLACEHOLDER" -s "$PREV_SEG"
+    polyzymd recover -w "@@WORKDIR@@" -s "$PREV_SEG"
     RECOVER_RC=$?
     if [ $RECOVER_RC -ne 0 ]; then
         echo "Recovery of segment $PREV_SEG FAILED (exit code $RECOVER_RC)"
@@ -209,13 +220,13 @@ set -e
 echo ""
 echo "Running continuation for segment 1..."
 
-cd SCRIPT_DIR_PLACEHOLDER
+cd @@SCRIPT_DIR@@
 
 polyzymd continue \
-    -w "WORKDIR_PLACEHOLDER" \
+    -w "@@WORKDIR@@" \
     -s 1 \
-    -t SEGMENT_TIME_PLACEHOLDER \
-    -n NUM_SAMPLES_PLACEHOLDER
+    -t @@SEGMENT_TIME@@ \
+    -n @@NUM_SAMPLES@@
 RC=$?
 
 # Exit code 99 = interrupted but state saved (graceful shutdown)
@@ -230,28 +241,18 @@ fi
 echo ""
 echo "Segment 1 completed successfully at $(date)"
 SLURM_SEG1
-
-sed -i "s|PARTITION_PLACEHOLDER|${PARTITION}|g" slurm_test_seg1.sh
-sed -i "s|ACCOUNT_PLACEHOLDER|${ACCOUNT}|g" slurm_test_seg1.sh
-sed -i "s|QOS_PLACEHOLDER|${QOS}|g" slurm_test_seg1.sh
-sed -i "s|EXCLUDE_PLACEHOLDER|${EXCLUDE}|g" slurm_test_seg1.sh
-sed -i "s|TIME_PLACEHOLDER|${TIME_LIMIT}|g" slurm_test_seg1.sh
-sed -i "s|CONDA_ENV_PLACEHOLDER|${CONDA_ENV}|g" slurm_test_seg1.sh
-sed -i "s|SCRIPT_DIR_PLACEHOLDER|${SCRIPT_DIR}|g" slurm_test_seg1.sh
-sed -i "s|WORKDIR_PLACEHOLDER|${WORKDIR}|g" slurm_test_seg1.sh
-sed -i "s|SEGMENT_TIME_PLACEHOLDER|${SEGMENT_TIME}|g" slurm_test_seg1.sh
-sed -i "s|NUM_SAMPLES_PLACEHOLDER|${NUM_SAMPLES}|g" slurm_test_seg1.sh
+inject_vars slurm_test_seg1.sh
 
 # --- Segment 2: Continuation with recovery (auto-recovers from segment 1) ---
 cat > slurm_test_seg2.sh <<'SLURM_SEG2'
 #!/bin/bash
-#SBATCH --partition=PARTITION_PLACEHOLDER
-#SBATCH --account=ACCOUNT_PLACEHOLDER
-#SBATCH --qos=QOS_PLACEHOLDER
-#SBATCH --exclude=EXCLUDE_PLACEHOLDER
+#SBATCH --partition=@@PARTITION@@
+#SBATCH --account=@@ACCOUNT@@
+#SBATCH --qos=@@QOS@@
+#SBATCH --exclude=@@EXCLUDE@@
 #SBATCH --job-name=test_seg2
 #SBATCH --output=slurm-seg2-%j.out
-#SBATCH --time=TIME_PLACEHOLDER
+#SBATCH --time=@@WALL_TIME@@
 #SBATCH --ntasks=1
 #SBATCH --signal=B:USR1@120
 #SBATCH --no-requeue
@@ -267,7 +268,7 @@ module purge 2>/dev/null || true
 ml miniforge 2>/dev/null || true
 
 eval "$(conda shell.bash hook)"
-conda activate CONDA_ENV_PLACEHOLDER
+conda activate @@CONDA_ENV@@
 
 echo "===== Segment 2: Continuation with Recovery Preamble ====="
 echo "Hostname: $(hostname)"
@@ -278,7 +279,7 @@ echo ""
 # Recovery preamble: check previous segment status
 # ---------------------------------------------------
 PREV_SEG=1
-PREV_DIR="WORKDIR_PLACEHOLDER/production_${PREV_SEG}"
+PREV_DIR="@@WORKDIR@@/production_${PREV_SEG}"
 
 if [ -f "${PREV_DIR}/INTERRUPTED" ]; then
     echo "Previous segment $PREV_SEG was interrupted — running recovery"
@@ -286,7 +287,7 @@ if [ -f "${PREV_DIR}/INTERRUPTED" ]; then
     cat "${PREV_DIR}/INTERRUPTED"
     echo ""
 
-    polyzymd recover -w "WORKDIR_PLACEHOLDER" -s "$PREV_SEG"
+    polyzymd recover -w "@@WORKDIR@@" -s "$PREV_SEG"
     RECOVER_RC=$?
     if [ $RECOVER_RC -ne 0 ]; then
         echo "Recovery of segment $PREV_SEG FAILED (exit code $RECOVER_RC)"
@@ -313,13 +314,13 @@ set -e
 echo ""
 echo "Running continuation for segment 2..."
 
-cd SCRIPT_DIR_PLACEHOLDER
+cd @@SCRIPT_DIR@@
 
 polyzymd continue \
-    -w "WORKDIR_PLACEHOLDER" \
+    -w "@@WORKDIR@@" \
     -s 2 \
-    -t SEGMENT_TIME_PLACEHOLDER \
-    -n NUM_SAMPLES_PLACEHOLDER
+    -t @@SEGMENT_TIME@@ \
+    -n @@NUM_SAMPLES@@
 RC=$?
 
 if [ $RC -eq 99 ]; then
@@ -338,7 +339,7 @@ echo "Segment 2 completed successfully at $(date)"
 # ---------------------------------------------------
 echo ""
 echo "===== Chain Complete: Final Directory Status ====="
-for d in WORKDIR_PLACEHOLDER/production_*; do
+for d in @@WORKDIR@@/production_*; do
     if [ -d "$d" ]; then
         name=$(basename "$d")
         n_files=$(ls "$d" | wc -l)
@@ -355,17 +356,7 @@ for d in WORKDIR_PLACEHOLDER/production_*; do
 done
 echo ""
 SLURM_SEG2
-
-sed -i "s|PARTITION_PLACEHOLDER|${PARTITION}|g" slurm_test_seg2.sh
-sed -i "s|ACCOUNT_PLACEHOLDER|${ACCOUNT}|g" slurm_test_seg2.sh
-sed -i "s|QOS_PLACEHOLDER|${QOS}|g" slurm_test_seg2.sh
-sed -i "s|EXCLUDE_PLACEHOLDER|${EXCLUDE}|g" slurm_test_seg2.sh
-sed -i "s|TIME_PLACEHOLDER|${TIME_LIMIT}|g" slurm_test_seg2.sh
-sed -i "s|CONDA_ENV_PLACEHOLDER|${CONDA_ENV}|g" slurm_test_seg2.sh
-sed -i "s|SCRIPT_DIR_PLACEHOLDER|${SCRIPT_DIR}|g" slurm_test_seg2.sh
-sed -i "s|WORKDIR_PLACEHOLDER|${WORKDIR}|g" slurm_test_seg2.sh
-sed -i "s|SEGMENT_TIME_PLACEHOLDER|${SEGMENT_TIME}|g" slurm_test_seg2.sh
-sed -i "s|NUM_SAMPLES_PLACEHOLDER|${NUM_SAMPLES}|g" slurm_test_seg2.sh
+inject_vars slurm_test_seg2.sh
 
 echo "Generated SLURM scripts:"
 echo "  slurm_test_seg0.sh"
