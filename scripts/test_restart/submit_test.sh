@@ -204,9 +204,13 @@ if [ \$PROGRESS_RC -eq 0 ]; then
 fi
 
 # --- Resubmit ---
+# NOTE: \$SLURM_JOB_SCRIPT is only available in SLURM >= 22.05.
+# Use the hardcoded script path as the reliable fallback.
+SCRIPT_PATH="${SLURM_SCRIPT}"
 echo ""
 echo "Work remains. Resubmitting..."
-RESUB_RESULT=\$(sbatch "\$SLURM_JOB_SCRIPT")
+echo "  Script: \$SCRIPT_PATH"
+RESUB_RESULT=\$(sbatch "\$SCRIPT_PATH")
 echo "Resubmitted: \$RESUB_RESULT"
 echo ""
 echo "===== Job ending at \$(date), continuation submitted ====="

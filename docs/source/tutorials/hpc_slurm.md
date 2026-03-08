@@ -311,7 +311,7 @@ PolyzyMD generates one identical SLURM script per replicate. Each job:
 
 1. Calls `polyzymd run-segment` to run the next segment of work
 2. After the segment finishes (or is interrupted), calls `polyzymd check-progress` to see if the simulation is complete
-3. If work remains, resubmits itself via `sbatch "$SLURM_JOB_SCRIPT"`
+3. If work remains, resubmits itself via `sbatch "$THIS_SCRIPT"`
 4. If the simulation is complete, exits cleanly
 
 ```
@@ -695,6 +695,10 @@ set -e
 
 export INTERCHANGE_EXPERIMENTAL=1
 
+# Resolve this script's path for self-resubmission
+# ($SLURM_JOB_SCRIPT is only available in SLURM >= 22.05)
+THIS_SCRIPT="${SLURM_JOB_SCRIPT:-$(realpath "$0")}"
+
 CONFIG_PATH="/projects/$USER/polyzymd/my_simulation/config.yaml"
 REPLICATE=1
 WORKING_DIR="/scratch/alpine/$USER/polyzymd_sims/LipA_300K_run1"
@@ -748,8 +752,10 @@ if [ $RC -ne 0 ] && [ $RC -ne 99 ]; then
 fi
 
 # Check whether more work remains
+set +e
 polyzymd check-progress -c "$CONFIG_PATH" -r "$REPLICATE" --scratch-dir "$WORKING_DIR"
 PROGRESS_RC=$?
+set -e
 
 if [ $PROGRESS_RC -eq 0 ]; then
     echo "Simulation complete — no resubmission needed."
@@ -758,7 +764,7 @@ fi
 
 # Work remains — resubmit this same script
 echo "Work remains — resubmitting job..."
-sbatch "${SLURM_JOB_SCRIPT:-$0}"
+sbatch "$THIS_SCRIPT"
 SUBMIT_RC=$?
 
 if [ $SUBMIT_RC -eq 0 ]; then
@@ -766,7 +772,7 @@ if [ $SUBMIT_RC -eq 0 ]; then
 else
     echo "WARNING: sbatch resubmission failed (exit code $SUBMIT_RC)"
     echo "You can manually resume with:"
-    echo "  sbatch ${SLURM_JOB_SCRIPT:-$0}"
+    echo "  sbatch $THIS_SCRIPT"
     exit 1
 fi
 
@@ -780,7 +786,7 @@ exit 0
 | **Signal forwarding** | `trap` + background `&` + `wait` loop ensures SIGUSR1/SIGTERM reach the Python process |
 | **Unified entry point** | `polyzymd run-segment` handles both initial (build + eq + seg 0) and continuation segments |
 | **Progress checking** | `polyzymd check-progress` returns exit code 0 (complete) or 1 (work remains) |
-| **Self-resubmission** | `sbatch "$SLURM_JOB_SCRIPT"` resubmits the exact same script |
+| **Self-resubmission** | `sbatch "$THIS_SCRIPT"` resubmits the exact same script (path resolved at script start via `$SLURM_JOB_SCRIPT` or `realpath "$0"`) |
 | **Error handling** | Non-zero, non-99 exit codes abort without resubmitting |
 
 ---

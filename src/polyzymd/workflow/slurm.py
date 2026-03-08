@@ -481,6 +481,10 @@ set -e
 # Required for OpenFF Interchange.combine() functionality
 export INTERCHANGE_EXPERIMENTAL=1
 
+# Resolve this script's path for self-resubmission.
+# $SLURM_JOB_SCRIPT is only available in SLURM >= 22.05; fall back to $0.
+THIS_SCRIPT="${{SLURM_JOB_SCRIPT:-$(realpath "$0")}}"
+
 # Configuration
 CONFIG_PATH="{config_path}"
 REPLICATE={replicate}
@@ -556,7 +560,7 @@ fi
 
 # Work remains — resubmit this same script
 echo "Work remains — resubmitting job..."
-sbatch "${{SLURM_JOB_SCRIPT:-$0}}"
+sbatch "$THIS_SCRIPT"
 SUBMIT_RC=$?
 
 if [ $SUBMIT_RC -eq 0 ]; then
@@ -564,7 +568,7 @@ if [ $SUBMIT_RC -eq 0 ]; then
 else
     echo "WARNING: sbatch resubmission failed (exit code $SUBMIT_RC)"
     echo "You can manually resume with:"
-    echo "  sbatch ${{SLURM_JOB_SCRIPT:-$0}}"
+    echo "  sbatch $THIS_SCRIPT"
     exit 1
 fi
 
