@@ -721,18 +721,18 @@ def _run_openmm(
         config=phases,
     )
 
-    # Calculate segment parameters
+    # Calculate production parameters
     total_time = sim_config.simulation_phases.production.duration
-    num_segments = sim_config.simulation_phases.segments
-    seg_time = segment_time or (total_time / num_segments)
-    seg_frames = segment_frames or (sim_config.simulation_phases.production.samples // num_segments)
+    total_samples = sim_config.simulation_phases.production.samples
+    prod_time = segment_time or total_time
+    prod_frames = segment_frames or total_samples
 
-    # Run first production segment
-    click.echo(f"Running production segment 0: {seg_time} ns, {seg_frames} frames (NPT)...")
+    # Run production
+    click.echo(f"Running production: {prod_time} ns, {prod_frames} frames (NPT)...")
     runner.run_production(
         temperature=temperature,
-        duration_ns=seg_time,
-        num_samples=seg_frames,
+        duration_ns=prod_time,
+        num_samples=prod_frames,
         pressure=pressure,
         segment_index=0,
     )
@@ -742,7 +742,7 @@ def _run_openmm(
 
 
 # =============================================================================
-# Submit Command (Daisy-chain)
+# Submit Command (SLURM)
 # =============================================================================
 
 
@@ -847,11 +847,11 @@ def submit(
     submit_openff_logs: bool,
     skip_build: bool,
 ) -> None:
-    """Submit daisy-chain simulation jobs to SLURM.
+    """Submit simulation jobs to SLURM.
 
-    Creates and submits a chain of dependent jobs that will run
-    sequentially, allowing long simulations to be broken into
-    smaller segments that fit within HPC time limits.
+    Creates and submits self-resubmitting jobs (one per replicate)
+    that automatically checkpoint and resume until the full
+    production duration is complete.
 
     Directory structure:
     - projects_dir: Where job scripts and SLURM logs are stored (long-term storage)
@@ -952,7 +952,7 @@ def continue_sim(
     """Continue a simulation from a previous segment.
 
     Loads state from the previous production segment and continues
-    the simulation. Used by daisy-chain continuation jobs.
+    the simulation. Prefer 'run-segment' for SLURM workflows.
     """
     from polyzymd.simulation.continuation import ContinuationManager
 
@@ -993,6 +993,399 @@ def continue_sim(
             import traceback
 
             traceback.print_exc()
+        sys.exit(1)
+
+
+# =============================================================================
+# Run-segment Command — unified entry point for self-resubmitting jobs
+# =============================================================================
+
+
+@cli.command("run-segment")
+@click.option(
+    "-c",
+    "--config",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to YAML configuration file",
+)
+@click.option(
+    "-r",
+    "--replicate",
+    default=1,
+    type=int,
+    help="Replicate number (default: 1)",
+)
+@click.option(
+    "--scratch-dir",
+    default=None,
+    type=click.Path(),
+    help="Override scratch directory for simulation output",
+)
+@click.option(
+    "--skip-build",
+    is_flag=True,
+    help="Skip system building (use existing) for initial segment",
+)
+def run_segment(
+    config: str,
+    replicate: int,
+    scratch_dir: Optional[str],
+    skip_build: bool,
+) -> None:
+    """Run the next simulation segment (self-resubmitting job entry point).
+
+    This is the unified command called by every SLURM job in the
+    self-resubmitting architecture. It determines what work remains
+    by loading progress state, then either:
+
+    \b
+    - Builds, equilibrates, and runs the first production segment (segment 0)
+    - Continues from the last completed segment
+    - Exits cleanly if the simulation is already complete
+
+    Exit codes:
+        0  - Segment completed (check progress to decide resubmission)
+        1  - Error
+        99 - Graceful interruption (wall-time signal, should resubmit)
+    """
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.simulation.progress import (
+        SimulationProgress,
+        SimulationStatus,
+        get_next_segment_info,
+        load_or_scan_progress,
+        save_progress,
+    )
+
+    click.echo(f"Loading configuration from: {config}")
+
+    try:
+        sim_config = SimulationConfig.from_yaml(config)
+    except Exception as e:
+        click.echo(f"Failed to load config: {e}", err=True)
+        sys.exit(1)
+
+    # Determine working directory
+    if scratch_dir:
+        working_dir = Path(scratch_dir)
+    else:
+        working_dir = sim_config.get_working_directory(replicate)
+
+    working_dir.mkdir(parents=True, exist_ok=True)
+
+    # Calculate total steps and samples from config
+    prod = sim_config.simulation_phases.production
+    timestep_fs = prod.time_step
+    total_steps = int(prod.duration * 1e6 / timestep_fs)
+    total_samples = prod.samples
+
+    click.echo(f"Working directory: {working_dir}")
+    click.echo(f"Total production: {prod.duration} ns = {total_steps} steps")
+
+    # Load or create progress
+    progress = load_or_scan_progress(
+        working_dir=working_dir,
+        config_path=str(Path(config).resolve()),
+        total_steps=total_steps,
+        total_samples=total_samples,
+        timestep_fs=timestep_fs,
+        replicate=replicate,
+    )
+    save_progress(working_dir, progress)
+
+    # Check if simulation is already complete
+    if progress.is_complete:
+        click.echo("Simulation already complete — nothing to do.")
+        sys.exit(0)
+
+    # Determine what to run next
+    seg_info = get_next_segment_info(progress, total_steps, total_samples)
+    if seg_info is None:
+        click.echo("No remaining work — simulation complete.")
+        sys.exit(0)
+
+    seg_idx = seg_info["segment_index"]
+    steps_to_run = seg_info["steps_to_run"]
+    samples_to_write = seg_info["samples_to_write"]
+    duration_ns = (steps_to_run * timestep_fs) / 1e6
+
+    click.echo(
+        f"Next segment: {seg_idx} "
+        f"({duration_ns:.3f} ns, {steps_to_run} steps, {samples_to_write} frames)"
+    )
+
+    try:
+        if seg_idx == 0 and not progress.segments:
+            # ---- FIRST RUN: build, equilibrate, run segment 0 ----
+            _run_initial_segment(
+                sim_config=sim_config,
+                working_dir=working_dir,
+                replicate=replicate,
+                skip_build=skip_build,
+                duration_ns=duration_ns,
+                num_samples=samples_to_write,
+                timestep_fs=timestep_fs,
+            )
+        else:
+            # ---- CONTINUATION: load previous state, run next segment ----
+            _run_continuation_segment(
+                working_dir=working_dir,
+                segment_index=seg_idx,
+                duration_ns=duration_ns,
+                num_samples=samples_to_write,
+                timestep_fs=timestep_fs,
+            )
+
+        click.echo(f"Segment {seg_idx} completed successfully.")
+
+    except Exception as e:
+        # Check if this is a GracefulExit (signal-based interruption)
+        from polyzymd.simulation.signals import EXIT_CODE_INTERRUPTED, GracefulExit
+
+        if isinstance(e, GracefulExit):
+            click.echo(f"Segment {seg_idx} interrupted (graceful shutdown): {e}")
+            sys.exit(EXIT_CODE_INTERRUPTED)
+
+        click.echo(f"Segment {seg_idx} failed: {e}", err=True)
+        if LOGGER.level == logging.DEBUG:
+            import traceback
+
+            traceback.print_exc()
+        sys.exit(1)
+
+
+def _run_initial_segment(
+    sim_config: "SimulationConfig",
+    working_dir: Path,
+    replicate: int,
+    skip_build: bool,
+    duration_ns: float,
+    num_samples: int,
+    timestep_fs: float,
+) -> None:
+    """Build system, equilibrate, and run the first production segment.
+
+    Parameters
+    ----------
+    sim_config : SimulationConfig
+        Validated simulation configuration.
+    working_dir : Path
+        Working directory for output.
+    replicate : int
+        Replicate number.
+    skip_build : bool
+        If True, load pre-built system from disk.
+    duration_ns : float
+        Production segment duration in nanoseconds.
+    num_samples : int
+        Number of trajectory frames to save.
+    timestep_fs : float
+        Integration timestep in femtoseconds.
+    """
+    from polyzymd.simulation.runner import SimulationRunner
+
+    temperature = sim_config.thermodynamics.temperature
+    pressure = sim_config.thermodynamics.pressure
+
+    if not skip_build:
+        from polyzymd.builders.system_builder import SystemBuilder
+
+        click.echo(f"Building system for replicate {replicate}...")
+        builder = SystemBuilder.from_config(sim_config)
+        builder.build_from_config(
+            config=sim_config,
+            working_dir=working_dir,
+            polymer_seed=replicate,
+        )
+
+        click.echo("Extracting OpenMM components...")
+        omm_topology, omm_system, omm_positions = builder.get_openmm_components()
+
+        # Apply restraints if configured
+        if sim_config.restraints:
+            from polyzymd.core.restraints import RestraintFactory, apply_restraints
+
+            click.echo(f"Applying {len(sim_config.restraints)} restraint(s)...")
+            restraint_defs = []
+            for r in sim_config.restraints:
+                if not r.enabled:
+                    continue
+                restraint_def = RestraintFactory.from_config(r.model_dump())
+                restraint_defs.append(restraint_def)
+            if restraint_defs:
+                apply_restraints(restraint_defs, omm_topology, omm_system)
+                click.echo(f"Applied {len(restraint_defs)} restraint(s)")
+    else:
+        from openmm import XmlSerializer
+        from openmm.app import PDBFile
+
+        click.echo("Loading pre-built system...")
+        pdb_path = working_dir / "solvated_system.pdb"
+        system_path = working_dir / "system.xml"
+        if not pdb_path.exists() or not system_path.exists():
+            raise FileNotFoundError(
+                f"Pre-built system not found in {working_dir}. "
+                "Run 'polyzymd build' first or remove --skip-build."
+            )
+        pdb = PDBFile(str(pdb_path))
+        omm_topology = pdb.topology
+        omm_positions = pdb.positions
+        with open(system_path, "r") as f:
+            omm_system = XmlSerializer.deserialize(f.read())
+
+    # Create runner
+    runner = SimulationRunner(
+        topology=omm_topology,
+        system=omm_system,
+        positions=omm_positions,
+        working_dir=working_dir,
+    )
+
+    # Minimize
+    click.echo("Running energy minimization...")
+    runner.minimize()
+
+    # Equilibrate
+    phases = sim_config.simulation_phases
+    eq_duration = phases.total_equilibration_duration
+    eq_mode = "multi-stage" if phases.uses_staged_equilibration else "simple"
+    click.echo(f"Running equilibration: {eq_duration:.3f} ns ({eq_mode})...")
+    runner.run_equilibration(temperature=temperature, config=phases)
+
+    # Run first production segment
+    click.echo(f"Running production segment 0: {duration_ns:.3f} ns, {num_samples} frames...")
+    runner.run_production(
+        temperature=temperature,
+        duration_ns=duration_ns,
+        num_samples=num_samples,
+        timestep_fs=timestep_fs,
+        pressure=pressure,
+        segment_index=0,
+    )
+
+
+def _run_continuation_segment(
+    working_dir: Path,
+    segment_index: int,
+    duration_ns: float,
+    num_samples: int,
+    timestep_fs: float,
+) -> None:
+    """Continue from the last completed segment.
+
+    Parameters
+    ----------
+    working_dir : Path
+        Working directory containing simulation outputs.
+    segment_index : int
+        Segment index to run.
+    duration_ns : float
+        Duration of this segment in nanoseconds.
+    num_samples : int
+        Number of trajectory frames to save.
+    timestep_fs : float
+        Integration timestep in femtoseconds.
+    """
+    from polyzymd.simulation.continuation import ContinuationManager
+
+    click.echo(f"Loading state from segment {segment_index - 1}...")
+    manager = ContinuationManager(
+        working_dir=working_dir,
+        segment_index=segment_index,
+    )
+    manager.load_previous_state()
+
+    click.echo(f"Running segment {segment_index}: {duration_ns:.3f} ns, {num_samples} frames...")
+    manager.run_segment(
+        duration_ns=duration_ns,
+        num_samples=num_samples,
+        timestep_fs=timestep_fs,
+    )
+
+
+# =============================================================================
+# Check-progress Command
+# =============================================================================
+
+
+@cli.command("check-progress")
+@click.option(
+    "-c",
+    "--config",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to YAML configuration file",
+)
+@click.option(
+    "-r",
+    "--replicate",
+    default=1,
+    type=int,
+    help="Replicate number (default: 1)",
+)
+@click.option(
+    "--scratch-dir",
+    default=None,
+    type=click.Path(),
+    help="Override scratch directory",
+)
+def check_progress(
+    config: str,
+    replicate: int,
+    scratch_dir: Optional[str],
+) -> None:
+    """Check whether a simulation is complete.
+
+    Loads progress state and exits with code 0 if the simulation is
+    complete, or code 1 if work remains. Used by SLURM resubmission
+    logic to decide whether to resubmit.
+
+    \b
+    Exit codes:
+        0 - Simulation complete (do NOT resubmit)
+        1 - Work remains (resubmit)
+    """
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.simulation.progress import load_or_scan_progress
+
+    try:
+        sim_config = SimulationConfig.from_yaml(config)
+    except Exception as e:
+        click.echo(f"Failed to load config: {e}", err=True)
+        sys.exit(1)
+
+    if scratch_dir:
+        working_dir = Path(scratch_dir)
+    else:
+        working_dir = sim_config.get_working_directory(replicate)
+
+    prod = sim_config.simulation_phases.production
+    timestep_fs = prod.time_step
+    total_steps = int(prod.duration * 1e6 / timestep_fs)
+    total_samples = prod.samples
+
+    progress = load_or_scan_progress(
+        working_dir=working_dir,
+        config_path=str(Path(config).resolve()),
+        total_steps=total_steps,
+        total_samples=total_samples,
+        timestep_fs=timestep_fs,
+        replicate=replicate,
+    )
+
+    pct = progress.fraction_complete() * 100
+    click.echo(
+        f"Progress: {progress.total_steps_completed}/{progress.total_steps_requested} steps "
+        f"({pct:.1f}%), {len(progress.segments)} segment(s)"
+    )
+
+    if progress.is_complete:
+        click.echo("Status: COMPLETE")
+        sys.exit(0)
+    else:
+        remaining_ns = (progress.steps_remaining * timestep_fs) / 1e6
+        click.echo(f"Status: {progress.status.value} — {remaining_ns:.3f} ns remaining")
         sys.exit(1)
 
 
@@ -1050,7 +1443,6 @@ def validate(config: str) -> None:
         click.echo(f"  Equilibration: {eq.duration} ns ({eq.ensemble.value})")
         prod = sim_config.simulation_phases.production
         click.echo(f"  Production: {prod.duration} ns ({prod.ensemble.value})")
-        click.echo(f"  Segments: {sim_config.simulation_phases.segments}")
 
         if sim_config.restraints:
             click.echo()
@@ -1277,224 +1669,181 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 
 
 # =============================================================================
-# Recover Command — finish an interrupted segment
+# Recover Command — resume a stalled simulation
 # =============================================================================
 
 
 @cli.command()
 @click.option(
-    "-w",
-    "--working-dir",
+    "-c",
+    "--config",
     required=True,
     type=click.Path(exists=True),
-    help="Working directory containing simulation output",
+    help="Path to YAML configuration file",
 )
 @click.option(
-    "-s",
-    "--segment",
-    required=True,
+    "-r",
+    "--replicate",
+    default=1,
     type=int,
-    help="Segment index that was interrupted",
+    help="Replicate number (default: 1)",
+)
+@click.option(
+    "--scratch-dir",
+    default=None,
+    type=click.Path(),
+    help="Override scratch directory",
+)
+@click.option(
+    "--preset",
+    type=click.Choice(["aa100", "al40", "blanca-shirts", "bridges2", "testing"]),
+    default="aa100",
+    help="SLURM partition preset (default: aa100)",
+)
+@click.option(
+    "--submit/--no-submit",
+    default=False,
+    help="Submit a self-resubmitting job to resume (default: status only)",
 )
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Show what would be recovered without running",
+    help="Show status and what would be submitted without actually submitting",
 )
-def recover(working_dir: str, segment: int, dry_run: bool) -> None:
-    """Recover an interrupted simulation segment.
+def recover(
+    config: str,
+    replicate: int,
+    scratch_dir: Optional[str],
+    preset: str,
+    submit: bool,
+    dry_run: bool,
+) -> None:
+    """Resume a stalled or interrupted simulation.
 
-    Reads the INTERRUPTED marker and emergency state files from a
-    previously interrupted segment, then runs the remaining steps
-    in a ``production_N_resume/`` subdirectory.
+    Scans the working directory, loads progress state, and reports how
+    much work remains. With ``--submit``, generates and submits a
+    self-resubmitting SLURM job that will automatically continue from
+    the last completed segment.
 
-    After recovery, the normal end-of-segment files (state.xml,
-    system.xml, parameters.json) are written to the original
-    ``production_N/`` directory so that the next ContinuationManager
-    can pick up seamlessly.
+    \b
+    Examples:
+        # Check status only
+        polyzymd recover -c config.yaml -r 1
+
+        # Submit a recovery job
+        polyzymd recover -c config.yaml -r 1 --submit --preset blanca-shirts
+
+        # Dry-run (show what would be submitted)
+        polyzymd recover -c config.yaml -r 1 --submit --dry-run
     """
-    import json
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.simulation.progress import load_or_scan_progress, save_progress
 
-    from openmm import XmlSerializer
-    from openmm.app import PDBFile, Simulation
-
-    from polyzymd.simulation.continuation import ContinuationManager, quantity_from_dict
-
-    work = Path(working_dir)
-    seg_dir = work / f"production_{segment}"
-    marker = seg_dir / "INTERRUPTED"
-
-    if not marker.exists():
-        click.echo(f"No INTERRUPTED marker found in {seg_dir}", err=True)
+    try:
+        sim_config = SimulationConfig.from_yaml(config)
+    except Exception as e:
+        click.echo(f"Failed to load config: {e}", err=True)
         sys.exit(1)
 
-    # Parse INTERRUPTED marker
-    meta = {}
-    for line in marker.read_text().strip().splitlines():
-        key, val = line.split("=", 1)
-        meta[key.strip()] = int(val.strip())
+    if scratch_dir:
+        working_dir = Path(scratch_dir)
+    else:
+        working_dir = sim_config.get_working_directory(replicate)
 
-    steps_completed = meta["steps_completed"]
-    total_steps = meta["total_steps"]
-    remaining_steps = meta["remaining_steps"]
-
-    click.echo(f"Segment {segment}: {steps_completed}/{total_steps} steps completed")
-    click.echo(f"  Remaining: {remaining_steps} steps")
-
-    # Load parameters to get reporter settings
-    # Try segment's own parameters first, then look in the segment directory
-    param_path = seg_dir / f"production_{segment}_parameters.json"
-    if not param_path.exists():
-        click.echo(f"Parameters file not found: {param_path}", err=True)
+    if not working_dir.exists():
+        click.echo(f"Working directory not found: {working_dir}", err=True)
         sys.exit(1)
 
-    with open(param_path) as f:
-        param_dict = json.load(f)
+    # Calculate total steps from config
+    prod = sim_config.simulation_phases.production
+    timestep_fs = prod.time_step
+    total_steps = int(prod.duration * 1e6 / timestep_fs)
+    total_samples = prod.samples
 
-    integ_raw = param_dict["__values__"]["integ_params"]["__values__"]
-    num_samples = integ_raw.get("num_samples", 250)
-    report_interval = max(1, total_steps // num_samples)
+    # Load progress
+    progress = load_or_scan_progress(
+        working_dir=working_dir,
+        config_path=str(Path(config).resolve()),
+        total_steps=total_steps,
+        total_samples=total_samples,
+        timestep_fs=timestep_fs,
+        replicate=replicate,
+    )
+    save_progress(working_dir, progress)
 
-    # Calculate remaining frames
-    remaining_frames = remaining_steps // report_interval
-    click.echo(f"  Remaining frames: ~{remaining_frames}")
+    # Report status
+    pct = progress.fraction_complete() * 100
+    remaining_ns = (progress.steps_remaining * timestep_fs) / 1e6
 
-    if dry_run:
-        click.echo()
-        click.echo("[DRY RUN] Would recover segment, no simulation run.")
+    click.echo(f"Working directory: {working_dir}")
+    click.echo(
+        f"Progress: {progress.total_steps_completed}/{progress.total_steps_requested} steps "
+        f"({pct:.1f}%)"
+    )
+    click.echo(f"Status: {progress.status.value}")
+    click.echo(f"Segments: {len(progress.segments)}")
+
+    for seg in progress.segments:
+        seg_pct = 100 * seg.steps_completed / max(seg.steps_requested, 1)
+        click.echo(f"  segment {seg.index}: {seg.status.value} ({seg_pct:.0f}%)")
+
+    if progress.is_complete:
+        click.echo(click.style("\nSimulation is complete — nothing to recover.", fg="green"))
         return
 
-    # Verify emergency state files exist
-    emergency_state = seg_dir / "emergency_state.xml"
-    emergency_system = seg_dir / "emergency_system.xml"
-    if not emergency_state.exists():
-        click.echo(f"Emergency state not found: {emergency_state}", err=True)
-        sys.exit(1)
-    if not emergency_system.exists():
-        click.echo(f"Emergency system not found: {emergency_system}", err=True)
-        sys.exit(1)
+    click.echo(f"\nRemaining: {remaining_ns:.3f} ns ({progress.steps_remaining} steps)")
 
-    # Create resume subdirectory
-    resume_dir = work / f"production_{segment}_resume"
-    resume_dir.mkdir(exist_ok=True)
-    click.echo(f"  Resume directory: {resume_dir}")
-
-    # Load system and state
-    click.echo("Loading emergency state...")
-    import openmm
-
-    with open(emergency_system) as f:
-        system = XmlSerializer.deserialize(f.read())
-
-    # Load topology (same as ContinuationManager)
-    pdb_path = _find_topology_pdb(work)
-    topology = PDBFile(str(pdb_path)).topology
-
-    # Create integrator from parameters
-    thermo_raw = param_dict["__values__"]["thermo_params"]["__values__"]
-    thermostat_raw = thermo_raw["thermostat_params"]["__values__"]
-    time_step = quantity_from_dict(integ_raw["time_step"])
-    temperature = quantity_from_dict(thermostat_raw["temperature"])
-    friction_coeff = quantity_from_dict(thermostat_raw["timescale"])
-
-    integrator = openmm.LangevinMiddleIntegrator(temperature, friction_coeff, time_step)
-
-    # Create simulation and load state
-    simulation = Simulation(topology, system, integrator)
-    simulation.loadState(str(emergency_state))
-
-    # Setup reporters for resume directory
-    from openmm.app import DCDReporter, StateDataReporter
-
-    resume_report_interval = max(1, remaining_steps // max(1, remaining_frames))
-
-    traj_path = resume_dir / f"production_{segment}_resume_trajectory.dcd"
-    state_data_path = resume_dir / f"production_{segment}_resume_state_data.csv"
-
-    simulation.reporters.append(DCDReporter(str(traj_path), resume_report_interval))
-    simulation.reporters.append(
-        StateDataReporter(
-            str(state_data_path),
-            resume_report_interval,
-            step=True,
-            time=True,
-            potentialEnergy=True,
-            kineticEnergy=True,
-            totalEnergy=True,
-            temperature=True,
-            volume=True,
-            density=True,
-            speed=True,
+    if not submit:
+        click.echo(
+            "\nTo resume, run:\n"
+            f"  polyzymd recover -c {config} -r {replicate} --submit --preset {preset}"
         )
+        return
+
+    # Generate and submit a self-resubmitting SLURM job
+    from polyzymd.workflow.slurm import SlurmConfig, SlurmScriptGenerator
+
+    click.echo(f"\nGenerating recovery job (preset: {preset})...")
+
+    slurm_config = SlurmConfig.from_preset(preset)
+    generator = SlurmScriptGenerator(slurm_config)
+
+    config_path_abs = str(Path(config).resolve())
+    script_content = generator.generate_job_script(
+        config_path=config_path_abs,
+        replicate=replicate,
+        working_dir=str(working_dir),
     )
 
-    # Install signal handlers (recovery can itself be interrupted)
-    from polyzymd.simulation.signals import (
-        GracefulExit,
-        install_handlers,
-        is_interrupted,
-        save_emergency_state,
+    # Write script
+    script_dir = working_dir / "recovery_scripts"
+    script_dir.mkdir(exist_ok=True)
+    script_path = script_dir / f"recover_rep{replicate}.sh"
+    script_path.write_text(script_content)
+    script_path.chmod(0o755)
+
+    click.echo(f"Script: {script_path}")
+
+    if dry_run:
+        click.echo("\n[DRY RUN] Would submit:")
+        click.echo(f"  sbatch {script_path}")
+        return
+
+    # Submit
+    import subprocess
+
+    result = subprocess.run(
+        ["sbatch", str(script_path)],
+        capture_output=True,
+        text=True,
     )
 
-    install_handlers()
-
-    # Run remaining steps (chunked for signal checking)
-    click.echo(f"Running {remaining_steps} remaining steps...")
-    chunk_size = min(resume_report_interval, remaining_steps)
-    steps_done = 0
-    try:
-        while steps_done < remaining_steps:
-            this_chunk = min(chunk_size, remaining_steps - steps_done)
-            simulation.step(this_chunk)
-            steps_done += this_chunk
-            if is_interrupted():
-                click.echo(
-                    f"Recovery interrupted at step {steps_done}/{remaining_steps}",
-                    err=True,
-                )
-                save_emergency_state(
-                    simulation=simulation,
-                    output_dir=seg_dir,
-                    segment_index=segment,
-                    steps_completed=steps_completed + steps_done,
-                    total_steps=total_steps,
-                )
-                sys.exit(99)
-    except GracefulExit:
-        sys.exit(99)
-
-    click.echo("Recovery simulation complete — writing end-of-segment files")
-
-    # Write normal end-of-segment files to the ORIGINAL segment directory
-    # so that ContinuationManager for segment+1 can find them
-    state = simulation.context.getState(
-        getPositions=True,
-        getVelocities=True,
-        getForces=True,
-        getEnergy=True,
-        getParameters=True,
-    )
-
-    state_xml_path = seg_dir / f"production_{segment}_state.xml"
-    with open(state_xml_path, "w") as f:
-        f.write(XmlSerializer.serialize(state))
-
-    system_xml_path = seg_dir / f"production_{segment}_system.xml"
-    with open(system_xml_path, "w") as f:
-        f.write(XmlSerializer.serialize(system))
-
-    # Copy parameters file (already exists, but confirm it's there)
-    # param_path already verified above
-
-    # Save checkpoint
-    chk_path = seg_dir / f"production_{segment}_checkpoint.chk"
-    simulation.saveCheckpoint(str(chk_path))
-
-    # Remove INTERRUPTED marker — segment is now complete
-    marker.unlink()
-    click.echo(f"Removed INTERRUPTED marker from {seg_dir}")
-
-    click.echo(click.style(f"Segment {segment} recovery complete!", fg="green"))
+    if result.returncode == 0:
+        click.echo(f"Submitted: {result.stdout.strip()}")
+        click.echo("Monitor with: squeue -u $USER")
+    else:
+        click.echo(f"Submission failed: {result.stderr.strip()}", err=True)
+        sys.exit(1)
 
 
 def _find_topology_pdb(working_dir: Path) -> Path:
@@ -1532,128 +1881,6 @@ def _find_topology_pdb(working_dir: Path) -> Path:
         return pdb_files[0]
 
     raise FileNotFoundError(f"Could not find topology PDB in {working_dir}")
-
-
-# =============================================================================
-# Recover-chain Command — scan and resubmit a broken chain
-# =============================================================================
-
-
-@cli.command("recover-chain")
-@click.option(
-    "-w",
-    "--working-dir",
-    required=True,
-    type=click.Path(exists=True),
-    help="Working directory containing simulation output",
-)
-@click.option(
-    "--dry-run",
-    is_flag=True,
-    help="Show chain status without taking action",
-)
-def recover_chain(working_dir: str, dry_run: bool) -> None:
-    """Scan a daisy-chain working directory and report segment status.
-
-    For each ``production_N/`` directory, reports whether the segment
-    completed, was interrupted (recoverable), or is missing (crashed).
-
-    With ``--dry-run`` (default behavior), only prints the status report.
-    Without ``--dry-run``, recovers any interrupted segments in-place.
-    """
-    work = Path(working_dir)
-
-    # Find all production_N directories
-    seg_dirs = sorted(work.glob("production_*"))
-    seg_dirs = [d for d in seg_dirs if d.is_dir() and "_resume" not in d.name]
-
-    if not seg_dirs:
-        click.echo("No production segments found.")
-        return
-
-    click.echo(f"Scanning {work}")
-    click.echo(f"Found {len(seg_dirs)} segment(s):\n")
-
-    statuses = []
-    for seg_dir in seg_dirs:
-        seg_name = seg_dir.name
-        # Extract segment index from directory name
-        try:
-            seg_idx = int(seg_name.split("_")[1])
-        except (IndexError, ValueError):
-            continue
-
-        marker = seg_dir / "INTERRUPTED"
-        state_xml = seg_dir / f"production_{seg_idx}_state.xml"
-
-        if marker.exists():
-            # Parse marker for details
-            meta = {}
-            for line in marker.read_text().strip().splitlines():
-                k, v = line.split("=", 1)
-                meta[k.strip()] = int(v.strip())
-            pct = 100 * meta.get("steps_completed", 0) / max(meta.get("total_steps", 1), 1)
-            status = f"INTERRUPTED ({pct:.0f}% done, {meta.get('remaining_steps', '?')} remaining)"
-            statuses.append(("interrupted", seg_idx))
-        elif state_xml.exists():
-            status = "COMPLETED"
-            statuses.append(("completed", seg_idx))
-        else:
-            status = "MISSING (no state.xml, no INTERRUPTED marker — likely crashed)"
-            statuses.append(("missing", seg_idx))
-
-        # Check for resume directory
-        resume_dir = work / f"production_{seg_idx}_resume"
-        resume_note = " [has resume/]" if resume_dir.exists() else ""
-
-        click.echo(f"  segment {seg_idx:>3d}: {status}{resume_note}")
-
-    click.echo()
-
-    interrupted = [idx for st, idx in statuses if st == "interrupted"]
-    missing = [idx for st, idx in statuses if st == "missing"]
-    completed = [idx for st, idx in statuses if st == "completed"]
-
-    click.echo(
-        f"Summary: {len(completed)} completed, "
-        f"{len(interrupted)} interrupted, {len(missing)} missing"
-    )
-
-    if not interrupted and not missing:
-        click.echo(click.style("All segments healthy!", fg="green"))
-        return
-
-    if missing:
-        click.echo(
-            click.style(
-                f"\nSegments {missing} have no recoverable state — "
-                "these must be re-run from the last completed segment.",
-                fg="red",
-            )
-        )
-
-    if interrupted and not dry_run:
-        click.echo(f"\nRecovering {len(interrupted)} interrupted segment(s)...")
-        from click.testing import CliRunner
-
-        runner = CliRunner()
-        for seg_idx in interrupted:
-            click.echo(f"\n--- Recovering segment {seg_idx} ---")
-            result = runner.invoke(
-                recover,
-                ["-w", working_dir, "-s", str(seg_idx)],
-            )
-            click.echo(result.output)
-            if result.exit_code != 0:
-                click.echo(
-                    click.style(f"Recovery of segment {seg_idx} failed!", fg="red"),
-                    err=True,
-                )
-                sys.exit(1)
-
-        click.echo(click.style("\nAll interrupted segments recovered!", fg="green"))
-    elif interrupted and dry_run:
-        click.echo(f"\n[DRY RUN] Would recover segments: {interrupted}")
 
 
 # =============================================================================
