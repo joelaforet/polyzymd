@@ -89,8 +89,8 @@ if [ ! -f "$CONFIG" ]; then
     exit 1
 fi
 
-if [ ! -f "$WORKDIR/simulation_progress.json" ]; then
-    echo "ERROR: simulation_progress.json not found in $WORKDIR"
+if [ ! -f "$WORKDIR/progress.json" ]; then
+    echo "ERROR: progress.json not found in $WORKDIR"
     echo "       Run setup_test_env.py first."
     exit 1
 fi
