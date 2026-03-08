@@ -544,8 +544,10 @@ if [ $RC -ne 0 ] && [ $RC -ne 99 ]; then
 fi
 
 # Check whether more work remains
+set +e
 polyzymd check-progress -c "$CONFIG_PATH" -r "$REPLICATE" --scratch-dir "$WORKING_DIR"
 PROGRESS_RC=$?
+set -e
 
 if [ $PROGRESS_RC -eq 0 ]; then
     echo "Simulation complete — no resubmission needed."

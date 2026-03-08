@@ -188,11 +188,13 @@ fi
 # Exit 0 (completed segment) or 99 (interrupted) — check if more work remains
 echo ""
 echo "Checking progress..."
+set +e
 polyzymd check-progress \\
     -c "${CONFIG}" \\
     -r 1 \\
     --scratch-dir "${WORKDIR}"
 PROGRESS_RC=\$?
+set -e
 
 if [ \$PROGRESS_RC -eq 0 ]; then
     echo ""
