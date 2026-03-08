@@ -80,8 +80,8 @@ if [ ! -f "$WORKDIR/solvated_system.pdb" ]; then
     fail_msg "$WORKDIR/solvated_system.pdb not found. Run setup_test_env.py first."
 fi
 
-if [ ! -f "$WORKDIR/simulation_progress.json" ]; then
-    fail_msg "simulation_progress.json not found. Run setup_test_env.py first."
+if [ ! -f "$WORKDIR/progress.json" ]; then
+    fail_msg "progress.json not found. Run setup_test_env.py first."
 fi
 
 if [ ! -f "$CONFIG" ]; then

@@ -7,13 +7,13 @@ that `polyzymd run-segment` and `ContinuationManager` expect.
 
 It also generates:
   - A minimal PolyzyMD config YAML (``test_config.yaml``)
-  - A progress file (``simulation_progress.json``) recording segment 0
+   - A progress file (``progress.json``) recording segment 0
 
 Output structure::
 
     test_restart_workdir/
         solvated_system.pdb
-        simulation_progress.json
+        progress.json
         production_0/
             production_0_state.xml
             production_0_system.xml
@@ -177,7 +177,7 @@ def write_progress_file(workdir: Path, config_path: Path) -> None:
     )
 
     save_progress(workdir, progress)
-    print(f"  Saved progress file: {workdir / 'simulation_progress.json'}")
+    print(f"  Saved progress file: {workdir / 'progress.json'}")
     print(f"  Total: {TOTAL_PRODUCTION_STEPS} steps, segment 0 done ({NUM_PRODUCTION_STEPS})")
     print(f"  Remaining: {TOTAL_PRODUCTION_STEPS - NUM_PRODUCTION_STEPS} steps")
 
@@ -461,7 +461,7 @@ def main():
     print(f"  {CONFIG_PATH}                    (PolyzyMD config)")
     print(f"  {WORKDIR}/")
     print(f"    solvated_system.pdb          ({pdb_path.stat().st_size // 1024} KB)")
-    print(f"    simulation_progress.json     (segment 0 complete)")
+    print(f"    progress.json                (segment 0 complete)")
     print(f"    production_0/")
     for fp in sorted(seg_dir.iterdir()):
         print(f"      {fp.name:<45} ({fp.stat().st_size // 1024} KB)")
