@@ -119,9 +119,11 @@ class SimulationProgress(BaseModel):
 
     @property
     def total_steps_completed(self) -> int:
-        """Total MD steps completed across all segments."""
+        """Total MD steps completed across all segments (including interrupted)."""
         return sum(
-            seg.steps_completed for seg in self.segments if seg.status == SegmentStatus.COMPLETED
+            seg.steps_completed
+            for seg in self.segments
+            if seg.status in (SegmentStatus.COMPLETED, SegmentStatus.INTERRUPTED)
         )
 
     @property

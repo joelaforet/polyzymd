@@ -29,7 +29,6 @@ from polyzymd.simulation.progress import (
     validate_progress,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -179,14 +178,14 @@ class TestSimulationProgress:
         assert p.fraction_complete() == pytest.approx(1.0)
         assert p.steps_remaining == 0
 
-    def test_interrupted_segment_not_counted(self):
-        """Interrupted segments should not count toward total_steps_completed."""
+    def test_interrupted_segment_counted_toward_total(self):
+        """Interrupted segments SHOULD count toward total_steps_completed."""
         segs = [
             _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
             _make_segment(1, steps=3000000, status=SegmentStatus.INTERRUPTED),
         ]
         p = _make_progress(segments=segs, total_steps=10000000)
-        assert p.total_steps_completed == 5000000  # Only segment 0
+        assert p.total_steps_completed == 8000000  # Both segments counted
         assert p.next_segment_index == 2
         assert p.is_complete is False
 

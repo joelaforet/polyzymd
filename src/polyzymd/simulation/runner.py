@@ -850,7 +850,7 @@ class SimulationRunner:
             get_interrupt_signal,
             install_handlers,
             is_interrupted,
-            save_emergency_state,
+            save_interrupted_state,
         )
 
         install_handlers()
@@ -867,7 +867,7 @@ class SimulationRunner:
                 steps_done += this_chunk
                 if is_interrupted():
                     LOGGER.warning(f"Interrupt detected at step {steps_done}/{total_steps}")
-                    save_emergency_state(
+                    save_interrupted_state(
                         simulation=self._simulation,
                         output_dir=phase_dir,
                         segment_index=segment_index,
@@ -888,9 +888,9 @@ class SimulationRunner:
         except GracefulExit:
             raise  # Re-raise so caller can handle exit code
         except Exception:
-            # On unexpected crash, still try to save emergency state
+            # On unexpected crash, still try to save interrupted state
             try:
-                save_emergency_state(
+                save_interrupted_state(
                     simulation=self._simulation,
                     output_dir=phase_dir,
                     segment_index=segment_index,
@@ -898,7 +898,7 @@ class SimulationRunner:
                     total_steps=total_steps,
                 )
             except Exception:
-                LOGGER.error("Failed to save emergency state after crash")
+                LOGGER.error("Failed to save interrupted state after crash")
             raise
 
         # Get final state (no enforcePeriodicBox to preserve molecular continuity)

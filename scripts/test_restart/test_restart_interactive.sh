@@ -207,10 +207,10 @@ if ! kill -0 $BG_PID 2>/dev/null; then
         SEG_NAME=$(basename "$LATEST_SEG")
         SEG_IDX=${SEG_NAME#production_}
 
-        # Copy state files as emergency files
+        # Copy state files as interrupted files
         if [ -f "$LATEST_SEG/${SEG_NAME}_state.xml" ]; then
-            cp "$LATEST_SEG/${SEG_NAME}_state.xml" "$LATEST_SEG/emergency_state.xml"
-            cp "$LATEST_SEG/${SEG_NAME}_system.xml" "$LATEST_SEG/emergency_system.xml"
+            cp "$LATEST_SEG/${SEG_NAME}_state.xml" "$LATEST_SEG/interrupted_state.xml"
+            cp "$LATEST_SEG/${SEG_NAME}_system.xml" "$LATEST_SEG/interrupted_system.xml"
         fi
 
         # Create INTERRUPTED marker

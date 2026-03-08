@@ -380,7 +380,7 @@ Every generated SLURM script includes three pieces of fault-tolerance
 infrastructure:
 
 1. **Signal handling** — Python-side handlers catch SIGUSR1 (wall-time
-   warning) and SIGTERM (preemption), save an emergency checkpoint, and
+   warning) and SIGTERM (preemption), save an interrupted checkpoint, and
    exit with code 99.
 2. **Signal forwarding** — Bash trap + background + wait pattern forwards
    signals from the SLURM batch shell to the Python child process.
@@ -392,8 +392,8 @@ infrastructure:
 
 | Scenario | Signal | What Happens | Outcome |
 |----------|--------|--------------|---------|
-| **Wall-time warning** | `SIGUSR1` (5 min before limit) | Emergency state saved, progress updated, exit 99 | Job resubmits and resumes |
-| **Preemption** | `SIGTERM` (120 s grace on Blanca) | Emergency state saved, progress updated, exit 99 | Job resubmits and resumes |
+| **Wall-time warning** | `SIGUSR1` (5 min before limit) | Interrupted state saved, progress updated, exit 99 | Job resubmits and resumes |
+| **Preemption** | `SIGTERM` (120 s grace on Blanca) | Interrupted state saved, progress updated, exit 99 | Job resubmits and resumes |
 | **Hard crash** | None (OOM, segfault, node failure) | No state saved | Job resubmits; `run-segment` detects incomplete segment and handles it |
 
 ```{note}
@@ -403,15 +403,15 @@ before the time limit expires. This gives the simulation enough time to
 save a full OpenMM state (~10-30 seconds on GPU).
 ```
 
-### Emergency Checkpoint Files
+### Interrupted State Files
 
 When an interrupt is detected, the signal handler writes three files into
 the current segment's directory (e.g. `production_3/`):
 
 | File | Purpose |
 |------|---------|
-| `emergency_state.xml` | Portable OpenMM state (positions, velocities, forces) |
-| `emergency_system.xml` | Serialized OpenMM System (force field parameters) |
+| `interrupted_state.xml` | Portable OpenMM state (positions, velocities, forces) |
+| `interrupted_system.xml` | Serialized OpenMM System (force field parameters) |
 | `INTERRUPTED` | Marker file with step-count metadata for recovery |
 
 The `INTERRUPTED` marker contains the information needed for recovery:
@@ -463,7 +463,7 @@ sending `SIGUSR1` via `scancel`:
 # Send USR1 to a specific job
 scancel --signal=USR1 <job_id>
 
-# The job will save emergency state, update progress, and exit with code 99
+# The job will save interrupted state, update progress, and exit with code 99
 # The resubmission logic then resubmits the job to continue
 ```
 
@@ -595,7 +595,7 @@ system. This section covers the cases where manual intervention is needed.
 
 ### Wall-Time or Preemption Interrupts
 
-**No action needed.** The smart restart system saves an emergency checkpoint,
+**No action needed.** The smart restart system saves an interrupted checkpoint,
 updates the progress file, and the job resubmits itself. Check the SLURM
 log to confirm:
 

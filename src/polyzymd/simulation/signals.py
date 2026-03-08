@@ -2,13 +2,13 @@
 Signal handling for graceful simulation interruption on HPC clusters.
 
 Provides SIGUSR1 and SIGTERM handlers that allow OpenMM simulations to
-save emergency state before SLURM wall-time or preemption kills the process.
+save interrupted state before SLURM wall-time or preemption kills the process.
 
 - SIGUSR1: Sent by SLURM via ``#SBATCH --signal=B:USR1@300`` (5 min before wall-time).
 - SIGTERM: Sent immediately on Blanca preemption (120 s grace period).
 
 The handler sets a flag that the simulation loop checks; on detection, the
-simulation saves an emergency checkpoint and raises ``GracefulExit`` so the
+simulation saves an interrupted checkpoint and raises ``GracefulExit`` so the
 caller can exit with a distinct exit code (99 = "interrupted but state saved").
 """
 
@@ -107,19 +107,20 @@ def install_handlers() -> None:
     LOGGER.info("Installed graceful-shutdown signal handlers (SIGUSR1, SIGTERM)")
 
 
-def save_emergency_state(
+def save_interrupted_state(
     simulation: Any,
     output_dir: Path,
     segment_index: int,
     steps_completed: int,
     total_steps: int,
 ) -> Path:
-    """Save emergency checkpoint files after an interrupt signal.
+    """Save checkpoint files after an interrupt signal.
 
     Writes three files into *output_dir*:
 
-    - ``emergency_state.xml``  — portable OpenMM state (positions, velocities)
-    - ``emergency_checkpoint.chk`` — binary checkpoint (fast reload)
+    - ``interrupted_state.xml``  — portable OpenMM state (positions, velocities)
+    - ``interrupted_checkpoint.chk`` — binary checkpoint (fast reload)
+    - ``interrupted_system.xml`` — serialized OpenMM System for recovery
     - ``INTERRUPTED`` — marker file with metadata for the recovery command
 
     Parameters
@@ -127,7 +128,7 @@ def save_emergency_state(
     simulation : openmm.app.Simulation
         The active OpenMM Simulation object.
     output_dir : Path
-        Directory to write emergency files into (e.g. ``production_3/``).
+        Directory to write interrupted files into (e.g. ``production_3/``).
     segment_index : int
         Current segment index.
     steps_completed : int
@@ -153,21 +154,21 @@ def save_emergency_state(
         getEnergy=True,
         getParameters=True,
     )
-    state_xml_path = output_dir / "emergency_state.xml"
+    state_xml_path = output_dir / "interrupted_state.xml"
     with open(state_xml_path, "w") as f:
         f.write(XmlSerializer.serialize(state))
-    LOGGER.info(f"Saved emergency state to {state_xml_path}")
+    LOGGER.info(f"Saved interrupted state to {state_xml_path}")
 
     # Save binary checkpoint (faster to reload than XML)
-    chk_path = output_dir / "emergency_checkpoint.chk"
+    chk_path = output_dir / "interrupted_checkpoint.chk"
     simulation.saveCheckpoint(str(chk_path))
-    LOGGER.info(f"Saved emergency checkpoint to {chk_path}")
+    LOGGER.info(f"Saved interrupted checkpoint to {chk_path}")
 
     # Save system XML (needed for recovery to rebuild simulation)
-    system_xml_path = output_dir / "emergency_system.xml"
+    system_xml_path = output_dir / "interrupted_system.xml"
     with open(system_xml_path, "w") as f:
         f.write(XmlSerializer.serialize(simulation.system))
-    LOGGER.info(f"Saved emergency system to {system_xml_path}")
+    LOGGER.info(f"Saved interrupted system to {system_xml_path}")
 
     # Write INTERRUPTED marker with metadata
     marker_path = output_dir / "INTERRUPTED"

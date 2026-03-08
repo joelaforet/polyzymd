@@ -107,6 +107,7 @@ class ContinuationManager:
         self._topology: Optional[Any] = None
         self._simulation: Optional[Simulation] = None
         self._param_dict: Optional[Dict[str, Any]] = None
+        self._use_checkpoint_recovery: bool = False
 
     @property
     def working_dir(self) -> Path:
@@ -163,21 +164,49 @@ class ContinuationManager:
         -------
         dict
             Dictionary with paths to state, system, and parameter files.
+            If the previous segment completed normally, ``state`` and ``system``
+            point to ``production_N_state.xml`` / ``production_N_system.xml``.
+            If the previous segment was interrupted (those files don't exist),
+            ``system`` falls back to ``interrupted_system.xml`` and
+            ``use_checkpoint`` is set to ``True`` to signal that
+            ``load_previous_state`` should use ``loadCheckpoint()`` instead
+            of ``loadState()``.
         """
         prev_dir = self._working_dir / f"production_{self._prev_segment}"
 
+        state_path = prev_dir / f"production_{self._prev_segment}_state.xml"
+        system_path = prev_dir / f"production_{self._prev_segment}_system.xml"
+        checkpoint_path = prev_dir / f"production_{self._prev_segment}_checkpoint.chk"
+        params_path = prev_dir / f"production_{self._prev_segment}_parameters.json"
+
+        # Check if previous segment was interrupted (normal state files missing)
+        interrupted_system = prev_dir / "interrupted_system.xml"
+        use_checkpoint = False
+
+        if not state_path.exists() and interrupted_system.exists():
+            LOGGER.info(
+                f"Previous segment {self._prev_segment} was interrupted — "
+                f"recovering from checkpoint + interrupted system XML"
+            )
+            system_path = interrupted_system
+            use_checkpoint = True
+
         return {
-            "state": prev_dir / f"production_{self._prev_segment}_state.xml",
-            "system": prev_dir / f"production_{self._prev_segment}_system.xml",
-            "params": prev_dir / f"production_{self._prev_segment}_parameters.json",
-            "checkpoint": prev_dir / f"production_{self._prev_segment}_checkpoint.chk",
+            "state": state_path,
+            "system": system_path,
+            "params": params_path,
+            "checkpoint": checkpoint_path,
+            "use_checkpoint": use_checkpoint,  # type: ignore[dict-item]
         }
 
     def load_previous_state(self) -> None:
         """Load state from the previous segment.
 
         This loads the system, topology, and parameters from the previous
-        production segment.
+        production segment. If the previous segment was interrupted (no
+        ``production_N_state.xml``), it loads the system from
+        ``interrupted_system.xml`` and marks the checkpoint for recovery
+        via ``loadCheckpoint()`` in ``run_segment()``.
 
         Raises
         ------
@@ -187,13 +216,20 @@ class ContinuationManager:
         LOGGER.info(f"Loading state from segment {self._prev_segment}")
 
         paths = self._get_previous_paths()
+        use_checkpoint = bool(paths.pop("use_checkpoint", False))
 
         # Check that required files exist
         for name, path in paths.items():
-            if name != "checkpoint" and not path.exists():
+            if name == "checkpoint":
+                continue
+            if name == "state" and use_checkpoint:
+                # State XML doesn't exist for interrupted segments; we'll
+                # use the checkpoint instead in run_segment()
+                continue
+            if not path.exists():
                 raise FileNotFoundError(f"Required file not found: {path}")
 
-        # Load system
+        # Load system (either normal or interrupted system XML)
         LOGGER.info(f"Loading system from {paths['system']}")
         with open(paths["system"], "r") as f:
             self._system = XmlSerializer.deserialize(f.read())
@@ -207,6 +243,9 @@ class ContinuationManager:
         LOGGER.info(f"Loading parameters from {paths['params']}")
         with open(paths["params"], "r") as f:
             self._param_dict = json.load(f)
+
+        # Store whether we need checkpoint recovery for run_segment()
+        self._use_checkpoint_recovery = use_checkpoint
 
         LOGGER.info("Previous state loaded successfully")
 
@@ -467,7 +506,7 @@ class ContinuationManager:
 
         Runs the simulation for the specified duration, saving trajectory
         frames at regular intervals. On completion, updates the progress
-        tracker. On interruption (SIGUSR1/SIGTERM), saves emergency state,
+        tracker. On interruption (SIGUSR1/SIGTERM), saves interrupted state,
         updates the progress tracker, and raises ``GracefulExit``.
 
         Parameters
@@ -510,8 +549,16 @@ class ContinuationManager:
 
         # Load state from previous segment
         paths = self._get_previous_paths()
-        LOGGER.info(f"Loading state from {paths['state']}")
-        self._simulation.loadState(str(paths["state"]))
+        if self._use_checkpoint_recovery:
+            # Previous segment was interrupted — no state XML exists.
+            # Use loadCheckpoint() with the reporter-interval checkpoint,
+            # which is consistent with the partial trajectory DCD.
+            chk_path = paths["checkpoint"]
+            LOGGER.info(f"Recovering from interrupted segment via checkpoint: {chk_path}")
+            self._simulation.loadCheckpoint(str(chk_path))
+        else:
+            LOGGER.info(f"Loading state from {paths['state']}")
+            self._simulation.loadState(str(paths["state"]))
 
         # Create output directory
         output_dir = self._working_dir / f"production_{self._segment_index}"
@@ -535,7 +582,7 @@ class ContinuationManager:
             get_interrupt_signal,
             install_handlers,
             is_interrupted,
-            save_emergency_state,
+            save_interrupted_state,
         )
 
         install_handlers()
@@ -553,7 +600,7 @@ class ContinuationManager:
                 steps_done += this_chunk
                 if is_interrupted():
                     LOGGER.warning(f"Interrupt detected at step {steps_done}/{total_steps}")
-                    save_emergency_state(
+                    save_interrupted_state(
                         simulation=self._simulation,
                         output_dir=output_dir,
                         segment_index=self._segment_index,
@@ -573,9 +620,9 @@ class ContinuationManager:
         except GracefulExit:
             raise  # Re-raise so caller can set exit code
         except Exception:
-            # On unexpected crash, still try to save emergency state
+            # On unexpected crash, still try to save interrupted state
             try:
-                save_emergency_state(
+                save_interrupted_state(
                     simulation=self._simulation,
                     output_dir=output_dir,
                     segment_index=self._segment_index,
@@ -583,7 +630,7 @@ class ContinuationManager:
                     total_steps=total_steps,
                 )
             except Exception:
-                LOGGER.error("Failed to save emergency state after crash")
+                LOGGER.error("Failed to save interrupted state after crash")
             raise
 
         # Save final state

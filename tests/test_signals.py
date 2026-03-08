@@ -3,7 +3,7 @@
 Covers:
 - GracefulExit exception attributes and formatting
 - Signal handler installation and flag setting
-- Emergency state saving (mocked OpenMM)
+- Interrupted state saving (mocked OpenMM)
 - INTERRUPTED marker file format
 - Exit code constants
 - Thread safety (handler only installs on main thread)
@@ -26,7 +26,7 @@ from polyzymd.simulation.signals import (
     install_handlers,
     is_interrupted,
     reset,
-    save_emergency_state,
+    save_interrupted_state,
 )
 
 # ---------------------------------------------------------------------------
@@ -168,15 +168,15 @@ class TestInstallHandlers:
 
 
 # ---------------------------------------------------------------------------
-# save_emergency_state (mocked OpenMM)
+# save_interrupted_state (mocked OpenMM)
 # ---------------------------------------------------------------------------
 
 
-class TestSaveEmergencyState:
-    """save_emergency_state() writes three files to the output directory."""
+class TestSaveInterruptedState:
+    """save_interrupted_state() writes three files to the output directory."""
 
     def test_writes_all_files(self, tmp_path):
-        """Emergency save creates state.xml, checkpoint.chk, system.xml, INTERRUPTED."""
+        """Interrupted save creates state.xml, checkpoint.chk, system.xml, INTERRUPTED."""
         # Mock simulation object
         mock_sim = MagicMock()
         mock_state = MagicMock()
@@ -192,7 +192,7 @@ class TestSaveEmergencyState:
         with patch("openmm.XmlSerializer") as mock_xml:
             mock_xml.serialize.return_value = "<mock_xml/>"
 
-            marker_path = save_emergency_state(
+            marker_path = save_interrupted_state(
                 simulation=mock_sim,
                 output_dir=tmp_path / "production_3",
                 segment_index=3,
@@ -204,9 +204,9 @@ class TestSaveEmergencyState:
         assert output_dir.exists()
 
         # Check all files exist
-        assert (output_dir / "emergency_state.xml").exists()
-        assert (output_dir / "emergency_checkpoint.chk").exists()
-        assert (output_dir / "emergency_system.xml").exists()
+        assert (output_dir / "interrupted_state.xml").exists()
+        assert (output_dir / "interrupted_checkpoint.chk").exists()
+        assert (output_dir / "interrupted_system.xml").exists()
         assert (output_dir / "INTERRUPTED").exists()
 
         # Check INTERRUPTED marker content
@@ -223,7 +223,7 @@ class TestSaveEmergencyState:
 
         with patch("openmm.XmlSerializer") as mock_xml:
             mock_xml.serialize.return_value = "<xml/>"
-            result = save_emergency_state(
+            result = save_interrupted_state(
                 simulation=mock_sim,
                 output_dir=tmp_path / "prod_1",
                 segment_index=1,
@@ -244,7 +244,7 @@ class TestSaveEmergencyState:
 
         with patch("openmm.XmlSerializer") as mock_xml:
             mock_xml.serialize.return_value = "<xml/>"
-            save_emergency_state(
+            save_interrupted_state(
                 simulation=mock_sim,
                 output_dir=nested,
                 segment_index=5,
@@ -262,7 +262,7 @@ class TestSaveEmergencyState:
 
         with patch("openmm.XmlSerializer") as mock_xml:
             mock_xml.serialize.return_value = "<xml/>"
-            save_emergency_state(
+            save_interrupted_state(
                 simulation=mock_sim,
                 output_dir=tmp_path / "p",
                 segment_index=0,

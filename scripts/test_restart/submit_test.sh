@@ -20,7 +20,7 @@
 # Signal testing:
 #   While the job is running, you can interrupt it with:
 #     scancel --signal=USR1 <job_id>
-#   The job will save emergency state (exit 99), then resubmit. The next
+#   The job will save interrupted state (exit 99), then resubmit. The next
 #   invocation will detect the interrupted segment and continue from there.
 #
 # Prerequisites:
@@ -254,7 +254,7 @@ echo "  scancel sends to job steps, which bypasses the batch script."
 echo ""
 echo "This will:"
 echo "  1. Send SIGUSR1 to the Python process"
-echo "  2. Trigger graceful shutdown (save emergency state, exit 99)"
+echo "  2. Trigger graceful shutdown (save interrupted state, exit 99)"
 echo "  3. Job resubmits itself"
 echo "  4. Next invocation auto-recovers from the interrupted segment"
 echo ""

@@ -627,7 +627,7 @@ output:
 |------|---------|
 | 0 | Success |
 | 1 | Error (validation failure, build failure, etc.) |
-| 99 | Graceful shutdown — simulation was interrupted but emergency state was saved (see {doc}`hpc_slurm`) |
+| 99 | Graceful shutdown — simulation was interrupted but interrupted state was saved (see {doc}`hpc_slurm`) |
 
 ---
 
