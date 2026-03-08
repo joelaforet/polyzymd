@@ -22,10 +22,10 @@ __all__ = [
     "SlurmScriptGenerator",
     "parse_replicate_range",
     "validate_replicate_range",
-    # Daisy-chain submission
+    # Job submission
     "DaisyChainConfig",
     "DaisyChainSubmitter",
-    "SegmentInfo",
+    "SegmentInfo",  # Deprecated — kept for backward compatibility
     "SubmissionResult",
     "submit_daisy_chain",
 ]

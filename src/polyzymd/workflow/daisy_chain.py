@@ -1,9 +1,16 @@
 """
-Daisy-chain job submission for HPC SLURM scheduler.
+Job submission for HPC SLURM scheduler.
 
-This module provides utilities for breaking long MD simulations into
-smaller dependent jobs that are automatically chained together using
-SLURM job dependencies.
+This module provides utilities for submitting self-resubmitting MD
+simulation jobs to SLURM.  Each replicate gets a single job script
+that calls ``polyzymd run-segment``, checks progress, and resubmits
+itself until the simulation is complete.
+
+.. versionchanged:: 2.0
+    Replaced the legacy daisy-chain (dependency-chain) model with
+    self-resubmitting jobs.  The public API (``submit_daisy_chain``,
+    ``DaisyChainConfig``, ``DaisyChainSubmitter``) is preserved for
+    backward compatibility but the internal behaviour is simplified.
 """
 
 from __future__ import annotations
@@ -11,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Union
@@ -31,12 +39,22 @@ LOGGER = logging.getLogger(__name__)
 class SegmentInfo:
     """Information about a single simulation segment.
 
-    Attributes:
-        index: Segment index (0-based for initial, 1+ for continuations)
-        duration_ns: Duration of this segment in nanoseconds
-        samples: Number of trajectory frames to save
-        is_initial: Whether this is the initial (build + equilibration + first prod) segment
-        cumulative_time_ns: Total simulated time up to and including this segment
+    .. deprecated::
+        No longer used in the self-resubmitting model.  Segments are
+        determined dynamically by the progress system at runtime.
+
+    Attributes
+    ----------
+    index : int
+        Segment index (0-based).
+    duration_ns : float
+        Duration of this segment in nanoseconds.
+    samples : int
+        Number of trajectory frames to save.
+    is_initial : bool
+        Whether this is the initial segment.
+    cumulative_time_ns : float
+        Total simulated time up to and including this segment.
     """
 
     index: int
@@ -48,64 +66,39 @@ class SegmentInfo:
 
 @dataclass
 class DaisyChainConfig:
-    """Configuration for daisy-chain submission.
+    """Configuration for job submission.
 
-    Attributes:
-        slurm_config: SLURM job configuration
-        total_production_time_ns: Total production time in nanoseconds
-        total_segments: Number of segments to split production into
-        total_samples: Total trajectory frames across all segments
-        equilibration_time_ns: Equilibration time (only for initial segment)
-        replicates: List of replicate numbers to run
-        dry_run: If True, create scripts but don't submit
-        output_script_dir: Directory for generated job scripts
-        config_path: Path to the YAML configuration file
+    Despite the legacy name, this now configures single self-resubmitting
+    jobs (one per replicate) rather than dependency chains.
+
+    Attributes
+    ----------
+    slurm_config : SlurmConfig
+        SLURM job configuration.
+    total_production_time_ns : float
+        Total production time in nanoseconds.
+    total_samples : int
+        Total trajectory frames across the entire production run.
+    equilibration_time_ns : float
+        Equilibration time (informational only).
+    replicates : list of int
+        Replicate numbers to run.
+    dry_run : bool
+        If True, create scripts but don't submit.
+    output_script_dir : Path
+        Directory for generated job scripts.
+    config_path : str
+        Path to the YAML configuration file.
     """
 
     slurm_config: SlurmConfig
     total_production_time_ns: float
-    total_segments: int = 10
     total_samples: int = 2500
     equilibration_time_ns: float = 0.5
     replicates: List[int] = field(default_factory=lambda: [1])
     dry_run: bool = False
     output_script_dir: Path = Path("daisy_chain_scripts")
     config_path: str = "config.yaml"
-
-    @property
-    def segment_duration_ns(self) -> float:
-        """Get the duration of each segment in nanoseconds."""
-        return self.total_production_time_ns / self.total_segments
-
-    @property
-    def samples_per_segment(self) -> int:
-        """Get the number of frames per segment."""
-        return self.total_samples // self.total_segments
-
-    def get_segments(self) -> List[SegmentInfo]:
-        """Generate segment information for all segments.
-
-        Returns:
-            List of SegmentInfo objects for each segment.
-        """
-        segments = []
-        cumulative_time = 0.0
-
-        for i in range(self.total_segments):
-            duration = self.segment_duration_ns
-            cumulative_time += duration
-
-            segments.append(
-                SegmentInfo(
-                    index=i,
-                    duration_ns=duration,
-                    samples=self.samples_per_segment,
-                    is_initial=(i == 0),
-                    cumulative_time_ns=cumulative_time,
-                )
-            )
-
-        return segments
 
     @classmethod
     def from_simulation_config(
@@ -119,16 +112,25 @@ class DaisyChainConfig:
     ) -> "DaisyChainConfig":
         """Create DaisyChainConfig from a SimulationConfig.
 
-        Args:
-            sim_config: Simulation configuration
-            slurm_config: SLURM configuration
-            replicates: Replicate range string (e.g., "1-5") or list of ints
-            dry_run: If True, don't submit jobs
-            output_script_dir: Directory for job scripts
-            config_path: Path to the YAML configuration file
+        Parameters
+        ----------
+        sim_config : SimulationConfig
+            Simulation configuration.
+        slurm_config : SlurmConfig
+            SLURM configuration.
+        replicates : str or list of int
+            Replicate range string (e.g. ``"1-5"``) or list of ints.
+        dry_run : bool
+            If True, don't submit jobs.
+        output_script_dir : str or Path
+            Directory for job scripts.
+        config_path : str
+            Path to the YAML configuration file.
 
-        Returns:
-            Configured DaisyChainConfig
+        Returns
+        -------
+        DaisyChainConfig
+            Configured instance.
         """
         # Parse replicates if string
         if isinstance(replicates, str):
@@ -140,7 +142,6 @@ class DaisyChainConfig:
         return cls(
             slurm_config=slurm_config,
             total_production_time_ns=sim_config.simulation_phases.production.duration,
-            total_segments=sim_config.simulation_phases.segments,
             total_samples=sim_config.simulation_phases.production.samples,
             equilibration_time_ns=sim_config.simulation_phases.total_equilibration_duration,
             replicates=replicate_list,
@@ -154,12 +155,18 @@ class DaisyChainConfig:
 class SubmissionResult:
     """Result of job submission.
 
-    Attributes:
-        job_id: SLURM job ID (or dummy ID for dry run)
-        script_path: Path to the generated script
-        segment_index: Segment index for this job
-        replicate: Replicate number
-        is_dry_run: Whether this was a dry run
+    Attributes
+    ----------
+    job_id : str
+        SLURM job ID (or dummy ID for dry run).
+    script_path : Path
+        Path to the generated script.
+    segment_index : int
+        Always 0 in the self-resubmitting model (kept for compatibility).
+    replicate : int
+        Replicate number.
+    is_dry_run : bool
+        Whether this was a dry run.
     """
 
     job_id: str
@@ -170,19 +177,21 @@ class SubmissionResult:
 
 
 class DaisyChainSubmitter:
-    """Handles daisy-chain job submission for MD simulations.
+    """Handles job submission for MD simulations.
 
-    This class generates SLURM job scripts and submits them with proper
-    dependencies so that continuation jobs run after their prerequisites.
+    In the self-resubmitting model, each replicate gets a single job
+    script.  The script calls ``polyzymd run-segment``, checks progress,
+    and resubmits itself until the simulation is complete.
 
-    Example:
-        >>> sim_config = SimulationConfig.from_yaml("config.yaml")
-        >>> slurm_config = SlurmConfig.from_preset("aa100", email="user@example.com")
-        >>> dc_config = DaisyChainConfig.from_simulation_config(
-        ...     sim_config, slurm_config, replicates="1-3"
-        ... )
-        >>> submitter = DaisyChainSubmitter(sim_config, dc_config)
-        >>> results = submitter.submit_all()
+    Example
+    -------
+    >>> sim_config = SimulationConfig.from_yaml("config.yaml")
+    >>> slurm_config = SlurmConfig.from_preset("aa100", email="user@example.com")
+    >>> dc_config = DaisyChainConfig.from_simulation_config(
+    ...     sim_config, slurm_config, replicates="1-3"
+    ... )
+    >>> submitter = DaisyChainSubmitter(sim_config, dc_config)
+    >>> results = submitter.submit_all()
     """
 
     def __init__(
@@ -193,14 +202,20 @@ class DaisyChainSubmitter:
         openff_logs: bool = False,
         skip_build: bool = False,
     ) -> None:
-        """Initialize the DaisyChainSubmitter.
+        """Initialize the submitter.
 
-        Args:
-            sim_config: Simulation configuration
-            dc_config: Daisy-chain configuration
-            conda_env: Conda environment name
-            openff_logs: Enable verbose OpenFF logs in generated scripts
-            skip_build: Skip system building in generated scripts (use pre-built system)
+        Parameters
+        ----------
+        sim_config : SimulationConfig
+            Simulation configuration.
+        dc_config : DaisyChainConfig
+            Submission configuration.
+        conda_env : str
+            Conda environment name.
+        openff_logs : bool
+            Enable verbose OpenFF logs in generated scripts.
+        skip_build : bool
+            Skip system building in generated scripts.
         """
         self._sim_config = sim_config
         self._dc_config = dc_config
@@ -220,26 +235,29 @@ class DaisyChainSubmitter:
 
     @property
     def dc_config(self) -> DaisyChainConfig:
-        """Get the daisy-chain configuration."""
+        """Get the submission configuration."""
         return self._dc_config
 
     @property
     def job_chains(self) -> Dict[int, List[SubmissionResult]]:
-        """Get the job chains for all replicates."""
+        """Get the submission results for all replicates."""
         return self._job_chains
 
-    def _create_job_name(self, segment_index: int, replicate: int) -> str:
-        """Create a descriptive job name.
+    def _create_job_name(self, replicate: int) -> str:
+        """Create a descriptive job name for a replicate.
 
-        The polymer composition suffix matches the directory naming convention,
-        e.g. ``s0_r1_310K_Fibronectin_SBMA-OEGMA_A75_B25``.
+        The polymer composition suffix matches the directory naming
+        convention, e.g. ``r1_310K_Fibronectin_SBMA-OEGMA_A75_B25``.
 
-        Args:
-            segment_index: Segment index
-            replicate: Replicate number
+        Parameters
+        ----------
+        replicate : int
+            Replicate number.
 
-        Returns:
-            Formatted job name
+        Returns
+        -------
+        str
+            Formatted job name.
         """
         enzyme = self._sim_config.enzyme.name
         temp = int(self._sim_config.thermodynamics.temperature)
@@ -247,114 +265,67 @@ class DaisyChainSubmitter:
         polymer_info = ""
         if self._sim_config.polymers and self._sim_config.polymers.enabled:
             prefix = self._sim_config.polymers.type_prefix
-            # Build full composition string matching directory naming, e.g. SBMA-OEGMA_A75_B25
             probs = {m.label: m.probability for m in self._sim_config.polymers.monomers}
             composition = "_".join(f"{lbl}{int(probs[lbl] * 100)}" for lbl in sorted(probs))
             polymer_info = f"_{prefix}_{composition}"
 
-        return f"s{segment_index}_r{replicate}_{temp}K_{enzyme}{polymer_info}"
-
-    def _create_output_file_pattern(self, segment_index: int, replicate: int) -> str:
-        """Create output file pattern for SLURM logs.
-
-        SLURM logs go to the slurm_logs subdirectory within projects.
-
-        Args:
-            segment_index: Segment index
-            replicate: Replicate number
-
-        Returns:
-            Output file pattern (relative to projects_dir)
-        """
-        job_name = self._create_job_name(segment_index, replicate)
-        logs_subdir = self._sim_config.output.slurm_logs_subdir
-        return f"{logs_subdir}/{job_name}.%A_%a.out"
+        return f"r{replicate}_{temp}K_{enzyme}{polymer_info}"
 
     def _get_scratch_dir(self, replicate: int) -> str:
         """Get the scratch directory path for a replicate.
 
-        This is where simulation output (trajectories, checkpoints) goes.
+        Parameters
+        ----------
+        replicate : int
+            Replicate number.
 
-        Args:
-            replicate: Replicate number
-
-        Returns:
-            Scratch directory path (absolute)
+        Returns
+        -------
+        str
+            Absolute scratch directory path.
         """
         scratch_dir = self._sim_config.get_working_directory(replicate)
         return str(scratch_dir.resolve())
 
-    def _get_projects_dir(self) -> str:
-        """Get the projects directory path.
+    def generate_job_script(self, replicate: int) -> str:
+        """Generate a self-resubmitting job script for a replicate.
 
-        This is where scripts, configs, and logs live.
+        Parameters
+        ----------
+        replicate : int
+            Replicate number.
 
-        Returns:
-            Projects directory path (absolute)
+        Returns
+        -------
+        str
+            Complete SLURM batch script content.
         """
-        projects_dir = self._sim_config.get_projects_directory()
-        return str(projects_dir.resolve())
+        job_name = self._create_job_name(replicate)
+        logs_subdir = self._sim_config.output.slurm_logs_subdir
+        output_file = f"{logs_subdir}/{job_name}.%j.out"
 
-    def generate_initial_script(self, replicate: int) -> str:
-        """Generate the initial job script content.
-
-        Args:
-            replicate: Replicate number
-
-        Returns:
-            Script content string
-        """
-        context = JobContext(
-            job_name=self._create_job_name(0, replicate),
-            output_file=self._create_output_file_pattern(0, replicate),
-            scratch_dir=self._get_scratch_dir(replicate),
-            projects_dir=self._get_projects_dir(),
-            segment_index=0,
-            replicate_num=replicate,
-        )
-
-        return self._generator.generate_initial_job(
-            context=context,
+        return self._generator.generate_job_script(
             config_path=self._dc_config.config_path,
             replicate=replicate,
-            segment_time=self._dc_config.segment_duration_ns,
-            segment_frames=self._dc_config.samples_per_segment,
-        )
-
-    def generate_continuation_script(self, segment_index: int, replicate: int) -> str:
-        """Generate a continuation job script content.
-
-        Args:
-            segment_index: Segment index (1 or higher)
-            replicate: Replicate number
-
-        Returns:
-            Script content string
-        """
-        context = JobContext(
-            job_name=self._create_job_name(segment_index, replicate),
-            output_file=self._create_output_file_pattern(segment_index, replicate),
-            scratch_dir=self._get_scratch_dir(replicate),
-            projects_dir=self._get_projects_dir(),
-            segment_index=segment_index,
-            replicate_num=replicate,
-        )
-
-        return self._generator.generate_continuation_job(
-            context=context,
-            segment_time=self._dc_config.segment_duration_ns,
-            num_samples=self._dc_config.samples_per_segment,
+            working_dir=self._get_scratch_dir(replicate),
+            job_name=job_name,
+            output_file=output_file,
         )
 
     def _save_script(self, content: str, filename: str) -> Path:
         """Save a script to the output directory.
 
-        Args:
-            content: Script content
-            filename: Script filename
+        Parameters
+        ----------
+        content : str
+            Script content.
+        filename : str
+            Script filename.
 
-        Returns:
-            Path to saved script
+        Returns
+        -------
+        Path
+            Path to saved script.
         """
         output_dir = self._dc_config.output_script_dir
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -369,56 +340,52 @@ class DaisyChainSubmitter:
     def _submit_job(
         self,
         script_path: Path,
-        segment_index: int,
         replicate: int,
-        dependency_job_id: Optional[str] = None,
     ) -> SubmissionResult:
         """Submit a job to SLURM.
 
-        Args:
-            script_path: Path to the job script
-            segment_index: Segment index
-            replicate: Replicate number
-            dependency_job_id: Job ID to depend on (for continuation jobs)
+        Parameters
+        ----------
+        script_path : Path
+            Path to the job script.
+        replicate : int
+            Replicate number.
 
-        Returns:
-            SubmissionResult with job information
+        Returns
+        -------
+        SubmissionResult
+            Submission result with job information.
         """
         if self._dc_config.dry_run:
-            job_id = f"DRY_RUN_{replicate}_{segment_index}"
+            job_id = f"DRY_RUN_{replicate}"
             LOGGER.info(f"[DRY RUN] Would submit {script_path}")
             return SubmissionResult(
                 job_id=job_id,
                 script_path=script_path,
-                segment_index=segment_index,
+                segment_index=0,
                 replicate=replicate,
                 is_dry_run=True,
             )
 
-        # Build sbatch command
-        # Use --export=NONE to start with clean environment, letting the script's
-        # module/conda initialization work properly regardless of submission context
+        # Use --export=NONE to start with clean environment, letting the
+        # script's module/conda initialization work properly regardless
+        # of submission context
         cmd = ["sbatch", "--export=NONE"]
 
-        if dependency_job_id:
-            cmd.extend(["--dependency", f"afterany:{dependency_job_id}"])
-
-        # Add exclude if configured
         if self._dc_config.slurm_config.exclude:
             cmd.extend(["--exclude", self._dc_config.slurm_config.exclude])
 
         cmd.append(str(script_path))
 
-        # Submit
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             job_id = result.stdout.strip().split()[-1]
-            LOGGER.info(f"Submitted job {job_id} from {script_path}")
+            LOGGER.info(f"Submitted job {job_id} for replicate {replicate}")
 
             return SubmissionResult(
                 job_id=job_id,
                 script_path=script_path,
-                segment_index=segment_index,
+                segment_index=0,
                 replicate=replicate,
                 is_dry_run=False,
             )
@@ -429,65 +396,69 @@ class DaisyChainSubmitter:
             LOGGER.error(f"STDERR: {e.stderr}")
             raise RuntimeError(f"Failed to submit job: {e.stderr}") from e
 
-    def submit_replicate_chain(self, replicate: int) -> List[SubmissionResult]:
-        """Submit all jobs for a single replicate.
+    def submit_replicate(self, replicate: int) -> SubmissionResult:
+        """Generate and submit the job for a single replicate.
 
-        Args:
-            replicate: Replicate number
+        Parameters
+        ----------
+        replicate : int
+            Replicate number.
 
-        Returns:
-            List of SubmissionResults for all segments
+        Returns
+        -------
+        SubmissionResult
+            Submission result.
         """
-        LOGGER.info(f"Submitting job chain for replicate {replicate}")
+        LOGGER.info(f"Submitting self-resubmitting job for replicate {replicate}")
 
-        results: List[SubmissionResult] = []
-        segments = self._dc_config.get_segments()
+        script_content = self.generate_job_script(replicate)
+        filename = f"run_rep{replicate}.sh"
+        script_path = self._save_script(script_content, filename)
 
-        for segment in segments:
-            if segment.is_initial:
-                # Initial job
-                script_content = self.generate_initial_script(replicate)
-                filename = f"initial_seg{segment.index}_rep{replicate}.sh"
-                script_path = self._save_script(script_content, filename)
+        result = self._submit_job(script_path=script_path, replicate=replicate)
 
-                result = self._submit_job(
-                    script_path=script_path,
-                    segment_index=segment.index,
-                    replicate=replicate,
-                    dependency_job_id=None,
-                )
+        # Store as a single-element list for backward compatibility
+        self._job_chains[replicate] = [result]
+        return result
 
-            else:
-                # Continuation job
-                script_content = self.generate_continuation_script(segment.index, replicate)
-                filename = f"continue_seg{segment.index}_rep{replicate}.sh"
-                script_path = self._save_script(script_content, filename)
+    def submit_replicate_chain(self, replicate: int) -> List[SubmissionResult]:
+        """Submit job for a single replicate.
 
-                # Depend on previous segment
-                prev_job_id = results[-1].job_id
+        .. deprecated::
+            Use :meth:`submit_replicate` instead.  This method is kept
+            for backward compatibility and returns a single-element list.
 
-                result = self._submit_job(
-                    script_path=script_path,
-                    segment_index=segment.index,
-                    replicate=replicate,
-                    dependency_job_id=prev_job_id,
-                )
+        Parameters
+        ----------
+        replicate : int
+            Replicate number.
 
-            results.append(result)
-
-        self._job_chains[replicate] = results
-        return results
+        Returns
+        -------
+        list of SubmissionResult
+            Single-element list with the submission result.
+        """
+        warnings.warn(
+            "submit_replicate_chain() is deprecated. Use submit_replicate() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        result = self.submit_replicate(replicate)
+        return [result]
 
     def submit_all(self) -> Dict[int, List[SubmissionResult]]:
         """Submit jobs for all replicates.
 
-        Returns:
-            Dictionary mapping replicate numbers to their job chains
+        Returns
+        -------
+        dict
+            Mapping of replicate numbers to their submission results
+            (each value is a single-element list for compatibility).
         """
         self._print_submission_summary()
 
         for replicate in self._dc_config.replicates:
-            self.submit_replicate_chain(replicate)
+            self.submit_replicate(replicate)
 
         self._print_completion_summary()
         return self._job_chains
@@ -496,9 +467,8 @@ class DaisyChainSubmitter:
         """Print a summary before submission."""
         config = self._dc_config
         num_replicates = len(config.replicates)
-        total_jobs = num_replicates * config.total_segments
 
-        print(f"\nPreparing {config.total_segments}-segment simulation jobs")
+        print("\nPreparing self-resubmitting simulation jobs")
         print(f"  Enzyme: {self._sim_config.enzyme.name}")
 
         if self._sim_config.polymers and self._sim_config.polymers.enabled:
@@ -507,16 +477,16 @@ class DaisyChainSubmitter:
 
         print(f"  Temperature: {self._sim_config.thermodynamics.temperature} K")
         print(f"  Total production time: {config.total_production_time_ns} ns")
-        print(f"  Time per segment: {config.segment_duration_ns} ns")
-        print(f"  Samples per segment: {config.samples_per_segment}")
+        print(f"  Total samples: {config.total_samples}")
         print(f"  Replicates: {config.replicates} ({num_replicates} total)")
-        print(f"  Total jobs to submit: {total_jobs}")
-        print(f"  Dependency chains: {num_replicates} independent chains")
+        print(f"  Jobs to submit: {num_replicates} (one per replicate, self-resubmitting)")
         print()
         print("SLURM Configuration:")
         print(f"  Partition: {config.slurm_config.partition}")
-        print(f"  QoS: {config.slurm_config.qos}")
-        print(f"  Account: {config.slurm_config.account}")
+        if config.slurm_config.qos:
+            print(f"  QoS: {config.slurm_config.qos}")
+        if config.slurm_config.account:
+            print(f"  Account: {config.slurm_config.account}")
         print(f"  Time limit: {config.slurm_config.time_limit}")
         print()
 
@@ -530,19 +500,20 @@ class DaisyChainSubmitter:
         total_jobs = sum(len(chain) for chain in self._job_chains.values())
 
         if config.dry_run:
-            print(f"\nDry run completed. {total_jobs} job scripts created.")
+            print(f"\nDry run completed. {total_jobs} job script(s) created.")
             print(f"Scripts saved to: {config.output_script_dir}")
             print("Review the scripts and run without --dry-run to submit them.")
         else:
-            print(f"\nAll {total_jobs} jobs submitted successfully!")
-            print("\nDependency chains:")
+            print(f"\nAll {total_jobs} job(s) submitted successfully!")
+            print("\nSubmitted jobs:")
 
             for replicate, results in sorted(self._job_chains.items()):
-                job_ids = [r.job_id for r in results]
-                print(f"  Replicate {replicate}: {' -> '.join(job_ids)}")
+                job_id = results[0].job_id
+                print(f"  Replicate {replicate}: job {job_id} (self-resubmitting)")
 
-            print("\nMonitor progress with: squeue -u $USER")
-            print("Check job details with: scontrol show job <job_id>")
+            print("\nEach job will automatically resubmit until the simulation completes.")
+            print("Monitor progress with: squeue -u $USER")
+            print("Check simulation status with: polyzymd check-progress -c <config> -r <rep>")
 
 
 def submit_daisy_chain(
@@ -562,41 +533,55 @@ def submit_daisy_chain(
     openff_logs: bool = False,
     skip_build: bool = False,
 ) -> Dict[int, List[SubmissionResult]]:
-    """Convenience function to submit daisy-chain jobs from a YAML config.
+    """Submit self-resubmitting simulation jobs from a YAML config.
 
-    Args:
-        config_path: Path to simulation YAML config
-        slurm_preset: SLURM preset name (aa100, al40, blanca-shirts, bridges2, testing)
-        replicates: Replicate range string (e.g., "1-5", "1,3,5")
-        email: Email for job notifications
-        dry_run: If True, don't submit jobs
-        conda_env: Conda environment name
-        output_dir: Directory for job scripts (default: from config or "job_scripts")
-        scratch_dir: Override scratch directory for simulation output
-        projects_dir: Override projects directory for scripts/logs
-        time_limit: Override SLURM time limit (format: HH:MM:SS or M:SS)
-        memory: Override SLURM memory allocation (e.g., "4G", "8G")
-        account: Override SLURM account / allocation ID.  Required for bridges2.
-        gpu_type: Override GPU type for presets that use the --gpus directive
-            (e.g. "v100-16", "v100-32", "l40s-48", "h100-80" on Bridges2).
-        openff_logs: Enable verbose OpenFF logs in generated scripts
-        skip_build: Skip system building in generated scripts (use pre-built system)
+    This is the main entry point called by ``polyzymd submit``.  Despite
+    the legacy function name, it now submits one self-resubmitting job
+    per replicate rather than a chain of dependent jobs.
 
-    Returns:
-        Dictionary mapping replicate numbers to submission results
+    Parameters
+    ----------
+    config_path : str or Path
+        Path to simulation YAML config.
+    slurm_preset : str
+        SLURM preset name (aa100, al40, blanca-shirts, bridges2, testing).
+    replicates : str
+        Replicate range string (e.g. ``"1-5"``, ``"1,3,5"``).
+    email : str
+        Email for job notifications.
+    dry_run : bool
+        If True, don't submit jobs.
+    conda_env : str
+        Conda environment name.
+    output_dir : str or Path or None
+        Directory for job scripts.
+    scratch_dir : str or Path or None
+        Override scratch directory for simulation output.
+    projects_dir : str or Path or None
+        Override projects directory for scripts/logs.
+    time_limit : str or None
+        Override SLURM time limit (format: ``HH:MM:SS``).
+    memory : str or None
+        Override SLURM memory allocation (e.g. ``"4G"``).
+    account : str or None
+        Override SLURM account / allocation ID.
+    gpu_type : str or None
+        Override GPU type for presets that use ``--gpus`` directive.
+    openff_logs : bool
+        Enable verbose OpenFF logs in generated scripts.
+    skip_build : bool
+        Skip system building in generated scripts.
 
-    Raises:
-        ValueError: If the resolved SLURM account is empty and dry_run is False
-            (actual submission requires a non-empty account).
+    Returns
+    -------
+    dict
+        Mapping of replicate numbers to submission results.
 
-    Example:
-        >>> results = submit_daisy_chain(
-        ...     config_path="simulation.yaml",
-        ...     slurm_preset="aa100",
-        ...     replicates="1-5",
-        ...     email="user@example.com",
-        ...     dry_run=True,
-        ... )
+    Raises
+    ------
+    ValueError
+        If the SLURM account is empty on a preset that requires one
+        and ``dry_run`` is False.
     """
     # Load simulation config
     sim_config = SimulationConfig.from_yaml(config_path)
@@ -617,11 +602,9 @@ def submit_daisy_chain(
     slurm_config = SlurmConfig.from_preset(slurm_preset, email=email)  # type: ignore[arg-type]
 
     # Record whether the preset itself ships with an empty account.
-    # Bridges2 intentionally omits --account (allocation inferred from login),
-    # so an empty account is valid for that preset.
     preset_account_is_empty = not slurm_config.account
 
-    # Apply CLI overrides (each is independent; all follow the same pattern)
+    # Apply CLI overrides
     if time_limit:
         slurm_config.time_limit = time_limit
     if memory:
@@ -633,8 +616,7 @@ def submit_daisy_chain(
 
     # Guard: an empty account on presets that require one (e.g. Alpine) will
     # produce an invalid SBATCH script.  Skip the guard when the preset itself
-    # ships with account="" (e.g. bridges2), where the allocation is inferred
-    # from the login session and the --account directive must be omitted.
+    # ships with account="" (e.g. bridges2).
     if not slurm_config.account and not preset_account_is_empty:
         msg = (
             f"SLURM account is required but was not set for preset '{slurm_preset}'. "
@@ -645,14 +627,14 @@ def submit_daisy_chain(
         else:
             raise ValueError(msg)
 
-    # Create daisy-chain config
+    # Create submission config
     dc_config = DaisyChainConfig.from_simulation_config(
         sim_config=sim_config,
         slurm_config=slurm_config,
         replicates=replicates,
         dry_run=dry_run,
         output_script_dir=script_output_dir,
-        config_path=str(config_path),
+        config_path=str(Path(config_path).resolve()),
     )
 
     # Create submitter and submit
@@ -660,108 +642,3 @@ def submit_daisy_chain(
         sim_config, dc_config, conda_env=conda_env, openff_logs=openff_logs, skip_build=skip_build
     )
     return submitter.submit_all()
-
-
-def main() -> int:
-    """Main entry point for daisy-chain submission CLI.
-
-    Returns:
-        Exit code (0 for success, 1 for failure).
-    """
-    import argparse
-    import sys
-
-    parser = argparse.ArgumentParser(description="Submit daisy-chained MD simulation jobs to SLURM")
-
-    parser.add_argument(
-        "-c",
-        "--config",
-        type=str,
-        required=True,
-        help="Path to simulation YAML configuration file",
-    )
-    parser.add_argument(
-        "-r",
-        "--replicates",
-        type=str,
-        default="1",
-        help="Replicate range (e.g., '1-5', '1,3,5'). Default: 1",
-    )
-    parser.add_argument(
-        "--preset",
-        type=str,
-        choices=["aa100", "al40", "blanca-shirts", "bridges2", "testing"],
-        default="aa100",
-        help="SLURM partition preset. Default: aa100",
-    )
-    parser.add_argument(
-        "--email",
-        type=str,
-        default="",
-        help="Email for job notifications",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Generate scripts but don't submit them",
-    )
-    parser.add_argument(
-        "--conda-env",
-        type=str,
-        default="polyzymd-env",
-        help="Conda environment name. Default: polyzymd-env",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default="daisy_chain_scripts",
-        help="Output directory for job scripts. Default: daisy_chain_scripts",
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Enable verbose logging",
-    )
-
-    args = parser.parse_args()
-
-    # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-    )
-
-    try:
-        submit_daisy_chain(
-            config_path=args.config,
-            slurm_preset=args.preset,
-            replicates=args.replicates,
-            email=args.email,
-            dry_run=args.dry_run,
-            conda_env=args.conda_env,
-            output_dir=args.output_dir,
-        )
-        return 0
-
-    except FileNotFoundError as e:
-        LOGGER.error(f"Configuration file not found: {e}")
-        return 1
-
-    except ValueError as e:
-        LOGGER.error(f"Invalid configuration: {e}")
-        return 1
-
-    except Exception as e:
-        LOGGER.error(f"Error during submission: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return 1
-
-
-if __name__ == "__main__":
-    import sys
-
-    sys.exit(main())
