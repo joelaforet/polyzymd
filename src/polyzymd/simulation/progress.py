@@ -665,9 +665,11 @@ def load_or_scan_progress(
         # Ensure metadata is set (may be missing from old progress files)
         if not progress.config_path and config_path:
             progress.config_path = config_path
-        if progress.total_steps_requested == 0 and total_steps > 0:
+        # Always sync total_steps/samples from config — the user may have
+        # changed the production duration since the progress file was written.
+        if total_steps > 0:
             progress.total_steps_requested = total_steps
-        if progress.total_samples_requested == 0 and total_samples > 0:
+        if total_samples > 0:
             progress.total_samples_requested = total_samples
         return progress
 

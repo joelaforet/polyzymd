@@ -69,11 +69,13 @@ NUM_PRODUCTION_STEPS = 1000  # Very short segment 0
 NUM_SAMPLES = 10  # 10 frames for segment 0
 BOX_SIZE_NM = 3.0  # Small box (must be > 2x nonbonded cutoff for NPT stability)
 
-# Total production: 0.005 ns = 2500 steps total across all segments.
-# Segment 0 does 1000 steps, leaving 1500 for subsequent segments.
-TOTAL_PRODUCTION_NS = 0.005
+# Total production: 1.5 ns = 750000 steps total across all segments.
+# Segment 0 does 1000 steps, leaving 749000 for subsequent segments.
+# At ~6000 steps/s on a Blanca GPU, this gives ~2 minutes of runtime —
+# long enough to test signal interruption via scancel --signal=USR1.
+TOTAL_PRODUCTION_NS = 1.5
 TOTAL_PRODUCTION_STEPS = int(TOTAL_PRODUCTION_NS * 1e6 / TIMESTEP_FS)
-TOTAL_SAMPLES = 25
+TOTAL_SAMPLES = 75
 
 
 def write_config_yaml(config_path: Path, pdb_path: Path) -> None:
