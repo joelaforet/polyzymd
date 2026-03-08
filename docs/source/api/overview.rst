@@ -20,10 +20,12 @@ Package Structure
     │   └── system_builder.py  # Main system assembly
     ├── simulation/       # MD simulation execution
     │   ├── runner.py     # Simulation runner
-    │   └── continuation.py    # Checkpoint continuation
+    │   ├── continuation.py    # Checkpoint continuation
+    │   ├── progress.py   # Segment progress tracking
+    │   └── signals.py    # SLURM signal handling
     ├── workflow/         # HPC workflow management
     │   ├── slurm.py      # SLURM script generation
-    │   └── daisy_chain.py     # Job chaining
+    │   └── daisy_chain.py     # Job submission
     ├── core/             # Core utilities
     │   ├── parameters.py # Simulation parameters
     │   └── restraints.py # Restraint definitions
@@ -54,11 +56,12 @@ Simulation
 
 - :py:class:`~polyzymd.simulation.runner.SimulationRunner` - Run simulations
 - :py:class:`~polyzymd.simulation.continuation.ContinuationManager` - Continue from checkpoint
+- :py:class:`~polyzymd.simulation.progress.SimulationProgress` - Track segment completion across jobs
 
 Workflow
 ~~~~~~~~
 
-- :py:class:`~polyzymd.workflow.daisy_chain.DaisyChainSubmitter` - SLURM job submission
+- :py:class:`~polyzymd.workflow.daisy_chain.DaisyChainSubmitter` - Self-resubmitting SLURM job submission
 - :py:class:`~polyzymd.workflow.slurm.SlurmConfig` - SLURM configuration
 
 Restraints

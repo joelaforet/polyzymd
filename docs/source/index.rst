@@ -19,7 +19,7 @@ Features
 
 - **YAML-based Configuration**: Define your entire simulation in a single, validated config file
 - **Automated System Building**: Combine enzymes, substrates, polymers, and solvents
-- **HPC Integration**: Daisy-chain job submission for SLURM clusters with automatic checkpointing
+- **HPC Integration**: Self-resubmitting SLURM jobs with automatic checkpointing and recovery
 - **Flexible Restraints**: MDAnalysis-style atom selection for distance restraints
 - **OpenFF/OpenMM Backend**: Modern force fields and GPU-accelerated simulations
 
@@ -47,10 +47,9 @@ Quick Example
      length: 5
      count: 2
    
-   simulation_phases:
-     production:
-       duration: 100.0  # ns
-     segments: 10  # for HPC time limits
+    simulation_phases:
+      production:
+        duration: 100.0  # ns
 
 .. code-block:: bash
 

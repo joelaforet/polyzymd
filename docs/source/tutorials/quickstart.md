@@ -136,7 +136,7 @@ simulation_phases:
     thermostat_timescale: 1.0
     barostat: "MC"
     barostat_frequency: 25
-  segments: 1            # Single segment for testing
+
 
 # Output - REQUIRED
 output:
@@ -258,7 +258,7 @@ Summary:
 Simulation phases:
   Equilibration: 1.0 ns (NVT)
   Production: 10.0 ns (NPT)
-  Segments: 1
+
 ```
 
 ## Step 5: Test Build (Dry Run)
@@ -318,7 +318,7 @@ my_simulation/
     ├── solvated_system.pdb
     ├── equilibration/
     │   └── trajectory.dcd
-    └── production_seg0/
+    └── production_0/
         ├── trajectory.dcd
         ├── checkpoint.chk
         └── state_data.csv
