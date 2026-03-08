@@ -11,7 +11,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ChargeMethod(str, Enum):
@@ -851,8 +851,9 @@ class SimulationPhasesConfig(BaseModel):
         equilibration_stages: Multi-stage equilibration protocol (new)
         equilibration: Simple single-stage equilibration (legacy)
         production: Production phase settings
-        segments: Number of segments for daisy-chaining
     """
+
+    model_config = ConfigDict(extra="ignore")
 
     # Staged equilibration (new)
     equilibration_stages: Optional[List[EquilibrationStageConfig]] = Field(
@@ -865,7 +866,24 @@ class SimulationPhasesConfig(BaseModel):
     )
 
     production: SimulationPhaseConfig = Field(..., description="Production settings")
-    segments: int = Field(1, ge=1, description="Number of daisy-chain segments")
+
+    @model_validator(mode="before")
+    @classmethod
+    def warn_deprecated_segments(cls, data: Any) -> Any:
+        """Warn if the deprecated 'segments' field is present and remove it."""
+        if isinstance(data, dict) and "segments" in data:
+            import warnings
+
+            warnings.warn(
+                "The 'segments' field in simulation_phases is deprecated and ignored. "
+                "Simulation segmenting is now handled automatically by the self-resubmitting "
+                "job architecture. Remove 'segments' from your config YAML to suppress "
+                "this warning.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            data.pop("segments", None)
+        return data
 
     @model_validator(mode="after")
     def validate_equilibration_mode(self) -> "SimulationPhasesConfig":
