@@ -874,6 +874,14 @@ class SimulationRunner:
                         steps_completed=steps_done,
                         total_steps=total_steps,
                     )
+                    # Update progress tracker (interrupted)
+                    self._update_progress_interrupted(
+                        segment_index=segment_index,
+                        steps_done=steps_done,
+                        total_steps=total_steps,
+                        duration_ns=duration_ns,
+                        timestep_fs=timestep_fs,
+                    )
                     raise GracefulExit(
                         signal_number=get_interrupt_signal(), steps_completed=steps_done
                     )
@@ -988,6 +996,15 @@ class SimulationRunner:
             json.dump(params_dict, f, indent=2)
         LOGGER.info(f"Saved parameters to {params_path}")
 
+        # Update progress tracker (successful completion)
+        self._update_progress_completed(
+            segment_index=segment_index,
+            total_steps=total_steps,
+            num_samples=num_samples,
+            duration_ns=duration_ns,
+            timestep_fs=timestep_fs,
+        )
+
         results = {
             "phase": "production",
             "segment": segment_index,
@@ -1007,6 +1024,125 @@ class SimulationRunner:
         LOGGER.info(f"Production segment {segment_index} complete")
 
         return results
+
+    def _update_progress_completed(
+        self,
+        segment_index: int,
+        total_steps: int,
+        num_samples: int,
+        duration_ns: float,
+        timestep_fs: float,
+    ) -> None:
+        """Update progress file after successful segment completion.
+
+        Parameters
+        ----------
+        segment_index : int
+            Production segment index (0 for initial production).
+        total_steps : int
+            Steps completed in this segment.
+        num_samples : int
+            Samples written in this segment.
+        duration_ns : float
+            Simulation time of this segment in nanoseconds.
+        timestep_fs : float
+            Integration timestep in femtoseconds.
+        """
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationStatus,
+            _now_iso,
+            load_progress,
+            save_progress,
+        )
+
+        progress = load_progress(self._working_dir)
+        if progress is None:
+            LOGGER.warning("No progress file found — skipping progress update")
+            return
+
+        record = SegmentRecord(
+            index=segment_index,
+            steps_completed=total_steps,
+            steps_requested=total_steps,
+            samples_written=num_samples,
+            status=SegmentStatus.COMPLETED,
+            duration_ns=duration_ns,
+        )
+        record.finished_at = _now_iso()
+
+        progress.segments.append(record)
+
+        # Update overall status
+        if progress.is_complete:
+            progress.status = SimulationStatus.COMPLETED
+        else:
+            progress.status = SimulationStatus.RUNNING
+
+        save_progress(self._working_dir, progress)
+        LOGGER.info(
+            f"Progress updated: {progress.total_steps_completed}/"
+            f"{progress.total_steps_requested} steps "
+            f"({progress.fraction_complete():.1%})"
+        )
+
+    def _update_progress_interrupted(
+        self,
+        segment_index: int,
+        steps_done: int,
+        total_steps: int,
+        duration_ns: float,
+        timestep_fs: float,
+    ) -> None:
+        """Update progress file after segment interruption.
+
+        Parameters
+        ----------
+        segment_index : int
+            Production segment index.
+        steps_done : int
+            Steps completed before interruption.
+        total_steps : int
+            Steps that were planned for this segment.
+        duration_ns : float
+            Planned simulation time of this segment in nanoseconds.
+        timestep_fs : float
+            Integration timestep in femtoseconds.
+        """
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationStatus,
+            load_progress,
+            save_progress,
+        )
+
+        progress = load_progress(self._working_dir)
+        if progress is None:
+            LOGGER.warning("No progress file found — skipping progress update")
+            return
+
+        # Calculate actual duration completed
+        actual_duration_ns = (steps_done * timestep_fs) / 1e6
+
+        record = SegmentRecord(
+            index=segment_index,
+            steps_completed=steps_done,
+            steps_requested=total_steps,
+            samples_written=0,  # Interrupted — samples may be partial
+            status=SegmentStatus.INTERRUPTED,
+            duration_ns=actual_duration_ns,
+        )
+
+        progress.segments.append(record)
+        progress.status = SimulationStatus.INTERRUPTED
+
+        save_progress(self._working_dir, progress)
+        LOGGER.info(
+            f"Progress updated (interrupted): {steps_done}/{total_steps} steps "
+            f"in segment {segment_index}"
+        )
 
     def save_history(self, path: Optional[Union[str, Path]] = None) -> None:
         """Save simulation history to JSON.

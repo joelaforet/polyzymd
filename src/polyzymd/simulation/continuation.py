@@ -2,7 +2,9 @@
 Continuation manager for resuming MD simulations from checkpoints.
 
 This module handles loading simulation state from previous segments
-and continuing production simulations for daisy-chain workflows.
+and continuing the simulation for self-resubmitting HPC workflows.
+Each segment runs until completion or interruption (wall-time / preemption),
+updates the progress tracker, and the SLURM script handles resubmission.
 """
 
 from __future__ import annotations
@@ -68,16 +70,17 @@ class ContinuationManager:
     """Manager for continuing MD simulations from previous segments.
 
     This class handles loading state from previous production segments
-    and continuing the simulation, primarily for daisy-chain workflows
-    on HPC clusters.
+    and continuing the simulation. It integrates with the progress
+    tracking system to enable self-resubmitting idempotent jobs.
 
-    Example:
-        >>> manager = ContinuationManager(
-        ...     working_dir="simulation_output/",
-        ...     segment_index=2,  # Continuing to segment 2
-        ... )
-        >>> manager.load_previous_state()
-        >>> manager.run_segment(duration_ns=20.0, num_samples=250)
+    Example
+    -------
+    >>> manager = ContinuationManager(
+    ...     working_dir="simulation_output/",
+    ...     segment_index=2,  # Continuing to segment 2
+    ... )
+    >>> manager.load_previous_state()
+    >>> manager.run_segment(duration_ns=20.0, num_samples=250)
     """
 
     def __init__(
@@ -87,9 +90,13 @@ class ContinuationManager:
     ) -> None:
         """Initialize the ContinuationManager.
 
-        Args:
-            working_dir: Working directory containing simulation outputs.
-            segment_index: Current segment index (1-based).
+        Parameters
+        ----------
+        working_dir : str or Path
+            Working directory containing simulation outputs.
+        segment_index : int
+            Current segment index (0-based for first continuation after
+            initial production, incrementing from there).
         """
         self._working_dir = Path(working_dir)
         self._segment_index = segment_index
@@ -119,11 +126,15 @@ class ContinuationManager:
     def _find_solvated_pdb(self) -> Path:
         """Find the solvated PDB file in the working directory.
 
-        Returns:
+        Returns
+        -------
+        Path
             Path to the solvated PDB file.
 
-        Raises:
-            FileNotFoundError: If no suitable PDB file is found.
+        Raises
+        ------
+        FileNotFoundError
+            If no suitable PDB file is found.
         """
         patterns = [
             "*solvated*.pdb",
@@ -148,7 +159,9 @@ class ContinuationManager:
     def _get_previous_paths(self) -> Dict[str, Path]:
         """Get paths to files from the previous segment.
 
-        Returns:
+        Returns
+        -------
+        dict
             Dictionary with paths to state, system, and parameter files.
         """
         prev_dir = self._working_dir / f"production_{self._prev_segment}"
@@ -166,8 +179,10 @@ class ContinuationManager:
         This loads the system, topology, and parameters from the previous
         production segment.
 
-        Raises:
-            FileNotFoundError: If required files are missing.
+        Raises
+        ------
+        FileNotFoundError
+            If required files are missing.
         """
         LOGGER.info(f"Loading state from segment {self._prev_segment}")
 
@@ -198,7 +213,9 @@ class ContinuationManager:
     def _create_integrator(self) -> openmm.Integrator:
         """Create an integrator from the parameter dictionary.
 
-        Returns:
+        Returns
+        -------
+        openmm.Integrator
             OpenMM LangevinMiddleIntegrator.
         """
         if self._param_dict is None:
@@ -252,10 +269,14 @@ class ContinuationManager:
     ) -> None:
         """Setup reporters for the simulation.
 
-        Args:
-            total_steps: Total steps for this segment.
-            num_samples: Number of trajectory frames to save.
-            output_dir: Output directory for this segment.
+        Parameters
+        ----------
+        total_steps : int
+            Total steps for this segment.
+        num_samples : int
+            Number of trajectory frames to save.
+        output_dir : Path
+            Output directory for this segment.
         """
         if self._simulation is None:
             raise RuntimeError("Simulation not created")
@@ -293,8 +314,10 @@ class ContinuationManager:
     def _save_final_state(self, output_dir: Path) -> None:
         """Save the final state and system after simulation.
 
-        Args:
-            output_dir: Output directory for this segment.
+        Parameters
+        ----------
+        output_dir : Path
+            Output directory for this segment.
         """
         if self._simulation is None:
             raise RuntimeError("Simulation not available")
@@ -320,6 +343,120 @@ class ContinuationManager:
         LOGGER.info(f"Saved final state to {state_path}")
         LOGGER.info(f"Saved system to {system_path}")
 
+    def _update_progress_completed(
+        self,
+        total_steps: int,
+        num_samples: int,
+        duration_ns: float,
+        timestep_fs: float,
+    ) -> None:
+        """Update progress file after successful segment completion.
+
+        Parameters
+        ----------
+        total_steps : int
+            Steps completed in this segment.
+        num_samples : int
+            Samples written in this segment.
+        duration_ns : float
+            Simulation time of this segment in nanoseconds.
+        timestep_fs : float
+            Integration timestep in femtoseconds.
+        """
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationStatus,
+            load_progress,
+            save_progress,
+        )
+
+        progress = load_progress(self._working_dir)
+        if progress is None:
+            LOGGER.warning("No progress file found — skipping progress update")
+            return
+
+        record = SegmentRecord(
+            index=self._segment_index,
+            steps_completed=total_steps,
+            steps_requested=total_steps,
+            samples_written=num_samples,
+            status=SegmentStatus.COMPLETED,
+            duration_ns=duration_ns,
+        )
+        from polyzymd.simulation.progress import _now_iso
+
+        record.finished_at = _now_iso()
+
+        progress.segments.append(record)
+
+        # Update overall status
+        if progress.is_complete:
+            progress.status = SimulationStatus.COMPLETED
+        else:
+            progress.status = SimulationStatus.RUNNING
+
+        save_progress(self._working_dir, progress)
+        LOGGER.info(
+            f"Progress updated: {progress.total_steps_completed}/"
+            f"{progress.total_steps_requested} steps "
+            f"({progress.fraction_complete():.1%})"
+        )
+
+    def _update_progress_interrupted(
+        self,
+        steps_done: int,
+        total_steps: int,
+        duration_ns: float,
+        timestep_fs: float,
+    ) -> None:
+        """Update progress file after segment interruption.
+
+        Parameters
+        ----------
+        steps_done : int
+            Steps completed before interruption.
+        total_steps : int
+            Steps that were planned for this segment.
+        duration_ns : float
+            Planned simulation time of this segment in nanoseconds.
+        timestep_fs : float
+            Integration timestep in femtoseconds.
+        """
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationStatus,
+            load_progress,
+            save_progress,
+        )
+
+        progress = load_progress(self._working_dir)
+        if progress is None:
+            LOGGER.warning("No progress file found — skipping progress update")
+            return
+
+        # Calculate actual duration completed
+        actual_duration_ns = (steps_done * timestep_fs) / 1e6
+
+        record = SegmentRecord(
+            index=self._segment_index,
+            steps_completed=steps_done,
+            steps_requested=total_steps,
+            samples_written=0,  # Interrupted — samples may be partial
+            status=SegmentStatus.INTERRUPTED,
+            duration_ns=actual_duration_ns,
+        )
+
+        progress.segments.append(record)
+        progress.status = SimulationStatus.INTERRUPTED
+
+        save_progress(self._working_dir, progress)
+        LOGGER.info(
+            f"Progress updated (interrupted): {steps_done}/{total_steps} steps "
+            f"in segment {self._segment_index}"
+        )
+
     def run_segment(
         self,
         duration_ns: float,
@@ -328,12 +465,23 @@ class ContinuationManager:
     ) -> Dict[str, Any]:
         """Run the continuation segment.
 
-        Args:
-            duration_ns: Duration of this segment in nanoseconds.
-            num_samples: Number of trajectory frames to save.
-            timestep_fs: Time step in femtoseconds.
+        Runs the simulation for the specified duration, saving trajectory
+        frames at regular intervals. On completion, updates the progress
+        tracker. On interruption (SIGUSR1/SIGTERM), saves emergency state,
+        updates the progress tracker, and raises ``GracefulExit``.
 
-        Returns:
+        Parameters
+        ----------
+        duration_ns : float
+            Duration of this segment in nanoseconds.
+        num_samples : int
+            Number of trajectory frames to save.
+        timestep_fs : float
+            Time step in femtoseconds.
+
+        Returns
+        -------
+        dict
             Dictionary with segment results.
         """
         if self._system is None or self._topology is None:
@@ -383,7 +531,6 @@ class ContinuationManager:
 
         # Install signal handlers for graceful shutdown (SIGUSR1 / SIGTERM)
         from polyzymd.simulation.signals import (
-            EXIT_CODE_INTERRUPTED,
             GracefulExit,
             get_interrupt_signal,
             install_handlers,
@@ -413,11 +560,18 @@ class ContinuationManager:
                         steps_completed=steps_done,
                         total_steps=total_steps,
                     )
+                    # Update progress before raising
+                    self._update_progress_interrupted(
+                        steps_done=steps_done,
+                        total_steps=total_steps,
+                        duration_ns=duration_ns,
+                        timestep_fs=timestep_fs,
+                    )
                     raise GracefulExit(
                         signal_number=get_interrupt_signal(), steps_completed=steps_done
                     )
         except GracefulExit:
-            raise  # Re-raise so caller (main()) can set exit code
+            raise  # Re-raise so caller can set exit code
         except Exception:
             # On unexpected crash, still try to save emergency state
             try:
@@ -435,6 +589,14 @@ class ContinuationManager:
         # Save final state
         self._save_final_state(output_dir)
 
+        # Update progress tracker
+        self._update_progress_completed(
+            total_steps=total_steps,
+            num_samples=num_samples,
+            duration_ns=duration_ns,
+            timestep_fs=timestep_fs,
+        )
+
         results = {
             "segment_index": self._segment_index,
             "duration_ns": duration_ns,
@@ -448,9 +610,15 @@ class ContinuationManager:
 
 
 def main() -> int:
-    """Main entry point for continuation script.
+    """Legacy entry point for continuation script.
 
-    Returns:
+    .. deprecated::
+        Use ``polyzymd run-segment`` CLI command instead, which provides
+        unified initial/continuation logic with progress tracking.
+
+    Returns
+    -------
+    int
         Exit code (0 for success, 1 for failure, 99 for graceful interrupt).
     """
     import argparse
