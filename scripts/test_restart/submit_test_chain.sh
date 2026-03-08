@@ -135,7 +135,10 @@ cat > slurm_test_seg0.sh <<'SLURM_SEG0'
 #SBATCH --job-name=test_seg0
 #SBATCH --output=slurm-seg0-%j.out
 #SBATCH --time=@@WALL_TIME@@
+#SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --mem=3G
+#SBATCH --gres=gpu:1
 #SBATCH --signal=B:USR1@120
 #SBATCH --no-requeue
 
@@ -175,7 +178,10 @@ cat > slurm_test_seg1.sh <<'SLURM_SEG1'
 #SBATCH --job-name=test_seg1
 #SBATCH --output=slurm-seg1-%j.out
 #SBATCH --time=@@WALL_TIME@@
+#SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --mem=3G
+#SBATCH --gres=gpu:1
 #SBATCH --signal=B:USR1@120
 #SBATCH --no-requeue
 
@@ -283,7 +289,10 @@ cat > slurm_test_seg2.sh <<'SLURM_SEG2'
 #SBATCH --job-name=test_seg2
 #SBATCH --output=slurm-seg2-%j.out
 #SBATCH --time=@@WALL_TIME@@
+#SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --mem=3G
+#SBATCH --gres=gpu:1
 #SBATCH --signal=B:USR1@120
 #SBATCH --no-requeue
 
