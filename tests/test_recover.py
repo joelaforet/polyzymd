@@ -1,15 +1,15 @@
-"""Tests for the recover and recover-chain CLI commands.
+"""Tests for the recover and check-progress CLI commands.
 
 Covers:
-- INTERRUPTED marker parsing
-- recover --dry-run output
-- recover-chain directory scanning and status reporting
 - _find_topology_pdb helper
+- recover CLI with new self-resubmitting interface
+- check-progress CLI (exit code 0 = complete, 1 = work remains)
 - SLURM template recovery preamble content
-- afterany dependency in daisy chain
+- Self-resubmitting model (no afterany dependencies)
 """
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -19,18 +19,6 @@ from polyzymd.cli.main import _find_topology_pdb, cli
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _write_interrupted_marker(seg_dir: Path, steps_completed: int, total_steps: int) -> None:
-    """Write an INTERRUPTED marker file to a segment directory."""
-    seg_dir.mkdir(parents=True, exist_ok=True)
-    remaining = total_steps - steps_completed
-    (seg_dir / "INTERRUPTED").write_text(
-        f"segment_index={seg_dir.name.split('_')[1]}\n"
-        f"steps_completed={steps_completed}\n"
-        f"total_steps={total_steps}\n"
-        f"remaining_steps={remaining}\n"
-    )
 
 
 def _write_completed_segment(seg_dir: Path, seg_idx: int) -> None:
@@ -74,120 +62,184 @@ class TestFindTopologyPdb:
 
 
 # ---------------------------------------------------------------------------
-# recover --dry-run
+# recover CLI (new self-resubmitting interface)
 # ---------------------------------------------------------------------------
 
 
-class TestRecoverDryRun:
-    """recover --dry-run reads the INTERRUPTED marker and exits without running."""
+def _mock_sim_config(working_dir: Path):
+    """Create a mock SimulationConfig that returns working_dir."""
+    mock = MagicMock()
+    mock.get_working_directory.return_value = working_dir
+    mock.simulation_phases.production.time_step = 2.0
+    mock.simulation_phases.production.duration = 20.0  # ns
+    mock.simulation_phases.production.samples = 250
+    return mock
 
-    def test_dry_run_shows_steps(self, tmp_path):
-        seg_dir = tmp_path / "production_3"
-        _write_interrupted_marker(seg_dir, steps_completed=50000, total_steps=100000)
-        # Write parameters file (needed for dry run)
-        import json
 
-        params = {
-            "__values__": {
-                "integ_params": {
-                    "__values__": {
-                        "num_samples": 250,
-                        "time_step": {
-                            "__class__": "Quantity",
-                            "__values__": {"value": 2.0, "unit": "femtosecond"},
-                        },
-                        "total_time": {
-                            "__class__": "Quantity",
-                            "__values__": {"value": 20.0, "unit": "nanosecond"},
-                        },
-                    }
-                },
-                "thermo_params": {"__values__": {}},
-            }
-        }
-        (seg_dir / "production_3_parameters.json").write_text(json.dumps(params))
+def _mock_progress(
+    total_steps=10000000,
+    completed_steps=5000000,
+    is_complete=False,
+    n_segments=1,
+):
+    """Create a mock SimulationProgress."""
+    from polyzymd.simulation.progress import (
+        SegmentRecord,
+        SegmentStatus,
+        SimulationProgress,
+        SimulationStatus,
+    )
+
+    segments = []
+    for i in range(n_segments):
+        seg = SegmentRecord(
+            index=i,
+            steps_completed=completed_steps // max(n_segments, 1),
+            steps_requested=completed_steps // max(n_segments, 1),
+            samples_written=125,
+            status=SegmentStatus.COMPLETED,
+            duration_ns=10.0 / max(n_segments, 1),
+        )
+        segments.append(seg)
+
+    return SimulationProgress(
+        config_path="/tmp/config.yaml",
+        total_steps_requested=total_steps,
+        total_samples_requested=250,
+        timestep_fs=2.0,
+        segments=segments,
+        status=SimulationStatus.COMPLETED if is_complete else SimulationStatus.INTERRUPTED,
+        replicate=1,
+    )
+
+
+class TestRecoverStatusReport:
+    """recover CLI shows progress status."""
+
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_shows_progress_report(self, mock_from_yaml, mock_load, mock_save, tmp_path):
+        """recover should report steps completed and remaining."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        sim_config = _mock_sim_config(working_dir)
+        mock_from_yaml.return_value = sim_config
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
 
         runner = CliRunner()
-        result = runner.invoke(
-            cli,
-            ["recover", "-w", str(tmp_path), "-s", "3", "--dry-run"],
-        )
+        result = runner.invoke(cli, ["recover", "-c", str(config_file), "-r", "1"])
         assert result.exit_code == 0
-        assert "50000/100000" in result.output
-        assert "DRY RUN" in result.output
+        assert "5000000/10000000" in result.output
+        assert "50.0%" in result.output
 
-    def test_no_marker_exits_with_error(self, tmp_path):
-        seg_dir = tmp_path / "production_3"
-        seg_dir.mkdir(parents=True)
-        # No INTERRUPTED marker
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_complete_simulation_shows_nothing_to_recover(
+        self, mock_from_yaml, mock_load, mock_save, tmp_path
+    ):
+        """recover should show 'nothing to recover' when simulation is done."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        sim_config = _mock_sim_config(working_dir)
+        mock_from_yaml.return_value = sim_config
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=10000000, is_complete=True, n_segments=2
+        )
 
         runner = CliRunner()
-        result = runner.invoke(
-            cli,
-            ["recover", "-w", str(tmp_path), "-s", "3"],
-        )
+        result = runner.invoke(cli, ["recover", "-c", str(config_file), "-r", "1"])
+        assert result.exit_code == 0
+        assert "nothing to recover" in result.output.lower()
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_missing_working_dir_exits_with_error(self, mock_from_yaml, tmp_path):
+        """recover should fail when working directory does not exist."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+
+        mock_from_yaml.return_value = _mock_sim_config(tmp_path / "nonexistent")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["recover", "-c", str(config_file), "-r", "1"])
         assert result.exit_code != 0
-        assert "No INTERRUPTED marker" in result.output
 
 
 # ---------------------------------------------------------------------------
-# recover-chain
+# check-progress CLI
 # ---------------------------------------------------------------------------
 
 
-class TestRecoverChain:
-    """recover-chain scans production directories and reports status."""
+class TestCheckProgress:
+    """check-progress reports status and exits with correct code."""
 
-    def test_all_completed(self, tmp_path):
-        for i in range(3):
-            _write_completed_segment(tmp_path / f"production_{i}", i)
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_complete_exits_zero(self, mock_from_yaml, mock_load, tmp_path):
+        """check-progress should exit 0 when simulation is complete."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
 
-        runner = CliRunner()
-        result = runner.invoke(cli, ["recover-chain", "-w", str(tmp_path), "--dry-run"])
-        assert result.exit_code == 0
-        assert "3 completed" in result.output
-        assert "0 interrupted" in result.output
-        assert "All segments healthy" in result.output
-
-    def test_one_interrupted(self, tmp_path):
-        _write_completed_segment(tmp_path / "production_0", 0)
-        _write_completed_segment(tmp_path / "production_1", 1)
-        seg2 = tmp_path / "production_2"
-        _write_interrupted_marker(seg2, 30000, 100000)
+        sim_config = _mock_sim_config(working_dir)
+        mock_from_yaml.return_value = sim_config
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=10000000, is_complete=True, n_segments=2
+        )
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["recover-chain", "-w", str(tmp_path), "--dry-run"])
+        result = runner.invoke(cli, ["check-progress", "-c", str(config_file), "-r", "1"])
         assert result.exit_code == 0
-        assert "1 interrupted" in result.output
-        assert "INTERRUPTED" in result.output
-        assert "DRY RUN" in result.output
+        assert "COMPLETE" in result.output
 
-    def test_missing_segment(self, tmp_path):
-        _write_completed_segment(tmp_path / "production_0", 0)
-        # production_1 exists but has no state.xml and no INTERRUPTED marker
-        (tmp_path / "production_1").mkdir()
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_incomplete_exits_one(self, mock_from_yaml, mock_load, tmp_path):
+        """check-progress should exit 1 when work remains."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        sim_config = _mock_sim_config(working_dir)
+        mock_from_yaml.return_value = sim_config
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["recover-chain", "-w", str(tmp_path), "--dry-run"])
-        assert result.exit_code == 0
-        assert "1 missing" in result.output
-        assert "MISSING" in result.output
+        result = runner.invoke(cli, ["check-progress", "-c", str(config_file), "-r", "1"])
+        assert result.exit_code == 1
+        assert "remaining" in result.output.lower()
 
-    def test_no_segments(self, tmp_path):
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_shows_segment_count(self, mock_from_yaml, mock_load, tmp_path):
+        """check-progress should report the number of segments."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        sim_config = _mock_sim_config(working_dir)
+        mock_from_yaml.return_value = sim_config
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=3
+        )
+
         runner = CliRunner()
-        result = runner.invoke(cli, ["recover-chain", "-w", str(tmp_path), "--dry-run"])
-        assert result.exit_code == 0
-        assert "No production segments found" in result.output
-
-    def test_resume_dir_noted(self, tmp_path):
-        _write_completed_segment(tmp_path / "production_0", 0)
-        # Create a resume directory
-        (tmp_path / "production_0_resume").mkdir()
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["recover-chain", "-w", str(tmp_path), "--dry-run"])
-        assert result.exit_code == 0
-        assert "has resume/" in result.output
+        result = runner.invoke(cli, ["check-progress", "-c", str(config_file), "-r", "1"])
+        assert "3 segment(s)" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -259,19 +311,34 @@ class TestSlurmTemplateRecovery:
 
 
 # ---------------------------------------------------------------------------
-# afterany dependency
+# Self-resubmitting model (no dependency chains)
 # ---------------------------------------------------------------------------
 
 
-class TestAfteranyDependency:
-    """DaisyChainSubmitter uses afterany instead of afterok."""
+class TestSelfResubmittingModel:
+    """DaisyChainSubmitter uses self-resubmitting jobs, not afterany chains."""
 
-    def test_afterany_in_source(self):
-        """Verify the dependency string uses afterany."""
+    def test_no_afterany_in_submit_job(self):
+        """Verify _submit_job does NOT use afterany dependencies."""
         import inspect
 
         from polyzymd.workflow.daisy_chain import DaisyChainSubmitter
 
         source = inspect.getsource(DaisyChainSubmitter._submit_job)
-        assert "afterany" in source
+        assert "afterany" not in source
         assert "afterok" not in source
+
+    def test_generate_job_script_produces_self_resubmitting(self):
+        """The unified job template should resubmit via sbatch $SLURM_JOB_SCRIPT."""
+        from polyzymd.workflow.slurm import SlurmConfig, SlurmScriptGenerator
+
+        gen = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), conda_env="test-env")
+        script = gen.generate_job_script(
+            config_path="/tmp/config.yaml",
+            replicate=1,
+            working_dir="/tmp/work",
+        )
+        assert "SLURM_JOB_SCRIPT" in script
+        assert "sbatch" in script
+        assert "check-progress" in script
+        assert "run-segment" in script

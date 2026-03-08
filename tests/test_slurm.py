@@ -595,6 +595,9 @@ class TestJobNameGeneration:
     Ensures the polymer composition suffix in SLURM --job-name matches the
     directory naming convention (e.g. SBMA-OEGMA_A75_B25) rather than the
     old minority-only format (SBMA-OEGMA-25%).
+
+    The new signature is _create_job_name(replicate) — segment index was
+    removed because each replicate uses a single self-resubmitting job.
     """
 
     def _make_submitter(self, enzyme_name, temperature, monomers_by_label):
@@ -637,7 +640,7 @@ class TestJobNameGeneration:
     def test_copolymer_uses_label_composition_format(self):
         """75/25 copolymer should produce SBMA-OEGMA_A75_B25, not SBMA-OEGMA-25%."""
         submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, {"A": 0.75, "B": 0.25})
-        name = submitter._create_job_name(0, 1)
+        name = submitter._create_job_name(1)
         assert "SBMA-OEGMA_A75_B25" in name
         assert "25%" not in name
         assert "-25" not in name
@@ -645,39 +648,35 @@ class TestJobNameGeneration:
     def test_copolymer_label_order_is_alphabetical(self):
         """Labels must be sorted alphabetically regardless of input order."""
         submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, {"B": 0.25, "A": 0.75})
-        name = submitter._create_job_name(0, 1)
+        name = submitter._create_job_name(1)
         # A must come before B
         assert name.index("_A75") < name.index("_B25")
 
     def test_full_name_format_two_monomers(self):
-        """Full job name should be s{seg}_r{rep}_{T}K_{enzyme}_{prefix}_{comp}."""
+        """Full job name should be r{rep}_{T}K_{enzyme}_{prefix}_{comp}."""
         submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, {"A": 0.75, "B": 0.25})
-        assert submitter._create_job_name(0, 1) == (
-            "s0_r1_310K_Fibronectin_8_to_10_SBMA-OEGMA_A75_B25"
-        )
+        assert submitter._create_job_name(1) == ("r1_310K_Fibronectin_8_to_10_SBMA-OEGMA_A75_B25")
 
-    def test_segment_and_replicate_encoded(self):
-        """Segment and replicate indices must appear in the job name."""
+    def test_replicate_encoded(self):
+        """Replicate index must appear in the job name."""
         submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, {"A": 0.75, "B": 0.25})
-        assert submitter._create_job_name(3, 2) == (
-            "s3_r2_310K_Fibronectin_8_to_10_SBMA-OEGMA_A75_B25"
-        )
+        assert submitter._create_job_name(2) == ("r2_310K_Fibronectin_8_to_10_SBMA-OEGMA_A75_B25")
 
     def test_no_polymer_omits_composition_suffix(self):
         """When no polymer is configured, name should have no polymer suffix."""
         submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, None)
-        assert submitter._create_job_name(0, 1) == "s0_r1_310K_Fibronectin_8_to_10"
+        assert submitter._create_job_name(1) == "r1_310K_Fibronectin_8_to_10"
 
     def test_three_monomer_composition(self):
         """Three-monomer system should list all three labels in sorted order."""
         submitter = self._make_submitter("LipA", 300.0, {"A": 0.50, "B": 0.30, "C": 0.20})
-        name = submitter._create_job_name(0, 1)
+        name = submitter._create_job_name(1)
         assert "SBMA-OEGMA_A50_B30_C20" in name
 
     def test_integer_rounding_of_probabilities(self):
         """Floating-point probabilities must round to clean integer percentages."""
         submitter = self._make_submitter("LipA", 300.0, {"A": 0.333, "B": 0.667})
-        name = submitter._create_job_name(0, 1)
+        name = submitter._create_job_name(1)
         # int(0.333 * 100) = 33, int(0.667 * 100) = 66
         assert "A33" in name
         assert "B66" in name
