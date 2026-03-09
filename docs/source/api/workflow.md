@@ -1,6 +1,6 @@
 # Workflow Module
 
-## Daisy Chain Submitter
+## Job Submitter
 
 ```{eval-rst}
 .. automodule:: polyzymd.workflow.daisy_chain

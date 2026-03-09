@@ -4,7 +4,7 @@ This guide covers running PolyzyMD simulations on HPC clusters using SLURM.
 
 ## Overview
 
-Long MD simulations often exceed HPC time limits (typically 24-48 hours). PolyzyMD solves this with **daisy-chaining**: breaking simulations into segments that run as dependent SLURM jobs.
+Long MD simulations often exceed HPC time limits (typically 24-48 hours). PolyzyMD solves this with **self-resubmitting jobs**: each SLURM job runs a single simulation segment, checks whether work remains, and resubmits itself if not finished. This approach is simpler and more robust than dependency chains — every job is identical, and the simulation resumes correctly after wall-time limits, preemptions, or node failures.
 
 ## User Workflow
 
@@ -39,7 +39,7 @@ cp -r /path/to/polymer_sdfs ./ATRP_EGPMA_SBMA_5-mer/
 polyzymd submit -c config.yaml --preset testing --dry-run
 
 # 5. Review the generated scripts
-cat job_scripts/initial_seg0_rep1.sh
+cat job_scripts/r1_300K_LipA.sh
 
 # 6. Submit for real (quick test first)
 polyzymd submit -c config.yaml --preset testing --time-limit 0:05:00 --replicates 1
@@ -68,22 +68,23 @@ PolyzyMD supports separating:
 │   │   ├── EGPMA-SBMA_AAAAA_5-mer_charged.sdf
 │   │   └── ...
 │   ├── job_scripts/                # Generated SLURM scripts
-│   │   ├── initial_seg0_rep1.sh
-│   │   ├── continue_seg1_rep1.sh
+│   │   ├── r1_300K_LipA.sh        # One script per replicate
+│   │   ├── r2_300K_LipA.sh
 │   │   └── ...
 │   └── slurm_logs/                 # Job output files
-│       └── s0_r1_300K_LipA.out
+│       └── r1_300K_LipA.12345.out
 
 /scratch/alpine/$USER/polyzymd_sims/  # High-performance storage
 ├── LipA_Substrate_EGPMA-SBMA_10pct_300K_run1/
 │   ├── system.pdb
+│   ├── progress.json               # Progress tracking file
 │   ├── equilibration/
 │   │   └── trajectory.dcd
-│   ├── production_seg0/
+│   ├── production_0/
 │   │   ├── trajectory.dcd
 │   │   ├── checkpoint.chk
 │   │   └── state_data.csv
-│   └── production_seg1/
+│   └── production_1/
 │       └── ...
 └── LipA_Substrate_EGPMA-SBMA_10pct_300K_run2/
 ```
@@ -241,7 +242,7 @@ polyzymd submit -c config.yaml \
     --dry-run
 
 # 2. Inspect the generated SBATCH directives
-cat job_scripts/initial_seg0_rep1.sh | head -20
+head -20 job_scripts/r1_300K_LipA.sh
 # You should see:
 #   #SBATCH --partition=GPU-shared
 #   #SBATCH -N 1                    ← single-line nodes directive
@@ -270,15 +271,16 @@ On Bridges2, use Ocean storage for long-term data and local scratch for active s
 │   │   ├── enzyme.pdb
 │   │   └── substrate.sdf
 │   ├── job_scripts/
-│   │   ├── initial_seg0_rep1.sh
+│   │   ├── r1_300K_LipA.sh
 │   │   └── ...
 │   └── slurm_logs/
 
 /local/scratch/$USER/polyzymd_sims/          # High-performance local scratch
 ├── LipA_Substrate_300K_run1/
 │   ├── system.pdb
+│   ├── progress.json
 │   ├── equilibration/
-│   └── production_seg0/
+│   └── production_0/
 ```
 
 Set these paths in your `config.yaml`:
@@ -301,39 +303,230 @@ polyzymd submit -c config.yaml \
 
 ---
 
-## Daisy-Chain Workflow
+## Self-Resubmitting Job Model
 
 ### How It Works
 
-1. **Initial job**: Builds system, runs equilibration, runs first production segment
-2. **Continuation jobs**: Load checkpoint, run next segment
-3. **Dependencies**: Each job depends on the previous one completing successfully
+PolyzyMD generates one identical SLURM script per replicate. Each job:
+
+1. Calls `polyzymd run-segment` to run the next segment of work
+2. After the segment finishes (or is interrupted), calls `polyzymd check-progress` to see if the simulation is complete
+3. If work remains, resubmits itself via `sbatch "$THIS_SCRIPT"`
+4. If the simulation is complete, exits cleanly
 
 ```
-Job 1 (initial)     Job 2 (continue)    Job 3 (continue)
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ Build       │     │ Load chkpt  │     │ Load chkpt  │
-│ Equilibrate │ --> │ Run seg 1   │ --> │ Run seg 2   │
-│ Run seg 0   │     │ Save chkpt  │     │ Save chkpt  │
-└─────────────┘     └─────────────┘     └─────────────┘
+  ┌───────────────────────────┐
+  │  Job submits itself       │
+  │                           │◄──────────────────┐
+  │  1. run-segment           │                   │
+  │     (build/eq/prod OR     │                   │
+  │      continue from last)  │                   │
+  │                           │                   │
+  │  2. check-progress        │     resubmit      │
+  │     └─ complete? exit 0   │                   │
+  │     └─ work remains? ─────┼───────────────────┘
+  │     └─ error? exit $RC    │
+  └───────────────────────────┘
 ```
 
-### Configuring Segments
+This model is simpler and more fault-tolerant than dependency chains:
+- **No `afterany` dependencies** — each job is independent
+- **Automatic recovery** — if a job is interrupted by wall-time or preemption, it saves a checkpoint, resubmits, and the next invocation picks up where it left off
+- **Idempotent** — each job scans the filesystem to determine what work remains, so the same script can be resubmitted manually at any time
+
+### Progress Tracking
+
+PolyzyMD tracks simulation progress in a `progress.json` file in the working directory. This file records:
+- Which segments have completed
+- How many steps each segment ran
+- Whether any segments were interrupted
+- The total steps requested vs. completed
+
+On startup, `run-segment` validates the progress file against the filesystem (checking for `production_N/` directories and their contents) to ensure consistency.
+
+### Configuring Production Duration
+
+Specify the total simulation time in your config. PolyzyMD determines segment boundaries automatically based on wall-time:
 
 ```yaml
 simulation_phases:
   production:
-    duration: 100.0    # 100 ns total
-  segments: 10         # 10 segments of 10 ns each
+    duration: 100.0    # 100 ns total production time
 ```
 
 ```{tip}
-**Segment duration** = total duration / segments
-
-Choose segment duration to fit within your cluster's time limit with margin:
-- 24h limit → ~8-10 ns segments (2h GPU time + overhead)
-- 48h limit → ~20 ns segments
+You don't need to configure segments manually. Each job runs as much
+production time as it can before the wall-time limit, checkpoints, and
+resubmits. The segment duration is determined at runtime by the
+``--segment-time`` and ``--segment-frames`` options passed to ``run``
+(which ``submit`` computes automatically from your config).
 ```
+
+---
+
+(smart-restart)=
+## Smart Restart & Fault Tolerance
+
+When you run 60 replicates, each resubmitting multiple times, robustness is
+critical. PolyzyMD's **smart restart** system handles interruptions
+automatically. The generated scripts already include everything described
+below — you do not need to configure anything. This section explains what
+happens under the hood so you can debug issues or adapt the approach to
+other workflows.
+
+### What Happens Automatically
+
+Every generated SLURM script includes three pieces of fault-tolerance
+infrastructure:
+
+1. **Signal handling** — Python-side handlers catch SIGUSR1 (wall-time
+   warning) and SIGTERM (preemption), save an interrupted checkpoint, and
+   exit with code 99.
+2. **Signal forwarding** — Bash trap + background + wait pattern forwards
+   signals from the SLURM batch shell to the Python child process.
+3. **Progress tracking** — After each segment (whether completed or
+   interrupted), the progress file is updated so the next invocation
+   knows exactly where to resume.
+
+### The Three Scenarios
+
+| Scenario | Signal | What Happens | Outcome |
+|----------|--------|--------------|---------|
+| **Wall-time warning** | `SIGUSR1` (5 min before limit) | Interrupted state saved, progress updated, exit 99 | Job resubmits and resumes |
+| **Preemption** | `SIGTERM` (120 s grace on Blanca) | Interrupted state saved, progress updated, exit 99 | Job resubmits and resumes |
+| **Hard crash** | None (OOM, segfault, node failure) | No state saved | Job resubmits; `run-segment` detects incomplete segment and handles it |
+
+```{note}
+The wall-time signal is configured via `#SBATCH --signal=B:USR1@300`, which
+tells SLURM to send `SIGUSR1` to the batch shell 300 seconds (5 minutes)
+before the time limit expires. This gives the simulation enough time to
+save a full OpenMM state (~10-30 seconds on GPU).
+```
+
+### Interrupted State Files
+
+When an interrupt is detected, the signal handler writes three files into
+the current segment's directory (e.g. `production_3/`):
+
+| File | Purpose |
+|------|---------|
+| `interrupted_state.xml` | Portable OpenMM state (positions, velocities, forces) |
+| `interrupted_system.xml` | Serialized OpenMM System (force field parameters) |
+| `INTERRUPTED` | Marker file with step-count metadata for recovery |
+
+The `INTERRUPTED` marker contains the information needed for recovery:
+
+```
+segment_index=3
+steps_completed=1250000
+total_steps=2500000
+remaining_steps=1250000
+```
+
+### Signal Forwarding: Why trap + background + wait?
+
+SLURM sends signals to the **batch shell process**, not to child processes.
+Bash ignores `SIGUSR1` by default, so without explicit forwarding, the
+Python simulation never sees the signal. The generated scripts use a
+standard pattern to solve this:
+
+```bash
+# Background the Python process
+polyzymd run-segment -c "$CONFIG_PATH" -r "$REPLICATE" --scratch-dir "$WORKING_DIR" &
+CHILD_PID=$!
+
+# Trap signals and forward them to the child
+trap 'forward_signal USR1' USR1
+trap 'forward_signal TERM' TERM
+
+# Wait in a loop (wait is interrupted by trapped signals)
+wait "$CHILD_PID"
+RC=$?
+while kill -0 "$CHILD_PID" 2>/dev/null; do
+    wait "$CHILD_PID"
+    RC=$?
+done
+```
+
+```{warning}
+Do not remove the `trap`, backgrounding (`&`), or `wait` loop from the
+generated scripts. Without them, signals will not reach the Python process
+and graceful shutdown will not work.
+```
+
+### Manually Triggering an Interrupt
+
+You can test graceful shutdown or manually stop a running simulation by
+sending `SIGUSR1` via `scancel`:
+
+```bash
+# Send USR1 to a specific job
+scancel --signal=USR1 <job_id>
+
+# The job will save interrupted state, update progress, and exit with code 99
+# The resubmission logic then resubmits the job to continue
+```
+
+This is useful when you realize a simulation has a problem and want to
+stop it cleanly without losing progress.
+
+### Cancelling a Job Permanently
+
+Because `scancel` sends `SIGTERM`, and our scripts treat SIGTERM the same as
+SIGUSR1 (save state, exit 99, resubmit), a plain `scancel <job_id>` will
+**not** permanently stop a simulation — the job will save its state and
+resubmit itself.
+
+To truly cancel a simulation so it does not restart, use `--signal=KILL`:
+
+```bash
+# Permanently stop a job (no state saved, no resubmission)
+scancel --signal=KILL <job_id>
+
+# Equivalent shorthand
+scancel -s KILL <job_id>
+```
+
+`SIGKILL` cannot be caught or trapped by bash or Python, so the process
+dies immediately and the resubmission logic never runs. The last
+*completed* segment's checkpoint is still intact — only in-progress work
+since the last checkpoint is lost.
+
+| Command | Saves state? | Resubmits? | Use case |
+|---------|-------------|-----------|----------|
+| `scancel <job_id>` | Yes | **Yes** | Don't use this to permanently stop a simulation |
+| `scancel --signal=USR1 <job_id>` | Yes | **Yes** | Graceful stop (saves progress, continues later) |
+| `scancel --signal=KILL <job_id>` | No | **No** | Permanently cancel a simulation |
+
+```{tip}
+If you need to cancel **all replicates** of a simulation, cancel them all
+at once so that none resubmit before you can cancel the others:
+
+    scancel --signal=KILL <job_id_1> <job_id_2> <job_id_3>
+
+Or cancel all your jobs:
+
+    scancel --signal=KILL -u $USER
+```
+
+### Manual Recovery
+
+If a simulation is stalled (e.g., the SLURM job exited without resubmitting),
+use the `recover` command to inspect status and optionally resume:
+
+```bash
+# Check status only
+polyzymd recover -c config.yaml -r 1
+
+# Submit a recovery job
+polyzymd recover -c config.yaml -r 1 --submit --preset blanca-shirts
+
+# Dry-run (show what would be submitted)
+polyzymd recover -c config.yaml -r 1 --submit --dry-run
+```
+
+See the {ref}`CLI Reference <cli-recover>` section below for full option
+details.
 
 ---
 
@@ -353,7 +546,7 @@ polyzymd submit -c config.yaml \
 Inspect generated scripts:
 
 ```bash
-cat job_scripts/initial_seg0_rep1.sh
+cat job_scripts/r1_300K_LipA.sh
 ```
 
 ### Submit for Real
@@ -402,7 +595,7 @@ watch -n 30 'squeue -u $USER'
 
 ```bash
 # Real-time output
-tail -f slurm_logs/s0_r1_300K_LipA*.out
+tail -f slurm_logs/r1_300K_LipA*.out
 
 # Check for errors
 grep -i error slurm_logs/*.out
@@ -410,6 +603,19 @@ grep -i fail slurm_logs/*.out
 ```
 
 ### Check Simulation Progress
+
+Use the `check-progress` command to query the progress file:
+
+```bash
+# Check a specific replicate
+polyzymd check-progress -c config.yaml -r 1
+
+# Example output:
+# Progress: 12500000/50000000 steps (25.0%), 5 segment(s)
+# Status: in_progress — 75.000 ns remaining
+```
+
+Or inspect files directly:
 
 ```bash
 # List trajectory files
@@ -423,22 +629,58 @@ du -h /scratch/$USER/polyzymd_sims/*/production_*/*.dcd
 
 ## Handling Failures
 
-### Job Failed Mid-Segment
+Most failures are handled automatically by the {ref}`smart restart <smart-restart>`
+system. This section covers the cases where manual intervention is needed.
 
-If a job fails, the dependent jobs won't start. To restart:
+### Wall-Time or Preemption Interrupts
+
+**No action needed.** The smart restart system saves an interrupted checkpoint,
+updates the progress file, and the job resubmits itself. Check the SLURM
+log to confirm:
+
+```bash
+# Look for the graceful shutdown message
+grep -i "interrupted\|graceful\|resubmit" slurm_logs/r1_300K_*.out
+```
+
+### Hard Crash (OOM, Segfault, Node Failure)
+
+If a job crashes without saving state, the resubmission logic still runs
+(since the crash only kills the child Python process, not the bash wrapper).
+The resubmitted job's `run-segment` will detect the incomplete segment and
+handle it appropriately.
+
+To diagnose issues:
 
 1. **Check the error**:
    ```bash
-   cat slurm_logs/s2_r1_300K_*.out
+   cat slurm_logs/r1_300K_*.out
    ```
 
-2. **Fix the issue** (if possible)
+2. **Fix the issue** (e.g. increase memory with `--memory 8G`)
 
-3. **Manually continue**:
+3. **Resume**:
    ```bash
-   # Edit and resubmit the continuation script
-   sbatch job_scripts/continue_seg2_rep1.sh
+   # Option 1: Resubmit the existing script
+   sbatch job_scripts/r1_300K_LipA.sh
+
+   # Option 2: Use recover to inspect and resume
+   polyzymd recover -c config.yaml -r 1 --submit --preset aa100
    ```
+
+### Checking Progress
+
+Use `check-progress` to get a quick status report:
+
+```bash
+polyzymd check-progress -c config.yaml -r 1
+```
+
+Or for a more detailed view with per-segment status:
+
+```bash
+polyzymd recover -c config.yaml -r 1
+```
 
 ### Start Fresh
 
@@ -456,15 +698,15 @@ polyzymd submit -c config.yaml --replicates 1 --preset aa100
 
 ## Generated Script Structure
 
-### Initial Script
-
-The initial job script (segment 0) builds the system, runs equilibration, and runs the first production segment:
+The submit command generates **one script per replicate**. Each script is a
+self-resubmitting job that handles the entire simulation lifecycle: building,
+equilibration, production segments, interruptions, and resubmission.
 
 ```bash
 #!/bin/bash
 #SBATCH --partition=aa100
-#SBATCH --job-name=i_s0_r1_300K_LipA
-#SBATCH --output=slurm_logs/s0_r1_300K_LipA.%A_%a.out
+#SBATCH --job-name=r1_300K_LipA
+#SBATCH --output=slurm_logs/r1_300K_LipA.%A_%a.out
 #SBATCH --qos=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -474,100 +716,117 @@ The initial job script (segment 0) builds the system, runs equilibration, and ru
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=your@email.edu
 #SBATCH --account=ucb625_asc1
+#SBATCH --signal=B:USR1@300
+#SBATCH --no-requeue
+
+# =============================================================================
+# PolyzyMD Self-Resubmitting Simulation Job
+# Generated by polyzymd — do not edit manually
+# =============================================================================
 
 module purge 2>/dev/null || true
 ml miniforge 2>/dev/null || true
 
 eval "$(conda shell.bash hook)"
-mamba activate polymerist-env
+conda activate polyzymd-env
 
 set -e
 
-# Required for OpenFF Interchange.combine() functionality
 export INTERCHANGE_EXPERIMENTAL=1
 
-# Projects directory (scripts, configs, logs)
-PROJECTS_DIR="/projects/$USER/polyzymd/my_simulation"
+# Resolve this script's path for self-resubmission
+# ($SLURM_JOB_SCRIPT is only available in SLURM >= 22.05)
+THIS_SCRIPT="${SLURM_JOB_SCRIPT:-$(realpath "$0")}"
 
-# Scratch directory (simulation output)
-SCRATCH_DIR="/scratch/alpine/$USER/polyzymd_sims/LipA_300K_run1"
+CONFIG_PATH="/projects/$USER/polyzymd/my_simulation/config.yaml"
+REPLICATE=1
+WORKING_DIR="/scratch/alpine/$USER/polyzymd_sims/LipA_300K_run1"
 
-# Ensure scratch directory exists
-mkdir -p "$SCRATCH_DIR"
+mkdir -p "$WORKING_DIR"
 
-# Change to projects directory where config lives
-cd "$PROJECTS_DIR"
-
-echo "Starting initial simulation segment 0"
-echo "Projects dir: $PROJECTS_DIR"
-echo "Scratch dir: $SCRATCH_DIR"
-echo "Config: config.yaml"
-echo "Replicate: 1"
+echo "=================================================="
+echo "PolyzyMD self-resubmitting job"
+echo "Config:    $CONFIG_PATH"
+echo "Replicate: $REPLICATE"
+echo "Work dir:  $WORKING_DIR"
+echo "Job ID:    ${SLURM_JOB_ID:-local}"
 echo "Timestamp: $(date)"
+echo "=================================================="
 
-# Run the initial simulation using polyzymd CLI
-polyzymd run -c "config.yaml" \
-    --replicate 1 \
-    --scratch-dir "$SCRATCH_DIR" \
-    --segment-time 10.0 \
-    --segment-frames 250
+# Signal forwarding (see Smart Restart docs)
+CHILD_PID=""
+forward_signal() {
+    if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+        echo "Forwarding $1 to Python process (PID $CHILD_PID)"
+        kill -"$1" "$CHILD_PID"
+    fi
+}
+trap 'forward_signal USR1' USR1
+trap 'forward_signal TERM' TERM
 
-echo "Segment 0 completed successfully at $(date)"
-```
+# Run the next segment (backgrounded for signal forwarding)
+polyzymd run-segment \
+    -c "$CONFIG_PATH" \
+    -r "$REPLICATE" \
+    --scratch-dir "$WORKING_DIR" &
+CHILD_PID=$!
 
-### Continuation Script
-
-Continuation scripts load the checkpoint from the previous segment and continue the simulation:
-
-```bash
-#!/bin/bash
-#SBATCH --partition=aa100
-#SBATCH --job-name=c_s1_r1_300K_LipA
-#SBATCH --output=slurm_logs/s1_r1_300K_LipA.%A_%a.out
-#SBATCH --qos=normal
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --mem=3G
-#SBATCH --time=23:59:59
-#SBATCH --gres=gpu:1
-#SBATCH --mail-type=FAIL
-#SBATCH --mail-user=your@email.edu
-#SBATCH --account=ucb625_asc1
-
-module purge 2>/dev/null || true
-ml miniforge 2>/dev/null || true
-
-eval "$(conda shell.bash hook)"
-mamba activate polymerist-env
-
+# Wait for the child process
+set +e
+wait "$CHILD_PID" 2>/dev/null
+RC=$?
+while kill -0 "$CHILD_PID" 2>/dev/null; do
+    wait "$CHILD_PID" 2>/dev/null
+    RC=$?
+done
 set -e
 
-# Required for OpenFF Interchange.combine() functionality
-export INTERCHANGE_EXPERIMENTAL=1
+echo "run-segment exited with code $RC at $(date)"
 
-# Projects directory (scripts, configs, logs)
-PROJECTS_DIR="/projects/$USER/polyzymd/my_simulation"
+# --- Resubmission logic ---
 
-# Scratch directory (simulation output - where previous segment data lives)
-SCRATCH_DIR="/scratch/alpine/$USER/polyzymd_sims/LipA_300K_run1"
+if [ $RC -ne 0 ] && [ $RC -ne 99 ]; then
+    echo "FATAL: run-segment failed (exit code $RC) — NOT resubmitting"
+    exit $RC
+fi
 
-# Change to projects directory
-cd "$PROJECTS_DIR"
+# Check whether more work remains
+set +e
+polyzymd check-progress -c "$CONFIG_PATH" -r "$REPLICATE" --scratch-dir "$WORKING_DIR"
+PROGRESS_RC=$?
+set -e
 
-echo "Starting continuation segment 1"
-echo "Projects dir: $PROJECTS_DIR"
-echo "Scratch dir: $SCRATCH_DIR"
-echo "Timestamp: $(date)"
+if [ $PROGRESS_RC -eq 0 ]; then
+    echo "Simulation complete — no resubmission needed."
+    exit 0
+fi
 
-# Continue simulation from previous segment using polyzymd CLI
-polyzymd continue \
-    -w "$SCRATCH_DIR" \
-    -s 1 \
-    -t 10.0 \
-    -n 250
+# Work remains — resubmit this same script
+echo "Work remains — resubmitting job..."
+sbatch "$THIS_SCRIPT"
+SUBMIT_RC=$?
 
-echo "Segment 1 completed successfully at $(date)"
+if [ $SUBMIT_RC -eq 0 ]; then
+    echo "Resubmitted successfully."
+else
+    echo "WARNING: sbatch resubmission failed (exit code $SUBMIT_RC)"
+    echo "You can manually resume with:"
+    echo "  sbatch $THIS_SCRIPT"
+    exit 1
+fi
+
+exit 0
 ```
+
+### Key Features of the Generated Script
+
+| Feature | How It Works |
+|---------|-------------|
+| **Signal forwarding** | `trap` + background `&` + `wait` loop ensures SIGUSR1/SIGTERM reach the Python process |
+| **Unified entry point** | `polyzymd run-segment` handles both initial (build + eq + seg 0) and continuation segments |
+| **Progress checking** | `polyzymd check-progress` returns exit code 0 (complete) or 1 (work remains) |
+| **Self-resubmission** | `sbatch "$THIS_SCRIPT"` resubmits the exact same script (path resolved at script start via `$SLURM_JOB_SCRIPT` or `realpath "$0"`) |
+| **Error handling** | Non-zero, non-99 exit codes abort without resubmitting |
 
 ---
 
@@ -597,7 +856,7 @@ polyzymd submit -c config.yaml \
 Watch the first segment complete to catch issues early:
 
 ```bash
-tail -f slurm_logs/*_s0_*.out
+tail -f slurm_logs/r1_300K_*.out
 ```
 
 ### 3. Back Up Important Data
@@ -620,8 +879,8 @@ You'll receive emails when jobs start, end, or fail.
 
 ### 5. Segment Duration Guidelines
 
-| Cluster Time Limit | Recommended Segment Duration |
-|--------------------|------------------------------|
+| Cluster Time Limit | Approximate Production per Segment |
+|--------------------|-------------------------------------|
 | 1 hour (testing) | 0.5 - 1 ns |
 | 24 hours | 8 - 12 ns |
 | 48 hours | 20 - 30 ns |
@@ -633,7 +892,7 @@ You'll receive emails when jobs start, end, or fail.
 
 ### `polyzymd submit`
 
-Submit daisy-chain simulation jobs to SLURM.
+Submit self-resubmitting simulation jobs to SLURM.
 
 ```bash
 polyzymd submit -c CONFIG [OPTIONS]
@@ -656,6 +915,51 @@ polyzymd submit -c CONFIG [OPTIONS]
 - `--openff-logs` - Enable verbose OpenFF logs in generated job scripts (for debugging)
 - `--dry-run` - Generate scripts without submitting
 
+### `polyzymd run-segment`
+
+Unified entry point for SLURM jobs. Determines what work remains and runs the next segment.
+
+```bash
+polyzymd run-segment -c CONFIG [OPTIONS]
+```
+
+**Required:**
+- `-c, --config PATH` - Path to YAML configuration file
+
+**Options:**
+- `-r, --replicate INT` - Replicate number. Default: 1
+- `--scratch-dir PATH` - Override scratch directory for simulation output
+- `--skip-build` - Skip system building (use existing) for initial segment
+
+**Behavior:**
+- If no segments exist: builds system, equilibrates, runs segment 0
+- If segments exist but simulation is incomplete: continues from last completed segment
+- If simulation is complete: exits 0 immediately
+
+**Exit codes:**
+- `0` - Segment completed successfully
+- `1` - Error
+- `99` - Graceful interruption (wall-time signal)
+
+### `polyzymd check-progress`
+
+Check whether a simulation is complete. Used by SLURM resubmission logic.
+
+```bash
+polyzymd check-progress -c CONFIG [OPTIONS]
+```
+
+**Required:**
+- `-c, --config PATH` - Path to YAML configuration file
+
+**Options:**
+- `-r, --replicate INT` - Replicate number. Default: 1
+- `--scratch-dir PATH` - Override scratch directory
+
+**Exit codes:**
+- `0` - Simulation complete (do NOT resubmit)
+- `1` - Work remains (resubmit)
+
 ### `polyzymd run`
 
 Run a complete simulation (build + equilibration + first production segment).
@@ -677,7 +981,7 @@ polyzymd run -c CONFIG [OPTIONS]
 
 ### `polyzymd continue`
 
-Continue a simulation from a previous segment checkpoint.
+Continue a simulation from a previous segment checkpoint. Prefer `run-segment` for SLURM workflows.
 
 ```bash
 polyzymd continue -w WORKING_DIR -s SEGMENT -t TIME [OPTIONS]
@@ -690,6 +994,58 @@ polyzymd continue -w WORKING_DIR -s SEGMENT -t TIME [OPTIONS]
 
 **Options:**
 - `-n, --num-samples INT` - Number of frames to save. Default: 250
+
+(hpc-recover)=
+### `polyzymd recover`
+
+Resume a stalled or interrupted simulation. Scans the working directory,
+loads progress state, and reports how much work remains. With `--submit`,
+generates and submits a self-resubmitting SLURM job that will automatically
+continue from the last completed segment.
+
+```bash
+polyzymd recover -c CONFIG [OPTIONS]
+```
+
+**Required:**
+- `-c, --config PATH` - Path to YAML configuration file
+
+**Options:**
+- `-r, --replicate INT` - Replicate number. Default: 1
+- `--scratch-dir PATH` - Override scratch directory
+- `--preset PRESET` - SLURM preset for recovery job. Default: aa100
+- `--submit / --no-submit` - Submit a recovery job (default: status only)
+- `--dry-run` - Show what would be submitted without submitting
+
+**Examples:**
+```bash
+# Check status only
+polyzymd recover -c config.yaml -r 1
+
+# Submit a recovery job
+polyzymd recover -c config.yaml -r 1 --submit --preset blanca-shirts
+
+# Dry-run (show what would be submitted)
+polyzymd recover -c config.yaml -r 1 --submit --dry-run
+```
+
+**Example output (status only):**
+```
+Working directory: /scratch/user/sim/LipA_300K_run1
+Progress: 12500000/50000000 steps (25.0%)
+Status: in_progress
+Segments: 5
+  segment 0: completed (100%)
+  segment 1: completed (100%)
+  segment 2: completed (100%)
+  segment 3: completed (100%)
+  segment 4: interrupted (50%)
+
+Remaining: 75.000 ns (37500000 steps)
+
+To resume, run:
+  polyzymd recover -c config.yaml -r 1 --submit --preset aa100
+```
 
 ---
 
@@ -705,7 +1061,6 @@ squeue -u $USER
 Common reasons:
 - `Resources` - Waiting for GPUs
 - `Priority` - Queue is busy
-- `Dependency` - Waiting for previous job
 
 ### "Module not found in job"
 
@@ -775,8 +1130,16 @@ Make sure the GPU directive is present in the generated script:
 
 ### "config.yaml not found"
 
-Make sure you're running `polyzymd submit` from the directory containing your `config.yaml`, or use an absolute path:
+The self-resubmitting script stores an absolute path to the config file.
+Make sure the config file has not been moved or deleted since job submission:
 
 ```bash
-polyzymd submit -c /full/path/to/config.yaml --preset aa100
+# Check the path in the generated script
+grep CONFIG_PATH job_scripts/r1_300K_LipA.sh
+```
+
+If the config was moved, either move it back or regenerate and resubmit:
+
+```bash
+polyzymd submit -c /new/path/to/config.yaml --preset aa100 --replicates 1
 ```

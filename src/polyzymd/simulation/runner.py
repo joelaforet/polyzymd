@@ -80,6 +80,7 @@ class SimulationRunner:
 
         self._simulation: Optional[Simulation] = None
         self._current_positions = positions
+        self._current_velocities = None  # Carried between equilibration stages
         self._current_box_vectors = None  # Updated during NPT stages
         self._history: Dict[str, Any] = {}
 
@@ -411,6 +412,7 @@ class SimulationRunner:
             getPositions=True, getVelocities=True, getEnergy=True
         )
         self._current_positions = state.getPositions()
+        self._current_velocities = state.getVelocities()
         self._current_box_vectors = state.getPeriodicBoxVectors()
 
         # Save checkpoint
@@ -541,7 +543,17 @@ class SimulationRunner:
             self._simulation.context.setPeriodicBoxVectors(*self._current_box_vectors)
 
         self._simulation.context.setPositions(self._current_positions)
-        self._simulation.context.setVelocitiesToTemperature(start_temp * omm_unit.kelvin)
+
+        # Velocity initialization: only generate fresh Maxwell-Boltzmann
+        # velocities for the first stage. Subsequent stages inherit velocities
+        # from the previous stage for physical continuity — matching the
+        # GROMACS convention (gen_vel=yes only for stage 0).
+        if stage_index == 0 or self._current_velocities is None:
+            self._simulation.context.setVelocitiesToTemperature(start_temp * omm_unit.kelvin)
+            LOGGER.info(f"Stage {stage_index}: initialized velocities at {start_temp} K")
+        else:
+            self._simulation.context.setVelocities(self._current_velocities)
+            LOGGER.info(f"Stage {stage_index}: inherited velocities from previous stage")
 
         # Log initial energy
         _state = self._simulation.context.getState(getEnergy=True)
@@ -616,6 +628,7 @@ class SimulationRunner:
             getPositions=True, getVelocities=True, getEnergy=True
         )
         self._current_positions = state.getPositions()
+        self._current_velocities = state.getVelocities()
         self._current_box_vectors = state.getPeriodicBoxVectors()
 
         # Log final energy for diagnostics
@@ -658,6 +671,80 @@ class SimulationRunner:
         LOGGER.info(f"Equilibration stage '{stage.name}' complete")
         return results
 
+    def _find_completed_eq_stages(
+        self,
+        stages: List["EquilibrationStageConfig"],
+    ) -> List[int]:
+        """Find equilibration stages whose checkpoints exist on disk.
+
+        Scans ``equilibration_N_name/`` directories for checkpoint files.
+        Stops at the first gap — stages must be contiguous from index 0.
+
+        Parameters
+        ----------
+        stages : list of EquilibrationStageConfig
+            The full list of stages from the config.
+
+        Returns
+        -------
+        list of int
+            Indices of completed stages (contiguous from 0).
+        """
+        completed: List[int] = []
+        for i, stage in enumerate(stages):
+            stage_name = f"equilibration_{i}_{stage.name}"
+            chk = self._working_dir / stage_name / f"{stage_name}_checkpoint.chk"
+            if chk.exists():
+                completed.append(i)
+            else:
+                break  # Stop at first gap — can't skip stages
+        return completed
+
+    def _load_eq_stage_state(
+        self,
+        stage_index: int,
+        stage_name: str,
+    ) -> None:
+        """Load positions, velocities, and box vectors from a completed equilibration checkpoint.
+
+        Creates a temporary ``Simulation`` to deserialise the binary
+        checkpoint, then stores the extracted state on ``self`` so
+        subsequent stages or production can pick up seamlessly.
+        The temporary simulation is discarded after extraction.
+
+        Parameters
+        ----------
+        stage_index : int
+            Index of the completed stage.
+        stage_name : str
+            Name of the completed stage (used in directory/file naming).
+        """
+        dir_name = f"equilibration_{stage_index}_{stage_name}"
+        chk_path = self._working_dir / dir_name / f"{dir_name}_checkpoint.chk"
+
+        if not chk_path.exists():
+            raise FileNotFoundError(f"Equilibration checkpoint not found: {chk_path}")
+
+        # Temporary simulation context to deserialise the binary checkpoint.
+        # We use a dummy VerletIntegrator because we only need to extract
+        # geometric state (positions, velocities, box vectors) — the next
+        # run_equilibration_stage() call creates a proper LangevinMiddleIntegrator.
+        integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
+        platform = self._get_platform()
+        temp_sim = Simulation(self._topology, self._system, integrator, platform)
+        temp_sim.loadCheckpoint(str(chk_path))
+
+        state = temp_sim.context.getState(getPositions=True, getVelocities=True)
+        self._current_positions = state.getPositions()
+        self._current_velocities = state.getVelocities()
+        self._current_box_vectors = state.getPeriodicBoxVectors()
+        # Discard the temporary simulation — it has a dummy integrator
+        del temp_sim
+
+        LOGGER.info(
+            f"Loaded state from equilibration stage {stage_index} ({stage_name}) checkpoint"
+        )
+
     def run_staged_equilibration(
         self,
         stages: List["EquilibrationStageConfig"],
@@ -673,7 +760,9 @@ class SimulationRunner:
         - Thermodynamic ensemble (NVT/NPT)
 
         Positions carry over between stages, and restraint forces are
-        added/removed as needed.
+        added/removed as needed. If a previous run was interrupted, completed
+        stages are detected on disk via their checkpoint files and skipped
+        automatically.
 
         Args:
             stages: List of EquilibrationStageConfig objects
@@ -683,12 +772,27 @@ class SimulationRunner:
         Returns:
             Dictionary with all stage results and summary
         """
+        import shutil
+
         LOGGER.info(f"Starting multi-stage equilibration with {len(stages)} stages")
 
-        # Store reference positions for restraints (post-minimization)
+        # Store reference positions for restraints BEFORE loading any checkpoint.
+        # These are the post-minimization positions that restraint forces target.
+        # Must be captured before _load_eq_stage_state() overwrites _current_positions.
         reference_positions = self._current_positions
 
-        results = {
+        # Detect stages that already completed (checkpoint exists on disk)
+        completed_indices = self._find_completed_eq_stages(stages)
+        if completed_indices:
+            last_idx = completed_indices[-1]
+            last_stage = stages[last_idx]
+            LOGGER.info(
+                f"Found {len(completed_indices)} completed equilibration stage(s) "
+                f"on disk — resuming after stage {last_idx} ({last_stage.name})"
+            )
+            self._load_eq_stage_state(last_idx, last_stage.name)
+
+        results: Dict[str, Any] = {
             "type": "staged_equilibration",
             "num_stages": len(stages),
             "stages": [],
@@ -696,6 +800,29 @@ class SimulationRunner:
         }
 
         for i, stage in enumerate(stages):
+            if i in completed_indices:
+                LOGGER.info(f"Skipping completed equilibration stage {i}: {stage.name}")
+                results["stages"].append(
+                    {
+                        "stage_index": i,
+                        "stage_name": stage.name,
+                        "skipped": True,
+                        "duration_ns": stage.duration,
+                    }
+                )
+                results["total_duration_ns"] += stage.duration
+                continue
+
+            # Clean up partial stage directory (exists but no checkpoint)
+            stage_dir_name = f"equilibration_{i}_{stage.name}"
+            partial_dir = self._working_dir / stage_dir_name
+            if partial_dir.exists():
+                LOGGER.warning(
+                    f"Stage {i} ({stage.name}) directory exists without checkpoint "
+                    f"— removing partial output and re-running"
+                )
+                shutil.rmtree(partial_dir)
+
             stage_result = self.run_equilibration_stage(
                 stage=stage,
                 reference_positions=reference_positions,
@@ -707,12 +834,22 @@ class SimulationRunner:
 
         # Get final energy
         if results["stages"]:
-            results["final_energy_kJ_mol"] = results["stages"][-1]["final_energy_kJ_mol"]
-            results["final_temperature_K"] = results["stages"][-1]["temperature_end_K"]
+            # Find last non-skipped result
+            last_result = None
+            for r in reversed(results["stages"]):
+                if not r.get("skipped"):
+                    last_result = r
+                    break
+            if last_result:
+                results["final_energy_kJ_mol"] = last_result["final_energy_kJ_mol"]
+                results["final_temperature_K"] = last_result["temperature_end_K"]
 
         self._history["equilibration"] = results
+        skipped = len(completed_indices)
+        ran = len(stages) - skipped
         LOGGER.info(
-            f"Multi-stage equilibration complete: {len(stages)} stages, "
+            f"Multi-stage equilibration complete: {len(stages)} stages "
+            f"({skipped} skipped, {ran} ran), "
             f"{results['total_duration_ns']:.3f} ns total"
         )
 
@@ -729,19 +866,24 @@ class SimulationRunner:
         barostat_frequency: int = 25,
         output_prefix: str = "production",
         segment_index: int = 0,
+        report_interval: int | None = None,
     ) -> Dict[str, Any]:
         """Run NPT production simulation.
 
         Args:
             temperature: Temperature in Kelvin.
             duration_ns: Duration in nanoseconds.
-            num_samples: Number of trajectory frames to save.
+            num_samples: Number of trajectory frames to save. Ignored when
+                ``report_interval`` is provided.
             timestep_fs: Time step in femtoseconds.
             friction: Friction coefficient in 1/ps.
             pressure: Pressure in atmospheres.
             barostat_frequency: Barostat update frequency.
             output_prefix: Prefix for output files.
-            segment_index: Segment index for daisy-chaining.
+            segment_index: Segment index for multi-segment production.
+            report_interval: Fixed reporter interval in steps. When provided,
+                this overrides the per-segment ``total_steps // num_samples``
+                calculation to keep frame spacing uniform across segments.
 
         Returns:
             Dictionary with phase results.
@@ -765,7 +907,11 @@ class SimulationRunner:
 
         # Calculate steps
         total_steps = int(duration_ns * 1e6 / timestep_fs)
-        report_interval = max(1, total_steps // num_samples)
+
+        # Determine report interval: prefer the fixed global value if given,
+        # otherwise fall back to per-segment calculation (legacy callers).
+        if report_interval is None:
+            report_interval = max(1, total_steps // num_samples)
 
         # Create integrator and simulation
         integrator = self._create_integrator(
@@ -775,23 +921,10 @@ class SimulationRunner:
         )
         platform = self._get_platform()
 
-        # Capture velocities and box vectors from equilibration before creating new Simulation
-        # (creating new Simulation destroys the old context)
-        # Box vectors are critical for NPT stages where box dimensions change
-        equilibration_velocities = None
-        equilibration_box_vectors = None
-        if self._simulation is not None and segment_index == 0:
-            state = self._simulation.context.getState(getVelocities=True)
-            equilibration_velocities = state.getVelocities()
-            equilibration_box_vectors = state.getPeriodicBoxVectors()
-
         self._simulation = Simulation(self._topology, self._system, integrator, platform)
 
         # Set box vectors BEFORE positions - critical for correct periodic boundary handling
-        # Use captured box vectors from equilibration, or fall back to stored ones from staged equilibration
-        if equilibration_box_vectors is not None:
-            self._simulation.context.setPeriodicBoxVectors(*equilibration_box_vectors)
-        elif self._current_box_vectors is not None:
+        if self._current_box_vectors is not None:
             self._simulation.context.setPeriodicBoxVectors(*self._current_box_vectors)
 
         self._simulation.context.setPositions(self._current_positions)
@@ -804,11 +937,11 @@ class SimulationRunner:
         # Set velocities for production
         # - If we have velocities from equilibration, use them (physical continuity)
         # - Otherwise generate new velocities at target temperature
-        # Note: For daisy-chain continuation (segment > 0), ContinuationManager uses
+        # Note: For continuation segments (segment > 0), ContinuationManager uses
         # loadState() which restores both positions and velocities from the XML state file
         if segment_index == 0:
-            if equilibration_velocities is not None:
-                self._simulation.context.setVelocities(equilibration_velocities)
+            if self._current_velocities is not None:
+                self._simulation.context.setVelocities(self._current_velocities)
                 LOGGER.info("Using velocities preserved from equilibration")
             else:
                 self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)
@@ -844,9 +977,62 @@ class SimulationRunner:
                 f,
             )
 
-        # Run simulation
+        # Install signal handlers for graceful shutdown (SIGUSR1 / SIGTERM)
+        from polyzymd.simulation.signals import (
+            GracefulExit,
+            get_interrupt_signal,
+            install_handlers,
+            is_interrupted,
+            save_interrupted_state,
+        )
+
+        install_handlers()
+
+        # Run simulation in chunks so we can check for interrupt signals
         LOGGER.info(f"Running {total_steps} steps...")
-        self._simulation.step(total_steps)
+        chunk_size = min(report_interval, total_steps)
+        steps_done = 0
+        try:
+            while steps_done < total_steps:
+                remaining = total_steps - steps_done
+                this_chunk = min(chunk_size, remaining)
+                self._simulation.step(this_chunk)
+                steps_done += this_chunk
+                if is_interrupted():
+                    LOGGER.warning(f"Interrupt detected at step {steps_done}/{total_steps}")
+                    save_interrupted_state(
+                        simulation=self._simulation,
+                        output_dir=phase_dir,
+                        segment_index=segment_index,
+                        steps_completed=steps_done,
+                        total_steps=total_steps,
+                    )
+                    # Update progress tracker (interrupted)
+                    self._update_progress_interrupted(
+                        segment_index=segment_index,
+                        steps_done=steps_done,
+                        total_steps=total_steps,
+                        duration_ns=duration_ns,
+                        timestep_fs=timestep_fs,
+                    )
+                    raise GracefulExit(
+                        signal_number=get_interrupt_signal(), steps_completed=steps_done
+                    )
+        except GracefulExit:
+            raise  # Re-raise so caller can handle exit code
+        except Exception:
+            # On unexpected crash, still try to save interrupted state
+            try:
+                save_interrupted_state(
+                    simulation=self._simulation,
+                    output_dir=phase_dir,
+                    segment_index=segment_index,
+                    steps_completed=steps_done,
+                    total_steps=total_steps,
+                )
+            except Exception:
+                LOGGER.error("Failed to save interrupted state after crash")
+            raise
 
         # Get final state (no enforcePeriodicBox to preserve molecular continuity)
         state = self._simulation.context.getState(
@@ -862,19 +1048,19 @@ class SimulationRunner:
         checkpoint_path = phase_dir / f"{phase_name}_checkpoint.chk"
         self._simulation.saveCheckpoint(str(checkpoint_path))
 
-        # Save state XML (needed for continuation/daisy-chain)
+        # Save state XML (needed for continuation across segments)
         state_xml_path = phase_dir / f"{phase_name}_state.xml"
         with open(state_xml_path, "w") as f:
             f.write(XmlSerializer.serialize(state))
         LOGGER.info(f"Saved state to {state_xml_path}")
 
-        # Save system XML (needed for continuation/daisy-chain)
+        # Save system XML (needed for continuation across segments)
         system_xml_path = phase_dir / f"{phase_name}_system.xml"
         with open(system_xml_path, "w") as f:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved system to {system_xml_path}")
 
-        # Save parameters JSON (needed for continuation/daisy-chain)
+        # Save parameters JSON (needed for continuation across segments)
         params_dict = {
             "__class__": "SimulationParameters",
             "__values__": {
@@ -943,6 +1129,15 @@ class SimulationRunner:
             json.dump(params_dict, f, indent=2)
         LOGGER.info(f"Saved parameters to {params_path}")
 
+        # Update progress tracker (successful completion)
+        self._update_progress_completed(
+            segment_index=segment_index,
+            total_steps=total_steps,
+            num_samples=num_samples,
+            duration_ns=duration_ns,
+            timestep_fs=timestep_fs,
+        )
+
         results = {
             "phase": "production",
             "segment": segment_index,
@@ -962,6 +1157,125 @@ class SimulationRunner:
         LOGGER.info(f"Production segment {segment_index} complete")
 
         return results
+
+    def _update_progress_completed(
+        self,
+        segment_index: int,
+        total_steps: int,
+        num_samples: int,
+        duration_ns: float,
+        timestep_fs: float,
+    ) -> None:
+        """Update progress file after successful segment completion.
+
+        Parameters
+        ----------
+        segment_index : int
+            Production segment index (0 for initial production).
+        total_steps : int
+            Steps completed in this segment.
+        num_samples : int
+            Samples written in this segment.
+        duration_ns : float
+            Simulation time of this segment in nanoseconds.
+        timestep_fs : float
+            Integration timestep in femtoseconds.
+        """
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationStatus,
+            _now_iso,
+            load_progress,
+            save_progress,
+        )
+
+        progress = load_progress(self._working_dir)
+        if progress is None:
+            LOGGER.warning("No progress file found — skipping progress update")
+            return
+
+        record = SegmentRecord(
+            index=segment_index,
+            steps_completed=total_steps,
+            steps_requested=total_steps,
+            samples_written=num_samples,
+            status=SegmentStatus.COMPLETED,
+            duration_ns=duration_ns,
+        )
+        record.finished_at = _now_iso()
+
+        progress.segments.append(record)
+
+        # Update overall status
+        if progress.is_complete:
+            progress.status = SimulationStatus.COMPLETED
+        else:
+            progress.status = SimulationStatus.RUNNING
+
+        save_progress(self._working_dir, progress)
+        LOGGER.info(
+            f"Progress updated: {progress.total_steps_completed}/"
+            f"{progress.total_steps_requested} steps "
+            f"({progress.fraction_complete():.1%})"
+        )
+
+    def _update_progress_interrupted(
+        self,
+        segment_index: int,
+        steps_done: int,
+        total_steps: int,
+        duration_ns: float,
+        timestep_fs: float,
+    ) -> None:
+        """Update progress file after segment interruption.
+
+        Parameters
+        ----------
+        segment_index : int
+            Production segment index.
+        steps_done : int
+            Steps completed before interruption.
+        total_steps : int
+            Steps that were planned for this segment.
+        duration_ns : float
+            Planned simulation time of this segment in nanoseconds.
+        timestep_fs : float
+            Integration timestep in femtoseconds.
+        """
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationStatus,
+            load_progress,
+            save_progress,
+        )
+
+        progress = load_progress(self._working_dir)
+        if progress is None:
+            LOGGER.warning("No progress file found — skipping progress update")
+            return
+
+        # Calculate actual duration completed
+        actual_duration_ns = (steps_done * timestep_fs) / 1e6
+
+        record = SegmentRecord(
+            index=segment_index,
+            steps_completed=steps_done,
+            steps_requested=total_steps,
+            samples_written=0,  # Interrupted — samples may be partial
+            status=SegmentStatus.INTERRUPTED,
+            duration_ns=actual_duration_ns,
+        )
+
+        progress.segments.append(record)
+        progress.status = SimulationStatus.INTERRUPTED
+
+        save_progress(self._working_dir, progress)
+        LOGGER.info(
+            f"Progress updated (interrupted): {steps_done}/{total_steps} steps "
+            f"in segment {segment_index}"
+        )
 
     def save_history(self, path: Optional[Union[str, Path]] = None) -> None:
         """Save simulation history to JSON.
