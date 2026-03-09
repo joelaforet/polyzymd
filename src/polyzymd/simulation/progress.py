@@ -493,6 +493,11 @@ def get_next_segment_info(
 ) -> Dict[str, Any] | None:
     """Determine what the next segment should run.
 
+    Uses a fixed report interval derived from the *global* config
+    (``total_steps // total_samples``) so that every segment writes
+    frames at the same cadence. This guarantees uniform time spacing
+    across segments, enabling seamless trajectory concatenation.
+
     Parameters
     ----------
     progress : SimulationProgress
@@ -505,9 +510,9 @@ def get_next_segment_info(
     Returns
     -------
     dict or None
-        Dictionary with ``segment_index``, ``steps_to_run``, and
-        ``samples_to_write`` for the next segment. Returns ``None`` if
-        the simulation is already complete.
+        Dictionary with ``segment_index``, ``steps_to_run``,
+        ``report_interval``, and ``samples_to_write`` for the next
+        segment. Returns ``None`` if the simulation is already complete.
     """
     completed = progress.total_steps_completed
     remaining = total_steps - completed
@@ -515,16 +520,14 @@ def get_next_segment_info(
     if remaining <= 0:
         return None
 
-    # Calculate samples proportionally to the fraction of steps remaining
-    if total_steps > 0:
-        fraction_remaining = remaining / total_steps
-    else:
-        fraction_remaining = 1.0
-    samples = max(1, int(total_samples * fraction_remaining))
+    # Fixed interval from the global config — same for every segment
+    report_interval = max(1, total_steps // total_samples)
+    samples = remaining // report_interval
 
     return {
         "segment_index": progress.next_segment_index,
         "steps_to_run": remaining,
+        "report_interval": report_interval,
         "samples_to_write": samples,
     }
 

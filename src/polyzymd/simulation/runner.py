@@ -729,19 +729,24 @@ class SimulationRunner:
         barostat_frequency: int = 25,
         output_prefix: str = "production",
         segment_index: int = 0,
+        report_interval: int | None = None,
     ) -> Dict[str, Any]:
         """Run NPT production simulation.
 
         Args:
             temperature: Temperature in Kelvin.
             duration_ns: Duration in nanoseconds.
-            num_samples: Number of trajectory frames to save.
+            num_samples: Number of trajectory frames to save. Ignored when
+                ``report_interval`` is provided.
             timestep_fs: Time step in femtoseconds.
             friction: Friction coefficient in 1/ps.
             pressure: Pressure in atmospheres.
             barostat_frequency: Barostat update frequency.
             output_prefix: Prefix for output files.
             segment_index: Segment index for daisy-chaining.
+            report_interval: Fixed reporter interval in steps. When provided,
+                this overrides the per-segment ``total_steps // num_samples``
+                calculation to keep frame spacing uniform across segments.
 
         Returns:
             Dictionary with phase results.
@@ -765,7 +770,11 @@ class SimulationRunner:
 
         # Calculate steps
         total_steps = int(duration_ns * 1e6 / timestep_fs)
-        report_interval = max(1, total_steps // num_samples)
+
+        # Determine report interval: prefer the fixed global value if given,
+        # otherwise fall back to per-segment calculation (legacy callers).
+        if report_interval is None:
+            report_interval = max(1, total_steps // num_samples)
 
         # Create integrator and simulation
         integrator = self._create_integrator(

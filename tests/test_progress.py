@@ -357,6 +357,7 @@ class TestGetNextSegmentInfo:
         assert info["segment_index"] == 0
         assert info["steps_to_run"] == 10000000
         assert info["samples_to_write"] == 250
+        assert info["report_interval"] == 40000  # 10_000_000 // 250
 
     def test_half_done_returns_remainder(self):
         seg = _make_segment(0, steps=5000000)
@@ -366,6 +367,7 @@ class TestGetNextSegmentInfo:
         assert info["segment_index"] == 1
         assert info["steps_to_run"] == 5000000
         assert info["samples_to_write"] == 125  # Half the samples
+        assert info["report_interval"] == 40000  # Same interval as full run
 
     def test_complete_returns_none(self):
         segs = [_make_segment(0, steps=5000000), _make_segment(1, steps=5000000)]
@@ -378,6 +380,36 @@ class TestGetNextSegmentInfo:
         p = _make_progress(segments=[seg], total_steps=10000000)
         info = get_next_segment_info(p, total_steps=10000000, total_samples=250)
         assert info is None
+
+    def test_report_interval_is_uniform_across_segments(self):
+        """Report interval should be identical regardless of how many steps remain."""
+        total_steps = 750000
+        total_samples = 75
+        expected_interval = 10000  # 750_000 // 75
+
+        # First segment: full run
+        p0 = _make_progress(total_steps=total_steps, total_samples=total_samples)
+        info0 = get_next_segment_info(p0, total_steps, total_samples)
+        assert info0 is not None
+        assert info0["report_interval"] == expected_interval
+
+        # After segment 0 ran 200_000 steps
+        seg0 = _make_segment(0, steps=200000)
+        p1 = _make_progress(segments=[seg0], total_steps=total_steps, total_samples=total_samples)
+        info1 = get_next_segment_info(p1, total_steps, total_samples)
+        assert info1 is not None
+        assert info1["report_interval"] == expected_interval
+        assert info1["samples_to_write"] == 55  # 550_000 // 10_000
+
+        # After two segments: 200_000 + 300_000 = 500_000
+        seg1 = _make_segment(1, steps=300000)
+        p2 = _make_progress(
+            segments=[seg0, seg1], total_steps=total_steps, total_samples=total_samples
+        )
+        info2 = get_next_segment_info(p2, total_steps, total_samples)
+        assert info2 is not None
+        assert info2["report_interval"] == expected_interval
+        assert info2["samples_to_write"] == 25  # 250_000 // 10_000
 
 
 # ---------------------------------------------------------------------------

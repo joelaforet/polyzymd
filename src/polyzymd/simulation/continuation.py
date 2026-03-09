@@ -302,25 +302,21 @@ class ContinuationManager:
 
     def _setup_reporters(
         self,
-        total_steps: int,
-        num_samples: int,
+        report_interval: int,
         output_dir: Path,
     ) -> None:
         """Setup reporters for the simulation.
 
         Parameters
         ----------
-        total_steps : int
-            Total steps for this segment.
-        num_samples : int
-            Number of trajectory frames to save.
+        report_interval : int
+            Step interval between reporter outputs. Kept constant
+            across all segments to ensure uniform frame spacing.
         output_dir : Path
             Output directory for this segment.
         """
         if self._simulation is None:
             raise RuntimeError("Simulation not created")
-
-        report_interval = max(1, total_steps // num_samples)
 
         # Trajectory reporter
         traj_path = output_dir / f"production_{self._segment_index}_trajectory.dcd"
@@ -501,6 +497,7 @@ class ContinuationManager:
         duration_ns: float,
         num_samples: int = 250,
         timestep_fs: float = 2.0,
+        report_interval: int | None = None,
     ) -> Dict[str, Any]:
         """Run the continuation segment.
 
@@ -514,9 +511,14 @@ class ContinuationManager:
         duration_ns : float
             Duration of this segment in nanoseconds.
         num_samples : int
-            Number of trajectory frames to save.
+            Number of trajectory frames to save. Ignored when
+            ``report_interval`` is provided.
         timestep_fs : float
             Time step in femtoseconds.
+        report_interval : int or None
+            Fixed reporter interval in steps. When provided, this
+            overrides the per-segment ``total_steps // num_samples``
+            calculation to keep frame spacing uniform across segments.
 
         Returns
         -------
@@ -567,8 +569,15 @@ class ContinuationManager:
         # Calculate total steps
         total_steps = int(duration_ns * 1e6 / timestep_fs)
 
+        # Determine report interval: prefer the fixed global value if given,
+        # otherwise fall back to per-segment calculation (legacy callers).
+        if report_interval is not None:
+            seg_report_interval = report_interval
+        else:
+            seg_report_interval = max(1, total_steps // num_samples)
+
         # Setup reporters
-        self._setup_reporters(total_steps, num_samples, output_dir)
+        self._setup_reporters(seg_report_interval, output_dir)
 
         # Save parameters for this segment
         if self._param_dict:
@@ -589,8 +598,7 @@ class ContinuationManager:
 
         # Run simulation in chunks so we can check for interrupt signals
         LOGGER.info(f"Running {total_steps} steps...")
-        report_interval = max(1, total_steps // num_samples)
-        chunk_size = min(report_interval, total_steps)
+        chunk_size = min(seg_report_interval, total_steps)
         steps_done = 0
         try:
             while steps_done < total_steps:

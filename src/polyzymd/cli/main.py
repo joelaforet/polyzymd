@@ -1108,6 +1108,7 @@ def run_segment(
     seg_idx = seg_info["segment_index"]
     steps_to_run = seg_info["steps_to_run"]
     samples_to_write = seg_info["samples_to_write"]
+    report_interval = seg_info["report_interval"]
     duration_ns = (steps_to_run * timestep_fs) / 1e6
 
     click.echo(
@@ -1126,6 +1127,7 @@ def run_segment(
                 duration_ns=duration_ns,
                 num_samples=samples_to_write,
                 timestep_fs=timestep_fs,
+                report_interval=report_interval,
             )
         else:
             # ---- CONTINUATION: load previous state, run next segment ----
@@ -1135,6 +1137,7 @@ def run_segment(
                 duration_ns=duration_ns,
                 num_samples=samples_to_write,
                 timestep_fs=timestep_fs,
+                report_interval=report_interval,
             )
 
         click.echo(f"Segment {seg_idx} completed successfully.")
@@ -1163,6 +1166,7 @@ def _run_initial_segment(
     duration_ns: float,
     num_samples: int,
     timestep_fs: float,
+    report_interval: int | None = None,
 ) -> None:
     """Build system, equilibrate, and run the first production segment.
 
@@ -1182,6 +1186,9 @@ def _run_initial_segment(
         Number of trajectory frames to save.
     timestep_fs : float
         Integration timestep in femtoseconds.
+    report_interval : int or None
+        Fixed reporter interval in steps. Overrides per-segment
+        interval calculation when provided.
     """
     from polyzymd.simulation.runner import SimulationRunner
 
@@ -1262,6 +1269,7 @@ def _run_initial_segment(
         timestep_fs=timestep_fs,
         pressure=pressure,
         segment_index=0,
+        report_interval=report_interval,
     )
 
 
@@ -1271,6 +1279,7 @@ def _run_continuation_segment(
     duration_ns: float,
     num_samples: int,
     timestep_fs: float,
+    report_interval: int | None = None,
 ) -> None:
     """Continue from the last completed segment.
 
@@ -1286,6 +1295,9 @@ def _run_continuation_segment(
         Number of trajectory frames to save.
     timestep_fs : float
         Integration timestep in femtoseconds.
+    report_interval : int or None
+        Fixed reporter interval in steps. Overrides per-segment
+        interval calculation when provided.
     """
     from polyzymd.simulation.continuation import ContinuationManager
 
@@ -1301,6 +1313,7 @@ def _run_continuation_segment(
         duration_ns=duration_ns,
         num_samples=num_samples,
         timestep_fs=timestep_fs,
+        report_interval=report_interval,
     )
 
 
