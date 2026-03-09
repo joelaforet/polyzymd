@@ -470,6 +470,45 @@ scancel --signal=USR1 <job_id>
 This is useful when you realize a simulation has a problem and want to
 stop it cleanly without losing progress.
 
+### Cancelling a Job Permanently
+
+Because `scancel` sends `SIGTERM`, and our scripts treat SIGTERM the same as
+SIGUSR1 (save state, exit 99, resubmit), a plain `scancel <job_id>` will
+**not** permanently stop a simulation — the job will save its state and
+resubmit itself.
+
+To truly cancel a simulation so it does not restart, use `--signal=KILL`:
+
+```bash
+# Permanently stop a job (no state saved, no resubmission)
+scancel --signal=KILL <job_id>
+
+# Equivalent shorthand
+scancel -s KILL <job_id>
+```
+
+`SIGKILL` cannot be caught or trapped by bash or Python, so the process
+dies immediately and the resubmission logic never runs. The last
+*completed* segment's checkpoint is still intact — only in-progress work
+since the last checkpoint is lost.
+
+| Command | Saves state? | Resubmits? | Use case |
+|---------|-------------|-----------|----------|
+| `scancel <job_id>` | Yes | **Yes** | Don't use this to permanently stop a simulation |
+| `scancel --signal=USR1 <job_id>` | Yes | **Yes** | Graceful stop (saves progress, continues later) |
+| `scancel --signal=KILL <job_id>` | No | **No** | Permanently cancel a simulation |
+
+```{tip}
+If you need to cancel **all replicates** of a simulation, cancel them all
+at once so that none resubmit before you can cancel the others:
+
+    scancel --signal=KILL <job_id_1> <job_id_2> <job_id_3>
+
+Or cancel all your jobs:
+
+    scancel --signal=KILL -u $USER
+```
+
 ### Manual Recovery
 
 If a simulation is stalled (e.g., the SLURM job exited without resubmitting),
