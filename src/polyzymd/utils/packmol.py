@@ -378,7 +378,7 @@ def pack_polymers(
         working_directory = Path(tempfile.mkdtemp())
         _temporary = True
     else:
-        working_directory = Path(working_directory)
+        working_directory = Path(working_directory).resolve()
         working_directory.mkdir(parents=True, exist_ok=True)
 
     # --- compute brick dimensions ---
@@ -585,7 +585,7 @@ def solvate_with_packmol(
         working_directory = Path(tempfile.mkdtemp())
         _temporary = True
     else:
-        working_directory = Path(working_directory)
+        working_directory = Path(working_directory).resolve()
         working_directory.mkdir(parents=True, exist_ok=True)
 
     # --- compute brick dimensions ---
