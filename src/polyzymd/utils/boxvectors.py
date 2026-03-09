@@ -41,6 +41,50 @@ if TYPE_CHECKING:
     from openff.units import Quantity
 
 
+def get_topology_bbox_bounds(topology: "Topology") -> tuple[NDArray, NDArray]:
+    """Return the min and max coordinate bounds of all atoms in a topology.
+
+    Unlike :func:`get_topology_bbox`, which returns a 3x3 diagonal matrix of
+    box *dimensions*, this function returns the raw per-axis minimum and
+    maximum coordinates.  This is needed when the absolute position of the
+    bounding box matters (e.g. computing an exclusion zone for Packmol).
+
+    Parameters
+    ----------
+    topology : openff.toolkit.Topology
+        Topology with at least one molecule that has conformer coordinates.
+
+    Returns
+    -------
+    min_coords : NDArray
+        1-D array of shape (3,) with [xmin, ymin, zmin] in Angstrom.
+    max_coords : NDArray
+        1-D array of shape (3,) with [xmax, ymax, zmax] in Angstrom.
+
+    Raises
+    ------
+    ValueError
+        If the topology has no molecules with coordinates.
+    """
+    all_positions: list[NDArray] = []
+
+    for molecule in topology.molecules:
+        if molecule.n_conformers > 0:
+            coords_angstrom = molecule.conformers[0].m_as("angstrom")
+            all_positions.append(coords_angstrom)
+
+    if not all_positions:
+        raise ValueError(
+            "Cannot calculate bounding box bounds: no molecules in topology have coordinates"
+        )
+
+    all_coords = np.vstack(all_positions)
+    min_coords: NDArray = np.min(all_coords, axis=0)
+    max_coords: NDArray = np.max(all_coords, axis=0)
+
+    return min_coords, max_coords
+
+
 def get_topology_bbox(topology: "Topology") -> "Quantity":
     """Calculate the bounding box of all molecules in a topology.
 

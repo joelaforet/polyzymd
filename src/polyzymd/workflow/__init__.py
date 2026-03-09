@@ -3,7 +3,6 @@
 from polyzymd.workflow.daisy_chain import (
     DaisyChainConfig,
     DaisyChainSubmitter,
-    SegmentInfo,
     SubmissionResult,
     submit_daisy_chain,
 )
@@ -22,10 +21,9 @@ __all__ = [
     "SlurmScriptGenerator",
     "parse_replicate_range",
     "validate_replicate_range",
-    # Daisy-chain submission
+    # Job submission
     "DaisyChainConfig",
     "DaisyChainSubmitter",
-    "SegmentInfo",
     "SubmissionResult",
     "submit_daisy_chain",
 ]

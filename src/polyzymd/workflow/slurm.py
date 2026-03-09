@@ -2,7 +2,7 @@
 SLURM job script generation for HPC cluster submission.
 
 This module provides templates and utilities for generating SLURM
-batch scripts for MD simulations.
+batch scripts for self-resubmitting MD simulation jobs.
 """
 
 from __future__ import annotations
@@ -15,7 +15,10 @@ from typing import Dict, List, Literal, Optional, Union
 LOGGER = logging.getLogger(__name__)
 
 # Preset types
-PresetType = Literal["aa100", "al40", "blanca-shirts", "testing"]
+PresetType = Literal["aa100", "al40", "blanca-shirts", "bridges2", "testing"]
+
+# Valid GPU types for Bridges2 (PSC).  Adding a new type is a one-line change here.
+BRIDGES2_GPU_TYPES: List[str] = ["v100-16", "v100-32", "l40s-48", "h100-80"]
 
 
 @dataclass
@@ -24,15 +27,36 @@ class SlurmConfig:
 
     Attributes:
         partition: SLURM partition(s) to use.
-        qos: Quality of service.
-        account: Account for resource allocation.
+        qos: Quality of service. Set to ``""`` to omit the ``--qos`` directive
+            entirely (required for clusters such as Bridges2 that do not use QoS).
+        account: Account / allocation ID for resource allocation.  Set to ``""``
+            to omit the ``--account`` directive entirely (e.g. Bridges2, which
+            infers the allocation from the submitting user's login).
         time_limit: Wall time limit (HH:MM:SS).
-        email: Email for notifications.
+        email: Email address for SLURM failure notifications.  Set to ``""`` to
+            omit both ``--mail-type`` and ``--mail-user`` directives.
         nodes: Number of nodes.
-        ntasks: Number of tasks.
-        memory: Memory allocation (e.g., "3G").
+        ntasks: Number of tasks.  Ignored when ``gpu_directive_style == "gpus"``
+            (Bridges2-style); those scripts emit ``#SBATCH -N {nodes}`` only.
+        memory: Memory allocation (e.g. ``"3G"``).  Set to ``None`` to omit the
+            ``--mem`` directive entirely (some clusters allocate memory per GPU
+            and reject an explicit ``--mem`` request).
         gpus: Number of GPUs.
-        exclude: Nodes to exclude.
+        exclude: Nodes to exclude (omitted when ``None``).
+        gpu_type: Optional GPU type string used with the ``--gpus`` directive
+            (e.g. ``"v100-32"`` for Bridges2).  When ``None`` the classic
+            ``--gres=gpu:<N>`` directive is emitted instead.
+        gpu_directive_style: ``"gres"`` (default, Alpine-style) or ``"gpus"``
+            (Bridges2-style).  Controls which SBATCH GPU directive is written.
+            Also governs which nodes/ntasks format is emitted.
+        module_load: Module name passed to ``ml`` in the job script
+            (e.g. ``"miniforge"`` for Alpine, ``"anaconda3/2024.10-1"`` for
+            Bridges2).
+        conda_command: Conda frontend used to activate the environment
+            (``"conda"`` by default — works reliably in non-interactive
+            SLURM shells after ``eval "$(conda shell.bash hook)"``).
+            Set to ``"mamba"`` on clusters where mamba activation is
+            available in batch scripts.
     """
 
     partition: str = "aa100"
@@ -42,13 +66,19 @@ class SlurmConfig:
     email: str = ""
     nodes: int = 1
     ntasks: int = 1
-    memory: str = "3G"
+    memory: Optional[str] = "3G"
     gpus: int = 1
     exclude: Optional[str] = None
+    # --- GPU directive fields (new in v1.0.1) ---
+    gpu_type: Optional[str] = None
+    gpu_directive_style: str = "gres"
+    # --- Module / conda fields (new in v1.0.1) ---
+    module_load: str = "miniforge"
+    conda_command: str = "conda"
 
     @classmethod
     def from_preset(cls, preset: PresetType, email: str = "") -> "SlurmConfig":
-        """Create a SlurmConfig from a preset.
+        """Create a SlurmConfig from a named preset.
 
         Args:
             preset: Preset name.
@@ -57,7 +87,7 @@ class SlurmConfig:
         Returns:
             SlurmConfig with preset values.
         """
-        presets: Dict[PresetType, Dict] = {
+        presets: Dict[str, Dict] = {
             "aa100": {
                 "partition": "aa100",
                 "qos": "normal",
@@ -76,6 +106,25 @@ class SlurmConfig:
                 "account": "blanca-shirts",
                 "time_limit": "23:59:59",
                 "exclude": "bgpu-bortz1",
+            },
+            "bridges2": {
+                "partition": "GPU-shared",
+                # Bridges2 does not use QoS — omit the directive entirely.
+                "qos": "",
+                # Bridges2 infers allocation from the submitting user's login;
+                # omit the --account directive entirely.
+                "account": "",
+                "time_limit": "24:00:00",
+                # GPU-shared allocates resources per GPU; explicit --mem is
+                # not required and may be rejected.  Set to None to omit.
+                "memory": None,
+                # Use the newer --gpus=<type>:<n> SBATCH syntax (also selects
+                # -N 1 nodes format instead of --nodes + --ntasks).
+                "gpu_type": "v100-32",
+                "gpu_directive_style": "gpus",
+                # Bridges2 uses anaconda3 + conda rather than miniforge + mamba.
+                "module_load": "anaconda3/2024.10-1",
+                "conda_command": "conda",
             },
             "testing": {
                 "partition": "atesting_a100",
@@ -128,145 +177,158 @@ class SlurmScriptGenerator:
     Example:
         >>> config = SlurmConfig.from_preset("aa100", email="user@example.com")
         >>> generator = SlurmScriptGenerator(config)
-        >>> script = generator.generate_initial_job(
-        ...     context=JobContext(
-        ...         job_name="my_sim",
-        ...         output_file="logs/output.log",
-        ...         scratch_dir="/scratch/user/sim_output",
-        ...         projects_dir="/projects/user/polyzymd",
-        ...     ),
-        ...     python_script="run_simulation.py",
-        ...     python_args={"temperature": 300},
+        >>> script = generator.generate_job_script(
+        ...     config_path="/projects/user/config.yaml",
+        ...     replicate=1,
+        ...     working_dir="/scratch/user/sim_output",
         ... )
     """
 
-    # Template for initial simulation jobs
-    # - Job is submitted from projects_dir
-    # - SLURM logs go to projects_dir/slurm_logs/
-    # - Simulation output goes to scratch_dir
-    INITIAL_JOB_TEMPLATE = """#!/bin/bash
+    # =====================================================================
+    # Self-resubmitting job template
+    # =====================================================================
+    # Every SLURM job runs the same script: it calls `polyzymd run-segment`
+    # which inspects progress state, runs the next segment, and exits.
+    # The bash wrapper then checks whether more work remains and resubmits
+    # itself via `sbatch "$SLURM_JOB_SCRIPT"`.
+    #
+    # Exit codes from `polyzymd run-segment`:
+    #   0  — segment completed normally (may or may not be final)
+    #   99 — graceful interruption (wall-time signal); should resubmit
+    #   other — unexpected failure; do NOT resubmit
+    # =====================================================================
+    JOB_TEMPLATE = """#!/bin/bash
 #SBATCH --partition={partition}
-#SBATCH --job-name=i_{job_name}
+#SBATCH --job-name={job_name}
 #SBATCH --output={output_file}
-#SBATCH --qos={qos}
-#SBATCH --nodes={nodes}
-#SBATCH --ntasks={ntasks}
-#SBATCH --mem={memory}
+{qos_line}
+{nodes_line}
+{mem_line}
 #SBATCH --time={time_limit}
-#SBATCH --gres=gpu:{gpus}
-#SBATCH --mail-type=FAIL
-#SBATCH --mail-user={email}
-#SBATCH --account={account}
+{gpu_line}
+{mail_line}
+{account_line}
 {exclude_line}
+#SBATCH --signal=B:USR1@300
+#SBATCH --no-requeue
 
 # =============================================================================
-# PolyzyMD Initial Simulation Job
-# Segment: {segment_index}
+# PolyzyMD Self-Resubmitting Simulation Job
+# Generated by polyzymd — do not edit manually
 # =============================================================================
 
 # Load conda environment (ignore module warnings on some HPC systems)
 module purge 2>/dev/null || true
-module load miniforge 2>/dev/null || true
+ml {module_load} 2>/dev/null || true
 
-# Initialize conda/mamba for non-interactive shell
+# Initialize conda for non-interactive shell
 eval "$(conda shell.bash hook)"
-mamba activate {conda_env}
+{conda_command} activate {conda_env}
 
 # Enable strict error handling after environment setup
 set -e
 
-# Projects directory (scripts, configs, logs)
-PROJECTS_DIR="{projects_dir}"
+# Required for OpenFF Interchange.combine() functionality
+export INTERCHANGE_EXPERIMENTAL=1
 
-# Scratch directory (simulation output)
-SCRATCH_DIR="{scratch_dir}"
+# Resolve this script's path for self-resubmission.
+# $SLURM_JOB_SCRIPT is only available in SLURM >= 22.05; fall back to $0.
+THIS_SCRIPT="${{SLURM_JOB_SCRIPT:-$(realpath "$0")}}"
 
-# Ensure scratch directory exists
-mkdir -p "$SCRATCH_DIR"
+# Configuration
+CONFIG_PATH="{config_path}"
+REPLICATE={replicate}
+WORKING_DIR="{working_dir}"
 
-# Change to projects directory where config and scripts live
-cd "$PROJECTS_DIR"
+# Ensure working directory exists
+mkdir -p "$WORKING_DIR"
 
-echo "Starting initial simulation segment {segment_index}"
-echo "Projects dir: $PROJECTS_DIR"
-echo "Scratch dir: $SCRATCH_DIR"
-echo "Config: {config_path}"
-echo "Replicate: {replicate}"
+echo "=================================================="
+echo "PolyzyMD self-resubmitting job"
+echo "Config:    $CONFIG_PATH"
+echo "Replicate: $REPLICATE"
+echo "Work dir:  $WORKING_DIR"
+echo "Job ID:    ${{SLURM_JOB_ID:-local}}"
 echo "Timestamp: $(date)"
+echo "=================================================="
 
-# Run the initial simulation using polyzymd CLI
-# This builds the system, runs equilibration, and runs the first production segment
-polyzymd{openff_logs_flag} run -c "{config_path}" \\
-    --replicate {replicate} \\
-    --scratch-dir "$SCRATCH_DIR" \\
-    --segment-time {segment_time} \\
-    --segment-frames {segment_frames}{skip_build_flag}
+# =========================================================================
+# Signal forwarding: SLURM sends signals to the batch shell, not to child
+# processes.  We trap SIGUSR1 (wall-time warning) and SIGTERM (preemption)
+# and forward them to the Python process running in the background.
+# =========================================================================
+CHILD_PID=""
+forward_signal() {{
+    if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+        echo "Forwarding $1 to Python process (PID $CHILD_PID)"
+        kill -"$1" "$CHILD_PID"
+    fi
+}}
+trap 'forward_signal USR1' USR1
+trap 'forward_signal TERM' TERM
 
-echo "Segment {segment_index} completed successfully at $(date)"
-"""
+# Run the next segment (backgrounded for signal forwarding)
+polyzymd{openff_logs_flag} run-segment \\
+    -c "$CONFIG_PATH" \\
+    -r "$REPLICATE" \\
+    --scratch-dir "$WORKING_DIR"{skip_build_flag} &
+CHILD_PID=$!
 
-    # Template for continuation jobs
-    CONTINUATION_JOB_TEMPLATE = """#!/bin/bash
-#SBATCH --partition={partition}
-#SBATCH --job-name=c_{job_name}
-#SBATCH --output={output_file}
-#SBATCH --qos={qos}
-#SBATCH --nodes={nodes}
-#SBATCH --ntasks={ntasks}
-#SBATCH --mem={memory}
-#SBATCH --time={time_limit}
-#SBATCH --gres=gpu:{gpus}
-#SBATCH --mail-type=FAIL
-#SBATCH --mail-user={email}
-#SBATCH --account={account}
-{exclude_line}
-
-# =============================================================================
-# PolyzyMD Continuation Job
-# Segment: {segment_index}
-# =============================================================================
-
-# Load conda environment (ignore module warnings on some HPC systems)
-module purge 2>/dev/null || true
-module load miniforge 2>/dev/null || true
-
-# Initialize conda/mamba for non-interactive shell
-eval "$(conda shell.bash hook)"
-mamba activate {conda_env}
-
-# Enable strict error handling after environment setup
+# Wait for the child; 'wait' is interrupted by trapped signals, so loop
+# until the child actually exits.  Temporarily disable 'set -e' so we can
+# capture non-zero exit codes (e.g. 99 for graceful shutdown) without the
+# shell exiting prematurely.
+set +e
+wait "$CHILD_PID" 2>/dev/null
+RC=$?
+while kill -0 "$CHILD_PID" 2>/dev/null; do
+    wait "$CHILD_PID" 2>/dev/null
+    RC=$?
+done
 set -e
 
-# Projects directory (scripts, configs, logs)
-PROJECTS_DIR="{projects_dir}"
+echo "run-segment exited with code $RC at $(date)"
 
-# Scratch directory (simulation output - where previous segment data lives)
-SCRATCH_DIR="{scratch_dir}"
+# =========================================================================
+# Resubmission logic
+# =========================================================================
+if [ $RC -ne 0 ] && [ $RC -ne 99 ]; then
+    echo "FATAL: run-segment failed (exit code $RC) — NOT resubmitting"
+    exit $RC
+fi
 
-# Change to projects directory
-cd "$PROJECTS_DIR"
+# Check whether more work remains
+set +e
+polyzymd check-progress -c "$CONFIG_PATH" -r "$REPLICATE" --scratch-dir "$WORKING_DIR"
+PROGRESS_RC=$?
+set -e
 
-echo "Starting continuation segment {segment_index}"
-echo "Projects dir: $PROJECTS_DIR"
-echo "Scratch dir: $SCRATCH_DIR"
-echo "Timestamp: $(date)"
+if [ $PROGRESS_RC -eq 0 ]; then
+    echo "Simulation complete — no resubmission needed."
+    exit 0
+fi
 
-# Continue simulation from previous segment using polyzymd CLI
-# Reads checkpoint from previous segment in SCRATCH_DIR
-# Writes new trajectory and checkpoint to SCRATCH_DIR
-polyzymd{openff_logs_flag} continue \\
-    -w "$SCRATCH_DIR" \\
-    -s {segment_index} \\
-    -t {segment_time} \\
-    -n {num_samples}
+# Work remains — resubmit this same script
+echo "Work remains — resubmitting job..."
+sbatch "$THIS_SCRIPT"
+SUBMIT_RC=$?
 
-echo "Segment {segment_index} completed successfully at $(date)"
+if [ $SUBMIT_RC -eq 0 ]; then
+    echo "Resubmitted successfully."
+else
+    echo "WARNING: sbatch resubmission failed (exit code $SUBMIT_RC)"
+    echo "You can manually resume with:"
+    echo "  sbatch $THIS_SCRIPT"
+    exit 1
+fi
+
+exit 0
 """
 
     def __init__(
         self,
         config: SlurmConfig,
-        conda_env: str = "polymerist-env",
+        conda_env: str = "polyzymd-env",
         openff_logs: bool = False,
         skip_build: bool = False,
     ) -> None:
@@ -288,111 +350,136 @@ echo "Segment {segment_index} completed successfully at $(date)"
         """Get the SLURM configuration."""
         return self._config
 
-    def generate_initial_job(
+    # ------------------------------------------------------------------
+    # Internal helpers — compute optional SBATCH directive lines
+    # ------------------------------------------------------------------
+
+    def _gpu_line(self) -> str:
+        """Return the appropriate GPU SBATCH directive for this config.
+
+        Returns ``#SBATCH --gpus=<type>:<n>`` for clusters that use the newer
+        ``--gpus`` syntax (e.g. Bridges2), or ``#SBATCH --gres=gpu:<n>`` for
+        clusters that use the classic Generic RESources syntax (Alpine).
+        """
+        if self._config.gpu_directive_style == "gpus" and self._config.gpu_type:
+            return f"#SBATCH --gpus={self._config.gpu_type}:{self._config.gpus}"
+        return f"#SBATCH --gres=gpu:{self._config.gpus}"
+
+    def _nodes_line(self) -> str:
+        """Return the nodes/tasks SBATCH directive(s) appropriate for this config.
+
+        Alpine-style (``gpu_directive_style == "gres"``) emits two lines::
+
+            #SBATCH --nodes=N
+            #SBATCH --ntasks=N
+
+        Bridges2-style (``gpu_directive_style == "gpus"``) emits a single
+        short-flag line::
+
+            #SBATCH -N N
+        """
+        if self._config.gpu_directive_style == "gpus":
+            return f"#SBATCH -N {self._config.nodes}"
+        return f"#SBATCH --nodes={self._config.nodes}\n#SBATCH --ntasks={self._config.ntasks}"
+
+    def _qos_line(self) -> str:
+        """Return the QoS SBATCH directive, or an empty string to omit it."""
+        return f"#SBATCH --qos={self._config.qos}" if self._config.qos else ""
+
+    def _mem_line(self) -> str:
+        """Return the memory SBATCH directive, or an empty string to omit it."""
+        return f"#SBATCH --mem={self._config.memory}" if self._config.memory else ""
+
+    def _account_line(self) -> str:
+        """Return the account SBATCH directive, or an empty string to omit it.
+
+        An empty account string means the cluster infers the allocation from the
+        submitting user's login (e.g. Bridges2).
+        """
+        return f"#SBATCH --account={self._config.account}" if self._config.account else ""
+
+    def _mail_line(self) -> str:
+        """Return the mail-type + mail-user SBATCH directives, or empty string.
+
+        Both ``--mail-type`` and ``--mail-user`` are omitted together when no
+        email address is configured, keeping the script clean.
+        """
+        if self._config.email:
+            return f"#SBATCH --mail-type=FAIL\n#SBATCH --mail-user={self._config.email}"
+        return ""
+
+    def _exclude_line(self) -> str:
+        """Return the exclude SBATCH directive, or an empty string to omit it."""
+        return f"#SBATCH --exclude={self._config.exclude}" if self._config.exclude else ""
+
+    # ------------------------------------------------------------------
+    # Self-resubmitting job generation
+    # ------------------------------------------------------------------
+
+    def generate_job_script(
         self,
-        context: JobContext,
         config_path: str,
         replicate: int,
-        segment_time: float,
-        segment_frames: int,
+        working_dir: str,
+        job_name: str | None = None,
+        output_file: str | None = None,
     ) -> str:
-        """Generate an initial simulation job script.
+        """Generate a self-resubmitting SLURM job script.
 
-        Args:
-            context: Job context information.
-            config_path: Path to the YAML configuration file.
-            replicate: Replicate number.
-            segment_time: Duration of first segment in nanoseconds.
-            segment_frames: Number of frames to save in first segment.
+        This produces a single script that handles the entire simulation
+        lifecycle.  Each invocation calls ``polyzymd run-segment`` which
+        determines what work remains, runs the next segment, and exits.
+        The bash wrapper then checks progress and resubmits itself if
+        more work is needed.
 
-        Returns:
-            SLURM batch script content.
+        Parameters
+        ----------
+        config_path : str
+            Absolute path to the YAML configuration file.
+        replicate : int
+            Replicate number.
+        working_dir : str
+            Directory for simulation output (trajectories, checkpoints).
+        job_name : str or None, optional
+            SLURM job name. Defaults to ``pzmd_r{replicate}``.
+        output_file : str or None, optional
+            SLURM log file pattern. Defaults to
+            ``slurm_logs/pzmd_r{replicate}.%j.out`` relative to the
+            directory where ``sbatch`` is invoked.
+
+        Returns
+        -------
+        str
+            Complete SLURM batch script content.
         """
-        # Format exclude line
-        exclude_line = ""
-        if self._config.exclude:
-            exclude_line = f"#SBATCH --exclude={self._config.exclude}"
+        if job_name is None:
+            job_name = f"pzmd_r{replicate}"
+        if output_file is None:
+            output_file = f"slurm_logs/{job_name}.%j.out"
 
-        # Use context.projects_dir
-        projects_dir = context.projects_dir if context.projects_dir != "." else "."
-
-        # Format openff_logs flag
         openff_logs_flag = " --openff-logs" if self._openff_logs else ""
-
-        # Format skip_build flag (only for initial job - continuation jobs don't build)
         skip_build_flag = " \\\n    --skip-build" if self._skip_build else ""
 
-        return self.INITIAL_JOB_TEMPLATE.format(
+        return self.JOB_TEMPLATE.format(
             partition=self._config.partition,
-            job_name=context.job_name,
-            output_file=context.output_file,
-            qos=self._config.qos,
-            nodes=self._config.nodes,
-            ntasks=self._config.ntasks,
-            memory=self._config.memory,
+            job_name=job_name,
+            output_file=output_file,
+            qos_line=self._qos_line(),
+            nodes_line=self._nodes_line(),
+            mem_line=self._mem_line(),
             time_limit=self._config.time_limit,
-            gpus=self._config.gpus,
-            email=self._config.email,
-            account=self._config.account,
-            exclude_line=exclude_line,
+            gpu_line=self._gpu_line(),
+            mail_line=self._mail_line(),
+            account_line=self._account_line(),
+            exclude_line=self._exclude_line(),
+            module_load=self._config.module_load,
+            conda_command=self._config.conda_command,
             conda_env=self._conda_env,
-            projects_dir=projects_dir,
-            scratch_dir=context.scratch_dir,
             config_path=config_path,
             replicate=replicate,
-            segment_time=segment_time,
-            segment_frames=segment_frames,
-            segment_index=context.segment_index,
+            working_dir=working_dir,
             openff_logs_flag=openff_logs_flag,
             skip_build_flag=skip_build_flag,
-        )
-
-    def generate_continuation_job(
-        self,
-        context: JobContext,
-        segment_time: float,
-        num_samples: int,
-    ) -> str:
-        """Generate a continuation job script.
-
-        Args:
-            context: Job context information.
-            segment_time: Duration of this segment in nanoseconds.
-            num_samples: Number of frames to save.
-
-        Returns:
-            SLURM batch script content.
-        """
-        exclude_line = ""
-        if self._config.exclude:
-            exclude_line = f"#SBATCH --exclude={self._config.exclude}"
-
-        # Use context.projects_dir
-        projects_dir = context.projects_dir if context.projects_dir != "." else "."
-
-        # Format openff_logs flag
-        openff_logs_flag = " --openff-logs" if self._openff_logs else ""
-
-        return self.CONTINUATION_JOB_TEMPLATE.format(
-            partition=self._config.partition,
-            job_name=context.job_name,
-            output_file=context.output_file,
-            qos=self._config.qos,
-            nodes=self._config.nodes,
-            ntasks=self._config.ntasks,
-            memory=self._config.memory,
-            time_limit=self._config.time_limit,
-            gpus=self._config.gpus,
-            email=self._config.email,
-            account=self._config.account,
-            exclude_line=exclude_line,
-            conda_env=self._conda_env,
-            projects_dir=projects_dir,
-            scratch_dir=context.scratch_dir,
-            segment_index=context.segment_index,
-            segment_time=segment_time,
-            num_samples=num_samples,
-            openff_logs_flag=openff_logs_flag,
         )
 
     def save_script(

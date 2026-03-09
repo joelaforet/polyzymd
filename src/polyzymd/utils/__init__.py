@@ -12,6 +12,7 @@ This module provides internal utilities for:
 from polyzymd.utils.boxvectors import (
     get_box_volume,
     get_topology_bbox,
+    get_topology_bbox_bounds,
     pad_box_vectors_uniform,
 )
 from polyzymd.utils.charging import (
@@ -39,6 +40,7 @@ __all__ = [
     "get_charger",
     # Box vectors
     "get_topology_bbox",
+    "get_topology_bbox_bounds",
     "pad_box_vectors_uniform",
     "get_box_volume",
     # Units

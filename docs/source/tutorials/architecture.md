@@ -7,7 +7,7 @@ This guide provides a detailed map of PolyzyMD's codebase, helping developers an
 ```
 src/polyzymd/
 ├── cli/                    # Command-line interface
-│   └── main.py             # Click commands (build, run, submit, continue, validate)
+│   └── main.py             # Click commands (build, run-gromacs, submit, run-segment, validate)
 ├── config/                 # Configuration and validation
 │   ├── schema.py           # Pydantic models for YAML config
 │   └── loader.py           # YAML loading utilities
@@ -19,10 +19,10 @@ src/polyzymd/
 │   └── solvent.py          # Solvation, ions, box setup
 ├── simulation/             # MD execution (Stage 5-6)
 │   ├── runner.py           # Initial simulation (equilibration + production)
-│   └── continuation.py     # Checkpoint-based continuation for daisy-chain
+│   └── continuation.py     # Checkpoint-based continuation for multi-segment runs
 ├── workflow/               # HPC job management
 │   ├── slurm.py            # SLURM script templates and generation
-│   └── daisy_chain.py      # Job submission with dependencies
+│   └── daisy_chain.py      # Self-resubmitting job submission
 ├── core/                   # Shared utilities
 │   ├── parameters.py       # Simulation parameter dataclasses
 │   └── restraints.py       # Distance restraint definitions
@@ -79,9 +79,11 @@ The command-line interface is built with [Click](https://click.palletsprojects.c
 |---------|----------|---------------------|
 | `polyzymd init` | Initialize new project directory | Template files |
 | `polyzymd build` | Build system without running | `SystemBuilder` |
-| `polyzymd run` | Build and run initial simulation | `SystemBuilder` + `SimulationRunner` |
-| `polyzymd continue` | Continue from checkpoint | `ContinuationManager` |
-| `polyzymd submit` | Submit daisy-chain to SLURM | `DaisyChainSubmitter` |
+| `polyzymd run-gromacs` | Build and run GROMACS simulation | `SystemBuilder` + GROMACS exporter |
+| `polyzymd run-segment` | Run a single production segment | `ContinuationManager` |
+| `polyzymd submit` | Submit self-resubmitting jobs to SLURM | `DaisyChainSubmitter` |
+| `polyzymd recover` | Resume a stalled simulation | Progress scanning |
+| `polyzymd check-progress` | Check simulation completion status | `SimulationProgress` |
 | `polyzymd validate` | Validate config file | `SimulationConfig` |
 | `polyzymd info` | Show installation info | Version + dependencies |
 
@@ -203,14 +205,13 @@ Contains job script templates and preset configurations.
 **Key components:**
 - `SlurmConfig` - Dataclass with partition, QOS, time limit, etc.
 - `SlurmConfig.from_preset(preset)` - Load preset (aa100, al40, testing, etc.)
-- `INITIAL_JOB_TEMPLATE` - Template for first segment (builds system)
-- `CONTINUATION_JOB_TEMPLATE` - Template for subsequent segments
-- `SlurmJobGenerator` - Fills templates with runtime values
+- `JOB_TEMPLATE` - Unified self-resubmitting job template
+- `SlurmScriptGenerator` - Fills template with runtime values
 
 **Where to modify:**
 - Add new SLURM presets: Add to `presets` dict in `from_preset()` method
-- Change job script behavior: Modify `INITIAL_JOB_TEMPLATE` or `CONTINUATION_JOB_TEMPLATE`
-- Change module loading: Edit the `module load` lines in templates
+- Change job script behavior: Modify `JOB_TEMPLATE`
+- Change module loading: Edit the `module load` lines in template
 
 **Current template structure (simplified):**
 ```bash
@@ -223,27 +224,36 @@ Contains job script templates and preset configurations.
 module purge 2>/dev/null || true
 module load miniforge 2>/dev/null || true
 eval "$(conda shell.bash hook)"
-mamba activate {conda_env}
+conda activate {conda_env}
 
 # Enable strict error handling after environment setup
 set -e
 
-# Run simulation
-polyzymd run -c "{config_path}" --replicate {replicate} ...
+# Check if simulation is already complete
+polyzymd check-progress -c "{config_path}" -r {replicate}
+if [ $? -eq 0 ]; then exit 0; fi
+
+# Run next production segment
+polyzymd run-segment -c "{config_path}" -r {replicate}
+
+# Self-resubmit if work remains
+polyzymd check-progress -c "{config_path}" -r {replicate}
+if [ $? -ne 0 ]; then sbatch "$THIS_SCRIPT"; fi
 ```
 
 #### `daisy_chain.py` - Job Submission
 
-Manages job dependencies for long simulations split across multiple SLURM jobs.
+Manages self-resubmitting SLURM jobs for long simulations. Each replicate
+gets a single job that resubmits itself until the total production time is
+reached.
 
 **Key components:**
-- `DaisyChainConfig` - Settings for the chain (segments, time per segment)
-- `DaisyChainSubmitter` - Generates scripts and submits with dependencies
+- `DaisyChainConfig` - Settings for the submission (time per segment, etc.)
+- `DaisyChainSubmitter` - Generates scripts and submits jobs
 - `submit_daisy_chain()` - Main entry point function
 
 **Where to modify:**
-- Change dependency type: Modify `--dependency=afterok:` in submission
-- Change job naming: Modify `JobContext` creation
+- Change job naming: Modify `_create_job_name()` method
 
 ### Core Utilities (`core/`)
 
@@ -334,7 +344,7 @@ Add methods to `SimulationRunner` class, then call them from `cli/main.py`.
 
 ### Submitting Jobs to HPC
 
-PolyzyMD provides several SLURM presets for common HPC partitions. Each replicate's daisy chain runs in parallel, with segments within each chain running sequentially.
+PolyzyMD provides several SLURM presets for common HPC partitions. Each replicate runs as a single self-resubmitting job that continues until the total production time is reached.
 
 #### Available Presets
 

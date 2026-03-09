@@ -7,9 +7,9 @@ for argument parsing and command organization.
 Usage:
     polyzymd --help
     polyzymd build --config simulation.yaml
-    polyzymd run --config simulation.yaml --replicate 1
     polyzymd submit --config simulation.yaml --replicates 1-5
-    polyzymd continue --working-dir path/to/sim --segment 2
+    polyzymd run-segment --config simulation.yaml --replicate 1
+    polyzymd run-gromacs --config simulation.yaml --replicate 1
 """
 
 from __future__ import annotations
@@ -355,11 +355,11 @@ def build(
 
 
 # =============================================================================
-# Run Command
+# Run-GROMACS Command
 # =============================================================================
 
 
-@cli.command()
+@cli.command("run-gromacs")
 @click.option(
     "-c",
     "--config",
@@ -387,67 +387,34 @@ def build(
     help="Projects directory for scripts and logs (long-term storage)",
 )
 @click.option(
-    "--segment-time",
-    default=None,
-    type=float,
-    help="Override production time per segment (ns) [OpenMM only]",
-)
-@click.option(
-    "--segment-frames",
-    default=None,
-    type=int,
-    help="Override frames per segment [OpenMM only]",
-)
-@click.option(
-    "--skip-build",
-    is_flag=True,
-    help="Skip system building (use existing) [OpenMM only]",
-)
-@click.option(
-    "--gromacs",
-    is_flag=True,
-    help="Run simulation using GROMACS instead of OpenMM",
-)
-@click.option(
     "--gmx-path",
     default="gmx",
-    help="Path to GROMACS executable (default: gmx) [GROMACS only]",
+    help="Path to GROMACS executable (default: gmx)",
 )
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Export files but don't run simulation [GROMACS only]",
+    help="Export files but don't run simulation",
 )
-def run(
+def run_gromacs(
     config: str,
     replicate: int,
     scratch_dir: Optional[str],
     projects_dir: Optional[str],
-    segment_time: Optional[float],
-    segment_frames: Optional[int],
-    skip_build: bool,
-    gromacs: bool,
     gmx_path: str,
     dry_run: bool,
 ) -> None:
-    """Run a simulation from configuration.
+    """Run a simulation using GROMACS.
 
-    By default, runs using OpenMM. Use --gromacs to run using GROMACS instead.
+    Builds the system, exports to GROMACS format (.gro, .top, .mdp),
+    and executes the full GROMACS workflow locally (EM, equilibration,
+    production, and trajectory post-processing).
 
-    OpenMM Mode (default):
-        Builds the system (unless --skip-build), runs equilibration,
-        and then runs production simulation using OpenMM.
-
-    GROMACS Mode (--gromacs):
-        Builds the system, exports to GROMACS format (.gro, .top, .mdp),
-        and executes the full GROMACS workflow locally (EM, equilibration,
-        production, and trajectory post-processing).
-
-    GROMACS Notes:
+    \b
+    Notes:
         - Requires GROMACS to be installed and accessible
         - Use --gmx-path to specify a custom GROMACS executable
         - Use --dry-run to export files without running the simulation
-        - --skip-build is not supported for GROMACS (always rebuilds)
     """
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
@@ -456,7 +423,7 @@ def run(
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-        click.echo(f"Running simulation: {sim_config.name}")
+        click.echo(f"Running GROMACS simulation: {sim_config.name}")
 
         # Override directories if provided via CLI
         if scratch_dir:
@@ -464,24 +431,12 @@ def run(
         if projects_dir:
             sim_config.output.projects_directory = Path(projects_dir)
 
-        # Branch based on simulation engine
-        if gromacs:
-            _run_gromacs(
-                sim_config=sim_config,
-                replicate=replicate,
-                gmx_path=gmx_path,
-                dry_run=dry_run,
-                skip_build=skip_build,
-            )
-        else:
-            _run_openmm(
-                sim_config=sim_config,
-                replicate=replicate,
-                scratch_dir=scratch_dir,
-                segment_time=segment_time,
-                segment_frames=segment_frames,
-                skip_build=skip_build,
-            )
+        _run_gromacs_impl(
+            sim_config=sim_config,
+            replicate=replicate,
+            gmx_path=gmx_path,
+            dry_run=dry_run,
+        )
 
     except Exception as e:
         click.echo(f"Simulation failed: {e}", err=True)
@@ -492,31 +447,27 @@ def run(
         sys.exit(1)
 
 
-def _run_gromacs(
+def _run_gromacs_impl(
     sim_config: "SimulationConfig",
     replicate: int,
     gmx_path: str,
     dry_run: bool,
-    skip_build: bool,
 ) -> None:
     """Run simulation using GROMACS.
 
-    Args:
-        sim_config: Validated simulation configuration.
-        replicate: Replicate number.
-        gmx_path: Path to GROMACS executable.
-        dry_run: If True, export files but don't run simulation.
-        skip_build: If True, skip system building (not supported for GROMACS MVP).
+    Parameters
+    ----------
+    sim_config : SimulationConfig
+        Validated simulation configuration.
+    replicate : int
+        Replicate number.
+    gmx_path : str
+        Path to GROMACS executable.
+    dry_run : bool
+        If True, export files but don't run simulation.
     """
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
-
-    # Warn about unsupported options
-    if skip_build:
-        click.echo(
-            "Warning: --skip-build is not supported for GROMACS mode. System will be rebuilt.",
-            err=True,
-        )
 
     # Determine output directory for GROMACS files
     gromacs_dir = sim_config.output.projects_directory / f"replicate_{replicate}" / "gromacs"
@@ -597,127 +548,8 @@ def _run_gromacs(
         sys.exit(1)
 
 
-def _run_openmm(
-    sim_config: "SimulationConfig",
-    replicate: int,
-    scratch_dir: Optional[str],
-    segment_time: Optional[float],
-    segment_frames: Optional[int],
-    skip_build: bool,
-) -> None:
-    """Run simulation using OpenMM.
-
-    Args:
-        sim_config: Validated simulation configuration.
-        replicate: Replicate number.
-        scratch_dir: Override for scratch directory.
-        segment_time: Override for production time per segment.
-        segment_frames: Override for frames per segment.
-        skip_build: If True, load pre-built system from disk.
-    """
-    from polyzymd.builders.system_builder import SystemBuilder
-    from polyzymd.simulation.runner import SimulationRunner
-
-    # Determine working directory
-    if scratch_dir:
-        working_dir = Path(scratch_dir)
-    else:
-        working_dir = sim_config.get_working_directory(replicate)
-
-    if not skip_build:
-        click.echo(f"Building system for replicate {replicate}...")
-        builder = SystemBuilder.from_config(sim_config)
-        interchange = builder.build_from_config(
-            config=sim_config,
-            working_dir=working_dir,
-            polymer_seed=replicate,
-        )
-
-        # Extract OpenMM components from Interchange
-        click.echo("Extracting OpenMM components...")
-        omm_topology, omm_system, omm_positions = builder.get_openmm_components()
-
-        # Apply restraints if configured
-        _apply_restraints(sim_config, omm_topology, omm_system)
-
-    else:
-        # --skip-build: Load pre-built system from disk
-        click.echo("Skipping build, loading pre-built system...")
-        from openmm import XmlSerializer
-        from openmm.app import PDBFile
-
-        # Check that required files exist
-        pdb_path = working_dir / "solvated_system.pdb"
-        system_path = working_dir / "system.xml"
-
-        if not pdb_path.exists():
-            click.echo(f"Error: {pdb_path} not found. Run 'polyzymd build' first.", err=True)
-            sys.exit(1)
-        if not system_path.exists():
-            click.echo(f"Error: {system_path} not found. Run 'polyzymd build' first.", err=True)
-            sys.exit(1)
-
-        # Load topology and positions from PDB
-        click.echo(f"Loading topology and positions from {pdb_path}...")
-        pdb = PDBFile(str(pdb_path))
-        omm_topology = pdb.topology
-        omm_positions = pdb.positions
-
-        # Load system from XML (already includes restraints from build)
-        click.echo(f"Loading OpenMM system from {system_path}...")
-        with open(system_path, "r") as f:
-            omm_system = XmlSerializer.deserialize(f.read())
-
-        click.echo("Pre-built system loaded successfully")
-
-    # Create runner
-    runner = SimulationRunner(
-        topology=omm_topology,
-        system=omm_system,
-        positions=omm_positions,
-        working_dir=working_dir,
-    )
-
-    # Run energy minimization first
-    click.echo("Running energy minimization...")
-    runner.minimize()
-
-    # Get thermodynamic parameters
-    temperature = sim_config.thermodynamics.temperature
-    pressure = sim_config.thermodynamics.pressure
-
-    # Run equilibration
-    phases = sim_config.simulation_phases
-    eq_duration = phases.total_equilibration_duration
-    eq_mode = "multi-stage" if phases.uses_staged_equilibration else "simple"
-    click.echo(f"Running equilibration: {eq_duration:.3f} ns at {temperature} K ({eq_mode})...")
-    runner.run_equilibration(
-        temperature=temperature,
-        config=phases,
-    )
-
-    # Calculate segment parameters
-    total_time = sim_config.simulation_phases.production.duration
-    num_segments = sim_config.simulation_phases.segments
-    seg_time = segment_time or (total_time / num_segments)
-    seg_frames = segment_frames or (sim_config.simulation_phases.production.samples // num_segments)
-
-    # Run first production segment
-    click.echo(f"Running production segment 0: {seg_time} ns, {seg_frames} frames (NPT)...")
-    runner.run_production(
-        temperature=temperature,
-        duration_ns=seg_time,
-        num_samples=seg_frames,
-        pressure=pressure,
-        segment_index=0,
-    )
-
-    click.echo("Simulation completed successfully!")
-    click.echo(f"Output: {working_dir}")
-
-
 # =============================================================================
-# Submit Command (Daisy-chain)
+# Submit Command (SLURM)
 # =============================================================================
 
 
@@ -749,7 +581,7 @@ def _run_openmm(
 )
 @click.option(
     "--preset",
-    type=click.Choice(["aa100", "al40", "blanca-shirts", "testing"]),
+    type=click.Choice(["aa100", "al40", "blanca-shirts", "bridges2", "testing"]),
     default="aa100",
     help="SLURM partition preset (default: aa100)",
 )
@@ -776,7 +608,24 @@ def _run_openmm(
 @click.option(
     "--memory",
     default=None,
-    help="Override SLURM memory allocation (default: 3G). Increase to 4-8G for larger systems or if you encounter OOM errors.",
+    help="Override SLURM memory allocation (e.g. '4G', '8G'). Not needed for bridges2 (allocated per GPU).",
+)
+@click.option(
+    "--account",
+    default=None,
+    help=(
+        "Override SLURM account / allocation ID. Required for bridges2 "
+        "(find yours at https://www.psc.edu/resources/bridges-2/user-guide)."
+    ),
+)
+@click.option(
+    "--gpu-type",
+    default=None,
+    type=click.Choice(["v100-16", "v100-32", "l40s-48", "h100-80"]),
+    help=(
+        "Override GPU type for presets that use the --gpus directive (e.g. bridges2). "
+        "Valid types: v100-16, v100-32, l40s-48, h100-80. Default for bridges2: v100-32."
+    ),
 )
 @click.option(
     "--openff-logs",
@@ -800,14 +649,16 @@ def submit(
     output_dir: Optional[str],
     time_limit: Optional[str],
     memory: Optional[str],
+    account: Optional[str],
+    gpu_type: Optional[str],
     submit_openff_logs: bool,
     skip_build: bool,
 ) -> None:
-    """Submit daisy-chain simulation jobs to SLURM.
+    """Submit simulation jobs to SLURM.
 
-    Creates and submits a chain of dependent jobs that will run
-    sequentially, allowing long simulations to be broken into
-    smaller segments that fit within HPC time limits.
+    Creates and submits self-resubmitting jobs (one per replicate)
+    that automatically checkpoint and resume until the full
+    production duration is complete.
 
     Directory structure:
     - projects_dir: Where job scripts and SLURM logs are stored (long-term storage)
@@ -822,8 +673,12 @@ def submit(
         click.echo(f"Scratch directory: {scratch_dir}")
     if projects_dir:
         click.echo(f"Projects directory: {projects_dir}")
+    if account:
+        click.echo(f"Account: {account}")
     if memory:
         click.echo(f"Memory allocation: {memory}")
+    if gpu_type:
+        click.echo(f"GPU type override: {gpu_type}")
     if skip_build:
         click.echo("Skip-build mode: using pre-built systems")
 
@@ -842,6 +697,8 @@ def submit(
             projects_dir=projects_dir,
             time_limit=time_limit,
             memory=memory,
+            account=account,
+            gpu_type=gpu_type,
             openff_logs=submit_openff_logs,
             skip_build=skip_build,
         )
@@ -860,83 +717,434 @@ def submit(
 
 
 # =============================================================================
-# Continue Command
+# Run-segment Command — unified entry point for self-resubmitting jobs
 # =============================================================================
 
 
-@cli.command("continue")
+@cli.command("run-segment")
 @click.option(
-    "-w",
-    "--working-dir",
+    "-c",
+    "--config",
     required=True,
     type=click.Path(exists=True),
-    help="Working directory with previous segment",
+    help="Path to YAML configuration file",
 )
 @click.option(
-    "-s",
-    "--segment",
-    required=True,
+    "-r",
+    "--replicate",
+    default=1,
     type=int,
-    help="Segment index to run (1-based)",
+    help="Replicate number (default: 1)",
 )
 @click.option(
-    "-t",
-    "--segment-time",
-    required=True,
-    type=float,
-    help="Duration of this segment (ns)",
+    "--scratch-dir",
+    default=None,
+    type=click.Path(),
+    help="Override scratch directory for simulation output",
 )
 @click.option(
-    "-n",
-    "--num-samples",
-    default=250,
-    type=int,
-    help="Number of frames to save (default: 250)",
+    "--skip-build",
+    is_flag=True,
+    help="Skip system building (use existing) for initial segment",
 )
-def continue_sim(
-    working_dir: str,
-    segment: int,
-    segment_time: float,
-    num_samples: int,
+def run_segment(
+    config: str,
+    replicate: int,
+    scratch_dir: Optional[str],
+    skip_build: bool,
 ) -> None:
-    """Continue a simulation from a previous segment.
+    """Run the next simulation segment (self-resubmitting job entry point).
 
-    Loads state from the previous production segment and continues
-    the simulation. Used by daisy-chain continuation jobs.
+    This is the unified command called by every SLURM job in the
+    self-resubmitting architecture. It determines what work remains
+    by loading progress state, then either:
+
+    \b
+    - Builds, equilibrates, and runs the first production segment (segment 0)
+    - Continues from the last completed segment
+    - Exits cleanly if the simulation is already complete
+
+    Exit codes:
+        0  - Segment completed (check progress to decide resubmission)
+        1  - Error
+        99 - Graceful interruption (wall-time signal, should resubmit)
     """
-    from polyzymd.simulation.continuation import ContinuationManager
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.simulation.progress import (
+        SimulationProgress,
+        SimulationStatus,
+        get_next_segment_info,
+        load_or_scan_progress,
+        save_progress,
+    )
 
-    click.echo(f"Continuing simulation from segment {segment - 1}")
-    click.echo(f"Working directory: {working_dir}")
-    click.echo(f"Duration: {segment_time} ns, Frames: {num_samples}")
+    click.echo(f"Loading configuration from: {config}")
 
     try:
-        manager = ContinuationManager(
-            working_dir=working_dir,
-            segment_index=segment,
-        )
-
-        click.echo("Loading previous state...")
-        manager.load_previous_state()
-
-        click.echo(f"Running segment {segment}...")
-        results = manager.run_segment(
-            duration_ns=segment_time,
-            num_samples=num_samples,
-        )
-
-        click.echo(f"Segment {segment} completed!")
-        click.echo(f"Output: {results['output_dir']}")
-
-    except FileNotFoundError as e:
-        click.echo(f"Error: Previous segment not found: {e}", err=True)
-        sys.exit(1)
+        sim_config = SimulationConfig.from_yaml(config)
     except Exception as e:
-        click.echo(f"Continuation failed: {e}", err=True)
+        click.echo(f"Failed to load config: {e}", err=True)
+        sys.exit(1)
+
+    # Determine working directory
+    if scratch_dir:
+        working_dir = Path(scratch_dir)
+    else:
+        working_dir = sim_config.get_working_directory(replicate)
+
+    working_dir.mkdir(parents=True, exist_ok=True)
+
+    # Calculate total steps and samples from config
+    prod = sim_config.simulation_phases.production
+    timestep_fs = prod.time_step
+    total_steps = int(prod.duration * 1e6 / timestep_fs)
+    total_samples = prod.samples
+
+    click.echo(f"Working directory: {working_dir}")
+    click.echo(f"Total production: {prod.duration} ns = {total_steps} steps")
+
+    # Load or create progress
+    progress = load_or_scan_progress(
+        working_dir=working_dir,
+        config_path=str(Path(config).resolve()),
+        total_steps=total_steps,
+        total_samples=total_samples,
+        timestep_fs=timestep_fs,
+        replicate=replicate,
+    )
+    save_progress(working_dir, progress)
+
+    # Check if simulation is already complete
+    if progress.is_complete:
+        click.echo("Simulation already complete — nothing to do.")
+        sys.exit(0)
+
+    # Determine what to run next
+    seg_info = get_next_segment_info(progress, total_steps, total_samples)
+    if seg_info is None:
+        click.echo("No remaining work — simulation complete.")
+        sys.exit(0)
+
+    seg_idx = seg_info["segment_index"]
+    steps_to_run = seg_info["steps_to_run"]
+    samples_to_write = seg_info["samples_to_write"]
+    report_interval = seg_info["report_interval"]
+    duration_ns = (steps_to_run * timestep_fs) / 1e6
+
+    click.echo(
+        f"Next segment: {seg_idx} "
+        f"({duration_ns:.3f} ns, {steps_to_run} steps, {samples_to_write} frames)"
+    )
+
+    try:
+        if seg_idx == 0 and not progress.segments:
+            # ---- FIRST RUN: build, equilibrate, run segment 0 ----
+            _run_initial_segment(
+                sim_config=sim_config,
+                working_dir=working_dir,
+                replicate=replicate,
+                skip_build=skip_build,
+                duration_ns=duration_ns,
+                num_samples=samples_to_write,
+                timestep_fs=timestep_fs,
+                report_interval=report_interval,
+            )
+        else:
+            # ---- CONTINUATION: load previous state, run next segment ----
+            _run_continuation_segment(
+                working_dir=working_dir,
+                segment_index=seg_idx,
+                duration_ns=duration_ns,
+                num_samples=samples_to_write,
+                timestep_fs=timestep_fs,
+                report_interval=report_interval,
+            )
+
+        click.echo(f"Segment {seg_idx} completed successfully.")
+
+    except Exception as e:
+        # Check if this is a GracefulExit (signal-based interruption)
+        from polyzymd.simulation.signals import EXIT_CODE_INTERRUPTED, GracefulExit
+
+        if isinstance(e, GracefulExit):
+            click.echo(f"Segment {seg_idx} interrupted (graceful shutdown): {e}")
+            sys.exit(EXIT_CODE_INTERRUPTED)
+
+        click.echo(f"Segment {seg_idx} failed: {e}", err=True)
         if LOGGER.level == logging.DEBUG:
             import traceback
 
             traceback.print_exc()
+        sys.exit(1)
+
+
+def _run_initial_segment(
+    sim_config: "SimulationConfig",
+    working_dir: Path,
+    replicate: int,
+    skip_build: bool,
+    duration_ns: float,
+    num_samples: int,
+    timestep_fs: float,
+    report_interval: int | None = None,
+) -> None:
+    """Build system, equilibrate, and run the first production segment.
+
+    Parameters
+    ----------
+    sim_config : SimulationConfig
+        Validated simulation configuration.
+    working_dir : Path
+        Working directory for output.
+    replicate : int
+        Replicate number.
+    skip_build : bool
+        If True, load pre-built system from disk.
+    duration_ns : float
+        Production segment duration in nanoseconds.
+    num_samples : int
+        Number of trajectory frames to save.
+    timestep_fs : float
+        Integration timestep in femtoseconds.
+    report_interval : int or None
+        Fixed reporter interval in steps. Overrides per-segment
+        interval calculation when provided.
+    """
+    from polyzymd.simulation.runner import SimulationRunner
+
+    temperature = sim_config.thermodynamics.temperature
+    pressure = sim_config.thermodynamics.pressure
+
+    if not skip_build:
+        from polyzymd.builders.system_builder import SystemBuilder
+
+        click.echo(f"Building system for replicate {replicate}...")
+        builder = SystemBuilder.from_config(sim_config)
+        builder.build_from_config(
+            config=sim_config,
+            working_dir=working_dir,
+            polymer_seed=replicate,
+        )
+
+        click.echo("Extracting OpenMM components...")
+        omm_topology, omm_system, omm_positions = builder.get_openmm_components()
+
+        # Apply restraints if configured
+        if sim_config.restraints:
+            from polyzymd.core.restraints import RestraintFactory, apply_restraints
+
+            click.echo(f"Applying {len(sim_config.restraints)} restraint(s)...")
+            restraint_defs = []
+            for r in sim_config.restraints:
+                if not r.enabled:
+                    continue
+                restraint_def = RestraintFactory.from_config(r.model_dump())
+                restraint_defs.append(restraint_def)
+            if restraint_defs:
+                apply_restraints(restraint_defs, omm_topology, omm_system)
+                click.echo(f"Applied {len(restraint_defs)} restraint(s)")
+    else:
+        from openmm import XmlSerializer
+        from openmm.app import PDBFile
+
+        click.echo("Loading pre-built system...")
+        pdb_path = working_dir / "solvated_system.pdb"
+        system_path = working_dir / "system.xml"
+        if not pdb_path.exists() or not system_path.exists():
+            raise FileNotFoundError(
+                f"Pre-built system not found in {working_dir}. "
+                "Run 'polyzymd build' first or remove --skip-build."
+            )
+        pdb = PDBFile(str(pdb_path))
+        omm_topology = pdb.topology
+        omm_positions = pdb.positions
+        with open(system_path, "r") as f:
+            omm_system = XmlSerializer.deserialize(f.read())
+
+    # Create runner
+    runner = SimulationRunner(
+        topology=omm_topology,
+        system=omm_system,
+        positions=omm_positions,
+        working_dir=working_dir,
+    )
+
+    # Minimize
+    click.echo("Running energy minimization...")
+    runner.minimize()
+
+    # Equilibrate
+    phases = sim_config.simulation_phases
+    eq_duration = phases.total_equilibration_duration
+    eq_mode = "multi-stage" if phases.uses_staged_equilibration else "simple"
+    click.echo(f"Running equilibration: {eq_duration:.3f} ns ({eq_mode})...")
+    eq_result = runner.run_equilibration(temperature=temperature, config=phases)
+
+    # Save equilibration progress so a resubmitted job knows eq is done
+    from polyzymd.simulation.progress import (
+        EquilibrationStageRecord,
+        SegmentStatus,
+        load_progress,
+        save_progress,
+    )
+
+    progress = load_progress(working_dir)
+    if progress is not None:
+        eq_stages = []
+        if eq_result.get("type") == "staged_equilibration":
+            for stage_info in eq_result.get("stages", []):
+                eq_stages.append(
+                    EquilibrationStageRecord(
+                        index=stage_info["stage_index"],
+                        name=stage_info["stage_name"],
+                        status=SegmentStatus.COMPLETED,
+                        duration_ns=stage_info["duration_ns"],
+                        ensemble=stage_info.get("ensemble", "NVT"),
+                    )
+                )
+        progress.equilibration_stages = eq_stages
+        save_progress(working_dir, progress)
+        click.echo(f"Saved equilibration progress ({len(eq_stages)} stages)")
+
+    # Run first production segment
+    click.echo(f"Running production segment 0: {duration_ns:.3f} ns, {num_samples} frames...")
+    runner.run_production(
+        temperature=temperature,
+        duration_ns=duration_ns,
+        num_samples=num_samples,
+        timestep_fs=timestep_fs,
+        pressure=pressure,
+        segment_index=0,
+        report_interval=report_interval,
+    )
+
+
+def _run_continuation_segment(
+    working_dir: Path,
+    segment_index: int,
+    duration_ns: float,
+    num_samples: int,
+    timestep_fs: float,
+    report_interval: int | None = None,
+) -> None:
+    """Continue from the last completed segment.
+
+    Parameters
+    ----------
+    working_dir : Path
+        Working directory containing simulation outputs.
+    segment_index : int
+        Segment index to run.
+    duration_ns : float
+        Duration of this segment in nanoseconds.
+    num_samples : int
+        Number of trajectory frames to save.
+    timestep_fs : float
+        Integration timestep in femtoseconds.
+    report_interval : int or None
+        Fixed reporter interval in steps. Overrides per-segment
+        interval calculation when provided.
+    """
+    from polyzymd.simulation.continuation import ContinuationManager
+
+    click.echo(f"Loading state from segment {segment_index - 1}...")
+    manager = ContinuationManager(
+        working_dir=working_dir,
+        segment_index=segment_index,
+    )
+    manager.load_previous_state()
+
+    click.echo(f"Running segment {segment_index}: {duration_ns:.3f} ns, {num_samples} frames...")
+    manager.run_segment(
+        duration_ns=duration_ns,
+        num_samples=num_samples,
+        timestep_fs=timestep_fs,
+        report_interval=report_interval,
+    )
+
+
+# =============================================================================
+# Check-progress Command
+# =============================================================================
+
+
+@cli.command("check-progress")
+@click.option(
+    "-c",
+    "--config",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to YAML configuration file",
+)
+@click.option(
+    "-r",
+    "--replicate",
+    default=1,
+    type=int,
+    help="Replicate number (default: 1)",
+)
+@click.option(
+    "--scratch-dir",
+    default=None,
+    type=click.Path(),
+    help="Override scratch directory",
+)
+def check_progress(
+    config: str,
+    replicate: int,
+    scratch_dir: Optional[str],
+) -> None:
+    """Check whether a simulation is complete.
+
+    Loads progress state and exits with code 0 if the simulation is
+    complete, or code 1 if work remains. Used by SLURM resubmission
+    logic to decide whether to resubmit.
+
+    \b
+    Exit codes:
+        0 - Simulation complete (do NOT resubmit)
+        1 - Work remains (resubmit)
+    """
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.simulation.progress import load_or_scan_progress
+
+    try:
+        sim_config = SimulationConfig.from_yaml(config)
+    except Exception as e:
+        click.echo(f"Failed to load config: {e}", err=True)
+        sys.exit(1)
+
+    if scratch_dir:
+        working_dir = Path(scratch_dir)
+    else:
+        working_dir = sim_config.get_working_directory(replicate)
+
+    prod = sim_config.simulation_phases.production
+    timestep_fs = prod.time_step
+    total_steps = int(prod.duration * 1e6 / timestep_fs)
+    total_samples = prod.samples
+
+    progress = load_or_scan_progress(
+        working_dir=working_dir,
+        config_path=str(Path(config).resolve()),
+        total_steps=total_steps,
+        total_samples=total_samples,
+        timestep_fs=timestep_fs,
+        replicate=replicate,
+    )
+
+    pct = progress.fraction_complete() * 100
+    click.echo(
+        f"Progress: {progress.total_steps_completed}/{progress.total_steps_requested} steps "
+        f"({pct:.1f}%), {len(progress.segments)} segment(s)"
+    )
+
+    if progress.is_complete:
+        click.echo("Status: COMPLETE")
+        sys.exit(0)
+    else:
+        remaining_ns = (progress.steps_remaining * timestep_fs) / 1e6
+        click.echo(f"Status: {progress.status.value} — {remaining_ns:.3f} ns remaining")
         sys.exit(1)
 
 
@@ -994,7 +1202,6 @@ def validate(config: str) -> None:
         click.echo(f"  Equilibration: {eq.duration} ns ({eq.ensemble.value})")
         prod = sim_config.simulation_phases.production
         click.echo(f"  Production: {prod.duration} ns ({prod.ensemble.value})")
-        click.echo(f"  Segments: {sim_config.simulation_phases.segments}")
 
         if sim_config.restraints:
             click.echo()
@@ -1080,16 +1287,15 @@ def init(name: str) -> None:
 # This directory should contain your input structure files.
 #
 # PROTEIN PDB FILE (required):
-#   - Properly protonated (use PDB2PQR, Reduce, or similar)
-#   - No missing residues in regions of interest
-#   - Standard amino acid residue names
+#   - Standard amino acid residue names (no nonstandard residues)
+#   - Properly protonated at your simulation pH
+#   - No missing heavy atoms in regions of interest
 #   - Rename to match your config.yaml enzyme.pdb_path setting
 #
-# PREPARATION TIPS:
-#   1. Download structure from PDB or use your own model
-#   2. Remove waters, ligands, and alternate conformations
-#   3. Add hydrogens at your simulation pH
-#   4. Check for missing loops/residues
+# PREPARATION:
+#   Use `polyzymd clean-pdb -i your_protein.pdb` or another PDB
+#   preparation tool to replace nonstandard residues and add
+#   missing hydrogens before building your system.
 #
 # Delete this placeholder file after adding your protein structure.
 # ============================================================================
@@ -1146,6 +1352,294 @@ def init(name: str) -> None:
             shutil.rmtree(project_dir)
         click.echo(click.style(f"Error creating project: {e}", fg="red"), err=True)
         sys.exit(1)
+
+
+# =============================================================================
+# Clean-PDB Command
+# =============================================================================
+
+
+@cli.command("clean-pdb")
+@click.option(
+    "-i",
+    "--input",
+    "input_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the input PDB file.",
+)
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Path for the cleaned PDB file. Defaults to <name>_clean.pdb.",
+)
+@click.option(
+    "--ph",
+    default=7.4,
+    type=float,
+    show_default=True,
+    help="pH for hydrogen addition.",
+)
+def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
+    """Clean a PDB file for use with PolyzyMD.
+
+    Replaces nonstandard residues with their standard equivalents and adds
+    missing hydrogens at the specified pH.  Chain IDs and residue numbers
+    are preserved in the output.
+
+    Requires the ``pdbfixer`` package (available via conda-forge).
+
+    \b
+    Examples:
+        polyzymd clean-pdb -i structures/my_protein.pdb
+        polyzymd clean-pdb -i raw.pdb -o cleaned.pdb --ph 7.0
+    """
+    from openmm.app import PDBFile
+    from pdbfixer import PDBFixer
+
+    input_file = Path(input_path)
+    if output_path is None:
+        output_file = input_file.with_name(f"{input_file.stem}_clean.pdb")
+    else:
+        output_file = Path(output_path)
+
+    click.echo(f"Cleaning PDB: {input_file}")
+    click.echo(f"  pH: {ph}")
+
+    fixer = PDBFixer(filename=str(input_file))
+
+    fixer.findNonstandardResidues()
+    n_nonstandard = len(fixer.nonstandardResidues)
+    if n_nonstandard > 0:
+        click.echo(f"  Replacing {n_nonstandard} nonstandard residue(s)...")
+    fixer.replaceNonstandardResidues()
+
+    click.echo("  Adding missing hydrogens...")
+    fixer.addMissingHydrogens(ph)
+
+    with open(output_file, "w") as f:
+        PDBFile.writeFile(fixer.topology, fixer.positions, f, keepIds=True)
+
+    click.echo()
+    click.echo(click.style(f"Cleaned PDB written to: {output_file}", fg="green"))
+
+
+# =============================================================================
+# Recover Command — resume a stalled simulation
+# =============================================================================
+
+
+@cli.command()
+@click.option(
+    "-c",
+    "--config",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to YAML configuration file",
+)
+@click.option(
+    "-r",
+    "--replicate",
+    default=1,
+    type=int,
+    help="Replicate number (default: 1)",
+)
+@click.option(
+    "--scratch-dir",
+    default=None,
+    type=click.Path(),
+    help="Override scratch directory",
+)
+@click.option(
+    "--preset",
+    type=click.Choice(["aa100", "al40", "blanca-shirts", "bridges2", "testing"]),
+    default="aa100",
+    help="SLURM partition preset (default: aa100)",
+)
+@click.option(
+    "--submit/--no-submit",
+    default=False,
+    help="Submit a self-resubmitting job to resume (default: status only)",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Show status and what would be submitted without actually submitting",
+)
+def recover(
+    config: str,
+    replicate: int,
+    scratch_dir: Optional[str],
+    preset: str,
+    submit: bool,
+    dry_run: bool,
+) -> None:
+    """Resume a stalled or interrupted simulation.
+
+    Scans the working directory, loads progress state, and reports how
+    much work remains. With ``--submit``, generates and submits a
+    self-resubmitting SLURM job that will automatically continue from
+    the last completed segment.
+
+    \b
+    Examples:
+        # Check status only
+        polyzymd recover -c config.yaml -r 1
+
+        # Submit a recovery job
+        polyzymd recover -c config.yaml -r 1 --submit --preset blanca-shirts
+
+        # Dry-run (show what would be submitted)
+        polyzymd recover -c config.yaml -r 1 --submit --dry-run
+    """
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.simulation.progress import load_or_scan_progress, save_progress
+
+    try:
+        sim_config = SimulationConfig.from_yaml(config)
+    except Exception as e:
+        click.echo(f"Failed to load config: {e}", err=True)
+        sys.exit(1)
+
+    if scratch_dir:
+        working_dir = Path(scratch_dir)
+    else:
+        working_dir = sim_config.get_working_directory(replicate)
+
+    if not working_dir.exists():
+        click.echo(f"Working directory not found: {working_dir}", err=True)
+        sys.exit(1)
+
+    # Calculate total steps from config
+    prod = sim_config.simulation_phases.production
+    timestep_fs = prod.time_step
+    total_steps = int(prod.duration * 1e6 / timestep_fs)
+    total_samples = prod.samples
+
+    # Load progress
+    progress = load_or_scan_progress(
+        working_dir=working_dir,
+        config_path=str(Path(config).resolve()),
+        total_steps=total_steps,
+        total_samples=total_samples,
+        timestep_fs=timestep_fs,
+        replicate=replicate,
+    )
+    save_progress(working_dir, progress)
+
+    # Report status
+    pct = progress.fraction_complete() * 100
+    remaining_ns = (progress.steps_remaining * timestep_fs) / 1e6
+
+    click.echo(f"Working directory: {working_dir}")
+    click.echo(
+        f"Progress: {progress.total_steps_completed}/{progress.total_steps_requested} steps "
+        f"({pct:.1f}%)"
+    )
+    click.echo(f"Status: {progress.status.value}")
+    click.echo(f"Segments: {len(progress.segments)}")
+
+    for seg in progress.segments:
+        seg_pct = 100 * seg.steps_completed / max(seg.steps_requested, 1)
+        click.echo(f"  segment {seg.index}: {seg.status.value} ({seg_pct:.0f}%)")
+
+    if progress.is_complete:
+        click.echo(click.style("\nSimulation is complete — nothing to recover.", fg="green"))
+        return
+
+    click.echo(f"\nRemaining: {remaining_ns:.3f} ns ({progress.steps_remaining} steps)")
+
+    if not submit:
+        click.echo(
+            "\nTo resume, run:\n"
+            f"  polyzymd recover -c {config} -r {replicate} --submit --preset {preset}"
+        )
+        return
+
+    # Generate and submit a self-resubmitting SLURM job
+    from polyzymd.workflow.slurm import SlurmConfig, SlurmScriptGenerator
+
+    click.echo(f"\nGenerating recovery job (preset: {preset})...")
+
+    slurm_config = SlurmConfig.from_preset(preset)
+    generator = SlurmScriptGenerator(slurm_config)
+
+    config_path_abs = str(Path(config).resolve())
+    script_content = generator.generate_job_script(
+        config_path=config_path_abs,
+        replicate=replicate,
+        working_dir=str(working_dir),
+    )
+
+    # Write script
+    script_dir = working_dir / "recovery_scripts"
+    script_dir.mkdir(exist_ok=True)
+    script_path = script_dir / f"recover_rep{replicate}.sh"
+    script_path.write_text(script_content)
+    script_path.chmod(0o755)
+
+    click.echo(f"Script: {script_path}")
+
+    if dry_run:
+        click.echo("\n[DRY RUN] Would submit:")
+        click.echo(f"  sbatch {script_path}")
+        return
+
+    # Submit
+    import subprocess
+
+    result = subprocess.run(
+        ["sbatch", str(script_path)],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode == 0:
+        click.echo(f"Submitted: {result.stdout.strip()}")
+        click.echo("Monitor with: squeue -u $USER")
+    else:
+        click.echo(f"Submission failed: {result.stderr.strip()}", err=True)
+        sys.exit(1)
+
+
+def _find_topology_pdb(working_dir: Path) -> Path:
+    """Find a suitable topology PDB in the working directory.
+
+    Parameters
+    ----------
+    working_dir : Path
+        Working directory to search.
+
+    Returns
+    -------
+    Path
+        Path to the PDB file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no suitable PDB is found.
+    """
+    patterns = [
+        "*solvated*.pdb",
+        "*_solvated.pdb",
+        "solvated_*.pdb",
+        "equilibration/*_topology.pdb",
+        "production_0/*_topology.pdb",
+    ]
+    for pattern in patterns:
+        pdb_files = list(working_dir.glob(pattern))
+        if pdb_files:
+            return pdb_files[0]
+
+    pdb_files = list(working_dir.glob("**/*.pdb"))
+    if pdb_files:
+        return pdb_files[0]
+
+    raise FileNotFoundError(f"Could not find topology PDB in {working_dir}")
 
 
 # =============================================================================

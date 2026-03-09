@@ -137,7 +137,6 @@ Summary:
 Simulation phases:
   Equilibration: 1.0 ns (NVT)
   Production: 100.0 ns (NPT)
-  Segments: 10
 ```
 
 ---
@@ -316,7 +315,11 @@ gromacs/
 
 ## polyzymd submit
 
-Submit daisy-chain jobs to SLURM for HPC execution.
+Submit self-resubmitting simulation jobs to SLURM for HPC execution.
+
+Each replicate gets one SLURM script that handles the full simulation
+lifecycle: building, equilibration, production segments, interruption
+recovery, and resubmission. See {doc}`hpc_slurm` for details.
 
 ```bash
 polyzymd submit --config <path> --replicates <range> [options]
@@ -366,17 +369,102 @@ polyzymd submit -c config.yaml -r 1-3 --preset aa100 \
     --projects-dir /projects/$USER/polyzymd
 ```
 
-### Daisy-Chain Jobs
+### Self-Resubmitting Jobs
 
-The submit command creates a chain of dependent SLURM jobs:
+The submit command creates one self-resubmitting SLURM script per replicate:
 
 ```
-Job 1 (initial)  →  Job 2 (continue)  →  Job 3 (continue)  →  ...
-   build + eq          segment 1           segment 2
-   + segment 0
+  ┌─────────────────────────┐
+  │  Job runs segment       │
+  │  Job checks progress    │◄──── resubmits itself
+  │  Job resubmits if       │      if work remains
+  │  work remains           │
+  └─────────────────────────┘
 ```
 
-Each job only starts after the previous one completes successfully.
+Each job is identical and idempotent — it scans the filesystem to determine
+what work remains. See {doc}`hpc_slurm` for details.
+
+---
+
+## polyzymd run-segment
+
+Unified entry point for SLURM jobs. Determines what work remains by loading
+progress state, then runs the next segment of work.
+
+```bash
+polyzymd run-segment -c CONFIG [OPTIONS]
+```
+
+### Options
+
+| Option | Short | Required | Default | Description |
+|--------|-------|----------|---------|-------------|
+| `--config` | `-c` | Yes | - | Path to YAML configuration file |
+| `--replicate` | `-r` | No | 1 | Replicate number |
+| `--scratch-dir` | - | No | from config | Override scratch directory |
+| `--skip-build` | - | No | false | Skip system building for initial segment |
+
+### Behavior
+
+- If no segments exist: builds system, equilibrates, runs production segment 0
+- If segments exist but simulation incomplete: continues from last completed segment
+- If simulation is already complete: exits 0 immediately
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Segment completed successfully |
+| 1 | Error |
+| 99 | Graceful interruption (wall-time/preemption signal) |
+
+### Notes
+
+- This command is called by the generated SLURM scripts, not typically by users directly
+- It is the unified replacement for separate `run` + `continue` calls in SLURM scripts
+- Progress is tracked in `progress.json` in the working directory
+
+---
+
+## polyzymd check-progress
+
+Check whether a simulation is complete. Used by SLURM resubmission logic
+to decide whether to resubmit.
+
+```bash
+polyzymd check-progress -c CONFIG [OPTIONS]
+```
+
+### Options
+
+| Option | Short | Required | Default | Description |
+|--------|-------|----------|---------|-------------|
+| `--config` | `-c` | Yes | - | Path to YAML configuration file |
+| `--replicate` | `-r` | No | 1 | Replicate number |
+| `--scratch-dir` | - | No | from config | Override scratch directory |
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Simulation complete — do NOT resubmit |
+| 1 | Work remains — resubmit |
+
+### Example
+
+```bash
+polyzymd check-progress -c config.yaml -r 1
+
+# Output:
+# Progress: 50000000/50000000 steps (100.0%), 10 segment(s)
+# Status: COMPLETE
+```
+
+### Notes
+
+- This command is called by the generated SLURM scripts, not typically by users directly
+- For interactive progress checking, `polyzymd recover` provides a more detailed view
 
 ---
 
@@ -407,9 +495,75 @@ polyzymd continue -w /scratch/user/sim/LipA_300K_run1 -s 2 -t 10.0 -n 250
 
 ### Notes
 
-- This command is typically called by SLURM continuation scripts, not manually
-- It loads the checkpoint from the previous segment automatically
+- Prefer `run-segment` for SLURM workflows — it handles segment selection automatically
+- This command loads the checkpoint from the previous segment automatically
 - The segment index is 1-based (segment 1 continues from segment 0)
+
+---
+
+(cli-recover)=
+## polyzymd recover
+
+Resume a stalled or interrupted simulation. Scans the working directory,
+loads progress state, and reports how much work remains. With `--submit`,
+generates and submits a self-resubmitting SLURM job that will automatically
+continue from the last completed segment.
+
+```bash
+polyzymd recover -c CONFIG [OPTIONS]
+```
+
+### Options
+
+| Option | Short | Required | Default | Description |
+|--------|-------|----------|---------|-------------|
+| `--config` | `-c` | Yes | - | Path to YAML configuration file |
+| `--replicate` | `-r` | No | 1 | Replicate number |
+| `--scratch-dir` | - | No | from config | Override scratch directory |
+| `--preset` | - | No | aa100 | SLURM preset for recovery job |
+| `--submit / --no-submit` | - | No | --no-submit | Submit a recovery job (default: status only) |
+| `--dry-run` | - | No | false | Show what would be submitted without submitting |
+
+### Example
+
+```bash
+# Check status only
+polyzymd recover -c config.yaml -r 1
+
+# Submit a recovery job
+polyzymd recover -c config.yaml -r 1 --submit --preset blanca-shirts
+
+# Dry-run (show what would be submitted)
+polyzymd recover -c config.yaml -r 1 --submit --dry-run
+```
+
+### Example Output (Status Only)
+
+```
+Working directory: /scratch/user/sim/LipA_300K_run1
+Progress: 12500000/50000000 steps (25.0%)
+Status: in_progress
+Segments: 5
+  segment 0: completed (100%)
+  segment 1: completed (100%)
+  segment 2: completed (100%)
+  segment 3: completed (100%)
+  segment 4: interrupted (50%)
+
+Remaining: 75.000 ns (37500000 steps)
+
+To resume, run:
+  polyzymd recover -c config.yaml -r 1 --submit --preset aa100
+```
+
+### Notes
+
+- Without `--submit`, this is a read-only status report — useful for inspecting
+  simulation health across replicates
+- With `--submit`, generates a self-resubmitting SLURM job in
+  `{working_dir}/recovery_scripts/` and submits it
+- The recovery job is identical to a normal submission job — it uses `run-segment`
+  to determine what work remains and continues from there
 
 ---
 
@@ -899,6 +1053,7 @@ output:
 |------|---------|
 | 0 | Success |
 | 1 | Error (validation failure, build failure, etc.) |
+| 99 | Graceful shutdown — simulation was interrupted but interrupted state was saved (see {doc}`hpc_slurm`) |
 
 ---
 

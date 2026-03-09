@@ -23,7 +23,7 @@ The GROMACS export maintains **1:1 parity** with OpenMM simulations using OpenFF
 | **HPC availability** | Less common | Very common |
 | **Analysis tools** | MDTraj, MDAnalysis | Built-in + MDAnalysis |
 | **Restart/checkpoint** | Native in PolyzyMD | Standard .cpt files |
-| **Daisy-chain jobs** | Built-in support | Manual or script-based |
+| **Job management** | Self-resubmitting jobs | Manual or script-based |
 | **Learning curve** | Simpler | More complex |
 
 **Use GROMACS when:**
@@ -34,7 +34,7 @@ The GROMACS export maintains **1:1 parity** with OpenMM simulations using OpenFF
 
 **Use OpenMM when:**
 - You want the simplest workflow
-- You need built-in daisy-chain job management
+- You need built-in self-resubmitting job management
 - You're running locally or on a workstation
 
 ---
@@ -45,10 +45,10 @@ The GROMACS export maintains **1:1 parity** with OpenMM simulations using OpenFF
 
 ```bash
 # Full workflow: build system + run GROMACS simulation
-polyzymd run -c config.yaml -r 1 --gromacs
+polyzymd run-gromacs -c config.yaml -r 1
 
 # Export files only (for manual execution or HPC submission)
-polyzymd run -c config.yaml -r 1 --gromacs --dry-run
+polyzymd run-gromacs -c config.yaml -r 1 --dry-run
 
 # Build only (export GROMACS files, no simulation)
 polyzymd build -c config.yaml -r 1 --gromacs
@@ -58,11 +58,11 @@ polyzymd build -c config.yaml -r 1 --gromacs
 
 ```bash
 # Specify custom GROMACS path
-polyzymd run -c config.yaml --gromacs --gmx-path /usr/local/gromacs/bin/gmx
+polyzymd run-gromacs -c config.yaml --gmx-path /usr/local/gromacs/bin/gmx
 
 # Or with module system
 module load gromacs/2023.3
-polyzymd run -c config.yaml --gromacs --gmx-path $(which gmx)
+polyzymd run-gromacs -c config.yaml --gmx-path $(which gmx)
 ```
 
 ---
@@ -171,10 +171,10 @@ polyzymd validate -c config_gromacs.yaml
 
 ```bash
 # Full workflow (build + run)
-polyzymd run -c config_gromacs.yaml -r 1 --gromacs
+polyzymd run-gromacs -c config_gromacs.yaml -r 1
 
 # Or dry-run to just export files
-polyzymd run -c config_gromacs.yaml -r 1 --gromacs --dry-run
+polyzymd run-gromacs -c config_gromacs.yaml -r 1 --dry-run
 ```
 
 ---
@@ -343,7 +343,7 @@ $GMX mdrun -deffnm prod -v -nb gpu -pme gpu -bonded gpu
 module load gromacs
 
 # Option 2: Specify path explicitly
-polyzymd run -c config.yaml --gromacs --gmx-path /opt/gromacs/bin/gmx
+polyzymd run-gromacs -c config.yaml --gmx-path /opt/gromacs/bin/gmx
 
 # Option 3: Add to PATH
 export PATH=$PATH:/opt/gromacs/bin
@@ -362,7 +362,7 @@ export PATH=$PATH:/opt/gromacs/bin
 **Solution**: Rebuild from scratch:
 ```bash
 rm -rf replicate_*/gromacs/
-polyzymd run -c config.yaml --gromacs
+polyzymd run-gromacs -c config.yaml
 ```
 
 ### "Simulation crashes during equilibration"
