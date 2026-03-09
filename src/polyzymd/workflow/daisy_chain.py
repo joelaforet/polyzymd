@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Union
@@ -33,35 +32,6 @@ from polyzymd.workflow.slurm import (
 )
 
 LOGGER = logging.getLogger(__name__)
-
-
-@dataclass
-class SegmentInfo:
-    """Information about a single simulation segment.
-
-    .. deprecated::
-        No longer used in the self-resubmitting model.  Segments are
-        determined dynamically by the progress system at runtime.
-
-    Attributes
-    ----------
-    index : int
-        Segment index (0-based).
-    duration_ns : float
-        Duration of this segment in nanoseconds.
-    samples : int
-        Number of trajectory frames to save.
-    is_initial : bool
-        Whether this is the initial segment.
-    cumulative_time_ns : float
-        Total simulated time up to and including this segment.
-    """
-
-    index: int
-    duration_ns: float
-    samples: int
-    is_initial: bool
-    cumulative_time_ns: float
 
 
 @dataclass
@@ -420,31 +390,6 @@ class DaisyChainSubmitter:
         # Store as a single-element list for backward compatibility
         self._job_chains[replicate] = [result]
         return result
-
-    def submit_replicate_chain(self, replicate: int) -> List[SubmissionResult]:
-        """Submit job for a single replicate.
-
-        .. deprecated::
-            Use :meth:`submit_replicate` instead.  This method is kept
-            for backward compatibility and returns a single-element list.
-
-        Parameters
-        ----------
-        replicate : int
-            Replicate number.
-
-        Returns
-        -------
-        list of SubmissionResult
-            Single-element list with the submission result.
-        """
-        warnings.warn(
-            "submit_replicate_chain() is deprecated. Use submit_replicate() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        result = self.submit_replicate(replicate)
-        return [result]
 
     def submit_all(self) -> Dict[int, List[SubmissionResult]]:
         """Submit jobs for all replicates.

@@ -7,9 +7,9 @@ for argument parsing and command organization.
 Usage:
     polyzymd --help
     polyzymd build --config simulation.yaml
-    polyzymd run --config simulation.yaml --replicate 1
     polyzymd submit --config simulation.yaml --replicates 1-5
-    polyzymd continue --working-dir path/to/sim --segment 2
+    polyzymd run-segment --config simulation.yaml --replicate 1
+    polyzymd run-gromacs --config simulation.yaml --replicate 1
 """
 
 from __future__ import annotations
@@ -334,11 +334,11 @@ def build(
 
 
 # =============================================================================
-# Run Command
+# Run-GROMACS Command
 # =============================================================================
 
 
-@cli.command()
+@cli.command("run-gromacs")
 @click.option(
     "-c",
     "--config",
@@ -366,67 +366,34 @@ def build(
     help="Projects directory for scripts and logs (long-term storage)",
 )
 @click.option(
-    "--segment-time",
-    default=None,
-    type=float,
-    help="Override production time per segment (ns) [OpenMM only]",
-)
-@click.option(
-    "--segment-frames",
-    default=None,
-    type=int,
-    help="Override frames per segment [OpenMM only]",
-)
-@click.option(
-    "--skip-build",
-    is_flag=True,
-    help="Skip system building (use existing) [OpenMM only]",
-)
-@click.option(
-    "--gromacs",
-    is_flag=True,
-    help="Run simulation using GROMACS instead of OpenMM",
-)
-@click.option(
     "--gmx-path",
     default="gmx",
-    help="Path to GROMACS executable (default: gmx) [GROMACS only]",
+    help="Path to GROMACS executable (default: gmx)",
 )
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Export files but don't run simulation [GROMACS only]",
+    help="Export files but don't run simulation",
 )
-def run(
+def run_gromacs(
     config: str,
     replicate: int,
     scratch_dir: Optional[str],
     projects_dir: Optional[str],
-    segment_time: Optional[float],
-    segment_frames: Optional[int],
-    skip_build: bool,
-    gromacs: bool,
     gmx_path: str,
     dry_run: bool,
 ) -> None:
-    """Run a simulation from configuration.
+    """Run a simulation using GROMACS.
 
-    By default, runs using OpenMM. Use --gromacs to run using GROMACS instead.
+    Builds the system, exports to GROMACS format (.gro, .top, .mdp),
+    and executes the full GROMACS workflow locally (EM, equilibration,
+    production, and trajectory post-processing).
 
-    OpenMM Mode (default):
-        Builds the system (unless --skip-build), runs equilibration,
-        and then runs production simulation using OpenMM.
-
-    GROMACS Mode (--gromacs):
-        Builds the system, exports to GROMACS format (.gro, .top, .mdp),
-        and executes the full GROMACS workflow locally (EM, equilibration,
-        production, and trajectory post-processing).
-
-    GROMACS Notes:
+    \b
+    Notes:
         - Requires GROMACS to be installed and accessible
         - Use --gmx-path to specify a custom GROMACS executable
         - Use --dry-run to export files without running the simulation
-        - --skip-build is not supported for GROMACS (always rebuilds)
     """
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
@@ -435,7 +402,7 @@ def run(
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-        click.echo(f"Running simulation: {sim_config.name}")
+        click.echo(f"Running GROMACS simulation: {sim_config.name}")
 
         # Override directories if provided via CLI
         if scratch_dir:
@@ -443,24 +410,12 @@ def run(
         if projects_dir:
             sim_config.output.projects_directory = Path(projects_dir)
 
-        # Branch based on simulation engine
-        if gromacs:
-            _run_gromacs(
-                sim_config=sim_config,
-                replicate=replicate,
-                gmx_path=gmx_path,
-                dry_run=dry_run,
-                skip_build=skip_build,
-            )
-        else:
-            _run_openmm(
-                sim_config=sim_config,
-                replicate=replicate,
-                scratch_dir=scratch_dir,
-                segment_time=segment_time,
-                segment_frames=segment_frames,
-                skip_build=skip_build,
-            )
+        _run_gromacs_impl(
+            sim_config=sim_config,
+            replicate=replicate,
+            gmx_path=gmx_path,
+            dry_run=dry_run,
+        )
 
     except Exception as e:
         click.echo(f"Simulation failed: {e}", err=True)
@@ -471,31 +426,27 @@ def run(
         sys.exit(1)
 
 
-def _run_gromacs(
+def _run_gromacs_impl(
     sim_config: "SimulationConfig",
     replicate: int,
     gmx_path: str,
     dry_run: bool,
-    skip_build: bool,
 ) -> None:
     """Run simulation using GROMACS.
 
-    Args:
-        sim_config: Validated simulation configuration.
-        replicate: Replicate number.
-        gmx_path: Path to GROMACS executable.
-        dry_run: If True, export files but don't run simulation.
-        skip_build: If True, skip system building (not supported for GROMACS MVP).
+    Parameters
+    ----------
+    sim_config : SimulationConfig
+        Validated simulation configuration.
+    replicate : int
+        Replicate number.
+    gmx_path : str
+        Path to GROMACS executable.
+    dry_run : bool
+        If True, export files but don't run simulation.
     """
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
-
-    # Warn about unsupported options
-    if skip_build:
-        click.echo(
-            "Warning: --skip-build is not supported for GROMACS mode. System will be rebuilt.",
-            err=True,
-        )
 
     # Determine output directory for GROMACS files
     gromacs_dir = sim_config.output.projects_directory / f"replicate_{replicate}" / "gromacs"
@@ -574,171 +525,6 @@ def _run_gromacs(
         click.echo(f"\nError: {e}", err=True)
         click.echo("Ensure GROMACS is installed and in your PATH, or use --gmx-path.", err=True)
         sys.exit(1)
-
-
-def _run_openmm(
-    sim_config: "SimulationConfig",
-    replicate: int,
-    scratch_dir: Optional[str],
-    segment_time: Optional[float],
-    segment_frames: Optional[int],
-    skip_build: bool,
-) -> None:
-    """Run simulation using OpenMM.
-
-    Args:
-        sim_config: Validated simulation configuration.
-        replicate: Replicate number.
-        scratch_dir: Override for scratch directory.
-        segment_time: Override for production time per segment.
-        segment_frames: Override for frames per segment.
-        skip_build: If True, load pre-built system from disk.
-    """
-    from polyzymd.builders.system_builder import SystemBuilder
-    from polyzymd.simulation.runner import SimulationRunner
-
-    # Determine working directory
-    if scratch_dir:
-        working_dir = Path(scratch_dir)
-    else:
-        working_dir = sim_config.get_working_directory(replicate)
-
-    if not skip_build:
-        click.echo(f"Building system for replicate {replicate}...")
-        builder = SystemBuilder.from_config(sim_config)
-        interchange = builder.build_from_config(
-            config=sim_config,
-            working_dir=working_dir,
-            polymer_seed=replicate,
-        )
-
-        # Extract OpenMM components from Interchange
-        click.echo("Extracting OpenMM components...")
-        omm_topology, omm_system, omm_positions = builder.get_openmm_components()
-
-        # Apply restraints if configured
-        if sim_config.restraints:
-            from polyzymd.core.restraints import RestraintFactory, apply_restraints
-
-            click.echo(f"Applying {len(sim_config.restraints)} restraint(s)...")
-            restraint_defs = []
-            for r in sim_config.restraints:
-                if not r.enabled:
-                    click.echo(f"  - {r.name}: DISABLED (skipping)")
-                    continue
-
-                # Create restraint definition from config
-                restraint_def = RestraintFactory.from_config(r.model_dump())
-
-                # Validate the selection resolves to exactly one atom each
-                try:
-                    indices1 = restraint_def.atom1.resolve(omm_topology)
-                    indices2 = restraint_def.atom2.resolve(omm_topology)
-
-                    if len(indices1) != 1:
-                        click.echo(
-                            f"Error: Restraint '{r.name}' atom1 selection matched "
-                            f"{len(indices1)} atoms (need exactly 1)",
-                            err=True,
-                        )
-                        sys.exit(1)
-                    if len(indices2) != 1:
-                        click.echo(
-                            f"Error: Restraint '{r.name}' atom2 selection matched "
-                            f"{len(indices2)} atoms (need exactly 1)",
-                            err=True,
-                        )
-                        sys.exit(1)
-
-                    click.echo(
-                        f"  - {r.name}: atom {indices1[0]} <-> atom {indices2[0]} "
-                        f"(type={r.type.value}, d={r.distance} A, k={r.force_constant} kJ/mol/nm^2)"
-                    )
-                    restraint_defs.append(restraint_def)
-
-                except ValueError as e:
-                    click.echo(f"Error: Restraint '{r.name}' invalid: {e}", err=True)
-                    sys.exit(1)
-
-            # Apply all validated restraints to the system
-            if restraint_defs:
-                apply_restraints(restraint_defs, omm_topology, omm_system)
-                click.echo(f"Successfully applied {len(restraint_defs)} restraint(s)")
-
-    else:
-        # --skip-build: Load pre-built system from disk
-        click.echo("Skipping build, loading pre-built system...")
-        from openmm import XmlSerializer
-        from openmm.app import PDBFile
-
-        # Check that required files exist
-        pdb_path = working_dir / "solvated_system.pdb"
-        system_path = working_dir / "system.xml"
-
-        if not pdb_path.exists():
-            click.echo(f"Error: {pdb_path} not found. Run 'polyzymd build' first.", err=True)
-            sys.exit(1)
-        if not system_path.exists():
-            click.echo(f"Error: {system_path} not found. Run 'polyzymd build' first.", err=True)
-            sys.exit(1)
-
-        # Load topology and positions from PDB
-        click.echo(f"Loading topology and positions from {pdb_path}...")
-        pdb = PDBFile(str(pdb_path))
-        omm_topology = pdb.topology
-        omm_positions = pdb.positions
-
-        # Load system from XML (already includes restraints from build)
-        click.echo(f"Loading OpenMM system from {system_path}...")
-        with open(system_path, "r") as f:
-            omm_system = XmlSerializer.deserialize(f.read())
-
-        click.echo("Pre-built system loaded successfully")
-
-    # Create runner
-    runner = SimulationRunner(
-        topology=omm_topology,
-        system=omm_system,
-        positions=omm_positions,
-        working_dir=working_dir,
-    )
-
-    # Run energy minimization first
-    click.echo("Running energy minimization...")
-    runner.minimize()
-
-    # Get thermodynamic parameters
-    temperature = sim_config.thermodynamics.temperature
-    pressure = sim_config.thermodynamics.pressure
-
-    # Run equilibration
-    phases = sim_config.simulation_phases
-    eq_duration = phases.total_equilibration_duration
-    eq_mode = "multi-stage" if phases.uses_staged_equilibration else "simple"
-    click.echo(f"Running equilibration: {eq_duration:.3f} ns at {temperature} K ({eq_mode})...")
-    runner.run_equilibration(
-        temperature=temperature,
-        config=phases,
-    )
-
-    # Calculate production parameters
-    total_time = sim_config.simulation_phases.production.duration
-    total_samples = sim_config.simulation_phases.production.samples
-    prod_time = segment_time or total_time
-    prod_frames = segment_frames or total_samples
-
-    # Run production
-    click.echo(f"Running production: {prod_time} ns, {prod_frames} frames (NPT)...")
-    runner.run_production(
-        temperature=temperature,
-        duration_ns=prod_time,
-        num_samples=prod_frames,
-        pressure=pressure,
-        segment_index=0,
-    )
-
-    click.echo("Simulation completed successfully!")
-    click.echo(f"Output: {working_dir}")
 
 
 # =============================================================================
@@ -902,93 +688,6 @@ def submit(
 
     except Exception as e:
         click.echo(f"Submission failed: {e}", err=True)
-        if LOGGER.level == logging.DEBUG:
-            import traceback
-
-            traceback.print_exc()
-        sys.exit(1)
-
-
-# =============================================================================
-# Continue Command
-# =============================================================================
-
-
-@cli.command("continue")
-@click.option(
-    "-w",
-    "--working-dir",
-    required=True,
-    type=click.Path(exists=True),
-    help="Working directory with previous segment",
-)
-@click.option(
-    "-s",
-    "--segment",
-    required=True,
-    type=int,
-    help="Segment index to run (1-based)",
-)
-@click.option(
-    "-t",
-    "--segment-time",
-    required=True,
-    type=float,
-    help="Duration of this segment (ns)",
-)
-@click.option(
-    "-n",
-    "--num-samples",
-    default=250,
-    type=int,
-    help="Number of frames to save (default: 250)",
-)
-def continue_sim(
-    working_dir: str,
-    segment: int,
-    segment_time: float,
-    num_samples: int,
-) -> None:
-    """Continue a simulation from a previous segment.
-
-    Loads state from the previous production segment and continues
-    the simulation. Prefer 'run-segment' for SLURM workflows.
-    """
-    from polyzymd.simulation.continuation import ContinuationManager
-
-    click.echo(f"Continuing simulation from segment {segment - 1}")
-    click.echo(f"Working directory: {working_dir}")
-    click.echo(f"Duration: {segment_time} ns, Frames: {num_samples}")
-
-    try:
-        manager = ContinuationManager(
-            working_dir=working_dir,
-            segment_index=segment,
-        )
-
-        click.echo("Loading previous state...")
-        manager.load_previous_state()
-
-        click.echo(f"Running segment {segment}...")
-        results = manager.run_segment(
-            duration_ns=segment_time,
-            num_samples=num_samples,
-        )
-
-        click.echo(f"Segment {segment} completed!")
-        click.echo(f"Output: {results['output_dir']}")
-
-    except FileNotFoundError as e:
-        click.echo(f"Error: Previous segment not found: {e}", err=True)
-        sys.exit(1)
-    except Exception as e:
-        # Check if this is a GracefulExit (signal-based interruption)
-        from polyzymd.simulation.signals import EXIT_CODE_INTERRUPTED, GracefulExit
-
-        if isinstance(e, GracefulExit):
-            click.echo(f"Segment {segment} interrupted (graceful shutdown): {e}", err=True)
-            sys.exit(EXIT_CODE_INTERRUPTED)
-        click.echo(f"Continuation failed: {e}", err=True)
         if LOGGER.level == logging.DEBUG:
             import traceback
 

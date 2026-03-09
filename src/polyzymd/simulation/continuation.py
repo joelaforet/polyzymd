@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
@@ -538,9 +537,9 @@ class ContinuationManager:
                 "__class__": "Quantity",
                 "__values__": {"value": duration_ns, "unit": "nanosecond"},
             }
-            self._param_dict["__values__"]["integ_params"]["__values__"][
-                "num_samples"
-            ] = num_samples
+            self._param_dict["__values__"]["integ_params"]["__values__"]["num_samples"] = (
+                num_samples
+            )
 
         # Add barostat if needed
         self._add_barostat_if_needed()
@@ -662,91 +661,3 @@ class ContinuationManager:
 
         LOGGER.info(f"Segment {self._segment_index} completed successfully")
         return results
-
-
-def main() -> int:
-    """Legacy entry point for continuation script.
-
-    .. deprecated::
-        Use ``polyzymd run-segment`` CLI command instead, which provides
-        unified initial/continuation logic with progress tracking.
-
-    Returns
-    -------
-    int
-        Exit code (0 for success, 1 for failure, 99 for graceful interrupt).
-    """
-    import argparse
-
-    from polyzymd.simulation.signals import EXIT_CODE_INTERRUPTED, GracefulExit
-
-    parser = argparse.ArgumentParser(description="Continue MD simulation from previous segment")
-    parser.add_argument(
-        "-s",
-        "--segment_index",
-        type=int,
-        required=True,
-        help="Current segment index (1-based)",
-    )
-    parser.add_argument(
-        "-w",
-        "--working_dir",
-        type=str,
-        required=True,
-        help="Working directory path",
-    )
-    parser.add_argument(
-        "-t",
-        "--segment_time",
-        type=float,
-        required=True,
-        help="Time for this segment in nanoseconds",
-    )
-    parser.add_argument(
-        "-n",
-        "--num_samples",
-        type=int,
-        default=250,
-        help="Number of frames to save for this segment",
-    )
-
-    args = parser.parse_args()
-
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.FileHandler(
-                Path(args.working_dir) / f"simulation_status_segment_{args.segment_index}.log"
-            ),
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
-
-    try:
-        manager = ContinuationManager(
-            working_dir=args.working_dir,
-            segment_index=args.segment_index,
-        )
-        manager.load_previous_state()
-        manager.run_segment(
-            duration_ns=args.segment_time,
-            num_samples=args.num_samples,
-        )
-        return 0
-
-    except GracefulExit as e:
-        LOGGER.warning(f"Graceful exit: {e}")
-        return EXIT_CODE_INTERRUPTED
-
-    except Exception as e:
-        LOGGER.error(f"Error during simulation: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())

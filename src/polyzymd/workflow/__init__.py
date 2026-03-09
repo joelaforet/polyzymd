@@ -3,7 +3,6 @@
 from polyzymd.workflow.daisy_chain import (
     DaisyChainConfig,
     DaisyChainSubmitter,
-    SegmentInfo,
     SubmissionResult,
     submit_daisy_chain,
 )
@@ -25,7 +24,6 @@ __all__ = [
     # Job submission
     "DaisyChainConfig",
     "DaisyChainSubmitter",
-    "SegmentInfo",  # Deprecated — kept for backward compatibility
     "SubmissionResult",
     "submit_daisy_chain",
 ]

@@ -4,7 +4,6 @@ Covers:
 - _find_topology_pdb helper
 - recover CLI with new self-resubmitting interface
 - check-progress CLI (exit code 0 = complete, 1 = work remains)
-- SLURM template recovery preamble content
 - Self-resubmitting model (no afterany dependencies)
 """
 
@@ -240,74 +239,6 @@ class TestCheckProgress:
         runner = CliRunner()
         result = runner.invoke(cli, ["check-progress", "-c", str(config_file), "-r", "1"])
         assert "3 segment(s)" in result.output
-
-
-# ---------------------------------------------------------------------------
-# SLURM template content
-# ---------------------------------------------------------------------------
-
-
-class TestSlurmTemplateRecovery:
-    """SLURM templates include signal and recovery directives."""
-
-    def test_signal_directive_in_initial_template(self):
-        from polyzymd.workflow.slurm import JobContext, SlurmConfig, SlurmScriptGenerator
-
-        gen = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), conda_env="test-env")
-        ctx = JobContext(
-            job_name="test",
-            output_file="test.out",
-            scratch_dir="/scratch/test",
-            projects_dir="/projects/test",
-        )
-        script = gen.generate_initial_job(
-            context=ctx,
-            config_path="config.yaml",
-            replicate=1,
-            segment_time=20.0,
-            segment_frames=250,
-        )
-        assert "#SBATCH --signal=B:USR1@300" in script
-        assert "#SBATCH --no-requeue" in script
-
-    def test_signal_directive_in_continuation_template(self):
-        from polyzymd.workflow.slurm import JobContext, SlurmConfig, SlurmScriptGenerator
-
-        gen = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), conda_env="test-env")
-        ctx = JobContext(
-            job_name="test",
-            output_file="test.out",
-            scratch_dir="/scratch/test",
-            projects_dir="/projects/test",
-            segment_index=3,
-        )
-        script = gen.generate_continuation_job(
-            context=ctx,
-            segment_time=20.0,
-            num_samples=250,
-        )
-        assert "#SBATCH --signal=B:USR1@300" in script
-        assert "#SBATCH --no-requeue" in script
-
-    def test_recovery_preamble_in_continuation_template(self):
-        from polyzymd.workflow.slurm import JobContext, SlurmConfig, SlurmScriptGenerator
-
-        gen = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), conda_env="test-env")
-        ctx = JobContext(
-            job_name="test",
-            output_file="test.out",
-            scratch_dir="/scratch/test",
-            projects_dir="/projects/test",
-            segment_index=3,
-        )
-        script = gen.generate_continuation_job(
-            context=ctx,
-            segment_time=20.0,
-            num_samples=250,
-        )
-        assert "Recovery preamble" in script
-        assert "INTERRUPTED" in script
-        assert "polyzymd recover" in script
 
 
 # ---------------------------------------------------------------------------

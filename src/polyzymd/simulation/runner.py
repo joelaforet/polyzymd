@@ -743,7 +743,7 @@ class SimulationRunner:
             pressure: Pressure in atmospheres.
             barostat_frequency: Barostat update frequency.
             output_prefix: Prefix for output files.
-            segment_index: Segment index for daisy-chaining.
+            segment_index: Segment index for multi-segment production.
             report_interval: Fixed reporter interval in steps. When provided,
                 this overrides the per-segment ``total_steps // num_samples``
                 calculation to keep frame spacing uniform across segments.
@@ -813,7 +813,7 @@ class SimulationRunner:
         # Set velocities for production
         # - If we have velocities from equilibration, use them (physical continuity)
         # - Otherwise generate new velocities at target temperature
-        # Note: For daisy-chain continuation (segment > 0), ContinuationManager uses
+        # Note: For continuation segments (segment > 0), ContinuationManager uses
         # loadState() which restores both positions and velocities from the XML state file
         if segment_index == 0:
             if equilibration_velocities is not None:
@@ -924,19 +924,19 @@ class SimulationRunner:
         checkpoint_path = phase_dir / f"{phase_name}_checkpoint.chk"
         self._simulation.saveCheckpoint(str(checkpoint_path))
 
-        # Save state XML (needed for continuation/daisy-chain)
+        # Save state XML (needed for continuation across segments)
         state_xml_path = phase_dir / f"{phase_name}_state.xml"
         with open(state_xml_path, "w") as f:
             f.write(XmlSerializer.serialize(state))
         LOGGER.info(f"Saved state to {state_xml_path}")
 
-        # Save system XML (needed for continuation/daisy-chain)
+        # Save system XML (needed for continuation across segments)
         system_xml_path = phase_dir / f"{phase_name}_system.xml"
         with open(system_xml_path, "w") as f:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved system to {system_xml_path}")
 
-        # Save parameters JSON (needed for continuation/daisy-chain)
+        # Save parameters JSON (needed for continuation across segments)
         params_dict = {
             "__class__": "SimulationParameters",
             "__values__": {

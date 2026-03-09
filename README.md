@@ -30,7 +30,7 @@ PolyzyMD provides a streamlined workflow for setting up and running MD simulatio
 - **System Building**: Combine enzyme structures, docked substrates, and random co-polymers
 - **Solvation**: Add water, ions, and optional co-solvents with PACKMOL
 - **Simulation**: Run equilibration and production with OpenMM
-- **HPC Integration**: Daisy-chain job submission for SLURM clusters
+- **HPC Integration**: Self-resubmitting job submission for SLURM clusters
 - **Configuration**: YAML-based configuration with validation
 
 ## Installation
@@ -114,9 +114,11 @@ See the [Quick Start Guide](https://polyzymd.readthedocs.io/en/latest/tutorials/
 | `polyzymd init -n my_project` | Initialize a new project directory |
 | `polyzymd validate -c config.yaml` | Validate configuration file |
 | `polyzymd build -c config.yaml` | Build simulation system |
-| `polyzymd run -c config.yaml` | Run simulation locally |
-| `polyzymd submit -c config.yaml` | Submit daisy-chain jobs to SLURM |
-| `polyzymd continue -w workdir -s 2` | Continue from previous segment |
+| `polyzymd run-gromacs -c config.yaml` | Build and run GROMACS simulation |
+| `polyzymd submit -c config.yaml` | Submit self-resubmitting jobs to SLURM |
+| `polyzymd run-segment -c config.yaml` | Run a single production segment |
+| `polyzymd check-progress -c config.yaml` | Check simulation completion status |
+| `polyzymd recover -c config.yaml` | Resume a stalled simulation |
 | `polyzymd info` | Show installation information |
 
 ## Documentation
