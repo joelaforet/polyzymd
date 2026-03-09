@@ -80,6 +80,7 @@ class SimulationRunner:
 
         self._simulation: Optional[Simulation] = None
         self._current_positions = positions
+        self._current_velocities = None  # Carried between equilibration stages
         self._current_box_vectors = None  # Updated during NPT stages
         self._history: Dict[str, Any] = {}
 
@@ -411,6 +412,7 @@ class SimulationRunner:
             getPositions=True, getVelocities=True, getEnergy=True
         )
         self._current_positions = state.getPositions()
+        self._current_velocities = state.getVelocities()
         self._current_box_vectors = state.getPeriodicBoxVectors()
 
         # Save checkpoint
@@ -541,7 +543,17 @@ class SimulationRunner:
             self._simulation.context.setPeriodicBoxVectors(*self._current_box_vectors)
 
         self._simulation.context.setPositions(self._current_positions)
-        self._simulation.context.setVelocitiesToTemperature(start_temp * omm_unit.kelvin)
+
+        # Velocity initialization: only generate fresh Maxwell-Boltzmann
+        # velocities for the first stage. Subsequent stages inherit velocities
+        # from the previous stage for physical continuity — matching the
+        # GROMACS convention (gen_vel=yes only for stage 0).
+        if stage_index == 0 or self._current_velocities is None:
+            self._simulation.context.setVelocitiesToTemperature(start_temp * omm_unit.kelvin)
+            LOGGER.info(f"Stage {stage_index}: initialized velocities at {start_temp} K")
+        else:
+            self._simulation.context.setVelocities(self._current_velocities)
+            LOGGER.info(f"Stage {stage_index}: inherited velocities from previous stage")
 
         # Log initial energy
         _state = self._simulation.context.getState(getEnergy=True)
@@ -616,6 +628,7 @@ class SimulationRunner:
             getPositions=True, getVelocities=True, getEnergy=True
         )
         self._current_positions = state.getPositions()
+        self._current_velocities = state.getVelocities()
         self._current_box_vectors = state.getPeriodicBoxVectors()
 
         # Log final energy for diagnostics
@@ -658,6 +671,80 @@ class SimulationRunner:
         LOGGER.info(f"Equilibration stage '{stage.name}' complete")
         return results
 
+    def _find_completed_eq_stages(
+        self,
+        stages: List["EquilibrationStageConfig"],
+    ) -> List[int]:
+        """Find equilibration stages whose checkpoints exist on disk.
+
+        Scans ``equilibration_N_name/`` directories for checkpoint files.
+        Stops at the first gap — stages must be contiguous from index 0.
+
+        Parameters
+        ----------
+        stages : list of EquilibrationStageConfig
+            The full list of stages from the config.
+
+        Returns
+        -------
+        list of int
+            Indices of completed stages (contiguous from 0).
+        """
+        completed: List[int] = []
+        for i, stage in enumerate(stages):
+            stage_name = f"equilibration_{i}_{stage.name}"
+            chk = self._working_dir / stage_name / f"{stage_name}_checkpoint.chk"
+            if chk.exists():
+                completed.append(i)
+            else:
+                break  # Stop at first gap — can't skip stages
+        return completed
+
+    def _load_eq_stage_state(
+        self,
+        stage_index: int,
+        stage_name: str,
+    ) -> None:
+        """Load positions, velocities, and box vectors from a completed equilibration checkpoint.
+
+        Creates a temporary ``Simulation`` to deserialise the binary
+        checkpoint, then stores the extracted state on ``self`` so
+        subsequent stages or production can pick up seamlessly.
+        The temporary simulation is discarded after extraction.
+
+        Parameters
+        ----------
+        stage_index : int
+            Index of the completed stage.
+        stage_name : str
+            Name of the completed stage (used in directory/file naming).
+        """
+        dir_name = f"equilibration_{stage_index}_{stage_name}"
+        chk_path = self._working_dir / dir_name / f"{dir_name}_checkpoint.chk"
+
+        if not chk_path.exists():
+            raise FileNotFoundError(f"Equilibration checkpoint not found: {chk_path}")
+
+        # Temporary simulation context to deserialise the binary checkpoint.
+        # We use a dummy VerletIntegrator because we only need to extract
+        # geometric state (positions, velocities, box vectors) — the next
+        # run_equilibration_stage() call creates a proper LangevinMiddleIntegrator.
+        integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
+        platform = self._get_platform()
+        temp_sim = Simulation(self._topology, self._system, integrator, platform)
+        temp_sim.loadCheckpoint(str(chk_path))
+
+        state = temp_sim.context.getState(getPositions=True, getVelocities=True)
+        self._current_positions = state.getPositions()
+        self._current_velocities = state.getVelocities()
+        self._current_box_vectors = state.getPeriodicBoxVectors()
+        # Discard the temporary simulation — it has a dummy integrator
+        del temp_sim
+
+        LOGGER.info(
+            f"Loaded state from equilibration stage {stage_index} ({stage_name}) checkpoint"
+        )
+
     def run_staged_equilibration(
         self,
         stages: List["EquilibrationStageConfig"],
@@ -673,7 +760,9 @@ class SimulationRunner:
         - Thermodynamic ensemble (NVT/NPT)
 
         Positions carry over between stages, and restraint forces are
-        added/removed as needed.
+        added/removed as needed. If a previous run was interrupted, completed
+        stages are detected on disk via their checkpoint files and skipped
+        automatically.
 
         Args:
             stages: List of EquilibrationStageConfig objects
@@ -683,12 +772,27 @@ class SimulationRunner:
         Returns:
             Dictionary with all stage results and summary
         """
+        import shutil
+
         LOGGER.info(f"Starting multi-stage equilibration with {len(stages)} stages")
 
-        # Store reference positions for restraints (post-minimization)
+        # Store reference positions for restraints BEFORE loading any checkpoint.
+        # These are the post-minimization positions that restraint forces target.
+        # Must be captured before _load_eq_stage_state() overwrites _current_positions.
         reference_positions = self._current_positions
 
-        results = {
+        # Detect stages that already completed (checkpoint exists on disk)
+        completed_indices = self._find_completed_eq_stages(stages)
+        if completed_indices:
+            last_idx = completed_indices[-1]
+            last_stage = stages[last_idx]
+            LOGGER.info(
+                f"Found {len(completed_indices)} completed equilibration stage(s) "
+                f"on disk — resuming after stage {last_idx} ({last_stage.name})"
+            )
+            self._load_eq_stage_state(last_idx, last_stage.name)
+
+        results: Dict[str, Any] = {
             "type": "staged_equilibration",
             "num_stages": len(stages),
             "stages": [],
@@ -696,6 +800,29 @@ class SimulationRunner:
         }
 
         for i, stage in enumerate(stages):
+            if i in completed_indices:
+                LOGGER.info(f"Skipping completed equilibration stage {i}: {stage.name}")
+                results["stages"].append(
+                    {
+                        "stage_index": i,
+                        "stage_name": stage.name,
+                        "skipped": True,
+                        "duration_ns": stage.duration,
+                    }
+                )
+                results["total_duration_ns"] += stage.duration
+                continue
+
+            # Clean up partial stage directory (exists but no checkpoint)
+            stage_dir_name = f"equilibration_{i}_{stage.name}"
+            partial_dir = self._working_dir / stage_dir_name
+            if partial_dir.exists():
+                LOGGER.warning(
+                    f"Stage {i} ({stage.name}) directory exists without checkpoint "
+                    f"— removing partial output and re-running"
+                )
+                shutil.rmtree(partial_dir)
+
             stage_result = self.run_equilibration_stage(
                 stage=stage,
                 reference_positions=reference_positions,
@@ -707,12 +834,22 @@ class SimulationRunner:
 
         # Get final energy
         if results["stages"]:
-            results["final_energy_kJ_mol"] = results["stages"][-1]["final_energy_kJ_mol"]
-            results["final_temperature_K"] = results["stages"][-1]["temperature_end_K"]
+            # Find last non-skipped result
+            last_result = None
+            for r in reversed(results["stages"]):
+                if not r.get("skipped"):
+                    last_result = r
+                    break
+            if last_result:
+                results["final_energy_kJ_mol"] = last_result["final_energy_kJ_mol"]
+                results["final_temperature_K"] = last_result["temperature_end_K"]
 
         self._history["equilibration"] = results
+        skipped = len(completed_indices)
+        ran = len(stages) - skipped
         LOGGER.info(
-            f"Multi-stage equilibration complete: {len(stages)} stages, "
+            f"Multi-stage equilibration complete: {len(stages)} stages "
+            f"({skipped} skipped, {ran} ran), "
             f"{results['total_duration_ns']:.3f} ns total"
         )
 
@@ -784,23 +921,10 @@ class SimulationRunner:
         )
         platform = self._get_platform()
 
-        # Capture velocities and box vectors from equilibration before creating new Simulation
-        # (creating new Simulation destroys the old context)
-        # Box vectors are critical for NPT stages where box dimensions change
-        equilibration_velocities = None
-        equilibration_box_vectors = None
-        if self._simulation is not None and segment_index == 0:
-            state = self._simulation.context.getState(getVelocities=True)
-            equilibration_velocities = state.getVelocities()
-            equilibration_box_vectors = state.getPeriodicBoxVectors()
-
         self._simulation = Simulation(self._topology, self._system, integrator, platform)
 
         # Set box vectors BEFORE positions - critical for correct periodic boundary handling
-        # Use captured box vectors from equilibration, or fall back to stored ones from staged equilibration
-        if equilibration_box_vectors is not None:
-            self._simulation.context.setPeriodicBoxVectors(*equilibration_box_vectors)
-        elif self._current_box_vectors is not None:
+        if self._current_box_vectors is not None:
             self._simulation.context.setPeriodicBoxVectors(*self._current_box_vectors)
 
         self._simulation.context.setPositions(self._current_positions)
@@ -816,8 +940,8 @@ class SimulationRunner:
         # Note: For continuation segments (segment > 0), ContinuationManager uses
         # loadState() which restores both positions and velocities from the XML state file
         if segment_index == 0:
-            if equilibration_velocities is not None:
-                self._simulation.context.setVelocities(equilibration_velocities)
+            if self._current_velocities is not None:
+                self._simulation.context.setVelocities(self._current_velocities)
                 LOGGER.info("Using velocities preserved from equilibration")
             else:
                 self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)

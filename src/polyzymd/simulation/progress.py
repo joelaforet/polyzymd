@@ -47,6 +47,39 @@ class SimulationStatus(str, Enum):
     FAILED = "failed"
 
 
+class EquilibrationStageRecord(BaseModel):
+    """Record of a single equilibration stage.
+
+    Used for observability in ``progress.json`` and for detecting
+    completed stages when resuming after a wall-time interruption.
+
+    Parameters
+    ----------
+    index : int
+        Stage index (0-based).
+    name : str
+        Stage name (e.g. ``"heating"``, ``"polymer_relaxation"``).
+    status : SegmentStatus
+        Current status of this stage.
+    duration_ns : float
+        Planned simulation time for this stage in nanoseconds.
+    ensemble : str
+        Thermodynamic ensemble (``"NVT"`` or ``"NPT"``).
+    started_at : str
+        ISO-format timestamp when the stage started.
+    finished_at : str | None
+        ISO-format timestamp when the stage finished.
+    """
+
+    index: int
+    name: str = ""
+    status: SegmentStatus = SegmentStatus.COMPLETED
+    duration_ns: float = 0.0
+    ensemble: str = "NVT"
+    started_at: str = Field(default_factory=lambda: _now_iso())
+    finished_at: str | None = None
+
+
 class SegmentRecord(BaseModel):
     """Record of a single production segment.
 
@@ -112,10 +145,23 @@ class SimulationProgress(BaseModel):
     total_steps_requested: int = 0
     total_samples_requested: int = 0
     timestep_fs: float = 2.0
+    equilibration_stages: List[EquilibrationStageRecord] = Field(default_factory=list)
     segments: List[SegmentRecord] = Field(default_factory=list)
     status: SimulationStatus = SimulationStatus.NOT_STARTED
     last_updated: str = Field(default_factory=lambda: _now_iso())
     replicate: int = 1
+
+    @property
+    def equilibration_complete(self) -> bool:
+        """Whether all recorded equilibration stages completed successfully."""
+        return len(self.equilibration_stages) > 0 and all(
+            s.status == SegmentStatus.COMPLETED for s in self.equilibration_stages
+        )
+
+    @property
+    def num_eq_stages_completed(self) -> int:
+        """Number of equilibration stages that completed successfully."""
+        return sum(1 for s in self.equilibration_stages if s.status == SegmentStatus.COMPLETED)
 
     @property
     def total_steps_completed(self) -> int:
@@ -269,6 +315,55 @@ def save_progress(working_dir: str | Path, progress: SimulationProgress) -> Path
 # ---------------------------------------------------------------------------
 
 _PRODUCTION_DIR_RE = re.compile(r"^production_(\d+)$")
+_EQ_STAGE_DIR_RE = re.compile(r"^equilibration_(\d+)_(.+)$")
+
+
+def scan_equilibration_stages(working_dir: str | Path) -> List[EquilibrationStageRecord]:
+    """Scan filesystem for completed equilibration stage directories.
+
+    A stage is considered completed if its checkpoint file
+    (``equilibration_N_name_checkpoint.chk``) exists. Directories
+    without a checkpoint are recorded with ``FAILED`` status.
+
+    Parameters
+    ----------
+    working_dir : str or Path
+        Simulation working directory.
+
+    Returns
+    -------
+    list of EquilibrationStageRecord
+        Records sorted by stage index.
+    """
+    working_dir = Path(working_dir)
+    if not working_dir.exists():
+        return []
+
+    records: List[EquilibrationStageRecord] = []
+    for entry in sorted(working_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        match = _EQ_STAGE_DIR_RE.match(entry.name)
+        if not match:
+            continue
+        stage_idx = int(match.group(1))
+        stage_name = match.group(2)
+        chk = entry / f"equilibration_{stage_idx}_{stage_name}_checkpoint.chk"
+        status = SegmentStatus.COMPLETED if chk.exists() else SegmentStatus.FAILED
+        records.append(
+            EquilibrationStageRecord(
+                index=stage_idx,
+                name=stage_name,
+                status=status,
+            )
+        )
+
+    records.sort(key=lambda r: r.index)
+    LOGGER.debug(
+        f"Equilibration scan: {sum(1 for r in records if r.status == SegmentStatus.COMPLETED)}"
+        f"/{len(records)} stage(s) completed"
+    )
+    return records
 
 
 def scan_filesystem(
@@ -311,6 +406,7 @@ def scan_filesystem(
 
     progress = SimulationProgress(
         timestep_fs=timestep_fs,
+        equilibration_stages=scan_equilibration_stages(working_dir),
         segments=segments,
     )
 
@@ -325,7 +421,8 @@ def scan_filesystem(
         progress.status = SimulationStatus.RUNNING
 
     LOGGER.info(
-        f"Filesystem scan: found {len(segments)} segment(s), "
+        f"Filesystem scan: {progress.num_eq_stages_completed} eq stage(s), "
+        f"{len(segments)} production segment(s), "
         f"{progress.total_steps_completed} total steps completed"
     )
     return progress

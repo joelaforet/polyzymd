@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from polyzymd.simulation.progress import (
+    EquilibrationStageRecord,
     SegmentRecord,
     SegmentStatus,
     SimulationProgress,
@@ -25,6 +26,7 @@ from polyzymd.simulation.progress import (
     load_or_scan_progress,
     load_progress,
     save_progress,
+    scan_equilibration_stages,
     scan_filesystem,
     validate_progress,
 )
@@ -554,3 +556,211 @@ class TestUnitConversion:
         from polyzymd.simulation.progress import _convert_to_fs
 
         assert _convert_to_fs(0.002, "picosecond") == pytest.approx(2.0)
+
+
+# ---------------------------------------------------------------------------
+# Helpers — equilibration stages
+# ---------------------------------------------------------------------------
+
+
+def _write_completed_eq_stage_on_disk(
+    working_dir: Path,
+    stage_idx: int,
+    stage_name: str,
+) -> None:
+    """Write minimal files simulating a completed equilibration stage."""
+    dir_name = f"equilibration_{stage_idx}_{stage_name}"
+    stage_dir = working_dir / dir_name
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    # Checkpoint existence is the completion indicator
+    (stage_dir / f"{dir_name}_checkpoint.chk").write_bytes(b"mock-chk")
+    (stage_dir / f"{dir_name}_trajectory.dcd").write_bytes(b"mock-dcd")
+    (stage_dir / f"{dir_name}_topology.pdb").write_text("<mock-pdb/>")
+    (stage_dir / f"{dir_name}_state_data.csv").write_text("step,time\n1,0.001\n")
+
+
+def _write_partial_eq_stage_on_disk(
+    working_dir: Path,
+    stage_idx: int,
+    stage_name: str,
+) -> None:
+    """Write an equilibration stage dir WITHOUT a checkpoint (partial/failed)."""
+    dir_name = f"equilibration_{stage_idx}_{stage_name}"
+    stage_dir = working_dir / dir_name
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    # Some files exist but NO checkpoint → stage didn't finish
+    (stage_dir / f"{dir_name}_trajectory.dcd").write_bytes(b"mock-dcd")
+
+
+# ---------------------------------------------------------------------------
+# EquilibrationStageRecord model
+# ---------------------------------------------------------------------------
+
+
+class TestEquilibrationStageRecord:
+    """EquilibrationStageRecord Pydantic model."""
+
+    def test_defaults(self):
+        rec = EquilibrationStageRecord(index=0)
+        assert rec.name == ""
+        assert rec.status == SegmentStatus.COMPLETED
+        assert rec.duration_ns == 0.0
+        assert rec.ensemble == "NVT"
+        assert rec.finished_at is None
+
+    def test_custom_values(self):
+        rec = EquilibrationStageRecord(
+            index=2,
+            name="density_equilibration",
+            status=SegmentStatus.COMPLETED,
+            duration_ns=1.0,
+            ensemble="NPT",
+        )
+        assert rec.index == 2
+        assert rec.name == "density_equilibration"
+        assert rec.ensemble == "NPT"
+        assert rec.duration_ns == 1.0
+
+
+# ---------------------------------------------------------------------------
+# SimulationProgress — equilibration properties
+# ---------------------------------------------------------------------------
+
+
+class TestEquilibrationProgressProperties:
+    """Equilibration-related properties on SimulationProgress."""
+
+    def test_no_eq_stages_not_complete(self):
+        p = _make_progress()
+        assert p.equilibration_complete is False
+        assert p.num_eq_stages_completed == 0
+
+    def test_all_eq_stages_completed(self):
+        stages = [
+            EquilibrationStageRecord(index=0, name="heating", status=SegmentStatus.COMPLETED),
+            EquilibrationStageRecord(index=1, name="npt", status=SegmentStatus.COMPLETED),
+        ]
+        p = _make_progress()
+        p.equilibration_stages = stages
+        assert p.equilibration_complete is True
+        assert p.num_eq_stages_completed == 2
+
+    def test_partial_eq_stages_not_complete(self):
+        stages = [
+            EquilibrationStageRecord(index=0, name="heating", status=SegmentStatus.COMPLETED),
+            EquilibrationStageRecord(index=1, name="npt", status=SegmentStatus.FAILED),
+        ]
+        p = _make_progress()
+        p.equilibration_stages = stages
+        assert p.equilibration_complete is False
+        assert p.num_eq_stages_completed == 1
+
+
+# ---------------------------------------------------------------------------
+# scan_equilibration_stages
+# ---------------------------------------------------------------------------
+
+
+class TestScanEquilibrationStages:
+    """Filesystem scanning for equilibration stage directories."""
+
+    def test_empty_directory(self, tmp_path):
+        records = scan_equilibration_stages(tmp_path)
+        assert records == []
+
+    def test_nonexistent_directory(self, tmp_path):
+        records = scan_equilibration_stages(tmp_path / "nonexistent")
+        assert records == []
+
+    def test_completed_stages(self, tmp_path):
+        _write_completed_eq_stage_on_disk(tmp_path, 0, "heating")
+        _write_completed_eq_stage_on_disk(tmp_path, 1, "npt_equilibration")
+        records = scan_equilibration_stages(tmp_path)
+        assert len(records) == 2
+        assert records[0].index == 0
+        assert records[0].name == "heating"
+        assert records[0].status == SegmentStatus.COMPLETED
+        assert records[1].index == 1
+        assert records[1].name == "npt_equilibration"
+        assert records[1].status == SegmentStatus.COMPLETED
+
+    def test_partial_stage_marked_failed(self, tmp_path):
+        _write_partial_eq_stage_on_disk(tmp_path, 0, "heating")
+        records = scan_equilibration_stages(tmp_path)
+        assert len(records) == 1
+        assert records[0].status == SegmentStatus.FAILED
+
+    def test_mixed_completed_and_partial(self, tmp_path):
+        _write_completed_eq_stage_on_disk(tmp_path, 0, "heating")
+        _write_partial_eq_stage_on_disk(tmp_path, 1, "npt_equilibration")
+        records = scan_equilibration_stages(tmp_path)
+        assert len(records) == 2
+        assert records[0].status == SegmentStatus.COMPLETED
+        assert records[1].status == SegmentStatus.FAILED
+
+    def test_stages_sorted_by_index(self, tmp_path):
+        _write_completed_eq_stage_on_disk(tmp_path, 2, "production_prep")
+        _write_completed_eq_stage_on_disk(tmp_path, 0, "heating")
+        _write_completed_eq_stage_on_disk(tmp_path, 1, "npt_equilibration")
+        records = scan_equilibration_stages(tmp_path)
+        indices = [r.index for r in records]
+        assert indices == [0, 1, 2]
+
+    def test_ignores_non_eq_directories(self, tmp_path):
+        """Directories not matching equilibration_N_name/ should be ignored."""
+        (tmp_path / "production_0").mkdir()
+        (tmp_path / "equilibration").mkdir()  # No index/name
+        (tmp_path / "random_dir").mkdir()
+        records = scan_equilibration_stages(tmp_path)
+        assert records == []
+
+
+# ---------------------------------------------------------------------------
+# scan_filesystem — equilibration stages integration
+# ---------------------------------------------------------------------------
+
+
+class TestScanFilesystemEquilibration:
+    """scan_filesystem picks up equilibration stages."""
+
+    def test_eq_stages_populated_in_scan(self, tmp_path):
+        _write_completed_eq_stage_on_disk(tmp_path, 0, "heating")
+        _write_completed_eq_stage_on_disk(tmp_path, 1, "npt_equilibration")
+        p = scan_filesystem(tmp_path)
+        assert len(p.equilibration_stages) == 2
+        assert p.num_eq_stages_completed == 2
+
+    def test_eq_stages_and_production_segments(self, tmp_path):
+        _write_completed_eq_stage_on_disk(tmp_path, 0, "heating")
+        _write_completed_segment_on_disk(tmp_path, 0, duration_ns=10.0)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.equilibration_stages) == 1
+        assert len(p.segments) == 1
+
+
+# ---------------------------------------------------------------------------
+# Round-trip serialization with equilibration stages
+# ---------------------------------------------------------------------------
+
+
+class TestEquilibrationRoundTrip:
+    """Save/load progress with equilibration stage records."""
+
+    def test_round_trip_with_eq_stages(self, tmp_path):
+        stages = [
+            EquilibrationStageRecord(index=0, name="heating", duration_ns=0.5, ensemble="NVT"),
+            EquilibrationStageRecord(index=1, name="npt_eq", duration_ns=1.0, ensemble="NPT"),
+        ]
+        p = _make_progress()
+        p.equilibration_stages = stages
+
+        save_progress(tmp_path, p)
+        loaded = load_progress(tmp_path)
+
+        assert loaded is not None
+        assert len(loaded.equilibration_stages) == 2
+        assert loaded.equilibration_stages[0].name == "heating"
+        assert loaded.equilibration_stages[0].ensemble == "NVT"
+        assert loaded.equilibration_stages[1].name == "npt_eq"
+        assert loaded.equilibration_stages[1].ensemble == "NPT"
+        assert loaded.equilibration_complete is True
