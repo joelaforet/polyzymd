@@ -977,6 +977,77 @@ class SimulationRunner:
                 f,
             )
 
+        # Save parameters JSON before the simulation loop so it exists even
+        # if the segment is interrupted (continuation.py requires this file)
+        # Save parameters JSON (needed for continuation across segments)
+        params_dict = {
+            "__class__": "SimulationParameters",
+            "__values__": {
+                "thermo_params": {
+                    "__class__": "ThermoParameters",
+                    "__values__": {
+                        "temperature": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": temperature, "unit": "kelvin"},
+                        },
+                        "thermostat_params": {
+                            "__class__": "ThermostatParameters",
+                            "__values__": {
+                                "temperature": {
+                                    "__class__": "Quantity",
+                                    "__values__": {"value": temperature, "unit": "kelvin"},
+                                },
+                                "timescale": {
+                                    "__class__": "Quantity",
+                                    "__values__": {"value": friction, "unit": "/picosecond"},
+                                },
+                            },
+                        },
+                        "barostat_params": {
+                            "__class__": "BarostatParameters",
+                            "__values__": {
+                                "pressure": {
+                                    "__class__": "Quantity",
+                                    "__values__": {"value": pressure, "unit": "atmosphere"},
+                                },
+                                "temperature": {
+                                    "__class__": "Quantity",
+                                    "__values__": {"value": temperature, "unit": "kelvin"},
+                                },
+                                "frequency": barostat_frequency,
+                            },
+                        },
+                    },
+                },
+                "integ_params": {
+                    "__class__": "IntegratorParameters",
+                    "__values__": {
+                        "time_step": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": timestep_fs, "unit": "femtosecond"},
+                        },
+                        "total_time": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": duration_ns, "unit": "nanosecond"},
+                        },
+                        "num_samples": num_samples,
+                    },
+                },
+                "reporter_params": {
+                    "__class__": "ReporterParameters",
+                    "__values__": {
+                        "report_interval": report_interval,
+                        "report_trajectory": True,
+                        "report_state_data": True,
+                    },
+                },
+            },
+        }
+        params_path = phase_dir / f"{phase_name}_parameters.json"
+        with open(params_path, "w") as f:
+            json.dump(params_dict, f, indent=2)
+        LOGGER.info(f"Saved parameters to {params_path}")
+
         # Install signal handlers for graceful shutdown (SIGUSR1 / SIGTERM)
         from polyzymd.simulation.signals import (
             GracefulExit,
@@ -1059,75 +1130,6 @@ class SimulationRunner:
         with open(system_xml_path, "w") as f:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved system to {system_xml_path}")
-
-        # Save parameters JSON (needed for continuation across segments)
-        params_dict = {
-            "__class__": "SimulationParameters",
-            "__values__": {
-                "thermo_params": {
-                    "__class__": "ThermoParameters",
-                    "__values__": {
-                        "temperature": {
-                            "__class__": "Quantity",
-                            "__values__": {"value": temperature, "unit": "kelvin"},
-                        },
-                        "thermostat_params": {
-                            "__class__": "ThermostatParameters",
-                            "__values__": {
-                                "temperature": {
-                                    "__class__": "Quantity",
-                                    "__values__": {"value": temperature, "unit": "kelvin"},
-                                },
-                                "timescale": {
-                                    "__class__": "Quantity",
-                                    "__values__": {"value": friction, "unit": "/picosecond"},
-                                },
-                            },
-                        },
-                        "barostat_params": {
-                            "__class__": "BarostatParameters",
-                            "__values__": {
-                                "pressure": {
-                                    "__class__": "Quantity",
-                                    "__values__": {"value": pressure, "unit": "atmosphere"},
-                                },
-                                "temperature": {
-                                    "__class__": "Quantity",
-                                    "__values__": {"value": temperature, "unit": "kelvin"},
-                                },
-                                "frequency": barostat_frequency,
-                            },
-                        },
-                    },
-                },
-                "integ_params": {
-                    "__class__": "IntegratorParameters",
-                    "__values__": {
-                        "time_step": {
-                            "__class__": "Quantity",
-                            "__values__": {"value": timestep_fs, "unit": "femtosecond"},
-                        },
-                        "total_time": {
-                            "__class__": "Quantity",
-                            "__values__": {"value": duration_ns, "unit": "nanosecond"},
-                        },
-                        "num_samples": num_samples,
-                    },
-                },
-                "reporter_params": {
-                    "__class__": "ReporterParameters",
-                    "__values__": {
-                        "report_interval": report_interval,
-                        "report_trajectory": True,
-                        "report_state_data": True,
-                    },
-                },
-            },
-        }
-        params_path = phase_dir / f"{phase_name}_parameters.json"
-        with open(params_path, "w") as f:
-            json.dump(params_dict, f, indent=2)
-        LOGGER.info(f"Saved parameters to {params_path}")
 
         # Update progress tracker (successful completion)
         self._update_progress_completed(
