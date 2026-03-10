@@ -188,6 +188,7 @@ class ContinuationManager:
                 f"recovering from checkpoint + interrupted system XML"
             )
             system_path = interrupted_system
+            checkpoint_path = prev_dir / "interrupted_checkpoint.chk"
             use_checkpoint = True
 
         return {
