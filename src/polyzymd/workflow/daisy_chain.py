@@ -168,7 +168,7 @@ class DaisyChainSubmitter:
         self,
         sim_config: SimulationConfig,
         dc_config: DaisyChainConfig,
-        conda_env: str = "polyzymd-env",
+        pixi_env: str = "cuda-12-4",
         openff_logs: bool = False,
         skip_build: bool = False,
     ) -> None:
@@ -180,8 +180,8 @@ class DaisyChainSubmitter:
             Simulation configuration.
         dc_config : DaisyChainConfig
             Submission configuration.
-        conda_env : str
-            Conda environment name.
+        pixi_env : str
+            Pixi environment name (e.g. ``"cuda-12-4"``, ``"cuda-12-6"``).
         openff_logs : bool
             Enable verbose OpenFF logs in generated scripts.
         skip_build : bool
@@ -192,7 +192,7 @@ class DaisyChainSubmitter:
         self._openff_logs = openff_logs
         self._skip_build = skip_build
         self._generator = SlurmScriptGenerator(
-            dc_config.slurm_config, conda_env, openff_logs=openff_logs, skip_build=skip_build
+            dc_config.slurm_config, pixi_env, openff_logs=openff_logs, skip_build=skip_build
         )
 
         # Track submitted jobs per replicate
@@ -338,7 +338,7 @@ class DaisyChainSubmitter:
             )
 
         # Use --export=NONE to start with clean environment, letting the
-        # script's module/conda initialization work properly regardless
+        # script's pixi shell-hook initialization work properly regardless
         # of submission context
         cmd = ["sbatch", "--export=NONE"]
 
@@ -467,7 +467,7 @@ def submit_daisy_chain(
     replicates: str = "1",
     email: str = "",
     dry_run: bool = False,
-    conda_env: str = "polyzymd-env",
+    pixi_env: str = "cuda-12-4",
     output_dir: Optional[Union[str, Path]] = None,
     scratch_dir: Optional[Union[str, Path]] = None,
     projects_dir: Optional[Union[str, Path]] = None,
@@ -496,8 +496,8 @@ def submit_daisy_chain(
         Email for job notifications.
     dry_run : bool
         If True, don't submit jobs.
-    conda_env : str
-        Conda environment name.
+    pixi_env : str
+        Pixi environment name (e.g. ``"cuda-12-4"``, ``"cuda-12-6"``).
     output_dir : str or Path or None
         Directory for job scripts.
     scratch_dir : str or Path or None
@@ -584,6 +584,6 @@ def submit_daisy_chain(
 
     # Create submitter and submit
     submitter = DaisyChainSubmitter(
-        sim_config, dc_config, conda_env=conda_env, openff_logs=openff_logs, skip_build=skip_build
+        sim_config, dc_config, pixi_env=pixi_env, openff_logs=openff_logs, skip_build=skip_build
     )
     return submitter.submit_all()
