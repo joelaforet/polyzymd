@@ -617,6 +617,15 @@ def _run_gromacs_impl(
     is_flag=True,
     help="Skip system building in generated jobs (use pre-built system from 'polyzymd build')",
 )
+@click.option(
+    "--pixi-env",
+    default=None,
+    type=click.Choice(["cuda-12-4", "cuda-12-6"]),
+    help=(
+        "Pixi environment for SLURM jobs. If omitted, inferred from --preset "
+        "(blanca/alpine presets → cuda-12-4, bridges2 → cuda-12-6)."
+    ),
+)
 def submit(
     config: str,
     replicates: str,
@@ -632,6 +641,7 @@ def submit(
     gpu_type: Optional[str],
     submit_openff_logs: bool,
     skip_build: bool,
+    pixi_env: Optional[str],
 ) -> None:
     """Submit simulation jobs to SLURM.
 
@@ -644,9 +654,14 @@ def submit(
     - scratch_dir: Where simulation data is written (high-performance storage)
     """
     from polyzymd.workflow.daisy_chain import submit_daisy_chain
+    from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV
+
+    # Resolve pixi environment: explicit flag > preset default
+    resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "cuda-12-4")
 
     click.echo(f"Loading configuration from: {config}")
     click.echo(f"Submitting jobs with preset: {preset}")
+    click.echo(f"Pixi environment: {resolved_pixi_env}")
     click.echo(f"Replicates: {replicates}")
     if scratch_dir:
         click.echo(f"Scratch directory: {scratch_dir}")
@@ -671,6 +686,7 @@ def submit(
             replicates=replicates,
             email=email,
             dry_run=dry_run,
+            pixi_env=resolved_pixi_env,
             output_dir=output_dir,
             scratch_dir=scratch_dir,
             projects_dir=projects_dir,
@@ -1448,6 +1464,14 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     is_flag=True,
     help="Show status and what would be submitted without actually submitting",
 )
+@click.option(
+    "--pixi-env",
+    default=None,
+    type=click.Choice(["cuda-12-4", "cuda-12-6"]),
+    help=(
+        "Pixi environment for the recovery SLURM job. If omitted, inferred from --preset."
+    ),
+)
 def recover(
     config: str,
     replicate: int,
@@ -1455,6 +1479,7 @@ def recover(
     preset: str,
     submit: bool,
     dry_run: bool,
+    pixi_env: Optional[str],
 ) -> None:
     """Resume a stalled or interrupted simulation.
 
@@ -1539,12 +1564,15 @@ def recover(
         return
 
     # Generate and submit a self-resubmitting SLURM job
-    from polyzymd.workflow.slurm import SlurmConfig, SlurmScriptGenerator
+    from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV, SlurmConfig, SlurmScriptGenerator
 
-    click.echo(f"\nGenerating recovery job (preset: {preset})...")
+    # Resolve pixi environment: explicit flag > preset default
+    resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "cuda-12-4")
+
+    click.echo(f"\nGenerating recovery job (preset: {preset}, pixi env: {resolved_pixi_env})...")
 
     slurm_config = SlurmConfig.from_preset(preset)
-    generator = SlurmScriptGenerator(slurm_config)
+    generator = SlurmScriptGenerator(slurm_config, pixi_env=resolved_pixi_env)
 
     config_path_abs = str(Path(config).resolve())
     script_content = generator.generate_job_script(
