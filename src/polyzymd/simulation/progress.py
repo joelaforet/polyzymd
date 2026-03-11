@@ -548,6 +548,43 @@ def _parse_interrupted_marker(marker_path: Path) -> tuple[int, int]:
     return steps_completed, total_steps
 
 
+def _estimate_steps_from_csv(csv_path: Path) -> int:
+    """Estimate the number of completed steps from a ``state_data.csv`` file.
+
+    Reads the last non-empty data line and extracts the step count from
+    the first column.  This is used to estimate progress for hard-killed
+    segments that have no ``INTERRUPTED`` marker or ``state.xml`` but do
+    have reporter output on disk.
+
+    Parameters
+    ----------
+    csv_path : Path
+        Path to the ``production_N_state_data.csv`` file.
+
+    Returns
+    -------
+    int
+        Estimated steps completed, or 0 if the file cannot be parsed.
+    """
+    try:
+        with open(csv_path, "r") as f:
+            lines = f.readlines()
+        # Need at least a header + one data line
+        if len(lines) < 2:
+            return 0
+        # Walk backwards to find the last non-empty line
+        for line in reversed(lines):
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                # First column is the step count (may be quoted)
+                step_str = stripped.split(",")[0].strip('"').strip()
+                return int(float(step_str))
+        return 0
+    except (ValueError, IndexError, OSError) as exc:
+        LOGGER.warning(f"Could not estimate steps from {csv_path}: {exc}")
+        return 0
+
+
 def _convert_to_ns(value: float, unit: str) -> float:
     """Convert a time value to nanoseconds."""
     unit = unit.lower().rstrip("s")
