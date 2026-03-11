@@ -503,18 +503,46 @@ def _scan_segment_dir(
             finished_at=_now_iso(),  # Approximate
         )
     else:
-        # No state.xml and no INTERRUPTED marker — likely a failed segment
-        # or an empty directory from a crash
-        LOGGER.warning(
-            f"Segment {seg_idx} directory exists but has no state.xml or "
-            f"INTERRUPTED marker — treating as failed"
-        )
-        return SegmentRecord(
-            index=seg_idx,
-            steps_completed=0,
-            steps_requested=0,
-            status=SegmentStatus.FAILED,
-        )
+        # No state.xml and no INTERRUPTED marker — check for checkpoint
+        # from periodic CheckpointReporter (hard-kill recovery).
+        checkpoint_chk = seg_dir / f"production_{seg_idx}_checkpoint.chk"
+        state_data_csv = seg_dir / f"production_{seg_idx}_state_data.csv"
+
+        if checkpoint_chk.exists():
+            # Hard-killed segment: periodic checkpoint survives but the
+            # signal handler never fired.  Treat as interrupted so the
+            # continuation manager can recover from the checkpoint.
+            steps_completed = (
+                _estimate_steps_from_csv(state_data_csv)
+                if state_data_csv.exists()
+                else 0
+            )
+            duration_ns = (steps_completed * timestep_fs) / 1e6
+            LOGGER.warning(
+                f"Segment {seg_idx} directory has checkpoint but no state.xml "
+                f"or INTERRUPTED marker — treating as interrupted "
+                f"(hard-kill recovery, ~{steps_completed} steps)"
+            )
+            return SegmentRecord(
+                index=seg_idx,
+                steps_completed=steps_completed,
+                steps_requested=0,  # Unknown — no INTERRUPTED metadata
+                samples_written=0,
+                status=SegmentStatus.INTERRUPTED,
+                duration_ns=duration_ns,
+            )
+        else:
+            # Truly failed: no recoverable files at all
+            LOGGER.warning(
+                f"Segment {seg_idx} directory exists but has no state.xml, "
+                f"INTERRUPTED marker, or checkpoint — treating as failed"
+            )
+            return SegmentRecord(
+                index=seg_idx,
+                steps_completed=0,
+                steps_requested=0,
+                status=SegmentStatus.FAILED,
+            )
 
 
 def _parse_interrupted_marker(marker_path: Path) -> tuple[int, int]:
