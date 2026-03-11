@@ -263,7 +263,7 @@ class TestSelfResubmittingModel:
         """The unified job template should resubmit via sbatch $SLURM_JOB_SCRIPT."""
         from polyzymd.workflow.slurm import SlurmConfig, SlurmScriptGenerator
 
-        gen = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), conda_env="test-env")
+        gen = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), pixi_env="cuda-12-4")
         script = gen.generate_job_script(
             config_path="/tmp/config.yaml",
             replicate=1,

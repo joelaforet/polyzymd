@@ -4,15 +4,17 @@ Covers:
 - SlurmConfig.from_preset() for all named presets
 - Conditional SBATCH directive generation (gpu_line, qos_line, mem_line,
   nodes_line, account_line, mail_line)
-- Bridges2-specific GPU type, directive style, module loading, conda command
+- Bridges2-specific GPU type, directive style
 - BRIDGES2_GPU_TYPES registry
 - Job name generation for self-resubmitting model
+- Pixi environment activation in generated scripts
 """
 
 import pytest
 
 from polyzymd.workflow.slurm import (
     BRIDGES2_GPU_TYPES,
+    PRESET_DEFAULT_PIXI_ENV,
     SlurmConfig,
     SlurmScriptGenerator,
 )
@@ -23,7 +25,7 @@ from polyzymd.workflow.slurm import (
 
 
 def _make_generator(config: SlurmConfig) -> SlurmScriptGenerator:
-    return SlurmScriptGenerator(config, conda_env="test-env")
+    return SlurmScriptGenerator(config, pixi_env="cuda-12-4")
 
 
 # ---------------------------------------------------------------------------
@@ -43,8 +45,6 @@ class TestPresetLoading:
         assert cfg.memory == "3G"
         assert cfg.gpu_directive_style == "gres"
         assert cfg.gpu_type is None
-        assert cfg.module_load == "miniforge"
-        assert cfg.conda_command == "conda"
 
     def test_al40_preset(self):
         cfg = SlurmConfig.from_preset("al40")
@@ -75,8 +75,6 @@ class TestPresetLoading:
         assert cfg.memory is None  # Per-GPU allocation; omit --mem
         assert cfg.gpu_type == "v100-32"
         assert cfg.gpu_directive_style == "gpus"
-        assert cfg.module_load == "anaconda3/2024.10-1"
-        assert cfg.conda_command == "conda"
 
     def test_preset_accepts_email(self):
         cfg = SlurmConfig.from_preset("aa100", email="user@example.com")
