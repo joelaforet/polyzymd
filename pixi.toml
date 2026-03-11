@@ -1,0 +1,246 @@
+# =============================================================================
+# PolyzyMD — pixi.toml
+# =============================================================================
+#
+# ENVIRONMENTS
+# ------------
+#   build       — structure building, PDB prep, local use (no CUDA required)
+#   cuda-12-4   — CUDA 12.4 driver (e.g. CU Boulder Blanca): OpenMM 8.1
+#   cuda-12-6   — CUDA 12.6 driver (e.g. PSC Bridges2):      OpenMM 8.4
+#
+# HOW TO FIND YOUR CUDA VERSION
+# ------------------------------
+# Run on a GPU node:  nvidia-smi | head -1
+# The driver version in the top-right maps to a maximum CUDA version.
+# Use the environment whose cuda-version does not exceed your driver.
+#
+# Known clusters:
+#   PSC Bridges2       → cuda-12-6
+#   CU Boulder Blanca  → cuda-12-4
+#
+# Adding support for a new cluster: file a PR adding a new feature block
+# following the pattern of [feature.cuda-12-4] below, and add the
+# corresponding environment and tasks.
+#
+# FIRST-TIME CLUSTER SETUP
+# ------------------------
+# 1. Install pixi:  curl -fsSL https://pixi.sh/install.sh | sh
+# 2. Clone the repo and cd into it
+# 3. Run: pixi install -e cuda-12-6   (or whichever matches your cluster)
+# 4. Run: pixi shell -e cuda-12-6
+#
+# After `pixi shell`, the `polyzymd` binary is on PATH and works exactly
+# as before — no `pixi run` prefix needed.
+#
+# LOCAL (no cluster) — use the "build" environment:
+#   polyzymd build ...     ✓
+#   polyzymd validate ...  ✓
+#   polyzymd clean-pdb ... ✓
+#   polyzymd submit ...    ✗  (requires a cuda-* environment)
+# =============================================================================
+
+[workspace]
+name        = "polyzymd"
+version     = "1.0.4"
+description = "MD simulations for enzyme-polymer systems"
+channels    = ["conda-forge"]
+platforms   = ["linux-64"]
+
+
+
+
+# =============================================================================
+# FEATURE: base
+# Packages shared across ALL environments. Floating versions — let the
+# conda-forge solver resolve per-platform. Pinned only where necessary for
+# correctness (e.g. numpy ABI compatibility with OpenMM).
+# =============================================================================
+[feature.base.dependencies]
+python              = "3.11.*"
+numpy               = "1.26.*"       # pinned: OpenMM and mdtraj ABI-sensitive
+scipy               = ">=1.10"
+pydantic            = ">=2.5"
+pyyaml              = ">=6.0"
+click               = ">=8.1"
+click-option-group  = ">=0.5.6"
+tqdm                = ">=4.60"
+rich                = ">=13.0"
+networkx            = ">=3.0"
+packaging           = ">=23.0"
+joblib              = ">=1.3"
+typing_extensions   = ">=4.5"
+
+# OpenFF stack — floated, solver resolves compatible set
+openff-toolkit      = ">=0.16"
+openff-interchange  = ">=0.5"
+openff-forcefields  = ">=2024.0"
+openff-nagl         = ">=0.4"
+openff-nagl-models  = ">=2024.0"
+openff-units        = ">=0.2"
+openff-utilities    = ">=0.1"
+openff-amber-ff-ports = ">=2024.0"
+
+# Molecular building
+mbuild              = ">=1.2"
+foyer               = ">=1.0"
+gmso                = ">=0.13"
+forcefield-utilities = ">=0.5"
+packmol             = ">=20.0"
+parmed              = ">=4.0"
+rdkit               = ">=2023.09"
+openbabel           = ">=3.1"
+pdbfixer            = ">=1.9"
+openff-models       = ">=0.1"
+smirnoff99frosst    = ">=1.1"
+
+# Simulation analysis (shared, non-GPU)
+mdtraj              = ">=1.9"        # available on conda-forge
+ambertools          = "=23.3"        # pinned: polymerist dependency; test relaxing later
+panedr              = ">=0.7"
+pyedr               = ">=0.7"
+parso               = ">=0.8"
+
+# Data / IO
+pandas              = ">=2.0"
+pytables            = ">=3.9"        # HDF5 backend
+hdf5                = ">=1.14"
+netcdf-fortran      = ">=4.6"
+lxml                = ">=5.0"
+xmltodict           = ">=0.13"
+bson                = ">=0.5"
+sqlalchemy          = ">=2.0"
+
+# Plotting / Jupyter
+matplotlib-base     = ">=3.8"
+jupyterlab          = ">=4.0"
+ipywidgets          = ">=8.0"
+notebook            = ">=7.0"
+
+# Numerics
+sympy               = ">=1.12"
+symengine           = ">=0.11"
+python-symengine    = ">=0.11"
+mpmath              = ">=1.3"
+
+# Misc runtime
+requests            = ">=2.31"
+fsspec              = ">=2023.0"
+filelock            = ">=3.12"
+pint                = ">=0.23"
+unyt                = ">=3.0"
+treelib             = ">=1.6"
+boltons             = ">=23.0"
+anytree             = ">=2.8"        # available conda-forge
+
+# OpenCL (CPU fallback for OpenMM)
+ocl-icd             = ">=2.3"
+ocl-icd-system      = ">=1.0"
+opencl-headers      = ">=2023.0"
+
+# PyTorch (for NAGL charge models)
+pytorch             = "2.6.*"
+pytorch-lightning   = ">=2.5"
+torchmetrics        = ">=1.5"
+
+[feature.base.pypi-dependencies]
+polyzymd      = ">=1.0.4"
+polymerist    = ">=1.0.1"
+biopandas     = ">=0.5"
+mdtraj        = ">=1.9"       # fallback if conda-forge build unavailable
+anytree       = ">=2.8"
+looseversion  = ">=1.1"
+mmtf-python   = ">=1.1"
+msgpack       = ">=1.1"
+edgembar      = ">=0.2"
+# AmberTools Python wrappers (these are pip-only)
+pytraj        = ">=2.0"
+lammps        = ">=2024.0"
+
+
+# =============================================================================
+# FEATURE: openmm-any
+# For the "build" environment — flexible OpenMM, no CUDA pin.
+# Suitable for local use: PDB writing, system building, validation.
+# =============================================================================
+[feature.openmm-any.dependencies]
+openmm = ">=8.1,<8.5"
+
+
+# =============================================================================
+# FEATURE: cuda-12-6
+# CUDA 12.6 driver — e.g. PSC Bridges2 (V100, sm_70)
+# Must pin nvrtc to match driver; newer nvrtc is incompatible with V100s.
+# OpenMM 8.4 is the tested version for this CUDA/GPU combination.
+#
+# To add a new CUDA 12.6 cluster: copy the tasks block below, rename the
+# suffix, and add your SLURM directives to the polyzymd config YAML.
+# =============================================================================
+[feature.cuda-12-6.dependencies]
+openmm       = "=8.4.0"
+cuda-version = "=12.6"
+cuda-nvrtc   = "=12.6.85"
+libcufft     = ">=11.3"
+
+
+# =============================================================================
+# FEATURE: cuda-12-4
+# CUDA 12.4 driver — e.g. CU Boulder Blanca
+# OpenMM 8.1 is the tested version for this CUDA/GPU combination.
+#
+# To add a new CUDA 12.4 cluster: copy the tasks block below, rename the
+# suffix, and add your SLURM directives to the polyzymd config YAML.
+# =============================================================================
+[feature.cuda-12-4.dependencies]
+openmm       = "=8.1.2"
+cuda-version = "=12.4"
+cuda-nvrtc   = "=12.4.127"
+libcufft     = ">=11.2"
+
+
+# =============================================================================
+# ENVIRONMENTS
+# Each environment = base feature + one OpenMM/CUDA feature.
+# solve-group: "build" solves independently (no CUDA).
+#              Each CUDA environment solves independently to keep pins isolated.
+# =============================================================================
+[environments]
+build      = { features = ["base", "openmm-any"], solve-group = "build" }
+cuda-12-6  = { features = ["base", "cuda-12-6"],  solve-group = "cuda-12-6" }
+cuda-12-4  = { features = ["base", "cuda-12-4"],  solve-group = "cuda-12-4" }
+
+
+# =============================================================================
+# TASKS
+# `pixi run <task>` — environment is selected automatically.
+# After `pixi shell`, these are also available as bare `polyzymd` commands.
+#
+# Simulation commands (submit, run-segment, run-gromacs, recover) are only
+# wired to cluster environments. Running them in the "build" environment
+# will not have a pinned CUDA/OpenMM and may not work on GPU nodes.
+# =============================================================================
+
+# --- build environment tasks (no CUDA needed) ---
+# These run in whichever environment is active, but are intended for "build".
+# Simulation commands are scoped to their CUDA feature below.
+[feature.openmm-any.tasks]
+build     = { cmd = "polyzymd build" }
+validate  = { cmd = "polyzymd validate" }
+init      = { cmd = "polyzymd init" }
+info      = { cmd = "polyzymd info" }
+clean-pdb = { cmd = "polyzymd clean-pdb" }
+
+# --- CUDA 12.6 simulation tasks (e.g. PSC Bridges2) ---
+[feature.cuda-12-6.tasks]
+submit        = { cmd = "polyzymd submit",        description = "Submit SLURM jobs (OpenMM 8.4, CUDA 12.6)" }
+run-segment   = { cmd = "polyzymd run-segment",   description = "Run next simulation segment" }
+run-gromacs   = { cmd = "polyzymd run-gromacs",   description = "Run GROMACS simulation" }
+recover       = { cmd = "polyzymd recover",        description = "Resume stalled simulation" }
+check-progress = { cmd = "polyzymd check-progress", description = "Check simulation progress" }
+
+# --- CUDA 12.4 simulation tasks (e.g. CU Boulder Blanca) ---
+[feature.cuda-12-4.tasks]
+submit        = { cmd = "polyzymd submit",        description = "Submit SLURM jobs (OpenMM 8.1, CUDA 12.4)" }
+run-segment   = { cmd = "polyzymd run-segment",   description = "Run next simulation segment" }
+run-gromacs   = { cmd = "polyzymd run-gromacs",   description = "Run GROMACS simulation" }
+recover       = { cmd = "polyzymd recover",        description = "Resume stalled simulation" }
+check-progress = { cmd = "polyzymd check-progress", description = "Check simulation progress" }
