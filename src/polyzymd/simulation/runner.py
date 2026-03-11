@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Uni
 import openmm
 from openmm import XmlSerializer
 from openmm import unit as omm_unit
-from openmm.app import DCDReporter, PDBFile, Simulation, StateDataReporter
+from openmm.app import CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
 
 if TYPE_CHECKING:
     from polyzymd.config.schema import (
@@ -934,6 +934,15 @@ class SimulationRunner:
         _energy = _state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
         LOGGER.info(f"Production segment {segment_index}: initial PE = {_energy:.2f} kJ/mol")
 
+        # Save system XML early so it exists on disk even if the segment is
+        # hard-killed (SIGKILL / OOM).  This is required for checkpoint-based
+        # recovery: loadCheckpoint() needs a matching System object.  The file
+        # is overwritten at segment completion with the final state.
+        system_xml_path = phase_dir / f"{phase_name}_system.xml"
+        with open(system_xml_path, "w") as f:
+            f.write(XmlSerializer.serialize(self._system))
+        LOGGER.info(f"Saved initial system to {system_xml_path}")
+
         # Set velocities for production
         # - If we have velocities from equilibration, use them (physical continuity)
         # - Otherwise generate new velocities at target temperature
@@ -967,6 +976,16 @@ class SimulationRunner:
                 density=True,
                 speed=True,
             )
+        )
+
+        # Periodic checkpoint reporter — ensures a .chk file is written every
+        # report_interval steps.  Without this, segment 0 has NO checkpoint on
+        # disk until the very end, so a hard kill (SIGKILL / OOM / node failure)
+        # would lose all progress.  Matches the behaviour already present in
+        # continuation.py for segments >= 1.
+        prod_chk_path = phase_dir / f"{phase_name}_checkpoint.chk"
+        self._simulation.reporters.append(
+            CheckpointReporter(str(prod_chk_path), report_interval)
         )
 
         # Save topology
