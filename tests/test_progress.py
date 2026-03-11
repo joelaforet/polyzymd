@@ -22,6 +22,7 @@ from polyzymd.simulation.progress import (
     SegmentStatus,
     SimulationProgress,
     SimulationStatus,
+    _estimate_steps_from_csv,
     get_next_segment_info,
     load_or_scan_progress,
     load_progress,
@@ -764,3 +765,171 @@ class TestEquilibrationRoundTrip:
         assert loaded.equilibration_stages[1].name == "npt_eq"
         assert loaded.equilibration_stages[1].ensemble == "NPT"
         assert loaded.equilibration_complete is True
+
+
+# ---------------------------------------------------------------------------
+# _estimate_steps_from_csv
+# ---------------------------------------------------------------------------
+
+
+class TestEstimateStepsFromCsv:
+    """_estimate_steps_from_csv reads the last data line of a CSV."""
+
+    def test_typical_csv(self, tmp_path):
+        csv = tmp_path / "state_data.csv"
+        csv.write_text(
+            '#"Step","Time (ps)","Potential Energy (kJ/mole)"\n'
+            "40000,80.0,-123456.0\n"
+            "80000,160.0,-123500.0\n"
+            "120000,240.0,-123550.0\n"
+        )
+        assert _estimate_steps_from_csv(csv) == 120000
+
+    def test_quoted_columns(self, tmp_path):
+        csv = tmp_path / "state_data.csv"
+        csv.write_text(
+            '#"Step","Time (ps)"\n'
+            '"40000","80.0"\n'
+            '"80000","160.0"\n'
+        )
+        assert _estimate_steps_from_csv(csv) == 80000
+
+    def test_header_only_returns_zero(self, tmp_path):
+        csv = tmp_path / "state_data.csv"
+        csv.write_text('#"Step","Time (ps)"\n')
+        assert _estimate_steps_from_csv(csv) == 0
+
+    def test_empty_file_returns_zero(self, tmp_path):
+        csv = tmp_path / "state_data.csv"
+        csv.write_text("")
+        assert _estimate_steps_from_csv(csv) == 0
+
+    def test_missing_file_returns_zero(self, tmp_path):
+        csv = tmp_path / "nonexistent.csv"
+        assert _estimate_steps_from_csv(csv) == 0
+
+    def test_trailing_empty_lines_skipped(self, tmp_path):
+        csv = tmp_path / "state_data.csv"
+        csv.write_text(
+            '#"Step","Time (ps)"\n'
+            "40000,80.0\n"
+            "80000,160.0\n"
+            "\n"
+            "\n"
+        )
+        assert _estimate_steps_from_csv(csv) == 80000
+
+    def test_single_data_line(self, tmp_path):
+        csv = tmp_path / "state_data.csv"
+        csv.write_text(
+            '#"Step","Time (ps)"\n'
+            "50000,100.0\n"
+        )
+        assert _estimate_steps_from_csv(csv) == 50000
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint-only segment classification (hard-kill recovery)
+# ---------------------------------------------------------------------------
+
+
+def _write_checkpoint_only_segment(
+    working_dir: Path,
+    seg_idx: int,
+    with_csv: bool = False,
+    csv_steps: int = 80000,
+) -> None:
+    """Write files simulating a hard-killed segment (checkpoint but no state.xml)."""
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    # Checkpoint exists (from periodic CheckpointReporter)
+    (seg_dir / f"production_{seg_idx}_checkpoint.chk").write_bytes(b"\x00" * 32)
+    # system.xml exists (saved at segment start)
+    (seg_dir / f"production_{seg_idx}_system.xml").write_text("<mock-system/>")
+    if with_csv:
+        (seg_dir / f"production_{seg_idx}_state_data.csv").write_text(
+            '#"Step","Time (ps)","PE (kJ/mole)"\n'
+            f"{csv_steps},{csv_steps * 0.002},-100000.0\n"
+        )
+
+
+class TestCheckpointOnlySegment:
+    """Segments with checkpoint but no state.xml should be INTERRUPTED (not FAILED)."""
+
+    def test_checkpoint_only_is_interrupted(self, tmp_path):
+        _write_checkpoint_only_segment(tmp_path, 0)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.INTERRUPTED
+        assert p.segments[0].steps_completed == 0  # No CSV to estimate from
+
+    def test_checkpoint_with_csv_estimates_steps(self, tmp_path):
+        _write_checkpoint_only_segment(tmp_path, 0, with_csv=True, csv_steps=120000)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.INTERRUPTED
+        assert p.segments[0].steps_completed == 120000
+
+    def test_checkpoint_only_counted_in_total_steps(self, tmp_path):
+        """Checkpoint-only segments should count toward total_steps_completed."""
+        _write_completed_segment_on_disk(tmp_path, 0, duration_ns=10.0)
+        _write_checkpoint_only_segment(tmp_path, 1, with_csv=True, csv_steps=200000)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert p.segments[0].status == SegmentStatus.COMPLETED
+        assert p.segments[1].status == SegmentStatus.INTERRUPTED
+        # Segment 0: 10ns at 2fs = 5_000_000 steps. Segment 1: ~200_000 steps
+        assert p.total_steps_completed == 5200000
+
+    def test_no_checkpoint_no_state_is_failed(self, tmp_path):
+        """Segment with directory but no checkpoint and no state.xml → FAILED."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        # Only system.xml, no checkpoint
+        (seg_dir / "production_0_system.xml").write_text("<mock/>")
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.FAILED
+
+    def test_checkpoint_only_next_segment_increments(self, tmp_path):
+        """After a checkpoint-only (INTERRUPTED) segment, next_segment_index increments."""
+        _write_checkpoint_only_segment(tmp_path, 0, with_csv=True, csv_steps=50000)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        progress = _make_progress(segments=p.segments, total_steps=10000000)
+        assert progress.next_segment_index == 1
+
+
+# ---------------------------------------------------------------------------
+# FAILED segment cleanup in progress
+# ---------------------------------------------------------------------------
+
+
+class TestFailedSegmentHandling:
+    """FAILED segments contribute 0 steps and get cleaned up."""
+
+    def test_failed_segment_zero_steps(self):
+        """FAILED segments should contribute 0 to total_steps_completed."""
+        segs = [
+            _make_segment(0, steps=0, status=SegmentStatus.FAILED),
+        ]
+        p = _make_progress(segments=segs, total_steps=10000000)
+        assert p.total_steps_completed == 0
+
+    def test_failed_after_completed(self):
+        """A FAILED segment after a COMPLETED one doesn't affect completed count."""
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=0, status=SegmentStatus.FAILED),
+        ]
+        p = _make_progress(segments=segs, total_steps=10000000)
+        assert p.total_steps_completed == 5000000
+        assert p.next_segment_index == 2
+
+    def test_removing_failed_segments_resets_index(self):
+        """After removing FAILED segments, next_segment_index recalculates correctly."""
+        segs = [
+            _make_segment(0, steps=0, status=SegmentStatus.FAILED),
+        ]
+        p = _make_progress(segments=segs, total_steps=10000000)
+        # Remove FAILED segments (simulating what main.py does)
+        p.segments = [s for s in p.segments if s.status != SegmentStatus.FAILED]
+        assert p.next_segment_index == 0  # Can retry from scratch
