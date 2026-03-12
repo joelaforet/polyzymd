@@ -56,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--pixi-env` option** for `polyzymd submit` and `polyzymd recover`.
   Overrides the default pixi environment name in generated SLURM scripts
   (default is auto-selected based on the SLURM preset). (`cli/main.py`)
+- **`--memory` option for `polyzymd recover`.**  Overrides the SLURM memory
+  allocation in recovery job scripts, matching the existing `--memory` flag
+  on `polyzymd submit`. Useful when a job OOM-killed and needs to be resumed
+  with more RAM. (`cli/main.py`)
 - **`_estimate_steps_from_csv` helper.** Estimates completed steps from
   `state_data.csv` when progress.json is missing or stale, enabling accurate
   progress reporting after hard kills. (`simulation/progress.py`)
@@ -110,6 +114,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   polyzymd uses NAGL (not espaloma) for charge assignment, and NAGL >=0.2
   has a pure-PyTorch fallback that works without dgl, removing
   `espaloma-charge` eliminates the crash with no loss of functionality.
+- **Fixed indentation bug in generated GROMACS run script.** The
+  post-processing section had a misindented `echo` line that would cause
+  the script to fail under `set -e`. (`exporters/gromacs.py`)
 
 ### Documentation
 

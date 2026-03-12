@@ -1543,6 +1543,11 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     help="Show status and what would be submitted without actually submitting",
 )
 @click.option(
+    "--memory",
+    default=None,
+    help="Override SLURM memory allocation (e.g. '4G', '8G'). Not needed for bridges2 (allocated per GPU).",
+)
+@click.option(
     "--pixi-env",
     default=None,
     type=click.Choice(["cuda-12-4", "cuda-12-6"]),
@@ -1555,6 +1560,7 @@ def recover(
     preset: str,
     submit: bool,
     dry_run: bool,
+    memory: Optional[str],
     pixi_env: Optional[str],
 ) -> None:
     """Resume a stalled or interrupted simulation.
@@ -1665,6 +1671,8 @@ def recover(
     )
 
     slurm_config = SlurmConfig.from_preset(preset)
+    if memory:
+        slurm_config.memory = memory
     generator = SlurmScriptGenerator(slurm_config, pixi_env=resolved_pixi_env)
 
     # Use the same descriptive job naming as `polyzymd submit`

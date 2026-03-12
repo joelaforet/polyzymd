@@ -250,6 +250,9 @@ This means the job exceeded its allocated RAM. This often happens during energy 
    
    # For very large systems (many polymers, large proteins)
    polyzymd submit -c config.yaml --memory 8G
+
+   # Also works with recover --submit
+   polyzymd recover -c config.yaml -r 1 --submit --memory 8G
    ```
 
 2. If using generated scripts directly, edit the `#SBATCH --mem` line:

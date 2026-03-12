@@ -479,6 +479,7 @@ polyzymd recover -c CONFIG [OPTIONS]
 | `--preset` | - | No | aa100 | SLURM preset for recovery job |
 | `--submit / --no-submit` | - | No | --no-submit | Submit a recovery job (default: status only) |
 | `--dry-run` | - | No | false | Show what would be submitted without submitting |
+| `--memory` | - | No | 3G | Override SLURM memory allocation (e.g. '4G', '8G') |
 
 ### Example
 

@@ -663,8 +663,8 @@ To diagnose issues:
    # Option 1: Resubmit the existing script
    sbatch job_scripts/r1_300K_LipA.sh
 
-   # Option 2: Use recover to inspect and resume
-   polyzymd recover -c config.yaml -r 1 --submit --preset aa100
+   # Option 2: Use recover to inspect and resume (with more memory if needed)
+   polyzymd recover -c config.yaml -r 1 --submit --preset aa100 --memory 8G
    ```
 
 ### Checking Progress
@@ -979,6 +979,7 @@ polyzymd recover -c CONFIG [OPTIONS]
 - `--preset PRESET` - SLURM preset for recovery job. Default: aa100
 - `--submit / --no-submit` - Submit a recovery job (default: status only)
 - `--dry-run` - Show what would be submitted without submitting
+- `--memory SIZE` - Override SLURM memory allocation (e.g. '4G', '8G'). Default: 3G
 
 **Examples:**
 ```bash
@@ -1073,6 +1074,9 @@ polyzymd submit -c config.yaml --memory 4G
 
 # For very large systems
 polyzymd submit -c config.yaml --memory 8G
+
+# Also works with recover --submit
+polyzymd recover -c config.yaml -r 1 --submit --memory 8G
 ```
 
 ### "GPU not detected"
