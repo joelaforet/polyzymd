@@ -96,35 +96,38 @@ def set_color_support(level: TerminalColorSupport) -> None:
 
 @dataclass(frozen=True)
 class ModuleColor:
-    """Associates a logger-name prefix with an RGB color and 256-color fallback."""
+    """Associates a logger-name prefix with an RGB color and fallback codes."""
 
     prefix: str
     rgb: tuple[int, int, int]
     xterm256: int  # Closest xterm-256 index
+    basic_ansi: str  # 16-color ANSI escape for BASIC terminals (e.g. "\033[94m")
 
 
 # Pre-computed nearest xterm-256 indices for each chosen RGB.
 # (Verified with the 6x6x6 color cube formula.)
+# Basic ANSI fallbacks use bright variants where possible for readability
+# on dark terminal backgrounds (e.g. TERM=xterm-16color on HPC nodes).
 _DEFAULT_MODULE_COLORS: list[ModuleColor] = [
-    # CLI / Workflow — lavender
-    ModuleColor("polyzymd.cli", (180, 180, 215), 146),
-    ModuleColor("polyzymd.workflow", (180, 180, 215), 146),
-    # Building — sage green
-    ModuleColor("polyzymd.builders", (175, 215, 175), 151),
-    # Simulation (runner / continuation) — warm peach
-    ModuleColor("polyzymd.simulation.runner", (215, 185, 175), 181),
-    ModuleColor("polyzymd.simulation.continuation", (215, 185, 175), 181),
-    # Progress / signals — steel blue
-    ModuleColor("polyzymd.simulation.progress", (175, 200, 220), 152),
-    ModuleColor("polyzymd.simulation.signals", (175, 200, 220), 152),
-    # Core — parchment
-    ModuleColor("polyzymd.core", (215, 210, 175), 187),
-    # Data — aqua/mint
-    ModuleColor("polyzymd.data", (175, 215, 205), 152),
-    # Exporters — lilac
-    ModuleColor("polyzymd.exporters", (205, 175, 215), 182),
-    # Utils — neutral gray
-    ModuleColor("polyzymd.utils", (195, 195, 195), 250),
+    # CLI / Workflow — lavender → bright blue
+    ModuleColor("polyzymd.cli", (180, 180, 215), 146, "\033[94m"),
+    ModuleColor("polyzymd.workflow", (180, 180, 215), 146, "\033[94m"),
+    # Building — sage green → bright green
+    ModuleColor("polyzymd.builders", (175, 215, 175), 151, "\033[92m"),
+    # Simulation (runner / continuation) — warm peach → bright magenta
+    ModuleColor("polyzymd.simulation.runner", (215, 185, 175), 181, "\033[95m"),
+    ModuleColor("polyzymd.simulation.continuation", (215, 185, 175), 181, "\033[95m"),
+    # Progress / signals — steel blue → bright cyan
+    ModuleColor("polyzymd.simulation.progress", (175, 200, 220), 152, "\033[96m"),
+    ModuleColor("polyzymd.simulation.signals", (175, 200, 220), 152, "\033[96m"),
+    # Core — parchment → dark yellow
+    ModuleColor("polyzymd.core", (215, 210, 175), 187, "\033[33m"),
+    # Data — aqua/mint → dark cyan
+    ModuleColor("polyzymd.data", (175, 215, 205), 152, "\033[36m"),
+    # Exporters — lilac → dark magenta
+    ModuleColor("polyzymd.exporters", (205, 175, 215), 182, "\033[35m"),
+    # Utils — neutral gray → white
+    ModuleColor("polyzymd.utils", (195, 195, 195), 250, "\033[37m"),
 ]
 
 # Level-override colors (apply regardless of module)
@@ -163,11 +166,12 @@ class ColorScheme:
         prefix: str,
         rgb: tuple[int, int, int],
         xterm256: int,
+        basic_ansi: str = "",
     ) -> None:
         """Add or replace a module color mapping."""
         # Remove any existing entry with the same prefix
         self._module_colors = [mc for mc in self._module_colors if mc.prefix != prefix]
-        self._module_colors.append(ModuleColor(prefix, rgb, xterm256))
+        self._module_colors.append(ModuleColor(prefix, rgb, xterm256, basic_ansi))
 
     # -- colour resolution ---------------------------------------------------
 
@@ -211,8 +215,8 @@ class ColorScheme:
             return f"\033[38;2;{r};{g};{b}m"
         if support is TerminalColorSupport.EXTENDED:
             return f"\033[38;5;{mc.xterm256}m"
-        # BASIC — no good mapping; use default (white-ish)
-        return ""
+        # BASIC — use the 16-color ANSI fallback
+        return mc.basic_ansi
 
     def _level_escape(self, level: int, support: TerminalColorSupport) -> str:
         if support is TerminalColorSupport.TRUECOLOR:
