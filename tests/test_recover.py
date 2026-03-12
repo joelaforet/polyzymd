@@ -261,14 +261,20 @@ class TestSelfResubmittingModel:
 
     def test_generate_job_script_produces_self_resubmitting(self):
         """The unified job template should resubmit via sbatch $SLURM_JOB_SCRIPT."""
+        from unittest.mock import patch
+
         from polyzymd.workflow.slurm import SlurmConfig, SlurmScriptGenerator
 
         gen = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), pixi_env="cuda-12-4")
-        script = gen.generate_job_script(
-            config_path="/tmp/config.yaml",
-            replicate=1,
-            working_dir="/tmp/work",
-        )
+        with patch(
+            "polyzymd.workflow.slurm._discover_manifest_path",
+            return_value="/fake/pixi.toml",
+        ):
+            script = gen.generate_job_script(
+                config_path="/tmp/config.yaml",
+                replicate=1,
+                working_dir="/tmp/work",
+            )
         assert "SLURM_JOB_SCRIPT" in script
         assert "sbatch" in script
         assert "check-progress" in script
