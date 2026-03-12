@@ -25,10 +25,13 @@ pip install -e .
 ModuleNotFoundError: No module named 'openmm'
 ```
 
-**Solution:** Install via conda (not pip):
+**Solution:** OpenMM is provided by the pixi environment. Make sure you are
+inside the correct pixi shell:
 
 ```bash
-conda install -c conda-forge openmm
+pixi shell -e build        # local use (no CUDA)
+pixi shell -e cuda-12-6    # HPC (e.g. Bridges2)
+python -c "import openmm; print(openmm.__version__)"
 ```
 
 ### "Import error after installation"
@@ -411,7 +414,7 @@ ValueError: System state doesn't match checkpoint
 polyzymd info
 
 # Python environment
-conda list | grep -E "openmm|openff|pydantic"
+pixi list -e build | grep -E "openmm|openff|pydantic"
 
 # Configuration validation
 polyzymd validate -c config.yaml

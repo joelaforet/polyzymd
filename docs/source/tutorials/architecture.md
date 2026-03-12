@@ -211,7 +211,7 @@ Contains job script templates and preset configurations.
 **Where to modify:**
 - Add new SLURM presets: Add to `presets` dict in `from_preset()` method
 - Change job script behavior: Modify `JOB_TEMPLATE`
-- Change module loading: Edit the `module load` lines in template
+- Add support for a new CUDA version: Add a new feature block in `pixi.toml` and a mapping in `PRESET_DEFAULT_PIXI_ENV`
 
 **Current template structure (simplified):**
 ```bash
@@ -220,11 +220,8 @@ Contains job script templates and preset configurations.
 #SBATCH --qos={qos}
 # ... other SBATCH directives
 
-# Load conda environment (ignore module warnings)
-module purge 2>/dev/null || true
-module load miniforge 2>/dev/null || true
-eval "$(conda shell.bash hook)"
-conda activate {conda_env}
+# Activate pixi environment
+eval "$(pixi shell-hook -e {pixi_env} --manifest-path {manifest_path})"
 
 # Enable strict error handling after environment setup
 set -e
