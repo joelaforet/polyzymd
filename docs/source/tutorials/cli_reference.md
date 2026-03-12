@@ -4,14 +4,29 @@ Complete reference for all PolyzyMD command-line interface commands.
 
 ## Global Options
 
-All commands support these global options:
+All commands support these global options (placed **before** the subcommand name):
 
 ```bash
 polyzymd --version        # Show version
 polyzymd --help           # Show help
 polyzymd -v <command>     # Verbose output (debug logging)
 polyzymd --openff-logs <command>  # Enable verbose OpenFF logs
+polyzymd --no-color <command>     # Disable colored output
 ```
+
+> **Note:** Global options must appear *before* the subcommand.
+> For example: `polyzymd --no-color check-progress -c config.yaml`
+> (not `polyzymd check-progress --no-color -c config.yaml`).
+
+### Colored Output
+
+PolyzyMD uses per-module colored logging to help you visually distinguish
+which subsystem (building, simulation, workflow, etc.) produced each log
+line. Colors are auto-detected based on your terminal capabilities and can
+be disabled with `--no-color` or the `NO_COLOR` environment variable.
+
+See the [Colored Logging Guide](colored_logging.md) for full details
+including the color table, terminal support levels, and HPC notes.
 
 ### Logging Behavior
 
