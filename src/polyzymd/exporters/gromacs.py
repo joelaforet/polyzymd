@@ -1450,7 +1450,7 @@ class RunScriptGenerator:
             "",
             'echo "Post-processing complete."',
             'echo "  - prod_nojump.xtc: Trajectory without PBC jumps"',
-            '  echo "  - prod_centered.xtc: Centered trajectory for visualization"',
+            'echo "  - prod_centered.xtc: Centered trajectory for visualization"',
             'echo ""',
             "",
         ]
