@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Removed `polyzymd-submit` and `polyzymd-continue` entry points.** These
   console-script aliases were broken and unused. Use `polyzymd submit` and
   `polyzymd run-segment` instead.
+- **Removed deprecated GROMACS exporter API.** `PositionRestraintGenerator.generate()`,
+  `generate_all_from_config()`, and the `TopologyModifier` class have been
+  removed. These were dead code never used externally. Use
+  `PositionRestraintGenerator.add_posres_to_itp_files()` instead.
 
 ### Added
 
@@ -75,6 +79,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Position restraints now applied to all polymer ITP files.** Previously,
+  only the first polymer ITP (`_MOL1.itp`) received `#ifdef POSRES_POLYMER`
+  blocks. With random copolymers, OpenFF Interchange generates a separate
+  molecule type (and ITP file) per unique polymer sequence, leaving most
+  polymer chains unrestrained. The rewritten `PositionRestraintGenerator`
+  discovers all polymer ITPs, parses each one's `[ atoms ]` section to
+  identify heavy atoms by atom name (HMR-safe), and appends position
+  restraint blocks to every polymer ITP. (`exporters/gromacs.py`)
+- **Residue numbering in .gro files is now globally sequential.** OpenFF
+  Interchange's GRO writer computes `(residue_index + copy_index) % 100_000`,
+  which creates a sliding +1 offset for multi-residue molecules (polymers).
+  A new post-processing step (`_fix_gro_residue_numbering`) assigns globally
+  sequential residue numbers across all multi-residue molecule copies, enabling
+  unique residue-based selection in MDAnalysis (e.g., `resid 11:15` for the
+  third polymer chain). Single-residue molecules (water, ions) are left
+  unchanged. (`exporters/gromacs.py`)
 - Segment 0 progress loss: previously, a hard kill during segment 0 could
   lose all progress because no checkpoint existed. Now `system.xml` is saved
   at the start of production, enabling checkpoint-based recovery.
