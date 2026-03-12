@@ -524,7 +524,7 @@ def _scan_segment_dir(
             return SegmentRecord(
                 index=seg_idx,
                 steps_completed=steps_completed,
-                steps_requested=0,  # Unknown — no INTERRUPTED metadata
+                steps_requested=steps_completed,  # Best estimate — no INTERRUPTED metadata
                 samples_written=0,
                 status=SegmentStatus.INTERRUPTED,
                 duration_ns=duration_ns,

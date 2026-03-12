@@ -1566,8 +1566,10 @@ def recover(
     click.echo(f"Segments: {len(progress.segments)}")
 
     for seg in progress.segments:
-        seg_pct = 100 * seg.steps_completed / max(seg.steps_requested, 1)
-        click.echo(f"  segment {seg.index}: {seg.status.value} ({seg_pct:.0f}%)")
+        click.echo(
+            f"  segment {seg.index}: {seg.status.value} "
+            f"({seg.duration_ns:.3f} ns, {seg.steps_completed} steps)"
+        )
 
     if progress.is_complete:
         click.echo(click.style("\nSimulation is complete — nothing to recover.", fg="green"))
