@@ -485,11 +485,14 @@ exit 0
         working_dir : str
             Directory for simulation output (trajectories, checkpoints).
         job_name : str or None, optional
-            SLURM job name. Defaults to ``pzmd_r{replicate}``.
+            SLURM job name.  Callers should use
+            :func:`~polyzymd.workflow.daisy_chain.create_job_name` to
+            produce descriptive names (e.g. ``r1_310K_Fibronectin_...``).
+            Falls back to ``pzmd_r{replicate}`` if not provided.
         output_file : str or None, optional
-            SLURM log file pattern. Defaults to
-            ``slurm_logs/pzmd_r{replicate}.%j.out`` relative to the
-            directory where ``sbatch`` is invoked.
+            SLURM log file pattern.  Falls back to
+            ``slurm_logs/{job_name}.%j.out`` relative to the directory
+            where ``sbatch`` is invoked.
 
         Returns
         -------

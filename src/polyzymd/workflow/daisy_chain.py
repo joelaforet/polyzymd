@@ -34,6 +34,37 @@ from polyzymd.workflow.slurm import (
 LOGGER = logging.getLogger(__name__)
 
 
+def create_job_name(sim_config: SimulationConfig, replicate: int) -> str:
+    """Create a descriptive SLURM job name for a replicate.
+
+    Produces names like ``r1_310K_Fibronectin_SBMA-OEGMA_A75_B25``
+    matching the directory naming convention.
+
+    Parameters
+    ----------
+    sim_config : SimulationConfig
+        Validated simulation configuration.
+    replicate : int
+        Replicate number.
+
+    Returns
+    -------
+    str
+        Formatted job name.
+    """
+    enzyme = sim_config.enzyme.name
+    temp = int(sim_config.thermodynamics.temperature)
+
+    polymer_info = ""
+    if sim_config.polymers and sim_config.polymers.enabled:
+        prefix = sim_config.polymers.type_prefix
+        probs = {m.label: m.probability for m in sim_config.polymers.monomers}
+        composition = "_".join(f"{lbl}{int(probs[lbl] * 100)}" for lbl in sorted(probs))
+        polymer_info = f"_{prefix}_{composition}"
+
+    return f"r{replicate}_{temp}K_{enzyme}{polymer_info}"
+
+
 @dataclass
 class DaisyChainConfig:
     """Configuration for job submission.
@@ -216,8 +247,7 @@ class DaisyChainSubmitter:
     def _create_job_name(self, replicate: int) -> str:
         """Create a descriptive job name for a replicate.
 
-        The polymer composition suffix matches the directory naming
-        convention, e.g. ``r1_310K_Fibronectin_SBMA-OEGMA_A75_B25``.
+        Delegates to the module-level :func:`create_job_name` function.
 
         Parameters
         ----------
@@ -229,17 +259,7 @@ class DaisyChainSubmitter:
         str
             Formatted job name.
         """
-        enzyme = self._sim_config.enzyme.name
-        temp = int(self._sim_config.thermodynamics.temperature)
-
-        polymer_info = ""
-        if self._sim_config.polymers and self._sim_config.polymers.enabled:
-            prefix = self._sim_config.polymers.type_prefix
-            probs = {m.label: m.probability for m in self._sim_config.polymers.monomers}
-            composition = "_".join(f"{lbl}{int(probs[lbl] * 100)}" for lbl in sorted(probs))
-            polymer_info = f"_{prefix}_{composition}"
-
-        return f"r{replicate}_{temp}K_{enzyme}{polymer_info}"
+        return create_job_name(self._sim_config, replicate)
 
     def _get_scratch_dir(self, replicate: int) -> str:
         """Get the scratch directory path for a replicate.

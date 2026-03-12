@@ -1583,6 +1583,7 @@ def recover(
         return
 
     # Generate and submit a self-resubmitting SLURM job
+    from polyzymd.workflow.daisy_chain import create_job_name
     from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV, SlurmConfig, SlurmScriptGenerator
 
     # Resolve pixi environment: explicit flag > preset default
@@ -1593,11 +1594,18 @@ def recover(
     slurm_config = SlurmConfig.from_preset(preset)
     generator = SlurmScriptGenerator(slurm_config, pixi_env=resolved_pixi_env)
 
+    # Use the same descriptive job naming as `polyzymd submit`
+    job_name = create_job_name(sim_config, replicate)
+    logs_subdir = sim_config.output.slurm_logs_subdir
+    output_file = f"{logs_subdir}/{job_name}.%j.out"
+
     config_path_abs = str(Path(config).resolve())
     script_content = generator.generate_job_script(
         config_path=config_path_abs,
         replicate=replicate,
         working_dir=str(working_dir),
+        job_name=job_name,
+        output_file=output_file,
     )
 
     # Write script

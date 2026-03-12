@@ -4,6 +4,7 @@ from polyzymd.workflow.daisy_chain import (
     DaisyChainConfig,
     DaisyChainSubmitter,
     SubmissionResult,
+    create_job_name,
     submit_daisy_chain,
 )
 from polyzymd.workflow.slurm import (
@@ -25,5 +26,6 @@ __all__ = [
     "DaisyChainConfig",
     "DaisyChainSubmitter",
     "SubmissionResult",
+    "create_job_name",
     "submit_daisy_chain",
 ]
