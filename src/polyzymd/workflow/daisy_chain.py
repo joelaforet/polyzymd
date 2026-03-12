@@ -6,7 +6,7 @@ simulation jobs to SLURM.  Each replicate gets a single job script
 that calls ``polyzymd run-segment``, checks progress, and resubmits
 itself until the simulation is complete.
 
-.. versionchanged:: 2.0
+.. versionchanged:: 1.1.0
     Replaced the legacy daisy-chain (dependency-chain) model with
     self-resubmitting jobs.  The public API (``submit_daisy_chain``,
     ``DaisyChainConfig``, ``DaisyChainSubmitter``) is preserved for

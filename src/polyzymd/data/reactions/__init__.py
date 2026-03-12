@@ -10,8 +10,8 @@ The reaction templates define:
 - Termination: Restoration of terminal alkene
 
 Example:
-    >>> from polyzymd.data.reactions import get_atrp_reactions
-    >>> reactions = get_atrp_reactions()
+    >>> from polyzymd.data.reactions import get_atrp_reaction_paths
+    >>> reactions = get_atrp_reaction_paths()
     >>> print(reactions["initiation"])
     PosixPath('/path/to/atrp_initiation.rxn')
 

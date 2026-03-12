@@ -4,7 +4,7 @@ SLURM job script generation for HPC cluster submission.
 This module provides templates and utilities for generating SLURM
 batch scripts for self-resubmitting MD simulation jobs.
 
-.. versionchanged:: 2.0
+.. versionchanged:: 1.1.0
     Replaced conda/module-load environment activation with pixi.
     The ``module_load`` and ``conda_command`` fields on ``SlurmConfig``
     have been removed.  Environment activation is now handled by
