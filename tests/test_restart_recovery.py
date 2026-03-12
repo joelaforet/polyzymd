@@ -65,11 +65,24 @@ def _write_interrupted_segment(
         f"total_steps=5000000\n"
         f"remaining_steps={5000000 - steps_completed}\n"
     )
-    params = {"__values__": {"integ_params": {"__values__": {
-        "num_samples": 100,
-        "time_step": {"__class__": "Quantity", "__values__": {"value": 2.0, "unit": "femtosecond"}},
-        "total_time": {"__class__": "Quantity", "__values__": {"value": 10.0, "unit": "nanosecond"}},
-    }}, "thermo_params": {"__values__": {}}}}
+    params = {
+        "__values__": {
+            "integ_params": {
+                "__values__": {
+                    "num_samples": 100,
+                    "time_step": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 2.0, "unit": "femtosecond"},
+                    },
+                    "total_time": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 10.0, "unit": "nanosecond"},
+                    },
+                }
+            },
+            "thermo_params": {"__values__": {}},
+        }
+    }
     (seg_dir / f"production_{seg_idx}_parameters.json").write_text(json.dumps(params))
 
 
@@ -81,24 +94,45 @@ def _write_hard_killed_segment(
     csv_steps: int = 80000,
 ) -> None:
     """Write files for a hard-killed segment (SIGKILL/OOM): checkpoint + system.xml only."""
+    import os
+    import time as _time
+
     seg_dir = working_dir / f"production_{seg_idx}"
     seg_dir.mkdir(parents=True, exist_ok=True)
     # Periodic checkpoint from CheckpointReporter
-    (seg_dir / f"production_{seg_idx}_checkpoint.chk").write_bytes(b"\x00" * 16)
+    chk_path = seg_dir / f"production_{seg_idx}_checkpoint.chk"
+    chk_path.write_bytes(b"\x00" * 16)
     if with_system_xml:
         (seg_dir / f"production_{seg_idx}_system.xml").write_text("<System/>")
     if with_csv:
         (seg_dir / f"production_{seg_idx}_state_data.csv").write_text(
-            '#"Step","Time (ps)","PE (kJ/mole)"\n'
-            f"{csv_steps},{csv_steps * 0.002},-100000.0\n"
+            f'#"Step","Time (ps)","PE (kJ/mole)"\n{csv_steps},{csv_steps * 0.002},-100000.0\n'
         )
     # Parameters file (continuation manager needs this)
-    params = {"__values__": {"integ_params": {"__values__": {
-        "num_samples": 100,
-        "time_step": {"__class__": "Quantity", "__values__": {"value": 2.0, "unit": "femtosecond"}},
-        "total_time": {"__class__": "Quantity", "__values__": {"value": 10.0, "unit": "nanosecond"}},
-    }}, "thermo_params": {"__values__": {}}}}
+    params = {
+        "__values__": {
+            "integ_params": {
+                "__values__": {
+                    "num_samples": 100,
+                    "time_step": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 2.0, "unit": "femtosecond"},
+                    },
+                    "total_time": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 10.0, "unit": "nanosecond"},
+                    },
+                }
+            },
+            "thermo_params": {"__values__": {}},
+        }
+    }
     (seg_dir / f"production_{seg_idx}_parameters.json").write_text(json.dumps(params))
+
+    # Backdate checkpoint mtime so the recency heuristic classifies this
+    # as INTERRUPTED (hard-killed) rather than RUNNING.
+    old_time = _time.time() - 1200  # 20 minutes ago
+    os.utime(chk_path, (old_time, old_time))
 
 
 def _write_eq_stage(
@@ -145,6 +179,7 @@ class TestGetPreviousPaths:
         # We import here to test in isolation; mock out openmm if unavailable
         try:
             from polyzymd.simulation.continuation import ContinuationManager
+
             mgr = ContinuationManager.__new__(ContinuationManager)
             mgr._working_dir = Path(working_dir)
             mgr._prev_segment = prev_segment
@@ -208,6 +243,7 @@ class TestLoadPreviousStateValidation:
     def _make_manager(self, working_dir, prev_segment):
         try:
             from polyzymd.simulation.continuation import ContinuationManager
+
             mgr = ContinuationManager.__new__(ContinuationManager)
             mgr._working_dir = Path(working_dir)
             mgr._prev_segment = prev_segment
@@ -288,6 +324,7 @@ class TestFindCompletedEqStages:
         """Create a minimal mock SimulationRunner for eq stage detection."""
         try:
             from polyzymd.simulation.runner import SimulationRunner
+
             runner = SimulationRunner.__new__(SimulationRunner)
             runner._working_dir = Path(working_dir)
             return runner
@@ -343,6 +380,7 @@ class TestFindInterruptedEqStage:
     def _make_runner(self, working_dir):
         try:
             from polyzymd.simulation.runner import SimulationRunner
+
             runner = SimulationRunner.__new__(SimulationRunner)
             runner._working_dir = Path(working_dir)
             return runner
@@ -358,8 +396,12 @@ class TestFindInterruptedEqStage:
         stages = [self._make_stage("heating"), self._make_stage("npt_eq")]
         _write_eq_stage(tmp_path, 0, "heating", completed=True)
         _write_eq_stage(
-            tmp_path, 1, "npt_eq", interrupted=True,
-            steps_completed=75000, total_steps=100000,
+            tmp_path,
+            1,
+            "npt_eq",
+            interrupted=True,
+            steps_completed=75000,
+            total_steps=100000,
             current_temperature=300.0,
         )
         runner = self._make_runner(tmp_path)
@@ -403,9 +445,14 @@ class TestFindInterruptedEqStage:
     def test_temperature_ramping_metadata(self, tmp_path):
         stages = [self._make_stage("ramp")]
         _write_eq_stage(
-            tmp_path, 0, "ramp", interrupted=True,
-            steps_completed=25000, total_steps=50000,
-            current_temperature=200.0, is_temperature_ramping=True,
+            tmp_path,
+            0,
+            "ramp",
+            interrupted=True,
+            steps_completed=25000,
+            total_steps=50000,
+            current_temperature=200.0,
+            is_temperature_ramping=True,
         )
         runner = self._make_runner(tmp_path)
         info = runner._find_interrupted_eq_stage(stages, completed_indices=[])
@@ -478,8 +525,10 @@ class TestFailedSegmentCleanup:
             timestep_fs=2.0,
             segments=[
                 SegmentRecord(
-                    index=0, steps_completed=5000000,
-                    status=SegmentStatus.COMPLETED, samples_written=125,
+                    index=0,
+                    steps_completed=5000000,
+                    status=SegmentStatus.COMPLETED,
+                    samples_written=125,
                 ),
                 SegmentRecord(index=1, steps_completed=0, status=SegmentStatus.FAILED),
             ],

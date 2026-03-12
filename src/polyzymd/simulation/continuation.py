@@ -401,6 +401,90 @@ class ContinuationManager:
         LOGGER.info(f"Saved final state to {state_path}")
         LOGGER.info(f"Saved system to {system_path}")
 
+    def _write_segment_started(self, total_steps: int) -> None:
+        """Write a RUNNING segment record to progress.json at segment start.
+
+        This marks the segment as actively executing so that
+        ``check-progress`` can distinguish a running simulation from
+        one that was interrupted. The record is later updated to
+        COMPLETED or INTERRUPTED by the corresponding handler.
+
+        Parameters
+        ----------
+        total_steps : int
+            Total steps planned for this segment.
+        """
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationStatus,
+            _update_or_append_segment,
+            load_progress,
+            save_progress,
+        )
+
+        progress = load_progress(self._working_dir)
+        if progress is None:
+            LOGGER.warning("No progress file found — skipping segment-started write")
+            return
+
+        record = SegmentRecord(
+            index=self._segment_index,
+            steps_completed=0,
+            steps_requested=total_steps,
+            samples_written=0,
+            status=SegmentStatus.RUNNING,
+        )
+
+        _update_or_append_segment(progress, record)
+        progress.status = SimulationStatus.RUNNING
+
+        save_progress(self._working_dir, progress)
+        LOGGER.info(f"Marked segment {self._segment_index} as RUNNING in progress file")
+
+    def _update_progress_running(
+        self,
+        steps_done: int,
+        timestep_fs: float,
+    ) -> None:
+        """Periodically update the RUNNING segment's step count.
+
+        Called during the simulation loop to keep ``progress.json``
+        up to date so that ``check-progress`` can show real-time
+        remaining nanoseconds.
+
+        Parameters
+        ----------
+        steps_done : int
+            Steps completed so far in this segment.
+        timestep_fs : float
+            Integration timestep in femtoseconds.
+        """
+        from polyzymd.simulation.progress import (
+            SegmentStatus,
+            SimulationStatus,
+            load_progress,
+            save_progress,
+        )
+
+        progress = load_progress(self._working_dir)
+        if progress is None:
+            return
+
+        # Find and update the existing RUNNING record
+        for seg in progress.segments:
+            if seg.index == self._segment_index and seg.status == SegmentStatus.RUNNING:
+                seg.steps_completed = steps_done
+                seg.duration_ns = (steps_done * timestep_fs) / 1e6
+                break
+        else:
+            # No RUNNING record found — shouldn't happen, but be safe
+            return
+
+        progress.status = SimulationStatus.RUNNING
+        save_progress(self._working_dir, progress)
+        LOGGER.debug(f"Updated running progress: segment {self._segment_index}, {steps_done} steps")
+
     def _update_progress_completed(
         self,
         total_steps: int,
@@ -425,6 +509,7 @@ class ContinuationManager:
             SegmentRecord,
             SegmentStatus,
             SimulationStatus,
+            _update_or_append_segment,
             load_progress,
             save_progress,
         )
@@ -446,7 +531,7 @@ class ContinuationManager:
 
         record.finished_at = _now_iso()
 
-        progress.segments.append(record)
+        _update_or_append_segment(progress, record)
 
         # Update overall status
         if progress.is_complete:
@@ -485,6 +570,7 @@ class ContinuationManager:
             SegmentRecord,
             SegmentStatus,
             SimulationStatus,
+            _update_or_append_segment,
             load_progress,
             save_progress,
         )
@@ -506,7 +592,7 @@ class ContinuationManager:
             duration_ns=actual_duration_ns,
         )
 
-        progress.segments.append(record)
+        _update_or_append_segment(progress, record)
         progress.status = SimulationStatus.INTERRUPTED
 
         save_progress(self._working_dir, progress)
@@ -628,16 +714,37 @@ class ContinuationManager:
 
         install_handlers()
 
+        # Mark this segment as RUNNING in progress.json so that
+        # check-progress can distinguish actively running simulations
+        # from interrupted ones.
+        self._write_segment_started(total_steps)
+
         # Run simulation in chunks so we can check for interrupt signals
         LOGGER.info(f"Running {total_steps} steps...")
         chunk_size = min(seg_report_interval, total_steps)
         steps_done = 0
+        import time as _time
+
+        from polyzymd.simulation.progress import PROGRESS_UPDATE_INTERVAL_SECONDS
+
+        _last_progress_write = _time.monotonic()
         try:
             while steps_done < total_steps:
                 remaining = total_steps - steps_done
                 this_chunk = min(chunk_size, remaining)
                 self._simulation.step(this_chunk)
                 steps_done += this_chunk
+
+                # Periodically update RUNNING record so check-progress
+                # can display real-time remaining nanoseconds.
+                _now = _time.monotonic()
+                if _now - _last_progress_write >= PROGRESS_UPDATE_INTERVAL_SECONDS:
+                    self._update_progress_running(
+                        steps_done=steps_done,
+                        timestep_fs=timestep_fs,
+                    )
+                    _last_progress_write = _now
+
                 if is_interrupted():
                     LOGGER.warning(f"Interrupt detected at step {steps_done}/{total_steps}")
                     save_interrupted_state(

@@ -787,11 +787,7 @@ class TestEstimateStepsFromCsv:
 
     def test_quoted_columns(self, tmp_path):
         csv = tmp_path / "state_data.csv"
-        csv.write_text(
-            '#"Step","Time (ps)"\n'
-            '"40000","80.0"\n'
-            '"80000","160.0"\n'
-        )
+        csv.write_text('#"Step","Time (ps)"\n"40000","80.0"\n"80000","160.0"\n')
         assert _estimate_steps_from_csv(csv) == 80000
 
     def test_header_only_returns_zero(self, tmp_path):
@@ -810,21 +806,12 @@ class TestEstimateStepsFromCsv:
 
     def test_trailing_empty_lines_skipped(self, tmp_path):
         csv = tmp_path / "state_data.csv"
-        csv.write_text(
-            '#"Step","Time (ps)"\n'
-            "40000,80.0\n"
-            "80000,160.0\n"
-            "\n"
-            "\n"
-        )
+        csv.write_text('#"Step","Time (ps)"\n40000,80.0\n80000,160.0\n\n\n')
         assert _estimate_steps_from_csv(csv) == 80000
 
     def test_single_data_line(self, tmp_path):
         csv = tmp_path / "state_data.csv"
-        csv.write_text(
-            '#"Step","Time (ps)"\n'
-            "50000,100.0\n"
-        )
+        csv.write_text('#"Step","Time (ps)"\n50000,100.0\n')
         assert _estimate_steps_from_csv(csv) == 50000
 
 
@@ -838,23 +825,42 @@ def _write_checkpoint_only_segment(
     seg_idx: int,
     with_csv: bool = False,
     csv_steps: int = 80000,
+    *,
+    recent: bool = False,
 ) -> None:
-    """Write files simulating a hard-killed segment (checkpoint but no state.xml)."""
+    """Write files simulating a hard-killed segment (checkpoint but no state.xml).
+
+    Parameters
+    ----------
+    recent : bool
+        If *False* (default), backdate the checkpoint's mtime so that the
+        recency heuristic classifies it as INTERRUPTED.  If *True*, leave
+        the mtime at the current time so it is classified as RUNNING.
+    """
+    import os
+
     seg_dir = working_dir / f"production_{seg_idx}"
     seg_dir.mkdir(parents=True, exist_ok=True)
     # Checkpoint exists (from periodic CheckpointReporter)
-    (seg_dir / f"production_{seg_idx}_checkpoint.chk").write_bytes(b"\x00" * 32)
+    chk_path = seg_dir / f"production_{seg_idx}_checkpoint.chk"
+    chk_path.write_bytes(b"\x00" * 32)
     # system.xml exists (saved at segment start)
     (seg_dir / f"production_{seg_idx}_system.xml").write_text("<mock-system/>")
     if with_csv:
         (seg_dir / f"production_{seg_idx}_state_data.csv").write_text(
-            '#"Step","Time (ps)","PE (kJ/mole)"\n'
-            f"{csv_steps},{csv_steps * 0.002},-100000.0\n"
+            f'#"Step","Time (ps)","PE (kJ/mole)"\n{csv_steps},{csv_steps * 0.002},-100000.0\n'
         )
+
+    if not recent:
+        # Backdate checkpoint mtime so recency heuristic classifies as INTERRUPTED
+        import time
+
+        old_time = time.time() - 1200  # 20 minutes ago
+        os.utime(chk_path, (old_time, old_time))
 
 
 class TestCheckpointOnlySegment:
-    """Segments with checkpoint but no state.xml should be INTERRUPTED (not FAILED)."""
+    """Segments with checkpoint but no state.xml: recency heuristic determines status."""
 
     def test_checkpoint_only_is_interrupted(self, tmp_path):
         _write_checkpoint_only_segment(tmp_path, 0)
@@ -868,6 +874,22 @@ class TestCheckpointOnlySegment:
         p = scan_filesystem(tmp_path, timestep_fs=2.0)
         assert len(p.segments) == 1
         assert p.segments[0].status == SegmentStatus.INTERRUPTED
+        assert p.segments[0].steps_completed == 120000
+
+    def test_recent_checkpoint_is_running(self, tmp_path):
+        """A checkpoint modified within the recency window → RUNNING."""
+        _write_checkpoint_only_segment(tmp_path, 0, recent=True)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.RUNNING
+        assert p.segments[0].steps_completed == 0
+
+    def test_recent_checkpoint_with_csv_is_running(self, tmp_path):
+        """A recent checkpoint with CSV data → RUNNING with estimated steps."""
+        _write_checkpoint_only_segment(tmp_path, 0, with_csv=True, csv_steps=120000, recent=True)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.RUNNING
         assert p.segments[0].steps_completed == 120000
 
     def test_checkpoint_only_counted_in_total_steps(self, tmp_path):
