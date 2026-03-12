@@ -1578,7 +1578,7 @@ def recover(
     if not submit:
         click.echo(
             "\nTo resume, run:\n"
-            f"  polyzymd recover -c {config} -r {replicate} --submit --preset {preset}"
+            f"  polyzymd recover -c {config} -r {replicate} --submit --preset <preset>"
         )
         return
 
