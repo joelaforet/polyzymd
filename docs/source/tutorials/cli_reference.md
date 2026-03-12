@@ -23,7 +23,7 @@ By default, PolyzyMD suppresses verbose log messages from OpenFF Interchange and
 
 ```bash
 polyzymd --openff-logs build -c config.yaml
-polyzymd --openff-logs run -c config.yaml
+polyzymd --openff-logs run-gromacs -c config.yaml
 ```
 
 This is useful when:
@@ -202,21 +202,18 @@ With `--gromacs`, the build command creates in `{projects_dir}/replicate_{N}/gro
 
 ---
 
-## polyzymd run
+## polyzymd run-gromacs
 
-Build and run a complete simulation.
+Build and run a complete simulation using GROMACS.
 
-By default, runs using OpenMM. Use `--gromacs` to run using GROMACS instead.
+Builds the system, exports to GROMACS format (.gro, .top, .mdp), and
+executes the full GROMACS workflow locally (energy minimization,
+equilibration, production, and trajectory post-processing).
 
 ```bash
-# OpenMM (default)
-polyzymd run --config <path> [options]
-polyzymd run -c <path> -r <replicate>
-
-# GROMACS
-polyzymd run -c <path> --gromacs
-polyzymd run -c <path> --gromacs --gmx-path /usr/local/gromacs/bin/gmx
-polyzymd run -c <path> --gromacs --dry-run
+polyzymd run-gromacs -c <path> [options]
+polyzymd run-gromacs -c <path> --gmx-path /usr/local/gromacs/bin/gmx
+polyzymd run-gromacs -c <path> --dry-run
 ```
 
 ### Options
@@ -227,52 +224,26 @@ polyzymd run -c <path> --gromacs --dry-run
 | `--replicate` | `-r` | No | 1 | Replicate number |
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
-| `--segment-time` | - | No | auto | Override production time per segment (ns) [OpenMM only] |
-| `--segment-frames` | - | No | auto | Override frames per segment [OpenMM only] |
-| `--skip-build` | - | No | false | Skip building (use existing system) [OpenMM only] |
-| `--gromacs` | - | No | false | Run using GROMACS instead of OpenMM |
-| `--gmx-path` | - | No | "gmx" | Path to GROMACS executable [GROMACS only] |
-| `--dry-run` | - | No | false | Export files but don't run simulation [GROMACS only] |
+| `--gmx-path` | - | No | "gmx" | Path to GROMACS executable |
+| `--dry-run` | - | No | false | Export files but don't run simulation |
 
-### Example (OpenMM)
-
-```bash
-# Run locally (useful for testing)
-polyzymd run -c config.yaml -r 1
-
-# Run with shorter segment for testing
-polyzymd run -c config.yaml -r 1 --segment-time 0.1 --segment-frames 10
-
-# Skip building (use pre-built system)
-polyzymd run -c config.yaml -r 1 --skip-build
-```
-
-### Example (GROMACS)
+### Example
 
 ```bash
 # Run full GROMACS workflow locally
-polyzymd run -c config.yaml -r 1 --gromacs
+polyzymd run-gromacs -c config.yaml -r 1
 
 # Use custom GROMACS installation
-polyzymd run -c config.yaml --gromacs --gmx-path /usr/local/gromacs/bin/gmx
+polyzymd run-gromacs -c config.yaml --gmx-path /usr/local/gromacs/bin/gmx
 
 # Export files only (for manual execution or HPC)
-polyzymd run -c config.yaml --gromacs --dry-run
+polyzymd run-gromacs -c config.yaml --dry-run
 ```
 
-### OpenMM Workflow
+### Workflow
 
 1. Load and validate configuration
 2. Build system (enzyme + substrate + polymers + solvent)
-3. Apply restraints (if configured)
-4. Run energy minimization
-5. Run equilibration (NVT/NPT stages)
-6. Run first production segment (NPT)
-
-### GROMACS Workflow
-
-1. Load and validate configuration
-2. Build system (same as OpenMM)
 3. Export to GROMACS format (.gro, .top, .mdp files)
 4. Run energy minimization (grompp + mdrun)
 5. Run equilibration stages (grompp + mdrun for each stage)
@@ -283,7 +254,7 @@ All GROMACS output is streamed in real-time for familiar user experience.
 On any failure, execution stops immediately and all intermediate files are
 preserved for debugging.
 
-### GROMACS Notes
+### Notes
 
 - Requires GROMACS to be installed and accessible via PATH
 - Use `--gmx-path` to specify a custom GROMACS executable location
@@ -291,8 +262,10 @@ preserved for debugging.
 - OpenFF force field defaults are used (rcoulomb=0.9, rvdw=0.9, PME) for 1:1 parity with OpenMM
 - Position restraints are automatically generated for equilibration stages
 - Post-processing creates `prod_nojump.xtc` and `prod_centered.xtc` trajectories
+- For OpenMM simulations, use `polyzymd run-segment` (for a single segment) or
+  `polyzymd submit` (to submit self-resubmitting SLURM jobs)
 
-### GROMACS Output Files
+### Output Files
 
 Files are created in `{projects_dir}/replicate_{N}/gromacs/`:
 
@@ -424,7 +397,6 @@ polyzymd run-segment -c CONFIG [OPTIONS]
 ### Notes
 
 - This command is called by the generated SLURM scripts, not typically by users directly
-- It is the unified replacement for separate `run` + `continue` calls in SLURM scripts
 - Progress is tracked in `progress.json` in the working directory
 
 ---
@@ -467,39 +439,6 @@ polyzymd check-progress -c config.yaml -r 1
 
 - This command is called by the generated SLURM scripts, not typically by users directly
 - For interactive progress checking, `polyzymd recover` provides a more detailed view
-
----
-
-## polyzymd continue
-
-Continue a simulation from a previous segment checkpoint.
-
-```bash
-polyzymd continue --working-dir <path> --segment <n> --segment-time <ns>
-polyzymd continue -w <path> -s <n> -t <ns>
-```
-
-### Options
-
-| Option | Short | Required | Default | Description |
-|--------|-------|----------|---------|-------------|
-| `--working-dir` | `-w` | Yes | - | Working directory with previous segment |
-| `--segment` | `-s` | Yes | - | Segment index to run (1-based) |
-| `--segment-time` | `-t` | Yes | - | Duration of this segment (ns) |
-| `--num-samples` | `-n` | No | 250 | Number of frames to save |
-
-### Example
-
-```bash
-# Continue to segment 2 (after segment 1 completed)
-polyzymd continue -w /scratch/user/sim/LipA_300K_run1 -s 2 -t 10.0 -n 250
-```
-
-### Notes
-
-- Prefer `run-segment` for SLURM workflows — it handles segment selection automatically
-- This command loads the checkpoint from the previous segment automatically
-- The segment index is 1-based (segment 1 continues from segment 0)
 
 ---
 

@@ -271,10 +271,15 @@ polyzymd build -c config.yaml --dry-run
 
 ## Step 6: Run Locally (Optional)
 
-For testing on a local machine with GPU:
+For testing on a local machine with GPU, first build the system, then run a
+single production segment:
 
 ```bash
-polyzymd run -c config.yaml --replicate 1
+# Build the system (energy minimization + equilibration)
+polyzymd build -c config.yaml
+
+# Run one production segment
+polyzymd run-segment -c config.yaml -r 1
 ```
 
 ## Step 7: Submit to HPC

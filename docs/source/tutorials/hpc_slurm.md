@@ -960,41 +960,6 @@ polyzymd check-progress -c CONFIG [OPTIONS]
 - `0` - Simulation complete (do NOT resubmit)
 - `1` - Work remains (resubmit)
 
-### `polyzymd run`
-
-Run a complete simulation (build + equilibration + first production segment).
-
-```bash
-polyzymd run -c CONFIG [OPTIONS]
-```
-
-**Required:**
-- `-c, --config PATH` - Path to YAML configuration file
-
-**Options:**
-- `-r, --replicate INT` - Replicate number. Default: 1
-- `--scratch-dir PATH` - Scratch directory for simulation output
-- `--projects-dir PATH` - Projects directory for scripts/logs
-- `--segment-time FLOAT` - Override production time per segment (ns)
-- `--segment-frames INT` - Override frames per segment
-- `--skip-build` - Skip system building (use existing)
-
-### `polyzymd continue`
-
-Continue a simulation from a previous segment checkpoint. Prefer `run-segment` for SLURM workflows.
-
-```bash
-polyzymd continue -w WORKING_DIR -s SEGMENT -t TIME [OPTIONS]
-```
-
-**Required:**
-- `-w, --working-dir PATH` - Working directory with previous segment
-- `-s, --segment INT` - Segment index to run (1-based)
-- `-t, --segment-time FLOAT` - Duration of this segment (ns)
-
-**Options:**
-- `-n, --num-samples INT` - Number of frames to save. Default: 250
-
 (hpc-recover)=
 ### `polyzymd recover`
 

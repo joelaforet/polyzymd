@@ -64,10 +64,11 @@ polymers:
 # ... rest of configuration (solvent, thermodynamics, etc.)
 ```
 
-Then run:
+Then build and run:
 
 ```bash
-polyzymd run -c config.yaml -r 1
+polyzymd build -c config.yaml
+polyzymd run-segment -c config.yaml -r 1
 ```
 
 ---
