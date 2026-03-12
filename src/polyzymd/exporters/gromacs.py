@@ -1938,9 +1938,9 @@ class GromacsRunner:
         import subprocess
         import sys
 
-        print(f"\n>>> {description}")
-        print(f">>> Command: {' '.join(cmd)}")
-        print("-" * 60)
+        logger.info(f"\n>>> {description}")
+        logger.info(f">>> Command: {' '.join(cmd)}")
+        logger.info("-" * 60)
 
         try:
             process = subprocess.Popen(
@@ -1972,8 +1972,8 @@ class GromacsRunner:
                     message=f"Step failed: {description}",
                 )
 
-            print("-" * 60)
-            print(f">>> {description} completed successfully")
+            logger.info("-" * 60)
+            logger.info(f">>> {description} completed successfully")
 
         except FileNotFoundError:
             raise GromacsError(
@@ -2030,7 +2030,9 @@ class GromacsRunner:
             stage_num = i + 1
             output_name = f"eq_{stage_num:02d}"
 
-            print(f"\n=== Equilibration Stage {stage_num}/{len(self._eq_mdps)}: {mdp_file} ===")
+            logger.info(
+                f"\n=== Equilibration Stage {stage_num}/{len(self._eq_mdps)}: {mdp_file} ==="
+            )
 
             # Build grompp command
             # Always use -r em.gro for reference coordinates (needed for position restraints)
@@ -2124,7 +2126,7 @@ class GromacsRunner:
         """Run trajectory post-processing with trjconv."""
         self._print_banner("Step 4: Trajectory Post-processing")
 
-        print("Removing periodic boundary jumps and centering trajectory...")
+        logger.info("Removing periodic boundary jumps and centering trajectory...")
 
         # Step 1: Remove PBC jumps
         # echo "System" | gmx trjconv -s prod.tpr -f prod.xtc -o prod_nojump.xtc -pbc nojump
@@ -2169,22 +2171,22 @@ class GromacsRunner:
 
     def _print_banner(self, title: str, subtitle: str = "") -> None:
         """Print a section banner."""
-        print("\n" + "=" * 60)
-        print(title)
+        logger.info("\n" + "=" * 60)
+        logger.info(title)
         if subtitle:
-            print(subtitle)
-        print("=" * 60)
+            logger.info(subtitle)
+        logger.info("=" * 60)
 
     def _print_summary(self) -> None:
         """Print workflow completion summary."""
         self._print_banner("Workflow Complete!", POLYZYMD_BRANDING)
-        print("\nOutput files:")
-        print("  em.gro              - Minimized structure")
+        logger.info("\nOutput files:")
+        logger.info("  em.gro              - Minimized structure")
         for i in range(len(self._eq_mdps)):
-            print(f"  eq_{i + 1:02d}.gro           - Equilibrated structure (stage {i + 1})")
-        print("  prod.xtc            - Production trajectory")
-        print("  prod.edr            - Energy file")
-        print("  prod.log            - Log file")
-        print("  prod_nojump.xtc     - Trajectory without PBC jumps")
-        print("  prod_centered.xtc   - Centered trajectory for visualization")
-        print(f"\nAll files in: {self._working_dir}")
+            logger.info(f"  eq_{i + 1:02d}.gro           - Equilibrated structure (stage {i + 1})")
+        logger.info("  prod.xtc            - Production trajectory")
+        logger.info("  prod.edr            - Energy file")
+        logger.info("  prod.log            - Log file")
+        logger.info("  prod_nojump.xtc     - Trajectory without PBC jumps")
+        logger.info("  prod_centered.xtc   - Centered trajectory for visualization")
+        logger.info(f"\nAll files in: {self._working_dir}")

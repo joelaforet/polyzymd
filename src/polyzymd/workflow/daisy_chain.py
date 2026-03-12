@@ -433,31 +433,31 @@ class DaisyChainSubmitter:
         config = self._dc_config
         num_replicates = len(config.replicates)
 
-        print("\nPreparing self-resubmitting simulation jobs")
-        print(f"  Enzyme: {self._sim_config.enzyme.name}")
+        LOGGER.info("\nPreparing self-resubmitting simulation jobs")
+        LOGGER.info(f"  Enzyme: {self._sim_config.enzyme.name}")
 
         if self._sim_config.polymers and self._sim_config.polymers.enabled:
-            print(f"  Polymer: {self._sim_config.polymers.type_prefix}")
-            print(f"  Polymer count: {self._sim_config.polymers.count}")
+            LOGGER.info(f"  Polymer: {self._sim_config.polymers.type_prefix}")
+            LOGGER.info(f"  Polymer count: {self._sim_config.polymers.count}")
 
-        print(f"  Temperature: {self._sim_config.thermodynamics.temperature} K")
-        print(f"  Total production time: {config.total_production_time_ns} ns")
-        print(f"  Total samples: {config.total_samples}")
-        print(f"  Replicates: {config.replicates} ({num_replicates} total)")
-        print(f"  Jobs to submit: {num_replicates} (one per replicate, self-resubmitting)")
-        print()
-        print("SLURM Configuration:")
-        print(f"  Partition: {config.slurm_config.partition}")
+        LOGGER.info(f"  Temperature: {self._sim_config.thermodynamics.temperature} K")
+        LOGGER.info(f"  Total production time: {config.total_production_time_ns} ns")
+        LOGGER.info(f"  Total samples: {config.total_samples}")
+        LOGGER.info(f"  Replicates: {config.replicates} ({num_replicates} total)")
+        LOGGER.info(f"  Jobs to submit: {num_replicates} (one per replicate, self-resubmitting)")
+        LOGGER.info("")
+        LOGGER.info("SLURM Configuration:")
+        LOGGER.info(f"  Partition: {config.slurm_config.partition}")
         if config.slurm_config.qos:
-            print(f"  QoS: {config.slurm_config.qos}")
+            LOGGER.info(f"  QoS: {config.slurm_config.qos}")
         if config.slurm_config.account:
-            print(f"  Account: {config.slurm_config.account}")
-        print(f"  Time limit: {config.slurm_config.time_limit}")
-        print()
+            LOGGER.info(f"  Account: {config.slurm_config.account}")
+        LOGGER.info(f"  Time limit: {config.slurm_config.time_limit}")
+        LOGGER.info("")
 
         if config.dry_run:
-            print("*** DRY RUN MODE - Scripts will be created but not submitted ***")
-            print()
+            LOGGER.info("*** DRY RUN MODE - Scripts will be created but not submitted ***")
+            LOGGER.info("")
 
     def _print_completion_summary(self) -> None:
         """Print a summary after submission."""
@@ -465,20 +465,22 @@ class DaisyChainSubmitter:
         total_jobs = sum(len(chain) for chain in self._job_chains.values())
 
         if config.dry_run:
-            print(f"\nDry run completed. {total_jobs} job script(s) created.")
-            print(f"Scripts saved to: {config.output_script_dir}")
-            print("Review the scripts and run without --dry-run to submit them.")
+            LOGGER.info(f"\nDry run completed. {total_jobs} job script(s) created.")
+            LOGGER.info(f"Scripts saved to: {config.output_script_dir}")
+            LOGGER.info("Review the scripts and run without --dry-run to submit them.")
         else:
-            print(f"\nAll {total_jobs} job(s) submitted successfully!")
-            print("\nSubmitted jobs:")
+            LOGGER.info(f"\nAll {total_jobs} job(s) submitted successfully!")
+            LOGGER.info("\nSubmitted jobs:")
 
             for replicate, results in sorted(self._job_chains.items()):
                 job_id = results[0].job_id
-                print(f"  Replicate {replicate}: job {job_id} (self-resubmitting)")
+                LOGGER.info(f"  Replicate {replicate}: job {job_id} (self-resubmitting)")
 
-            print("\nEach job will automatically resubmit until the simulation completes.")
-            print("Monitor progress with: squeue -u $USER")
-            print("Check simulation status with: polyzymd check-progress -c <config> -r <rep>")
+            LOGGER.info("\nEach job will automatically resubmit until the simulation completes.")
+            LOGGER.info("Monitor progress with: squeue -u $USER")
+            LOGGER.info(
+                "Check simulation status with: polyzymd check-progress -c <config> -r <rep>"
+            )
 
 
 def submit_daisy_chain(

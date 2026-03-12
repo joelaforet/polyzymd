@@ -21,7 +21,10 @@ from typing import Optional
 
 import click
 
-# Setup logging
+from polyzymd.cli.colors import colored_echo, setup_colored_logging
+
+# Bootstrap a minimal root handler so suppress_openff_logs() works at import
+# time.  setup_colored_logging() replaces this handler when the CLI runs.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -95,14 +98,19 @@ suppress_openff_logs()
     is_flag=True,
     help="Enable verbose OpenFF Interchange/Toolkit logs (suppressed by default)",
 )
-def cli(verbose: bool, openff_logs: bool) -> None:
+@click.option(
+    "--no-color",
+    is_flag=True,
+    help="Disable colored output (also respects NO_COLOR env var)",
+)
+def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     """PolyzyMD: MD simulations for enzyme-polymer systems.
 
     A toolkit for building, running, and analyzing molecular dynamics
     simulations of enzymes with co-polymers.
     """
-    if verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    # Replace the bootstrap handler with the colored formatter
+    setup_colored_logging(verbose=verbose, no_color=no_color)
 
     if openff_logs:
         enable_openff_logs()
@@ -184,11 +192,11 @@ def build(
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
 
-    click.echo(f"Loading configuration from: {config}")
+    colored_echo(f"Loading configuration from: {config}", phase="build")
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-        click.echo(f"Configuration validated: {sim_config.name}")
+        colored_echo(f"Configuration validated: {sim_config.name}", phase="build")
 
         # Override directories if provided via CLI
         effective_scratch = scratch_dir or output_dir  # output_dir is alias for scratch_dir
@@ -198,26 +206,31 @@ def build(
             sim_config.output.projects_directory = Path(projects_dir)
 
         if dry_run:
-            click.echo("Dry run - configuration is valid")
-            click.echo(f"  Enzyme: {sim_config.enzyme.name}")
+            colored_echo("Dry run - configuration is valid", phase="build")
+            colored_echo(f"  Enzyme: {sim_config.enzyme.name}", phase="build")
             if sim_config.substrate:
-                click.echo(f"  Substrate: {sim_config.substrate.name}")
+                colored_echo(f"  Substrate: {sim_config.substrate.name}", phase="build")
             if sim_config.polymers and sim_config.polymers.enabled:
-                click.echo(f"  Polymers: {sim_config.polymers.type_prefix}")
-                click.echo(f"  Polymer count: {sim_config.polymers.count}")
-            click.echo(f"  Temperature: {sim_config.thermodynamics.temperature} K")
-            click.echo(f"  Production time: {sim_config.simulation_phases.production.duration} ns")
-            click.echo()
-            click.echo("Directories:")
-            click.echo(f"  Projects: {sim_config.output.projects_directory}")
-            click.echo(f"  Scratch: {sim_config.output.effective_scratch_directory}")
+                colored_echo(f"  Polymers: {sim_config.polymers.type_prefix}", phase="build")
+                colored_echo(f"  Polymer count: {sim_config.polymers.count}", phase="build")
+            colored_echo(f"  Temperature: {sim_config.thermodynamics.temperature} K", phase="build")
+            colored_echo(
+                f"  Production time: {sim_config.simulation_phases.production.duration} ns",
+                phase="build",
+            )
+            colored_echo(phase="build")
+            colored_echo("Directories:", phase="build")
+            colored_echo(f"  Projects: {sim_config.output.projects_directory}", phase="build")
+            colored_echo(
+                f"  Scratch: {sim_config.output.effective_scratch_directory}", phase="build"
+            )
             if gromacs:
-                click.echo()
-                click.echo("GROMACS export enabled:")
-                click.echo("  Output: {projects_dir}/{replicate}/gromacs/")
+                colored_echo(phase="build")
+                colored_echo("GROMACS export enabled:", phase="build")
+                colored_echo("  Output: {projects_dir}/{replicate}/gromacs/", phase="build")
             return
 
-        click.echo(f"Building system for replicate {replicate}...")
+        colored_echo(f"Building system for replicate {replicate}...", phase="build")
         working_dir = sim_config.get_working_directory(replicate)
         builder = SystemBuilder.from_config(sim_config)
         interchange = builder.build_from_config(
@@ -229,43 +242,49 @@ def build(
         # Branch based on export format
         if gromacs:
             # Export to GROMACS format
-            click.echo("Exporting to GROMACS format...")
+            colored_echo("Exporting to GROMACS format...", phase="export")
             gromacs_dir = (
                 sim_config.output.projects_directory / f"replicate_{replicate}" / "gromacs"
             )
             export_result = builder.export_to_gromacs(gromacs_dir)
 
-            click.echo("GROMACS export successful!")
-            click.echo(f"Output directory: {gromacs_dir}")
-            click.echo("Files generated:")
-            click.echo(f"  - {export_result['gro'].name} (coordinates)")
-            click.echo(f"  - {export_result['top'].name} (topology)")
-            click.echo(f"  - {export_result['em_mdp'].name} (energy minimization)")
+            colored_echo("GROMACS export successful!", phase="export")
+            colored_echo(f"Output directory: {gromacs_dir}", phase="export")
+            colored_echo("Files generated:", phase="export")
+            colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
+            colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
+            colored_echo(
+                f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export"
+            )
             for eq_mdp in export_result.get("eq_mdps", []):
-                click.echo(f"  - {eq_mdp.name} (equilibration)")
-            click.echo(f"  - {export_result['prod_mdp'].name} (production)")
+                colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
+            colored_echo(f"  - {export_result['prod_mdp'].name} (production)", phase="export")
             if export_result.get("posres_defines"):
-                click.echo("Position restraints added to molecule ITP files:")
+                colored_echo("Position restraints added to molecule ITP files:", phase="export")
                 for component, define in export_result["posres_defines"].items():
-                    click.echo(f"  - {component}: #ifdef {define}")
-            click.echo(f"  - {export_result['run_script'].name} (run script)")
-            click.echo()
-            click.echo(f"To run: cd {gromacs_dir} && ./{export_result['run_script'].name}")
+                    colored_echo(f"  - {component}: #ifdef {define}", phase="export")
+            colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
+            colored_echo(phase="export")
+            colored_echo(
+                f"To run: cd {gromacs_dir} && ./{export_result['run_script'].name}", phase="export"
+            )
 
         else:
             # Default: prepare for OpenMM simulation
-            click.echo("Extracting OpenMM components...")
+            colored_echo("Extracting OpenMM components...", phase="build")
             omm_topology, omm_system, omm_positions = builder.get_openmm_components()
 
             # Apply restraints if configured
             if sim_config.restraints:
                 from polyzymd.core.restraints import RestraintFactory, apply_restraints
 
-                click.echo(f"Applying {len(sim_config.restraints)} restraint(s)...")
+                colored_echo(
+                    f"Applying {len(sim_config.restraints)} restraint(s)...", phase="build"
+                )
                 restraint_defs = []
                 for r in sim_config.restraints:
                     if not r.enabled:
-                        click.echo(f"  - {r.name}: DISABLED (skipping)")
+                        colored_echo(f"  - {r.name}: DISABLED (skipping)", phase="build")
                         continue
 
                     # Create restraint definition from config
@@ -277,55 +296,67 @@ def build(
                         indices2 = restraint_def.atom2.resolve(omm_topology)
 
                         if len(indices1) != 1:
-                            click.echo(
+                            colored_echo(
                                 f"Error: Restraint '{r.name}' atom1 selection matched "
                                 f"{len(indices1)} atoms (need exactly 1)",
                                 err=True,
+                                level=logging.ERROR,
                             )
                             sys.exit(1)
                         if len(indices2) != 1:
-                            click.echo(
+                            colored_echo(
                                 f"Error: Restraint '{r.name}' atom2 selection matched "
                                 f"{len(indices2)} atoms (need exactly 1)",
                                 err=True,
+                                level=logging.ERROR,
                             )
                             sys.exit(1)
 
-                        click.echo(
+                        colored_echo(
                             f"  - {r.name}: atom {indices1[0]} <-> atom {indices2[0]} "
-                            f"(type={r.type.value}, d={r.distance} A, k={r.force_constant} kJ/mol/nm^2)"
+                            f"(type={r.type.value}, d={r.distance} A, "
+                            f"k={r.force_constant} kJ/mol/nm^2)",
+                            phase="build",
                         )
                         restraint_defs.append(restraint_def)
 
                     except ValueError as e:
-                        click.echo(f"Error: Restraint '{r.name}' invalid: {e}", err=True)
+                        colored_echo(
+                            f"Error: Restraint '{r.name}' invalid: {e}",
+                            err=True,
+                            level=logging.ERROR,
+                        )
                         sys.exit(1)
 
                 # Apply all validated restraints to the system
                 if restraint_defs:
                     apply_restraints(restraint_defs, omm_topology, omm_system)
-                    click.echo(f"Successfully applied {len(restraint_defs)} restraint(s)")
+                    colored_echo(
+                        f"Successfully applied {len(restraint_defs)} restraint(s)", phase="build"
+                    )
 
             # Save OpenMM system to XML for --skip-build support
             from openmm import XmlSerializer
 
             system_xml_path = working_dir / "system.xml"
-            click.echo(f"Saving OpenMM system to {system_xml_path}...")
+            colored_echo(f"Saving OpenMM system to {system_xml_path}...", phase="build")
             with open(system_xml_path, "w") as f:
                 f.write(XmlSerializer.serialize(omm_system))
 
-            click.echo("System built successfully!")
-            click.echo(f"Output directory: {working_dir}")
-            click.echo("Files saved:")
-            click.echo("  - solvated_system.pdb (topology + positions)")
-            click.echo("  - system.xml (OpenMM system with restraints)")
-            click.echo("Use 'polyzymd run --skip-build' to run without rebuilding.")
+            colored_echo("System built successfully!", phase="build")
+            colored_echo(f"Output directory: {working_dir}", phase="build")
+            colored_echo("Files saved:", phase="build")
+            colored_echo("  - solvated_system.pdb (topology + positions)", phase="build")
+            colored_echo("  - system.xml (OpenMM system with restraints)", phase="build")
+            colored_echo(
+                "Use 'polyzymd run --skip-build' to run without rebuilding.", phase="build"
+            )
 
     except FileNotFoundError as e:
-        click.echo(f"Error: {e}", err=True)
+        colored_echo(f"Error: {e}", err=True, level=logging.ERROR)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"Build failed: {e}", err=True)
+        colored_echo(f"Build failed: {e}", err=True, level=logging.ERROR)
         if LOGGER.level == logging.DEBUG:
             import traceback
 
@@ -398,11 +429,11 @@ def run_gromacs(
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
 
-    click.echo(f"Loading configuration from: {config}")
+    colored_echo(f"Loading configuration from: {config}", phase="export")
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-        click.echo(f"Running GROMACS simulation: {sim_config.name}")
+        colored_echo(f"Running GROMACS simulation: {sim_config.name}", phase="export")
 
         # Override directories if provided via CLI
         if scratch_dir:
@@ -418,7 +449,7 @@ def run_gromacs(
         )
 
     except Exception as e:
-        click.echo(f"Simulation failed: {e}", err=True)
+        colored_echo(f"Simulation failed: {e}", err=True, level=logging.ERROR)
         if LOGGER.level == logging.DEBUG:
             import traceback
 
@@ -464,7 +495,7 @@ def _run_gromacs_impl(
     component_info = builder.get_component_info()
 
     # Export to GROMACS format
-    click.echo("Exporting to GROMACS format...")
+    colored_echo("Exporting to GROMACS format...", phase="export")
     exporter = GromacsExporter(
         interchange=interchange,
         config=sim_config,
@@ -475,28 +506,33 @@ def _run_gromacs_impl(
         gmx_command=gmx_path,
     )
 
-    click.echo(f"\nGROMACS files exported to: {gromacs_dir}")
-    click.echo("Files generated:")
-    click.echo(f"  - {export_result['gro'].name} (coordinates)")
-    click.echo(f"  - {export_result['top'].name} (topology)")
-    click.echo(f"  - {export_result['em_mdp'].name} (energy minimization)")
+    colored_echo(f"\nGROMACS files exported to: {gromacs_dir}", phase="export")
+    colored_echo("Files generated:", phase="export")
+    colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
+    colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
+    colored_echo(f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export")
     for eq_mdp in export_result["eq_mdps"]:
-        click.echo(f"  - {eq_mdp.name} (equilibration)")
-    click.echo(f"  - {export_result['prod_mdp'].name} (production)")
+        colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
+    colored_echo(f"  - {export_result['prod_mdp'].name} (production)", phase="export")
     if export_result.get("posres_defines"):
-        click.echo("Position restraints added to molecule ITP files:")
+        colored_echo("Position restraints added to molecule ITP files:", phase="export")
         for component, define in export_result["posres_defines"].items():
-            click.echo(f"  - {component}: #ifdef {define}")
-    click.echo(f"  - {export_result['run_script'].name} (run script)")
+            colored_echo(f"  - {component}: #ifdef {define}", phase="export")
+    colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
 
     if dry_run:
-        click.echo("\n--dry-run specified: Files exported but simulation not started.")
-        click.echo(f"To run manually: cd {gromacs_dir} && ./{export_result['run_script'].name}")
+        colored_echo(
+            "\n--dry-run specified: Files exported but simulation not started.", phase="export"
+        )
+        colored_echo(
+            f"To run manually: cd {gromacs_dir} && ./{export_result['run_script'].name}",
+            phase="export",
+        )
         return
 
     # Run GROMACS workflow
-    click.echo("\nStarting GROMACS simulation...")
-    click.echo(f"Using GROMACS executable: {gmx_path}")
+    colored_echo("\nStarting GROMACS simulation...", phase="export")
+    colored_echo(f"Using GROMACS executable: {gmx_path}", phase="export")
 
     # Get equilibration MDP filenames
     eq_mdp_names = [p.name for p in export_result["eq_mdps"]]
@@ -513,17 +549,21 @@ def _run_gromacs_impl(
         )
         runner.run_full_workflow()
 
-        click.echo("\nGROMACS simulation completed successfully!")
-        click.echo(f"Output directory: {gromacs_dir}")
+        colored_echo("\nGROMACS simulation completed successfully!", phase="export")
+        colored_echo(f"Output directory: {gromacs_dir}", phase="export")
 
     except GromacsError as e:
-        click.echo(f"\nGROMACS simulation failed: {e}", err=True)
-        click.echo(f"Check log files in: {gromacs_dir}", err=True)
+        colored_echo(f"\nGROMACS simulation failed: {e}", err=True, level=logging.ERROR)
+        colored_echo(f"Check log files in: {gromacs_dir}", err=True, level=logging.ERROR)
         sys.exit(1)
 
     except FileNotFoundError as e:
-        click.echo(f"\nError: {e}", err=True)
-        click.echo("Ensure GROMACS is installed and in your PATH, or use --gmx-path.", err=True)
+        colored_echo(f"\nError: {e}", err=True, level=logging.ERROR)
+        colored_echo(
+            "Ensure GROMACS is installed and in your PATH, or use --gmx-path.",
+            err=True,
+            level=logging.ERROR,
+        )
         sys.exit(1)
 
 
@@ -659,25 +699,25 @@ def submit(
     # Resolve pixi environment: explicit flag > preset default
     resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "cuda-12-4")
 
-    click.echo(f"Loading configuration from: {config}")
-    click.echo(f"Submitting jobs with preset: {preset}")
-    click.echo(f"Pixi environment: {resolved_pixi_env}")
-    click.echo(f"Replicates: {replicates}")
+    colored_echo(f"Loading configuration from: {config}", phase="workflow")
+    colored_echo(f"Submitting jobs with preset: {preset}", phase="workflow")
+    colored_echo(f"Pixi environment: {resolved_pixi_env}", phase="workflow")
+    colored_echo(f"Replicates: {replicates}", phase="workflow")
     if scratch_dir:
-        click.echo(f"Scratch directory: {scratch_dir}")
+        colored_echo(f"Scratch directory: {scratch_dir}", phase="workflow")
     if projects_dir:
-        click.echo(f"Projects directory: {projects_dir}")
+        colored_echo(f"Projects directory: {projects_dir}", phase="workflow")
     if account:
-        click.echo(f"Account: {account}")
+        colored_echo(f"Account: {account}", phase="workflow")
     if memory:
-        click.echo(f"Memory allocation: {memory}")
+        colored_echo(f"Memory allocation: {memory}", phase="workflow")
     if gpu_type:
-        click.echo(f"GPU type override: {gpu_type}")
+        colored_echo(f"GPU type override: {gpu_type}", phase="workflow")
     if skip_build:
-        click.echo("Skip-build mode: using pre-built systems")
+        colored_echo("Skip-build mode: using pre-built systems", phase="workflow")
 
     if dry_run:
-        click.echo("DRY RUN MODE - scripts will be created but not submitted")
+        colored_echo("DRY RUN MODE - scripts will be created but not submitted", phase="workflow")
 
     try:
         results = submit_daisy_chain(
@@ -699,11 +739,11 @@ def submit(
         )
 
         if not dry_run:
-            click.echo("\nJob submission complete!")
-            click.echo("Monitor with: squeue -u $USER")
+            colored_echo("\nJob submission complete!", phase="workflow")
+            colored_echo("Monitor with: squeue -u $USER", phase="workflow")
 
     except Exception as e:
-        click.echo(f"Submission failed: {e}", err=True)
+        colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
         if LOGGER.level == logging.DEBUG:
             import traceback
 
@@ -774,12 +814,12 @@ def run_segment(
         save_progress,
     )
 
-    click.echo(f"Loading configuration from: {config}")
+    colored_echo(f"Loading configuration from: {config}", phase="simulation")
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
     except Exception as e:
-        click.echo(f"Failed to load config: {e}", err=True)
+        colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
         sys.exit(1)
 
     # Determine working directory
@@ -796,8 +836,8 @@ def run_segment(
     total_steps = int(prod.duration * 1e6 / timestep_fs)
     total_samples = prod.samples
 
-    click.echo(f"Working directory: {working_dir}")
-    click.echo(f"Total production: {prod.duration} ns = {total_steps} steps")
+    colored_echo(f"Working directory: {working_dir}", phase="simulation")
+    colored_echo(f"Total production: {prod.duration} ns = {total_steps} steps", phase="simulation")
 
     # Load or create progress
     progress = load_or_scan_progress(
@@ -812,7 +852,7 @@ def run_segment(
 
     # Check if simulation is already complete
     if progress.is_complete:
-        click.echo("Simulation already complete — nothing to do.")
+        colored_echo("Simulation already complete — nothing to do.", phase="simulation")
         sys.exit(0)
 
     # ---- Handle FAILED segments before determining next work ----
@@ -827,8 +867,10 @@ def run_segment(
     for failed in failed_segments:
         failed_dir = working_dir / f"production_{failed.index}"
         if failed_dir.exists():
-            click.echo(
-                f"Cleaning up failed segment {failed.index} (no recoverable state) — will retry"
+            colored_echo(
+                f"Cleaning up failed segment {failed.index} (no recoverable state) — will retry",
+                phase="simulation",
+                level=logging.WARNING,
             )
             shutil.rmtree(failed_dir)
         progress.segments = [s for s in progress.segments if s.index != failed.index]
@@ -838,7 +880,7 @@ def run_segment(
     # Determine what to run next
     seg_info = get_next_segment_info(progress, total_steps, total_samples)
     if seg_info is None:
-        click.echo("No remaining work — simulation complete.")
+        colored_echo("No remaining work — simulation complete.", phase="simulation")
         sys.exit(0)
 
     seg_idx = seg_info["segment_index"]
@@ -847,9 +889,10 @@ def run_segment(
     report_interval = seg_info["report_interval"]
     duration_ns = (steps_to_run * timestep_fs) / 1e6
 
-    click.echo(
+    colored_echo(
         f"Next segment: {seg_idx} "
-        f"({duration_ns:.3f} ns, {steps_to_run} steps, {samples_to_write} frames)"
+        f"({duration_ns:.3f} ns, {steps_to_run} steps, {samples_to_write} frames)",
+        phase="simulation",
     )
 
     try:
@@ -876,17 +919,21 @@ def run_segment(
                 report_interval=report_interval,
             )
 
-        click.echo(f"Segment {seg_idx} completed successfully.")
+        colored_echo(f"Segment {seg_idx} completed successfully.", phase="simulation")
 
     except Exception as e:
         # Check if this is a GracefulExit (signal-based interruption)
         from polyzymd.simulation.signals import EXIT_CODE_INTERRUPTED, GracefulExit
 
         if isinstance(e, GracefulExit):
-            click.echo(f"Segment {seg_idx} interrupted (graceful shutdown): {e}")
+            colored_echo(
+                f"Segment {seg_idx} interrupted (graceful shutdown): {e}",
+                phase="simulation",
+                level=logging.WARNING,
+            )
             sys.exit(EXIT_CODE_INTERRUPTED)
 
-        click.echo(f"Segment {seg_idx} failed: {e}", err=True)
+        colored_echo(f"Segment {seg_idx} failed: {e}", err=True, level=logging.ERROR)
         if LOGGER.level == logging.DEBUG:
             import traceback
 
@@ -934,7 +981,7 @@ def _run_initial_segment(
     if not skip_build:
         from polyzymd.builders.system_builder import SystemBuilder
 
-        click.echo(f"Building system for replicate {replicate}...")
+        colored_echo(f"Building system for replicate {replicate}...", phase="build")
         builder = SystemBuilder.from_config(sim_config)
         builder.build_from_config(
             config=sim_config,
@@ -942,14 +989,14 @@ def _run_initial_segment(
             polymer_seed=replicate,
         )
 
-        click.echo("Extracting OpenMM components...")
+        colored_echo("Extracting OpenMM components...", phase="build")
         omm_topology, omm_system, omm_positions = builder.get_openmm_components()
 
         # Apply restraints if configured
         if sim_config.restraints:
             from polyzymd.core.restraints import RestraintFactory, apply_restraints
 
-            click.echo(f"Applying {len(sim_config.restraints)} restraint(s)...")
+            colored_echo(f"Applying {len(sim_config.restraints)} restraint(s)...", phase="build")
             restraint_defs = []
             for r in sim_config.restraints:
                 if not r.enabled:
@@ -958,12 +1005,12 @@ def _run_initial_segment(
                 restraint_defs.append(restraint_def)
             if restraint_defs:
                 apply_restraints(restraint_defs, omm_topology, omm_system)
-                click.echo(f"Applied {len(restraint_defs)} restraint(s)")
+                colored_echo(f"Applied {len(restraint_defs)} restraint(s)", phase="build")
     else:
         from openmm import XmlSerializer
         from openmm.app import PDBFile
 
-        click.echo("Loading pre-built system...")
+        colored_echo("Loading pre-built system...", phase="simulation")
         pdb_path = working_dir / "solvated_system.pdb"
         system_path = working_dir / "system.xml"
         if not pdb_path.exists() or not system_path.exists():
@@ -986,14 +1033,14 @@ def _run_initial_segment(
     )
 
     # Minimize
-    click.echo("Running energy minimization...")
+    colored_echo("Running energy minimization...", phase="simulation")
     runner.minimize()
 
     # Equilibrate
     phases = sim_config.simulation_phases
     eq_duration = phases.total_equilibration_duration
     eq_mode = "multi-stage" if phases.uses_staged_equilibration else "simple"
-    click.echo(f"Running equilibration: {eq_duration:.3f} ns ({eq_mode})...")
+    colored_echo(f"Running equilibration: {eq_duration:.3f} ns ({eq_mode})...", phase="simulation")
     eq_result = runner.run_equilibration(temperature=temperature, config=phases)
 
     # Save equilibration progress so a resubmitted job knows eq is done
@@ -1020,10 +1067,13 @@ def _run_initial_segment(
                 )
         progress.equilibration_stages = eq_stages
         save_progress(working_dir, progress)
-        click.echo(f"Saved equilibration progress ({len(eq_stages)} stages)")
+        colored_echo(f"Saved equilibration progress ({len(eq_stages)} stages)", phase="simulation")
 
     # Run first production segment
-    click.echo(f"Running production segment 0: {duration_ns:.3f} ns, {num_samples} frames...")
+    colored_echo(
+        f"Running production segment 0: {duration_ns:.3f} ns, {num_samples} frames...",
+        phase="simulation",
+    )
     runner.run_production(
         temperature=temperature,
         duration_ns=duration_ns,
@@ -1063,14 +1113,17 @@ def _run_continuation_segment(
     """
     from polyzymd.simulation.continuation import ContinuationManager
 
-    click.echo(f"Loading state from segment {segment_index - 1}...")
+    colored_echo(f"Loading state from segment {segment_index - 1}...", phase="simulation")
     manager = ContinuationManager(
         working_dir=working_dir,
         segment_index=segment_index,
     )
     manager.load_previous_state()
 
-    click.echo(f"Running segment {segment_index}: {duration_ns:.3f} ns, {num_samples} frames...")
+    colored_echo(
+        f"Running segment {segment_index}: {duration_ns:.3f} ns, {num_samples} frames...",
+        phase="simulation",
+    )
     manager.run_segment(
         duration_ns=duration_ns,
         num_samples=num_samples,
@@ -1127,7 +1180,7 @@ def check_progress(
     try:
         sim_config = SimulationConfig.from_yaml(config)
     except Exception as e:
-        click.echo(f"Failed to load config: {e}", err=True)
+        colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
         sys.exit(1)
 
     if scratch_dir:
@@ -1150,17 +1203,21 @@ def check_progress(
     )
 
     pct = progress.fraction_complete() * 100
-    click.echo(
+    colored_echo(
         f"Progress: {progress.total_steps_completed}/{progress.total_steps_requested} steps "
-        f"({pct:.1f}%), {len(progress.segments)} segment(s)"
+        f"({pct:.1f}%), {len(progress.segments)} segment(s)",
+        phase="progress",
     )
 
     if progress.is_complete:
-        click.echo("Status: COMPLETE")
+        colored_echo("Status: COMPLETE", phase="progress")
         sys.exit(0)
     else:
         remaining_ns = (progress.steps_remaining * timestep_fs) / 1e6
-        click.echo(f"Status: {progress.status.value} — {remaining_ns:.3f} ns remaining")
+        colored_echo(
+            f"Status: {progress.status.value} — {remaining_ns:.3f} ns remaining",
+            phase="progress",
+        )
         sys.exit(1)
 
 
@@ -1185,46 +1242,46 @@ def validate(config: str) -> None:
     """
     from polyzymd.config.schema import SimulationConfig
 
-    click.echo(f"Validating configuration: {config}")
+    colored_echo(f"Validating configuration: {config}")
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
 
         click.echo(click.style("Configuration is valid!", fg="green"))
-        click.echo()
-        click.echo("Summary:")
-        click.echo(f"  Name: {sim_config.name}")
-        click.echo(f"  Enzyme: {sim_config.enzyme.name}")
+        colored_echo()
+        colored_echo("Summary:")
+        colored_echo(f"  Name: {sim_config.name}")
+        colored_echo(f"  Enzyme: {sim_config.enzyme.name}")
 
         if sim_config.substrate:
-            click.echo(f"  Substrate: {sim_config.substrate.name}")
+            colored_echo(f"  Substrate: {sim_config.substrate.name}")
         else:
-            click.echo("  Substrate: None (apo simulation)")
+            colored_echo("  Substrate: None (apo simulation)")
 
         if sim_config.polymers and sim_config.polymers.enabled:
-            click.echo(f"  Polymers: {sim_config.polymers.type_prefix}")
-            click.echo(f"    Count: {sim_config.polymers.count}")
-            click.echo(f"    Length: {sim_config.polymers.length}")
+            colored_echo(f"  Polymers: {sim_config.polymers.type_prefix}")
+            colored_echo(f"    Count: {sim_config.polymers.count}")
+            colored_echo(f"    Length: {sim_config.polymers.length}")
             for m in sim_config.polymers.monomers:
-                click.echo(f"    Monomer {m.label}: {m.probability * 100:.1f}%")
+                colored_echo(f"    Monomer {m.label}: {m.probability * 100:.1f}%")
         else:
-            click.echo("  Polymers: Disabled")
+            colored_echo("  Polymers: Disabled")
 
-        click.echo(f"  Temperature: {sim_config.thermodynamics.temperature} K")
-        click.echo(f"  Pressure: {sim_config.thermodynamics.pressure} atm")
-        click.echo()
-        click.echo("Simulation phases:")
+        colored_echo(f"  Temperature: {sim_config.thermodynamics.temperature} K")
+        colored_echo(f"  Pressure: {sim_config.thermodynamics.pressure} atm")
+        colored_echo()
+        colored_echo("Simulation phases:")
         eq = sim_config.simulation_phases.equilibration
-        click.echo(f"  Equilibration: {eq.duration} ns ({eq.ensemble.value})")
+        colored_echo(f"  Equilibration: {eq.duration} ns ({eq.ensemble.value})")
         prod = sim_config.simulation_phases.production
-        click.echo(f"  Production: {prod.duration} ns ({prod.ensemble.value})")
+        colored_echo(f"  Production: {prod.duration} ns ({prod.ensemble.value})")
 
         if sim_config.restraints:
-            click.echo()
-            click.echo(f"Restraints: {len(sim_config.restraints)}")
+            colored_echo()
+            colored_echo(f"Restraints: {len(sim_config.restraints)}")
             for r in sim_config.restraints:
                 status = "enabled" if r.enabled else "disabled"
-                click.echo(f"  - {r.name} ({r.type.value}): {status}")
+                colored_echo(f"  - {r.name} ({r.type.value}): {status}")
 
     except FileNotFoundError as e:
         click.echo(click.style(f"Error: {e}", fg="red"), err=True)
@@ -1274,12 +1331,12 @@ def init(name: str) -> None:
             click.style(f"Error: Directory '{name}' already exists.", fg="red"),
             err=True,
         )
-        click.echo("Choose a different name or remove the existing directory.")
+        colored_echo("Choose a different name or remove the existing directory.")
         sys.exit(1)
 
     try:
         # Create directory structure
-        click.echo(f"Creating project directory: {name}/")
+        colored_echo(f"Creating project directory: {name}/")
         project_dir.mkdir(parents=True)
         (project_dir / "structures").mkdir()
         (project_dir / "job_scripts").mkdir()
@@ -1342,23 +1399,23 @@ def init(name: str) -> None:
 """)
 
         # Success message
-        click.echo()
+        colored_echo()
         click.echo(click.style("Project created successfully!", fg="green"))
-        click.echo()
-        click.echo("Directory structure:")
-        click.echo(f"  {name}/")
-        click.echo("  ├── config.yaml              <- Edit this file")
-        click.echo("  ├── structures/              <- Add your PDB/SDF files")
-        click.echo("  ├── job_scripts/")
-        click.echo("  └── slurm_logs/")
-        click.echo()
-        click.echo("Next steps:")
-        click.echo(f"  1. Add structure files to {name}/structures/")
-        click.echo(f"  2. Edit {name}/config.yaml (uncomment and customize sections)")
-        click.echo(f"  3. Validate: polyzymd validate -c {name}/config.yaml")
-        click.echo(f"  4. Build:    polyzymd build -c {name}/config.yaml -r 1")
-        click.echo()
-        click.echo(
+        colored_echo()
+        colored_echo("Directory structure:")
+        colored_echo(f"  {name}/")
+        colored_echo("  ├── config.yaml              <- Edit this file")
+        colored_echo("  ├── structures/              <- Add your PDB/SDF files")
+        colored_echo("  ├── job_scripts/")
+        colored_echo("  └── slurm_logs/")
+        colored_echo()
+        colored_echo("Next steps:")
+        colored_echo(f"  1. Add structure files to {name}/structures/")
+        colored_echo(f"  2. Edit {name}/config.yaml (uncomment and customize sections)")
+        colored_echo(f"  3. Validate: polyzymd validate -c {name}/config.yaml")
+        colored_echo(f"  4. Build:    polyzymd build -c {name}/config.yaml -r 1")
+        colored_echo()
+        colored_echo(
             "Documentation: https://polyzymd.readthedocs.io/en/latest/tutorials/quickstart.html"
         )
 
@@ -1422,24 +1479,24 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     else:
         output_file = Path(output_path)
 
-    click.echo(f"Cleaning PDB: {input_file}")
-    click.echo(f"  pH: {ph}")
+    colored_echo(f"Cleaning PDB: {input_file}")
+    colored_echo(f"  pH: {ph}")
 
     fixer = PDBFixer(filename=str(input_file))
 
     fixer.findNonstandardResidues()
     n_nonstandard = len(fixer.nonstandardResidues)
     if n_nonstandard > 0:
-        click.echo(f"  Replacing {n_nonstandard} nonstandard residue(s)...")
+        colored_echo(f"  Replacing {n_nonstandard} nonstandard residue(s)...")
     fixer.replaceNonstandardResidues()
 
-    click.echo("  Adding missing hydrogens...")
+    colored_echo("  Adding missing hydrogens...")
     fixer.addMissingHydrogens(ph)
 
     with open(output_file, "w") as f:
         PDBFile.writeFile(fixer.topology, fixer.positions, f, keepIds=True)
 
-    click.echo()
+    colored_echo()
     click.echo(click.style(f"Cleaned PDB written to: {output_file}", fg="green"))
 
 
@@ -1524,7 +1581,7 @@ def recover(
     try:
         sim_config = SimulationConfig.from_yaml(config)
     except Exception as e:
-        click.echo(f"Failed to load config: {e}", err=True)
+        colored_echo(f"Failed to load config: {e}", err=True, phase="workflow", level=logging.ERROR)
         sys.exit(1)
 
     if scratch_dir:
@@ -1533,7 +1590,12 @@ def recover(
         working_dir = sim_config.get_working_directory(replicate)
 
     if not working_dir.exists():
-        click.echo(f"Working directory not found: {working_dir}", err=True)
+        colored_echo(
+            f"Working directory not found: {working_dir}",
+            err=True,
+            phase="workflow",
+            level=logging.ERROR,
+        )
         sys.exit(1)
 
     # Calculate total steps from config
@@ -1557,30 +1619,36 @@ def recover(
     pct = progress.fraction_complete() * 100
     remaining_ns = (progress.steps_remaining * timestep_fs) / 1e6
 
-    click.echo(f"Working directory: {working_dir}")
-    click.echo(
+    colored_echo(f"Working directory: {working_dir}", phase="workflow")
+    colored_echo(
         f"Progress: {progress.total_steps_completed}/{progress.total_steps_requested} steps "
-        f"({pct:.1f}%)"
+        f"({pct:.1f}%)",
+        phase="workflow",
     )
-    click.echo(f"Status: {progress.status.value}")
-    click.echo(f"Segments: {len(progress.segments)}")
+    colored_echo(f"Status: {progress.status.value}", phase="workflow")
+    colored_echo(f"Segments: {len(progress.segments)}", phase="workflow")
 
     for seg in progress.segments:
-        click.echo(
+        colored_echo(
             f"  segment {seg.index}: {seg.status.value} "
-            f"({seg.duration_ns:.3f} ns, {seg.steps_completed} steps)"
+            f"({seg.duration_ns:.3f} ns, {seg.steps_completed} steps)",
+            phase="workflow",
         )
 
     if progress.is_complete:
         click.echo(click.style("\nSimulation is complete — nothing to recover.", fg="green"))
         return
 
-    click.echo(f"\nRemaining: {remaining_ns:.3f} ns ({progress.steps_remaining} steps)")
+    colored_echo(
+        f"\nRemaining: {remaining_ns:.3f} ns ({progress.steps_remaining} steps)",
+        phase="workflow",
+    )
 
     if not submit:
-        click.echo(
+        colored_echo(
             "\nTo resume, run:\n"
-            f"  polyzymd recover -c {config} -r {replicate} --submit --preset <preset>"
+            f"  polyzymd recover -c {config} -r {replicate} --submit --preset <preset>",
+            phase="workflow",
         )
         return
 
@@ -1591,7 +1659,10 @@ def recover(
     # Resolve pixi environment: explicit flag > preset default
     resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "cuda-12-4")
 
-    click.echo(f"\nGenerating recovery job (preset: {preset}, pixi env: {resolved_pixi_env})...")
+    colored_echo(
+        f"\nGenerating recovery job (preset: {preset}, pixi env: {resolved_pixi_env})...",
+        phase="workflow",
+    )
 
     slurm_config = SlurmConfig.from_preset(preset)
     generator = SlurmScriptGenerator(slurm_config, pixi_env=resolved_pixi_env)
@@ -1617,11 +1688,11 @@ def recover(
     script_path.write_text(script_content)
     script_path.chmod(0o755)
 
-    click.echo(f"Script: {script_path}")
+    colored_echo(f"Script: {script_path}", phase="workflow")
 
     if dry_run:
-        click.echo("\n[DRY RUN] Would submit:")
-        click.echo(f"  sbatch {script_path}")
+        colored_echo("\n[DRY RUN] Would submit:", phase="workflow")
+        colored_echo(f"  sbatch {script_path}", phase="workflow")
         return
 
     # Submit
@@ -1634,10 +1705,15 @@ def recover(
     )
 
     if result.returncode == 0:
-        click.echo(f"Submitted: {result.stdout.strip()}")
-        click.echo("Monitor with: squeue -u $USER")
+        colored_echo(f"Submitted: {result.stdout.strip()}", phase="workflow")
+        colored_echo("Monitor with: squeue -u $USER", phase="workflow")
     else:
-        click.echo(f"Submission failed: {result.stderr.strip()}", err=True)
+        colored_echo(
+            f"Submission failed: {result.stderr.strip()}",
+            err=True,
+            phase="workflow",
+            level=logging.ERROR,
+        )
         sys.exit(1)
 
 
@@ -1688,43 +1764,43 @@ def info() -> None:
     """Show PolyzyMD installation information."""
     from polyzymd import __version__
 
-    click.echo("PolyzyMD - Molecular Dynamics for Enzyme-Polymer Systems")
-    click.echo(f"Version: {__version__}")
-    click.echo()
+    colored_echo("PolyzyMD - Molecular Dynamics for Enzyme-Polymer Systems", phase="cli")
+    colored_echo(f"Version: {__version__}", phase="cli")
+    colored_echo("", phase="cli")
 
     # Check dependencies
-    click.echo("Dependencies:")
+    colored_echo("Dependencies:", phase="cli")
 
     try:
         import openmm
 
-        click.echo(f"  OpenMM: {openmm.__version__}")
+        colored_echo(f"  OpenMM: {openmm.__version__}", phase="cli")
     except ImportError:
-        click.echo("  OpenMM: NOT INSTALLED")
+        colored_echo("  OpenMM: NOT INSTALLED", phase="cli")
 
     try:
         from openff.toolkit import __version__ as off_version
 
-        click.echo(f"  OpenFF Toolkit: {off_version}")
+        colored_echo(f"  OpenFF Toolkit: {off_version}", phase="cli")
     except ImportError:
-        click.echo("  OpenFF Toolkit: NOT INSTALLED")
+        colored_echo("  OpenFF Toolkit: NOT INSTALLED", phase="cli")
 
     try:
         from openff.interchange import __version__ as int_version
 
-        click.echo(f"  OpenFF Interchange: {int_version}")
+        colored_echo(f"  OpenFF Interchange: {int_version}", phase="cli")
     except ImportError:
-        click.echo("  OpenFF Interchange: NOT INSTALLED")
+        colored_echo("  OpenFF Interchange: NOT INSTALLED", phase="cli")
 
     try:
         import pydantic
 
-        click.echo(f"  Pydantic: {pydantic.__version__}")
+        colored_echo(f"  Pydantic: {pydantic.__version__}", phase="cli")
     except ImportError:
-        click.echo("  Pydantic: NOT INSTALLED")
+        colored_echo("  Pydantic: NOT INSTALLED", phase="cli")
 
-    click.echo()
-    click.echo("Example configs: polyzymd/configs/examples/")
+    colored_echo("", phase="cli")
+    colored_echo("Example configs: polyzymd/configs/examples/", phase="cli")
 
 
 def main() -> int:
@@ -1735,7 +1811,7 @@ def main() -> int:
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else 1
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        colored_echo(f"Error: {e}", err=True, phase="cli", level=logging.ERROR)
         return 1
 
 

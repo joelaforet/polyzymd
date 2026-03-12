@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-module colored logging.** Each module group (builders, simulation,
+  workflow, exporters, etc.) gets a distinct near-white tinted color for
+  INFO/DEBUG log messages, making it easy to visually distinguish which
+  subsystem produced each log line. WARNING stays amber yellow, ERROR stays
+  red. Colors auto-detect terminal capability (truecolor > 256-color > basic
+  > none) and respect the `NO_COLOR` environment variable.
+  (`cli/colors.py` — new module)
+- **`--no-color` CLI flag.** Disables all ANSI color output for logging and
+  `colored_echo` messages. Added to the top-level `polyzymd` command group.
+  (`cli/main.py`)
 - **Hard-kill recovery.** If a SLURM job is killed without a graceful signal
   (e.g., node failure, `scancel`, OOM), the next job detects the incomplete
   segment via checkpoint + CSV analysis and resumes from the last checkpoint
@@ -48,6 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- All `click.echo()` calls in the CLI migrated to `colored_echo()` with
+  phase-aware coloring (e.g., build commands use sage green, workflow
+  commands use lavender). Success messages (`click.style(fg="green")`) and
+  error messages (`click.style(fg="red")`) are preserved as-is.
+- All `print()` calls in production code (`workflow/daisy_chain.py`,
+  `exporters/gromacs.py`, `data/solvents/_generator.py`) migrated to
+  `LOGGER.info()` so they flow through the colored logging formatter.
 - SLURM job scripts now activate the environment via
   `pixi shell-hook -e <env> --manifest-path <path>` instead of
   `module load` + `conda activate`. The manifest path is auto-detected
