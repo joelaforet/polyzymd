@@ -503,18 +503,46 @@ def _scan_segment_dir(
             finished_at=_now_iso(),  # Approximate
         )
     else:
-        # No state.xml and no INTERRUPTED marker — likely a failed segment
-        # or an empty directory from a crash
-        LOGGER.warning(
-            f"Segment {seg_idx} directory exists but has no state.xml or "
-            f"INTERRUPTED marker — treating as failed"
-        )
-        return SegmentRecord(
-            index=seg_idx,
-            steps_completed=0,
-            steps_requested=0,
-            status=SegmentStatus.FAILED,
-        )
+        # No state.xml and no INTERRUPTED marker — check for checkpoint
+        # from periodic CheckpointReporter (hard-kill recovery).
+        checkpoint_chk = seg_dir / f"production_{seg_idx}_checkpoint.chk"
+        state_data_csv = seg_dir / f"production_{seg_idx}_state_data.csv"
+
+        if checkpoint_chk.exists():
+            # Hard-killed segment: periodic checkpoint survives but the
+            # signal handler never fired.  Treat as interrupted so the
+            # continuation manager can recover from the checkpoint.
+            steps_completed = (
+                _estimate_steps_from_csv(state_data_csv)
+                if state_data_csv.exists()
+                else 0
+            )
+            duration_ns = (steps_completed * timestep_fs) / 1e6
+            LOGGER.warning(
+                f"Segment {seg_idx} directory has checkpoint but no state.xml "
+                f"or INTERRUPTED marker — treating as interrupted "
+                f"(hard-kill recovery, ~{steps_completed} steps)"
+            )
+            return SegmentRecord(
+                index=seg_idx,
+                steps_completed=steps_completed,
+                steps_requested=0,  # Unknown — no INTERRUPTED metadata
+                samples_written=0,
+                status=SegmentStatus.INTERRUPTED,
+                duration_ns=duration_ns,
+            )
+        else:
+            # Truly failed: no recoverable files at all
+            LOGGER.warning(
+                f"Segment {seg_idx} directory exists but has no state.xml, "
+                f"INTERRUPTED marker, or checkpoint — treating as failed"
+            )
+            return SegmentRecord(
+                index=seg_idx,
+                steps_completed=0,
+                steps_requested=0,
+                status=SegmentStatus.FAILED,
+            )
 
 
 def _parse_interrupted_marker(marker_path: Path) -> tuple[int, int]:
@@ -546,6 +574,43 @@ def _parse_interrupted_marker(marker_path: Path) -> tuple[int, int]:
         LOGGER.warning(f"Could not parse INTERRUPTED marker {marker_path}: {exc}")
 
     return steps_completed, total_steps
+
+
+def _estimate_steps_from_csv(csv_path: Path) -> int:
+    """Estimate the number of completed steps from a ``state_data.csv`` file.
+
+    Reads the last non-empty data line and extracts the step count from
+    the first column.  This is used to estimate progress for hard-killed
+    segments that have no ``INTERRUPTED`` marker or ``state.xml`` but do
+    have reporter output on disk.
+
+    Parameters
+    ----------
+    csv_path : Path
+        Path to the ``production_N_state_data.csv`` file.
+
+    Returns
+    -------
+    int
+        Estimated steps completed, or 0 if the file cannot be parsed.
+    """
+    try:
+        with open(csv_path, "r") as f:
+            lines = f.readlines()
+        # Need at least a header + one data line
+        if len(lines) < 2:
+            return 0
+        # Walk backwards to find the last non-empty line
+        for line in reversed(lines):
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                # First column is the step count (may be quoted)
+                step_str = stripped.split(",")[0].strip('"').strip()
+                return int(float(step_str))
+        return 0
+    except (ValueError, IndexError, OSError) as exc:
+        LOGGER.warning(f"Could not estimate steps from {csv_path}: {exc}")
+        return 0
 
 
 def _convert_to_ns(value: float, unit: str) -> float:

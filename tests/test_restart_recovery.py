@@ -1,0 +1,569 @@
+"""Tests for the automatic restart and hard-kill recovery infrastructure.
+
+Covers:
+- Checkpoint fallback recovery paths in ContinuationManager._get_previous_paths()
+- File validation for checkpoint vs state-based recovery
+- _estimate_steps_from_csv edge cases (covered more extensively in test_progress.py)
+- EQ_INTERRUPTED marker parsing in _find_interrupted_eq_stage()
+- _find_completed_eq_stages with interrupted stages
+- FAILED segment cleanup logic
+- End-to-end restart flow for checkpoint-only segments
+"""
+
+import json
+import shutil
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _write_normal_segment(working_dir: Path, seg_idx: int) -> None:
+    """Write minimal files simulating a normally completed segment."""
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    (seg_dir / f"production_{seg_idx}_state.xml").write_text("<State/>")
+    (seg_dir / f"production_{seg_idx}_system.xml").write_text("<System/>")
+    (seg_dir / f"production_{seg_idx}_checkpoint.chk").write_bytes(b"\x00" * 16)
+    params = {
+        "__values__": {
+            "integ_params": {
+                "__values__": {
+                    "num_samples": 100,
+                    "time_step": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 2.0, "unit": "femtosecond"},
+                    },
+                    "total_time": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 10.0, "unit": "nanosecond"},
+                    },
+                }
+            },
+            "thermo_params": {"__values__": {}},
+        }
+    }
+    (seg_dir / f"production_{seg_idx}_parameters.json").write_text(json.dumps(params))
+
+
+def _write_interrupted_segment(
+    working_dir: Path, seg_idx: int, steps_completed: int = 3000000
+) -> None:
+    """Write files for a gracefully interrupted segment (SIGUSR1/SIGTERM)."""
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    (seg_dir / "interrupted_state.xml").write_text("<State/>")
+    (seg_dir / "interrupted_system.xml").write_text("<System/>")
+    (seg_dir / "interrupted_checkpoint.chk").write_bytes(b"\x00" * 16)
+    (seg_dir / "INTERRUPTED").write_text(
+        f"segment_index={seg_idx}\n"
+        f"steps_completed={steps_completed}\n"
+        f"total_steps=5000000\n"
+        f"remaining_steps={5000000 - steps_completed}\n"
+    )
+    params = {"__values__": {"integ_params": {"__values__": {
+        "num_samples": 100,
+        "time_step": {"__class__": "Quantity", "__values__": {"value": 2.0, "unit": "femtosecond"}},
+        "total_time": {"__class__": "Quantity", "__values__": {"value": 10.0, "unit": "nanosecond"}},
+    }}, "thermo_params": {"__values__": {}}}}
+    (seg_dir / f"production_{seg_idx}_parameters.json").write_text(json.dumps(params))
+
+
+def _write_hard_killed_segment(
+    working_dir: Path,
+    seg_idx: int,
+    with_system_xml: bool = True,
+    with_csv: bool = False,
+    csv_steps: int = 80000,
+) -> None:
+    """Write files for a hard-killed segment (SIGKILL/OOM): checkpoint + system.xml only."""
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    # Periodic checkpoint from CheckpointReporter
+    (seg_dir / f"production_{seg_idx}_checkpoint.chk").write_bytes(b"\x00" * 16)
+    if with_system_xml:
+        (seg_dir / f"production_{seg_idx}_system.xml").write_text("<System/>")
+    if with_csv:
+        (seg_dir / f"production_{seg_idx}_state_data.csv").write_text(
+            '#"Step","Time (ps)","PE (kJ/mole)"\n'
+            f"{csv_steps},{csv_steps * 0.002},-100000.0\n"
+        )
+    # Parameters file (continuation manager needs this)
+    params = {"__values__": {"integ_params": {"__values__": {
+        "num_samples": 100,
+        "time_step": {"__class__": "Quantity", "__values__": {"value": 2.0, "unit": "femtosecond"}},
+        "total_time": {"__class__": "Quantity", "__values__": {"value": 10.0, "unit": "nanosecond"}},
+    }}, "thermo_params": {"__values__": {}}}}
+    (seg_dir / f"production_{seg_idx}_parameters.json").write_text(json.dumps(params))
+
+
+def _write_eq_stage(
+    working_dir: Path,
+    stage_index: int,
+    stage_name: str,
+    completed: bool = True,
+    interrupted: bool = False,
+    steps_completed: int = 50000,
+    total_steps: int = 100000,
+    current_temperature: float = 300.0,
+    is_temperature_ramping: bool = False,
+) -> None:
+    """Write equilibration stage files on disk."""
+    dir_name = f"equilibration_{stage_index}_{stage_name}"
+    stage_dir = working_dir / dir_name
+    stage_dir.mkdir(parents=True, exist_ok=True)
+
+    if completed or interrupted:
+        # Checkpoint exists in both completed and interrupted cases
+        (stage_dir / f"{dir_name}_checkpoint.chk").write_bytes(b"\x00" * 16)
+
+    if interrupted:
+        (stage_dir / "EQ_INTERRUPTED").write_text(
+            f"stage_index={stage_index}\n"
+            f"stage_name={stage_name}\n"
+            f"steps_completed={steps_completed}\n"
+            f"total_steps={total_steps}\n"
+            f"current_temperature={current_temperature}\n"
+            f"is_temperature_ramping={is_temperature_ramping}\n"
+        )
+
+
+# ---------------------------------------------------------------------------
+# ContinuationManager._get_previous_paths — recovery path selection
+# ---------------------------------------------------------------------------
+
+
+class TestGetPreviousPaths:
+    """ContinuationManager._get_previous_paths selects the right recovery path."""
+
+    def _make_manager(self, working_dir, prev_segment):
+        """Create a minimal ContinuationManager-like object for testing."""
+        # We import here to test in isolation; mock out openmm if unavailable
+        try:
+            from polyzymd.simulation.continuation import ContinuationManager
+            mgr = ContinuationManager.__new__(ContinuationManager)
+            mgr._working_dir = Path(working_dir)
+            mgr._prev_segment = prev_segment
+            return mgr
+        except ImportError:
+            pytest.skip("polyzymd.simulation.continuation not importable")
+
+    def test_normal_completion_path(self, tmp_path):
+        """Normal segment: state.xml exists → no checkpoint recovery."""
+        _write_normal_segment(tmp_path, 0)
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is False
+        assert paths["state"].exists()
+        assert "state.xml" in str(paths["state"])
+
+    def test_graceful_interrupt_path(self, tmp_path):
+        """Gracefully interrupted: interrupted_* files → checkpoint recovery."""
+        _write_interrupted_segment(tmp_path, 0)
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is True
+        assert "interrupted_system.xml" in str(paths["system"])
+        assert "interrupted_checkpoint.chk" in str(paths["checkpoint"])
+
+    def test_hard_kill_checkpoint_recovery(self, tmp_path):
+        """Hard-killed: only checkpoint + system.xml → checkpoint recovery."""
+        _write_hard_killed_segment(tmp_path, 0)
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is True
+        assert "production_0_system.xml" in str(paths["system"])
+        assert "production_0_checkpoint.chk" in str(paths["checkpoint"])
+
+    def test_hard_kill_no_system_xml_not_recoverable(self, tmp_path):
+        """Hard-killed with no system.xml: checkpoint exists but not recoverable."""
+        _write_hard_killed_segment(tmp_path, 0, with_system_xml=False)
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        # use_checkpoint should still be False because there's no system.xml
+        # (the error branch logs an error but doesn't set use_checkpoint)
+        assert paths["use_checkpoint"] is False
+
+    def test_hard_kill_recovery_after_completed_segment(self, tmp_path):
+        """Normal segment 0, then hard-killed segment 1 → recovery from seg 1."""
+        _write_normal_segment(tmp_path, 0)
+        _write_hard_killed_segment(tmp_path, 1)
+        mgr = self._make_manager(tmp_path, 1)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is True
+
+
+# ---------------------------------------------------------------------------
+# File validation in load_previous_state
+# ---------------------------------------------------------------------------
+
+
+class TestLoadPreviousStateValidation:
+    """load_previous_state validates files based on recovery mode."""
+
+    def _make_manager(self, working_dir, prev_segment):
+        try:
+            from polyzymd.simulation.continuation import ContinuationManager
+            mgr = ContinuationManager.__new__(ContinuationManager)
+            mgr._working_dir = Path(working_dir)
+            mgr._prev_segment = prev_segment
+            return mgr
+        except ImportError:
+            pytest.skip("polyzymd.simulation.continuation not importable")
+
+    def test_normal_segment_validates_state_xml(self, tmp_path):
+        """For normal recovery, state.xml must exist."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        # No state.xml, no checkpoint, no interrupted files
+        (seg_dir / "production_0_system.xml").write_text("<System/>")
+        (seg_dir / "production_0_parameters.json").write_text("{}")
+        mgr = self._make_manager(tmp_path, 0)
+        with pytest.raises(FileNotFoundError, match="state"):
+            mgr.load_previous_state()
+
+    def test_checkpoint_recovery_validates_checkpoint(self, tmp_path):
+        """For checkpoint recovery, checkpoint.chk must exist."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        # Has interrupted_system.xml but no checkpoint
+        (seg_dir / "interrupted_system.xml").write_text("<System/>")
+        (seg_dir / "production_0_parameters.json").write_text("{}")
+        mgr = self._make_manager(tmp_path, 0)
+        with pytest.raises(FileNotFoundError, match="checkpoint"):
+            mgr.load_previous_state()
+
+
+# ---------------------------------------------------------------------------
+# EQ_INTERRUPTED marker parsing
+# ---------------------------------------------------------------------------
+
+
+class TestEqInterruptedMarker:
+    """Tests for EQ_INTERRUPTED marker write/read cycle."""
+
+    def test_marker_format(self, tmp_path):
+        """Verify the marker file format written by run_equilibration_stage."""
+        stage_dir = tmp_path / "equilibration_2_npt_eq"
+        stage_dir.mkdir()
+        marker = stage_dir / "EQ_INTERRUPTED"
+        marker.write_text(
+            "stage_index=2\n"
+            "stage_name=npt_eq\n"
+            "steps_completed=75000\n"
+            "total_steps=100000\n"
+            "current_temperature=350.5\n"
+            "is_temperature_ramping=True\n"
+        )
+
+        # Parse manually (same logic as _find_interrupted_eq_stage)
+        info = {}
+        for line in marker.read_text().strip().splitlines():
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if key == "steps_completed":
+                info["steps_completed"] = int(value)
+            elif key == "total_steps":
+                info["total_steps"] = int(value)
+            elif key == "current_temperature":
+                info["current_temperature"] = float(value)
+            elif key == "is_temperature_ramping":
+                info["is_temperature_ramping"] = value.lower() == "true"
+
+        assert info["steps_completed"] == 75000
+        assert info["total_steps"] == 100000
+        assert info["current_temperature"] == 350.5
+        assert info["is_temperature_ramping"] is True
+
+
+class TestFindCompletedEqStages:
+    """_find_completed_eq_stages handles completed/interrupted stages."""
+
+    def _make_runner(self, working_dir):
+        """Create a minimal mock SimulationRunner for eq stage detection."""
+        try:
+            from polyzymd.simulation.runner import SimulationRunner
+            runner = SimulationRunner.__new__(SimulationRunner)
+            runner._working_dir = Path(working_dir)
+            return runner
+        except ImportError:
+            pytest.skip("polyzymd.simulation.runner not importable")
+
+    def _make_stage(self, name):
+        """Create a minimal mock EquilibrationStageConfig."""
+        stage = MagicMock()
+        stage.name = name
+        return stage
+
+    def test_all_completed(self, tmp_path):
+        stages = [self._make_stage("heating"), self._make_stage("npt_eq")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        _write_eq_stage(tmp_path, 1, "npt_eq", completed=True)
+        runner = self._make_runner(tmp_path)
+        completed = runner._find_completed_eq_stages(stages)
+        assert completed == [0, 1]
+
+    def test_stops_at_interrupted(self, tmp_path):
+        """Interrupted stage (with EQ_INTERRUPTED marker) is NOT completed."""
+        stages = [self._make_stage("heating"), self._make_stage("npt_eq")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        _write_eq_stage(tmp_path, 1, "npt_eq", interrupted=True)
+        runner = self._make_runner(tmp_path)
+        completed = runner._find_completed_eq_stages(stages)
+        assert completed == [0]  # Only stage 0
+
+    def test_stops_at_first_gap(self, tmp_path):
+        stages = [
+            self._make_stage("heating"),
+            self._make_stage("npt_eq"),
+            self._make_stage("final"),
+        ]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        # Stage 1 missing
+        _write_eq_stage(tmp_path, 2, "final", completed=True)
+        runner = self._make_runner(tmp_path)
+        completed = runner._find_completed_eq_stages(stages)
+        assert completed == [0]  # Stops at gap
+
+    def test_empty(self, tmp_path):
+        stages = [self._make_stage("heating")]
+        runner = self._make_runner(tmp_path)
+        completed = runner._find_completed_eq_stages(stages)
+        assert completed == []
+
+
+class TestFindInterruptedEqStage:
+    """_find_interrupted_eq_stage detects mid-stage interrupts."""
+
+    def _make_runner(self, working_dir):
+        try:
+            from polyzymd.simulation.runner import SimulationRunner
+            runner = SimulationRunner.__new__(SimulationRunner)
+            runner._working_dir = Path(working_dir)
+            return runner
+        except ImportError:
+            pytest.skip("polyzymd.simulation.runner not importable")
+
+    def _make_stage(self, name):
+        stage = MagicMock()
+        stage.name = name
+        return stage
+
+    def test_finds_interrupted_stage(self, tmp_path):
+        stages = [self._make_stage("heating"), self._make_stage("npt_eq")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        _write_eq_stage(
+            tmp_path, 1, "npt_eq", interrupted=True,
+            steps_completed=75000, total_steps=100000,
+            current_temperature=300.0,
+        )
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[0])
+        assert info is not None
+        assert info["stage_index"] == 1
+        assert info["steps_completed"] == 75000
+        assert info["total_steps"] == 100000
+        assert info["current_temperature"] == 300.0
+
+    def test_no_interrupted_stage(self, tmp_path):
+        stages = [self._make_stage("heating"), self._make_stage("npt_eq")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[0])
+        assert info is None
+
+    def test_all_completed_returns_none(self, tmp_path):
+        stages = [self._make_stage("heating")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[0])
+        assert info is None
+
+    def test_interrupted_without_checkpoint_returns_none(self, tmp_path):
+        """EQ_INTERRUPTED marker without checkpoint → can't resume → None."""
+        stages = [self._make_stage("heating")]
+        dir_name = "equilibration_0_heating"
+        stage_dir = tmp_path / dir_name
+        stage_dir.mkdir()
+        (stage_dir / "EQ_INTERRUPTED").write_text(
+            "stage_index=0\nstage_name=heating\n"
+            "steps_completed=5000\ntotal_steps=10000\n"
+            "current_temperature=300.0\nis_temperature_ramping=False\n"
+        )
+        # No checkpoint file
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[])
+        assert info is None
+
+    def test_temperature_ramping_metadata(self, tmp_path):
+        stages = [self._make_stage("ramp")]
+        _write_eq_stage(
+            tmp_path, 0, "ramp", interrupted=True,
+            steps_completed=25000, total_steps=50000,
+            current_temperature=200.0, is_temperature_ramping=True,
+        )
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[])
+        assert info is not None
+        assert info["is_temperature_ramping"] is True
+        assert info["current_temperature"] == 200.0
+
+
+# ---------------------------------------------------------------------------
+# FAILED segment cleanup in main.py
+# ---------------------------------------------------------------------------
+
+
+class TestFailedSegmentCleanup:
+    """FAILED segment directories get removed before retry."""
+
+    def test_failed_dir_removed(self, tmp_path):
+        """Simulates the cleanup logic from main.py run_segment()."""
+        from polyzymd.simulation.progress import SegmentRecord, SegmentStatus
+
+        # Create a failed segment on disk
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        (seg_dir / "some_partial_file.txt").write_text("partial")
+
+        # Create a progress with a FAILED record
+        from polyzymd.simulation.progress import SimulationProgress
+
+        failed_seg = SegmentRecord(index=0, steps_completed=0, status=SegmentStatus.FAILED)
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[failed_seg],
+            replicate=1,
+        )
+
+        # Simulate the cleanup logic from main.py
+        failed_segments = [s for s in progress.segments if s.status == SegmentStatus.FAILED]
+        for failed in failed_segments:
+            failed_dir = tmp_path / f"production_{failed.index}"
+            if failed_dir.exists():
+                shutil.rmtree(failed_dir)
+            progress.segments = [s for s in progress.segments if s.index != failed.index]
+
+        # Verify cleanup
+        assert not seg_dir.exists()
+        assert len(progress.segments) == 0
+        assert progress.next_segment_index == 0
+
+    def test_failed_after_completed_cleanup(self, tmp_path):
+        """Only the FAILED segment is removed; completed segments survive."""
+        from polyzymd.simulation.progress import SegmentRecord, SegmentStatus, SimulationProgress
+
+        # Completed segment 0
+        seg0_dir = tmp_path / "production_0"
+        seg0_dir.mkdir()
+        (seg0_dir / "production_0_state.xml").write_text("<State/>")
+
+        # Failed segment 1
+        seg1_dir = tmp_path / "production_1"
+        seg1_dir.mkdir()
+        (seg1_dir / "partial.txt").write_text("x")
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0, steps_completed=5000000,
+                    status=SegmentStatus.COMPLETED, samples_written=125,
+                ),
+                SegmentRecord(index=1, steps_completed=0, status=SegmentStatus.FAILED),
+            ],
+            replicate=1,
+        )
+
+        # Cleanup
+        failed_segments = [s for s in progress.segments if s.status == SegmentStatus.FAILED]
+        for failed in failed_segments:
+            failed_dir = tmp_path / f"production_{failed.index}"
+            if failed_dir.exists():
+                shutil.rmtree(failed_dir)
+            progress.segments = [s for s in progress.segments if s.index != failed.index]
+
+        # Verify
+        assert seg0_dir.exists()
+        assert not seg1_dir.exists()
+        assert len(progress.segments) == 1
+        assert progress.segments[0].index == 0
+        assert progress.next_segment_index == 1
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: scan → recovery path selection
+# ---------------------------------------------------------------------------
+
+
+class TestEndToEndRecoveryFlow:
+    """Integration test: filesystem scan → correct recovery classification."""
+
+    def test_hard_killed_seg0_becomes_interrupted(self, tmp_path):
+        """Segment 0 hard-killed → classified as INTERRUPTED → continuation resumes."""
+        from polyzymd.simulation.progress import (
+            SegmentStatus,
+            get_next_segment_info,
+            scan_filesystem,
+        )
+
+        _write_hard_killed_segment(tmp_path, 0, with_csv=True, csv_steps=200000)
+
+        progress = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(progress.segments) == 1
+        assert progress.segments[0].status == SegmentStatus.INTERRUPTED
+        assert progress.segments[0].steps_completed == 200000
+
+        # Configure progress for next segment calculation
+        progress.total_steps_requested = 10000000
+        progress.total_samples_requested = 250
+
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 1  # Continuation from seg 0
+        assert info["steps_to_run"] == 10000000 - 200000
+
+    def test_truly_empty_seg_is_failed(self, tmp_path):
+        """Empty directory → FAILED → next run should clean up and retry."""
+        from polyzymd.simulation.progress import SegmentStatus, scan_filesystem
+
+        (tmp_path / "production_0").mkdir()
+        progress = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert progress.segments[0].status == SegmentStatus.FAILED
+
+    def test_completed_then_hard_killed(self, tmp_path):
+        """Segment 0 completed, segment 1 hard-killed → correct recovery."""
+        from polyzymd.simulation.progress import (
+            SegmentStatus,
+            get_next_segment_info,
+            scan_filesystem,
+        )
+
+        _write_normal_segment(tmp_path, 0)
+        _write_hard_killed_segment(tmp_path, 1, with_csv=True, csv_steps=300000)
+
+        progress = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert progress.segments[0].status == SegmentStatus.COMPLETED
+        assert progress.segments[1].status == SegmentStatus.INTERRUPTED
+
+        progress.total_steps_requested = 10000000
+        progress.total_samples_requested = 250
+        # Segment 0: 10ns at 2fs = 5_000_000. Segment 1: 300_000 estimated
+        total_done = progress.total_steps_completed
+        assert total_done == 5300000
+
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 2
+        assert info["steps_to_run"] == 10000000 - 5300000

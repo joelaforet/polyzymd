@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Uni
 import openmm
 from openmm import XmlSerializer
 from openmm import unit as omm_unit
-from openmm.app import DCDReporter, PDBFile, Simulation, StateDataReporter
+from openmm.app import CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
 
 if TYPE_CHECKING:
     from polyzymd.config.schema import (
@@ -445,6 +445,8 @@ class SimulationRunner:
         stage_index: int,
         default_timestep: float = 2.0,
         default_friction: float = 1.0,
+        resume_from_step: int = 0,
+        resume_temperature: float | None = None,
     ) -> Dict[str, Any]:
         """Run a single equilibration stage with optional position restraints.
 
@@ -453,6 +455,7 @@ class SimulationRunner:
         - Position restraints on predefined atom groups
         - Temperature ramping (simulated annealing)
         - NVT or NPT ensembles
+        - Graceful interruption and mid-stage resume
 
         Args:
             stage: EquilibrationStageConfig with stage settings
@@ -461,6 +464,11 @@ class SimulationRunner:
             stage_index: Index of this stage (for output naming)
             default_timestep: Default time step in fs if not specified in stage
             default_friction: Default friction coefficient in 1/ps
+            resume_from_step: Step to resume from within this stage (0 = start fresh).
+                When resuming, the simulation must already be loaded from checkpoint.
+            resume_temperature: Current temperature when resuming a temperature-ramping
+                stage. Only used when ``resume_from_step > 0`` and the stage uses
+                temperature ramping.
 
         Returns:
             Dictionary with stage results
@@ -590,38 +598,152 @@ class SimulationRunner:
                 f,
             )
 
+        # Periodic checkpoint reporter so state survives hard kills
+        eq_chk_path = phase_dir / f"{stage_name}_checkpoint.chk"
+        self._simulation.reporters.append(
+            CheckpointReporter(str(eq_chk_path), report_interval)
+        )
+
+        # Install signal handlers for graceful shutdown
+        from polyzymd.simulation.signals import (
+            GracefulExit,
+            get_interrupt_signal,
+            install_handlers,
+            is_interrupted,
+        )
+
+        install_handlers()
+
+        # Helper: save EQ_INTERRUPTED marker for mid-stage resume
+        def _save_eq_interrupted(steps_done: int, current_temp: float) -> None:
+            marker_path = phase_dir / "EQ_INTERRUPTED"
+            marker_path.write_text(
+                f"stage_index={stage_index}\n"
+                f"stage_name={stage.name}\n"
+                f"steps_completed={steps_done}\n"
+                f"total_steps={total_steps}\n"
+                f"current_temperature={current_temp}\n"
+                f"is_temperature_ramping={stage.is_temperature_ramping}\n"
+            )
+            LOGGER.info(
+                f"Saved EQ_INTERRUPTED marker: stage {stage_index}, "
+                f"step {steps_done}/{total_steps}, temp {current_temp} K"
+            )
+
+        # Track steps completed (starting from resume point)
+        steps_done = resume_from_step
+
         # Run simulation with temperature ramping if needed
         if stage.is_temperature_ramping:
             LOGGER.info(
                 f"Temperature ramping: {stage.temperature_start} K -> {stage.temperature_end} K "
                 f"(increment={stage.temperature_increment} K every {stage.temperature_interval} fs)"
             )
-            current_temp = stage.temperature_start
             steps_per_update = int(stage.temperature_interval / timestep_fs)
 
             # Calculate total temperature updates needed
             temp_range = stage.temperature_end - stage.temperature_start
             num_updates = int(temp_range / stage.temperature_increment)
             steps_for_ramping = num_updates * steps_per_update
-            remaining_steps = total_steps - steps_for_ramping
+            remaining_steps_at_final = total_steps - steps_for_ramping
 
-            # Temperature ramping phase
+            # Determine starting temperature (for resume or fresh start)
+            if resume_from_step > 0 and resume_temperature is not None:
+                current_temp = resume_temperature
+                LOGGER.info(
+                    f"Resuming temperature ramp from step {resume_from_step}, "
+                    f"temp {current_temp} K"
+                )
+            else:
+                current_temp = stage.temperature_start
+
+            # Temperature ramping phase — each update is a chunk we can
+            # interrupt between.  Skip chunks already completed on resume.
+            ramp_step_count = 0
             while current_temp < stage.temperature_end:
+                chunk_end = ramp_step_count + steps_per_update
+                if chunk_end <= resume_from_step:
+                    # Already completed this chunk in a previous run
+                    ramp_step_count = chunk_end
+                    current_temp += stage.temperature_increment
+                    continue
+
                 integrator.setTemperature(current_temp * omm_unit.kelvin)
-                self._simulation.step(steps_per_update)
+
+                # If resuming mid-chunk, only run the remainder
+                steps_already = max(0, resume_from_step - ramp_step_count)
+                steps_this_chunk = steps_per_update - steps_already
+                self._simulation.step(steps_this_chunk)
+                steps_done += steps_this_chunk
+                ramp_step_count = chunk_end
                 current_temp += stage.temperature_increment
 
-            # Final temperature - run remaining steps
+                if is_interrupted():
+                    LOGGER.warning(
+                        f"Interrupt during equilibration stage {stage_index} "
+                        f"at step {steps_done}/{total_steps} (ramping, T={current_temp:.1f} K)"
+                    )
+                    _save_eq_interrupted(steps_done, current_temp)
+                    raise GracefulExit(
+                        signal_number=get_interrupt_signal(), steps_completed=steps_done
+                    )
+
+            # Final temperature - run remaining steps in chunks
             integrator.setTemperature(stage.temperature_end * omm_unit.kelvin)
-            if remaining_steps > 0:
+            current_temp = stage.temperature_end
+            steps_at_final_done = steps_done - steps_for_ramping
+            steps_at_final_remaining = max(0, remaining_steps_at_final - steps_at_final_done)
+
+            if steps_at_final_remaining > 0:
                 LOGGER.info(
-                    f"Running {remaining_steps} steps at final temperature {stage.temperature_end} K"
+                    f"Running {steps_at_final_remaining} steps at final "
+                    f"temperature {stage.temperature_end} K"
                 )
-                self._simulation.step(remaining_steps)
+                chunk_size = min(report_interval, steps_at_final_remaining)
+                while steps_at_final_remaining > 0:
+                    this_chunk = min(chunk_size, steps_at_final_remaining)
+                    self._simulation.step(this_chunk)
+                    steps_done += this_chunk
+                    steps_at_final_remaining -= this_chunk
+
+                    if is_interrupted():
+                        LOGGER.warning(
+                            f"Interrupt during equilibration stage {stage_index} "
+                            f"at step {steps_done}/{total_steps} (final temp)"
+                        )
+                        _save_eq_interrupted(steps_done, current_temp)
+                        raise GracefulExit(
+                            signal_number=get_interrupt_signal(),
+                            steps_completed=steps_done,
+                        )
         else:
-            # Constant temperature - just run all steps
-            LOGGER.info(f"Running {total_steps} steps at {stage.temperature} K")
-            self._simulation.step(total_steps)
+            # Constant temperature - run in chunks with signal checking
+            current_temp = stage.temperature
+            steps_remaining = total_steps - resume_from_step
+            if resume_from_step > 0:
+                LOGGER.info(
+                    f"Resuming constant-temp stage from step {resume_from_step}, "
+                    f"{steps_remaining} steps remaining"
+                )
+            else:
+                LOGGER.info(f"Running {total_steps} steps at {stage.temperature} K")
+
+            chunk_size = min(report_interval, steps_remaining)
+            while steps_remaining > 0:
+                this_chunk = min(chunk_size, steps_remaining)
+                self._simulation.step(this_chunk)
+                steps_done += this_chunk
+                steps_remaining -= this_chunk
+
+                if is_interrupted():
+                    LOGGER.warning(
+                        f"Interrupt during equilibration stage {stage_index} "
+                        f"at step {steps_done}/{total_steps}"
+                    )
+                    _save_eq_interrupted(steps_done, current_temp)
+                    raise GracefulExit(
+                        signal_number=get_interrupt_signal(), steps_completed=steps_done
+                    )
 
         # Get final state (including box vectors for NPT stages)
         state = self._simulation.context.getState(
@@ -638,6 +760,12 @@ class SimulationRunner:
         # Save checkpoint
         checkpoint_path = phase_dir / f"{stage_name}_checkpoint.chk"
         self._simulation.saveCheckpoint(str(checkpoint_path))
+
+        # Remove EQ_INTERRUPTED marker if present (stage completed successfully)
+        eq_interrupted_marker = phase_dir / "EQ_INTERRUPTED"
+        if eq_interrupted_marker.exists():
+            eq_interrupted_marker.unlink()
+            LOGGER.info("Removed EQ_INTERRUPTED marker — stage completed successfully")
 
         # Remove position restraints from system for next stage
         if restraint_force_indices:
@@ -679,6 +807,8 @@ class SimulationRunner:
 
         Scans ``equilibration_N_name/`` directories for checkpoint files.
         Stops at the first gap — stages must be contiguous from index 0.
+        An interrupted stage (has ``EQ_INTERRUPTED`` marker) is NOT
+        considered completed and stops the scan.
 
         Parameters
         ----------
@@ -693,12 +823,86 @@ class SimulationRunner:
         completed: List[int] = []
         for i, stage in enumerate(stages):
             stage_name = f"equilibration_{i}_{stage.name}"
-            chk = self._working_dir / stage_name / f"{stage_name}_checkpoint.chk"
-            if chk.exists():
+            stage_dir = self._working_dir / stage_name
+            chk = stage_dir / f"{stage_name}_checkpoint.chk"
+            eq_marker = stage_dir / "EQ_INTERRUPTED"
+            if chk.exists() and not eq_marker.exists():
                 completed.append(i)
             else:
                 break  # Stop at first gap — can't skip stages
         return completed
+
+    def _find_interrupted_eq_stage(
+        self,
+        stages: List["EquilibrationStageConfig"],
+        completed_indices: List[int],
+    ) -> Dict[str, Any] | None:
+        """Check if the next unfinished equilibration stage was interrupted mid-run.
+
+        Looks for an ``EQ_INTERRUPTED`` marker in the stage directory that
+        follows the last completed stage. If found, parses resume metadata.
+
+        Parameters
+        ----------
+        stages : list of EquilibrationStageConfig
+            The full list of stages from the config.
+        completed_indices : list of int
+            Indices of fully completed stages (from ``_find_completed_eq_stages``).
+
+        Returns
+        -------
+        dict or None
+            Dictionary with ``stage_index``, ``steps_completed``, ``total_steps``,
+            and ``current_temperature`` if an interrupted stage is found;
+            ``None`` otherwise.
+        """
+        next_idx = len(completed_indices)
+        if next_idx >= len(stages):
+            return None
+
+        stage = stages[next_idx]
+        stage_name = f"equilibration_{next_idx}_{stage.name}"
+        stage_dir = self._working_dir / stage_name
+        marker_path = stage_dir / "EQ_INTERRUPTED"
+
+        if not marker_path.exists():
+            return None
+
+        # Parse the marker
+        info: Dict[str, Any] = {"stage_index": next_idx}
+        try:
+            text = marker_path.read_text()
+            for line in text.strip().splitlines():
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip()
+                if key == "steps_completed":
+                    info["steps_completed"] = int(value)
+                elif key == "total_steps":
+                    info["total_steps"] = int(value)
+                elif key == "current_temperature":
+                    info["current_temperature"] = float(value)
+                elif key == "is_temperature_ramping":
+                    info["is_temperature_ramping"] = value.lower() == "true"
+        except (ValueError, OSError) as exc:
+            LOGGER.warning(f"Could not parse EQ_INTERRUPTED marker {marker_path}: {exc}")
+            return None
+
+        # Verify checkpoint exists (needed for resume)
+        chk = stage_dir / f"{stage_name}_checkpoint.chk"
+        if not chk.exists():
+            LOGGER.warning(
+                f"EQ_INTERRUPTED marker found for stage {next_idx} but no checkpoint — "
+                f"will restart stage from beginning"
+            )
+            return None
+
+        LOGGER.info(
+            f"Found interrupted equilibration stage {next_idx} ({stage.name}): "
+            f"{info.get('steps_completed', 0)}/{info.get('total_steps', '?')} steps, "
+            f"T={info.get('current_temperature', '?')} K"
+        )
+        return info
 
     def _load_eq_stage_state(
         self,
@@ -792,6 +996,9 @@ class SimulationRunner:
             )
             self._load_eq_stage_state(last_idx, last_stage.name)
 
+        # Check if the next stage was interrupted mid-run (has EQ_INTERRUPTED marker)
+        interrupted_info = self._find_interrupted_eq_stage(stages, completed_indices)
+
         results: Dict[str, Any] = {
             "type": "staged_equilibration",
             "num_stages": len(stages),
@@ -813,9 +1020,34 @@ class SimulationRunner:
                 results["total_duration_ns"] += stage.duration
                 continue
 
-            # Clean up partial stage directory (exists but no checkpoint)
             stage_dir_name = f"equilibration_{i}_{stage.name}"
             partial_dir = self._working_dir / stage_dir_name
+
+            # Check if this stage was interrupted and can be resumed
+            if interrupted_info is not None and interrupted_info["stage_index"] == i:
+                # Resume mid-stage from checkpoint
+                resume_step = interrupted_info.get("steps_completed", 0)
+                resume_temp = interrupted_info.get("current_temperature")
+                LOGGER.info(
+                    f"Resuming interrupted equilibration stage {i} ({stage.name}) "
+                    f"from step {resume_step}"
+                )
+                self._load_eq_stage_state(i, stage.name)
+
+                stage_result = self.run_equilibration_stage(
+                    stage=stage,
+                    reference_positions=reference_positions,
+                    atom_group_resolver=atom_group_resolver,
+                    stage_index=i,
+                    resume_from_step=resume_step,
+                    resume_temperature=resume_temp,
+                )
+                results["stages"].append(stage_result)
+                results["total_duration_ns"] += stage.duration
+                continue
+
+            # Clean up partial stage directory (exists but no checkpoint and
+            # no EQ_INTERRUPTED marker — truly failed, restart from scratch)
             if partial_dir.exists():
                 LOGGER.warning(
                     f"Stage {i} ({stage.name}) directory exists without checkpoint "
@@ -934,6 +1166,15 @@ class SimulationRunner:
         _energy = _state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
         LOGGER.info(f"Production segment {segment_index}: initial PE = {_energy:.2f} kJ/mol")
 
+        # Save system XML early so it exists on disk even if the segment is
+        # hard-killed (SIGKILL / OOM).  This is required for checkpoint-based
+        # recovery: loadCheckpoint() needs a matching System object.  The file
+        # is overwritten at segment completion with the final state.
+        system_xml_path = phase_dir / f"{phase_name}_system.xml"
+        with open(system_xml_path, "w") as f:
+            f.write(XmlSerializer.serialize(self._system))
+        LOGGER.info(f"Saved initial system to {system_xml_path}")
+
         # Set velocities for production
         # - If we have velocities from equilibration, use them (physical continuity)
         # - Otherwise generate new velocities at target temperature
@@ -967,6 +1208,16 @@ class SimulationRunner:
                 density=True,
                 speed=True,
             )
+        )
+
+        # Periodic checkpoint reporter — ensures a .chk file is written every
+        # report_interval steps.  Without this, segment 0 has NO checkpoint on
+        # disk until the very end, so a hard kill (SIGKILL / OOM / node failure)
+        # would lose all progress.  Matches the behaviour already present in
+        # continuation.py for segments >= 1.
+        prod_chk_path = phase_dir / f"{phase_name}_checkpoint.chk"
+        self._simulation.reporters.append(
+            CheckpointReporter(str(prod_chk_path), report_interval)
         )
 
         # Save topology

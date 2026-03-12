@@ -766,6 +766,7 @@ def run_segment(
     """
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.simulation.progress import (
+        SegmentStatus,
         SimulationProgress,
         SimulationStatus,
         get_next_segment_info,
@@ -813,6 +814,27 @@ def run_segment(
     if progress.is_complete:
         click.echo("Simulation already complete — nothing to do.")
         sys.exit(0)
+
+    # ---- Handle FAILED segments before determining next work ----
+    # A FAILED segment (no state.xml, no INTERRUPTED, no checkpoint) means
+    # no recoverable state exists.  Clean up the directory and remove the
+    # record so the segment can be retried from the appropriate starting
+    # point (initial build if segment 0, or continuation from the last good
+    # segment otherwise).
+    import shutil
+
+    failed_segments = [s for s in progress.segments if s.status == SegmentStatus.FAILED]
+    for failed in failed_segments:
+        failed_dir = working_dir / f"production_{failed.index}"
+        if failed_dir.exists():
+            click.echo(
+                f"Cleaning up failed segment {failed.index} "
+                f"(no recoverable state) — will retry"
+            )
+            shutil.rmtree(failed_dir)
+        progress.segments = [s for s in progress.segments if s.index != failed.index]
+    if failed_segments:
+        save_progress(working_dir, progress)
 
     # Determine what to run next
     seg_info = get_next_segment_info(progress, total_steps, total_samples)

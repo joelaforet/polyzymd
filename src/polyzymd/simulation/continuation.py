@@ -170,6 +170,11 @@ class ContinuationManager:
             ``use_checkpoint`` is set to ``True`` to signal that
             ``load_previous_state`` should use ``loadCheckpoint()`` instead
             of ``loadState()``.
+
+            A third recovery path handles hard-killed segments (SIGKILL, OOM,
+            node failure) where neither ``state.xml`` nor ``interrupted_*``
+            files exist, but the periodic ``checkpoint.chk`` and early-saved
+            ``system.xml`` are on disk.
         """
         prev_dir = self._working_dir / f"production_{self._prev_segment}"
 
@@ -183,6 +188,7 @@ class ContinuationManager:
         use_checkpoint = False
 
         if not state_path.exists() and interrupted_system.exists():
+            # Graceful interruption: signal handler saved interrupted_* files
             LOGGER.info(
                 f"Previous segment {self._prev_segment} was interrupted — "
                 f"recovering from checkpoint + interrupted system XML"
@@ -190,6 +196,22 @@ class ContinuationManager:
             system_path = interrupted_system
             checkpoint_path = prev_dir / "interrupted_checkpoint.chk"
             use_checkpoint = True
+        elif not state_path.exists() and checkpoint_path.exists():
+            # Hard kill: no state XML and no interrupted files, but the
+            # periodic CheckpointReporter wrote a .chk file and system.xml
+            # was saved at segment start.
+            if system_path.exists():
+                LOGGER.warning(
+                    f"Previous segment {self._prev_segment} appears hard-killed — "
+                    f"no state.xml or interrupted files, recovering from "
+                    f"periodic checkpoint + early-saved system XML"
+                )
+                use_checkpoint = True
+            else:
+                LOGGER.error(
+                    f"Previous segment {self._prev_segment} has a checkpoint "
+                    f"but no system.xml — cannot recover"
+                )
 
         return {
             "state": state_path,
@@ -220,11 +242,12 @@ class ContinuationManager:
 
         # Check that required files exist
         for name, path in paths.items():
-            if name == "checkpoint":
-                continue
             if name == "state" and use_checkpoint:
-                # State XML doesn't exist for interrupted segments; we'll
-                # use the checkpoint instead in run_segment()
+                # State XML doesn't exist for interrupted/hard-killed segments;
+                # we'll use the checkpoint instead in run_segment()
+                continue
+            if name == "checkpoint" and not use_checkpoint:
+                # Checkpoint only required when recovering from interruption
                 continue
             if not path.exists():
                 raise FileNotFoundError(f"Required file not found: {path}")
@@ -565,6 +588,15 @@ class ContinuationManager:
         # Create output directory
         output_dir = self._working_dir / f"production_{self._segment_index}"
         output_dir.mkdir(exist_ok=True)
+
+        # Save system XML early so it exists on disk even if the segment is
+        # hard-killed (SIGKILL / OOM).  This is required for checkpoint-based
+        # recovery: loadCheckpoint() needs a matching System object.  The file
+        # is overwritten at segment completion by _save_final_state().
+        system_xml_path = output_dir / f"production_{self._segment_index}_system.xml"
+        with open(system_xml_path, "w") as f:
+            f.write(XmlSerializer.serialize(self._system))
+        LOGGER.info(f"Saved initial system to {system_xml_path}")
 
         # Calculate total steps
         total_steps = int(duration_ns * 1e6 / timestep_fs)
