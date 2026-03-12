@@ -513,9 +513,7 @@ def _scan_segment_dir(
             # signal handler never fired.  Treat as interrupted so the
             # continuation manager can recover from the checkpoint.
             steps_completed = (
-                _estimate_steps_from_csv(state_data_csv)
-                if state_data_csv.exists()
-                else 0
+                _estimate_steps_from_csv(state_data_csv) if state_data_csv.exists() else 0
             )
             duration_ns = (steps_completed * timestep_fs) / 1e6
             LOGGER.warning(

@@ -600,9 +600,7 @@ class SimulationRunner:
 
         # Periodic checkpoint reporter so state survives hard kills
         eq_chk_path = phase_dir / f"{stage_name}_checkpoint.chk"
-        self._simulation.reporters.append(
-            CheckpointReporter(str(eq_chk_path), report_interval)
-        )
+        self._simulation.reporters.append(CheckpointReporter(str(eq_chk_path), report_interval))
 
         # Install signal handlers for graceful shutdown
         from polyzymd.simulation.signals import (
@@ -651,8 +649,7 @@ class SimulationRunner:
             if resume_from_step > 0 and resume_temperature is not None:
                 current_temp = resume_temperature
                 LOGGER.info(
-                    f"Resuming temperature ramp from step {resume_from_step}, "
-                    f"temp {current_temp} K"
+                    f"Resuming temperature ramp from step {resume_from_step}, temp {current_temp} K"
                 )
             else:
                 current_temp = stage.temperature_start
@@ -1216,9 +1213,7 @@ class SimulationRunner:
         # would lose all progress.  Matches the behaviour already present in
         # continuation.py for segments >= 1.
         prod_chk_path = phase_dir / f"{phase_name}_checkpoint.chk"
-        self._simulation.reporters.append(
-            CheckpointReporter(str(prod_chk_path), report_interval)
-        )
+        self._simulation.reporters.append(CheckpointReporter(str(prod_chk_path), report_interval))
 
         # Save topology
         with open(pdb_path, "w") as f:

@@ -828,8 +828,7 @@ def run_segment(
         failed_dir = working_dir / f"production_{failed.index}"
         if failed_dir.exists():
             click.echo(
-                f"Cleaning up failed segment {failed.index} "
-                f"(no recoverable state) — will retry"
+                f"Cleaning up failed segment {failed.index} (no recoverable state) — will retry"
             )
             shutil.rmtree(failed_dir)
         progress.segments = [s for s in progress.segments if s.index != failed.index]
@@ -1490,9 +1489,7 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     "--pixi-env",
     default=None,
     type=click.Choice(["cuda-12-4", "cuda-12-6"]),
-    help=(
-        "Pixi environment for the recovery SLURM job. If omitted, inferred from --preset."
-    ),
+    help=("Pixi environment for the recovery SLURM job. If omitted, inferred from --preset."),
 )
 def recover(
     config: str,
