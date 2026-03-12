@@ -36,7 +36,7 @@ COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
 Run the generator script to create the SDF file with embedded charges:
 
 ```bash
-conda activate polymerist-env
+pixi shell -e build
 cd /path/to/polyzymd
 python src/polyzymd/data/solvents/_generator.py
 ```

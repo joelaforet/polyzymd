@@ -317,13 +317,14 @@ simulation_phases:
 ModuleNotFoundError in SLURM output
 ```
 
-**Solution:** Ensure your job script loads conda:
+**Solution:** Ensure your job script activates the pixi environment. PolyzyMD-generated
+scripts handle this automatically via `pixi shell-hook`. If you are editing scripts
+manually:
 
 1. Edit generated script in `job_scripts/`
-2. Add at the top:
+2. Add the pixi activation:
    ```bash
-   module load anaconda
-   source activate polymerist-env
+   eval "$(pixi shell-hook -e cuda-12-4 --manifest-path /path/to/polyzymd/pixi.toml)"
    ```
 
 ### "Permission denied on scratch"

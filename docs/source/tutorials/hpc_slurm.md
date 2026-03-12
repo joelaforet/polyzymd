@@ -1072,19 +1072,17 @@ module spider miniforge
 module spider anaconda
 ```
 
-You may need to edit the generated scripts to use a different module:
+You may need to verify that pixi is available in your job environment.
+PolyzyMD-generated scripts use `pixi shell-hook` to activate the correct
+environment automatically. If pixi is not found, ensure it is installed
+on the cluster (see the [Installation Guide](installation.md)):
+
 ```bash
-# Instead of:
-module load miniforge
-mamba activate polymerist-env
+# Check pixi is available
+which pixi
 
-# Try:
-module load anaconda
-conda activate polymerist-env
-
-# Or source conda directly:
-source /curc/sw/anaconda3/latest/etc/profile.d/conda.sh
-conda activate polymerist-env
+# If not installed, install it:
+curl -fsSL https://pixi.sh/install.sh | sh
 ```
 
 ### "Out of memory"
