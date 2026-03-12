@@ -76,6 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pixi.toml` trimmed to actual runtime dependencies with three environments:
   `build` (no CUDA), `cuda-12-4` (CU Boulder Blanca), `cuda-12-6`
   (PSC Bridges2).
+- Added `openbabel` to `pixi.toml` conda dependencies. Required at import
+  time by `polymerist.polymers.building.mbconvert`, which `polyzymd build`
+  triggers unconditionally.
 
 ### Fixed
 
@@ -100,6 +103,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at the start of production, enabling checkpoint-based recovery.
 - Stale `.pyc` files from feature branches no longer cause import errors
   after branch switching (resolved by merging both feature branches).
+- **Removed `espaloma-charge` from `pixi.toml`** to prevent a broken import
+  chain. `polymerist` eagerly imports `espaloma_charge` at module level
+  (in `_toolkits.py`), which pulls in `dgl`, which fails to load
+  `libgraphbolt` when dgl and PyTorch versions are mismatched. Since
+  polyzymd uses NAGL (not espaloma) for charge assignment, and NAGL >=0.2
+  has a pure-PyTorch fallback that works without dgl, removing
+  `espaloma-charge` eliminates the crash with no loss of functionality.
 
 ### Documentation
 

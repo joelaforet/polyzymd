@@ -76,6 +76,7 @@ openff-nagl-models  = ">=2024.0"
 
 # Molecular building
 mbuild              = ">=1.2"        # required by polymerist
+openbabel           = ">=3.1"        # required at import time by polymerist.polymers.building
 rdkit               = ">=2023.09"
 pdbfixer            = ">=1.9"        # conditional import in polyzymd
 packmol             = ">=20.0"       # called as subprocess by mbuild/polymerist
@@ -88,7 +89,12 @@ pytest = ">=9.0.2,<10"
 [feature.base.pypi-dependencies]
 polyzymd            = { path = ".", editable = true }
 polymerist          = ">=1.0.1"
-espaloma-charge     = ">=0.0.3"      # conditional import in polyzymd
+# NOTE: espaloma-charge is intentionally excluded. polymerist eagerly imports
+# it at module level (_toolkits.py), which triggers a broken dgl -> graphbolt
+# import chain that crashes when dgl and PyTorch versions are mismatched.
+# polyzymd uses NAGL (not espaloma) for charge assignment; NAGL >=0.2 has a
+# pure-PyTorch fallback that works without dgl. Users who need espaloma can
+# install it manually: pip install espaloma-charge
 
 
 # =============================================================================
