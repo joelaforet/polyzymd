@@ -669,13 +669,19 @@ To diagnose issues:
 
 ### Checking Progress
 
-Use `check-progress` to get a quick status report:
+For a visual overview of **all replicates** at once:
+
+```bash
+polyzymd status -c config.yaml
+```
+
+Use `check-progress` to check a single replicate (used by SLURM scripts):
 
 ```bash
 polyzymd check-progress -c config.yaml -r 1
 ```
 
-Or for a more detailed view with per-segment status:
+Or for a detailed per-segment view with recovery options:
 
 ```bash
 polyzymd recover -c config.yaml -r 1

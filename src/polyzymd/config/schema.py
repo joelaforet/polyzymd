@@ -1214,6 +1214,49 @@ class SimulationConfig(BaseModel):
         """
         return self.output.projects_directory
 
+    def discover_replicate_dirs(self) -> list[tuple[int, Path]]:
+        """Auto-detect all replicate directories on disk.
+
+        Builds a glob pattern from the naming template with
+        ``replicate="*"`` and scans the effective scratch directory.
+
+        Returns:
+            Sorted list of ``(replicate_number, directory_path)`` tuples.
+        """
+        import re
+
+        # Build the same template values as _format_run_directory_name
+        # but substitute replicate with "*" for globbing.
+        polymer_type = "none"
+        if self.polymers and self.polymers.enabled:
+            probs = {m.label: m.probability for m in self.polymers.monomers}
+            sorted_labels = sorted(probs.keys())
+            composition = "_".join(f"{lbl}{probs[lbl] * 100:.0f}" for lbl in sorted_labels)
+            polymer_type = f"{self.polymers.type_prefix}_{composition}"
+
+        substrate_name = self.substrate.name if self.substrate else "apo"
+
+        glob_pattern = self.output.naming_template.format(
+            enzyme=self.enzyme.name,
+            substrate=substrate_name.replace("-", ""),
+            polymer_type=polymer_type,
+            temperature=int(self.thermodynamics.temperature),
+            replicate="*",
+            duration=int(self.simulation_phases.production.duration),
+        )
+
+        scratch = self.output.effective_scratch_directory
+        results: list[tuple[int, Path]] = []
+        for path in scratch.glob(glob_pattern):
+            if not path.is_dir():
+                continue
+            match = re.search(r"run(\d+)$", path.name)
+            if match:
+                results.append((int(match.group(1)), path))
+
+        results.sort(key=lambda t: t[0])
+        return results
+
     def _format_run_directory_name(self, replicate: int) -> str:
         """Format the run directory name for a replicate.
 

@@ -376,3 +376,67 @@ def setup_colored_logging(
 
     root.setLevel(level)
     root.addHandler(handler)
+
+
+# ---------------------------------------------------------------------------
+# Progress bar rendering for ``polyzymd status``
+# ---------------------------------------------------------------------------
+
+# Status → (RGB, xterm-256 index, basic ANSI code)
+_STATUS_COLORS: dict[str, tuple[tuple[int, int, int], int, str]] = {
+    "completed": ((80, 200, 120), 78, "\033[92m"),  # green
+    "running": ((100, 180, 255), 75, "\033[96m"),  # blue/cyan
+    "interrupted": ((255, 200, 50), 220, "\033[93m"),  # amber
+    "failed": ((255, 80, 80), 196, "\033[91m"),  # red
+    "not_started": ((128, 128, 128), 244, "\033[90m"),  # dim gray
+    "not_found": ((128, 128, 128), 244, "\033[90m"),  # dim gray
+}
+
+_FILLED_CHAR = "\u2588"  # █
+_EMPTY_CHAR = "\u2591"  # ░
+
+
+def _colorize(text: str, status: str) -> str:
+    """Wrap *text* in ANSI color escapes based on *status* and terminal support."""
+    level = get_color_support()
+    if level == TerminalColorSupport.NONE:
+        return text
+
+    rgb, xterm, basic = _STATUS_COLORS.get(status, _STATUS_COLORS["not_found"])
+
+    if level == TerminalColorSupport.TRUECOLOR:
+        r, g, b = rgb
+        return f"\033[38;2;{r};{g};{b}m{text}\033[0m"
+    if level == TerminalColorSupport.EXTENDED:
+        return f"\033[38;5;{xterm}m{text}\033[0m"
+    return f"{basic}{text}\033[0m"
+
+
+def render_progress_bar(
+    fraction: float,
+    status: str,
+    *,
+    width: int = 40,
+) -> str:
+    """Render a colored Unicode progress bar.
+
+    Parameters
+    ----------
+    fraction : float
+        Completion fraction, 0.0 – 1.0.
+    status : str
+        Simulation status string (e.g. ``"completed"``, ``"running"``).
+        Controls the bar color.
+    width : int
+        Character width of the bar (default 40).
+
+    Returns
+    -------
+    str
+        A string of *width* characters (``█`` for filled, ``░`` for empty)
+        wrapped in ANSI color escapes appropriate for the terminal.
+    """
+    fraction = max(0.0, min(1.0, fraction))
+    filled = int(fraction * width)
+    bar = _FILLED_CHAR * filled + _EMPTY_CHAR * (width - filled)
+    return _colorize(bar, status)

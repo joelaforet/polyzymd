@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`polyzymd status` CLI command.** Displays a compact progress overview
+  for all replicates of a simulation with colored Unicode progress bars,
+  completion percentages, nanosecond progress, and per-replicate status.
+  Auto-detects replicate directories via the naming template. Read-only
+  (uses `load_progress()` only). (`cli/main.py`, `cli/colors.py`,
+  `config/schema.py`)
 - **Per-module colored logging.** Each module group (builders, simulation,
   workflow, exporters, etc.) gets a distinct near-white tinted color for
   INFO/DEBUG log messages, making it easy to visually distinguish which

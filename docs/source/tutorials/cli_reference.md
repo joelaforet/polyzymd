@@ -453,7 +453,61 @@ polyzymd check-progress -c config.yaml -r 1
 ### Notes
 
 - This command is called by the generated SLURM scripts, not typically by users directly
-- For interactive progress checking, `polyzymd recover` provides a more detailed view
+- For a visual overview of all replicates, use `polyzymd status` instead
+
+---
+
+(cli-status)=
+## polyzymd status
+
+Show a compact progress overview for all replicates of a simulation.
+Auto-detects replicate directories on disk and displays colored progress
+bars with completion percentage, nanoseconds completed, and simulation
+status.
+
+### Usage
+
+```bash
+polyzymd status -c config.yaml
+```
+
+### Options
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `-c, --config PATH` | Yes | Path to YAML configuration file |
+
+### Output Format
+
+```
+  polyzymd status — fnIII_apo_OEGMA-SBMA_A50_B50_100ns_310K
+  ──────────────────────────────────────────────────────
+
+  run1  ██████████████████████████████████████████  100.0%  100.0/100.0 ns  completed
+  run2  █████████████████████░░░░░░░░░░░░░░░░░░░░░   50.2%   50.2/100.0 ns  running
+  run3  ███████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░   35.0%   35.0/100.0 ns  interrupted
+  run4  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    0.0%    0.0/100.0 ns  not_started
+
+  1/4 need attention (recover with: polyzymd recover -c config.yaml -r <N> --submit)
+```
+
+### Status Colors
+
+| Status | Color | Meaning |
+|--------|-------|---------|
+| `completed` | Green | Production run finished |
+| `running` | Cyan | Currently executing |
+| `interrupted` | Amber | Stalled — needs `polyzymd recover` |
+| `failed` | Red | Error occurred |
+| `not_started` | Gray | Directory exists but no progress data |
+| `not found` | Gray | Expected directory not on disk |
+
+### Notes
+
+- This is a **read-only** command — it only reads `progress.json` files
+- Replicate directories are auto-detected via the naming template in the config
+- The command is a one-shot snapshot (prints and exits)
+- Use `polyzymd recover -c config.yaml -r <N> --submit` to resume interrupted replicates
 
 ---
 

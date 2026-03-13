@@ -1222,6 +1222,128 @@ def check_progress(
 
 
 # =============================================================================
+# Status Command
+# =============================================================================
+
+
+@cli.command()
+@click.option(
+    "-c",
+    "--config",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to YAML configuration file",
+)
+def status(config: str) -> None:
+    """Show progress overview for all replicates.
+
+    Auto-detects replicate directories and displays a compact progress
+    summary with colored bars, completion percentage, ns progress, and
+    simulation status for each replicate.
+
+    \b
+    Example:
+        polyzymd status -c config.yaml
+    """
+    from polyzymd.cli.colors import render_progress_bar
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.simulation.progress import SimulationStatus, load_progress
+
+    try:
+        sim_config = SimulationConfig.from_yaml(config)
+    except Exception as e:
+        click.echo(click.style(f"Error: Failed to load config: {e}", fg="red"), err=True)
+        sys.exit(1)
+
+    # Total production time from config
+    total_ns = sim_config.simulation_phases.production.duration
+
+    # Build a human-readable system name from the directory template
+    # (format with replicate=1, then strip the trailing "_run1")
+    dir_name = sim_config._format_run_directory_name(1)
+    system_name = dir_name.rsplit("_run", 1)[0] if "_run" in dir_name else dir_name
+
+    # Discover replicate directories
+    replicates = sim_config.discover_replicate_dirs()
+
+    # Also include configured replicates that don't exist on disk yet
+    # (they show as "not found")
+    found_nums = {num for num, _ in replicates}
+    rep_map: dict[int, Path | None] = dict(replicates)
+
+    # If no replicates found on disk, show a message
+    if not replicates:
+        click.echo(click.style(f"  polyzymd status — {system_name}", bold=True))
+        click.echo(f"  {'─' * 50}")
+        click.echo()
+        click.echo("  No replicate directories found.")
+        click.echo(
+            f"  Expected pattern: {sim_config._format_run_directory_name(1).rsplit('1', 1)[0]}*"
+        )
+        click.echo(f"  In: {sim_config.output.effective_scratch_directory}")
+        sys.exit(0)
+
+    # Header
+    click.echo()
+    click.echo(click.style(f"  polyzymd status — {system_name}", bold=True))
+    click.echo(f"  {'─' * 50}")
+    click.echo()
+
+    # Determine the widest replicate label for alignment
+    max_rep = max(found_nums)
+    label_width = len(f"run{max_rep}")
+
+    need_attention = 0
+
+    for rep_num, rep_path in sorted(rep_map.items()):
+        label = f"run{rep_num}"
+
+        if rep_path is None:
+            # Directory not found on disk
+            frac = 0.0
+            completed_ns = 0.0
+            status_str = "not_found"
+            status_display = "not found"
+        else:
+            progress = load_progress(rep_path)
+            if progress is None:
+                frac = 0.0
+                completed_ns = 0.0
+                status_str = "not_started"
+                status_display = SimulationStatus.NOT_STARTED.value
+            else:
+                frac = progress.fraction_complete()
+                completed_ns = progress.time_completed_ns()
+                status_val = progress.status
+                status_str = status_val.value
+                status_display = status_val.value
+
+        bar = render_progress_bar(frac, status_str)
+        pct = frac * 100
+
+        # Count replicates needing attention
+        if status_str in ("interrupted", "failed", "not_started", "not_found"):
+            need_attention += 1
+
+        # Format: "  run1  ████░░░░  100.0%  100.0/100.0 ns  completed"
+        click.echo(
+            f"  {label:<{label_width}}  {bar}  {pct:5.1f}%  "
+            f"{completed_ns:6.1f}/{total_ns:.1f} ns  {status_display}"
+        )
+
+    click.echo()
+    total_reps = len(rep_map)
+    if need_attention > 0:
+        click.echo(
+            f"  {need_attention}/{total_reps} need attention "
+            f"(recover with: polyzymd recover -c {config} -r <N> --submit)"
+        )
+    else:
+        click.echo(click.style(f"  All {total_reps} replicates completed!", fg="green"))
+    click.echo()
+
+
+# =============================================================================
 # Validate Command
 # =============================================================================
 
