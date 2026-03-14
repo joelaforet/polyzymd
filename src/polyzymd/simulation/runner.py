@@ -1096,6 +1096,7 @@ class SimulationRunner:
         output_prefix: str = "production",
         segment_index: int = 0,
         report_interval: int | None = None,
+        checkpoint_interval_s: float = 60.0,
     ) -> Dict[str, Any]:
         """Run NPT production simulation.
 
@@ -1113,6 +1114,10 @@ class SimulationRunner:
             report_interval: Fixed reporter interval in steps. When provided,
                 this overrides the per-segment ``total_steps // num_samples``
                 calculation to keep frame spacing uniform across segments.
+            checkpoint_interval_s: Wall-time interval in seconds between
+                portable restart checkpoints.  Also controls how frequently
+                the loop checks for SLURM preemption signals.  Set to 0 to
+                disable wall-time checkpoints (reverts to legacy behaviour).
 
         Returns:
             Dictionary with phase results.
@@ -1301,6 +1306,7 @@ class SimulationRunner:
             install_handlers,
             is_interrupted,
             save_interrupted_state,
+            save_restart_checkpoint,
         )
 
         install_handlers()
@@ -1310,25 +1316,78 @@ class SimulationRunner:
         # from interrupted ones.
         self._write_segment_started(segment_index, total_steps)
 
-        # Run simulation in chunks so we can check for interrupt signals
+        # Run simulation with adaptive sub-chunks for interrupt responsiveness
+        # and periodic wall-time restart checkpoints for preemption resilience.
         LOGGER.info(f"Running {total_steps} steps...")
-        chunk_size = min(report_interval, total_steps)
         steps_done = 0
         import time as _time
 
         from polyzymd.simulation.progress import PROGRESS_UPDATE_INTERVAL_SECONDS
 
         _last_progress_write = _time.monotonic()
+        _last_checkpoint_write = _time.monotonic()
+        _loop_start = _time.monotonic()
+
+        # Adaptive sub-chunk sizing: start with report_interval (the original
+        # chunk_size).  After the first checkpoint interval elapses, measure
+        # actual steps/second and adapt sub_chunk to target
+        # checkpoint_interval / 4 seconds (~15s worth of steps).  This
+        # ensures ~4 interrupt checks per checkpoint interval regardless of
+        # system size or hardware speed.
+        sub_chunk = min(report_interval, total_steps)
+        _adapted = False
+
         try:
             while steps_done < total_steps:
                 remaining = total_steps - steps_done
-                this_chunk = min(chunk_size, remaining)
+                this_chunk = min(sub_chunk, remaining)
                 self._simulation.step(this_chunk)
                 steps_done += this_chunk
 
+                _now = _time.monotonic()
+
+                # Adaptive sub-chunk calibration (once, after first interval)
+                if (
+                    not _adapted
+                    and checkpoint_interval_s > 0
+                    and (_now - _loop_start) >= checkpoint_interval_s
+                ):
+                    elapsed = _now - _loop_start
+                    steps_per_sec = steps_done / elapsed if elapsed > 0 else 1.0
+                    # Target sub-chunk duration = checkpoint_interval / 4
+                    target_seconds = checkpoint_interval_s / 4.0
+                    new_sub_chunk = max(10, int(steps_per_sec * target_seconds))
+                    # Sub-chunk must be a divisor-friendly size relative to
+                    # report_interval to avoid misaligned reporter writes.
+                    # Round down to the nearest multiple of report_interval,
+                    # or use report_interval itself if it's already smaller.
+                    if new_sub_chunk >= report_interval:
+                        new_sub_chunk = report_interval
+                    else:
+                        # Ensure sub_chunk divides evenly into report_interval
+                        # so reporters fire at exact multiples.
+                        # Find largest divisor of report_interval <= new_sub_chunk
+                        best = new_sub_chunk
+                        for candidate in [
+                            report_interval // k
+                            for k in range(1, report_interval // max(1, new_sub_chunk) + 2)
+                        ]:
+                            if candidate <= new_sub_chunk and report_interval % candidate == 0:
+                                best = candidate
+                                break
+                        new_sub_chunk = max(10, best)
+
+                    if new_sub_chunk != sub_chunk:
+                        LOGGER.info(
+                            f"Adaptive sub-chunk: {sub_chunk} -> {new_sub_chunk} steps "
+                            f"(~{new_sub_chunk / steps_per_sec:.1f}s at "
+                            f"{steps_per_sec:.0f} steps/s)"
+                        )
+                        sub_chunk = new_sub_chunk
+                    _adapted = True
+
                 # Periodically update RUNNING record so check-progress
                 # can display real-time remaining nanoseconds.
-                _now = _time.monotonic()
                 if _now - _last_progress_write >= PROGRESS_UPDATE_INTERVAL_SECONDS:
                     self._update_progress_running(
                         segment_index=segment_index,
@@ -1336,6 +1395,18 @@ class SimulationRunner:
                         timestep_fs=timestep_fs,
                     )
                     _last_progress_write = _now
+
+                # Wall-time restart checkpoint
+                if (
+                    checkpoint_interval_s > 0
+                    and (_now - _last_checkpoint_write) >= checkpoint_interval_s
+                    and steps_done < total_steps  # skip if we're about to finish
+                ):
+                    save_restart_checkpoint(
+                        simulation=self._simulation,
+                        output_dir=phase_dir,
+                    )
+                    _last_checkpoint_write = _now
 
                 if is_interrupted():
                     LOGGER.warning(f"Interrupt detected at step {steps_done}/{total_steps}")

@@ -196,14 +196,120 @@ class TestGetPreviousPaths:
         assert paths["state"].exists()
         assert "state.xml" in str(paths["state"])
 
-    def test_graceful_interrupt_path(self, tmp_path):
-        """Gracefully interrupted: interrupted_* files → checkpoint recovery."""
+    def test_graceful_interrupt_prefers_state_xml(self, tmp_path):
+        """Gracefully interrupted with interrupted_state.xml → portable state recovery."""
         _write_interrupted_segment(tmp_path, 0)
         mgr = self._make_manager(tmp_path, 0)
         paths = mgr._get_previous_paths()
-        assert paths["use_checkpoint"] is True
+        # New behaviour: interrupted_state.xml exists → use loadState (portable)
+        assert paths["use_checkpoint"] is False
+        assert "interrupted_state.xml" in str(paths["state"])
         assert "interrupted_system.xml" in str(paths["system"])
+
+    def test_graceful_interrupt_legacy_chk_only(self, tmp_path):
+        """Gracefully interrupted with only .chk (no state.xml) → checkpoint recovery."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir(parents=True, exist_ok=True)
+        # Legacy format: only .chk and system.xml, no interrupted_state.xml
+        (seg_dir / "interrupted_checkpoint.chk").write_bytes(b"\x00" * 16)
+        (seg_dir / "interrupted_system.xml").write_text("<System/>")
+        (seg_dir / "INTERRUPTED").write_text(
+            "segment_index=0\nsteps_completed=3000000\n"
+            "total_steps=5000000\nremaining_steps=2000000\n"
+        )
+        params = {
+            "__values__": {
+                "integ_params": {
+                    "__values__": {
+                        "num_samples": 100,
+                        "time_step": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": 2.0, "unit": "femtosecond"},
+                        },
+                        "total_time": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": 10.0, "unit": "nanosecond"},
+                        },
+                    }
+                },
+                "thermo_params": {"__values__": {}},
+            }
+        }
+        (seg_dir / "production_0_parameters.json").write_text(json.dumps(params))
+
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is True
         assert "interrupted_checkpoint.chk" in str(paths["checkpoint"])
+        assert "interrupted_system.xml" in str(paths["system"])
+
+    def test_restart_checkpoint_recovery(self, tmp_path):
+        """Wall-time restart checkpoint: restart_state.xml → portable state recovery."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir(parents=True, exist_ok=True)
+        # No normal state.xml, no interrupted files, but restart checkpoint exists
+        (seg_dir / "restart_state.xml").write_text("<State/>")
+        (seg_dir / "restart_system.xml").write_text("<System/>")
+        params = {
+            "__values__": {
+                "integ_params": {
+                    "__values__": {
+                        "num_samples": 100,
+                        "time_step": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": 2.0, "unit": "femtosecond"},
+                        },
+                        "total_time": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": 10.0, "unit": "nanosecond"},
+                        },
+                    }
+                },
+                "thermo_params": {"__values__": {}},
+            }
+        }
+        (seg_dir / "production_0_parameters.json").write_text(json.dumps(params))
+
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is False
+        assert "restart_state.xml" in str(paths["state"])
+        assert "restart_system.xml" in str(paths["system"])
+
+    def test_interrupted_state_preferred_over_restart(self, tmp_path):
+        """When both interrupted_state.xml and restart_state.xml exist,
+        interrupted_state.xml is preferred (more recent)."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir(parents=True, exist_ok=True)
+        (seg_dir / "interrupted_state.xml").write_text("<State-interrupted/>")
+        (seg_dir / "interrupted_system.xml").write_text("<System-interrupted/>")
+        (seg_dir / "restart_state.xml").write_text("<State-restart/>")
+        (seg_dir / "restart_system.xml").write_text("<System-restart/>")
+        params = {
+            "__values__": {
+                "integ_params": {
+                    "__values__": {
+                        "num_samples": 100,
+                        "time_step": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": 2.0, "unit": "femtosecond"},
+                        },
+                        "total_time": {
+                            "__class__": "Quantity",
+                            "__values__": {"value": 10.0, "unit": "nanosecond"},
+                        },
+                    }
+                },
+                "thermo_params": {"__values__": {}},
+            }
+        }
+        (seg_dir / "production_0_parameters.json").write_text(json.dumps(params))
+
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is False
+        assert "interrupted_state.xml" in str(paths["state"])
+        assert "interrupted_system.xml" in str(paths["system"])
 
     def test_hard_kill_checkpoint_recovery(self, tmp_path):
         """Hard-killed: only checkpoint + system.xml → checkpoint recovery."""
@@ -263,15 +369,35 @@ class TestLoadPreviousStateValidation:
             mgr.load_previous_state()
 
     def test_checkpoint_recovery_validates_checkpoint(self, tmp_path):
-        """For checkpoint recovery, checkpoint.chk must exist."""
+        """Legacy format: only interrupted_system.xml + interrupted_checkpoint.chk
+        (no interrupted_state.xml) → checkpoint recovery validates .chk exists."""
         seg_dir = tmp_path / "production_0"
         seg_dir.mkdir()
-        # Has interrupted_system.xml but no checkpoint
+        # Has interrupted_system.xml and interrupted_checkpoint.chk but no state XML
         (seg_dir / "interrupted_system.xml").write_text("<System/>")
+        # No interrupted_checkpoint.chk — should fail validation
         (seg_dir / "production_0_parameters.json").write_text("{}")
         mgr = self._make_manager(tmp_path, 0)
-        with pytest.raises(FileNotFoundError, match="checkpoint"):
+        # Without interrupted_state.xml or interrupted_checkpoint.chk,
+        # the recovery path doesn't match case 4.  Falls through to
+        # no-match → state_path points to non-existent production_0_state.xml.
+        with pytest.raises(FileNotFoundError, match="state"):
             mgr.load_previous_state()
+
+    def test_legacy_chk_recovery_validates_checkpoint_exists(self, tmp_path):
+        """Legacy format: interrupted_system.xml + interrupted_checkpoint.chk
+        present → checkpoint recovery mode."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        (seg_dir / "interrupted_system.xml").write_text("<System/>")
+        (seg_dir / "interrupted_checkpoint.chk").write_bytes(b"\x00")
+        (seg_dir / "production_0_parameters.json").write_text("{}")
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        # Verify case 4: legacy .chk recovery
+        assert paths["use_checkpoint"] is True
+        assert "interrupted_checkpoint.chk" in str(paths["checkpoint"])
+        assert "interrupted_system.xml" in str(paths["system"])
 
 
 # ---------------------------------------------------------------------------

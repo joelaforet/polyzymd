@@ -907,6 +907,7 @@ def run_segment(
                 num_samples=samples_to_write,
                 timestep_fs=timestep_fs,
                 report_interval=report_interval,
+                checkpoint_interval_s=prod.checkpoint_interval,
             )
         else:
             # ---- CONTINUATION: load previous state, run next segment ----
@@ -917,6 +918,7 @@ def run_segment(
                 num_samples=samples_to_write,
                 timestep_fs=timestep_fs,
                 report_interval=report_interval,
+                checkpoint_interval_s=prod.checkpoint_interval,
             )
 
         colored_echo(f"Segment {seg_idx} completed successfully.", phase="simulation")
@@ -950,6 +952,7 @@ def _run_initial_segment(
     num_samples: int,
     timestep_fs: float,
     report_interval: int | None = None,
+    checkpoint_interval_s: float = 60.0,
 ) -> None:
     """Build system, equilibrate, and run the first production segment.
 
@@ -972,6 +975,8 @@ def _run_initial_segment(
     report_interval : int or None
         Fixed reporter interval in steps. Overrides per-segment
         interval calculation when provided.
+    checkpoint_interval_s : float
+        Wall-time interval in seconds between restart checkpoints.
     """
     from polyzymd.simulation.runner import SimulationRunner
 
@@ -1082,6 +1087,7 @@ def _run_initial_segment(
         pressure=pressure,
         segment_index=0,
         report_interval=report_interval,
+        checkpoint_interval_s=checkpoint_interval_s,
     )
 
 
@@ -1092,6 +1098,7 @@ def _run_continuation_segment(
     num_samples: int,
     timestep_fs: float,
     report_interval: int | None = None,
+    checkpoint_interval_s: float = 60.0,
 ) -> None:
     """Continue from the last completed segment.
 
@@ -1110,6 +1117,8 @@ def _run_continuation_segment(
     report_interval : int or None
         Fixed reporter interval in steps. Overrides per-segment
         interval calculation when provided.
+    checkpoint_interval_s : float
+        Wall-time interval in seconds between restart checkpoints.
     """
     from polyzymd.simulation.continuation import ContinuationManager
 
@@ -1129,6 +1138,7 @@ def _run_continuation_segment(
         num_samples=num_samples,
         timestep_fs=timestep_fs,
         report_interval=report_interval,
+        checkpoint_interval_s=checkpoint_interval_s,
     )
 
 

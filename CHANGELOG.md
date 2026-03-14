@@ -30,6 +30,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Auto-detects replicate directories via the naming template. Read-only
   (uses `load_progress()` only). (`cli/main.py`, `cli/colors.py`,
   `config/schema.py`)
+- **Wall-time restart checkpoints for SLURM preemption resilience.** The
+  simulation loop now saves portable `restart_state.xml` +
+  `restart_system.xml` at a configurable wall-time interval
+  (`checkpoint_interval` in config, default 60s). On SLURM preemption,
+  the loop detects SIGTERM within ~15s (via adaptive sub-chunking) and
+  saves an interrupted state before the grace period expires. Previously,
+  a single `simulation.step(200000)` call could block for ~2 minutes,
+  leaving no time for graceful shutdown within a 120s grace period.
+  (`simulation/runner.py`, `simulation/continuation.py`,
+  `simulation/signals.py`, `config/schema.py`)
+- **Adaptive sub-chunk sizing.** After the first checkpoint interval, the
+  loop measures actual steps/second and adjusts the sub-chunk size to
+  target ~15s between interrupt checks. This ensures responsive signal
+  handling regardless of system size or hardware speed.
+  (`simulation/runner.py`, `simulation/continuation.py`)
+- **Portable recovery path priority.** Continuation recovery now prefers
+  portable state XML files (`interrupted_state.xml`, `restart_state.xml`)
+  over binary `.chk` checkpoints, which are not portable across
+  heterogeneous GPU clusters. Binary `.chk` is only used as a last-resort
+  fallback for legacy interrupted segments or hard-killed segments.
+  (`simulation/continuation.py`)
 - **Per-module colored logging.** Each module group (builders, simulation,
   workflow, exporters, etc.) gets a distinct near-white tinted color for
   INFO/DEBUG log messages, making it easy to visually distinguish which
@@ -98,7 +119,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   had been simulated across interrupted replicates. Now uses
   `total_steps_completed * timestep_fs / 1e6` for accurate progress
   display. (`cli/main.py`)
-
 - **Position restraints now applied to all polymer ITP files.** Previously,
   only the first polymer ITP (`_MOL1.itp`) received `#ifdef POSRES_POLYMER`
   blocks. With random copolymers, OpenFF Interchange generates a separate

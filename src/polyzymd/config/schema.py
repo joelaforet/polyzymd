@@ -655,6 +655,8 @@ class SimulationPhaseConfig(BaseModel):
         thermostat_timescale: Thermostat coupling timescale in ps
         barostat: Barostat type (for NPT)
         barostat_frequency: Barostat update frequency (steps)
+        checkpoint_interval: Wall-time interval (seconds) between restart
+            checkpoints for preemption resilience
     """
 
     ensemble: Ensemble = Field(..., description="Thermodynamic ensemble")
@@ -667,6 +669,17 @@ class SimulationPhaseConfig(BaseModel):
     thermostat_timescale: float = Field(1.0, gt=0.0, description="Thermostat timescale (ps)")
     barostat: Optional[BarostatType] = Field(None, description="Barostat type")
     barostat_frequency: int = Field(25, ge=1, description="Barostat update frequency")
+    checkpoint_interval: float = Field(
+        60.0,
+        ge=0.0,
+        description=(
+            "Wall-time interval in seconds between restart checkpoints. "
+            "Controls how frequently simulation state is saved for automatic "
+            "restart on SLURM preemption or hard kill. Independent of "
+            "trajectory/reporter output frequency. Default 60s ensures at "
+            "most 1 minute of lost work on unexpected termination."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_ensemble_barostat(self) -> "SimulationPhaseConfig":

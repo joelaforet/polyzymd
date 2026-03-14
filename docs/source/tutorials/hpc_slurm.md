@@ -422,6 +422,48 @@ total_steps=2500000
 remaining_steps=1250000
 ```
 
+### Wall-Time Restart Checkpoints
+
+In addition to signal-triggered saves, the simulation loop periodically
+writes portable restart checkpoints at a configurable wall-time interval
+(default: 60 seconds):
+
+| File | Purpose |
+|------|---------|
+| `restart_state.xml` | Portable OpenMM state (overwritten each checkpoint) |
+| `restart_system.xml` | Serialized OpenMM System (for self-contained recovery) |
+
+These files serve as a safety net: if the process is killed between signal
+delivery and the signal handler completing (e.g., the SLURM grace period
+expires), the restart checkpoint from the last 60-second interval is still
+on disk.  Recovery prefers portable state XML files over binary `.chk`
+checkpoints, which is important on heterogeneous clusters where jobs may
+restart on different GPU hardware.
+
+You can tune the checkpoint interval in your YAML config:
+
+```yaml
+simulation_phases:
+  production:
+    duration: 100.0   # ns
+    samples: 2500
+    checkpoint_interval: 60.0  # seconds (default)
+```
+
+Set to `0` to disable wall-time checkpoints (not recommended on preemptible
+queues).
+
+### Adaptive Sub-Chunking
+
+OpenMM's `simulation.step(N)` blocks Python for the entire call.  With
+large report intervals (e.g., 200,000 steps), each call can take ~2 minutes
+on a slow system, leaving no opportunity to check for SIGTERM.  PolyzyMD
+solves this with **adaptive sub-chunking**: after the first checkpoint
+interval, it measures actual simulation speed and divides the loop into
+smaller chunks (~15 seconds each), ensuring the signal flag is checked ~4
+times per checkpoint interval.  This is transparent — reporters still fire
+at the original interval, and sub-chunk overhead is negligible (<0.001%).
+
 ### Signal Forwarding: Why trap + background + wait?
 
 SLURM sends signals to the **batch shell process**, not to child processes.
