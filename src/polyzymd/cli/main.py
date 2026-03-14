@@ -1313,7 +1313,9 @@ def status(config: str) -> None:
                 status_display = SimulationStatus.NOT_STARTED.value
             else:
                 frac = progress.fraction_complete()
-                completed_ns = progress.time_completed_ns()
+                # Compute ns from total steps (not time_completed_ns which
+                # only counts COMPLETED segments, ignoring INTERRUPTED/RUNNING).
+                completed_ns = (progress.total_steps_completed * progress.timestep_fs) / 1e6
                 status_val = progress.status
                 status_str = status_val.value
                 status_display = status_val.value

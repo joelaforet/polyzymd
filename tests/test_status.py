@@ -451,3 +451,58 @@ class TestStatusCli:
         assert result.exit_code == 0, f"Output: {result.output}"
         assert "polyzymd status" in result.output
         assert "fnIII_apo_none_100ns_310K" in result.output
+
+    def test_status_ns_includes_interrupted_segments(self, tmp_path):
+        """ns column accounts for steps in INTERRUPTED segments, not just COMPLETED."""
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+
+        # Simulate a replicate with 2 segments: one interrupted, one running.
+        # total_steps_requested = 50_000_000 (100 ns at 2 fs/step)
+        # Segment 0: INTERRUPTED at 25_000_000 steps (50 ns worth)
+        # Segment 1: RUNNING at 10_000_000 steps (20 ns worth)
+        # Total completed steps = 35_000_000 => 70 ns
+        # time_completed_ns() would return 0.0 (no COMPLETED segments)
+        # Correct ns = 35_000_000 * 2.0 / 1e6 = 70.0
+        rep_dir = scratch / "fnIII_apo_none_100ns_310K_run1"
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=50_000_000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=25_000_000,
+                    steps_requested=50_000_000,
+                    samples_written=125,
+                    status=SegmentStatus.INTERRUPTED,
+                    duration_ns=100.0,
+                ),
+                SegmentRecord(
+                    index=1,
+                    steps_completed=10_000_000,
+                    steps_requested=25_000_000,
+                    samples_written=50,
+                    status=SegmentStatus.RUNNING,
+                    duration_ns=50.0,
+                ),
+            ],
+            status=SimulationStatus.RUNNING,
+            replicate=1,
+        )
+        rep_dir.mkdir(parents=True, exist_ok=True)
+        (rep_dir / "progress.json").write_text(progress.model_dump_json(indent=2))
+
+        mock_cfg = _mock_sim_config(scratch)
+        mock_cfg.discover_replicate_dirs.return_value = [(1, rep_dir)]
+
+        config_path = self._make_dummy_config(tmp_path)
+        runner = CliRunner()
+
+        with patch("polyzymd.config.schema.SimulationConfig.from_yaml", return_value=mock_cfg):
+            result = runner.invoke(cli, ["status", "-c", str(config_path)])
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        # Should show 70.0 ns (from steps), NOT 0.0 ns (from time_completed_ns)
+        assert "70.0/100.0 ns" in result.output

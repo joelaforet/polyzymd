@@ -92,6 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`polyzymd status` ns calculation now includes interrupted segments.**
+  Previously, the status command used `time_completed_ns()` which only
+  counts COMPLETED segments, showing 0.000 ns even when millions of steps
+  had been simulated across interrupted replicates. Now uses
+  `total_steps_completed * timestep_fs / 1e6` for accurate progress
+  display. (`cli/main.py`)
+
 - **Position restraints now applied to all polymer ITP files.** Previously,
   only the first polymer ITP (`_MOL1.itp`) received `#ifdef POSRES_POLYMER`
   blocks. With random copolymers, OpenFF Interchange generates a separate
