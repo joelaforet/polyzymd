@@ -1257,7 +1257,11 @@ def status(config: str) -> None:
     """
     from polyzymd.cli.colors import render_progress_bar
     from polyzymd.config.schema import SimulationConfig
-    from polyzymd.simulation.progress import SimulationStatus, load_progress
+    from polyzymd.simulation.progress import (
+        SimulationStatus,
+        load_or_scan_progress,
+        save_progress,
+    )
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
@@ -1265,8 +1269,12 @@ def status(config: str) -> None:
         click.echo(click.style(f"Error: Failed to load config: {e}", fg="red"), err=True)
         sys.exit(1)
 
-    # Total production time from config
-    total_ns = sim_config.simulation_phases.production.duration
+    # Total production metadata from config
+    prod = sim_config.simulation_phases.production
+    total_ns = prod.duration
+    timestep_fs = prod.time_step
+    total_steps = int(prod.duration * 1e6 / timestep_fs)
+    total_samples = prod.samples
 
     # Build a human-readable system name from the directory template
     # (format with replicate=1, then strip the trailing "_run1")
@@ -1304,6 +1312,8 @@ def status(config: str) -> None:
     label_width = len(f"run{max_rep}")
 
     need_attention = 0
+    completed_count = 0
+    running_count = 0
 
     for rep_num, rep_path in sorted(rep_map.items()):
         label = f"run{rep_num}"
@@ -1315,26 +1325,33 @@ def status(config: str) -> None:
             status_str = "not_found"
             status_display = "not found"
         else:
-            progress = load_progress(rep_path)
-            if progress is None:
-                frac = 0.0
-                completed_ns = 0.0
-                status_str = "not_started"
-                status_display = SimulationStatus.NOT_STARTED.value
-            else:
-                frac = progress.fraction_complete()
-                # Compute ns from total steps (not time_completed_ns which
-                # only counts COMPLETED segments, ignoring INTERRUPTED/RUNNING).
-                completed_ns = (progress.total_steps_completed * progress.timestep_fs) / 1e6
-                status_val = progress.status
-                status_str = status_val.value
-                status_display = status_val.value
+            progress = load_or_scan_progress(
+                working_dir=rep_path,
+                config_path=str(Path(config).resolve()),
+                total_steps=total_steps,
+                total_samples=total_samples,
+                timestep_fs=timestep_fs,
+                replicate=rep_num,
+            )
+            save_progress(rep_path, progress)
+
+            frac = progress.fraction_complete()
+            # Compute ns from total steps (not time_completed_ns which
+            # only counts COMPLETED segments, ignoring INTERRUPTED/RUNNING).
+            completed_ns = (progress.total_steps_completed * progress.timestep_fs) / 1e6
+            status_val = progress.status
+            status_str = status_val.value
+            status_display = status_val.value
 
         bar = render_progress_bar(frac, status_str)
         pct = frac * 100
 
-        # Count replicates needing attention
-        if status_str in ("interrupted", "failed", "not_started", "not_found"):
+        # Count replicates by category
+        if status_str == "completed":
+            completed_count += 1
+        elif status_str == "running":
+            running_count += 1
+        else:
             need_attention += 1
 
         # Format: "  run1  ████░░░░  100.0%  100.0/100.0 ns  completed"
@@ -1345,13 +1362,18 @@ def status(config: str) -> None:
 
     click.echo()
     total_reps = len(rep_map)
-    if need_attention > 0:
-        click.echo(
-            f"  {need_attention}/{total_reps} need attention "
-            f"(recover with: polyzymd recover -c {config} -r <N> --submit)"
-        )
-    else:
+    if completed_count == total_reps:
         click.echo(click.style(f"  All {total_reps} replicates completed!", fg="green"))
+    else:
+        if need_attention > 0:
+            click.echo(
+                f"  {need_attention}/{total_reps} need attention "
+                f"(recover with: polyzymd recover -c {config} -r <N> --submit)"
+            )
+        if running_count > 0:
+            click.echo(f"  {completed_count}/{total_reps} completed, {running_count} still running")
+        if need_attention == 0 and running_count == 0:
+            click.echo(f"  {completed_count}/{total_reps} completed")
     click.echo()
 
 

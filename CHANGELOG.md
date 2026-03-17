@@ -119,6 +119,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   had been simulated across interrupted replicates. Now uses
   `total_steps_completed * timestep_fs / 1e6` for accurate progress
   display. (`cli/main.py`)
+- **`polyzymd status` summary no longer falsely reports "All completed".**
+  The summary line only counted `interrupted`, `failed`, `not_started`,
+  and `not_found` statuses as needing attention, so replicates with
+  `running` status (including stale-running jobs that were killed without
+  graceful shutdown) fell through to the "All N replicates completed!"
+  message. The summary now tracks `completed_count`, `running_count`, and
+  `need_attention` separately, and only shows the green completion message
+  when every replicate has `status == completed`. (`cli/main.py`)
+- **`polyzymd status` now detects stale "running" replicates.** Switched
+  from `load_progress()` (raw JSON read) to `load_or_scan_progress()`
+  which validates progress against the filesystem. If a checkpoint file
+  is older than 10 minutes, the segment is reclassified from `running` to
+  `interrupted`, matching what `polyzymd recover` already sees. The
+  corrected status is saved back to `progress.json`. (`cli/main.py`)
 - **Position restraints now applied to all polymer ITP files.** Previously,
   only the first polymer ITP (`_MOL1.itp`) received `#ifdef POSRES_POLYMER`
   blocks. With random copolymers, OpenFF Interchange generates a separate
