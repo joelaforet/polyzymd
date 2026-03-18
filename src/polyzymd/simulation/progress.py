@@ -400,12 +400,19 @@ def scan_equilibration_stages(working_dir: str | Path) -> List[EquilibrationStag
         stage_idx = int(match.group(1))
         stage_name = match.group(2)
         chk = entry / f"equilibration_{stage_idx}_{stage_name}_checkpoint.chk"
-        status = SegmentStatus.COMPLETED if chk.exists() else SegmentStatus.FAILED
+        chk_exists = chk.exists()
+        status = SegmentStatus.COMPLETED if chk_exists else SegmentStatus.FAILED
+        # Use checkpoint mtime as an approximate finished_at for completed stages
+        finished_at: str | None = None
+        if chk_exists:
+            mtime = chk.stat().st_mtime
+            finished_at = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
         records.append(
             EquilibrationStageRecord(
                 index=stage_idx,
                 name=stage_name,
                 status=status,
+                finished_at=finished_at,
             )
         )
 

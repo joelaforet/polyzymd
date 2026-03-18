@@ -1049,6 +1049,8 @@ def _run_initial_segment(
     eq_result = runner.run_equilibration(temperature=temperature, config=phases)
 
     # Save equilibration progress so a resubmitted job knows eq is done
+    from datetime import datetime, timezone
+
     from polyzymd.simulation.progress import (
         EquilibrationStageRecord,
         SegmentStatus,
@@ -1060,6 +1062,7 @@ def _run_initial_segment(
     if progress is not None:
         eq_stages = []
         if eq_result.get("type") == "staged_equilibration":
+            now_iso = datetime.now(timezone.utc).isoformat()
             for stage_info in eq_result.get("stages", []):
                 eq_stages.append(
                     EquilibrationStageRecord(
@@ -1068,6 +1071,7 @@ def _run_initial_segment(
                         status=SegmentStatus.COMPLETED,
                         duration_ns=stage_info["duration_ns"],
                         ensemble=stage_info.get("ensemble", "NVT"),
+                        finished_at=now_iso,
                     )
                 )
         progress.equilibration_stages = eq_stages
