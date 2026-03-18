@@ -746,3 +746,125 @@ class TestEndToEndRecoveryFlow:
         assert info is not None
         assert info["segment_index"] == 2
         assert info["steps_to_run"] == 10000000 - 5300000
+
+
+# ---------------------------------------------------------------------------
+# Concurrency guard: RUNNING segment blocks new segment start
+# ---------------------------------------------------------------------------
+
+
+class TestRunningSegmentConcurrencyGuard:
+    """Prevent starting a new segment while one is still RUNNING."""
+
+    def test_running_segment_blocks_new_segment(self, tmp_path):
+        """If any segment is RUNNING, the guard prevents advancing."""
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationProgress,
+        )
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=5000000,
+                    status=SegmentStatus.COMPLETED,
+                    samples_written=125,
+                ),
+                SegmentRecord(
+                    index=1,
+                    steps_completed=1000000,
+                    status=SegmentStatus.RUNNING,
+                ),
+            ],
+            replicate=1,
+        )
+
+        # Simulate the guard logic from main.py run_segment()
+        running_segments = [s for s in progress.segments if s.status == SegmentStatus.RUNNING]
+        assert len(running_segments) == 1
+        assert running_segments[0].index == 1
+
+    def test_no_running_segments_allows_advance(self, tmp_path):
+        """With no RUNNING segments, the guard is a no-op."""
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationProgress,
+            get_next_segment_info,
+        )
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=5000000,
+                    status=SegmentStatus.COMPLETED,
+                    samples_written=125,
+                ),
+                SegmentRecord(
+                    index=1,
+                    steps_completed=1000000,
+                    status=SegmentStatus.INTERRUPTED,
+                ),
+            ],
+            replicate=1,
+        )
+
+        running_segments = [s for s in progress.segments if s.status == SegmentStatus.RUNNING]
+        assert len(running_segments) == 0
+
+        # Advance is allowed — get_next_segment_info returns the next segment
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 2
+
+    def test_scan_filesystem_classifies_recent_checkpoint_as_running(self, tmp_path):
+        """A segment with a recent checkpoint (no INTERRUPTED marker) is RUNNING."""
+        import os
+        import time as _time
+
+        from polyzymd.simulation.progress import SegmentStatus, scan_filesystem
+
+        # Create a segment with a very recent checkpoint
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        chk = seg_dir / "production_0_checkpoint.chk"
+        chk.write_bytes(b"\x00" * 16)
+        (seg_dir / "production_0_system.xml").write_text("<System/>")
+        # Touch checkpoint to be recent (now)
+        now = _time.time()
+        os.utime(chk, (now, now))
+
+        progress = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(progress.segments) == 1
+        assert progress.segments[0].status == SegmentStatus.RUNNING
+
+    def test_scan_filesystem_classifies_stale_checkpoint_as_interrupted(self, tmp_path):
+        """A segment with a stale checkpoint (no INTERRUPTED marker) is INTERRUPTED."""
+        import os
+        import time as _time
+
+        from polyzymd.simulation.progress import SegmentStatus, scan_filesystem
+
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        chk = seg_dir / "production_0_checkpoint.chk"
+        chk.write_bytes(b"\x00" * 16)
+        (seg_dir / "production_0_system.xml").write_text("<System/>")
+        # Backdate checkpoint to be stale (20 min ago)
+        old = _time.time() - 1200
+        os.utime(chk, (old, old))
+
+        progress = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(progress.segments) == 1
+        assert progress.segments[0].status == SegmentStatus.INTERRUPTED

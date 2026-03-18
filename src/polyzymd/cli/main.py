@@ -877,6 +877,25 @@ def run_segment(
     if failed_segments:
         save_progress(working_dir, progress)
 
+    # ---- Handle RUNNING segments (concurrency guard) ----
+    # If any segment appears to still be executing (recent checkpoint),
+    # refuse to start a new segment to prevent concurrent execution and
+    # the associated data-loss / overlap bugs.  Exit cleanly (code 0) so
+    # the resubmission script will retry later once the running segment
+    # has finished or its checkpoint becomes stale.
+    running_segments = [s for s in progress.segments if s.status == SegmentStatus.RUNNING]
+    if running_segments:
+        indices = ", ".join(str(s.index) for s in running_segments)
+        colored_echo(
+            f"Segment(s) {indices} appear(s) to still be running "
+            f"(checkpoint written recently). Refusing to start a new "
+            f"segment to avoid concurrent execution — will retry on "
+            f"next resubmission.",
+            phase="simulation",
+            level=logging.WARNING,
+        )
+        sys.exit(0)
+
     # Determine what to run next
     seg_info = get_next_segment_info(progress, total_steps, total_samples)
     if seg_info is None:
