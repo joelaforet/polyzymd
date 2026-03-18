@@ -591,6 +591,9 @@ def _scan_segment_dir(
                 return SegmentRecord(
                     index=seg_idx,
                     steps_completed=steps_completed,
+                    # Best estimate — no authoritative metadata available.
+                    # validate_progress() reconciliation will prefer the
+                    # progress file's steps_requested when available.
                     steps_requested=steps_completed,
                     samples_written=0,
                     status=SegmentStatus.RUNNING,
@@ -606,7 +609,10 @@ def _scan_segment_dir(
                 return SegmentRecord(
                     index=seg_idx,
                     steps_completed=steps_completed,
-                    steps_requested=steps_completed,  # Best estimate — no INTERRUPTED metadata
+                    # Best estimate — no authoritative metadata available.
+                    # validate_progress() reconciliation will prefer the
+                    # progress file's steps_requested when available.
+                    steps_requested=steps_completed,
                     samples_written=0,
                     status=SegmentStatus.INTERRUPTED,
                     duration_ns=duration_ns,
