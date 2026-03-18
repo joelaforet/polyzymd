@@ -113,6 +113,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Concurrency guard prevents duplicate segment execution.** When SLURM
+  requeues a preempted job while a recovery script also resubmits, two jobs
+  can race to start the next segment. `run-segment` now checks for any
+  segment with a recently-modified checkpoint file (< 600s) classified as
+  RUNNING and exits cleanly (code 0) instead of launching a concurrent
+  segment. This prevents data corruption from two writers on the same
+  trajectory. (`cli/main.py`)
+- **Hard-killed segments now retry in-place instead of advancing.**
+  When SLURM kills a job without a grace period (SIGKILL, node failure,
+  OOM), no `INTERRUPTED` marker file is written. Previously, the next job
+  would classify the segment as INTERRUPTED via the stale-checkpoint
+  heuristic and advance to a new segment index, loading from
+  `restart_state.xml` — potentially losing all work done after that
+  periodic checkpoint. Now, `run-segment` detects this case (highest-index
+  segment classified INTERRUPTED but missing the `INTERRUPTED` marker file),
+  cleans up the incomplete directory, and removes it from progress. This
+  causes `get_next_segment_info()` to reassign the same index, retrying
+  from the previous completed segment's state with no data loss.
+  (`cli/main.py`)
 - **`_estimate_steps_from_csv` now returns per-segment step counts.**
   Previously, the function returned the raw cumulative step number from the
   last CSV row. OpenMM's `StateDataReporter` writes cumulative integrator
