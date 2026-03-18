@@ -896,6 +896,44 @@ def run_segment(
         )
         sys.exit(0)
 
+    # ---- Handle hard-killed segments (no INTERRUPTED marker) ----
+    # When SLURM preempts a job with SIGKILL (no grace period) the
+    # graceful shutdown handler never runs: no ``INTERRUPTED`` marker,
+    # no ``interrupted_state.xml``.  The filesystem scanner classifies
+    # these segments as INTERRUPTED via the stale-checkpoint heuristic,
+    # but the only recovery file is ``restart_state.xml`` which may be
+    # at an arbitrarily early position within the segment's run.
+    #
+    # Advancing to a new segment index in this situation causes massive
+    # data loss: the new segment loads from ``restart_state.xml`` (an
+    # early wall-time checkpoint) and re-simulates work that the killed
+    # segment had already completed beyond that point.  The step
+    # accounting also becomes corrupted because the filesystem scanner
+    # estimates steps from the CSV file rather than an authoritative
+    # INTERRUPTED marker.
+    #
+    # Fix: clean up the hard-killed segment's directory and remove it
+    # from progress so that ``get_next_segment_info()`` assigns the
+    # *same* segment index.  The segment will be retried from the
+    # previous good state (the last segment with a proper completion
+    # or graceful interruption).
+    if progress.segments:
+        last_seg = max(progress.segments, key=lambda s: s.index)
+        if last_seg.status == SegmentStatus.INTERRUPTED:
+            last_seg_dir = working_dir / f"production_{last_seg.index}"
+            interrupted_marker = last_seg_dir / "INTERRUPTED"
+            if last_seg_dir.exists() and not interrupted_marker.exists():
+                colored_echo(
+                    f"Segment {last_seg.index} was hard-killed (no INTERRUPTED "
+                    f"marker — only stale checkpoint found). Cleaning up "
+                    f"directory to retry from previous good state.",
+                    phase="simulation",
+                    level=logging.WARNING,
+                )
+                shutil.rmtree(last_seg_dir)
+                progress.segments = [s for s in progress.segments if s.index != last_seg.index]
+                save_progress(working_dir, progress)
+
     # Determine what to run next
     seg_info = get_next_segment_info(progress, total_steps, total_samples)
     if seg_info is None:

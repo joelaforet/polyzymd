@@ -868,3 +868,208 @@ class TestRunningSegmentConcurrencyGuard:
         progress = scan_filesystem(tmp_path, timestep_fs=2.0)
         assert len(progress.segments) == 1
         assert progress.segments[0].status == SegmentStatus.INTERRUPTED
+
+
+# ---------------------------------------------------------------------------
+# Hard-kill retry-in-place: clean up and retry hard-killed segments
+# ---------------------------------------------------------------------------
+
+
+class TestHardKillRetryInPlace:
+    """Hard-killed segments (no INTERRUPTED marker) get cleaned up and retried."""
+
+    def test_hard_killed_segment_cleaned_up(self, tmp_path):
+        """Hard-killed last segment is removed so the index is retried."""
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationProgress,
+            get_next_segment_info,
+            save_progress,
+        )
+
+        # Segment 0 completed normally
+        _write_normal_segment(tmp_path, 0)
+        # Segment 1 hard-killed (no INTERRUPTED marker)
+        _write_hard_killed_segment(tmp_path, 1, with_csv=True, csv_steps=300000)
+
+        # Build progress with segment 1 as INTERRUPTED (from filesystem scan)
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=5000000,
+                    status=SegmentStatus.COMPLETED,
+                    samples_written=125,
+                ),
+                SegmentRecord(
+                    index=1,
+                    steps_completed=300000,
+                    status=SegmentStatus.INTERRUPTED,
+                ),
+            ],
+            replicate=1,
+        )
+        save_progress(tmp_path, progress)
+
+        # --- Simulate the hard-kill retry logic from main.py ---
+        last_seg = max(progress.segments, key=lambda s: s.index)
+        assert last_seg.status == SegmentStatus.INTERRUPTED
+        last_seg_dir = tmp_path / f"production_{last_seg.index}"
+        interrupted_marker = last_seg_dir / "INTERRUPTED"
+        assert last_seg_dir.exists()
+        assert not interrupted_marker.exists()  # hard-killed: no marker
+
+        # Clean up
+        shutil.rmtree(last_seg_dir)
+        progress.segments = [s for s in progress.segments if s.index != last_seg.index]
+        save_progress(tmp_path, progress)
+
+        # Verify: directory removed, progress updated
+        assert not last_seg_dir.exists()
+        assert len(progress.segments) == 1
+        assert progress.segments[0].index == 0
+
+        # The same segment index (1) should be assigned for retry
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 1  # Retry, not advance to 2!
+
+    def test_graceful_interrupted_segment_not_cleaned_up(self, tmp_path):
+        """Gracefully interrupted segment (with INTERRUPTED marker) is preserved."""
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationProgress,
+            get_next_segment_info,
+        )
+
+        # Segment 0 completed, segment 1 gracefully interrupted
+        _write_normal_segment(tmp_path, 0)
+        _write_interrupted_segment(tmp_path, 1, steps_completed=3000000)
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=5000000,
+                    status=SegmentStatus.COMPLETED,
+                    samples_written=125,
+                ),
+                SegmentRecord(
+                    index=1,
+                    steps_completed=3000000,
+                    status=SegmentStatus.INTERRUPTED,
+                ),
+            ],
+            replicate=1,
+        )
+
+        # Check that the INTERRUPTED marker exists
+        last_seg = max(progress.segments, key=lambda s: s.index)
+        last_seg_dir = tmp_path / f"production_{last_seg.index}"
+        interrupted_marker = last_seg_dir / "INTERRUPTED"
+        assert interrupted_marker.exists()
+
+        # The hard-kill guard should NOT trigger
+        should_cleanup = (
+            last_seg.status == SegmentStatus.INTERRUPTED
+            and last_seg_dir.exists()
+            and not interrupted_marker.exists()
+        )
+        assert not should_cleanup
+
+        # Segment advances normally to 2
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 2
+
+    def test_hard_killed_seg0_retried_from_scratch(self, tmp_path):
+        """Hard-killed segment 0 is cleaned up so the run restarts from scratch."""
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationProgress,
+            get_next_segment_info,
+            save_progress,
+        )
+
+        _write_hard_killed_segment(tmp_path, 0, with_csv=True, csv_steps=100000)
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=100000,
+                    status=SegmentStatus.INTERRUPTED,
+                ),
+            ],
+            replicate=1,
+        )
+        save_progress(tmp_path, progress)
+
+        # Simulate hard-kill retry logic
+        last_seg = max(progress.segments, key=lambda s: s.index)
+        last_seg_dir = tmp_path / f"production_{last_seg.index}"
+        interrupted_marker = last_seg_dir / "INTERRUPTED"
+        assert not interrupted_marker.exists()
+
+        shutil.rmtree(last_seg_dir)
+        progress.segments = [s for s in progress.segments if s.index != last_seg.index]
+        save_progress(tmp_path, progress)
+
+        assert not last_seg_dir.exists()
+        assert len(progress.segments) == 0
+
+        # Segment 0 should be retried
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 0
+
+    def test_completed_segment_not_affected_by_hard_kill_guard(self, tmp_path):
+        """A COMPLETED last segment is not affected by the hard-kill logic."""
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationProgress,
+            get_next_segment_info,
+        )
+
+        _write_normal_segment(tmp_path, 0)
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=5000000,
+                    status=SegmentStatus.COMPLETED,
+                    samples_written=125,
+                ),
+            ],
+            replicate=1,
+        )
+
+        last_seg = max(progress.segments, key=lambda s: s.index)
+        # Guard only applies to INTERRUPTED status
+        assert last_seg.status != SegmentStatus.INTERRUPTED
+
+        # Normal advance to segment 1
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 1
