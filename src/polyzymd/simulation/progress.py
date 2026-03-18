@@ -659,10 +659,16 @@ def _parse_interrupted_marker(marker_path: Path) -> tuple[int, int]:
 def _estimate_steps_from_csv(csv_path: Path) -> int:
     """Estimate the number of completed steps from a ``state_data.csv`` file.
 
-    Reads the last non-empty data line and extracts the step count from
-    the first column.  This is used to estimate progress for hard-killed
-    segments that have no ``INTERRUPTED`` marker or ``state.xml`` but do
-    have reporter output on disk.
+    Computes ``last_step - first_step`` from the first and last data rows
+    to obtain a **per-segment** step count.  OpenMM's ``StateDataReporter``
+    writes the cumulative integrator step number (from the very start of
+    the simulation, including equilibration and all prior segments), so
+    using the raw last-row value would overcount for any segment after the
+    first.
+
+    This is used to estimate progress for hard-killed segments that have
+    no ``INTERRUPTED`` marker or ``state.xml`` but do have reporter output
+    on disk.
 
     Parameters
     ----------
@@ -672,22 +678,41 @@ def _estimate_steps_from_csv(csv_path: Path) -> int:
     Returns
     -------
     int
-        Estimated steps completed, or 0 if the file cannot be parsed.
+        Estimated per-segment steps completed, or 0 if the file cannot
+        be parsed or contains fewer than two data rows.
     """
     try:
         with open(csv_path, "r") as f:
             lines = f.readlines()
-        # Need at least a header + one data line
+        # Need at least a header + two data lines to compute a delta
         if len(lines) < 2:
             return 0
-        # Walk backwards to find the last non-empty line
-        for line in reversed(lines):
+
+        def _parse_step(line: str) -> int | None:
             stripped = line.strip()
-            if stripped and not stripped.startswith("#"):
-                # First column is the step count (may be quoted)
+            if stripped and not stripped.startswith("#") and not stripped.startswith('"#'):
                 step_str = stripped.split(",")[0].strip('"').strip()
                 return int(float(step_str))
-        return 0
+            return None
+
+        # Find the first non-comment, non-empty data line
+        first_step: int | None = None
+        for line in lines:
+            first_step = _parse_step(line)
+            if first_step is not None:
+                break
+
+        # Find the last non-comment, non-empty data line
+        last_step: int | None = None
+        for line in reversed(lines):
+            last_step = _parse_step(line)
+            if last_step is not None:
+                break
+
+        if first_step is None or last_step is None:
+            return 0
+
+        return max(0, last_step - first_step)
     except (ValueError, IndexError, OSError) as exc:
         LOGGER.warning(f"Could not estimate steps from {csv_path}: {exc}")
         return 0
