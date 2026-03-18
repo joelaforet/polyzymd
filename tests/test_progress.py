@@ -715,6 +715,26 @@ class TestScanEquilibrationStages:
         records = scan_equilibration_stages(tmp_path)
         assert records == []
 
+    def test_completed_stage_has_finished_at(self, tmp_path):
+        """Completed equilibration stages should have finished_at set from checkpoint mtime."""
+        _write_completed_eq_stage_on_disk(tmp_path, 0, "heating")
+        records = scan_equilibration_stages(tmp_path)
+        assert len(records) == 1
+        assert records[0].status == SegmentStatus.COMPLETED
+        assert records[0].finished_at is not None
+        # Should be a valid ISO timestamp
+        from datetime import datetime
+
+        datetime.fromisoformat(records[0].finished_at)
+
+    def test_failed_stage_has_no_finished_at(self, tmp_path):
+        """Failed equilibration stages should not have finished_at set."""
+        _write_partial_eq_stage_on_disk(tmp_path, 0, "heating")
+        records = scan_equilibration_stages(tmp_path)
+        assert len(records) == 1
+        assert records[0].status == SegmentStatus.FAILED
+        assert records[0].finished_at is None
+
 
 # ---------------------------------------------------------------------------
 # scan_filesystem — equilibration stages integration
@@ -773,7 +793,7 @@ class TestEquilibrationRoundTrip:
 
 
 class TestEstimateStepsFromCsv:
-    """_estimate_steps_from_csv reads the last data line of a CSV."""
+    """_estimate_steps_from_csv computes last_step - first_step for per-segment counts."""
 
     def test_typical_csv(self, tmp_path):
         csv = tmp_path / "state_data.csv"
@@ -783,12 +803,14 @@ class TestEstimateStepsFromCsv:
             "80000,160.0,-123500.0\n"
             "120000,240.0,-123550.0\n"
         )
-        assert _estimate_steps_from_csv(csv) == 120000
+        # Per-segment steps = 120000 - 40000 = 80000
+        assert _estimate_steps_from_csv(csv) == 80000
 
     def test_quoted_columns(self, tmp_path):
         csv = tmp_path / "state_data.csv"
         csv.write_text('#"Step","Time (ps)"\n"40000","80.0"\n"80000","160.0"\n')
-        assert _estimate_steps_from_csv(csv) == 80000
+        # 80000 - 40000 = 40000
+        assert _estimate_steps_from_csv(csv) == 40000
 
     def test_header_only_returns_zero(self, tmp_path):
         csv = tmp_path / "state_data.csv"
@@ -807,12 +829,34 @@ class TestEstimateStepsFromCsv:
     def test_trailing_empty_lines_skipped(self, tmp_path):
         csv = tmp_path / "state_data.csv"
         csv.write_text('#"Step","Time (ps)"\n40000,80.0\n80000,160.0\n\n\n')
-        assert _estimate_steps_from_csv(csv) == 80000
+        # 80000 - 40000 = 40000
+        assert _estimate_steps_from_csv(csv) == 40000
 
-    def test_single_data_line(self, tmp_path):
+    def test_single_data_line_returns_zero(self, tmp_path):
+        """A single data row yields 0 (first == last, no delta to compute)."""
         csv = tmp_path / "state_data.csv"
         csv.write_text('#"Step","Time (ps)"\n50000,100.0\n')
-        assert _estimate_steps_from_csv(csv) == 50000
+        assert _estimate_steps_from_csv(csv) == 0
+
+    def test_continuation_segment_csv(self, tmp_path):
+        """CSV from a continuation segment has large cumulative offsets;
+        result should be the per-segment delta, not the raw last value."""
+        csv = tmp_path / "state_data.csv"
+        csv.write_text(
+            '#"Step","Time (ps)","Potential Energy (kJ/mole)"\n'
+            "200000000,400000.0,-123456.0\n"
+            "250000000,500000.0,-123500.0\n"
+            "358400000,716800.0,-123550.0\n"
+        )
+        # Per-segment: 358400000 - 200000000 = 158400000
+        assert _estimate_steps_from_csv(csv) == 158400000
+
+    def test_two_data_rows(self, tmp_path):
+        """Exactly two data rows: delta is straightforward."""
+        csv = tmp_path / "state_data.csv"
+        csv.write_text('#"Step","Time (ps)"\n100000,200.0\n300000,600.0\n')
+        # 300000 - 100000 = 200000
+        assert _estimate_steps_from_csv(csv) == 200000
 
 
 # ---------------------------------------------------------------------------
@@ -826,12 +870,22 @@ def _write_checkpoint_only_segment(
     with_csv: bool = False,
     csv_steps: int = 80000,
     *,
+    csv_start_step: int = 0,
     recent: bool = False,
 ) -> None:
     """Write files simulating a hard-killed segment (checkpoint but no state.xml).
 
     Parameters
     ----------
+    csv_steps : int
+        The **per-segment** step count to simulate.  The CSV will contain
+        two data rows: one at ``csv_start_step`` and one at
+        ``csv_start_step + csv_steps``, so that
+        ``_estimate_steps_from_csv`` returns ``csv_steps``.
+    csv_start_step : int
+        Cumulative step offset at the start of this segment (simulates
+        continuation segments where the OpenMM integrator step counter
+        carries over from previous segments).
     recent : bool
         If *False* (default), backdate the checkpoint's mtime so that the
         recency heuristic classifies it as INTERRUPTED.  If *True*, leave
@@ -847,8 +901,12 @@ def _write_checkpoint_only_segment(
     # system.xml exists (saved at segment start)
     (seg_dir / f"production_{seg_idx}_system.xml").write_text("<mock-system/>")
     if with_csv:
+        first_step = csv_start_step
+        last_step = csv_start_step + csv_steps
         (seg_dir / f"production_{seg_idx}_state_data.csv").write_text(
-            f'#"Step","Time (ps)","PE (kJ/mole)"\n{csv_steps},{csv_steps * 0.002},-100000.0\n'
+            f'#"Step","Time (ps)","PE (kJ/mole)"\n'
+            f"{first_step},{first_step * 0.002},-100000.0\n"
+            f"{last_step},{last_step * 0.002},-100000.0\n"
         )
 
     if not recent:
@@ -918,6 +976,32 @@ class TestCheckpointOnlySegment:
         p = scan_filesystem(tmp_path, timestep_fs=2.0)
         progress = _make_progress(segments=p.segments, total_steps=10000000)
         assert progress.next_segment_index == 1
+
+    def test_continuation_segment_csv_offset_not_overcounted(self, tmp_path):
+        """Continuation segments with cumulative CSV step offsets must not
+        be overcounted.  This is the core regression test for the bug where
+        ``_estimate_steps_from_csv`` returned the raw cumulative step number
+        instead of the per-segment delta.
+        """
+        # Segment 0: completed normally (10 ns at 2 fs = 5,000,000 steps)
+        _write_completed_segment_on_disk(tmp_path, 0, duration_ns=10.0)
+        # Segment 1: hard-killed continuation with CSV that has cumulative offset.
+        # It ran 4,000,000 per-segment steps, starting from cumulative step 5,000,000.
+        _write_checkpoint_only_segment(
+            tmp_path,
+            1,
+            with_csv=True,
+            csv_steps=4000000,
+            csv_start_step=5000000,
+        )
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert p.segments[0].status == SegmentStatus.COMPLETED
+        assert p.segments[0].steps_completed == 5000000
+        assert p.segments[1].status == SegmentStatus.INTERRUPTED
+        # Must be 4,000,000 (per-segment), NOT 9,000,000 (cumulative last row)
+        assert p.segments[1].steps_completed == 4000000
+        # Total: 5M + 4M = 9M
+        assert p.total_steps_completed == 9000000
 
 
 # ---------------------------------------------------------------------------

@@ -105,8 +105,12 @@ def _write_hard_killed_segment(
     if with_system_xml:
         (seg_dir / f"production_{seg_idx}_system.xml").write_text("<System/>")
     if with_csv:
+        # Write two data rows so _estimate_steps_from_csv computes the
+        # correct per-segment delta (last_step - first_step = csv_steps).
         (seg_dir / f"production_{seg_idx}_state_data.csv").write_text(
-            f'#"Step","Time (ps)","PE (kJ/mole)"\n{csv_steps},{csv_steps * 0.002},-100000.0\n'
+            f'#"Step","Time (ps)","PE (kJ/mole)"\n'
+            f"0,0.0,-100000.0\n"
+            f"{csv_steps},{csv_steps * 0.002},-100000.0\n"
         )
     # Parameters file (continuation manager needs this)
     params = {
