@@ -113,6 +113,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`_estimate_steps_from_csv` now returns per-segment step counts.**
+  Previously, the function returned the raw cumulative step number from the
+  last CSV row. OpenMM's `StateDataReporter` writes cumulative integrator
+  steps (from time=0 including equilibration and all prior segments), so for
+  continuation segments this massively overcounted progress — causing
+  `validate_progress()` to mark in-progress simulations as completed.  The
+  function now computes `last_step - first_step` for the correct per-segment
+  delta.  For single-row CSVs it returns 0 (safe undercount).
+  (`simulation/progress.py`)
+- **Equilibration `finished_at` timestamps are now populated.**
+  `EquilibrationStageRecord.finished_at` existed in the Pydantic model but
+  was always null. `scan_equilibration_stages()` now sets it from the
+  checkpoint file's mtime, and `_run_initial_segment()` sets it to the
+  current time during live runs. (`simulation/progress.py`, `cli/main.py`)
 - **`polyzymd status` ns calculation now includes interrupted segments.**
   Previously, the status command used `time_completed_ns()` which only
   counts COMPLETED segments, showing 0.000 ns even when millions of steps
