@@ -87,6 +87,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allocation in recovery job scripts, matching the existing `--memory` flag
   on `polyzymd submit`. Useful when a job OOM-killed and needs to be resumed
   with more RAM. (`cli/main.py`)
+- **squeue-based duplicate detection at submission time.** Both `polyzymd
+  submit` and `polyzymd recover --submit` now query `squeue` for
+  RUNNING/PENDING jobs with the same job name before submitting.  If a
+  duplicate is found, submission is blocked with a clear error message.
+  The check is best-effort: if `squeue` is unavailable (non-SLURM
+  environment, CI), a warning is logged and submission proceeds normally.
+  A new `--force` flag on both commands allows explicit override.
+  (`workflow/daisy_chain.py`, `cli/main.py`)
 - **`_estimate_steps_from_csv` helper.** Estimates completed steps from
   `state_data.csv` when progress.json is missing or stale, enabling accurate
   progress reporting after hard kills. (`simulation/progress.py`)
@@ -117,9 +125,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requeues a preempted job while a recovery script also resubmits, two jobs
   can race to start the next segment. `run-segment` now checks for any
   segment with a recently-modified checkpoint file (< 600s) classified as
-  RUNNING and exits cleanly (code 0) instead of launching a concurrent
-  segment. This prevents data corruption from two writers on the same
-  trajectory. (`cli/main.py`)
+  RUNNING and exits with code 2 (`EXIT_CODE_CONCURRENT`) instead of
+  launching a concurrent segment. The SLURM bash wrapper intercepts exit
+  code 2 and terminates cleanly without resubmitting, breaking infinite
+  submit-cancel-resubmit loops that occurred when a job was accidentally
+  double-submitted. (`cli/main.py`, `simulation/signals.py`,
+  `workflow/slurm.py`)
 - **Hard-killed segments now retry in-place instead of advancing.**
   When SLURM kills a job without a grace period (SIGKILL, node failure,
   OOM), no `INTERRUPTED` marker file is written. Previously, the next job
