@@ -816,6 +816,7 @@ def run_segment(
         SegmentStatus,
         SimulationProgress,
         SimulationStatus,
+        _derive_overall_status,
         get_next_segment_info,
         load_or_scan_progress,
         save_progress,
@@ -882,6 +883,9 @@ def run_segment(
             shutil.rmtree(failed_dir)
         progress.segments = [s for s in progress.segments if s.index != failed.index]
     if failed_segments:
+        progress.status = _derive_overall_status(
+            progress.segments, is_complete=progress.is_complete
+        )
         save_progress(working_dir, progress)
 
     # ---- Handle RUNNING segments (concurrency guard) ----
@@ -945,6 +949,9 @@ def run_segment(
                 )
                 shutil.rmtree(last_seg_dir)
                 progress.segments = [s for s in progress.segments if s.index != last_seg.index]
+                progress.status = _derive_overall_status(
+                    progress.segments, is_complete=progress.is_complete
+                )
                 save_progress(working_dir, progress)
 
     # Determine what to run next

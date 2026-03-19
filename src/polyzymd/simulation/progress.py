@@ -424,6 +424,56 @@ def scan_equilibration_stages(working_dir: str | Path) -> List[EquilibrationStag
     return records
 
 
+def _derive_overall_status(
+    segments: List[SegmentRecord],
+    is_complete: bool = False,
+) -> SimulationStatus:
+    """Compute the overall simulation status from segment statuses.
+
+    The key rule: when no segment is actively RUNNING, the **most recent**
+    segment (highest index) determines the overall status.  This prevents
+    an earlier INTERRUPTED segment from masking a later FAILED segment,
+    which would mislead the user into thinking auto-resume will recover
+    the simulation when manual resubmission is actually required.
+
+    Priority:
+    1. ``is_complete`` → COMPLETED (all requested steps done).
+    2. No segments → NOT_STARTED.
+    3. Any segment RUNNING → RUNNING (active process always wins).
+    4. Latest segment FAILED → FAILED.
+    5. Latest segment INTERRUPTED → INTERRUPTED.
+    6. All segments completed but total not reached → RUNNING (awaiting
+       next segment submission).
+
+    Parameters
+    ----------
+    segments : list of SegmentRecord
+        All known segment records.
+    is_complete : bool
+        Whether the simulation has reached its total requested steps.
+
+    Returns
+    -------
+    SimulationStatus
+    """
+    if is_complete:
+        return SimulationStatus.COMPLETED
+    if not segments:
+        return SimulationStatus.NOT_STARTED
+    if any(s.status == SegmentStatus.RUNNING for s in segments):
+        return SimulationStatus.RUNNING
+
+    # Use the most recent segment to determine overall status
+    last = max(segments, key=lambda s: s.index)
+    if last.status == SegmentStatus.FAILED:
+        return SimulationStatus.FAILED
+    if last.status == SegmentStatus.INTERRUPTED:
+        return SimulationStatus.INTERRUPTED
+
+    # All segments completed but total not reached — still in progress
+    return SimulationStatus.RUNNING
+
+
 def scan_filesystem(
     working_dir: str | Path,
     timestep_fs: float = 2.0,
@@ -468,17 +518,9 @@ def scan_filesystem(
         segments=segments,
     )
 
-    # Determine overall status
-    if not segments:
-        progress.status = SimulationStatus.NOT_STARTED
-    elif any(s.status == SegmentStatus.RUNNING for s in segments):
-        progress.status = SimulationStatus.RUNNING
-    elif any(s.status == SegmentStatus.INTERRUPTED for s in segments):
-        progress.status = SimulationStatus.INTERRUPTED
-    elif any(s.status == SegmentStatus.FAILED for s in segments):
-        progress.status = SimulationStatus.FAILED
-    else:
-        progress.status = SimulationStatus.COMPLETED
+    # Determine overall status — delegate to helper so the logic lives
+    # in one place and the "latest segment wins" rule is applied consistently.
+    progress.status = _derive_overall_status(segments)
 
     LOGGER.info(
         f"Filesystem scan: {progress.num_eq_stages_completed} eq stage(s), "
@@ -889,19 +931,9 @@ def validate_progress(
 
     progress.segments = reconciled
 
-    # Recompute overall status
-    if progress.is_complete:
-        progress.status = SimulationStatus.COMPLETED
-    elif any(s.status == SegmentStatus.RUNNING for s in reconciled):
-        progress.status = SimulationStatus.RUNNING
-    elif any(s.status == SegmentStatus.INTERRUPTED for s in reconciled):
-        progress.status = SimulationStatus.INTERRUPTED
-    elif any(s.status == SegmentStatus.FAILED for s in reconciled):
-        progress.status = SimulationStatus.FAILED
-    elif reconciled:
-        progress.status = SimulationStatus.RUNNING
-    else:
-        progress.status = SimulationStatus.NOT_STARTED
+    # Recompute overall status — delegate to the shared helper so
+    # "latest segment wins" is applied consistently.
+    progress.status = _derive_overall_status(reconciled, is_complete=progress.is_complete)
 
     LOGGER.info(
         f"Validated progress: {progress.total_steps_completed}/{progress.total_steps_requested} "

@@ -131,6 +131,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   submit-cancel-resubmit loops that occurred when a job was accidentally
   double-submitted. (`cli/main.py`, `simulation/signals.py`,
   `workflow/slurm.py`)
+- **Overall status now reflects the most recent segment, not `any()`.**
+  When a simulation had mixed segment statuses (e.g., segment 0 INTERRUPTED,
+  segment 1 FAILED — as seen with the CALB replicate 2 infinite-loop bug),
+  the `any(INTERRUPTED)` check in the status cascade fired before
+  `any(FAILED)`, setting `progress.status` to `"interrupted"`. This misled
+  the user into thinking auto-resume would handle recovery when the
+  simulation actually needed manual resubmission. The status derivation
+  logic now uses the highest-index segment's status to determine the
+  overall state: if the latest segment is FAILED, overall = FAILED. A new
+  `_derive_overall_status()` helper centralises this logic (previously
+  duplicated in `scan_filesystem` and `validate_progress`). Additionally,
+  cleanup blocks in `run-segment` (FAILED segment removal, hard-kill
+  cleanup) now recompute `progress.status` before saving, preventing stale
+  status values from persisting in `progress.json`.
+  (`simulation/progress.py`, `cli/main.py`)
 - **Hard-killed segments now retry in-place instead of advancing.**
   When SLURM kills a job without a grace period (SIGKILL, node failure,
   OOM), no `INTERRUPTED` marker file is written. Previously, the next job

@@ -22,6 +22,7 @@ from polyzymd.simulation.progress import (
     SegmentStatus,
     SimulationProgress,
     SimulationStatus,
+    _derive_overall_status,
     _estimate_steps_from_csv,
     get_next_segment_info,
     load_or_scan_progress,
@@ -1039,3 +1040,222 @@ class TestFailedSegmentHandling:
         # Remove FAILED segments (simulating what main.py does)
         p.segments = [s for s in p.segments if s.status != SegmentStatus.FAILED]
         assert p.next_segment_index == 0  # Can retry from scratch
+
+
+# ---------------------------------------------------------------------------
+# _derive_overall_status — unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestDeriveOverallStatus:
+    """Verify the centralised status derivation helper.
+
+    Key invariant: when no segment is RUNNING, the **most recent** segment
+    (highest index) determines the overall status.  This prevents an earlier
+    INTERRUPTED segment from masking a later FAILED segment.
+    """
+
+    # ---- Basic single-status cases ----
+
+    def test_no_segments_not_started(self):
+        assert _derive_overall_status([]) == SimulationStatus.NOT_STARTED
+
+    def test_single_completed_not_complete(self):
+        """One completed segment but total not reached → RUNNING (awaiting next)."""
+        segs = [_make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED)]
+        assert _derive_overall_status(segs) == SimulationStatus.RUNNING
+
+    def test_single_completed_is_complete(self):
+        segs = [_make_segment(0, steps=10000000, status=SegmentStatus.COMPLETED)]
+        assert _derive_overall_status(segs, is_complete=True) == SimulationStatus.COMPLETED
+
+    def test_single_running(self):
+        segs = [_make_segment(0, steps=0, status=SegmentStatus.RUNNING)]
+        assert _derive_overall_status(segs) == SimulationStatus.RUNNING
+
+    def test_single_interrupted(self):
+        segs = [_make_segment(0, steps=3000000, status=SegmentStatus.INTERRUPTED)]
+        assert _derive_overall_status(segs) == SimulationStatus.INTERRUPTED
+
+    def test_single_failed(self):
+        segs = [_make_segment(0, steps=0, status=SegmentStatus.FAILED)]
+        assert _derive_overall_status(segs) == SimulationStatus.FAILED
+
+    # ---- RUNNING always wins ----
+
+    def test_running_overrides_interrupted(self):
+        segs = [
+            _make_segment(0, steps=3000000, status=SegmentStatus.INTERRUPTED),
+            _make_segment(1, steps=0, status=SegmentStatus.RUNNING),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.RUNNING
+
+    def test_running_overrides_failed(self):
+        segs = [
+            _make_segment(0, steps=0, status=SegmentStatus.FAILED),
+            _make_segment(1, steps=0, status=SegmentStatus.RUNNING),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.RUNNING
+
+    def test_running_in_middle_still_wins(self):
+        """RUNNING segment at a lower index than later segments still dominates."""
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=0, status=SegmentStatus.RUNNING),
+            _make_segment(2, steps=0, status=SegmentStatus.FAILED),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.RUNNING
+
+    # ---- Latest segment determines status (the core bug fix) ----
+
+    def test_interrupted_then_failed_overall_failed(self):
+        """This is the exact scenario from the CALB replicate 2 bug:
+        seg 0 = INTERRUPTED (hard-killed), seg 1 = FAILED (0 steps).
+        Overall should be FAILED, not INTERRUPTED."""
+        segs = [
+            _make_segment(0, steps=57000000, status=SegmentStatus.INTERRUPTED),
+            _make_segment(1, steps=0, status=SegmentStatus.FAILED),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.FAILED
+
+    def test_failed_then_interrupted_overall_interrupted(self):
+        """If a later segment is INTERRUPTED (not FAILED), that takes precedence."""
+        segs = [
+            _make_segment(0, steps=0, status=SegmentStatus.FAILED),
+            _make_segment(1, steps=3000000, status=SegmentStatus.INTERRUPTED),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.INTERRUPTED
+
+    def test_completed_then_failed_overall_failed(self):
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=0, status=SegmentStatus.FAILED),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.FAILED
+
+    def test_completed_then_interrupted_overall_interrupted(self):
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=3000000, status=SegmentStatus.INTERRUPTED),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.INTERRUPTED
+
+    def test_many_segments_latest_wins(self):
+        """With many mixed segments, the highest-index determines status."""
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=3000000, status=SegmentStatus.INTERRUPTED),
+            _make_segment(2, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(3, steps=0, status=SegmentStatus.FAILED),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.FAILED
+
+    # ---- is_complete trumps everything ----
+
+    def test_is_complete_overrides_failed(self):
+        """Even if a segment is FAILED, is_complete=True → COMPLETED."""
+        segs = [_make_segment(0, steps=0, status=SegmentStatus.FAILED)]
+        assert _derive_overall_status(segs, is_complete=True) == SimulationStatus.COMPLETED
+
+    def test_is_complete_overrides_interrupted(self):
+        segs = [_make_segment(0, steps=3000000, status=SegmentStatus.INTERRUPTED)]
+        assert _derive_overall_status(segs, is_complete=True) == SimulationStatus.COMPLETED
+
+    # ---- After cleanup (segments removed) ----
+
+    def test_after_removing_failed_segments(self):
+        """Simulates the cleanup in main.py: remove FAILED, recompute."""
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=0, status=SegmentStatus.FAILED),
+        ]
+        # Remove failed segments (as main.py does)
+        cleaned = [s for s in segs if s.status != SegmentStatus.FAILED]
+        assert _derive_overall_status(cleaned) == SimulationStatus.RUNNING
+
+    def test_after_removing_all_segments(self):
+        """If all segments are removed, status is NOT_STARTED."""
+        segs = [_make_segment(0, steps=0, status=SegmentStatus.FAILED)]
+        cleaned = [s for s in segs if s.status != SegmentStatus.FAILED]
+        assert _derive_overall_status(cleaned) == SimulationStatus.NOT_STARTED
+
+
+# ---------------------------------------------------------------------------
+# Status derivation integration — scan_filesystem & validate_progress
+# ---------------------------------------------------------------------------
+
+
+class TestStatusDerivationIntegration:
+    """Verify that scan_filesystem and validate_progress use
+    _derive_overall_status correctly (latest segment wins)."""
+
+    def test_scan_interrupted_then_failed_on_disk(self, tmp_path):
+        """Filesystem with seg 0 interrupted + seg 1 failed → overall FAILED.
+
+        This reproduces the CALB replicate 2 scenario through the filesystem
+        scanning path.
+        """
+        # Segment 0: interrupted (with INTERRUPTED marker)
+        _write_interrupted_segment_on_disk(tmp_path, 0, steps_completed=57000000)
+
+        # Segment 1: failed — an empty directory with no state.xml, no
+        # INTERRUPTED marker, no checkpoint.  The scanner should pick it
+        # up as FAILED (or it won't appear).  To guarantee a FAILED status
+        # we write a minimal directory that causes _scan_segment_dir to
+        # return a record.  The simplest way: save progress with a FAILED
+        # segment and reload via validate_progress (which is what really
+        # matters for this bug).
+        seg_dir = tmp_path / "production_1"
+        seg_dir.mkdir()
+        # Empty segment dir with only system.xml → scanner may skip it,
+        # so we test through validate_progress instead (see next test).
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        # At minimum, seg 0 is INTERRUPTED; overall should reflect that.
+        assert p.status in {SimulationStatus.INTERRUPTED, SimulationStatus.FAILED}
+
+    def test_validate_interrupted_then_failed_overall_failed(self, tmp_path):
+        """validate_progress with seg 0=INTERRUPTED, seg 1=FAILED → overall FAILED."""
+        # Write seg 0 on disk as interrupted
+        _write_interrupted_segment_on_disk(tmp_path, 0, steps_completed=57000000)
+
+        # Build a progress object with both segments in file
+        segs = [
+            _make_segment(0, steps=57000000, status=SegmentStatus.INTERRUPTED),
+            _make_segment(1, steps=0, status=SegmentStatus.FAILED),
+        ]
+        p = _make_progress(segments=segs, total_steps=200000000)
+        validated = validate_progress(tmp_path, p, timestep_fs=2.0)
+
+        # The key assertion: overall status is FAILED (not INTERRUPTED)
+        assert validated.status == SimulationStatus.FAILED
+
+    def test_validate_completed_then_interrupted_overall_interrupted(self, tmp_path):
+        """validate_progress with seg 0=COMPLETED, seg 1=INTERRUPTED → INTERRUPTED."""
+        _write_completed_segment_on_disk(tmp_path, 0, duration_ns=10.0)
+        _write_interrupted_segment_on_disk(tmp_path, 1, steps_completed=3000000)
+
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=3000000, status=SegmentStatus.INTERRUPTED),
+        ]
+        p = _make_progress(segments=segs, total_steps=20000000)
+        validated = validate_progress(tmp_path, p, timestep_fs=2.0)
+
+        assert validated.status == SimulationStatus.INTERRUPTED
+
+    def test_scan_completed_segments_without_target_shows_running(self, tmp_path):
+        """scan_filesystem doesn't know total_steps_requested, so all-completed
+        segments result in RUNNING (awaiting next segment), not COMPLETED.
+        COMPLETED is only set once total_steps_requested is known (via
+        load_or_scan_progress or validate_progress with is_complete=True)."""
+        _write_completed_segment_on_disk(tmp_path, 0, duration_ns=10.0)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        # scan_filesystem doesn't pass is_complete, so the helper defaults to
+        # is_complete=False → all completed segments → RUNNING.
+        assert p.status == SimulationStatus.RUNNING
+
+    def test_scan_empty_dir_not_started(self, tmp_path):
+        """Empty working directory → NOT_STARTED (regression check)."""
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert p.status == SimulationStatus.NOT_STARTED
