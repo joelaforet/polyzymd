@@ -206,6 +206,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-1.26.4-py311h64a7726_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ocl-icd-2.3.3-hb9d3cd8_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ocl-icd-system-1.0.0-1.tar.bz2
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/openbabel-3.1.1-py311h8b422cb_9.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/opencl-headers-2025.06.13-h5888daf_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-amber-ff-ports-2025.09.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-forcefields-2026.01.0-pyhd8ed1ab_0.conda
@@ -340,14 +341,11 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3e/21/95378d5d0dd5c64f382d3b43e5270e4e6618fd70b724713cb654cd2bdcab/biopandas-0.5.1-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/15/0b/07c479b28b2b36cbc49f5fa78156fc77f918a4bf5927c9409947d2d3d68d/dgl-2.1.0-cp311-cp311-manylinux1_x86_64.whl
-      - pypi: https://files.pythonhosted.org/packages/76/0d/4efbe171490410bf76830fe96d1a66f69cb0014852641bc754de7b50de8c/espaloma_charge-0.0.8-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/1a/3a/aa07b056117926ecdd1b26f490980bc058070cece1c90493b8872729481a/lammps-2024.8.29.0.0-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ef/01/c12a04269340d7e2b904e9dd1d2df6b165871514ae63aec53baf19660c0d/looseversion-1.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3c/f1/efea3da858043ed9c078f507ab744b6d00933c7bc8a75a24821937600178/mmtf_python-1.1.3-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/da/e0/6cc2e852837cd6086fe7d8406af4294e66827a60a4cf60b86575a4a65ca8/msgpack-1.1.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/7c/a1/c5aabe25db98da6b9aee1c117fd7ac5481be368410593f2698de64cb9b6b/polymerist-1.0.2-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/95/d4/af694ef718aedbe95a72760ab9ff7a6a7a44ace2d7f70c27bfeb67c5c503/torchdata-0.11.0-py3-none-any.whl
       - pypi: ./
   cuda-12-4:
     channels:
@@ -555,6 +553,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-1.26.4-py311h64a7726_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ocl-icd-2.3.3-hb9d3cd8_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ocl-icd-system-1.0.0-1.tar.bz2
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/openbabel-3.1.1-py311h8b422cb_9.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/opencl-headers-2025.06.13-h5888daf_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-amber-ff-ports-2025.09.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-forcefields-2026.01.0-pyhd8ed1ab_0.conda
@@ -688,14 +687,11 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3e/21/95378d5d0dd5c64f382d3b43e5270e4e6618fd70b724713cb654cd2bdcab/biopandas-0.5.1-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/15/0b/07c479b28b2b36cbc49f5fa78156fc77f918a4bf5927c9409947d2d3d68d/dgl-2.1.0-cp311-cp311-manylinux1_x86_64.whl
-      - pypi: https://files.pythonhosted.org/packages/76/0d/4efbe171490410bf76830fe96d1a66f69cb0014852641bc754de7b50de8c/espaloma_charge-0.0.8-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/1a/3a/aa07b056117926ecdd1b26f490980bc058070cece1c90493b8872729481a/lammps-2024.8.29.0.0-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ef/01/c12a04269340d7e2b904e9dd1d2df6b165871514ae63aec53baf19660c0d/looseversion-1.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3c/f1/efea3da858043ed9c078f507ab744b6d00933c7bc8a75a24821937600178/mmtf_python-1.1.3-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/da/e0/6cc2e852837cd6086fe7d8406af4294e66827a60a4cf60b86575a4a65ca8/msgpack-1.1.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/7c/a1/c5aabe25db98da6b9aee1c117fd7ac5481be368410593f2698de64cb9b6b/polymerist-1.0.2-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/95/d4/af694ef718aedbe95a72760ab9ff7a6a7a44ace2d7f70c27bfeb67c5c503/torchdata-0.11.0-py3-none-any.whl
       - pypi: ./
   cuda-12-6:
     channels:
@@ -903,6 +899,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-1.26.4-py311h64a7726_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ocl-icd-2.3.3-hb9d3cd8_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ocl-icd-system-1.0.0-1.tar.bz2
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/openbabel-3.1.1-py311h8b422cb_9.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/opencl-headers-2025.06.13-h5888daf_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-amber-ff-ports-2025.09.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-forcefields-2026.01.0-pyhd8ed1ab_0.conda
@@ -1037,14 +1034,11 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3e/21/95378d5d0dd5c64f382d3b43e5270e4e6618fd70b724713cb654cd2bdcab/biopandas-0.5.1-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/15/0b/07c479b28b2b36cbc49f5fa78156fc77f918a4bf5927c9409947d2d3d68d/dgl-2.1.0-cp311-cp311-manylinux1_x86_64.whl
-      - pypi: https://files.pythonhosted.org/packages/76/0d/4efbe171490410bf76830fe96d1a66f69cb0014852641bc754de7b50de8c/espaloma_charge-0.0.8-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/1a/3a/aa07b056117926ecdd1b26f490980bc058070cece1c90493b8872729481a/lammps-2024.8.29.0.0-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ef/01/c12a04269340d7e2b904e9dd1d2df6b165871514ae63aec53baf19660c0d/looseversion-1.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3c/f1/efea3da858043ed9c078f507ab744b6d00933c7bc8a75a24821937600178/mmtf_python-1.1.3-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/da/e0/6cc2e852837cd6086fe7d8406af4294e66827a60a4cf60b86575a4a65ca8/msgpack-1.1.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/7c/a1/c5aabe25db98da6b9aee1c117fd7ac5481be368410593f2698de64cb9b6b/polymerist-1.0.2-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/95/d4/af694ef718aedbe95a72760ab9ff7a6a7a44ace2d7f70c27bfeb67c5c503/torchdata-0.11.0-py3-none-any.whl
       - pypi: ./
   default:
     channels:
@@ -1738,18 +1732,6 @@ packages:
   - pkg:pypi/defusedxml?source=hash-mapping
   size: 24062
   timestamp: 1615232388757
-- pypi: https://files.pythonhosted.org/packages/15/0b/07c479b28b2b36cbc49f5fa78156fc77f918a4bf5927c9409947d2d3d68d/dgl-2.1.0-cp311-cp311-manylinux1_x86_64.whl
-  name: dgl
-  version: 2.1.0
-  sha256: 050af2b3d54f158be67ae222dbf786b2b35e5d5d6a29fbf2a81b854e99f13adf
-  requires_dist:
-  - numpy>=1.14.0
-  - scipy>=1.1.0
-  - networkx>=2.1
-  - requests>=2.19.0
-  - tqdm
-  - psutil>=5.8.0
-  - torchdata>=0.5.0
 - conda: https://conda.anaconda.org/conda-forge/noarch/ele-0.2.0-pyhd8ed1ab_0.tar.bz2
   sha256: cce65a991b125276154870d492dcb698094654c739fec99793b37d22809d521a
   md5: c2a1975b69cf28dc7b3d8bbfbadd071f
@@ -1761,15 +1743,6 @@ packages:
   - pkg:pypi/ele?source=hash-mapping
   size: 13315
   timestamp: 1617284725767
-- pypi: https://files.pythonhosted.org/packages/76/0d/4efbe171490410bf76830fe96d1a66f69cb0014852641bc754de7b50de8c/espaloma_charge-0.0.8-py3-none-any.whl
-  name: espaloma-charge
-  version: 0.0.8
-  sha256: ebe374427a18e68b227bc51d05bb5c0139436f9583a67ee7511cd4a55c4a4b21
-  requires_dist:
-  - dgl
-  - torch
-  - numpy
-  - rdkit
 - conda: https://conda.anaconda.org/conda-forge/noarch/exceptiongroup-1.3.1-pyhd8ed1ab_0.conda
   sha256: ee6cf346d017d954255bbcbdb424cddea4d14e4ed7e9813e429db1d795d01144
   md5: 8e662bd460bda79b1ea39194e3c4c9ab
@@ -3948,6 +3921,22 @@ packages:
   purls: []
   size: 4253
   timestamp: 1575483836797
+- conda: https://conda.anaconda.org/conda-forge/linux-64/openbabel-3.1.1-py311h8b422cb_9.conda
+  sha256: 93b3986c4fa369bed3afd9816e95f0320e785cea2af32ce5cb2cd9d83c775443
+  md5: 5494059bca051cc8dca180587941bb13
+  depends:
+  - cairo >=1.18.0,<2.0a0
+  - libgcc-ng >=12
+  - libstdcxx-ng >=12
+  - libxml2 >=2.12.1,<2.14.0a0
+  - libzlib >=1.2.13,<2.0.0a0
+  - python >=3.11,<3.12.0a0
+  - python_abi 3.11.* *_cp311
+  license: GPL-2.0-only
+  license_family: GPL
+  purls: []
+  size: 5256821
+  timestamp: 1701377047300
 - conda: https://conda.anaconda.org/conda-forge/linux-64/opencl-headers-2025.06.13-h5888daf_0.conda
   sha256: 2b6ce54174ec19110e1b3c37455f7cd138d0e228a75727a9bba443427da30a36
   md5: 45c3d2c224002d6d0d7769142b29f986
@@ -5511,15 +5500,6 @@ packages:
   - pkg:pypi/tomli?source=compressed-mapping
   size: 21453
   timestamp: 1768146676791
-- pypi: https://files.pythonhosted.org/packages/95/d4/af694ef718aedbe95a72760ab9ff7a6a7a44ace2d7f70c27bfeb67c5c503/torchdata-0.11.0-py3-none-any.whl
-  name: torchdata
-  version: 0.11.0
-  sha256: 52b940fbbe0e00fb21cabddf528449d1bec5bfb0d0823b7487b15f951658ee33
-  requires_dist:
-  - urllib3>=1.25
-  - requests
-  - torch>=2
-  requires_python: '>=3.9'
 - conda: https://conda.anaconda.org/conda-forge/noarch/torchmetrics-1.8.2-pyhd8ed1ab_0.conda
   sha256: d3171f8d6689db5208e36f1acab7bcaa38fe4ce0cbbd0cfa59e100813754ceab
   md5: 5d6e1558a945d0333ae7dc557add7201
