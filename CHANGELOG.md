@@ -223,6 +223,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed indentation bug in generated GROMACS run script.** The
   post-processing section had a misindented `echo` line that would cause
   the script to fail under `set -e`. (`exporters/gromacs.py`)
+- **`recover --submit` no longer rebuilds system when equilibration is
+  complete.**  When a replicate had completed equilibration but no production
+  segments, `polyzymd recover --submit` generated a SLURM script that re-ran
+  the full build routine.  Since polymer packing and solvation are
+  non-deterministic, this produced a different atom count, causing
+  `loadCheckpoint` to crash with `"wrong number of particles"`.  The
+  `recover` command now detects pre-built system files
+  (`solvated_system.pdb`, `system.xml`) and passes `--skip-build` to the
+  generated script.  Additionally, `_run_initial_segment` now skips
+  minimization and equilibration when `--skip-build` is active and
+  equilibration is already recorded as complete in `progress.json`, jumping
+  directly to production segment 0.
+  (`cli/main.py`)
 
 ### Documentation
 
