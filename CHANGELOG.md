@@ -236,6 +236,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   equilibration is already recorded as complete in `progress.json`, jumping
   directly to production segment 0.
   (`cli/main.py`)
+- **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
+  If a segment was gracefully interrupted, then restarted in-place and ran much
+  further before being hard-killed, the old INTERRUPTED marker would persist
+  with the original (too-low) step count while the CSV reflected all the work
+  actually done.  `_scan_segment_dir` now compares the marker's
+  `steps_completed` against the CSV delta; if the CSV shows more than 2× the
+  marker value and exceeds 1 million steps, the stale marker is overridden with
+  the CSV estimate and a warning is logged.  This prevents undercounting
+  completed steps, which would inflate the "remaining" calculation and cause the
+  simulation to overshoot its target duration.
+  (`simulation/progress.py`)
 
 ### Documentation
 
