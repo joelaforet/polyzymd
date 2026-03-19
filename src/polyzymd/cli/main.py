@@ -880,21 +880,27 @@ def run_segment(
     # ---- Handle RUNNING segments (concurrency guard) ----
     # If any segment appears to still be executing (recent checkpoint),
     # refuse to start a new segment to prevent concurrent execution and
-    # the associated data-loss / overlap bugs.  Exit cleanly (code 0) so
-    # the resubmission script will retry later once the running segment
-    # has finished or its checkpoint becomes stale.
+    # the associated data-loss / overlap bugs.  Exit with a dedicated
+    # code (EXIT_CODE_CONCURRENT = 2) so the SLURM bash wrapper knows
+    # this is a duplicate chain and terminates WITHOUT resubmitting.
+    #
+    # Previously this exited with code 0, which caused the resubmission
+    # logic to call check-progress (work remains → exit 1) and resubmit,
+    # creating an infinite submit-cancel-resubmit loop.
+    from polyzymd.simulation.signals import EXIT_CODE_CONCURRENT
+
     running_segments = [s for s in progress.segments if s.status == SegmentStatus.RUNNING]
     if running_segments:
         indices = ", ".join(str(s.index) for s in running_segments)
         colored_echo(
             f"Segment(s) {indices} appear(s) to still be running "
             f"(checkpoint written recently). Refusing to start a new "
-            f"segment to avoid concurrent execution — will retry on "
-            f"next resubmission.",
+            f"segment to avoid concurrent execution — this duplicate "
+            f"chain will terminate without resubmitting.",
             phase="simulation",
             level=logging.WARNING,
         )
-        sys.exit(0)
+        sys.exit(EXIT_CODE_CONCURRENT)
 
     # ---- Handle hard-killed segments (no INTERRUPTED marker) ----
     # When SLURM preempts a job with SIGKILL (no grace period) the

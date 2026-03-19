@@ -348,3 +348,64 @@ class TestJobNameGeneration:
         # int(0.333 * 100) = 33, int(0.667 * 100) = 66
         assert "A33" in name
         assert "B66" in name
+
+
+# ---------------------------------------------------------------------------
+# Exit code handling in JOB_TEMPLATE
+# ---------------------------------------------------------------------------
+
+
+class TestJobTemplateExitCodeHandling:
+    """Verify that JOB_TEMPLATE handles exit codes correctly.
+
+    The bash wrapper must:
+    - Exit code 2 (concurrent): terminate cleanly without resubmitting
+    - Exit code 0 or 99: proceed to check-progress / resubmit logic
+    - Other non-zero: abort with error
+    """
+
+    def test_template_contains_exit_code_2_guard(self):
+        """JOB_TEMPLATE must intercept exit code 2 before the generic fatal check."""
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        assert "if [ $RC -eq 2 ]" in template
+
+    def test_exit_code_2_does_not_resubmit(self):
+        """The exit-code-2 block must exit 0 (no resubmit) and log CONCURRENT."""
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        # Find the exit-code-2 block
+        lines = template.splitlines()
+        in_block = False
+        block_lines = []
+        for line in lines:
+            if "if [ $RC -eq 2 ]" in line:
+                in_block = True
+            if in_block:
+                block_lines.append(line)
+                if line.strip() == "fi":
+                    break
+
+        block = "\n".join(block_lines)
+        assert "exit 0" in block, "Exit code 2 block must exit 0 (clean termination)"
+        assert "CONCURRENT" in block, "Exit code 2 block must log CONCURRENT message"
+
+    def test_exit_code_2_guard_precedes_fatal_check(self):
+        """Exit code 2 handling must appear BEFORE the generic non-zero check.
+
+        If the order were reversed, exit code 2 would be caught by the
+        'RC -ne 0 && RC -ne 99' guard and treated as a fatal error.
+        """
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        pos_concurrent = template.index("if [ $RC -eq 2 ]")
+        pos_fatal = template.index("if [ $RC -ne 0 ] && [ $RC -ne 99 ]")
+        assert pos_concurrent < pos_fatal, (
+            "Exit code 2 guard must appear before the generic fatal-error guard"
+        )
+
+    def test_template_fatal_check_excludes_code_2(self):
+        """The fatal-error guard checks 'RC -ne 0 && RC -ne 99'.
+
+        Since exit code 2 is intercepted earlier, it never reaches this guard.
+        This test documents the expected pattern.
+        """
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        assert "if [ $RC -ne 0 ] && [ $RC -ne 99 ]" in template

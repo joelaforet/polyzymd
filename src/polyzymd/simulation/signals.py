@@ -25,6 +25,10 @@ LOGGER = logging.getLogger(__name__)
 # Exit code that means "interrupted cleanly, state was saved"
 EXIT_CODE_INTERRUPTED = 99
 
+# Exit code that means "another job is already running this replicate —
+# this duplicate chain should terminate without resubmitting"
+EXIT_CODE_CONCURRENT = 2
+
 # Module-level flag checked by the simulation loop
 _interrupted = threading.Event()
 

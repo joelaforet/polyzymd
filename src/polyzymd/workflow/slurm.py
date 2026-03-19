@@ -241,6 +241,8 @@ class SlurmScriptGenerator:
     #
     # Exit codes from `polyzymd run-segment`:
     #   0  — segment completed normally (may or may not be final)
+    #   2  — concurrent execution detected (another job already running);
+    #        this duplicate chain should terminate without resubmitting
     #   99 — graceful interruption (wall-time signal); should resubmit
     #   other — unexpected failure; do NOT resubmit
     # =====================================================================
@@ -336,6 +338,12 @@ echo "run-segment exited with code $RC at $(date)"
 # =========================================================================
 # Resubmission logic
 # =========================================================================
+if [ $RC -eq 2 ]; then
+    echo "CONCURRENT: Another job is already running this replicate — NOT resubmitting."
+    echo "This duplicate job chain will now terminate cleanly."
+    exit 0
+fi
+
 if [ $RC -ne 0 ] && [ $RC -ne 99 ]; then
     echo "FATAL: run-segment failed (exit code $RC) — NOT resubmitting"
     exit $RC

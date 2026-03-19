@@ -763,6 +763,7 @@ class TestRunningSegmentConcurrencyGuard:
             SegmentStatus,
             SimulationProgress,
         )
+        from polyzymd.simulation.signals import EXIT_CODE_CONCURRENT
 
         progress = SimulationProgress(
             config_path="/tmp/config.yaml",
@@ -789,6 +790,10 @@ class TestRunningSegmentConcurrencyGuard:
         running_segments = [s for s in progress.segments if s.status == SegmentStatus.RUNNING]
         assert len(running_segments) == 1
         assert running_segments[0].index == 1
+
+        # Verify the exit code constant is 2 (used by JOB_TEMPLATE to
+        # terminate duplicate chains without resubmitting)
+        assert EXIT_CODE_CONCURRENT == 2
 
     def test_no_running_segments_allows_advance(self, tmp_path):
         """With no RUNNING segments, the guard is a no-op."""
