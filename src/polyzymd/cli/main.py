@@ -1114,6 +1114,50 @@ def _run_initial_segment(
         working_dir=working_dir,
     )
 
+    # ------------------------------------------------------------------
+    # Fast-path: skip minimize + equilibration when recovering a job that
+    # already completed equilibration but was interrupted before starting
+    # production.  Without this, the runner would re-run all equilibration
+    # stages (or worse, rebuild the system with a different atom count).
+    # ------------------------------------------------------------------
+    if skip_build:
+        from polyzymd.simulation.progress import load_progress
+
+        progress = load_progress(working_dir)
+        if progress is not None and progress.equilibration_complete:
+            phases = sim_config.simulation_phases
+            if phases.uses_staged_equilibration:
+                eq_stages_cfg = phases.equilibration_stages
+                last_idx = len(eq_stages_cfg) - 1
+                last_name = eq_stages_cfg[last_idx].name
+            else:
+                last_idx = 0
+                last_name = "equilibration"
+
+            colored_echo(
+                f"Equilibration already complete "
+                f"({progress.num_eq_stages_completed} stage(s)) "
+                "— skipping minimize + equilibrate, jumping to production",
+                phase="simulation",
+            )
+            runner._load_eq_stage_state(last_idx, last_name)
+
+            colored_echo(
+                f"Running production segment 0: {duration_ns:.3f} ns, {num_samples} frames...",
+                phase="simulation",
+            )
+            runner.run_production(
+                temperature=temperature,
+                duration_ns=duration_ns,
+                num_samples=num_samples,
+                timestep_fs=timestep_fs,
+                pressure=pressure,
+                segment_index=0,
+                report_interval=report_interval,
+                checkpoint_interval_s=checkpoint_interval_s,
+            )
+            return
+
     # Minimize
     colored_echo("Running energy minimization...", phase="simulation")
     runner.minimize()
@@ -1131,11 +1175,11 @@ def _run_initial_segment(
     from polyzymd.simulation.progress import (
         EquilibrationStageRecord,
         SegmentStatus,
-        load_progress,
+        load_progress as _load_progress,
         save_progress,
     )
 
-    progress = load_progress(working_dir)
+    progress = _load_progress(working_dir)
     if progress is not None:
         eq_stages = []
         if eq_result.get("type") == "staged_equilibration":
@@ -1916,7 +1960,22 @@ def recover(
     slurm_config = SlurmConfig.from_preset(preset)
     if memory:
         slurm_config.memory = memory
-    generator = SlurmScriptGenerator(slurm_config, pixi_env=resolved_pixi_env)
+
+    # Detect pre-built system files so the recovery job loads the existing
+    # topology instead of rebuilding (non-deterministic packing would produce
+    # a different atom count and crash on checkpoint reload).
+    system_already_built = (working_dir / "solvated_system.pdb").exists() and (
+        working_dir / "system.xml"
+    ).exists()
+    if system_already_built:
+        colored_echo(
+            "Detected pre-built system — recovery job will use --skip-build",
+            phase="workflow",
+        )
+
+    generator = SlurmScriptGenerator(
+        slurm_config, pixi_env=resolved_pixi_env, skip_build=system_already_built
+    )
 
     # Use the same descriptive job naming as `polyzymd submit`
     job_name = create_job_name(sim_config, replicate)
