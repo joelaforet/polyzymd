@@ -34,6 +34,68 @@ from polyzymd.workflow.slurm import (
 LOGGER = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# squeue-based duplicate detection
+# ---------------------------------------------------------------------------
+
+
+def check_existing_slurm_jobs(job_name: str) -> List[str]:
+    """Query SLURM for RUNNING or PENDING jobs that match *job_name*.
+
+    This is a best-effort check: if ``squeue`` is unavailable (e.g. in a
+    non-SLURM environment or CI), a warning is logged and an empty list is
+    returned so that submission proceeds unimpeded.
+
+    Parameters
+    ----------
+    job_name : str
+        The SLURM ``--job-name`` to search for (exact match).
+
+    Returns
+    -------
+    list of str
+        SLURM job IDs that are RUNNING or PENDING with the given name.
+        Empty if ``squeue`` is unavailable or returns no matches.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "squeue",
+                "--noheader",
+                "--name",
+                job_name,
+                "--states",
+                "RUNNING,PENDING",
+                "--format",
+                "%i",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except FileNotFoundError:
+        LOGGER.warning(
+            "squeue not found — skipping duplicate-job check "
+            "(this is expected outside of SLURM environments)"
+        )
+        return []
+    except subprocess.TimeoutExpired:
+        LOGGER.warning("squeue timed out — skipping duplicate-job check")
+        return []
+    except OSError as exc:
+        LOGGER.warning(f"squeue failed ({exc}) — skipping duplicate-job check")
+        return []
+
+    if result.returncode != 0:
+        LOGGER.warning(
+            f"squeue returned exit code {result.returncode} — skipping duplicate-job check"
+        )
+        return []
+
+    job_ids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return job_ids
+
+
 def create_job_name(sim_config: SimulationConfig, replicate: int) -> str:
     """Create a descriptive SLURM job name for a replicate.
 
@@ -86,6 +148,9 @@ class DaisyChainConfig:
         Replicate numbers to run.
     dry_run : bool
         If True, create scripts but don't submit.
+    force : bool
+        If True, skip the squeue duplicate-job check and submit even if
+        a RUNNING/PENDING job already exists for the same replicate.
     output_script_dir : Path
         Directory for generated job scripts.
     config_path : str
@@ -98,6 +163,7 @@ class DaisyChainConfig:
     equilibration_time_ns: float = 0.5
     replicates: List[int] = field(default_factory=lambda: [1])
     dry_run: bool = False
+    force: bool = False
     output_script_dir: Path = Path("daisy_chain_scripts")
     config_path: str = "config.yaml"
 
@@ -108,6 +174,7 @@ class DaisyChainConfig:
         slurm_config: SlurmConfig,
         replicates: Union[str, List[int]] = "1",
         dry_run: bool = False,
+        force: bool = False,
         output_script_dir: Union[str, Path] = "daisy_chain_scripts",
         config_path: str = "config.yaml",
     ) -> "DaisyChainConfig":
@@ -123,6 +190,8 @@ class DaisyChainConfig:
             Replicate range string (e.g. ``"1-5"``) or list of ints.
         dry_run : bool
             If True, don't submit jobs.
+        force : bool
+            If True, skip duplicate-job check.
         output_script_dir : str or Path
             Directory for job scripts.
         config_path : str
@@ -147,6 +216,7 @@ class DaisyChainConfig:
             equilibration_time_ns=sim_config.simulation_phases.total_equilibration_duration,
             replicates=replicate_list,
             dry_run=dry_run,
+            force=force,
             output_script_dir=Path(output_script_dir),
             config_path=config_path,
         )
@@ -389,6 +459,10 @@ class DaisyChainSubmitter:
     def submit_replicate(self, replicate: int) -> SubmissionResult:
         """Generate and submit the job for a single replicate.
 
+        Before submitting, checks ``squeue`` for existing RUNNING/PENDING
+        jobs with the same job name.  If duplicates are found and
+        ``force`` is not set, raises ``RuntimeError``.
+
         Parameters
         ----------
         replicate : int
@@ -398,7 +472,26 @@ class DaisyChainSubmitter:
         -------
         SubmissionResult
             Submission result.
+
+        Raises
+        ------
+        RuntimeError
+            If a SLURM job is already RUNNING or PENDING for this
+            replicate and ``force`` is False.
         """
+        job_name = self._create_job_name(replicate)
+
+        # Best-effort duplicate guard (skipped for dry runs)
+        if not self._dc_config.dry_run and not self._dc_config.force:
+            existing = check_existing_slurm_jobs(job_name)
+            if existing:
+                ids = ", ".join(existing)
+                raise RuntimeError(
+                    f"Replicate {replicate} already has RUNNING/PENDING SLURM "
+                    f"job(s): {ids} (job name '{job_name}'). "
+                    "Use --force to submit anyway."
+                )
+
         LOGGER.info(f"Submitting self-resubmitting job for replicate {replicate}")
 
         script_content = self.generate_job_script(replicate)
@@ -489,6 +582,7 @@ def submit_daisy_chain(
     replicates: str = "1",
     email: str = "",
     dry_run: bool = False,
+    force: bool = False,
     pixi_env: str = "cuda-12-4",
     output_dir: Optional[Union[str, Path]] = None,
     scratch_dir: Optional[Union[str, Path]] = None,
@@ -518,6 +612,8 @@ def submit_daisy_chain(
         Email for job notifications.
     dry_run : bool
         If True, don't submit jobs.
+    force : bool
+        If True, skip the squeue duplicate-job check.
     pixi_env : str
         Pixi environment name (e.g. ``"cuda-12-4"``, ``"cuda-12-6"``).
     output_dir : str or Path or None
@@ -600,6 +696,7 @@ def submit_daisy_chain(
         slurm_config=slurm_config,
         replicates=replicates,
         dry_run=dry_run,
+        force=force,
         output_script_dir=script_output_dir,
         config_path=str(Path(config_path).resolve()),
     )

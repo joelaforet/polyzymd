@@ -409,3 +409,195 @@ class TestJobTemplateExitCodeHandling:
         """
         template = SlurmScriptGenerator.JOB_TEMPLATE
         assert "if [ $RC -ne 0 ] && [ $RC -ne 99 ]" in template
+
+
+# ---------------------------------------------------------------------------
+# squeue-based duplicate detection (check_existing_slurm_jobs)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckExistingSlurmJobs:
+    """Tests for the best-effort squeue duplicate-job guard.
+
+    All tests mock subprocess.run so they work in non-SLURM CI environments.
+    """
+
+    def test_returns_job_ids_when_jobs_exist(self, monkeypatch):
+        """If squeue finds RUNNING/PENDING jobs, their IDs are returned."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "12345\n67890\n"
+
+        monkeypatch.setattr(
+            "polyzymd.workflow.daisy_chain.subprocess.run", lambda *a, **kw: mock_result
+        )
+
+        ids = check_existing_slurm_jobs("r1_310K_Fibronectin")
+        assert ids == ["12345", "67890"]
+
+    def test_returns_empty_when_no_jobs(self, monkeypatch):
+        """If squeue finds no matching jobs, an empty list is returned."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+
+        monkeypatch.setattr(
+            "polyzymd.workflow.daisy_chain.subprocess.run", lambda *a, **kw: mock_result
+        )
+
+        ids = check_existing_slurm_jobs("r1_310K_Fibronectin")
+        assert ids == []
+
+    def test_returns_empty_when_squeue_not_found(self, monkeypatch):
+        """If squeue binary is missing (non-SLURM env), return empty list."""
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs
+
+        def _raise_fnf(*a, **kw):
+            raise FileNotFoundError("squeue not found")
+
+        monkeypatch.setattr("polyzymd.workflow.daisy_chain.subprocess.run", _raise_fnf)
+
+        ids = check_existing_slurm_jobs("r1_310K_Fibronectin")
+        assert ids == []
+
+    def test_returns_empty_when_squeue_times_out(self, monkeypatch):
+        """If squeue hangs, return empty list after timeout."""
+        import subprocess as sp
+
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs
+
+        def _raise_timeout(*a, **kw):
+            raise sp.TimeoutExpired(cmd="squeue", timeout=15)
+
+        monkeypatch.setattr("polyzymd.workflow.daisy_chain.subprocess.run", _raise_timeout)
+
+        ids = check_existing_slurm_jobs("r1_310K_Fibronectin")
+        assert ids == []
+
+    def test_returns_empty_when_squeue_fails(self, monkeypatch):
+        """If squeue returns non-zero, return empty list (best-effort)."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+
+        monkeypatch.setattr(
+            "polyzymd.workflow.daisy_chain.subprocess.run", lambda *a, **kw: mock_result
+        )
+
+        ids = check_existing_slurm_jobs("r1_310K_Fibronectin")
+        assert ids == []
+
+    def test_returns_empty_on_oserror(self, monkeypatch):
+        """If squeue raises OSError (e.g. permission), return empty list."""
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs
+
+        def _raise_os(*a, **kw):
+            raise OSError("Permission denied")
+
+        monkeypatch.setattr("polyzymd.workflow.daisy_chain.subprocess.run", _raise_os)
+
+        ids = check_existing_slurm_jobs("r1_310K_Fibronectin")
+        assert ids == []
+
+
+class TestDuplicateJobGuardIntegration:
+    """Tests that submit_replicate respects the squeue duplicate guard."""
+
+    def _make_submitter(self, *, force: bool = False, dry_run: bool = False):
+        """Create a DaisyChainSubmitter with mocked configs."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow.daisy_chain import DaisyChainConfig, DaisyChainSubmitter
+
+        sim_config = MagicMock()
+        sim_config.enzyme.name = "Fibronectin_8_to_10"
+        sim_config.thermodynamics.temperature = 310.0
+        sim_config.polymers = None
+        sim_config.output.slurm_logs_subdir = "slurm_logs"
+        sim_config.get_working_directory.return_value = MagicMock()
+
+        dc_config = MagicMock(spec=DaisyChainConfig)
+        dc_config.dry_run = dry_run
+        dc_config.force = force
+        dc_config.slurm_config = MagicMock()
+        dc_config.slurm_config.exclude = ""
+        dc_config.output_script_dir = MagicMock()
+        dc_config.config_path = "/fake/config.yaml"
+
+        return DaisyChainSubmitter(sim_config=sim_config, dc_config=dc_config)
+
+    def test_submit_raises_when_duplicate_found(self, monkeypatch):
+        """submit_replicate raises RuntimeError if squeue finds existing jobs."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow import daisy_chain
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "12345\n"
+        monkeypatch.setattr(
+            "polyzymd.workflow.daisy_chain.subprocess.run", lambda *a, **kw: mock_result
+        )
+
+        submitter = self._make_submitter(force=False)
+        with pytest.raises(RuntimeError, match="already has RUNNING/PENDING"):
+            submitter.submit_replicate(1)
+
+    def test_submit_proceeds_with_force(self, monkeypatch):
+        """submit_replicate skips squeue check when force=True."""
+        from unittest.mock import MagicMock
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "12345\n"
+        monkeypatch.setattr(
+            "polyzymd.workflow.daisy_chain.subprocess.run", lambda *a, **kw: mock_result
+        )
+
+        submitter = self._make_submitter(force=True)
+        # The method will proceed past the guard but fail at _submit_job
+        # because we haven't mocked sbatch. That's fine — we just verify
+        # it doesn't raise RuntimeError about duplicates.
+        try:
+            submitter.submit_replicate(1)
+        except RuntimeError as e:
+            assert "already has RUNNING/PENDING" not in str(e)
+        except Exception:
+            pass  # Other errors are expected (mocked config)
+
+    def test_submit_skips_guard_for_dry_run(self, monkeypatch):
+        """Dry run should never check squeue."""
+        from unittest.mock import MagicMock
+
+        call_log = []
+
+        def _mock_run(*a, **kw):
+            call_log.append(a)
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "99999\n"
+            return result
+
+        monkeypatch.setattr("polyzymd.workflow.daisy_chain.subprocess.run", _mock_run)
+
+        submitter = self._make_submitter(dry_run=True, force=False)
+        try:
+            submitter.submit_replicate(1)
+        except Exception:
+            pass  # mocked config won't produce valid scripts
+
+        # squeue should not have been called (dry_run skips the guard)
+        squeue_calls = [c for c in call_log if "squeue" in str(c)]
+        assert len(squeue_calls) == 0, "squeue should not be called during dry run"

@@ -666,6 +666,11 @@ def _run_gromacs_impl(
         "(blanca/alpine presets → cuda-12-4, bridges2 → cuda-12-6)."
     ),
 )
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Skip duplicate-job check and submit even if a SLURM job is already running for the replicate",
+)
 def submit(
     config: str,
     replicates: str,
@@ -682,6 +687,7 @@ def submit(
     submit_openff_logs: bool,
     skip_build: bool,
     pixi_env: Optional[str],
+    force: bool,
 ) -> None:
     """Submit simulation jobs to SLURM.
 
@@ -726,6 +732,7 @@ def submit(
             replicates=replicates,
             email=email,
             dry_run=dry_run,
+            force=force,
             pixi_env=resolved_pixi_env,
             output_dir=output_dir,
             scratch_dir=scratch_dir,
@@ -1776,6 +1783,11 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     type=click.Choice(["cuda-12-4", "cuda-12-6"]),
     help=("Pixi environment for the recovery SLURM job. If omitted, inferred from --preset."),
 )
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Skip duplicate-job check and submit even if a SLURM job is already running for the replicate",
+)
 def recover(
     config: str,
     replicate: int,
@@ -1785,6 +1797,7 @@ def recover(
     dry_run: bool,
     memory: Optional[str],
     pixi_env: Optional[str],
+    force: bool,
 ) -> None:
     """Resume a stalled or interrupted simulation.
 
@@ -1882,7 +1895,7 @@ def recover(
         return
 
     # Generate and submit a self-resubmitting SLURM job
-    from polyzymd.workflow.daisy_chain import create_job_name
+    from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs, create_job_name
     from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV, SlurmConfig, SlurmScriptGenerator
 
     # Resolve pixi environment: explicit flag > preset default
@@ -1902,6 +1915,21 @@ def recover(
     job_name = create_job_name(sim_config, replicate)
     logs_subdir = sim_config.output.slurm_logs_subdir
     output_file = f"{logs_subdir}/{job_name}.%j.out"
+
+    # Best-effort duplicate guard
+    if not force:
+        existing = check_existing_slurm_jobs(job_name)
+        if existing:
+            ids = ", ".join(existing)
+            colored_echo(
+                f"Replicate {replicate} already has RUNNING/PENDING SLURM "
+                f"job(s): {ids} (job name '{job_name}'). "
+                "Use --force to submit anyway.",
+                err=True,
+                phase="workflow",
+                level=logging.ERROR,
+            )
+            sys.exit(1)
 
     config_path_abs = str(Path(config).resolve())
     script_content = generator.generate_job_script(
