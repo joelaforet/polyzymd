@@ -560,6 +560,27 @@ def _scan_segment_dir(
         status = SegmentStatus.INTERRUPTED
         # Read metadata from the INTERRUPTED marker
         steps_completed, total_steps = _parse_interrupted_marker(interrupted_marker)
+
+        # Cross-check against CSV to detect stale INTERRUPTED markers.
+        # If a segment was interrupted, then restarted in-place and ran
+        # much further before being hard-killed, the old marker persists
+        # with the *first* interruption's step count while the CSV
+        # reflects all the work actually done.  Using the stale marker
+        # undercounts progress, inflating ``remaining`` and causing the
+        # simulation to overshoot its target duration.
+        state_data_csv = seg_dir / f"production_{seg_idx}_state_data.csv"
+        if state_data_csv.exists():
+            csv_steps = _estimate_steps_from_csv(state_data_csv)
+            if csv_steps > steps_completed * 2 and csv_steps > 1_000_000:
+                LOGGER.warning(
+                    "Segment %d: INTERRUPTED marker reports %s steps but "
+                    "CSV shows ~%s — marker appears stale, using CSV estimate",
+                    seg_idx,
+                    f"{steps_completed:,}",
+                    f"{csv_steps:,}",
+                )
+                steps_completed = csv_steps
+
         duration_ns = (steps_completed * timestep_fs) / 1e6
         return SegmentRecord(
             index=seg_idx,

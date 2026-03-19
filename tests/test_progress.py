@@ -861,6 +861,143 @@ class TestEstimateStepsFromCsv:
 
 
 # ---------------------------------------------------------------------------
+# Stale INTERRUPTED marker cross-check (Bug 4 defense-in-depth)
+# ---------------------------------------------------------------------------
+
+
+def _write_csv_for_segment(
+    working_dir: Path,
+    seg_idx: int,
+    first_step: int,
+    last_step: int,
+) -> None:
+    """Write a minimal state_data CSV for a production segment.
+
+    The CSV contains exactly two data rows so that
+    ``_estimate_steps_from_csv`` returns ``last_step - first_step``.
+    """
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    (seg_dir / f"production_{seg_idx}_state_data.csv").write_text(
+        f'#"Step","Time (ps)","PE (kJ/mole)"\n'
+        f"{first_step},{first_step * 0.002},-100000.0\n"
+        f"{last_step},{last_step * 0.002},-100000.0\n"
+    )
+
+
+class TestStaleInterruptedMarkerCrossCheck:
+    """_scan_segment_dir cross-checks INTERRUPTED markers against CSV data.
+
+    When a segment is gracefully interrupted, restarted in-place, and then
+    hard-killed, the old INTERRUPTED marker persists with a stale (too-low)
+    step count.  The cross-check detects this and uses the CSV estimate
+    instead.  Thresholds: csv_steps > marker * 2 AND csv_steps > 1_000_000.
+    """
+
+    def test_marker_and_csv_agree(self, tmp_path):
+        """When the CSV delta roughly matches the marker, marker value is used."""
+        steps = 3_000_000
+        _write_interrupted_segment_on_disk(
+            tmp_path, 0, steps_completed=steps, total_steps=5_000_000
+        )
+        # CSV shows same delta (cumulative 100M → 103M = 3M per-segment)
+        _write_csv_for_segment(tmp_path, 0, first_step=100_000_000, last_step=103_000_000)
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.INTERRUPTED
+        assert p.segments[0].steps_completed == steps
+
+    def test_stale_marker_uses_csv(self, tmp_path):
+        """Stale marker (CSV >> marker by >2x and >1M) → CSV estimate used."""
+        marker_steps = 567_234  # Original interruption
+        csv_delta = 85_400_000  # Actual work after restart (>> 2x and >> 1M)
+        _write_interrupted_segment_on_disk(
+            tmp_path, 0, steps_completed=marker_steps, total_steps=100_000_000
+        )
+        _write_csv_for_segment(
+            tmp_path,
+            0,
+            first_step=200_000_000,
+            last_step=200_000_000 + csv_delta,
+        )
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.INTERRUPTED
+        # Should use CSV estimate, NOT the stale marker value
+        assert p.segments[0].steps_completed == csv_delta
+
+    def test_no_csv_uses_marker(self, tmp_path):
+        """When no CSV file exists, marker value is used (no crash)."""
+        steps = 3_000_000
+        _write_interrupted_segment_on_disk(
+            tmp_path, 0, steps_completed=steps, total_steps=5_000_000
+        )
+        # No CSV written — only the INTERRUPTED marker
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].steps_completed == steps
+
+    def test_csv_below_2x_threshold_uses_marker(self, tmp_path):
+        """CSV delta < 2x marker → marker value used (not stale)."""
+        marker_steps = 3_000_000
+        csv_delta = 5_000_000  # 1.67x — below 2x threshold
+        _write_interrupted_segment_on_disk(
+            tmp_path, 0, steps_completed=marker_steps, total_steps=10_000_000
+        )
+        _write_csv_for_segment(
+            tmp_path,
+            0,
+            first_step=50_000_000,
+            last_step=50_000_000 + csv_delta,
+        )
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].steps_completed == marker_steps
+
+    def test_csv_above_2x_but_below_absolute_threshold_uses_marker(self, tmp_path):
+        """CSV delta > 2x marker but < 1M absolute → marker value used.
+
+        This prevents false positives on very short segments where a 2x
+        ratio might occur with tiny step counts.
+        """
+        marker_steps = 100_000
+        csv_delta = 500_000  # 5x ratio but only 500K — below 1M absolute
+        _write_interrupted_segment_on_disk(
+            tmp_path, 0, steps_completed=marker_steps, total_steps=1_000_000
+        )
+        _write_csv_for_segment(
+            tmp_path,
+            0,
+            first_step=10_000_000,
+            last_step=10_000_000 + csv_delta,
+        )
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].steps_completed == marker_steps
+
+    def test_stale_marker_does_not_affect_status(self, tmp_path):
+        """Even when the CSV overrides the marker value, status stays INTERRUPTED."""
+        _write_interrupted_segment_on_disk(
+            tmp_path, 0, steps_completed=500_000, total_steps=100_000_000
+        )
+        _write_csv_for_segment(
+            tmp_path,
+            0,
+            first_step=300_000_000,
+            last_step=385_000_000,  # delta = 85M, >> 2*500K and >> 1M
+        )
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert p.segments[0].status == SegmentStatus.INTERRUPTED
+        assert p.status == SimulationStatus.INTERRUPTED
+
+
+# ---------------------------------------------------------------------------
 # Checkpoint-only segment classification (hard-kill recovery)
 # ---------------------------------------------------------------------------
 
