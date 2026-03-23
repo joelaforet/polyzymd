@@ -168,8 +168,6 @@ Always use this file (not your input structures) when determining `pdbindex` val
 First, build your system to generate `solvated_system.pdb`:
 
 ```bash
-polyzymd run -c config.yaml --replicate 1
-# Or just build without running:
 polyzymd build -c config.yaml
 ```
 

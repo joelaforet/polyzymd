@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -26,6 +27,24 @@ from typing import Any, Dict, List
 from pydantic import BaseModel, Field
 
 LOGGER = logging.getLogger(__name__)
+
+# Threshold (in seconds) for checkpoint file recency.  When a segment
+# directory has a checkpoint file but no ``state.xml`` or ``INTERRUPTED``
+# marker, we check the file's modification time.  If it was written
+# within the last ``CHECKPOINT_RECENCY_SECONDS`` seconds, we assume the
+# simulation process is still alive and classify the segment as RUNNING.
+# If the checkpoint is older, the process was likely hard-killed and the
+# segment is classified as INTERRUPTED.
+#
+# NOTE: This is a **heuristic** — we do not inspect running processes or
+# query SLURM.  Checkpoints are typically written every 10-35 seconds of
+# wall time, so 600 s (10 minutes) provides a very conservative margin.
+CHECKPOINT_RECENCY_SECONDS: int = 600
+
+# How often (wall-clock seconds) the simulation loop should update
+# ``progress.json`` with the current step count of the running segment.
+# This enables ``check-progress`` to show real-time remaining ns.
+PROGRESS_UPDATE_INTERVAL_SECONDS: int = 300  # 5 minutes
 
 
 class SegmentStatus(str, Enum):
@@ -165,11 +184,17 @@ class SimulationProgress(BaseModel):
 
     @property
     def total_steps_completed(self) -> int:
-        """Total MD steps completed across all segments (including interrupted)."""
+        """Total MD steps completed across all segments.
+
+        Includes COMPLETED, INTERRUPTED, and RUNNING segments so that
+        ``check-progress`` reflects real-time progress while a segment
+        is actively executing.
+        """
         return sum(
             seg.steps_completed
             for seg in self.segments
-            if seg.status in (SegmentStatus.COMPLETED, SegmentStatus.INTERRUPTED)
+            if seg.status
+            in (SegmentStatus.COMPLETED, SegmentStatus.INTERRUPTED, SegmentStatus.RUNNING)
         )
 
     @property
@@ -304,10 +329,38 @@ def save_progress(working_dir: str | Path, progress: SimulationProgress) -> Path
 
     with open(tmp, "w") as f:
         json.dump(progress.model_dump(mode="json"), f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
 
     os.replace(str(tmp), str(target))
     LOGGER.debug(f"Saved progress to {target}")
     return target
+
+
+def _update_or_append_segment(
+    progress: SimulationProgress,
+    record: SegmentRecord,
+) -> None:
+    """Update an existing segment record or append a new one.
+
+    If a segment with the same ``index`` already exists in
+    ``progress.segments``, it is replaced in-place. Otherwise the
+    record is appended. This supports the lifecycle where a RUNNING
+    record is created at segment start and later updated to COMPLETED
+    or INTERRUPTED at segment end.
+
+    Parameters
+    ----------
+    progress : SimulationProgress
+        Progress state to modify (mutated in place).
+    record : SegmentRecord
+        The segment record to upsert.
+    """
+    for i, existing in enumerate(progress.segments):
+        if existing.index == record.index:
+            progress.segments[i] = record
+            return
+    progress.segments.append(record)
 
 
 # ---------------------------------------------------------------------------
@@ -349,12 +402,19 @@ def scan_equilibration_stages(working_dir: str | Path) -> List[EquilibrationStag
         stage_idx = int(match.group(1))
         stage_name = match.group(2)
         chk = entry / f"equilibration_{stage_idx}_{stage_name}_checkpoint.chk"
-        status = SegmentStatus.COMPLETED if chk.exists() else SegmentStatus.FAILED
+        chk_exists = chk.exists()
+        status = SegmentStatus.COMPLETED if chk_exists else SegmentStatus.FAILED
+        # Use checkpoint mtime as an approximate finished_at for completed stages
+        finished_at: str | None = None
+        if chk_exists:
+            mtime = chk.stat().st_mtime
+            finished_at = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
         records.append(
             EquilibrationStageRecord(
                 index=stage_idx,
                 name=stage_name,
                 status=status,
+                finished_at=finished_at,
             )
         )
 
@@ -364,6 +424,56 @@ def scan_equilibration_stages(working_dir: str | Path) -> List[EquilibrationStag
         f"/{len(records)} stage(s) completed"
     )
     return records
+
+
+def _derive_overall_status(
+    segments: List[SegmentRecord],
+    is_complete: bool = False,
+) -> SimulationStatus:
+    """Compute the overall simulation status from segment statuses.
+
+    The key rule: when no segment is actively RUNNING, the **most recent**
+    segment (highest index) determines the overall status.  This prevents
+    an earlier INTERRUPTED segment from masking a later FAILED segment,
+    which would mislead the user into thinking auto-resume will recover
+    the simulation when manual resubmission is actually required.
+
+    Priority:
+    1. ``is_complete`` → COMPLETED (all requested steps done).
+    2. No segments → NOT_STARTED.
+    3. Any segment RUNNING → RUNNING (active process always wins).
+    4. Latest segment FAILED → FAILED.
+    5. Latest segment INTERRUPTED → INTERRUPTED.
+    6. All segments completed but total not reached → RUNNING (awaiting
+       next segment submission).
+
+    Parameters
+    ----------
+    segments : list of SegmentRecord
+        All known segment records.
+    is_complete : bool
+        Whether the simulation has reached its total requested steps.
+
+    Returns
+    -------
+    SimulationStatus
+    """
+    if is_complete:
+        return SimulationStatus.COMPLETED
+    if not segments:
+        return SimulationStatus.NOT_STARTED
+    if any(s.status == SegmentStatus.RUNNING for s in segments):
+        return SimulationStatus.RUNNING
+
+    # Use the most recent segment to determine overall status
+    last = max(segments, key=lambda s: s.index)
+    if last.status == SegmentStatus.FAILED:
+        return SimulationStatus.FAILED
+    if last.status == SegmentStatus.INTERRUPTED:
+        return SimulationStatus.INTERRUPTED
+
+    # All segments completed but total not reached — still in progress
+    return SimulationStatus.RUNNING
 
 
 def scan_filesystem(
@@ -410,15 +520,9 @@ def scan_filesystem(
         segments=segments,
     )
 
-    # Determine overall status
-    if not segments:
-        progress.status = SimulationStatus.NOT_STARTED
-    elif any(s.status == SegmentStatus.INTERRUPTED for s in segments):
-        progress.status = SimulationStatus.INTERRUPTED
-    elif any(s.status == SegmentStatus.FAILED for s in segments):
-        progress.status = SimulationStatus.FAILED
-    else:
-        progress.status = SimulationStatus.RUNNING
+    # Determine overall status — delegate to helper so the logic lives
+    # in one place and the "latest segment wins" rule is applied consistently.
+    progress.status = _derive_overall_status(segments)
 
     LOGGER.info(
         f"Filesystem scan: {progress.num_eq_stages_completed} eq stage(s), "
@@ -458,6 +562,27 @@ def _scan_segment_dir(
         status = SegmentStatus.INTERRUPTED
         # Read metadata from the INTERRUPTED marker
         steps_completed, total_steps = _parse_interrupted_marker(interrupted_marker)
+
+        # Cross-check against CSV to detect stale INTERRUPTED markers.
+        # If a segment was interrupted, then restarted in-place and ran
+        # much further before being hard-killed, the old marker persists
+        # with the *first* interruption's step count while the CSV
+        # reflects all the work actually done.  Using the stale marker
+        # undercounts progress, inflating ``remaining`` and causing the
+        # simulation to overshoot its target duration.
+        state_data_csv = seg_dir / f"production_{seg_idx}_state_data.csv"
+        if state_data_csv.exists():
+            csv_steps = _estimate_steps_from_csv(state_data_csv)
+            if csv_steps > steps_completed * 2 and csv_steps > 1_000_000:
+                LOGGER.warning(
+                    "Segment %d: INTERRUPTED marker reports %s steps but "
+                    "CSV shows ~%s — marker appears stale, using CSV estimate",
+                    seg_idx,
+                    f"{steps_completed:,}",
+                    f"{csv_steps:,}",
+                )
+                steps_completed = csv_steps
+
         duration_ns = (steps_completed * timestep_fs) / 1e6
         return SegmentRecord(
             index=seg_idx,
@@ -503,18 +628,79 @@ def _scan_segment_dir(
             finished_at=_now_iso(),  # Approximate
         )
     else:
-        # No state.xml and no INTERRUPTED marker — likely a failed segment
-        # or an empty directory from a crash
-        LOGGER.warning(
-            f"Segment {seg_idx} directory exists but has no state.xml or "
-            f"INTERRUPTED marker — treating as failed"
-        )
-        return SegmentRecord(
-            index=seg_idx,
-            steps_completed=0,
-            steps_requested=0,
-            status=SegmentStatus.FAILED,
-        )
+        # No state.xml and no INTERRUPTED marker — check for checkpoint
+        # from periodic CheckpointReporter (hard-kill recovery).
+        checkpoint_chk = seg_dir / f"production_{seg_idx}_checkpoint.chk"
+        state_data_csv = seg_dir / f"production_{seg_idx}_state_data.csv"
+
+        if checkpoint_chk.exists():
+            # Checkpoint exists but no state.xml or INTERRUPTED marker.
+            # This means either:
+            #   (a) the simulation is still running (checkpoint recently written), or
+            #   (b) the process was hard-killed (SIGKILL / OOM / node failure).
+            #
+            # We distinguish these using a **heuristic**: if the checkpoint
+            # file was modified within the last CHECKPOINT_RECENCY_SECONDS
+            # (default 10 min), the simulation is likely still alive.
+            # Checkpoints are written every ~10-35 s of wall time, so a
+            # 10-minute threshold provides a very conservative margin.
+            #
+            # NOTE: This does NOT inspect running processes or query SLURM.
+            checkpoint_age = time.time() - checkpoint_chk.stat().st_mtime
+            is_likely_running = checkpoint_age < CHECKPOINT_RECENCY_SECONDS
+
+            steps_completed = (
+                _estimate_steps_from_csv(state_data_csv) if state_data_csv.exists() else 0
+            )
+            duration_ns = (steps_completed * timestep_fs) / 1e6
+
+            if is_likely_running:
+                LOGGER.info(
+                    f"Segment {seg_idx} has a recent checkpoint "
+                    f"(age {checkpoint_age:.0f}s < {CHECKPOINT_RECENCY_SECONDS}s) — "
+                    f"treating as running (~{steps_completed} steps so far)"
+                )
+                return SegmentRecord(
+                    index=seg_idx,
+                    steps_completed=steps_completed,
+                    # Best estimate — no authoritative metadata available.
+                    # validate_progress() reconciliation will prefer the
+                    # progress file's steps_requested when available.
+                    steps_requested=steps_completed,
+                    samples_written=0,
+                    status=SegmentStatus.RUNNING,
+                    duration_ns=duration_ns,
+                )
+            else:
+                LOGGER.warning(
+                    f"Segment {seg_idx} directory has checkpoint but no state.xml "
+                    f"or INTERRUPTED marker (age {checkpoint_age:.0f}s) — "
+                    f"treating as interrupted "
+                    f"(hard-kill recovery, ~{steps_completed} steps)"
+                )
+                return SegmentRecord(
+                    index=seg_idx,
+                    steps_completed=steps_completed,
+                    # Best estimate — no authoritative metadata available.
+                    # validate_progress() reconciliation will prefer the
+                    # progress file's steps_requested when available.
+                    steps_requested=steps_completed,
+                    samples_written=0,
+                    status=SegmentStatus.INTERRUPTED,
+                    duration_ns=duration_ns,
+                )
+        else:
+            # Truly failed: no recoverable files at all
+            LOGGER.warning(
+                f"Segment {seg_idx} directory exists but has no state.xml, "
+                f"INTERRUPTED marker, or checkpoint — treating as failed"
+            )
+            return SegmentRecord(
+                index=seg_idx,
+                steps_completed=0,
+                steps_requested=0,
+                status=SegmentStatus.FAILED,
+            )
 
 
 def _parse_interrupted_marker(marker_path: Path) -> tuple[int, int]:
@@ -546,6 +732,68 @@ def _parse_interrupted_marker(marker_path: Path) -> tuple[int, int]:
         LOGGER.warning(f"Could not parse INTERRUPTED marker {marker_path}: {exc}")
 
     return steps_completed, total_steps
+
+
+def _estimate_steps_from_csv(csv_path: Path) -> int:
+    """Estimate the number of completed steps from a ``state_data.csv`` file.
+
+    Computes ``last_step - first_step`` from the first and last data rows
+    to obtain a **per-segment** step count.  OpenMM's ``StateDataReporter``
+    writes the cumulative integrator step number (from the very start of
+    the simulation, including equilibration and all prior segments), so
+    using the raw last-row value would overcount for any segment after the
+    first.
+
+    This is used to estimate progress for hard-killed segments that have
+    no ``INTERRUPTED`` marker or ``state.xml`` but do have reporter output
+    on disk.
+
+    Parameters
+    ----------
+    csv_path : Path
+        Path to the ``production_N_state_data.csv`` file.
+
+    Returns
+    -------
+    int
+        Estimated per-segment steps completed, or 0 if the file cannot
+        be parsed or contains fewer than two data rows.
+    """
+    try:
+        with open(csv_path, "r") as f:
+            lines = f.readlines()
+        # Need at least a header + two data lines to compute a delta
+        if len(lines) < 2:
+            return 0
+
+        def _parse_step(line: str) -> int | None:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and not stripped.startswith('"#'):
+                step_str = stripped.split(",")[0].strip('"').strip()
+                return int(float(step_str))
+            return None
+
+        # Find the first non-comment, non-empty data line
+        first_step: int | None = None
+        for line in lines:
+            first_step = _parse_step(line)
+            if first_step is not None:
+                break
+
+        # Find the last non-comment, non-empty data line
+        last_step: int | None = None
+        for line in reversed(lines):
+            last_step = _parse_step(line)
+            if last_step is not None:
+                break
+
+        if first_step is None or last_step is None:
+            return 0
+
+        return max(0, last_step - first_step)
+    except (ValueError, IndexError, OSError) as exc:
+        LOGGER.warning(f"Could not estimate steps from {csv_path}: {exc}")
+        return 0
 
 
 def _convert_to_ns(value: float, unit: str) -> float:
@@ -671,7 +919,9 @@ def validate_progress(
         file_rec = file_segments.get(idx)
 
         if fs_rec is not None and file_rec is not None:
-            # Both exist — filesystem status is authoritative
+            # Both exist — filesystem status is authoritative for
+            # completed vs interrupted, and also for running vs
+            # interrupted (via checkpoint recency heuristic).
             if fs_rec.status != file_rec.status:
                 LOGGER.warning(
                     f"Segment {idx}: progress file says {file_rec.status.value}, "
@@ -704,17 +954,9 @@ def validate_progress(
 
     progress.segments = reconciled
 
-    # Recompute overall status
-    if progress.is_complete:
-        progress.status = SimulationStatus.COMPLETED
-    elif any(s.status == SegmentStatus.INTERRUPTED for s in reconciled):
-        progress.status = SimulationStatus.INTERRUPTED
-    elif any(s.status == SegmentStatus.FAILED for s in reconciled):
-        progress.status = SimulationStatus.FAILED
-    elif reconciled:
-        progress.status = SimulationStatus.RUNNING
-    else:
-        progress.status = SimulationStatus.NOT_STARTED
+    # Recompute overall status — delegate to the shared helper so
+    # "latest segment wins" is applied consistently.
+    progress.status = _derive_overall_status(reconciled, is_complete=progress.is_complete)
 
     LOGGER.info(
         f"Validated progress: {progress.total_steps_completed}/{progress.total_steps_requested} "

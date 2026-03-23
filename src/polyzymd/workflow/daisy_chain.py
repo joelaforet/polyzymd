@@ -6,7 +6,7 @@ simulation jobs to SLURM.  Each replicate gets a single job script
 that calls ``polyzymd run-segment``, checks progress, and resubmits
 itself until the simulation is complete.
 
-.. versionchanged:: 2.0
+.. versionchanged:: 1.1.0
     Replaced the legacy daisy-chain (dependency-chain) model with
     self-resubmitting jobs.  The public API (``submit_daisy_chain``,
     ``DaisyChainConfig``, ``DaisyChainSubmitter``) is preserved for
@@ -34,6 +34,99 @@ from polyzymd.workflow.slurm import (
 LOGGER = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# squeue-based duplicate detection
+# ---------------------------------------------------------------------------
+
+
+def check_existing_slurm_jobs(job_name: str) -> List[str]:
+    """Query SLURM for RUNNING or PENDING jobs that match *job_name*.
+
+    This is a best-effort check: if ``squeue`` is unavailable (e.g. in a
+    non-SLURM environment or CI), a warning is logged and an empty list is
+    returned so that submission proceeds unimpeded.
+
+    Parameters
+    ----------
+    job_name : str
+        The SLURM ``--job-name`` to search for (exact match).
+
+    Returns
+    -------
+    list of str
+        SLURM job IDs that are RUNNING or PENDING with the given name.
+        Empty if ``squeue`` is unavailable or returns no matches.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "squeue",
+                "--noheader",
+                "--name",
+                job_name,
+                "--states",
+                "RUNNING,PENDING",
+                "--format",
+                "%i",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except FileNotFoundError:
+        LOGGER.warning(
+            "squeue not found — skipping duplicate-job check "
+            "(this is expected outside of SLURM environments)"
+        )
+        return []
+    except subprocess.TimeoutExpired:
+        LOGGER.warning("squeue timed out — skipping duplicate-job check")
+        return []
+    except OSError as exc:
+        LOGGER.warning(f"squeue failed ({exc}) — skipping duplicate-job check")
+        return []
+
+    if result.returncode != 0:
+        LOGGER.warning(
+            f"squeue returned exit code {result.returncode} — skipping duplicate-job check"
+        )
+        return []
+
+    job_ids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return job_ids
+
+
+def create_job_name(sim_config: SimulationConfig, replicate: int) -> str:
+    """Create a descriptive SLURM job name for a replicate.
+
+    Produces names like ``r1_310K_Fibronectin_SBMA-OEGMA_A75_B25``
+    matching the directory naming convention.
+
+    Parameters
+    ----------
+    sim_config : SimulationConfig
+        Validated simulation configuration.
+    replicate : int
+        Replicate number.
+
+    Returns
+    -------
+    str
+        Formatted job name.
+    """
+    enzyme = sim_config.enzyme.name
+    temp = int(sim_config.thermodynamics.temperature)
+
+    polymer_info = ""
+    if sim_config.polymers and sim_config.polymers.enabled:
+        prefix = sim_config.polymers.type_prefix
+        probs = {m.label: m.probability for m in sim_config.polymers.monomers}
+        composition = "_".join(f"{lbl}{int(probs[lbl] * 100)}" for lbl in sorted(probs))
+        polymer_info = f"_{prefix}_{composition}"
+
+    return f"r{replicate}_{temp}K_{enzyme}{polymer_info}"
+
+
 @dataclass
 class DaisyChainConfig:
     """Configuration for job submission.
@@ -55,6 +148,9 @@ class DaisyChainConfig:
         Replicate numbers to run.
     dry_run : bool
         If True, create scripts but don't submit.
+    force : bool
+        If True, skip the squeue duplicate-job check and submit even if
+        a RUNNING/PENDING job already exists for the same replicate.
     output_script_dir : Path
         Directory for generated job scripts.
     config_path : str
@@ -67,6 +163,7 @@ class DaisyChainConfig:
     equilibration_time_ns: float = 0.5
     replicates: List[int] = field(default_factory=lambda: [1])
     dry_run: bool = False
+    force: bool = False
     output_script_dir: Path = Path("daisy_chain_scripts")
     config_path: str = "config.yaml"
 
@@ -77,6 +174,7 @@ class DaisyChainConfig:
         slurm_config: SlurmConfig,
         replicates: Union[str, List[int]] = "1",
         dry_run: bool = False,
+        force: bool = False,
         output_script_dir: Union[str, Path] = "daisy_chain_scripts",
         config_path: str = "config.yaml",
     ) -> "DaisyChainConfig":
@@ -92,6 +190,8 @@ class DaisyChainConfig:
             Replicate range string (e.g. ``"1-5"``) or list of ints.
         dry_run : bool
             If True, don't submit jobs.
+        force : bool
+            If True, skip duplicate-job check.
         output_script_dir : str or Path
             Directory for job scripts.
         config_path : str
@@ -116,6 +216,7 @@ class DaisyChainConfig:
             equilibration_time_ns=sim_config.simulation_phases.total_equilibration_duration,
             replicates=replicate_list,
             dry_run=dry_run,
+            force=force,
             output_script_dir=Path(output_script_dir),
             config_path=config_path,
         )
@@ -168,7 +269,7 @@ class DaisyChainSubmitter:
         self,
         sim_config: SimulationConfig,
         dc_config: DaisyChainConfig,
-        conda_env: str = "polyzymd-env",
+        pixi_env: str = "cuda-12-4",
         openff_logs: bool = False,
         skip_build: bool = False,
     ) -> None:
@@ -180,8 +281,8 @@ class DaisyChainSubmitter:
             Simulation configuration.
         dc_config : DaisyChainConfig
             Submission configuration.
-        conda_env : str
-            Conda environment name.
+        pixi_env : str
+            Pixi environment name (e.g. ``"cuda-12-4"``, ``"cuda-12-6"``).
         openff_logs : bool
             Enable verbose OpenFF logs in generated scripts.
         skip_build : bool
@@ -192,7 +293,7 @@ class DaisyChainSubmitter:
         self._openff_logs = openff_logs
         self._skip_build = skip_build
         self._generator = SlurmScriptGenerator(
-            dc_config.slurm_config, conda_env, openff_logs=openff_logs, skip_build=skip_build
+            dc_config.slurm_config, pixi_env, openff_logs=openff_logs, skip_build=skip_build
         )
 
         # Track submitted jobs per replicate
@@ -216,8 +317,7 @@ class DaisyChainSubmitter:
     def _create_job_name(self, replicate: int) -> str:
         """Create a descriptive job name for a replicate.
 
-        The polymer composition suffix matches the directory naming
-        convention, e.g. ``r1_310K_Fibronectin_SBMA-OEGMA_A75_B25``.
+        Delegates to the module-level :func:`create_job_name` function.
 
         Parameters
         ----------
@@ -229,17 +329,7 @@ class DaisyChainSubmitter:
         str
             Formatted job name.
         """
-        enzyme = self._sim_config.enzyme.name
-        temp = int(self._sim_config.thermodynamics.temperature)
-
-        polymer_info = ""
-        if self._sim_config.polymers and self._sim_config.polymers.enabled:
-            prefix = self._sim_config.polymers.type_prefix
-            probs = {m.label: m.probability for m in self._sim_config.polymers.monomers}
-            composition = "_".join(f"{lbl}{int(probs[lbl] * 100)}" for lbl in sorted(probs))
-            polymer_info = f"_{prefix}_{composition}"
-
-        return f"r{replicate}_{temp}K_{enzyme}{polymer_info}"
+        return create_job_name(self._sim_config, replicate)
 
     def _get_scratch_dir(self, replicate: int) -> str:
         """Get the scratch directory path for a replicate.
@@ -338,7 +428,7 @@ class DaisyChainSubmitter:
             )
 
         # Use --export=NONE to start with clean environment, letting the
-        # script's module/conda initialization work properly regardless
+        # script's pixi shell-hook initialization work properly regardless
         # of submission context
         cmd = ["sbatch", "--export=NONE"]
 
@@ -369,6 +459,10 @@ class DaisyChainSubmitter:
     def submit_replicate(self, replicate: int) -> SubmissionResult:
         """Generate and submit the job for a single replicate.
 
+        Before submitting, checks ``squeue`` for existing RUNNING/PENDING
+        jobs with the same job name.  If duplicates are found and
+        ``force`` is not set, raises ``RuntimeError``.
+
         Parameters
         ----------
         replicate : int
@@ -378,7 +472,26 @@ class DaisyChainSubmitter:
         -------
         SubmissionResult
             Submission result.
+
+        Raises
+        ------
+        RuntimeError
+            If a SLURM job is already RUNNING or PENDING for this
+            replicate and ``force`` is False.
         """
+        job_name = self._create_job_name(replicate)
+
+        # Best-effort duplicate guard (skipped for dry runs)
+        if not self._dc_config.dry_run and not self._dc_config.force:
+            existing = check_existing_slurm_jobs(job_name)
+            if existing:
+                ids = ", ".join(existing)
+                raise RuntimeError(
+                    f"Replicate {replicate} already has RUNNING/PENDING SLURM "
+                    f"job(s): {ids} (job name '{job_name}'). "
+                    "Use --force to submit anyway."
+                )
+
         LOGGER.info(f"Submitting self-resubmitting job for replicate {replicate}")
 
         script_content = self.generate_job_script(replicate)
@@ -413,31 +526,31 @@ class DaisyChainSubmitter:
         config = self._dc_config
         num_replicates = len(config.replicates)
 
-        print("\nPreparing self-resubmitting simulation jobs")
-        print(f"  Enzyme: {self._sim_config.enzyme.name}")
+        LOGGER.info("\nPreparing self-resubmitting simulation jobs")
+        LOGGER.info(f"  Enzyme: {self._sim_config.enzyme.name}")
 
         if self._sim_config.polymers and self._sim_config.polymers.enabled:
-            print(f"  Polymer: {self._sim_config.polymers.type_prefix}")
-            print(f"  Polymer count: {self._sim_config.polymers.count}")
+            LOGGER.info(f"  Polymer: {self._sim_config.polymers.type_prefix}")
+            LOGGER.info(f"  Polymer count: {self._sim_config.polymers.count}")
 
-        print(f"  Temperature: {self._sim_config.thermodynamics.temperature} K")
-        print(f"  Total production time: {config.total_production_time_ns} ns")
-        print(f"  Total samples: {config.total_samples}")
-        print(f"  Replicates: {config.replicates} ({num_replicates} total)")
-        print(f"  Jobs to submit: {num_replicates} (one per replicate, self-resubmitting)")
-        print()
-        print("SLURM Configuration:")
-        print(f"  Partition: {config.slurm_config.partition}")
+        LOGGER.info(f"  Temperature: {self._sim_config.thermodynamics.temperature} K")
+        LOGGER.info(f"  Total production time: {config.total_production_time_ns} ns")
+        LOGGER.info(f"  Total samples: {config.total_samples}")
+        LOGGER.info(f"  Replicates: {config.replicates} ({num_replicates} total)")
+        LOGGER.info(f"  Jobs to submit: {num_replicates} (one per replicate, self-resubmitting)")
+        LOGGER.info("")
+        LOGGER.info("SLURM Configuration:")
+        LOGGER.info(f"  Partition: {config.slurm_config.partition}")
         if config.slurm_config.qos:
-            print(f"  QoS: {config.slurm_config.qos}")
+            LOGGER.info(f"  QoS: {config.slurm_config.qos}")
         if config.slurm_config.account:
-            print(f"  Account: {config.slurm_config.account}")
-        print(f"  Time limit: {config.slurm_config.time_limit}")
-        print()
+            LOGGER.info(f"  Account: {config.slurm_config.account}")
+        LOGGER.info(f"  Time limit: {config.slurm_config.time_limit}")
+        LOGGER.info("")
 
         if config.dry_run:
-            print("*** DRY RUN MODE - Scripts will be created but not submitted ***")
-            print()
+            LOGGER.info("*** DRY RUN MODE - Scripts will be created but not submitted ***")
+            LOGGER.info("")
 
     def _print_completion_summary(self) -> None:
         """Print a summary after submission."""
@@ -445,20 +558,22 @@ class DaisyChainSubmitter:
         total_jobs = sum(len(chain) for chain in self._job_chains.values())
 
         if config.dry_run:
-            print(f"\nDry run completed. {total_jobs} job script(s) created.")
-            print(f"Scripts saved to: {config.output_script_dir}")
-            print("Review the scripts and run without --dry-run to submit them.")
+            LOGGER.info(f"\nDry run completed. {total_jobs} job script(s) created.")
+            LOGGER.info(f"Scripts saved to: {config.output_script_dir}")
+            LOGGER.info("Review the scripts and run without --dry-run to submit them.")
         else:
-            print(f"\nAll {total_jobs} job(s) submitted successfully!")
-            print("\nSubmitted jobs:")
+            LOGGER.info(f"\nAll {total_jobs} job(s) submitted successfully!")
+            LOGGER.info("\nSubmitted jobs:")
 
             for replicate, results in sorted(self._job_chains.items()):
                 job_id = results[0].job_id
-                print(f"  Replicate {replicate}: job {job_id} (self-resubmitting)")
+                LOGGER.info(f"  Replicate {replicate}: job {job_id} (self-resubmitting)")
 
-            print("\nEach job will automatically resubmit until the simulation completes.")
-            print("Monitor progress with: squeue -u $USER")
-            print("Check simulation status with: polyzymd check-progress -c <config> -r <rep>")
+            LOGGER.info("\nEach job will automatically resubmit until the simulation completes.")
+            LOGGER.info("Monitor progress with: squeue -u $USER")
+            LOGGER.info(
+                "Check simulation status with: polyzymd check-progress -c <config> -r <rep>"
+            )
 
 
 def submit_daisy_chain(
@@ -467,7 +582,8 @@ def submit_daisy_chain(
     replicates: str = "1",
     email: str = "",
     dry_run: bool = False,
-    conda_env: str = "polyzymd-env",
+    force: bool = False,
+    pixi_env: str = "cuda-12-4",
     output_dir: Optional[Union[str, Path]] = None,
     scratch_dir: Optional[Union[str, Path]] = None,
     projects_dir: Optional[Union[str, Path]] = None,
@@ -496,8 +612,10 @@ def submit_daisy_chain(
         Email for job notifications.
     dry_run : bool
         If True, don't submit jobs.
-    conda_env : str
-        Conda environment name.
+    force : bool
+        If True, skip the squeue duplicate-job check.
+    pixi_env : str
+        Pixi environment name (e.g. ``"cuda-12-4"``, ``"cuda-12-6"``).
     output_dir : str or Path or None
         Directory for job scripts.
     scratch_dir : str or Path or None
@@ -578,12 +696,13 @@ def submit_daisy_chain(
         slurm_config=slurm_config,
         replicates=replicates,
         dry_run=dry_run,
+        force=force,
         output_script_dir=script_output_dir,
         config_path=str(Path(config_path).resolve()),
     )
 
     # Create submitter and submit
     submitter = DaisyChainSubmitter(
-        sim_config, dc_config, conda_env=conda_env, openff_logs=openff_logs, skip_build=skip_build
+        sim_config, dc_config, pixi_env=pixi_env, openff_logs=openff_logs, skip_build=skip_build
     )
     return submitter.submit_all()

@@ -67,6 +67,7 @@ Getting Started
    tutorials/installation
    tutorials/quickstart
    tutorials/cli_reference
+   tutorials/colored_logging
    tutorials/configuration
    tutorials/equilibration
    tutorials/restraints

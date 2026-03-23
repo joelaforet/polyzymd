@@ -163,13 +163,23 @@ class ContinuationManager:
         -------
         dict
             Dictionary with paths to state, system, and parameter files.
-            If the previous segment completed normally, ``state`` and ``system``
-            point to ``production_N_state.xml`` / ``production_N_system.xml``.
-            If the previous segment was interrupted (those files don't exist),
-            ``system`` falls back to ``interrupted_system.xml`` and
-            ``use_checkpoint`` is set to ``True`` to signal that
-            ``load_previous_state`` should use ``loadCheckpoint()`` instead
-            of ``loadState()``.
+
+            Recovery priority (portable state XML preferred over binary .chk):
+
+            1. **Normal completion** — ``production_N_state.xml`` and
+               ``production_N_system.xml`` exist.
+            2. **Graceful interruption with interrupted state** —
+               ``interrupted_state.xml`` saved by signal handler.  Uses
+               ``loadState()`` (portable).
+            3. **Graceful interruption with restart checkpoint** —
+               ``restart_state.xml`` saved by wall-time checkpoint loop.
+               Uses ``loadState()`` (portable).
+            4. **Graceful interruption (legacy, .chk only)** —
+               ``interrupted_checkpoint.chk`` exists but no state XML.
+               Falls back to ``loadCheckpoint()`` (non-portable).
+            5. **Hard kill** — periodic ``checkpoint.chk`` from
+               CheckpointReporter exists but no XML state files.
+               Falls back to ``loadCheckpoint()`` (non-portable).
         """
         prev_dir = self._working_dir / f"production_{self._prev_segment}"
 
@@ -178,18 +188,66 @@ class ContinuationManager:
         checkpoint_path = prev_dir / f"production_{self._prev_segment}_checkpoint.chk"
         params_path = prev_dir / f"production_{self._prev_segment}_parameters.json"
 
-        # Check if previous segment was interrupted (normal state files missing)
+        # Portable state XMLs from interruption handlers
+        interrupted_state = prev_dir / "interrupted_state.xml"
         interrupted_system = prev_dir / "interrupted_system.xml"
+        restart_state = prev_dir / "restart_state.xml"
+        restart_system = prev_dir / "restart_system.xml"
+        interrupted_chk = prev_dir / "interrupted_checkpoint.chk"
+
         use_checkpoint = False
 
-        if not state_path.exists() and interrupted_system.exists():
+        if state_path.exists():
+            # Case 1: Normal completion — state.xml exists
+            pass
+
+        elif interrupted_state.exists():
+            # Case 2: Graceful interruption — portable interrupted_state.xml
             LOGGER.info(
                 f"Previous segment {self._prev_segment} was interrupted — "
-                f"recovering from checkpoint + interrupted system XML"
+                f"recovering from interrupted_state.xml (portable)"
+            )
+            state_path = interrupted_state
+            if interrupted_system.exists():
+                system_path = interrupted_system
+
+        elif restart_state.exists():
+            # Case 3: Interrupted between checkpoints — wall-time restart
+            LOGGER.info(
+                f"Previous segment {self._prev_segment} was interrupted — "
+                f"recovering from restart_state.xml (portable wall-time checkpoint)"
+            )
+            state_path = restart_state
+            if restart_system.exists():
+                system_path = restart_system
+
+        elif interrupted_chk.exists() and interrupted_system.exists():
+            # Case 4: Legacy graceful interruption — only .chk available
+            LOGGER.warning(
+                f"Previous segment {self._prev_segment} was interrupted — "
+                f"no portable state XML found, falling back to "
+                f"interrupted_checkpoint.chk (non-portable)"
             )
             system_path = interrupted_system
-            checkpoint_path = prev_dir / "interrupted_checkpoint.chk"
+            checkpoint_path = interrupted_chk
             use_checkpoint = True
+
+        elif checkpoint_path.exists() and system_path.exists():
+            # Case 5: Hard kill — periodic CheckpointReporter .chk file
+            LOGGER.warning(
+                f"Previous segment {self._prev_segment} appears hard-killed — "
+                f"no state XML or interrupted files, recovering from "
+                f"periodic checkpoint + early-saved system XML (non-portable)"
+            )
+            use_checkpoint = True
+
+        elif checkpoint_path.exists():
+            # Case 5b: Hard kill but no system.xml — cannot recover
+            raise FileNotFoundError(
+                f"Previous segment {self._prev_segment} has a checkpoint "
+                f"({checkpoint_path}) but no system.xml ({system_path}) — "
+                f"cannot recover.  The segment must be re-run from scratch."
+            )
 
         return {
             "state": state_path,
@@ -203,10 +261,11 @@ class ContinuationManager:
         """Load state from the previous segment.
 
         This loads the system, topology, and parameters from the previous
-        production segment. If the previous segment was interrupted (no
-        ``production_N_state.xml``), it loads the system from
-        ``interrupted_system.xml`` and marks the checkpoint for recovery
-        via ``loadCheckpoint()`` in ``run_segment()``.
+        production segment.  Recovery prefers portable state XML files
+        (``production_N_state.xml``, ``interrupted_state.xml``, or
+        ``restart_state.xml``) over binary ``.chk`` checkpoints.  Only
+        falls back to ``loadCheckpoint()`` when no portable state XML
+        is available (legacy interrupted segments, hard-killed segments).
 
         Raises
         ------
@@ -220,11 +279,12 @@ class ContinuationManager:
 
         # Check that required files exist
         for name, path in paths.items():
-            if name == "checkpoint":
-                continue
             if name == "state" and use_checkpoint:
-                # State XML doesn't exist for interrupted segments; we'll
-                # use the checkpoint instead in run_segment()
+                # State XML doesn't exist for interrupted/hard-killed segments;
+                # we'll use the checkpoint instead in run_segment()
+                continue
+            if name == "checkpoint" and not use_checkpoint:
+                # Checkpoint only required when recovering from interruption
                 continue
             if not path.exists():
                 raise FileNotFoundError(f"Required file not found: {path}")
@@ -378,6 +438,90 @@ class ContinuationManager:
         LOGGER.info(f"Saved final state to {state_path}")
         LOGGER.info(f"Saved system to {system_path}")
 
+    def _write_segment_started(self, total_steps: int) -> None:
+        """Write a RUNNING segment record to progress.json at segment start.
+
+        This marks the segment as actively executing so that
+        ``check-progress`` can distinguish a running simulation from
+        one that was interrupted. The record is later updated to
+        COMPLETED or INTERRUPTED by the corresponding handler.
+
+        Parameters
+        ----------
+        total_steps : int
+            Total steps planned for this segment.
+        """
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationStatus,
+            _update_or_append_segment,
+            load_progress,
+            save_progress,
+        )
+
+        progress = load_progress(self._working_dir)
+        if progress is None:
+            LOGGER.warning("No progress file found — skipping segment-started write")
+            return
+
+        record = SegmentRecord(
+            index=self._segment_index,
+            steps_completed=0,
+            steps_requested=total_steps,
+            samples_written=0,
+            status=SegmentStatus.RUNNING,
+        )
+
+        _update_or_append_segment(progress, record)
+        progress.status = SimulationStatus.RUNNING
+
+        save_progress(self._working_dir, progress)
+        LOGGER.info(f"Marked segment {self._segment_index} as RUNNING in progress file")
+
+    def _update_progress_running(
+        self,
+        steps_done: int,
+        timestep_fs: float,
+    ) -> None:
+        """Periodically update the RUNNING segment's step count.
+
+        Called during the simulation loop to keep ``progress.json``
+        up to date so that ``check-progress`` can show real-time
+        remaining nanoseconds.
+
+        Parameters
+        ----------
+        steps_done : int
+            Steps completed so far in this segment.
+        timestep_fs : float
+            Integration timestep in femtoseconds.
+        """
+        from polyzymd.simulation.progress import (
+            SegmentStatus,
+            SimulationStatus,
+            load_progress,
+            save_progress,
+        )
+
+        progress = load_progress(self._working_dir)
+        if progress is None:
+            return
+
+        # Find and update the existing RUNNING record
+        for seg in progress.segments:
+            if seg.index == self._segment_index and seg.status == SegmentStatus.RUNNING:
+                seg.steps_completed = steps_done
+                seg.duration_ns = (steps_done * timestep_fs) / 1e6
+                break
+        else:
+            # No RUNNING record found — shouldn't happen, but be safe
+            return
+
+        progress.status = SimulationStatus.RUNNING
+        save_progress(self._working_dir, progress)
+        LOGGER.debug(f"Updated running progress: segment {self._segment_index}, {steps_done} steps")
+
     def _update_progress_completed(
         self,
         total_steps: int,
@@ -402,6 +546,7 @@ class ContinuationManager:
             SegmentRecord,
             SegmentStatus,
             SimulationStatus,
+            _update_or_append_segment,
             load_progress,
             save_progress,
         )
@@ -423,7 +568,7 @@ class ContinuationManager:
 
         record.finished_at = _now_iso()
 
-        progress.segments.append(record)
+        _update_or_append_segment(progress, record)
 
         # Update overall status
         if progress.is_complete:
@@ -462,6 +607,7 @@ class ContinuationManager:
             SegmentRecord,
             SegmentStatus,
             SimulationStatus,
+            _update_or_append_segment,
             load_progress,
             save_progress,
         )
@@ -483,7 +629,7 @@ class ContinuationManager:
             duration_ns=actual_duration_ns,
         )
 
-        progress.segments.append(record)
+        _update_or_append_segment(progress, record)
         progress.status = SimulationStatus.INTERRUPTED
 
         save_progress(self._working_dir, progress)
@@ -498,6 +644,7 @@ class ContinuationManager:
         num_samples: int = 250,
         timestep_fs: float = 2.0,
         report_interval: int | None = None,
+        checkpoint_interval_s: float = 60.0,
     ) -> Dict[str, Any]:
         """Run the continuation segment.
 
@@ -519,6 +666,11 @@ class ContinuationManager:
             Fixed reporter interval in steps. When provided, this
             overrides the per-segment ``total_steps // num_samples``
             calculation to keep frame spacing uniform across segments.
+        checkpoint_interval_s : float
+            Wall-time interval in seconds between portable restart
+            checkpoints.  Also controls how frequently the loop checks
+            for SLURM preemption signals.  Set to 0 to disable
+            wall-time checkpoints (reverts to legacy behaviour).
 
         Returns
         -------
@@ -552,19 +704,27 @@ class ContinuationManager:
         # Load state from previous segment
         paths = self._get_previous_paths()
         if self._use_checkpoint_recovery:
-            # Previous segment was interrupted — no state XML exists.
-            # Use loadCheckpoint() with the reporter-interval checkpoint,
-            # which is consistent with the partial trajectory DCD.
+            # Cases 4/5: Only binary checkpoint available (non-portable).
             chk_path = paths["checkpoint"]
             LOGGER.info(f"Recovering from interrupted segment via checkpoint: {chk_path}")
             self._simulation.loadCheckpoint(str(chk_path))
         else:
+            # Cases 1/2/3: Portable state XML (normal, interrupted, or restart).
             LOGGER.info(f"Loading state from {paths['state']}")
             self._simulation.loadState(str(paths["state"]))
 
         # Create output directory
         output_dir = self._working_dir / f"production_{self._segment_index}"
         output_dir.mkdir(exist_ok=True)
+
+        # Save system XML early so it exists on disk even if the segment is
+        # hard-killed (SIGKILL / OOM).  This is required for checkpoint-based
+        # recovery: loadCheckpoint() needs a matching System object.  The file
+        # is overwritten at segment completion by _save_final_state().
+        system_xml_path = output_dir / f"production_{self._segment_index}_system.xml"
+        with open(system_xml_path, "w") as f:
+            f.write(XmlSerializer.serialize(self._system))
+        LOGGER.info(f"Saved initial system to {system_xml_path}")
 
         # Calculate total steps
         total_steps = int(duration_ns * 1e6 / timestep_fs)
@@ -592,20 +752,103 @@ class ContinuationManager:
             install_handlers,
             is_interrupted,
             save_interrupted_state,
+            save_restart_checkpoint,
         )
 
         install_handlers()
 
-        # Run simulation in chunks so we can check for interrupt signals
+        # Mark this segment as RUNNING in progress.json so that
+        # check-progress can distinguish actively running simulations
+        # from interrupted ones.
+        self._write_segment_started(total_steps)
+
+        # Run simulation with adaptive sub-chunks for interrupt responsiveness
+        # and periodic wall-time restart checkpoints for preemption resilience.
         LOGGER.info(f"Running {total_steps} steps...")
-        chunk_size = min(seg_report_interval, total_steps)
         steps_done = 0
+        import time as _time
+
+        from polyzymd.simulation.progress import PROGRESS_UPDATE_INTERVAL_SECONDS
+
+        _last_progress_write = _time.monotonic()
+        _last_checkpoint_write = _time.monotonic()
+        _loop_start = _time.monotonic()
+
+        # Adaptive sub-chunk sizing: start with seg_report_interval (the
+        # original chunk_size).  After the first checkpoint interval elapses,
+        # measure actual steps/second and adapt sub_chunk to target
+        # checkpoint_interval / 4 seconds (~15s worth of steps).  This
+        # ensures ~4 interrupt checks per checkpoint interval regardless of
+        # system size or hardware speed.
+        sub_chunk = min(seg_report_interval, total_steps)
+        _adapted = False
+
         try:
             while steps_done < total_steps:
                 remaining = total_steps - steps_done
-                this_chunk = min(chunk_size, remaining)
+                this_chunk = min(sub_chunk, remaining)
                 self._simulation.step(this_chunk)
                 steps_done += this_chunk
+
+                _now = _time.monotonic()
+
+                # Adaptive sub-chunk calibration (once, after first interval)
+                if (
+                    not _adapted
+                    and checkpoint_interval_s > 0
+                    and (_now - _loop_start) >= checkpoint_interval_s
+                ):
+                    elapsed = _now - _loop_start
+                    steps_per_sec = steps_done / elapsed if elapsed > 0 else 1.0
+                    # Target sub-chunk duration = checkpoint_interval / 4
+                    target_seconds = checkpoint_interval_s / 4.0
+                    new_sub_chunk = max(10, int(steps_per_sec * target_seconds))
+                    # Sub-chunk must be a divisor-friendly size relative to
+                    # seg_report_interval to avoid misaligned reporter writes.
+                    if new_sub_chunk >= seg_report_interval:
+                        new_sub_chunk = seg_report_interval
+                    else:
+                        # Find largest divisor of seg_report_interval <= new_sub_chunk
+                        best = new_sub_chunk
+                        for candidate in [
+                            seg_report_interval // k
+                            for k in range(1, seg_report_interval // max(1, new_sub_chunk) + 2)
+                        ]:
+                            if candidate <= new_sub_chunk and seg_report_interval % candidate == 0:
+                                best = candidate
+                                break
+                        new_sub_chunk = max(10, best)
+
+                    if new_sub_chunk != sub_chunk:
+                        LOGGER.info(
+                            f"Adaptive sub-chunk: {sub_chunk} -> {new_sub_chunk} steps "
+                            f"(~{new_sub_chunk / steps_per_sec:.1f}s at "
+                            f"{steps_per_sec:.0f} steps/s)"
+                        )
+                        sub_chunk = new_sub_chunk
+                    _adapted = True
+
+                # Periodically update RUNNING record so check-progress
+                # can display real-time remaining nanoseconds.
+                if _now - _last_progress_write >= PROGRESS_UPDATE_INTERVAL_SECONDS:
+                    self._update_progress_running(
+                        steps_done=steps_done,
+                        timestep_fs=timestep_fs,
+                    )
+                    _last_progress_write = _now
+
+                # Wall-time restart checkpoint
+                if (
+                    checkpoint_interval_s > 0
+                    and (_now - _last_checkpoint_write) >= checkpoint_interval_s
+                    and steps_done < total_steps  # skip if we're about to finish
+                ):
+                    save_restart_checkpoint(
+                        simulation=self._simulation,
+                        output_dir=output_dir,
+                    )
+                    _last_checkpoint_write = _now
+
                 if is_interrupted():
                     LOGGER.warning(f"Interrupt detected at step {steps_done}/{total_steps}")
                     save_interrupted_state(

@@ -205,5 +205,5 @@ if __name__ == "__main__":
         verify_sdf_files()
     else:
         generate_all_solvents()
-        print()
+        LOGGER.info("")
         verify_sdf_files()

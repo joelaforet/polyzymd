@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "polyzymd"
-version = "1.0.4"
+version = "1.1.1"
 description = "Molecular dynamics simulation toolkit for enzyme-polymer systems"
 readme = "README.md"
 license = "MIT"
@@ -36,16 +36,14 @@ requires-python = ">=3.10"
 # =============================================================================
 # Core Dependencies
 # =============================================================================
-# NOTE: Many of these packages are best installed via conda/mamba due to
-# complex compiled dependencies. The recommended installation is:
+# NOTE: polyzymd is intended to be installed via pixi (see pixi.toml).
+# The dependencies below are listed for pip compatibility but many require
+# conda-forge packages that cannot be installed via pip alone.
 #
-#   mamba create -n polyzymd-env python=3.11
-#   mamba activate polyzymd-env
-#   mamba install -c conda-forge openmm openff-toolkit openff-interchange \
-#       openff-nagl ambertools packmol rdkit mdanalysis
-#   pip install -e .
-#
-# The dependencies below are listed for pip but may fail without conda prereqs.
+# Recommended installation:
+#   git clone <repo> && cd polyzymd
+#   pixi install -e cuda-12-4   # (or cuda-12-6, or build)
+#   pixi shell -e cuda-12-4
 # =============================================================================
 dependencies = [
     # Configuration and CLI (these install cleanly via pip)
@@ -121,8 +119,6 @@ full = [
 
 [project.scripts]
 polyzymd = "polyzymd.cli.main:main"
-polyzymd-continue = "polyzymd.simulation.continuation:main"
-polyzymd-submit = "polyzymd.workflow.daisy_chain:main"
 
 [project.urls]
 Homepage = "https://github.com/joelaforet/polyzymd"

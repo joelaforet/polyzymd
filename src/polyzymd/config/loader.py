@@ -30,7 +30,16 @@ def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
     Returns:
         Configuration with expanded paths
     """
-    path_keys = {"pdb_path", "sdf_path", "sdf_directory", "cache_directory", "base_directory"}
+    path_keys = {
+        "pdb_path",
+        "sdf_path",
+        "sdf_directory",
+        "cache_directory",
+        "base_directory",
+        "initiation",
+        "polymerization",
+        "termination",
+    }
 
     def expand_value(key: str, value: Any) -> Any:
         if key in path_keys and isinstance(value, str):
@@ -60,7 +69,16 @@ def _convert_paths_to_relative(data: Dict[str, Any], base_path: Path) -> Dict[st
     Returns:
         Configuration with relative paths
     """
-    path_keys = {"pdb_path", "sdf_path", "sdf_directory", "cache_directory", "base_directory"}
+    path_keys = {
+        "pdb_path",
+        "sdf_path",
+        "sdf_directory",
+        "cache_directory",
+        "base_directory",
+        "initiation",
+        "polymerization",
+        "termination",
+    }
 
     def relativize_value(key: str, value: Any) -> Any:
         if key in path_keys and isinstance(value, str):
@@ -153,16 +171,28 @@ def save_config(
     if relative_paths:
         data = _convert_paths_to_relative(data, path.parent.absolute())
 
-    # Custom YAML representer for cleaner output
+    # Custom YAML representer for cleaner output — use a local Dumper
+    # subclass so we don't mutate the global yaml.Dumper state.
+    class _CleanDumper(yaml.Dumper):
+        pass
+
     def str_representer(dumper: yaml.Dumper, data: str) -> yaml.Node:
         if "\n" in data:
             return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
         return dumper.represent_scalar("tag:yaml.org,2002:str", data)
 
-    yaml.add_representer(str, str_representer)
+    _CleanDumper.add_representer(str, str_representer)
 
     with open(path, "w") as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True, width=100)
+        yaml.dump(
+            data,
+            f,
+            Dumper=_CleanDumper,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+            width=100,
+        )
 
 
 def load_config_dict(data: Dict[str, Any], base_path: Path = Path.cwd()) -> SimulationConfig:

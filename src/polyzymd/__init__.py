@@ -10,23 +10,23 @@ Example usage:
     >>> config = SimulationConfig.from_yaml("my_simulation.yaml")
 
     >>> from polyzymd import SystemBuilder
-    >>> builder = SystemBuilder(config)
-    >>> system = builder.build()
+    >>> builder = SystemBuilder.from_config(config)
+    >>> interchange = builder.build_from_config(config)
 
 Key modules:
     - config: Configuration management with YAML support
     - builders: System construction (enzyme, substrate, polymer, solvent)
     - simulation: MD execution and continuation
-    - workflow: SLURM job submission and daisy-chaining
+    - workflow: SLURM job submission and self-resubmitting HPC jobs
     - exporters: GROMACS export functionality
 
 Note:
     This package uses lazy imports for heavy dependencies (OpenMM, OpenFF, etc.).
     The config module can be imported without these dependencies, but simulation
-    modules require a full conda environment with OpenMM and OpenFF installed.
+    modules require a full pixi environment with OpenMM and OpenFF installed.
 """
 
-__version__ = "1.0.4"
+__version__ = "1.1.1"
 __author__ = "Joseph R. Laforet Jr."
 __email__ = "jola3134@colorado.edu"
 

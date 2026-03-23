@@ -5,9 +5,8 @@
 <h1 align="center">PolyzyMD</h1>
 
 <p align="center">
-  <a href="https://pypi.org/project/polyzymd/"><img src="https://img.shields.io/pypi/v/polyzymd.svg" alt="PyPI"></a>
   <a href="https://github.com/joelaforet/polyzymd/actions/workflows/ci.yml"><img src="https://github.com/joelaforet/polyzymd/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11-blue.svg" alt="Python 3.11"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
@@ -35,49 +34,61 @@ PolyzyMD provides a streamlined workflow for setting up and running MD simulatio
 
 ## Installation
 
-PolyzyMD requires OpenMM and the OpenFF stack, which are only available via conda/mamba.
+PolyzyMD uses [pixi](https://pixi.sh) for environment management. Pixi handles
+all dependencies (OpenMM, OpenFF stack, CUDA, etc.) from conda-forge with
+reproducible lockfiles.
 
-### User Installation
-
-**Step 1: Create conda environment**
-
-Using mamba (recommended for speed):
+### 1. Install pixi
 
 ```bash
-mamba create -n polyzymd-env python=3.11 openmm openff-toolkit openff-interchange \
-    openff-nagl openff-nagl-models openff-forcefields openff-units packmol \
-    mbuild mdtraj numpy scipy pandas pydantic pyyaml click tqdm -c conda-forge
-mamba activate polyzymd-env
+curl -fsSL https://pixi.sh/install.sh | sh
 ```
 
-Or using our environment file:
-
-```bash
-mamba env create -f https://raw.githubusercontent.com/joelaforet/polyzymd/main/devtools/conda-envs/polyzymd-env.yml
-mamba activate polyzymd-env
-```
-
-**Step 2: Install PolyzyMD**
-
-```bash
-pip install polyzymd
-```
-
-### Developer Installation
-
-For contributing or modifying the source code:
+### 2. Clone and install
 
 ```bash
 git clone https://github.com/joelaforet/polyzymd.git
 cd polyzymd
-mamba env create -f devtools/conda-envs/polyzymd-env.yml
-mamba activate polyzymd-env
-pip install -e ".[dev]"
 ```
 
-> **Note for uv users:** OpenMM and the OpenFF stack are not available on PyPI and must be installed via conda/mamba. You can use uv for other packages within an activated conda environment, but the core simulation dependencies require conda.
+**For local use (building systems, validation, no GPU):**
 
-For detailed installation instructions, including HPC setup and troubleshooting, see the [Installation Guide](https://polyzymd.readthedocs.io/en/latest/tutorials/installation.html).
+```bash
+pixi install -e build
+pixi shell -e build
+```
+
+**For HPC clusters (GPU simulations):**
+
+Pick the environment that matches your cluster's CUDA version:
+
+| Cluster | CUDA | Environment | OpenMM |
+|---------|------|-------------|--------|
+| CU Boulder Blanca | 12.4 | `cuda-12-4` | 8.1 |
+| PSC Bridges2 | 12.6 | `cuda-12-6` | 8.4 |
+
+```bash
+# Example for Blanca:
+pixi install -e cuda-12-4
+pixi shell -e cuda-12-4
+
+# Example for Bridges2:
+pixi install -e cuda-12-6
+pixi shell -e cuda-12-6
+```
+
+After `pixi shell`, the `polyzymd` command is on PATH and works normally.
+
+### How to find your CUDA version
+
+Run on a GPU node:
+
+```bash
+nvidia-smi | head -1
+```
+
+The driver version in the top-right maps to a maximum supported CUDA version.
+Use the environment whose CUDA version does not exceed your driver.
 
 ## Quick Start
 
@@ -102,7 +113,15 @@ cp /path/to/substrate.sdf structures/  # optional
 ```bash
 # Edit config.yaml with your settings, then:
 polyzymd validate -c config.yaml
-polyzymd submit -c config.yaml --replicates 1-5 --preset aa100
+polyzymd submit -c config.yaml --replicates 1-5 --preset blanca-shirts
+```
+
+The `--preset` flag selects SLURM configuration and automatically picks the
+correct pixi environment (`cuda-12-4` for Blanca, `cuda-12-6` for Bridges2).
+You can override with `--pixi-env`:
+
+```bash
+polyzymd submit -c config.yaml --replicates 1-5 --preset bridges2 --pixi-env cuda-12-6
 ```
 
 See the [Quick Start Guide](https://polyzymd.readthedocs.io/en/latest/tutorials/quickstart.html) for a complete walkthrough.
@@ -120,6 +139,29 @@ See the [Quick Start Guide](https://polyzymd.readthedocs.io/en/latest/tutorials/
 | `polyzymd check-progress -c config.yaml` | Check simulation completion status |
 | `polyzymd recover -c config.yaml` | Resume a stalled simulation |
 | `polyzymd info` | Show installation information |
+
+## Pixi Environments
+
+PolyzyMD uses [pixi](https://pixi.sh) instead of conda/mamba. Key differences:
+
+- **No `conda activate`** — use `pixi shell -e <env>` instead
+- **No environment YAML** — `pixi.toml` + `pixi.lock` are the single source of truth
+- **Reproducible** — the lockfile pins every package to exact versions
+- **CUDA-aware** — each environment pins the correct CUDA and OpenMM versions
+
+| Environment | Use case | Requires GPU? |
+|-------------|----------|---------------|
+| `build` | System building, PDB prep, validation | No |
+| `cuda-12-4` | Simulations on CUDA 12.4 clusters (Blanca) | Yes |
+| `cuda-12-6` | Simulations on CUDA 12.6 clusters (Bridges2) | Yes |
+
+### Adding support for a new cluster
+
+1. Determine the CUDA version (`nvidia-smi` on a GPU node)
+2. Add a new `[feature.cuda-X-Y]` block in `pixi.toml` following the existing pattern
+3. Add the corresponding environment in `[environments]`
+4. Add the preset mapping in `PRESET_DEFAULT_PIXI_ENV` in `slurm.py`
+5. File a PR
 
 ## Documentation
 
@@ -141,7 +183,7 @@ If you use PolyzyMD in your research, please cite:
 ```bibtex
 @software{polyzymd,
   author = {Laforet Jr., Joseph R.},
-  title = {PolyzyMD: MD Simulations for Enzyme-Polymer Systems},
+  title = {PolyzyMD: Polymer-Enzyme Interactions Studied with Molecular Dynamics},
   year = {2026},
   url = {https://github.com/joelaforet/polyzymd}
 }

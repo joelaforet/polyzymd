@@ -4,15 +4,17 @@ Covers:
 - SlurmConfig.from_preset() for all named presets
 - Conditional SBATCH directive generation (gpu_line, qos_line, mem_line,
   nodes_line, account_line, mail_line)
-- Bridges2-specific GPU type, directive style, module loading, conda command
+- Bridges2-specific GPU type, directive style
 - BRIDGES2_GPU_TYPES registry
 - Job name generation for self-resubmitting model
+- Pixi environment activation in generated scripts
 """
 
 import pytest
 
 from polyzymd.workflow.slurm import (
     BRIDGES2_GPU_TYPES,
+    PRESET_DEFAULT_PIXI_ENV,
     SlurmConfig,
     SlurmScriptGenerator,
 )
@@ -23,7 +25,7 @@ from polyzymd.workflow.slurm import (
 
 
 def _make_generator(config: SlurmConfig) -> SlurmScriptGenerator:
-    return SlurmScriptGenerator(config, conda_env="test-env")
+    return SlurmScriptGenerator(config, pixi_env="cuda-12-4")
 
 
 # ---------------------------------------------------------------------------
@@ -43,8 +45,6 @@ class TestPresetLoading:
         assert cfg.memory == "3G"
         assert cfg.gpu_directive_style == "gres"
         assert cfg.gpu_type is None
-        assert cfg.module_load == "miniforge"
-        assert cfg.conda_command == "conda"
 
     def test_al40_preset(self):
         cfg = SlurmConfig.from_preset("al40")
@@ -75,17 +75,23 @@ class TestPresetLoading:
         assert cfg.memory is None  # Per-GPU allocation; omit --mem
         assert cfg.gpu_type == "v100-32"
         assert cfg.gpu_directive_style == "gpus"
-        assert cfg.module_load == "anaconda3/2024.10-1"
-        assert cfg.conda_command == "conda"
 
     def test_preset_accepts_email(self):
         cfg = SlurmConfig.from_preset("aa100", email="user@example.com")
         assert cfg.email == "user@example.com"
 
-    def test_unknown_preset_falls_back_to_aa100(self):
-        """Unrecognised preset names silently fall back to aa100 (existing behaviour)."""
-        cfg = SlurmConfig.from_preset("nonexistent")  # type: ignore[arg-type]
-        assert cfg.partition == "aa100"
+    def test_unknown_preset_raises_value_error(self):
+        """Unrecognised preset names raise ValueError with available presets."""
+        with pytest.raises(ValueError, match="Unknown SLURM preset 'nonexistent'"):
+            SlurmConfig.from_preset("nonexistent")  # type: ignore[arg-type]
+
+    def test_unknown_preset_error_lists_valid_presets(self):
+        """The ValueError message includes all valid preset names."""
+        with pytest.raises(ValueError, match="aa100") as exc_info:
+            SlurmConfig.from_preset("bogus")  # type: ignore[arg-type]
+        msg = str(exc_info.value)
+        for name in ("aa100", "al40", "blanca-shirts", "bridges2", "testing"):
+            assert name in msg, f"Missing preset {name!r} from error message"
 
 
 # ---------------------------------------------------------------------------
@@ -350,3 +356,256 @@ class TestJobNameGeneration:
         # int(0.333 * 100) = 33, int(0.667 * 100) = 66
         assert "A33" in name
         assert "B66" in name
+
+
+# ---------------------------------------------------------------------------
+# Exit code handling in JOB_TEMPLATE
+# ---------------------------------------------------------------------------
+
+
+class TestJobTemplateExitCodeHandling:
+    """Verify that JOB_TEMPLATE handles exit codes correctly.
+
+    The bash wrapper must:
+    - Exit code 2 (concurrent): terminate cleanly without resubmitting
+    - Exit code 0 or 99: proceed to check-progress / resubmit logic
+    - Other non-zero: abort with error
+    """
+
+    def test_template_contains_exit_code_2_guard(self):
+        """JOB_TEMPLATE must intercept exit code 2 before the generic fatal check."""
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        assert "if [ $RC -eq 2 ]" in template
+
+    def test_exit_code_2_does_not_resubmit(self):
+        """The exit-code-2 block must exit 0 (no resubmit) and log CONCURRENT."""
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        # Find the exit-code-2 block
+        lines = template.splitlines()
+        in_block = False
+        block_lines = []
+        for line in lines:
+            if "if [ $RC -eq 2 ]" in line:
+                in_block = True
+            if in_block:
+                block_lines.append(line)
+                if line.strip() == "fi":
+                    break
+
+        block = "\n".join(block_lines)
+        assert "exit 0" in block, "Exit code 2 block must exit 0 (clean termination)"
+        assert "CONCURRENT" in block, "Exit code 2 block must log CONCURRENT message"
+
+    def test_exit_code_2_guard_precedes_fatal_check(self):
+        """Exit code 2 handling must appear BEFORE the generic non-zero check.
+
+        If the order were reversed, exit code 2 would be caught by the
+        'RC -ne 0 && RC -ne 99' guard and treated as a fatal error.
+        """
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        pos_concurrent = template.index("if [ $RC -eq 2 ]")
+        pos_fatal = template.index("if [ $RC -ne 0 ] && [ $RC -ne 99 ]")
+        assert pos_concurrent < pos_fatal, (
+            "Exit code 2 guard must appear before the generic fatal-error guard"
+        )
+
+    def test_template_fatal_check_excludes_code_2(self):
+        """The fatal-error guard checks 'RC -ne 0 && RC -ne 99'.
+
+        Since exit code 2 is intercepted earlier, it never reaches this guard.
+        This test documents the expected pattern.
+        """
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        assert "if [ $RC -ne 0 ] && [ $RC -ne 99 ]" in template
+
+
+# ---------------------------------------------------------------------------
+# squeue-based duplicate detection (check_existing_slurm_jobs)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckExistingSlurmJobs:
+    """Tests for the best-effort squeue duplicate-job guard.
+
+    All tests mock subprocess.run so they work in non-SLURM CI environments.
+    """
+
+    def test_returns_job_ids_when_jobs_exist(self, monkeypatch):
+        """If squeue finds RUNNING/PENDING jobs, their IDs are returned."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "12345\n67890\n"
+
+        monkeypatch.setattr(
+            "polyzymd.workflow.daisy_chain.subprocess.run", lambda *a, **kw: mock_result
+        )
+
+        ids = check_existing_slurm_jobs("r1_310K_Fibronectin")
+        assert ids == ["12345", "67890"]
+
+    def test_returns_empty_when_no_jobs(self, monkeypatch):
+        """If squeue finds no matching jobs, an empty list is returned."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+
+        monkeypatch.setattr(
+            "polyzymd.workflow.daisy_chain.subprocess.run", lambda *a, **kw: mock_result
+        )
+
+        ids = check_existing_slurm_jobs("r1_310K_Fibronectin")
+        assert ids == []
+
+    def test_returns_empty_when_squeue_not_found(self, monkeypatch):
+        """If squeue binary is missing (non-SLURM env), return empty list."""
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs
+
+        def _raise_fnf(*a, **kw):
+            raise FileNotFoundError("squeue not found")
+
+        monkeypatch.setattr("polyzymd.workflow.daisy_chain.subprocess.run", _raise_fnf)
+
+        ids = check_existing_slurm_jobs("r1_310K_Fibronectin")
+        assert ids == []
+
+    def test_returns_empty_when_squeue_times_out(self, monkeypatch):
+        """If squeue hangs, return empty list after timeout."""
+        import subprocess as sp
+
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs
+
+        def _raise_timeout(*a, **kw):
+            raise sp.TimeoutExpired(cmd="squeue", timeout=15)
+
+        monkeypatch.setattr("polyzymd.workflow.daisy_chain.subprocess.run", _raise_timeout)
+
+        ids = check_existing_slurm_jobs("r1_310K_Fibronectin")
+        assert ids == []
+
+    def test_returns_empty_when_squeue_fails(self, monkeypatch):
+        """If squeue returns non-zero, return empty list (best-effort)."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+
+        monkeypatch.setattr(
+            "polyzymd.workflow.daisy_chain.subprocess.run", lambda *a, **kw: mock_result
+        )
+
+        ids = check_existing_slurm_jobs("r1_310K_Fibronectin")
+        assert ids == []
+
+    def test_returns_empty_on_oserror(self, monkeypatch):
+        """If squeue raises OSError (e.g. permission), return empty list."""
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs
+
+        def _raise_os(*a, **kw):
+            raise OSError("Permission denied")
+
+        monkeypatch.setattr("polyzymd.workflow.daisy_chain.subprocess.run", _raise_os)
+
+        ids = check_existing_slurm_jobs("r1_310K_Fibronectin")
+        assert ids == []
+
+
+class TestDuplicateJobGuardIntegration:
+    """Tests that submit_replicate respects the squeue duplicate guard."""
+
+    def _make_submitter(self, *, force: bool = False, dry_run: bool = False):
+        """Create a DaisyChainSubmitter with mocked configs."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow.daisy_chain import DaisyChainConfig, DaisyChainSubmitter
+
+        sim_config = MagicMock()
+        sim_config.enzyme.name = "Fibronectin_8_to_10"
+        sim_config.thermodynamics.temperature = 310.0
+        sim_config.polymers = None
+        sim_config.output.slurm_logs_subdir = "slurm_logs"
+        sim_config.get_working_directory.return_value = MagicMock()
+
+        dc_config = MagicMock(spec=DaisyChainConfig)
+        dc_config.dry_run = dry_run
+        dc_config.force = force
+        dc_config.slurm_config = MagicMock()
+        dc_config.slurm_config.exclude = ""
+        dc_config.output_script_dir = MagicMock()
+        dc_config.config_path = "/fake/config.yaml"
+
+        return DaisyChainSubmitter(sim_config=sim_config, dc_config=dc_config)
+
+    def test_submit_raises_when_duplicate_found(self, monkeypatch):
+        """submit_replicate raises RuntimeError if squeue finds existing jobs."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow import daisy_chain
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "12345\n"
+        monkeypatch.setattr(
+            "polyzymd.workflow.daisy_chain.subprocess.run", lambda *a, **kw: mock_result
+        )
+
+        submitter = self._make_submitter(force=False)
+        with pytest.raises(RuntimeError, match="already has RUNNING/PENDING"):
+            submitter.submit_replicate(1)
+
+    def test_submit_proceeds_with_force(self, monkeypatch):
+        """submit_replicate skips squeue check when force=True."""
+        from unittest.mock import MagicMock
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "12345\n"
+        monkeypatch.setattr(
+            "polyzymd.workflow.daisy_chain.subprocess.run", lambda *a, **kw: mock_result
+        )
+
+        submitter = self._make_submitter(force=True)
+        # The method will proceed past the guard but fail at _submit_job
+        # because we haven't mocked sbatch. That's fine — we just verify
+        # it doesn't raise RuntimeError about duplicates.
+        try:
+            submitter.submit_replicate(1)
+        except RuntimeError as e:
+            assert "already has RUNNING/PENDING" not in str(e)
+        except Exception:
+            pass  # Other errors are expected (mocked config)
+
+    def test_submit_skips_guard_for_dry_run(self, monkeypatch):
+        """Dry run should never check squeue."""
+        from unittest.mock import MagicMock
+
+        call_log = []
+
+        def _mock_run(*a, **kw):
+            call_log.append(a)
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "99999\n"
+            return result
+
+        monkeypatch.setattr("polyzymd.workflow.daisy_chain.subprocess.run", _mock_run)
+
+        submitter = self._make_submitter(dry_run=True, force=False)
+        try:
+            submitter.submit_replicate(1)
+        except Exception:
+            pass  # mocked config won't produce valid scripts
+
+        # squeue should not have been called (dry_run skips the guard)
+        squeue_calls = [c for c in call_log if "squeue" in str(c)]
+        assert len(squeue_calls) == 0, "squeue should not be called during dry run"

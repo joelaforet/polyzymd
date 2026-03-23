@@ -15,6 +15,7 @@ caller can exit with a distinct exit code (99 = "interrupted but state saved").
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import threading
 from pathlib import Path
@@ -24,6 +25,14 @@ LOGGER = logging.getLogger(__name__)
 
 # Exit code that means "interrupted cleanly, state was saved"
 EXIT_CODE_INTERRUPTED = 99
+
+# Exit code that means "another job is already running this replicate —
+# this duplicate chain should terminate without resubmitting"
+EXIT_CODE_CONCURRENT = 2
+
+# Exit code for check-progress errors (config load failure, missing files, etc.)
+# Distinguished from exit code 1 ("work remains") to prevent infinite resubmission.
+EXIT_CODE_CHECK_ERROR = 3
 
 # Module-level flag checked by the simulation loop
 _interrupted = threading.Event()
@@ -85,10 +94,16 @@ def _handler(signum: int, frame: Any) -> None:
         Current stack frame (unused).
     """
     global _interrupt_signal
-    sig_name = signal.Signals(signum).name
-    LOGGER.warning(f"Received {sig_name} — requesting graceful shutdown")
     _interrupt_signal = signum
     _interrupted.set()
+    # Avoid LOGGER.warning() here — Python's logging module uses locks, which
+    # can deadlock if the signal interrupts code that already holds the lock.
+    # Use os.write() to stderr instead (async-signal-safe).
+    try:
+        sig_name = signal.Signals(signum).name
+        os.write(2, f"[signal] Received {sig_name} — requesting graceful shutdown\n".encode())
+    except Exception:
+        pass  # Best-effort; never let the handler itself crash
 
 
 def install_handlers() -> None:
@@ -184,3 +199,58 @@ def save_interrupted_state(
     )
 
     return marker_path
+
+
+def save_restart_checkpoint(
+    simulation: Any,
+    output_dir: Path,
+) -> Path:
+    """Save a periodic wall-time restart checkpoint during simulation.
+
+    Writes two files into *output_dir*, overwriting any previous restart
+    checkpoint:
+
+    - ``restart_state.xml``  — portable OpenMM state (positions, velocities)
+    - ``restart_system.xml`` — serialized OpenMM System for recovery
+
+    Unlike ``save_interrupted_state``, this does **not** write a binary
+    ``.chk`` file (non-portable across heterogeneous clusters) and does
+    **not** write an ``INTERRUPTED`` marker (the segment is still running).
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        The active OpenMM Simulation object.
+    output_dir : Path
+        Directory to write restart files into (e.g. ``production_3/``).
+
+    Returns
+    -------
+    Path
+        Path to the ``restart_state.xml`` file.
+    """
+    from openmm import XmlSerializer
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save portable state XML
+    state = simulation.context.getState(
+        getPositions=True,
+        getVelocities=True,
+        getForces=True,
+        getEnergy=True,
+        getParameters=True,
+    )
+    state_xml_path = output_dir / "restart_state.xml"
+    with open(state_xml_path, "w") as f:
+        f.write(XmlSerializer.serialize(state))
+    LOGGER.info(f"Saved restart state to {state_xml_path}")
+
+    # Save system XML (for self-containedness — cheap to write)
+    system_xml_path = output_dir / "restart_system.xml"
+    with open(system_xml_path, "w") as f:
+        f.write(XmlSerializer.serialize(simulation.system))
+    LOGGER.info(f"Saved restart system to {system_xml_path}")
+
+    return state_xml_path

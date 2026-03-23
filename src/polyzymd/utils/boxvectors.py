@@ -5,6 +5,7 @@ This module provides functions for calculating and manipulating periodic box
 vectors used in molecular dynamics simulations:
 
 - get_topology_bbox: Calculate the bounding box of all molecules in a topology
+- get_topology_bbox_bounds: Return per-axis min/max coordinate bounds
 - pad_box_vectors_uniform: Add uniform padding to box vectors
 - get_box_volume: Calculate the volume enclosed by box vectors
 

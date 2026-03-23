@@ -27,6 +27,7 @@ from polyzymd.simulation.signals import (
     is_interrupted,
     reset,
     save_interrupted_state,
+    save_restart_checkpoint,
 )
 
 # ---------------------------------------------------------------------------
@@ -125,6 +126,35 @@ class TestInterruptFlag:
         assert get_interrupt_signal() == signal.SIGTERM
         reset()
         assert get_interrupt_signal() == signal.SIGUSR1
+
+    def test_handler_does_not_use_logger(self):
+        """Signal handler must not call LOGGER methods (async-signal-unsafe).
+
+        Python's logging module uses locks internally; calling LOGGER from a
+        signal handler can deadlock if the signal interrupts code that already
+        holds the logging lock.  The handler should use os.write() instead.
+        """
+        import inspect
+        src = inspect.getsource(_handler)
+        # Check for actual LOGGER method calls (e.g. LOGGER.warning(...)),
+        # ignoring mentions in comments.
+        code_lines = [
+            line.split("#")[0]  # strip inline comments
+            for line in src.splitlines()
+        ]
+        code_only = "\n".join(code_lines)
+        assert "LOGGER." not in code_only, (
+            "_handler must not call LOGGER methods — use os.write(2, ...) for "
+            "async-signal-safe stderr output"
+        )
+
+    def test_handler_uses_os_write(self):
+        """Signal handler uses os.write(2, ...) for async-signal-safe output."""
+        import inspect
+        src = inspect.getsource(_handler)
+        assert "os.write" in src, (
+            "_handler should use os.write(2, ...) for stderr output"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -275,4 +305,105 @@ class TestSaveInterruptedState:
         # First call should be the state
         mock_xml.serialize.assert_any_call(mock_state)
         # Second call should be the system
+        mock_xml.serialize.assert_any_call(mock_sim.system)
+
+
+# ---------------------------------------------------------------------------
+# save_restart_checkpoint (mocked OpenMM)
+# ---------------------------------------------------------------------------
+
+
+class TestSaveRestartCheckpoint:
+    """save_restart_checkpoint() writes portable restart files."""
+
+    def test_writes_state_and_system_xml(self, tmp_path):
+        """Restart checkpoint creates restart_state.xml and restart_system.xml."""
+        mock_sim = MagicMock()
+        mock_state = MagicMock()
+        mock_sim.context.getState.return_value = mock_state
+
+        with patch("openmm.XmlSerializer") as mock_xml:
+            mock_xml.serialize.return_value = "<mock_xml/>"
+
+            result = save_restart_checkpoint(
+                simulation=mock_sim,
+                output_dir=tmp_path / "production_2",
+            )
+
+        output_dir = tmp_path / "production_2"
+        assert output_dir.exists()
+        assert (output_dir / "restart_state.xml").exists()
+        assert (output_dir / "restart_system.xml").exists()
+        assert result == output_dir / "restart_state.xml"
+
+    def test_does_not_write_chk_or_marker(self, tmp_path):
+        """Restart checkpoint does NOT write .chk or INTERRUPTED marker."""
+        mock_sim = MagicMock()
+        mock_sim.context.getState.return_value = MagicMock()
+
+        with patch("openmm.XmlSerializer") as mock_xml:
+            mock_xml.serialize.return_value = "<xml/>"
+            save_restart_checkpoint(
+                simulation=mock_sim,
+                output_dir=tmp_path / "prod",
+            )
+
+        output_dir = tmp_path / "prod"
+        # No .chk files
+        assert not list(output_dir.glob("*.chk"))
+        # No INTERRUPTED marker
+        assert not (output_dir / "INTERRUPTED").exists()
+
+    def test_creates_output_dir(self, tmp_path):
+        """Output directory is created if it doesn't exist."""
+        mock_sim = MagicMock()
+        mock_sim.context.getState.return_value = MagicMock()
+
+        nested = tmp_path / "deep" / "nested" / "production_7"
+        assert not nested.exists()
+
+        with patch("openmm.XmlSerializer") as mock_xml:
+            mock_xml.serialize.return_value = "<xml/>"
+            save_restart_checkpoint(
+                simulation=mock_sim,
+                output_dir=nested,
+            )
+
+        assert nested.exists()
+
+    def test_overwrites_previous_restart(self, tmp_path):
+        """Restart checkpoint overwrites previous restart files."""
+        mock_sim = MagicMock()
+        mock_sim.context.getState.return_value = MagicMock()
+
+        output_dir = tmp_path / "production_0"
+        output_dir.mkdir()
+        (output_dir / "restart_state.xml").write_text("<old/>")
+        (output_dir / "restart_system.xml").write_text("<old/>")
+
+        with patch("openmm.XmlSerializer") as mock_xml:
+            mock_xml.serialize.return_value = "<new/>"
+            save_restart_checkpoint(
+                simulation=mock_sim,
+                output_dir=output_dir,
+            )
+
+        assert (output_dir / "restart_state.xml").read_text() == "<new/>"
+        assert (output_dir / "restart_system.xml").read_text() == "<new/>"
+
+    def test_xml_serialize_called_for_state_and_system(self, tmp_path):
+        """XmlSerializer.serialize is called for both state and system."""
+        mock_sim = MagicMock()
+        mock_state = MagicMock()
+        mock_sim.context.getState.return_value = mock_state
+
+        with patch("openmm.XmlSerializer") as mock_xml:
+            mock_xml.serialize.return_value = "<xml/>"
+            save_restart_checkpoint(
+                simulation=mock_sim,
+                output_dir=tmp_path / "p",
+            )
+
+        assert mock_xml.serialize.call_count == 2
+        mock_xml.serialize.assert_any_call(mock_state)
         mock_xml.serialize.assert_any_call(mock_sim.system)

@@ -25,10 +25,13 @@ pip install -e .
 ModuleNotFoundError: No module named 'openmm'
 ```
 
-**Solution:** Install via conda (not pip):
+**Solution:** OpenMM is provided by the pixi environment. Make sure you are
+inside the correct pixi shell:
 
 ```bash
-conda install -c conda-forge openmm
+pixi shell -e build        # local use (no CUDA)
+pixi shell -e cuda-12-6    # HPC (e.g. Bridges2)
+python -c "import openmm; print(openmm.__version__)"
 ```
 
 ### "Import error after installation"
@@ -247,6 +250,9 @@ This means the job exceeded its allocated RAM. This often happens during energy 
    
    # For very large systems (many polymers, large proteins)
    polyzymd submit -c config.yaml --memory 8G
+
+   # Also works with recover --submit
+   polyzymd recover -c config.yaml -r 1 --submit --memory 8G
    ```
 
 2. If using generated scripts directly, edit the `#SBATCH --mem` line:
@@ -317,13 +323,14 @@ simulation_phases:
 ModuleNotFoundError in SLURM output
 ```
 
-**Solution:** Ensure your job script loads conda:
+**Solution:** Ensure your job script activates the pixi environment. PolyzyMD-generated
+scripts handle this automatically via `pixi shell-hook`. If you are editing scripts
+manually:
 
 1. Edit generated script in `job_scripts/`
-2. Add at the top:
+2. Add the pixi activation:
    ```bash
-   module load anaconda
-   source activate polymerist-env
+   eval "$(pixi shell-hook -e cuda-12-4 --manifest-path /path/to/polyzymd/pixi.toml)"
    ```
 
 ### "Permission denied on scratch"
@@ -410,7 +417,7 @@ ValueError: System state doesn't match checkpoint
 polyzymd info
 
 # Python environment
-conda list | grep -E "openmm|openff|pydantic"
+pixi list -e build | grep -E "openmm|openff|pydantic"
 
 # Configuration validation
 polyzymd validate -c config.yaml

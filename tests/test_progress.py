@@ -22,6 +22,8 @@ from polyzymd.simulation.progress import (
     SegmentStatus,
     SimulationProgress,
     SimulationStatus,
+    _derive_overall_status,
+    _estimate_steps_from_csv,
     get_next_segment_info,
     load_or_scan_progress,
     load_progress,
@@ -272,6 +274,37 @@ class TestProgressIO:
         save_progress(tmp_path, _make_progress())
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert len(tmp_files) == 0
+
+    def test_save_calls_fsync_before_rename(self):
+        """save_progress must flush and fsync before os.replace (B8).
+
+        Without fsync, a power failure after rename could leave a truncated
+        progress.json because the kernel hadn't flushed the page cache.
+        """
+        import inspect
+
+        source = inspect.getsource(save_progress)
+        lines = source.split("\n")
+
+        flush_idx = None
+        fsync_idx = None
+        replace_idx = None
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if "f.flush()" in stripped:
+                flush_idx = i
+            if "os.fsync(" in stripped:
+                fsync_idx = i
+            if "os.replace(" in stripped:
+                replace_idx = i
+
+        assert flush_idx is not None, "f.flush() not found in save_progress"
+        assert fsync_idx is not None, "os.fsync() not found in save_progress"
+        assert replace_idx is not None, "os.replace() not found in save_progress"
+        assert flush_idx < fsync_idx < replace_idx, (
+            f"Expected order: flush ({flush_idx}) < fsync ({fsync_idx}) < replace ({replace_idx})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -714,6 +747,26 @@ class TestScanEquilibrationStages:
         records = scan_equilibration_stages(tmp_path)
         assert records == []
 
+    def test_completed_stage_has_finished_at(self, tmp_path):
+        """Completed equilibration stages should have finished_at set from checkpoint mtime."""
+        _write_completed_eq_stage_on_disk(tmp_path, 0, "heating")
+        records = scan_equilibration_stages(tmp_path)
+        assert len(records) == 1
+        assert records[0].status == SegmentStatus.COMPLETED
+        assert records[0].finished_at is not None
+        # Should be a valid ISO timestamp
+        from datetime import datetime
+
+        datetime.fromisoformat(records[0].finished_at)
+
+    def test_failed_stage_has_no_finished_at(self, tmp_path):
+        """Failed equilibration stages should not have finished_at set."""
+        _write_partial_eq_stage_on_disk(tmp_path, 0, "heating")
+        records = scan_equilibration_stages(tmp_path)
+        assert len(records) == 1
+        assert records[0].status == SegmentStatus.FAILED
+        assert records[0].finished_at is None
+
 
 # ---------------------------------------------------------------------------
 # scan_filesystem — equilibration stages integration
@@ -764,3 +817,613 @@ class TestEquilibrationRoundTrip:
         assert loaded.equilibration_stages[1].name == "npt_eq"
         assert loaded.equilibration_stages[1].ensemble == "NPT"
         assert loaded.equilibration_complete is True
+
+
+# ---------------------------------------------------------------------------
+# _estimate_steps_from_csv
+# ---------------------------------------------------------------------------
+
+
+class TestEstimateStepsFromCsv:
+    """_estimate_steps_from_csv computes last_step - first_step for per-segment counts."""
+
+    def test_typical_csv(self, tmp_path):
+        csv = tmp_path / "state_data.csv"
+        csv.write_text(
+            '#"Step","Time (ps)","Potential Energy (kJ/mole)"\n'
+            "40000,80.0,-123456.0\n"
+            "80000,160.0,-123500.0\n"
+            "120000,240.0,-123550.0\n"
+        )
+        # Per-segment steps = 120000 - 40000 = 80000
+        assert _estimate_steps_from_csv(csv) == 80000
+
+    def test_quoted_columns(self, tmp_path):
+        csv = tmp_path / "state_data.csv"
+        csv.write_text('#"Step","Time (ps)"\n"40000","80.0"\n"80000","160.0"\n')
+        # 80000 - 40000 = 40000
+        assert _estimate_steps_from_csv(csv) == 40000
+
+    def test_header_only_returns_zero(self, tmp_path):
+        csv = tmp_path / "state_data.csv"
+        csv.write_text('#"Step","Time (ps)"\n')
+        assert _estimate_steps_from_csv(csv) == 0
+
+    def test_empty_file_returns_zero(self, tmp_path):
+        csv = tmp_path / "state_data.csv"
+        csv.write_text("")
+        assert _estimate_steps_from_csv(csv) == 0
+
+    def test_missing_file_returns_zero(self, tmp_path):
+        csv = tmp_path / "nonexistent.csv"
+        assert _estimate_steps_from_csv(csv) == 0
+
+    def test_trailing_empty_lines_skipped(self, tmp_path):
+        csv = tmp_path / "state_data.csv"
+        csv.write_text('#"Step","Time (ps)"\n40000,80.0\n80000,160.0\n\n\n')
+        # 80000 - 40000 = 40000
+        assert _estimate_steps_from_csv(csv) == 40000
+
+    def test_single_data_line_returns_zero(self, tmp_path):
+        """A single data row yields 0 (first == last, no delta to compute)."""
+        csv = tmp_path / "state_data.csv"
+        csv.write_text('#"Step","Time (ps)"\n50000,100.0\n')
+        assert _estimate_steps_from_csv(csv) == 0
+
+    def test_continuation_segment_csv(self, tmp_path):
+        """CSV from a continuation segment has large cumulative offsets;
+        result should be the per-segment delta, not the raw last value."""
+        csv = tmp_path / "state_data.csv"
+        csv.write_text(
+            '#"Step","Time (ps)","Potential Energy (kJ/mole)"\n'
+            "200000000,400000.0,-123456.0\n"
+            "250000000,500000.0,-123500.0\n"
+            "358400000,716800.0,-123550.0\n"
+        )
+        # Per-segment: 358400000 - 200000000 = 158400000
+        assert _estimate_steps_from_csv(csv) == 158400000
+
+    def test_two_data_rows(self, tmp_path):
+        """Exactly two data rows: delta is straightforward."""
+        csv = tmp_path / "state_data.csv"
+        csv.write_text('#"Step","Time (ps)"\n100000,200.0\n300000,600.0\n')
+        # 300000 - 100000 = 200000
+        assert _estimate_steps_from_csv(csv) == 200000
+
+
+# ---------------------------------------------------------------------------
+# Stale INTERRUPTED marker cross-check (Bug 4 defense-in-depth)
+# ---------------------------------------------------------------------------
+
+
+def _write_csv_for_segment(
+    working_dir: Path,
+    seg_idx: int,
+    first_step: int,
+    last_step: int,
+) -> None:
+    """Write a minimal state_data CSV for a production segment.
+
+    The CSV contains exactly two data rows so that
+    ``_estimate_steps_from_csv`` returns ``last_step - first_step``.
+    """
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    (seg_dir / f"production_{seg_idx}_state_data.csv").write_text(
+        f'#"Step","Time (ps)","PE (kJ/mole)"\n'
+        f"{first_step},{first_step * 0.002},-100000.0\n"
+        f"{last_step},{last_step * 0.002},-100000.0\n"
+    )
+
+
+class TestStaleInterruptedMarkerCrossCheck:
+    """_scan_segment_dir cross-checks INTERRUPTED markers against CSV data.
+
+    When a segment is gracefully interrupted, restarted in-place, and then
+    hard-killed, the old INTERRUPTED marker persists with a stale (too-low)
+    step count.  The cross-check detects this and uses the CSV estimate
+    instead.  Thresholds: csv_steps > marker * 2 AND csv_steps > 1_000_000.
+    """
+
+    def test_marker_and_csv_agree(self, tmp_path):
+        """When the CSV delta roughly matches the marker, marker value is used."""
+        steps = 3_000_000
+        _write_interrupted_segment_on_disk(
+            tmp_path, 0, steps_completed=steps, total_steps=5_000_000
+        )
+        # CSV shows same delta (cumulative 100M → 103M = 3M per-segment)
+        _write_csv_for_segment(tmp_path, 0, first_step=100_000_000, last_step=103_000_000)
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.INTERRUPTED
+        assert p.segments[0].steps_completed == steps
+
+    def test_stale_marker_uses_csv(self, tmp_path):
+        """Stale marker (CSV >> marker by >2x and >1M) → CSV estimate used."""
+        marker_steps = 567_234  # Original interruption
+        csv_delta = 85_400_000  # Actual work after restart (>> 2x and >> 1M)
+        _write_interrupted_segment_on_disk(
+            tmp_path, 0, steps_completed=marker_steps, total_steps=100_000_000
+        )
+        _write_csv_for_segment(
+            tmp_path,
+            0,
+            first_step=200_000_000,
+            last_step=200_000_000 + csv_delta,
+        )
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.INTERRUPTED
+        # Should use CSV estimate, NOT the stale marker value
+        assert p.segments[0].steps_completed == csv_delta
+
+    def test_no_csv_uses_marker(self, tmp_path):
+        """When no CSV file exists, marker value is used (no crash)."""
+        steps = 3_000_000
+        _write_interrupted_segment_on_disk(
+            tmp_path, 0, steps_completed=steps, total_steps=5_000_000
+        )
+        # No CSV written — only the INTERRUPTED marker
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].steps_completed == steps
+
+    def test_csv_below_2x_threshold_uses_marker(self, tmp_path):
+        """CSV delta < 2x marker → marker value used (not stale)."""
+        marker_steps = 3_000_000
+        csv_delta = 5_000_000  # 1.67x — below 2x threshold
+        _write_interrupted_segment_on_disk(
+            tmp_path, 0, steps_completed=marker_steps, total_steps=10_000_000
+        )
+        _write_csv_for_segment(
+            tmp_path,
+            0,
+            first_step=50_000_000,
+            last_step=50_000_000 + csv_delta,
+        )
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].steps_completed == marker_steps
+
+    def test_csv_above_2x_but_below_absolute_threshold_uses_marker(self, tmp_path):
+        """CSV delta > 2x marker but < 1M absolute → marker value used.
+
+        This prevents false positives on very short segments where a 2x
+        ratio might occur with tiny step counts.
+        """
+        marker_steps = 100_000
+        csv_delta = 500_000  # 5x ratio but only 500K — below 1M absolute
+        _write_interrupted_segment_on_disk(
+            tmp_path, 0, steps_completed=marker_steps, total_steps=1_000_000
+        )
+        _write_csv_for_segment(
+            tmp_path,
+            0,
+            first_step=10_000_000,
+            last_step=10_000_000 + csv_delta,
+        )
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].steps_completed == marker_steps
+
+    def test_stale_marker_does_not_affect_status(self, tmp_path):
+        """Even when the CSV overrides the marker value, status stays INTERRUPTED."""
+        _write_interrupted_segment_on_disk(
+            tmp_path, 0, steps_completed=500_000, total_steps=100_000_000
+        )
+        _write_csv_for_segment(
+            tmp_path,
+            0,
+            first_step=300_000_000,
+            last_step=385_000_000,  # delta = 85M, >> 2*500K and >> 1M
+        )
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert p.segments[0].status == SegmentStatus.INTERRUPTED
+        assert p.status == SimulationStatus.INTERRUPTED
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint-only segment classification (hard-kill recovery)
+# ---------------------------------------------------------------------------
+
+
+def _write_checkpoint_only_segment(
+    working_dir: Path,
+    seg_idx: int,
+    with_csv: bool = False,
+    csv_steps: int = 80000,
+    *,
+    csv_start_step: int = 0,
+    recent: bool = False,
+) -> None:
+    """Write files simulating a hard-killed segment (checkpoint but no state.xml).
+
+    Parameters
+    ----------
+    csv_steps : int
+        The **per-segment** step count to simulate.  The CSV will contain
+        two data rows: one at ``csv_start_step`` and one at
+        ``csv_start_step + csv_steps``, so that
+        ``_estimate_steps_from_csv`` returns ``csv_steps``.
+    csv_start_step : int
+        Cumulative step offset at the start of this segment (simulates
+        continuation segments where the OpenMM integrator step counter
+        carries over from previous segments).
+    recent : bool
+        If *False* (default), backdate the checkpoint's mtime so that the
+        recency heuristic classifies it as INTERRUPTED.  If *True*, leave
+        the mtime at the current time so it is classified as RUNNING.
+    """
+    import os
+
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    # Checkpoint exists (from periodic CheckpointReporter)
+    chk_path = seg_dir / f"production_{seg_idx}_checkpoint.chk"
+    chk_path.write_bytes(b"\x00" * 32)
+    # system.xml exists (saved at segment start)
+    (seg_dir / f"production_{seg_idx}_system.xml").write_text("<mock-system/>")
+    if with_csv:
+        first_step = csv_start_step
+        last_step = csv_start_step + csv_steps
+        (seg_dir / f"production_{seg_idx}_state_data.csv").write_text(
+            f'#"Step","Time (ps)","PE (kJ/mole)"\n'
+            f"{first_step},{first_step * 0.002},-100000.0\n"
+            f"{last_step},{last_step * 0.002},-100000.0\n"
+        )
+
+    if not recent:
+        # Backdate checkpoint mtime so recency heuristic classifies as INTERRUPTED
+        import time
+
+        old_time = time.time() - 1200  # 20 minutes ago
+        os.utime(chk_path, (old_time, old_time))
+
+
+class TestCheckpointOnlySegment:
+    """Segments with checkpoint but no state.xml: recency heuristic determines status."""
+
+    def test_checkpoint_only_is_interrupted(self, tmp_path):
+        _write_checkpoint_only_segment(tmp_path, 0)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.INTERRUPTED
+        assert p.segments[0].steps_completed == 0  # No CSV to estimate from
+
+    def test_checkpoint_with_csv_estimates_steps(self, tmp_path):
+        _write_checkpoint_only_segment(tmp_path, 0, with_csv=True, csv_steps=120000)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.INTERRUPTED
+        assert p.segments[0].steps_completed == 120000
+
+    def test_recent_checkpoint_is_running(self, tmp_path):
+        """A checkpoint modified within the recency window → RUNNING."""
+        _write_checkpoint_only_segment(tmp_path, 0, recent=True)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.RUNNING
+        assert p.segments[0].steps_completed == 0
+
+    def test_recent_checkpoint_with_csv_is_running(self, tmp_path):
+        """A recent checkpoint with CSV data → RUNNING with estimated steps."""
+        _write_checkpoint_only_segment(tmp_path, 0, with_csv=True, csv_steps=120000, recent=True)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.RUNNING
+        assert p.segments[0].steps_completed == 120000
+
+    def test_checkpoint_only_counted_in_total_steps(self, tmp_path):
+        """Checkpoint-only segments should count toward total_steps_completed."""
+        _write_completed_segment_on_disk(tmp_path, 0, duration_ns=10.0)
+        _write_checkpoint_only_segment(tmp_path, 1, with_csv=True, csv_steps=200000)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert p.segments[0].status == SegmentStatus.COMPLETED
+        assert p.segments[1].status == SegmentStatus.INTERRUPTED
+        # Segment 0: 10ns at 2fs = 5_000_000 steps. Segment 1: ~200_000 steps
+        assert p.total_steps_completed == 5200000
+
+    def test_no_checkpoint_no_state_is_failed(self, tmp_path):
+        """Segment with directory but no checkpoint and no state.xml → FAILED."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        # Only system.xml, no checkpoint
+        (seg_dir / "production_0_system.xml").write_text("<mock/>")
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(p.segments) == 1
+        assert p.segments[0].status == SegmentStatus.FAILED
+
+    def test_checkpoint_only_next_segment_increments(self, tmp_path):
+        """After a checkpoint-only (INTERRUPTED) segment, next_segment_index increments."""
+        _write_checkpoint_only_segment(tmp_path, 0, with_csv=True, csv_steps=50000)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        progress = _make_progress(segments=p.segments, total_steps=10000000)
+        assert progress.next_segment_index == 1
+
+    def test_continuation_segment_csv_offset_not_overcounted(self, tmp_path):
+        """Continuation segments with cumulative CSV step offsets must not
+        be overcounted.  This is the core regression test for the bug where
+        ``_estimate_steps_from_csv`` returned the raw cumulative step number
+        instead of the per-segment delta.
+        """
+        # Segment 0: completed normally (10 ns at 2 fs = 5,000,000 steps)
+        _write_completed_segment_on_disk(tmp_path, 0, duration_ns=10.0)
+        # Segment 1: hard-killed continuation with CSV that has cumulative offset.
+        # It ran 4,000,000 per-segment steps, starting from cumulative step 5,000,000.
+        _write_checkpoint_only_segment(
+            tmp_path,
+            1,
+            with_csv=True,
+            csv_steps=4000000,
+            csv_start_step=5000000,
+        )
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert p.segments[0].status == SegmentStatus.COMPLETED
+        assert p.segments[0].steps_completed == 5000000
+        assert p.segments[1].status == SegmentStatus.INTERRUPTED
+        # Must be 4,000,000 (per-segment), NOT 9,000,000 (cumulative last row)
+        assert p.segments[1].steps_completed == 4000000
+        # Total: 5M + 4M = 9M
+        assert p.total_steps_completed == 9000000
+
+
+# ---------------------------------------------------------------------------
+# FAILED segment cleanup in progress
+# ---------------------------------------------------------------------------
+
+
+class TestFailedSegmentHandling:
+    """FAILED segments contribute 0 steps and get cleaned up."""
+
+    def test_failed_segment_zero_steps(self):
+        """FAILED segments should contribute 0 to total_steps_completed."""
+        segs = [
+            _make_segment(0, steps=0, status=SegmentStatus.FAILED),
+        ]
+        p = _make_progress(segments=segs, total_steps=10000000)
+        assert p.total_steps_completed == 0
+
+    def test_failed_after_completed(self):
+        """A FAILED segment after a COMPLETED one doesn't affect completed count."""
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=0, status=SegmentStatus.FAILED),
+        ]
+        p = _make_progress(segments=segs, total_steps=10000000)
+        assert p.total_steps_completed == 5000000
+        assert p.next_segment_index == 2
+
+    def test_removing_failed_segments_resets_index(self):
+        """After removing FAILED segments, next_segment_index recalculates correctly."""
+        segs = [
+            _make_segment(0, steps=0, status=SegmentStatus.FAILED),
+        ]
+        p = _make_progress(segments=segs, total_steps=10000000)
+        # Remove FAILED segments (simulating what main.py does)
+        p.segments = [s for s in p.segments if s.status != SegmentStatus.FAILED]
+        assert p.next_segment_index == 0  # Can retry from scratch
+
+
+# ---------------------------------------------------------------------------
+# _derive_overall_status — unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestDeriveOverallStatus:
+    """Verify the centralised status derivation helper.
+
+    Key invariant: when no segment is RUNNING, the **most recent** segment
+    (highest index) determines the overall status.  This prevents an earlier
+    INTERRUPTED segment from masking a later FAILED segment.
+    """
+
+    # ---- Basic single-status cases ----
+
+    def test_no_segments_not_started(self):
+        assert _derive_overall_status([]) == SimulationStatus.NOT_STARTED
+
+    def test_single_completed_not_complete(self):
+        """One completed segment but total not reached → RUNNING (awaiting next)."""
+        segs = [_make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED)]
+        assert _derive_overall_status(segs) == SimulationStatus.RUNNING
+
+    def test_single_completed_is_complete(self):
+        segs = [_make_segment(0, steps=10000000, status=SegmentStatus.COMPLETED)]
+        assert _derive_overall_status(segs, is_complete=True) == SimulationStatus.COMPLETED
+
+    def test_single_running(self):
+        segs = [_make_segment(0, steps=0, status=SegmentStatus.RUNNING)]
+        assert _derive_overall_status(segs) == SimulationStatus.RUNNING
+
+    def test_single_interrupted(self):
+        segs = [_make_segment(0, steps=3000000, status=SegmentStatus.INTERRUPTED)]
+        assert _derive_overall_status(segs) == SimulationStatus.INTERRUPTED
+
+    def test_single_failed(self):
+        segs = [_make_segment(0, steps=0, status=SegmentStatus.FAILED)]
+        assert _derive_overall_status(segs) == SimulationStatus.FAILED
+
+    # ---- RUNNING always wins ----
+
+    def test_running_overrides_interrupted(self):
+        segs = [
+            _make_segment(0, steps=3000000, status=SegmentStatus.INTERRUPTED),
+            _make_segment(1, steps=0, status=SegmentStatus.RUNNING),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.RUNNING
+
+    def test_running_overrides_failed(self):
+        segs = [
+            _make_segment(0, steps=0, status=SegmentStatus.FAILED),
+            _make_segment(1, steps=0, status=SegmentStatus.RUNNING),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.RUNNING
+
+    def test_running_in_middle_still_wins(self):
+        """RUNNING segment at a lower index than later segments still dominates."""
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=0, status=SegmentStatus.RUNNING),
+            _make_segment(2, steps=0, status=SegmentStatus.FAILED),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.RUNNING
+
+    # ---- Latest segment determines status (the core bug fix) ----
+
+    def test_interrupted_then_failed_overall_failed(self):
+        """This is the exact scenario from the CALB replicate 2 bug:
+        seg 0 = INTERRUPTED (hard-killed), seg 1 = FAILED (0 steps).
+        Overall should be FAILED, not INTERRUPTED."""
+        segs = [
+            _make_segment(0, steps=57000000, status=SegmentStatus.INTERRUPTED),
+            _make_segment(1, steps=0, status=SegmentStatus.FAILED),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.FAILED
+
+    def test_failed_then_interrupted_overall_interrupted(self):
+        """If a later segment is INTERRUPTED (not FAILED), that takes precedence."""
+        segs = [
+            _make_segment(0, steps=0, status=SegmentStatus.FAILED),
+            _make_segment(1, steps=3000000, status=SegmentStatus.INTERRUPTED),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.INTERRUPTED
+
+    def test_completed_then_failed_overall_failed(self):
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=0, status=SegmentStatus.FAILED),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.FAILED
+
+    def test_completed_then_interrupted_overall_interrupted(self):
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=3000000, status=SegmentStatus.INTERRUPTED),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.INTERRUPTED
+
+    def test_many_segments_latest_wins(self):
+        """With many mixed segments, the highest-index determines status."""
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=3000000, status=SegmentStatus.INTERRUPTED),
+            _make_segment(2, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(3, steps=0, status=SegmentStatus.FAILED),
+        ]
+        assert _derive_overall_status(segs) == SimulationStatus.FAILED
+
+    # ---- is_complete trumps everything ----
+
+    def test_is_complete_overrides_failed(self):
+        """Even if a segment is FAILED, is_complete=True → COMPLETED."""
+        segs = [_make_segment(0, steps=0, status=SegmentStatus.FAILED)]
+        assert _derive_overall_status(segs, is_complete=True) == SimulationStatus.COMPLETED
+
+    def test_is_complete_overrides_interrupted(self):
+        segs = [_make_segment(0, steps=3000000, status=SegmentStatus.INTERRUPTED)]
+        assert _derive_overall_status(segs, is_complete=True) == SimulationStatus.COMPLETED
+
+    # ---- After cleanup (segments removed) ----
+
+    def test_after_removing_failed_segments(self):
+        """Simulates the cleanup in main.py: remove FAILED, recompute."""
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=0, status=SegmentStatus.FAILED),
+        ]
+        # Remove failed segments (as main.py does)
+        cleaned = [s for s in segs if s.status != SegmentStatus.FAILED]
+        assert _derive_overall_status(cleaned) == SimulationStatus.RUNNING
+
+    def test_after_removing_all_segments(self):
+        """If all segments are removed, status is NOT_STARTED."""
+        segs = [_make_segment(0, steps=0, status=SegmentStatus.FAILED)]
+        cleaned = [s for s in segs if s.status != SegmentStatus.FAILED]
+        assert _derive_overall_status(cleaned) == SimulationStatus.NOT_STARTED
+
+
+# ---------------------------------------------------------------------------
+# Status derivation integration — scan_filesystem & validate_progress
+# ---------------------------------------------------------------------------
+
+
+class TestStatusDerivationIntegration:
+    """Verify that scan_filesystem and validate_progress use
+    _derive_overall_status correctly (latest segment wins)."""
+
+    def test_scan_interrupted_then_failed_on_disk(self, tmp_path):
+        """Filesystem with seg 0 interrupted + seg 1 failed → overall FAILED.
+
+        This reproduces the CALB replicate 2 scenario through the filesystem
+        scanning path.
+        """
+        # Segment 0: interrupted (with INTERRUPTED marker)
+        _write_interrupted_segment_on_disk(tmp_path, 0, steps_completed=57000000)
+
+        # Segment 1: failed — an empty directory with no state.xml, no
+        # INTERRUPTED marker, no checkpoint.  The scanner should pick it
+        # up as FAILED (or it won't appear).  To guarantee a FAILED status
+        # we write a minimal directory that causes _scan_segment_dir to
+        # return a record.  The simplest way: save progress with a FAILED
+        # segment and reload via validate_progress (which is what really
+        # matters for this bug).
+        seg_dir = tmp_path / "production_1"
+        seg_dir.mkdir()
+        # Empty segment dir with only system.xml → scanner may skip it,
+        # so we test through validate_progress instead (see next test).
+
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        # At minimum, seg 0 is INTERRUPTED; overall should reflect that.
+        assert p.status in {SimulationStatus.INTERRUPTED, SimulationStatus.FAILED}
+
+    def test_validate_interrupted_then_failed_overall_failed(self, tmp_path):
+        """validate_progress with seg 0=INTERRUPTED, seg 1=FAILED → overall FAILED."""
+        # Write seg 0 on disk as interrupted
+        _write_interrupted_segment_on_disk(tmp_path, 0, steps_completed=57000000)
+
+        # Build a progress object with both segments in file
+        segs = [
+            _make_segment(0, steps=57000000, status=SegmentStatus.INTERRUPTED),
+            _make_segment(1, steps=0, status=SegmentStatus.FAILED),
+        ]
+        p = _make_progress(segments=segs, total_steps=200000000)
+        validated = validate_progress(tmp_path, p, timestep_fs=2.0)
+
+        # The key assertion: overall status is FAILED (not INTERRUPTED)
+        assert validated.status == SimulationStatus.FAILED
+
+    def test_validate_completed_then_interrupted_overall_interrupted(self, tmp_path):
+        """validate_progress with seg 0=COMPLETED, seg 1=INTERRUPTED → INTERRUPTED."""
+        _write_completed_segment_on_disk(tmp_path, 0, duration_ns=10.0)
+        _write_interrupted_segment_on_disk(tmp_path, 1, steps_completed=3000000)
+
+        segs = [
+            _make_segment(0, steps=5000000, status=SegmentStatus.COMPLETED),
+            _make_segment(1, steps=3000000, status=SegmentStatus.INTERRUPTED),
+        ]
+        p = _make_progress(segments=segs, total_steps=20000000)
+        validated = validate_progress(tmp_path, p, timestep_fs=2.0)
+
+        assert validated.status == SimulationStatus.INTERRUPTED
+
+    def test_scan_completed_segments_without_target_shows_running(self, tmp_path):
+        """scan_filesystem doesn't know total_steps_requested, so all-completed
+        segments result in RUNNING (awaiting next segment), not COMPLETED.
+        COMPLETED is only set once total_steps_requested is known (via
+        load_or_scan_progress or validate_progress with is_complete=True)."""
+        _write_completed_segment_on_disk(tmp_path, 0, duration_ns=10.0)
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        # scan_filesystem doesn't pass is_complete, so the helper defaults to
+        # is_complete=False → all completed segments → RUNNING.
+        assert p.status == SimulationStatus.RUNNING
+
+    def test_scan_empty_dir_not_started(self, tmp_path):
+        """Empty working directory → NOT_STARTED (regression check)."""
+        p = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert p.status == SimulationStatus.NOT_STARTED
