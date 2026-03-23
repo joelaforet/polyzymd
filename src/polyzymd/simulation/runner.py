@@ -488,8 +488,8 @@ class SimulationRunner:
 
         # Get stage parameters (with defaults)
         timestep_fs = stage.time_step if stage.time_step is not None else default_timestep
-        friction = default_friction
         thermostat_timescale = stage.thermostat_timescale if stage.thermostat_timescale else 1.0
+        friction = 1.0 / thermostat_timescale  # friction (1/ps) = 1 / timescale (ps)
 
         # Calculate steps and reporting interval
         total_steps = int(stage.duration * 1e6 / timestep_fs)

@@ -240,6 +240,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   co-solvents.** `validate_volume_fractions` called `sum()` over `volume_fraction`
   fields without filtering `None` values, raising `TypeError` when any co-solvent
   used `concentration` instead of `volume_fraction`. (`config/schema.py`)
+- **Equilibration stages now honour `thermostat_timescale` for integrator friction.**
+  The `thermostat_timescale` field was read from the stage config but never used;
+  the integrator always received the default friction of 1.0/ps. Friction is now
+  computed as `1.0 / thermostat_timescale`. (`simulation/runner.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist
