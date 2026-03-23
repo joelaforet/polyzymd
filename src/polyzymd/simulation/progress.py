@@ -329,6 +329,8 @@ def save_progress(working_dir: str | Path, progress: SimulationProgress) -> Path
 
     with open(tmp, "w") as f:
         json.dump(progress.model_dump(mode="json"), f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
 
     os.replace(str(tmp), str(target))
     LOGGER.debug(f"Saved progress to {target}")

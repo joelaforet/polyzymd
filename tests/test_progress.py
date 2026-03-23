@@ -275,6 +275,37 @@ class TestProgressIO:
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert len(tmp_files) == 0
 
+    def test_save_calls_fsync_before_rename(self):
+        """save_progress must flush and fsync before os.replace (B8).
+
+        Without fsync, a power failure after rename could leave a truncated
+        progress.json because the kernel hadn't flushed the page cache.
+        """
+        import inspect
+
+        source = inspect.getsource(save_progress)
+        lines = source.split("\n")
+
+        flush_idx = None
+        fsync_idx = None
+        replace_idx = None
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if "f.flush()" in stripped:
+                flush_idx = i
+            if "os.fsync(" in stripped:
+                fsync_idx = i
+            if "os.replace(" in stripped:
+                replace_idx = i
+
+        assert flush_idx is not None, "f.flush() not found in save_progress"
+        assert fsync_idx is not None, "os.fsync() not found in save_progress"
+        assert replace_idx is not None, "os.replace() not found in save_progress"
+        assert flush_idx < fsync_idx < replace_idx, (
+            f"Expected order: flush ({flush_idx}) < fsync ({fsync_idx}) < replace ({replace_idx})"
+        )
+
 
 # ---------------------------------------------------------------------------
 # scan_filesystem

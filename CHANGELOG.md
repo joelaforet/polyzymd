@@ -279,6 +279,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   infinite loop on persistent errors.  Error conditions now exit with code 3
   (`EXIT_CODE_CHECK_ERROR`), and the SLURM template only resubmits on exit
   code 1. (`cli/main.py`, `simulation/signals.py`, `workflow/slurm.py`)
+- **Progress file writes are now crash-safe with `fsync` before rename.**
+  `save_progress()` already used atomic write-to-temp-then-rename, but did not
+  call `fsync` on the temporary file before `os.replace()`.  On power loss or
+  kernel panic the rename could be durable while the file contents were not,
+  leaving a zero-length or corrupt `progress.json`.  The function now calls
+  `f.flush()` and `os.fsync(f.fileno())` before the rename.
+  (`simulation/progress.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist
