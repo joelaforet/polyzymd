@@ -314,6 +314,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `_current_velocities`, they could incorrectly re-randomize velocities
   instead of continuing from the checkpoint's kinetic state.
   (`simulation/runner.py`)
+- **Sorted import block in `run-segment` handler.**  ruff I001 (import sort)
+  violation in the equilibration progress save block.  (`cli/main.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist

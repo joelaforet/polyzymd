@@ -1175,8 +1175,10 @@ def _run_initial_segment(
     from polyzymd.simulation.progress import (
         EquilibrationStageRecord,
         SegmentStatus,
-        load_progress as _load_progress,
         save_progress,
+    )
+    from polyzymd.simulation.progress import (
+        load_progress as _load_progress,
     )
 
     progress = _load_progress(working_dir)
