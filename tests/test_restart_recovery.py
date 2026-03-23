@@ -328,10 +328,8 @@ class TestGetPreviousPaths:
         """Hard-killed with no system.xml: checkpoint exists but not recoverable."""
         _write_hard_killed_segment(tmp_path, 0, with_system_xml=False)
         mgr = self._make_manager(tmp_path, 0)
-        paths = mgr._get_previous_paths()
-        # use_checkpoint should still be False because there's no system.xml
-        # (the error branch logs an error but doesn't set use_checkpoint)
-        assert paths["use_checkpoint"] is False
+        with pytest.raises(FileNotFoundError, match="cannot recover"):
+            mgr._get_previous_paths()
 
     def test_hard_kill_recovery_after_completed_segment(self, tmp_path):
         """Normal segment 0, then hard-killed segment 1 → recovery from seg 1."""

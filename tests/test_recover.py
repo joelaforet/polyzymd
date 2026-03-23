@@ -684,3 +684,65 @@ class TestRunInitialSegmentEquilibrationSkip:
         assert "equilibration_complete" in source
         # The _load_eq_stage_state call must be inside the skip_build guard
         assert "_load_eq_stage_state" in source
+
+
+# ---------------------------------------------------------------------------
+# Case 5b: Hard kill without system.xml raises immediately (B6)
+# ---------------------------------------------------------------------------
+
+
+class TestHardKillNoSystemXmlRaises:
+    """_get_previous_paths must raise FileNotFoundError for Case 5b.
+
+    When a segment has a periodic checkpoint (.chk) but no system.xml,
+    recovery is impossible.  Before the fix, the code logged an error but
+    fell through silently, returning paths to non-existent files.
+    """
+
+    def test_checkpoint_without_system_xml_raises(self, tmp_path):
+        """Case 5b: .chk exists, system.xml absent — must raise."""
+        from polyzymd.simulation.continuation import ContinuationManager
+
+        prev_idx = 0
+        seg_dir = tmp_path / f"production_{prev_idx}"
+        seg_dir.mkdir()
+
+        # Only the periodic checkpoint exists — no state/system XML at all
+        (seg_dir / f"production_{prev_idx}_checkpoint.chk").write_bytes(b"binary")
+        (seg_dir / f"production_{prev_idx}_parameters.json").write_text("{}")
+
+        mgr = ContinuationManager(working_dir=tmp_path, segment_index=prev_idx + 1)
+        with pytest.raises(FileNotFoundError, match="cannot recover"):
+            mgr._get_previous_paths()
+
+    def test_checkpoint_with_system_xml_does_not_raise(self, tmp_path):
+        """Case 5 (normal hard kill): .chk + system.xml — should NOT raise."""
+        from polyzymd.simulation.continuation import ContinuationManager
+
+        prev_idx = 0
+        seg_dir = tmp_path / f"production_{prev_idx}"
+        seg_dir.mkdir()
+
+        (seg_dir / f"production_{prev_idx}_checkpoint.chk").write_bytes(b"binary")
+        (seg_dir / f"production_{prev_idx}_system.xml").write_text("<System/>")
+        (seg_dir / f"production_{prev_idx}_parameters.json").write_text("{}")
+
+        mgr = ContinuationManager(working_dir=tmp_path, segment_index=prev_idx + 1)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is True
+
+    def test_normal_completion_does_not_raise(self, tmp_path):
+        """Case 1: state.xml exists (normal completion) — should NOT raise."""
+        from polyzymd.simulation.continuation import ContinuationManager
+
+        prev_idx = 0
+        seg_dir = tmp_path / f"production_{prev_idx}"
+        seg_dir.mkdir()
+
+        (seg_dir / f"production_{prev_idx}_state.xml").write_text("<State/>")
+        (seg_dir / f"production_{prev_idx}_system.xml").write_text("<System/>")
+        (seg_dir / f"production_{prev_idx}_parameters.json").write_text("{}")
+
+        mgr = ContinuationManager(working_dir=tmp_path, segment_index=prev_idx + 1)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is False

@@ -243,9 +243,10 @@ class ContinuationManager:
 
         elif checkpoint_path.exists():
             # Case 5b: Hard kill but no system.xml — cannot recover
-            LOGGER.error(
+            raise FileNotFoundError(
                 f"Previous segment {self._prev_segment} has a checkpoint "
-                f"but no system.xml — cannot recover"
+                f"({checkpoint_path}) but no system.xml ({system_path}) — "
+                f"cannot recover.  The segment must be re-run from scratch."
             )
 
         return {

@@ -265,6 +265,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to jump ahead in temperature. The ramp loop now always starts from
   `stage.temperature_start` and lets the fast-forward loop reconstruct the
   correct temperature by skipping completed chunks. (`simulation/runner.py`)
+- **Unrecoverable hard-kill state (checkpoint without system.xml) now raises
+  immediately.** When a segment was hard-killed and only the periodic
+  checkpoint existed (no `system.xml`), the continuation manager logged an
+  error but fell through silently, returning paths to non-existent files.
+  This caused confusing downstream `FileNotFoundError` messages.  Case 5b
+  now raises `FileNotFoundError` immediately with a clear message.
+  (`simulation/continuation.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist
