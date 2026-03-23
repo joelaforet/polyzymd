@@ -183,8 +183,7 @@ class SlurmConfig:
 
         if preset not in presets:
             raise ValueError(
-                f"Unknown SLURM preset {preset!r}. "
-                f"Valid presets: {', '.join(sorted(presets))}"
+                f"Unknown SLURM preset {preset!r}. Valid presets: {', '.join(sorted(presets))}"
             )
         config_dict = presets[preset]
         return cls(email=email, **config_dict)

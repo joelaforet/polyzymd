@@ -573,9 +573,7 @@ class SolventConfig(BaseModel):
     @model_validator(mode="after")
     def validate_volume_fractions(self) -> "SolventConfig":
         """Ensure co-solvent volume fractions don't exceed 1.0."""
-        total = sum(
-            cs.volume_fraction for cs in self.co_solvents if cs.volume_fraction is not None
-        )
+        total = sum(cs.volume_fraction for cs in self.co_solvents if cs.volume_fraction is not None)
         if total >= 1.0:
             raise ValueError(f"Total co-solvent volume fraction must be < 1.0, got {total}")
         return self

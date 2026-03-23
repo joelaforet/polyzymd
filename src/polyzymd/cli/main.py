@@ -227,7 +227,10 @@ def build(
             if gromacs:
                 colored_echo(phase="build")
                 colored_echo("GROMACS export enabled:", phase="build")
-                colored_echo(f"  Output: {sim_config.output.projects_directory}/{replicate}/gromacs/", phase="build")
+                colored_echo(
+                    f"  Output: {sim_config.output.projects_directory}/{replicate}/gromacs/",
+                    phase="build",
+                )
             return
 
         colored_echo(f"Building system for replicate {replicate}...", phase="build")

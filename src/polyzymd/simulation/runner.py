@@ -1764,9 +1764,7 @@ class SimulationRunner:
         self._simulation.loadCheckpoint(str(checkpoint_path))
 
         # Update current positions, velocities, and box vectors
-        state = self._simulation.context.getState(
-            getPositions=True, getVelocities=True
-        )
+        state = self._simulation.context.getState(getPositions=True, getVelocities=True)
         self._current_positions = state.getPositions()
         self._current_velocities = state.getVelocities()
         self._current_box_vectors = state.getPeriodicBoxVectors()
