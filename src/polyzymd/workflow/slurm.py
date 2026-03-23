@@ -360,7 +360,12 @@ if [ $PROGRESS_RC -eq 0 ]; then
     exit 0
 fi
 
-# Work remains — resubmit this same script
+if [ $PROGRESS_RC -ne 1 ]; then
+    echo "FATAL: check-progress failed (exit code $PROGRESS_RC) — NOT resubmitting"
+    exit $PROGRESS_RC
+fi
+
+# Work remains (exit code 1) — resubmit this same script
 echo "Work remains — resubmitting job..."
 sbatch "$THIS_SCRIPT"
 SUBMIT_RC=$?

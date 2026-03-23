@@ -1308,15 +1308,17 @@ def check_progress(
     Exit codes:
         0 - Simulation complete (do NOT resubmit)
         1 - Work remains (resubmit)
+        3 - Error (do NOT resubmit)
     """
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.simulation.progress import load_or_scan_progress
+    from polyzymd.simulation.signals import EXIT_CODE_CHECK_ERROR
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
     except Exception as e:
         colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
-        sys.exit(1)
+        sys.exit(EXIT_CODE_CHECK_ERROR)
 
     if scratch_dir:
         working_dir = Path(scratch_dir)
@@ -1328,14 +1330,18 @@ def check_progress(
     total_steps = int(prod.duration * 1e6 / timestep_fs)
     total_samples = prod.samples
 
-    progress = load_or_scan_progress(
-        working_dir=working_dir,
-        config_path=str(Path(config).resolve()),
-        total_steps=total_steps,
-        total_samples=total_samples,
-        timestep_fs=timestep_fs,
-        replicate=replicate,
-    )
+    try:
+        progress = load_or_scan_progress(
+            working_dir=working_dir,
+            config_path=str(Path(config).resolve()),
+            total_steps=total_steps,
+            total_samples=total_samples,
+            timestep_fs=timestep_fs,
+            replicate=replicate,
+        )
+    except Exception as e:
+        colored_echo(f"Failed to load progress: {e}", err=True, level=logging.ERROR)
+        sys.exit(EXIT_CODE_CHECK_ERROR)
 
     pct = progress.fraction_complete() * 100
     colored_echo(

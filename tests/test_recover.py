@@ -240,6 +240,50 @@ class TestCheckProgress:
         result = runner.invoke(cli, ["check-progress", "-c", str(config_file), "-r", "1"])
         assert "3 segment(s)" in result.output
 
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_config_error_exits_three(self, mock_from_yaml, tmp_path):
+        """check-progress should exit 3 (not 1) on config load failure.
+
+        Exit code 1 means 'work remains' and triggers SLURM resubmission.
+        Errors must use a distinct exit code to prevent infinite resubmission.
+        """
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+
+        mock_from_yaml.side_effect = ValueError("bad config")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["check-progress", "-c", str(config_file), "-r", "1"])
+        assert result.exit_code == 3
+
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_progress_load_error_exits_three(self, mock_from_yaml, mock_load, tmp_path):
+        """check-progress should exit 3 on progress load failure."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        sim_config = _mock_sim_config(working_dir)
+        mock_from_yaml.return_value = sim_config
+        mock_load.side_effect = FileNotFoundError("no progress file")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["check-progress", "-c", str(config_file), "-r", "1"])
+        assert result.exit_code == 3
+
+    def test_slurm_template_guards_check_progress_errors(self):
+        """SLURM template must NOT resubmit on check-progress error codes."""
+        from polyzymd.workflow.slurm import SlurmScriptGenerator
+
+        # Access the job template
+        template = SlurmScriptGenerator.JOB_TEMPLATE
+        # Must check for non-1 exit code before resubmitting
+        assert "PROGRESS_RC -ne 1" in template
+        # Must stop on error
+        assert "NOT resubmitting" in template
+
 
 # ---------------------------------------------------------------------------
 # Self-resubmitting model (no dependency chains)

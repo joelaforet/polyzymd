@@ -29,6 +29,10 @@ EXIT_CODE_INTERRUPTED = 99
 # this duplicate chain should terminate without resubmitting"
 EXIT_CODE_CONCURRENT = 2
 
+# Exit code for check-progress errors (config load failure, missing files, etc.)
+# Distinguished from exit code 1 ("work remains") to prevent infinite resubmission.
+EXIT_CODE_CHECK_ERROR = 3
+
 # Module-level flag checked by the simulation loop
 _interrupted = threading.Event()
 

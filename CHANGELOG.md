@@ -272,6 +272,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   This caused confusing downstream `FileNotFoundError` messages.  Case 5b
   now raises `FileNotFoundError` immediately with a clear message.
   (`simulation/continuation.py`)
+- **`check-progress` errors no longer trigger infinite SLURM resubmission.**
+  Errors in `check-progress` (config load failure, missing progress file)
+  exited with code 1 — the same code used for "work remains."  The SLURM
+  bash wrapper interpreted any non-zero exit as "resubmit," causing an
+  infinite loop on persistent errors.  Error conditions now exit with code 3
+  (`EXIT_CODE_CHECK_ERROR`), and the SLURM template only resubmits on exit
+  code 1. (`cli/main.py`, `simulation/signals.py`, `workflow/slurm.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist
