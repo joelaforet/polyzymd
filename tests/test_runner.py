@@ -353,3 +353,37 @@ class TestRampResumeFastForward:
         assert current_temp == pytest.approx(130.0), (
             f"current_temp should equal temp_end ({temp_end}) after fast-forward"
         )
+
+
+# ---------------------------------------------------------------------------
+# B14 – load_checkpoint must restore velocities, not just positions
+# ---------------------------------------------------------------------------
+
+
+class TestLoadCheckpointRestoresVelocities:
+    """load_checkpoint must update _current_velocities from the checkpoint."""
+
+    def test_getstate_requests_velocities(self):
+        """The getState call must include getVelocities=True."""
+        import inspect
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        src = inspect.getsource(SimulationRunner.load_checkpoint)
+        assert "getVelocities=True" in src, (
+            "load_checkpoint must call getState with getVelocities=True"
+        )
+
+    def test_current_velocities_assigned(self):
+        """_current_velocities must be set from state.getVelocities()."""
+        import inspect
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        src = inspect.getsource(SimulationRunner.load_checkpoint)
+        assert "_current_velocities" in src, (
+            "load_checkpoint must update self._current_velocities"
+        )
+        assert "getVelocities()" in src, (
+            "load_checkpoint must call state.getVelocities()"
+        )

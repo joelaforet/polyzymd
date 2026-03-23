@@ -307,6 +307,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The statepoint export unconditionally accessed `cosolvent.volume_fraction`, which
   is `None` for concentration-based co-solvents.  Now exports `_fraction` or
   `_molarity` depending on which is set.  (`config/schema.py`)
+- **`load_checkpoint` now restores velocities, not just positions.**
+  `getState()` was called with `getPositions=True` only, so
+  `_current_velocities` remained stale (or `None`) after loading a
+  checkpoint.  If equilibration stages subsequently checked
+  `_current_velocities`, they could incorrectly re-randomize velocities
+  instead of continuing from the checkpoint's kinetic state.
+  (`simulation/runner.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist
