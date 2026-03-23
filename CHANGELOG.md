@@ -316,6 +316,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`simulation/runner.py`)
 - **Sorted import block in `run-segment` handler.**  ruff I001 (import sort)
   violation in the equilibration progress save block.  (`cli/main.py`)
+- **Signal handler no longer calls `LOGGER` (async-signal-unsafe).**  The
+  `_handler()` function used `LOGGER.warning()`, which acquires Python's
+  logging lock internally.  If the signal arrives while application code
+  already holds that lock, the handler deadlocks.  Replaced with
+  `os.write(2, ...)` which is async-signal-safe.  (`simulation/signals.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist

@@ -127,6 +127,35 @@ class TestInterruptFlag:
         reset()
         assert get_interrupt_signal() == signal.SIGUSR1
 
+    def test_handler_does_not_use_logger(self):
+        """Signal handler must not call LOGGER methods (async-signal-unsafe).
+
+        Python's logging module uses locks internally; calling LOGGER from a
+        signal handler can deadlock if the signal interrupts code that already
+        holds the logging lock.  The handler should use os.write() instead.
+        """
+        import inspect
+        src = inspect.getsource(_handler)
+        # Check for actual LOGGER method calls (e.g. LOGGER.warning(...)),
+        # ignoring mentions in comments.
+        code_lines = [
+            line.split("#")[0]  # strip inline comments
+            for line in src.splitlines()
+        ]
+        code_only = "\n".join(code_lines)
+        assert "LOGGER." not in code_only, (
+            "_handler must not call LOGGER methods — use os.write(2, ...) for "
+            "async-signal-safe stderr output"
+        )
+
+    def test_handler_uses_os_write(self):
+        """Signal handler uses os.write(2, ...) for async-signal-safe output."""
+        import inspect
+        src = inspect.getsource(_handler)
+        assert "os.write" in src, (
+            "_handler should use os.write(2, ...) for stderr output"
+        )
+
 
 # ---------------------------------------------------------------------------
 # install_handlers

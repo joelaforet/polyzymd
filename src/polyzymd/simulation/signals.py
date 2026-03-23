@@ -15,6 +15,7 @@ caller can exit with a distinct exit code (99 = "interrupted but state saved").
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import threading
 from pathlib import Path
@@ -93,10 +94,16 @@ def _handler(signum: int, frame: Any) -> None:
         Current stack frame (unused).
     """
     global _interrupt_signal
-    sig_name = signal.Signals(signum).name
-    LOGGER.warning(f"Received {sig_name} — requesting graceful shutdown")
     _interrupt_signal = signum
     _interrupted.set()
+    # Avoid LOGGER.warning() here — Python's logging module uses locks, which
+    # can deadlock if the signal interrupts code that already holds the lock.
+    # Use os.write() to stderr instead (async-signal-safe).
+    try:
+        sig_name = signal.Signals(signum).name
+        os.write(2, f"[signal] Received {sig_name} — requesting graceful shutdown\n".encode())
+    except Exception:
+        pass  # Best-effort; never let the handler itself crash
 
 
 def install_handlers() -> None:
