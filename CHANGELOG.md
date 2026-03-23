@@ -290,6 +290,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Previously, an unrecognised preset name silently fell back to the `aa100` preset,
   masking typos in config files or CLI arguments.  The error message lists all valid
   presets. (`workflow/slurm.py`)
+- **`save_config` no longer mutates the global `yaml.Dumper` representer registry.**
+  The custom multiline-string representer was registered via `yaml.add_representer()`,
+  which permanently alters `yaml.Dumper` for the entire process.  Now uses a local
+  `Dumper` subclass so other YAML consumers are unaffected.  (`config/loader.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist

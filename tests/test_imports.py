@@ -171,3 +171,54 @@ class TestCoSolventVolumeValidation:
             ]
         )
         assert len(config.co_solvents) == 2
+
+
+# ---------------------------------------------------------------------------
+# B10 – save_config must not mutate global yaml.Dumper
+# ---------------------------------------------------------------------------
+
+
+class TestSaveConfigYamlDumper:
+    """save_config uses a local Dumper subclass, not the global yaml.Dumper."""
+
+    def test_global_dumper_unmodified_after_save(self, tmp_path):
+        """Calling save_config must not add representers to yaml.Dumper."""
+        import yaml
+
+        from polyzymd.config.loader import save_config
+        from polyzymd.config.schema import SimulationConfig
+
+        # Snapshot the global Dumper's str representer before save_config
+        original_representer = yaml.Dumper.yaml_representers.get(str)
+
+        # Build a minimal config — save_config needs a valid SimulationConfig.
+        # Use model_construct to skip validation (we only care about YAML dump).
+        config = SimulationConfig.model_construct(
+            name="test",
+            _fields_set=set(),
+        )
+        out = tmp_path / "test_config.yaml"
+        save_config(config, out)
+
+        after_representer = yaml.Dumper.yaml_representers.get(str)
+        assert after_representer is original_representer, (
+            "save_config must not mutate yaml.Dumper.yaml_representers"
+        )
+
+    def test_multiline_strings_use_block_style(self, tmp_path):
+        """Multiline strings in saved YAML use literal block (|) style."""
+        import yaml
+
+        from polyzymd.config.loader import save_config
+        from polyzymd.config.schema import SimulationConfig
+
+        config = SimulationConfig.model_construct(
+            name="multi\nline\ntest",
+            _fields_set=set(),
+        )
+        out = tmp_path / "test_config.yaml"
+        save_config(config, out)
+
+        content = out.read_text()
+        # The literal block indicator (| or |-) should appear for multiline strings
+        assert "|-" in content or "|\n" in content
