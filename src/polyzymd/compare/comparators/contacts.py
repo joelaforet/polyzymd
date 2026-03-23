@@ -572,54 +572,58 @@ class ContactsComparator(
         try:
             traj_info = loader.get_trajectory_info(replicate)
         except FileNotFoundError as e:
-            logger.warning(f"  Replicate {replicate} not found: {e}")
+            logger.warning(f"  Skipping replicate {replicate}: trajectory data not found. {e}")
             return None
 
-        # Create universe from resolved paths
-        traj_files = [str(p) for p in traj_info.trajectory_files]
-        universe = mda.Universe(str(traj_info.topology_file), traj_files)
-
-        # Convert equilibration time to start frame
-        eq_value, eq_unit = parse_time_string(self.equilibration)
-        eq_time_ps = convert_time(eq_value, eq_unit, "ps")
-
-        # Get timestep from trajectory
         try:
-            timestep_ps = universe.trajectory.dt
-        except (AttributeError, ValueError):
-            timestep_ps = 1.0
+            # Create universe from resolved paths
+            traj_files = [str(p) for p in traj_info.trajectory_files]
+            universe = mda.Universe(str(traj_info.topology_file), traj_files)
 
-        start_frame = int(eq_time_ps / timestep_ps) if timestep_ps > 0 else 0
-        logger.info(f"    Equilibration: {self.equilibration} -> frame {start_frame}")
+            # Convert equilibration time to start frame
+            eq_value, eq_unit = parse_time_string(self.equilibration)
+            eq_time_ps = convert_time(eq_value, eq_unit, "ps")
 
-        # Create selectors
-        target_selector = MDAnalysisSelector(self.analysis_settings.protein_selection)
-        query_selector = MDAnalysisSelector(self.analysis_settings.polymer_selection)
+            # Get timestep from trajectory
+            try:
+                timestep_ps = universe.trajectory.dt
+            except (AttributeError, ValueError):
+                timestep_ps = 1.0
 
-        # Create analyzer
-        analyzer = ParallelContactAnalyzer(
-            target_selector=target_selector,
-            query_selector=query_selector,
-            cutoff=self.analysis_settings.cutoff,
-        )
+            start_frame = int(eq_time_ps / timestep_ps) if timestep_ps > 0 else 0
+            logger.info(f"    Equilibration: {self.equilibration} -> frame {start_frame}")
 
-        # Run analysis
-        result = analyzer.run(
-            universe,
-            start=start_frame,
-        )
+            # Create selectors
+            target_selector = MDAnalysisSelector(self.analysis_settings.protein_selection)
+            query_selector = MDAnalysisSelector(self.analysis_settings.polymer_selection)
 
-        # Save result — use condition-specific dir if available
-        if condition_output_dir is not None:
-            output_dir = condition_output_dir
-        else:
-            output_dir = sim_config.output.projects_directory / "analysis" / "contacts"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_file = output_dir / f"contacts_rep{replicate}.json"
-        result.save(output_file)
-        logger.info(f"  Saved: {output_file}")
+            # Create analyzer
+            analyzer = ParallelContactAnalyzer(
+                target_selector=target_selector,
+                query_selector=query_selector,
+                cutoff=self.analysis_settings.cutoff,
+            )
 
-        return result
+            # Run analysis
+            result = analyzer.run(
+                universe,
+                start=start_frame,
+            )
+
+            # Save result — use condition-specific dir if available
+            if condition_output_dir is not None:
+                output_dir = condition_output_dir
+            else:
+                output_dir = sim_config.output.projects_directory / "analysis" / "contacts"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = output_dir / f"contacts_rep{replicate}.json"
+            result.save(output_file)
+            logger.info(f"  Saved: {output_file}")
+
+            return result
+        except Exception as e:
+            logger.warning(f"  Skipping replicate {replicate}: analysis failed with error: {e}")
+            return None
 
     def _find_replicate_result(
         self,

@@ -336,83 +336,89 @@ class ExposureDynamicsComparator(
         try:
             traj_info = loader.get_trajectory_info(replicate)
         except FileNotFoundError as e:
-            logger.warning(f"  Trajectory not found for rep {replicate}: {e}")
+            logger.warning(f"  Skipping replicate {replicate}: trajectory data not found. {e}")
             return None
 
-        topology_path = traj_info.topology_file
-        trajectory_paths = traj_info.trajectory_files  # list[Path] — multi-segment support
+        try:
+            topology_path = traj_info.topology_file
+            trajectory_paths = traj_info.trajectory_files  # list[Path] — multi-segment support
 
-        # Analysis directory for this replicate — use condition-specific dir if available
-        if condition_output_dir is not None:
-            analysis_dir = condition_output_dir / f"rep{replicate}"
-        else:
-            analysis_dir = self._get_analysis_dir(sim_config, cond_config_path) / f"rep{replicate}"
+            # Analysis directory for this replicate — use condition-specific dir if available
+            if condition_output_dir is not None:
+                analysis_dir = condition_output_dir / f"rep{replicate}"
+            else:
+                analysis_dir = (
+                    self._get_analysis_dir(sim_config, cond_config_path) / f"rep{replicate}"
+                )
 
-        # SASA config
-        sasa_config = SASAConfig(
-            exposure_threshold=self.analysis_settings.exposure_threshold,
-            probe_radius_nm=self.analysis_settings.probe_radius_nm,
-            n_sphere_points=self.analysis_settings.n_sphere_points,
-            chain_id=self.analysis_settings.protein_chain,
-            cache_sasa=True,
-        )
+            # SASA config
+            sasa_config = SASAConfig(
+                exposure_threshold=self.analysis_settings.exposure_threshold,
+                probe_radius_nm=self.analysis_settings.probe_radius_nm,
+                n_sphere_points=self.analysis_settings.n_sphere_points,
+                chain_id=self.analysis_settings.protein_chain,
+                cache_sasa=True,
+            )
 
-        # Check cached ExposureDynamicsResult
-        dynamics_cache_path = ExposureDynamicsResult.cache_path(analysis_dir)
-        if not recompute and dynamics_cache_path.exists():
-            logger.info(f"  Loading cached exposure dynamics: {dynamics_cache_path}")
-            dynamics = ExposureDynamicsResult.load(dynamics_cache_path)
-            # Still need to compute enrichment (not cached separately)
+            # Check cached ExposureDynamicsResult
+            dynamics_cache_path = ExposureDynamicsResult.cache_path(analysis_dir)
+            if not recompute and dynamics_cache_path.exists():
+                logger.info(f"  Loading cached exposure dynamics: {dynamics_cache_path}")
+                dynamics = ExposureDynamicsResult.load(dynamics_cache_path)
+                # Still need to compute enrichment (not cached separately)
+                sasa_result = compute_trajectory_sasa(
+                    topology_path=topology_path,
+                    trajectory_path=trajectory_paths,
+                    config=sasa_config,
+                    analysis_dir=analysis_dir,
+                    recompute=False,  # Use SASA cache if available
+                )
+                enrichment = compute_chaperone_enrichment(
+                    sasa_result=sasa_result,
+                    contact_result=contact_result,
+                    polymer_resnames=self.analysis_settings.polymer_resnames,
+                )
+                return dynamics, enrichment
+
+            # Compute SASA
+            logger.info(f"  Computing SASA for rep {replicate}...")
             sasa_result = compute_trajectory_sasa(
                 topology_path=topology_path,
                 trajectory_path=trajectory_paths,
                 config=sasa_config,
                 analysis_dir=analysis_dir,
-                recompute=False,  # Use SASA cache if available
+                recompute=recompute,
             )
+
+            # Compute exposure dynamics (with caching)
+            from polyzymd.analysis.exposure.config import ExposureConfig
+
+            exposure_config = ExposureConfig(
+                transient_lower=self.analysis_settings.transient_lower,
+                transient_upper=self.analysis_settings.transient_upper,
+                min_event_length=self.analysis_settings.min_event_length,
+            )
+
+            logger.info(f"  Analyzing exposure dynamics for rep {replicate}...")
+            dynamics = analyze_exposure_dynamics(
+                sasa_result=sasa_result,
+                contact_result=contact_result,
+                config=exposure_config,
+                analysis_dir=analysis_dir,
+                recompute=recompute,
+            )
+
+            # Compute enrichment
             enrichment = compute_chaperone_enrichment(
                 sasa_result=sasa_result,
                 contact_result=contact_result,
                 polymer_resnames=self.analysis_settings.polymer_resnames,
             )
+
             return dynamics, enrichment
-
-        # Compute SASA
-        logger.info(f"  Computing SASA for rep {replicate}...")
-        sasa_result = compute_trajectory_sasa(
-            topology_path=topology_path,
-            trajectory_path=trajectory_paths,
-            config=sasa_config,
-            analysis_dir=analysis_dir,
-            recompute=recompute,
-        )
-
-        # Compute exposure dynamics (with caching)
-        from polyzymd.analysis.exposure.config import ExposureConfig
-
-        exposure_config = ExposureConfig(
-            transient_lower=self.analysis_settings.transient_lower,
-            transient_upper=self.analysis_settings.transient_upper,
-            min_event_length=self.analysis_settings.min_event_length,
-        )
-
-        logger.info(f"  Analyzing exposure dynamics for rep {replicate}...")
-        dynamics = analyze_exposure_dynamics(
-            sasa_result=sasa_result,
-            contact_result=contact_result,
-            config=exposure_config,
-            analysis_dir=analysis_dir,
-            recompute=recompute,
-        )
-
-        # Compute enrichment
-        enrichment = compute_chaperone_enrichment(
-            sasa_result=sasa_result,
-            contact_result=contact_result,
-            polymer_resnames=self.analysis_settings.polymer_resnames,
-        )
-
-        return dynamics, enrichment
+        except Exception as e:
+            logger.warning(f"  Skipping replicate {replicate}: analysis failed with error: {e}")
+            return None
 
     def _build_condition_summary(
         self,
