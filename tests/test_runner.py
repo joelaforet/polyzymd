@@ -71,3 +71,59 @@ class TestThermostatTimescaleFriction:
         friction = 1.0 / thermostat_timescale
 
         assert friction == pytest.approx(default_friction)
+
+
+class TestBarostatTemperatureRampUpdate:
+    """Verify that barostat temperature is updated during NPT temperature ramps (B3).
+
+    The MonteCarloBarostat must track the integrator temperature during ramps,
+    otherwise volume-move acceptance is evaluated at the wrong temperature.
+    """
+
+    def test_barostat_update_present_in_ramp_loop(self):
+        """The ramp loop must call context.setParameter for the barostat temperature."""
+        import inspect
+        from polyzymd.simulation.runner import SimulationRunner
+
+        source = inspect.getsource(SimulationRunner.run_equilibration_stage)
+        # Verify the barostat temperature update is present in the ramp section
+        assert "MonteCarloBarostat.Temperature()" in source
+        assert "context.setParameter" in source
+
+    def test_barostat_update_conditional_on_npt(self):
+        """Barostat temperature update must be conditional on NPT ensemble."""
+        import inspect
+        from polyzymd.simulation.runner import SimulationRunner
+
+        source = inspect.getsource(SimulationRunner.run_equilibration_stage)
+        # The setParameter call should appear after an NPT check
+        lines = source.split("\n")
+        for i, line in enumerate(lines):
+            if "MonteCarloBarostat.Temperature()" in line:
+                # Walk backwards to find the nearest ensemble check
+                for j in range(i - 1, max(0, i - 5), -1):
+                    if "Ensemble.NPT" in lines[j]:
+                        break
+                else:
+                    pytest.fail(
+                        "MonteCarloBarostat.Temperature() update not guarded by Ensemble.NPT check"
+                    )
+
+    def test_barostat_temperature_parameter_name(self):
+        """The MonteCarloBarostat.Temperature() parameter name must be correct."""
+        import openmm
+
+        # This is the string used in context.setParameter(...)
+        param_name = openmm.MonteCarloBarostat.Temperature()
+        assert param_name == "MonteCarloTemperature"
+
+    def test_ramp_loop_has_two_barostat_updates(self):
+        """There should be two barostat updates: one in the ramp loop and one at final temp."""
+        import inspect
+        from polyzymd.simulation.runner import SimulationRunner
+
+        source = inspect.getsource(SimulationRunner.run_equilibration_stage)
+        count = source.count("MonteCarloBarostat.Temperature()")
+        assert count == 2, (
+            f"Expected 2 barostat temperature updates (ramp loop + final), found {count}"
+        )

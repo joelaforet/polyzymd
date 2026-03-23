@@ -242,8 +242,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   used `concentration` instead of `volume_fraction`. (`config/schema.py`)
 - **Equilibration stages now honour `thermostat_timescale` for integrator friction.**
   The `thermostat_timescale` field was read from the stage config but never used;
-  the integrator always received the default friction of 1.0/ps. Friction is now
+   the integrator always received the default friction of 1.0/ps. Friction is now
   computed as `1.0 / thermostat_timescale`. (`simulation/runner.py`)
+- **Barostat temperature now tracks the integrator during NPT temperature ramps.**
+  When an equilibration stage used NPT ensemble with temperature ramping, the
+  `MonteCarloBarostat` was initialized at the starting temperature but never
+  updated as the ramp progressed. This caused the barostat to evaluate
+  volume-move acceptance at the wrong temperature throughout the entire ramp,
+  leading to incorrect pressure coupling. The ramp loop and final-temperature
+  section now call `context.setParameter(MonteCarloBarostat.Temperature(), ...)`
+  to keep the barostat in sync with the integrator. (`simulation/runner.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist

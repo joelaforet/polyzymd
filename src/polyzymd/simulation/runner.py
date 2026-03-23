@@ -666,6 +666,11 @@ class SimulationRunner:
                     continue
 
                 integrator.setTemperature(current_temp * omm_unit.kelvin)
+                if stage.ensemble == Ensemble.NPT:
+                    self._simulation.context.setParameter(
+                        openmm.MonteCarloBarostat.Temperature(),
+                        current_temp * omm_unit.kelvin,
+                    )
 
                 # If resuming mid-chunk, only run the remainder
                 steps_already = max(0, resume_from_step - ramp_step_count)
@@ -687,6 +692,11 @@ class SimulationRunner:
 
             # Final temperature - run remaining steps in chunks
             integrator.setTemperature(stage.temperature_end * omm_unit.kelvin)
+            if stage.ensemble == Ensemble.NPT:
+                self._simulation.context.setParameter(
+                    openmm.MonteCarloBarostat.Temperature(),
+                    stage.temperature_end * omm_unit.kelvin,
+                )
             current_temp = stage.temperature_end
             steps_at_final_done = steps_done - steps_for_ramping
             steps_at_final_remaining = max(0, remaining_steps_at_final - steps_at_final_done)
