@@ -302,7 +302,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only knew about `pdb_path`, `sdf_path`, `sdf_directory`, `cache_directory`, and
   `base_directory`.  Relative `.rxn` paths in the `reactions:` config block were
   passed through as-is, causing `FileNotFoundError` when the config file lived in
-  a different directory from the CWD.  (`config/loader.py`)
+  a different   directory from the CWD.  (`config/loader.py`)
+- **`to_signac_statepoint()` no longer crashes with concentration-based co-solvents.**
+  The statepoint export unconditionally accessed `cosolvent.volume_fraction`, which
+  is `None` for concentration-based co-solvents.  Now exports `_fraction` or
+  `_molarity` depending on which is set.  (`config/schema.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist

@@ -1332,6 +1332,9 @@ class SimulationConfig(BaseModel):
 
         # Include co-solvent info
         for cosolvent in self.solvent.co_solvents:
-            statepoint[f"cosolvent_{cosolvent.name}_fraction"] = cosolvent.volume_fraction
+            if cosolvent.volume_fraction is not None:
+                statepoint[f"cosolvent_{cosolvent.name}_fraction"] = cosolvent.volume_fraction
+            elif cosolvent.concentration is not None:
+                statepoint[f"cosolvent_{cosolvent.name}_molarity"] = cosolvent.concentration
 
         return statepoint

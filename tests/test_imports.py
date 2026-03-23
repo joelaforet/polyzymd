@@ -276,3 +276,60 @@ class TestReactionPathResolution:
         base = Path("/configs")
         result = _convert_paths_to_relative(data, base)
         assert result["reactions"]["initiation"] == "templates/init.rxn"
+
+
+# ---------------------------------------------------------------------------
+# B13 – statepoint export handles concentration-based co-solvents
+# ---------------------------------------------------------------------------
+
+
+class TestStatepointCoSolventExport:
+    """to_statepoint must not crash when co-solvents use concentration instead
+    of volume_fraction."""
+
+    def _make_config(self, *, volume_fraction=None, concentration=None):
+        """Build a minimal SimulationConfig with one co-solvent."""
+        from unittest.mock import MagicMock
+
+        config = MagicMock()
+        config.enzyme.name = "CALB"
+        config.thermodynamics.temperature = 310.0
+        config.substrate = None
+        config.polymers = None
+
+        cs = MagicMock()
+        cs.name = "urea"
+        cs.volume_fraction = volume_fraction
+        cs.concentration = concentration
+        config.solvent.co_solvents = [cs]
+        return config
+
+    def test_volume_fraction_exported_as_fraction_key(self):
+        """volume_fraction co-solvent produces a _fraction key."""
+        from polyzymd.config.schema import SimulationConfig
+
+        _to_statepoint = SimulationConfig.__dict__["to_signac_statepoint"]
+        cfg = self._make_config(volume_fraction=0.3)
+        sp = _to_statepoint(cfg)
+        assert sp["cosolvent_urea_fraction"] == 0.3
+        assert "cosolvent_urea_molarity" not in sp
+
+    def test_concentration_exported_as_molarity_key(self):
+        """concentration co-solvent produces a _molarity key, not _fraction."""
+        from polyzymd.config.schema import SimulationConfig
+
+        _to_statepoint = SimulationConfig.__dict__["to_signac_statepoint"]
+        cfg = self._make_config(concentration=2.0)
+        sp = _to_statepoint(cfg)
+        assert sp["cosolvent_urea_molarity"] == 2.0
+        assert "cosolvent_urea_fraction" not in sp
+
+    def test_no_crash_with_none_volume_fraction(self):
+        """Previously crashed with TypeError when volume_fraction was None."""
+        from polyzymd.config.schema import SimulationConfig
+
+        _to_statepoint = SimulationConfig.__dict__["to_signac_statepoint"]
+        cfg = self._make_config(concentration=1.5)
+        # Should not raise
+        sp = _to_statepoint(cfg)
+        assert "cosolvent_urea_molarity" in sp
