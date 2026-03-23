@@ -252,6 +252,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leading to incorrect pressure coupling. The ramp loop and final-temperature
   section now call `context.setParameter(MonteCarloBarostat.Temperature(), ...)`
   to keep the barostat in sync with the integrator. (`simulation/runner.py`)
+- **EQ_INTERRUPTED marker now records the correct temperature during ramps.**
+  The temperature ramp loop incremented `current_temp` *before* the interrupt
+  check, so the `EQ_INTERRUPTED` marker saved a temperature one increment
+  higher than what was actually simulated. The increment is now moved to
+  *after* the interrupt check, and log messages report the correct
+  temperature. (`simulation/runner.py`)
+- **Temperature ramp resume no longer double-counts fast-forwarded chunks.**
+  On resume, `current_temp` was initialized from `resume_temperature` (the
+  value saved in the marker) and then the fast-forward skip loop *also*
+  incremented `current_temp` for each skipped chunk, causing the simulation
+  to jump ahead in temperature. The ramp loop now always starts from
+  `stage.temperature_start` and lets the fast-forward loop reconstruct the
+  correct temperature by skipping completed chunks. (`simulation/runner.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist

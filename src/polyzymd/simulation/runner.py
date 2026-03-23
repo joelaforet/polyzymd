@@ -645,14 +645,16 @@ class SimulationRunner:
             steps_for_ramping = num_updates * steps_per_update
             remaining_steps_at_final = total_steps - steps_for_ramping
 
-            # Determine starting temperature (for resume or fresh start)
+            # Determine starting temperature — always begin from
+            # temperature_start and let the fast-forward loop advance
+            # current_temp by skipping already-completed chunks.  On
+            # resume, resume_temperature is used only for logging.
+            current_temp = stage.temperature_start
             if resume_from_step > 0 and resume_temperature is not None:
-                current_temp = resume_temperature
                 LOGGER.info(
-                    f"Resuming temperature ramp from step {resume_from_step}, temp {current_temp} K"
+                    f"Resuming temperature ramp from step {resume_from_step}, "
+                    f"saved temp {resume_temperature} K (fast-forwarding from {current_temp} K)"
                 )
-            else:
-                current_temp = stage.temperature_start
 
             # Temperature ramping phase — each update is a chunk we can
             # interrupt between.  Skip chunks already completed on resume.
@@ -678,7 +680,6 @@ class SimulationRunner:
                 self._simulation.step(steps_this_chunk)
                 steps_done += steps_this_chunk
                 ramp_step_count = chunk_end
-                current_temp += stage.temperature_increment
 
                 if is_interrupted():
                     LOGGER.warning(
@@ -689,6 +690,8 @@ class SimulationRunner:
                     raise GracefulExit(
                         signal_number=get_interrupt_signal(), steps_completed=steps_done
                     )
+
+                current_temp += stage.temperature_increment
 
             # Final temperature - run remaining steps in chunks
             integrator.setTemperature(stage.temperature_end * omm_unit.kelvin)
