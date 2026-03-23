@@ -30,7 +30,10 @@ def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
     Returns:
         Configuration with expanded paths
     """
-    path_keys = {"pdb_path", "sdf_path", "sdf_directory", "cache_directory", "base_directory"}
+    path_keys = {
+        "pdb_path", "sdf_path", "sdf_directory", "cache_directory", "base_directory",
+        "initiation", "polymerization", "termination",
+    }
 
     def expand_value(key: str, value: Any) -> Any:
         if key in path_keys and isinstance(value, str):
@@ -60,7 +63,10 @@ def _convert_paths_to_relative(data: Dict[str, Any], base_path: Path) -> Dict[st
     Returns:
         Configuration with relative paths
     """
-    path_keys = {"pdb_path", "sdf_path", "sdf_directory", "cache_directory", "base_directory"}
+    path_keys = {
+        "pdb_path", "sdf_path", "sdf_directory", "cache_directory", "base_directory",
+        "initiation", "polymerization", "termination",
+    }
 
     def relativize_value(key: str, value: Any) -> Any:
         if key in path_keys and isinstance(value, str):

@@ -297,6 +297,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`build --dry-run --gromacs` now shows the actual output path.**  The GROMACS
   dry-run summary printed the literal string `{projects_dir}/{replicate}/gromacs/`
   instead of interpolating the real directory.  (`cli/main.py`)
+- **Reaction template paths (`initiation`, `polymerization`, `termination`) are now
+  included in path resolution.**  `_expand_paths` and `_convert_paths_to_relative`
+  only knew about `pdb_path`, `sdf_path`, `sdf_directory`, `cache_directory`, and
+  `base_directory`.  Relative `.rxn` paths in the `reactions:` config block were
+  passed through as-is, causing `FileNotFoundError` when the config file lived in
+  a different directory from the CWD.  (`config/loader.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist

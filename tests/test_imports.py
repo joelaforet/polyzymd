@@ -222,3 +222,57 @@ class TestSaveConfigYamlDumper:
         content = out.read_text()
         # The literal block indicator (| or |-) should appear for multiline strings
         assert "|-" in content or "|\n" in content
+
+
+# ---------------------------------------------------------------------------
+# B12 – reaction template paths included in path resolution
+# ---------------------------------------------------------------------------
+
+
+class TestReactionPathResolution:
+    """_expand_paths and _convert_paths_to_relative handle reaction template keys."""
+
+    def test_expand_paths_resolves_initiation(self):
+        """Relative initiation path should be expanded to absolute."""
+        from polyzymd.config.loader import _expand_paths
+
+        data = {"reactions": {"initiation": "templates/init.rxn"}}
+        base = Path("/configs")
+        result = _expand_paths(data, base)
+        assert result["reactions"]["initiation"] == "/configs/templates/init.rxn"
+
+    def test_expand_paths_resolves_polymerization(self):
+        """Relative polymerization path should be expanded to absolute."""
+        from polyzymd.config.loader import _expand_paths
+
+        data = {"reactions": {"polymerization": "templates/poly.rxn"}}
+        base = Path("/configs")
+        result = _expand_paths(data, base)
+        assert result["reactions"]["polymerization"] == "/configs/templates/poly.rxn"
+
+    def test_expand_paths_resolves_termination(self):
+        """Relative termination path should be expanded to absolute."""
+        from polyzymd.config.loader import _expand_paths
+
+        data = {"reactions": {"termination": "templates/term.rxn"}}
+        base = Path("/configs")
+        result = _expand_paths(data, base)
+        assert result["reactions"]["termination"] == "/configs/templates/term.rxn"
+
+    def test_expand_paths_preserves_absolute_reaction_path(self):
+        """Absolute reaction paths should not be modified."""
+        from polyzymd.config.loader import _expand_paths
+
+        data = {"reactions": {"initiation": "/absolute/init.rxn"}}
+        base = Path("/configs")
+        result = _expand_paths(data, base)
+        assert result["reactions"]["initiation"] == "/absolute/init.rxn"
+
+    def test_convert_paths_relativizes_reaction_paths(self):
+        """Absolute reaction paths should be converted to relative for saving."""
+        from polyzymd.config.loader import _convert_paths_to_relative
+
+        data = {"reactions": {"initiation": "/configs/templates/init.rxn"}}
+        base = Path("/configs")
+        result = _convert_paths_to_relative(data, base)
+        assert result["reactions"]["initiation"] == "templates/init.rxn"
