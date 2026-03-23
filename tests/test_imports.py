@@ -116,3 +116,58 @@ class TestConfigValidation:
         config = ThermodynamicsConfig(temperature=300.0)
         assert config.temperature == 300.0
         assert config.pressure == 1.0  # Default pressure
+
+
+class TestCoSolventVolumeValidation:
+    """Test co-solvent volume fraction / concentration validation."""
+
+    def test_concentration_cosolvent_does_not_crash_validator(self):
+        """Concentration-based co-solvents must not crash validate_volume_fractions.
+
+        Regression: sum() over volume_fraction raised TypeError when any
+        co-solvent used concentration (volume_fraction=None).
+        """
+        from polyzymd.config.schema import CoSolventSpec, SolventConfig
+
+        config = SolventConfig(
+            co_solvents=[CoSolventSpec(name="urea", concentration=2.0)]
+        )
+        assert len(config.co_solvents) == 1
+
+    def test_mixed_volume_fraction_and_concentration_cosolvents(self):
+        """Mixed volume_fraction + concentration co-solvents should validate."""
+        from polyzymd.config.schema import CoSolventSpec, SolventConfig
+
+        config = SolventConfig(
+            co_solvents=[
+                CoSolventSpec(name="dmso", volume_fraction=0.3),
+                CoSolventSpec(name="urea", concentration=2.0),
+            ]
+        )
+        assert len(config.co_solvents) == 2
+
+    def test_volume_fractions_exceeding_one_rejected(self):
+        """Total volume fractions >= 1.0 should still be rejected."""
+        from pydantic import ValidationError
+
+        from polyzymd.config.schema import CoSolventSpec, SolventConfig
+
+        with pytest.raises(ValidationError, match="volume fraction must be < 1.0"):
+            SolventConfig(
+                co_solvents=[
+                    CoSolventSpec(name="dmso", volume_fraction=0.6),
+                    CoSolventSpec(name="ethanol", volume_fraction=0.5),
+                ]
+            )
+
+    def test_volume_fractions_below_one_accepted(self):
+        """Total volume fractions < 1.0 should pass validation."""
+        from polyzymd.config.schema import CoSolventSpec, SolventConfig
+
+        config = SolventConfig(
+            co_solvents=[
+                CoSolventSpec(name="dmso", volume_fraction=0.3),
+                CoSolventSpec(name="ethanol", volume_fraction=0.2),
+            ]
+        )
+        assert len(config.co_solvents) == 2

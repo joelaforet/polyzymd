@@ -236,6 +236,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   equilibration is already recorded as complete in `progress.json`, jumping
   directly to production segment 0.
   (`cli/main.py`)
+- **Co-solvent volume fraction validator no longer crashes with concentration-based
+  co-solvents.** `validate_volume_fractions` called `sum()` over `volume_fraction`
+  fields without filtering `None` values, raising `TypeError` when any co-solvent
+  used `concentration` instead of `volume_fraction`. (`config/schema.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist
