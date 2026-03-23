@@ -294,6 +294,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The custom multiline-string representer was registered via `yaml.add_representer()`,
   which permanently alters `yaml.Dumper` for the entire process.  Now uses a local
   `Dumper` subclass so other YAML consumers are unaffected.  (`config/loader.py`)
+- **`build --dry-run --gromacs` now shows the actual output path.**  The GROMACS
+  dry-run summary printed the literal string `{projects_dir}/{replicate}/gromacs/`
+  instead of interpolating the real directory.  (`cli/main.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist

@@ -790,3 +790,40 @@ class TestHardKillNoSystemXmlRaises:
         mgr = ContinuationManager(working_dir=tmp_path, segment_index=prev_idx + 1)
         paths = mgr._get_previous_paths()
         assert paths["use_checkpoint"] is False
+
+
+# ---------------------------------------------------------------------------
+# B11 – GROMACS dry-run output path uses f-string, not literal braces
+# ---------------------------------------------------------------------------
+
+
+class TestBuildDryRunGromacs:
+    """build --dry-run --gromacs must show an actual directory, not {projects_dir}."""
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_gromacs_dry_run_shows_actual_path(self, mock_from_yaml, tmp_path):
+        """The GROMACS output line must contain the real projects_directory, not
+        the literal string '{projects_dir}'."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+
+        mock_cfg = MagicMock()
+        mock_cfg.name = "test"
+        mock_cfg.enzyme.name = "CALB"
+        mock_cfg.substrate = None
+        mock_cfg.polymers = None
+        mock_cfg.thermodynamics.temperature = 310.0
+        mock_cfg.simulation_phases.production.duration = 100.0
+        mock_cfg.output.projects_directory = tmp_path / "projects"
+        mock_cfg.output.effective_scratch_directory = tmp_path / "scratch"
+        mock_from_yaml.return_value = mock_cfg
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["build", "-c", str(config_file), "--dry-run", "--gromacs", "-r", "1"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "{projects_dir}" not in result.output, (
+            "Output path must be interpolated, not literal {projects_dir}"
+        )
+        assert str(tmp_path / "projects") in result.output
