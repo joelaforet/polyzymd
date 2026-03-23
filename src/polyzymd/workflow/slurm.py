@@ -181,7 +181,12 @@ class SlurmConfig:
             },
         }
 
-        config_dict = presets.get(preset, presets["aa100"])
+        if preset not in presets:
+            raise ValueError(
+                f"Unknown SLURM preset {preset!r}. "
+                f"Valid presets: {', '.join(sorted(presets))}"
+            )
+        config_dict = presets[preset]
         return cls(email=email, **config_dict)
 
 

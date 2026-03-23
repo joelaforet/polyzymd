@@ -286,6 +286,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leaving a zero-length or corrupt `progress.json`.  The function now calls
   `f.flush()` and `os.fsync(f.fileno())` before the rename.
   (`simulation/progress.py`)
+- **`SlurmConfig.from_preset()` now raises `ValueError` for unknown preset names.**
+  Previously, an unrecognised preset name silently fell back to the `aa100` preset,
+  masking typos in config files or CLI arguments.  The error message lists all valid
+  presets. (`workflow/slurm.py`)
 - **Cross-check INTERRUPTED markers against CSV data to detect stale markers.**
   If a segment was gracefully interrupted, then restarted in-place and ran much
   further before being hard-killed, the old INTERRUPTED marker would persist

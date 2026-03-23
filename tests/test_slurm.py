@@ -80,10 +80,18 @@ class TestPresetLoading:
         cfg = SlurmConfig.from_preset("aa100", email="user@example.com")
         assert cfg.email == "user@example.com"
 
-    def test_unknown_preset_falls_back_to_aa100(self):
-        """Unrecognised preset names silently fall back to aa100 (existing behaviour)."""
-        cfg = SlurmConfig.from_preset("nonexistent")  # type: ignore[arg-type]
-        assert cfg.partition == "aa100"
+    def test_unknown_preset_raises_value_error(self):
+        """Unrecognised preset names raise ValueError with available presets."""
+        with pytest.raises(ValueError, match="Unknown SLURM preset 'nonexistent'"):
+            SlurmConfig.from_preset("nonexistent")  # type: ignore[arg-type]
+
+    def test_unknown_preset_error_lists_valid_presets(self):
+        """The ValueError message includes all valid preset names."""
+        with pytest.raises(ValueError, match="aa100") as exc_info:
+            SlurmConfig.from_preset("bogus")  # type: ignore[arg-type]
+        msg = str(exc_info.value)
+        for name in ("aa100", "al40", "blanca-shirts", "bridges2", "testing"):
+            assert name in msg, f"Missing preset {name!r} from error message"
 
 
 # ---------------------------------------------------------------------------
