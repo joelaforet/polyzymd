@@ -32,23 +32,23 @@ Examples
 """
 
 from polyzymd.analysis.common.selectors.base import (
-    MolecularSelector,
-    MDAnalysisSelector,
-    SelectionResult,
     CompositeSelector,
+    MDAnalysisSelector,
+    MolecularSelector,
+    SelectionResult,
+)
+from polyzymd.analysis.common.selectors.polymer import (
+    PolymerChains,
+    PolymerResiduesByType,
 )
 from polyzymd.analysis.common.selectors.protein import (
     ProteinResidues,
     ProteinResiduesByGroup,
     ProteinResiduesNearReference,
 )
-from polyzymd.analysis.common.selectors.polymer import (
-    PolymerChains,
-    PolymerResiduesByType,
-)
 from polyzymd.analysis.common.selectors.solvent import (
-    SolventMolecules,
     CosolventMolecules,
+    SolventMolecules,
     SubstrateMolecule,
 )
 

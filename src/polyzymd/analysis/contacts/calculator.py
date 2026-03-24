@@ -47,8 +47,8 @@ from polyzymd.analysis.common.selectors.base import MolecularSelector
 from polyzymd.analysis.contacts.criteria import AnyAtomWithinCutoff, ContactCriteria
 from polyzymd.analysis.contacts.results import (
     ContactResult,
-    ResidueContactData,
     PolymerSegmentContacts,
+    ResidueContactData,
     compress_contact_array,
 )
 

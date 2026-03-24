@@ -157,7 +157,7 @@ def validate_config_hash(
                 "To recompute analysis with current config, use --recompute flag.\n"
                 "=" * 70
             )
-            warnings.warn(warning_msg, UserWarning)
+            warnings.warn(warning_msg, UserWarning, stacklevel=2)
         return False
 
     return True

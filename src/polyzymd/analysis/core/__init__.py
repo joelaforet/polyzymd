@@ -1,113 +1,104 @@
-"""Core analysis infrastructure.
+"""Core analysis infrastructure."""
 
-This module provides foundational utilities for trajectory analysis:
-- Config hashing for cache validation
-- Statistical functions for replicate aggregation
-- Autocorrelation analysis for independent sampling
-- Trajectory loading from PolyzyMD outputs
-- Centroid/representative frame finding for trajectory alignment
-- Trajectory alignment utilities (shared across all analysis modules)
-- PBC-aware distance calculations
-- Registry pattern for extensible analysis types
-"""
+from __future__ import annotations
 
-from polyzymd.analysis.core.config_hash import (
-    compute_config_hash,
-    validate_config_hash,
-)
-from polyzymd.analysis.core.statistics import (
-    StatResult,
-    PerResidueStats,
-    compute_sem,
-    aggregate_per_residue_stats,
-    aggregate_region_stats,
-    weighted_mean_with_sem,
-)
-from polyzymd.analysis.core.autocorrelation import (
-    ACFResult,
-    CorrelationTimeResult,
-    MIN_RECOMMENDED_N_INDEPENDENT,
-    compute_acf,
-    estimate_correlation_time,
-    get_independent_indices,
-    statistical_inefficiency,
-    statistical_inefficiency_multiple,
-    n_effective,
-    check_statistical_reliability,
-)
-from polyzymd.analysis.core.loader import (
-    TrajectoryInfo,
-    TrajectoryLoader,
-    parse_time_string,
-    convert_time,
-    time_to_frame,
-)
-from polyzymd.analysis.core.centroid import (
-    find_centroid_frame,
-    find_reference_frame,
-    get_reference_mode_description,
-)
-from polyzymd.analysis.core.selections import (
-    SelectionMode,
-    ParsedSelection,
-    translate_selection,
-    parse_selection_string,
-    select_atoms,
-    get_position,
-    get_position_from_selection,
-    validate_selection,
-    format_selection_for_label,
-)
-from polyzymd.analysis.core.diagnostics import (
-    get_selection_diagnostics,
-    get_residue_info,
-    get_protein_residue_range,
-    format_diagnostic_message,
-    validate_equilibration_time,
-)
-from polyzymd.analysis.core.registry import (
-    BaseAnalysisSettings,
-    BaseComparisonSettings,
-    BaseAnalyzer,
-    BasePlotSettings,
-    AnalysisSettingsRegistry,
-    ComparisonSettingsRegistry,
-    AnalyzerRegistry,
-    PlotSettingsRegistry,
-)
-from polyzymd.analysis.core.metric_type import (
-    MetricType,
-    AutocorrelationStrategy,
-    get_autocorrelation_strategy,
-)
-from polyzymd.analysis.core.pbc import (
-    minimum_image_distance,
-    pairwise_distances_pbc,
-)
-from polyzymd.analysis.core.alignment import (
-    AlignmentConfig,
-    ReferenceMode,
-    align_trajectory,
-    get_alignment_description,
-)
-from polyzymd.analysis.core.constants import (
-    DEFAULT_CONTACT_CUTOFF,
-    DEFAULT_DISTANCE_THRESHOLD,
-    DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
-)
+from importlib import import_module
+from typing import Any
+
+_MODULE_EXPORTS: dict[str, list[str]] = {
+    "polyzymd.analysis.core.config_hash": ["compute_config_hash", "validate_config_hash"],
+    "polyzymd.analysis.core.statistics": [
+        "StatResult",
+        "PerResidueStats",
+        "compute_sem",
+        "aggregate_per_residue_stats",
+        "aggregate_region_stats",
+        "weighted_mean_with_sem",
+    ],
+    "polyzymd.analysis.core.autocorrelation": [
+        "ACFResult",
+        "CorrelationTimeResult",
+        "MIN_RECOMMENDED_N_INDEPENDENT",
+        "compute_acf",
+        "estimate_correlation_time",
+        "get_independent_indices",
+        "statistical_inefficiency",
+        "statistical_inefficiency_multiple",
+        "n_effective",
+        "check_statistical_reliability",
+    ],
+    "polyzymd.analysis.core.loader": [
+        "TrajectoryInfo",
+        "TrajectoryLoader",
+        "parse_time_string",
+        "convert_time",
+        "time_to_frame",
+    ],
+    "polyzymd.analysis.core.centroid": [
+        "find_centroid_frame",
+        "find_reference_frame",
+        "get_reference_mode_description",
+    ],
+    "polyzymd.analysis.core.selections": [
+        "SelectionMode",
+        "ParsedSelection",
+        "translate_selection",
+        "parse_selection_string",
+        "select_atoms",
+        "get_position",
+        "get_position_from_selection",
+        "validate_selection",
+        "format_selection_for_label",
+    ],
+    "polyzymd.analysis.core.diagnostics": [
+        "get_selection_diagnostics",
+        "get_residue_info",
+        "get_protein_residue_range",
+        "format_diagnostic_message",
+        "validate_equilibration_time",
+    ],
+    "polyzymd.analysis.core.registry": [
+        "BaseAnalysisSettings",
+        "BaseComparisonSettings",
+        "BaseAnalyzer",
+        "BasePlotSettings",
+        "AnalysisSettingsRegistry",
+        "ComparisonSettingsRegistry",
+        "AnalyzerRegistry",
+        "PlotSettingsRegistry",
+    ],
+    "polyzymd.analysis.core.metric_type": [
+        "MetricType",
+        "AutocorrelationStrategy",
+        "get_autocorrelation_strategy",
+    ],
+    "polyzymd.analysis.core.pbc": ["minimum_image_distance", "pairwise_distances_pbc"],
+    "polyzymd.analysis.core.alignment": [
+        "AlignmentConfig",
+        "ReferenceMode",
+        "align_trajectory",
+        "get_alignment_description",
+    ],
+    "polyzymd.analysis.core.constants": [
+        "DEFAULT_CONTACT_CUTOFF",
+        "DEFAULT_DISTANCE_THRESHOLD",
+        "DEFAULT_SURFACE_EXPOSURE_THRESHOLD",
+    ],
+}
+
+_EXPORTS = {
+    name: (module_name, name) for module_name, names in _MODULE_EXPORTS.items() for name in names
+}
 
 __all__ = [
-    # Config hashing
     "compute_config_hash",
     "validate_config_hash",
-    # Statistics
     "StatResult",
     "PerResidueStats",
     "compute_sem",
     "aggregate_per_residue_stats",
     "aggregate_region_stats",
     "weighted_mean_with_sem",
-    # Autocorrelation
     "ACFResult",
     "CorrelationTimeResult",
     "MIN_RECOMMENDED_N_INDEPENDENT",
@@ -118,18 +109,15 @@ __all__ = [
     "statistical_inefficiency_multiple",
     "n_effective",
     "check_statistical_reliability",
-    # Trajectory loading
     "TrajectoryInfo",
     "TrajectoryLoader",
     "parse_time_string",
     "convert_time",
     "time_to_frame",
-    # Centroid/reference frame finding
     "ReferenceMode",
     "find_centroid_frame",
     "find_reference_frame",
     "get_reference_mode_description",
-    # Selection parsing
     "SelectionMode",
     "ParsedSelection",
     "translate_selection",
@@ -139,13 +127,11 @@ __all__ = [
     "get_position_from_selection",
     "validate_selection",
     "format_selection_for_label",
-    # Diagnostics
     "get_selection_diagnostics",
     "get_residue_info",
     "get_protein_residue_range",
     "format_diagnostic_message",
     "validate_equilibration_time",
-    # Registry pattern
     "BaseAnalysisSettings",
     "BaseComparisonSettings",
     "BaseAnalyzer",
@@ -154,19 +140,31 @@ __all__ = [
     "ComparisonSettingsRegistry",
     "AnalyzerRegistry",
     "PlotSettingsRegistry",
-    # Metric type for autocorrelation handling
     "MetricType",
     "AutocorrelationStrategy",
     "get_autocorrelation_strategy",
-    # PBC utilities
     "minimum_image_distance",
     "pairwise_distances_pbc",
-    # Trajectory alignment
     "AlignmentConfig",
     "align_trajectory",
     "get_alignment_description",
-    # Shared constants
     "DEFAULT_CONTACT_CUTOFF",
     "DEFAULT_DISTANCE_THRESHOLD",
     "DEFAULT_SURFACE_EXPOSURE_THRESHOLD",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily import analysis-core exports to avoid heavy optional deps."""
+    try:
+        module_name, attr_name = _EXPORTS[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+
+    module = import_module(module_name)
+    return getattr(module, attr_name)
+
+
+def __dir__() -> list[str]:
+    """Return module attributes for tab completion and introspection."""
+    return sorted(set(globals()) | set(__all__))

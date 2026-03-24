@@ -21,9 +21,9 @@ Examples
 """
 
 from polyzymd.analysis.common.groupings.base import (
-    ResidueGrouping,
-    ProteinAAClassification,
     CustomGrouping,
+    ProteinAAClassification,
+    ResidueGrouping,
 )
 
 __all__ = [

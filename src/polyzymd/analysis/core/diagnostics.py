@@ -342,7 +342,7 @@ def warn_if_multi_chain_selection(
 
     # Get unique chain IDs
     try:
-        chain_ids = set(atom.chainID for atom in atoms)
+        chain_ids = {atom.chainID for atom in atoms}
     except AttributeError:
         # Fallback to segment IDs if chainID not available
         chain_ids = set(atoms.segments.segids)

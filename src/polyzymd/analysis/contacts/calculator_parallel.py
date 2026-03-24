@@ -29,18 +29,17 @@ import logging
 from typing import TYPE_CHECKING
 
 import numpy as np
-from numpy.typing import NDArray
-
 from MDAnalysis.analysis.base import AnalysisBase
 from MDAnalysis.lib.distances import capped_distance
+from numpy.typing import NDArray
 
 from polyzymd.analysis.common.groupings import ProteinAAClassification, ResidueGrouping
 from polyzymd.analysis.common.selectors import PolymerChains, ProteinResidues
 from polyzymd.analysis.common.selectors.base import MolecularSelector
 from polyzymd.analysis.contacts.results import (
     ContactResult,
-    ResidueContactData,
     PolymerSegmentContacts,
+    ResidueContactData,
     compress_contact_array,
 )
 

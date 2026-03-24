@@ -27,8 +27,8 @@ Examples
 
 from polyzymd.analysis.contacts.criteria.base import ContactCriteria
 from polyzymd.analysis.contacts.criteria.distance import (
-    AnyAtomWithinCutoff,
     AnyAtomToCOM,
+    AnyAtomWithinCutoff,
     COMToCOM,
     MinimumDistance,
 )

@@ -1,121 +1,88 @@
-"""PolyzyMD Comparison Module.
+"""PolyzyMD comparison module with lazy public exports."""
 
-This module provides tools for comparing analysis results across multiple
-simulation conditions (e.g., different polymer compositions, temperatures).
+from __future__ import annotations
 
-Main components:
-- ComparisonConfig: Schema for comparison.yaml configuration files
-- RMSFComparator: Compare RMSF across conditions with statistical analysis
-- TriadComparator: Compare catalytic triad geometry across conditions
-- ContactsComparator: Compare polymer-protein contacts across conditions
-- BindingFreeEnergyComparator: Compare ΔG_sel binding selectivity across conditions
-- ComparisonResult: Structured results with statistics and rankings
-- TriadComparisonResult: Structured results for triad comparison
-- ContactsComparisonResult: Structured results for contacts comparison
-- BindingFreeEnergyResult: Structured results for ΔG_sel comparison
-- Formatters: Output formatting for console, markdown, and JSON
+from importlib import import_module
+from typing import Any
 
-Usage:
-    # Initialize a comparison project
-    polyzymd compare init my_polymer_study
+_MODULE_EXPORTS: dict[str, list[str]] = {
+    "polyzymd.compare.core.base": [
+        "ANOVASummary",
+        "BaseComparator",
+        "BaseComparisonResult",
+        "BaseConditionSummary",
+        "PairwiseComparison",
+    ],
+    "polyzymd.compare.core.registry": ["ComparatorRegistry"],
+    "polyzymd.compare.config": ["ComparisonConfig", "ConditionConfig"],
+    "polyzymd.compare.settings": [
+        "RMSFAnalysisSettings",
+        "RMSFComparisonSettings",
+        "CatalyticTriadAnalysisSettings",
+        "CatalyticTriadComparisonSettings",
+        "ContactsAnalysisSettings",
+        "ContactsComparisonSettings",
+        "BindingFreeEnergyAnalysisSettings",
+        "BindingFreeEnergyComparisonSettings",
+        "PolymerAffinityScoreSettings",
+        "PolymerAffinityScoreComparisonSettings",
+    ],
+    "polyzymd.compare.comparators.rmsf": ["RMSFComparator"],
+    "polyzymd.compare.comparators.triad": ["TriadComparator"],
+    "polyzymd.compare.comparators.contacts": ["ContactsComparator"],
+    "polyzymd.compare.comparators.binding_free_energy": ["BindingFreeEnergyComparator"],
+    "polyzymd.compare.comparators.polymer_affinity": ["PolymerAffinityScoreComparator"],
+    "polyzymd.compare.formatters": [
+        "format_console_table",
+        "format_markdown",
+        "format_result",
+        "to_json",
+    ],
+    "polyzymd.compare.triad_formatters": [
+        "format_triad_console_table",
+        "format_triad_markdown",
+        "format_triad_result",
+        "triad_to_json",
+    ],
+    "polyzymd.compare.contacts_formatters": [
+        "contacts_to_json",
+        "format_contacts_console_table",
+        "format_contacts_markdown",
+        "format_contacts_result",
+    ],
+    "polyzymd.compare.binding_free_energy_formatters": ["format_bfe_result"],
+    "polyzymd.compare.polymer_affinity_formatters": ["format_affinity_result"],
+    "polyzymd.compare.results": [
+        "AffinityScoreConditionSummary",
+        "AffinityScorePairwiseEntry",
+        "AggregateComparisonResult",
+        "BindingFreeEnergyResult",
+        "ComparisonResult",
+        "ContactsComparisonResult",
+        "ContactsConditionSummary",
+        "ContactsPairwiseComparison",
+        "FreeEnergyConditionSummary",
+        "FreeEnergyEntry",
+        "FreeEnergyPairwiseEntry",
+        "PolymerAffinityScoreResult",
+        "TriadComparisonResult",
+        "TriadConditionSummary",
+    ],
+}
 
-    # Edit comparison.yaml to define conditions
-
-    # Run RMSF comparison
-    polyzymd compare rmsf --eq-time 10ns
-
-    # Run triad comparison
-    polyzymd compare triad --eq-time 10ns
-
-    # Run contacts comparison
-    polyzymd compare contacts --eq-time 10ns
-
-    # Run binding free energy comparison
-    polyzymd compare binding-free-energy --units kcal/mol
-"""
-
-from polyzymd.compare.binding_free_energy_formatters import (
-    format_bfe_result,
-)
-from polyzymd.compare.comparators.binding_free_energy import BindingFreeEnergyComparator
-from polyzymd.compare.comparators.contacts import ContactsComparator
-from polyzymd.compare.comparators.polymer_affinity import PolymerAffinityScoreComparator
-from polyzymd.compare.comparators.rmsf import RMSFComparator
-from polyzymd.compare.comparators.triad import TriadComparator
-from polyzymd.compare.config import (
-    ComparisonConfig,
-    ConditionConfig,
-)
-from polyzymd.compare.contacts_formatters import (
-    contacts_to_json,
-    format_contacts_console_table,
-    format_contacts_markdown,
-    format_contacts_result,
-)
-from polyzymd.compare.core.base import (
-    ANOVASummary,
-    BaseComparator,
-    BaseComparisonResult,
-    BaseConditionSummary,
-    PairwiseComparison,
-)
-from polyzymd.compare.core.registry import ComparatorRegistry
-from polyzymd.compare.formatters import (
-    format_console_table,
-    format_markdown,
-    format_result,
-    to_json,
-)
-from polyzymd.compare.polymer_affinity_formatters import (
-    format_affinity_result,
-)
-from polyzymd.compare.results import (
-    AffinityScoreConditionSummary,
-    AffinityScorePairwiseEntry,
-    AggregateComparisonResult,
-    BindingFreeEnergyResult,
-    ComparisonResult,
-    ContactsComparisonResult,
-    ContactsConditionSummary,
-    ContactsPairwiseComparison,
-    FreeEnergyConditionSummary,
-    FreeEnergyEntry,
-    FreeEnergyPairwiseEntry,
-    PolymerAffinityScoreResult,
-    TriadComparisonResult,
-    TriadConditionSummary,
-)
-from polyzymd.compare.settings import (
-    BindingFreeEnergyAnalysisSettings,
-    BindingFreeEnergyComparisonSettings,
-    CatalyticTriadAnalysisSettings,
-    CatalyticTriadComparisonSettings,
-    ContactsAnalysisSettings,
-    ContactsComparisonSettings,
-    PolymerAffinityScoreComparisonSettings,
-    PolymerAffinityScoreSettings,
-    RMSFAnalysisSettings,
-    RMSFComparisonSettings,
-)
-from polyzymd.compare.triad_formatters import (
-    format_triad_console_table,
-    format_triad_markdown,
-    format_triad_result,
-    triad_to_json,
-)
+_EXPORTS = {
+    name: (module_name, name) for module_name, names in _MODULE_EXPORTS.items() for name in names
+}
 
 __all__ = [
-    # Core/Base classes
     "BaseComparator",
     "BaseComparisonResult",
     "BaseConditionSummary",
     "PairwiseComparison",
     "ANOVASummary",
     "ComparatorRegistry",
-    # Config
     "ComparisonConfig",
     "ConditionConfig",
-    # Analysis Settings
     "RMSFAnalysisSettings",
     "RMSFComparisonSettings",
     "CatalyticTriadAnalysisSettings",
@@ -124,14 +91,12 @@ __all__ = [
     "ContactsComparisonSettings",
     "BindingFreeEnergyAnalysisSettings",
     "BindingFreeEnergyComparisonSettings",
-    # RMSF comparison
     "RMSFComparator",
     "ComparisonResult",
     "format_console_table",
     "format_markdown",
     "format_result",
     "to_json",
-    # Triad comparison
     "TriadComparator",
     "TriadComparisonResult",
     "TriadConditionSummary",
@@ -139,7 +104,6 @@ __all__ = [
     "format_triad_markdown",
     "format_triad_result",
     "triad_to_json",
-    # Contacts comparison
     "ContactsComparator",
     "ContactsComparisonResult",
     "ContactsConditionSummary",
@@ -149,14 +113,12 @@ __all__ = [
     "format_contacts_markdown",
     "format_contacts_result",
     "contacts_to_json",
-    # Binding free energy comparison
     "BindingFreeEnergyComparator",
     "BindingFreeEnergyResult",
     "FreeEnergyConditionSummary",
     "FreeEnergyEntry",
     "FreeEnergyPairwiseEntry",
     "format_bfe_result",
-    # Polymer affinity score comparison
     "PolymerAffinityScoreComparator",
     "PolymerAffinityScoreResult",
     "AffinityScoreConditionSummary",
@@ -165,3 +127,19 @@ __all__ = [
     "PolymerAffinityScoreComparisonSettings",
     "format_affinity_result",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily import compare exports to avoid importing optional deps at install time."""
+    try:
+        module_name, attr_name = _EXPORTS[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+
+    module = import_module(module_name)
+    return getattr(module, attr_name)
+
+
+def __dir__() -> list[str]:
+    """Return module attributes for tab completion and introspection."""
+    return sorted(set(globals()) | set(__all__))

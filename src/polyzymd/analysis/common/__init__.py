@@ -11,32 +11,32 @@ molecular systems while maintaining separation of concerns.
 """
 
 from polyzymd.analysis.common.aa_classification import (
-    AAClass,
-    AA_CLASSIFICATION_TABLE,
     AA_CLASS_RESIDUES,
+    AA_CLASSIFICATION_TABLE,
     DEFAULT_AA_CLASS_SELECTIONS,
     MAX_ASA_TABLE,
     STANDARD_AA_CODES,
+    AAClass,
     get_aa_class,
     get_max_asa,
     get_residues_for_class,
     get_selection_for_class,
 )
+from polyzymd.analysis.common.groupings import (
+    CustomGrouping,
+    ProteinAAClassification,
+    ResidueGrouping,
+)
 from polyzymd.analysis.common.selectors import (
+    CosolventMolecules,
     MolecularSelector,
+    PolymerChains,
+    PolymerResiduesByType,
     ProteinResidues,
     ProteinResiduesByGroup,
     ProteinResiduesNearReference,
-    PolymerChains,
-    PolymerResiduesByType,
-    SubstrateMolecule,
     SolventMolecules,
-    CosolventMolecules,
-)
-from polyzymd.analysis.common.groupings import (
-    ResidueGrouping,
-    ProteinAAClassification,
-    CustomGrouping,
+    SubstrateMolecule,
 )
 
 __all__ = [

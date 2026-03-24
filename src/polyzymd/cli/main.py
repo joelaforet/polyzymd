@@ -2143,16 +2143,18 @@ def info() -> None:
 # Analysis Commands (from analysis module)
 # =============================================================================
 
-# Register analysis command groups
-from polyzymd.analysis.cli import analyze, plot  # noqa: E402
 
-cli.add_command(analyze)
-cli.add_command(plot)
+def _register_optional_command_groups() -> None:
+    """Register analysis/compare command groups only when optional deps are importable."""
+    from polyzymd.analysis.cli import analyze, plot
+    from polyzymd.compare.cli import compare
 
-# Register compare command group
-from polyzymd.compare.cli import compare  # noqa: E402
+    cli.add_command(analyze)
+    cli.add_command(plot)
+    cli.add_command(compare)
 
-cli.add_command(compare)
+
+_register_optional_command_groups()
 
 
 def main() -> int:
