@@ -18,6 +18,13 @@ Run contacts analysis first, then enable exposure dynamics in your comparison
 configuration.
 ```
 
+```{warning}
+Exposure dynamics is currently labeled **experimental** in the presentation
+release. The command remains available and plots are still produced, but CLI
+output and figures now carry explicit experimental labeling because the metric
+definitions and interpretation may still change.
+```
+
 ## Scientific Motivation
 
 ### Why static analysis is insufficient

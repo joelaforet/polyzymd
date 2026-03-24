@@ -15,6 +15,13 @@ Binding free energy analysis is a **post-processing step**. It requires:
    compare contacts`)
 ```
 
+```{warning}
+Binding free energy is currently labeled **experimental** in the presentation
+release. The command and plots remain available, but PolyzyMD now adds explicit
+experimental warnings because the scientific framing and interpretation may
+still change.
+```
+
 ## Scientific Motivation
 
 ### From Enrichment to Free Energy

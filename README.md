@@ -32,6 +32,12 @@ PolyzyMD provides a streamlined workflow for setting up and running MD simulatio
 - **HPC Integration**: Self-resubmitting job submission for SLURM clusters
 - **Configuration**: YAML-based configuration with validation
 
+## Analysis Status
+
+- Stable comparison and plotting workflows: RMSF, contacts, distances, catalytic triad, and secondary structure
+- Experimental but still available: contacts binding preference, exposure dynamics, binding free energy, and polymer affinity score
+- Experimental analyses remain callable from the CLI, but PolyzyMD labels their text output and generated figures as experimental because definitions and interpretation may change in a later release
+
 ## Installation
 
 PolyzyMD uses [pixi](https://pixi.sh) for environment management. Pixi handles

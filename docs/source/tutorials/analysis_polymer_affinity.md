@@ -9,9 +9,16 @@ surface?"*
 
 ```{note}
 The polymer affinity score is a **comparative scoring metric for ranking polymer
-compositions**. It is derived entirely from cached binding preference data — no
+compositions**. It is derived entirely from cached binding preference data - no
 additional trajectory access is needed. Run contacts analysis with
 `compute_binding_preference: true` first.
+```
+
+```{warning}
+Polymer affinity is currently labeled **experimental** in the presentation
+release. The CLI command and plots remain available, but PolyzyMD now adds
+explicit experimental warnings because the score definition and interpretation
+may still change.
 ```
 
 ## Scientific Motivation

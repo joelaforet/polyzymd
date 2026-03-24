@@ -12,6 +12,14 @@ with automated t-tests, effect size calculations, and ranking.
 Then return here to compare conditions.
 ```
 
+```{important}
+For the presentation release, the stable comparison stack is **RMSF, contacts,
+distances, catalytic triad, and secondary structure**. Binding preference,
+exposure dynamics, binding free energy, and polymer affinity remain callable
+from the CLI and still generate plots, but PolyzyMD labels them explicitly as
+**experimental** in text output and on figures.
+```
+
 ## TL;DR
 
 ```bash
@@ -32,6 +40,11 @@ polyzymd compare run distances --eq-time 10ns # Compare inter-atomic distances
 polyzymd compare run rmsf --format table     # Console table (default)
 polyzymd compare run rmsf --format markdown  # For documentation
 polyzymd compare run rmsf --format json      # Machine-readable
+
+# Experimental but available workflows
+polyzymd compare run exposure                # Experimental
+polyzymd compare binding-free-energy         # Experimental
+polyzymd compare polymer-affinity            # Experimental
 ```
 
 ## Overview

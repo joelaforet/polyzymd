@@ -10,6 +10,13 @@ Run contacts analysis first, then enable binding preference in your comparison
 configuration.
 ```
 
+```{warning}
+Binding preference is currently labeled **experimental** in the presentation
+release. The workflow remains available from `polyzymd compare contacts`, and
+its plots are still generated, but CLI output and figures are explicitly marked
+experimental because definitions and interpretation may still change.
+```
+
 ## Scientific Motivation
 
 When designing enzyme-polymer conjugates, understanding polymer binding
@@ -235,7 +242,7 @@ print(f"  Enrichment: {entry.enrichment:+.2f}")
 ### Example Output
 
 When you run `polyzymd compare contacts` with binding preference enabled, you'll
-see output like this:
+see output like this after an experimental warning banner:
 
 ```
 Binding Preference - Enrichment by Amino Acid Class
