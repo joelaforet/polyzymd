@@ -1136,13 +1136,9 @@ def _run_initial_segment(
         progress = load_progress(working_dir)
         if progress is not None and progress.equilibration_complete:
             phases = sim_config.simulation_phases
-            if phases.uses_staged_equilibration:
-                eq_stages_cfg = phases.equilibration_stages
-                last_idx = len(eq_stages_cfg) - 1
-                last_name = eq_stages_cfg[last_idx].name
-            else:
-                last_idx = 0
-                last_name = "equilibration"
+            eq_stages_cfg = phases.equilibration_stages
+            last_idx = len(eq_stages_cfg) - 1
+            last_name = eq_stages_cfg[last_idx].name
 
             colored_echo(
                 f"Equilibration already complete "
@@ -1175,8 +1171,7 @@ def _run_initial_segment(
     # Equilibrate
     phases = sim_config.simulation_phases
     eq_duration = phases.total_equilibration_duration
-    eq_mode = "multi-stage" if phases.uses_staged_equilibration else "simple"
-    colored_echo(f"Running equilibration: {eq_duration:.3f} ns ({eq_mode})...", phase="simulation")
+    colored_echo(f"Running staged equilibration: {eq_duration:.3f} ns...", phase="simulation")
     eq_result = runner.run_equilibration(temperature=temperature, config=phases)
 
     # Save equilibration progress so a resubmitted job knows eq is done
@@ -1570,8 +1565,13 @@ def validate(config: str) -> None:
         colored_echo(f"  Pressure: {sim_config.thermodynamics.pressure} atm")
         colored_echo()
         colored_echo("Simulation phases:")
-        eq = sim_config.simulation_phases.equilibration
-        colored_echo(f"  Equilibration: {eq.duration} ns ({eq.ensemble.value})")
+        eq_stages = sim_config.simulation_phases.equilibration_stages
+        colored_echo(
+            f"  Equilibration: {sim_config.simulation_phases.total_equilibration_duration} ns "
+            f"across {len(eq_stages)} stage(s)"
+        )
+        for stage in eq_stages:
+            colored_echo(f"    - {stage.name}: {stage.duration} ns ({stage.ensemble.value})")
         prod = sim_config.simulation_phases.production
         colored_echo(f"  Production: {prod.duration} ns ({prod.ensemble.value})")
 
@@ -2097,7 +2097,6 @@ def _find_topology_pdb(working_dir: Path) -> Path:
         "*solvated*.pdb",
         "*_solvated.pdb",
         "solvated_*.pdb",
-        "equilibration/*_topology.pdb",
         "production_0/*_topology.pdb",
     ]
     for pattern in patterns:

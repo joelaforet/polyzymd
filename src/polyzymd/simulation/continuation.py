@@ -140,7 +140,6 @@ class ContinuationManager:
             "*solvated*.pdb",
             "*_solvated.pdb",
             "solvated_*.pdb",
-            "equilibration/*_topology.pdb",
             "production_0/*_topology.pdb",
         ]
 

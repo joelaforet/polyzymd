@@ -306,8 +306,9 @@ The polymer structure may have issues:
 - Run longer equilibration:
   ```yaml
   simulation_phases:
-    equilibration:
-      duration: 2.0    # Increase from 1.0 ns
+    equilibration_stages:
+      - name: "free_equilibration"
+        duration: 2.0    # Increase from 1.0 ns
   ```
 - Use softer restraints initially
 - Check for clashes in initial structure

@@ -137,13 +137,25 @@ thermodynamics:
 
 # Simulation phases
 simulation_phases:
-  equilibration:
-    ensemble: "NVT"
-    duration: 1.0
-    samples: 100
-    time_step: 2.0
-    thermostat: "LangevinMiddle"
-    thermostat_timescale: 1.0
+  equilibration_stages:
+    - name: "heating"
+      duration: 0.2
+      samples: 20
+      ensemble: "NVT"
+      temperature_start: 60.0
+      temperature_end: 300.0
+      temperature_increment: 1.0
+      temperature_interval: 1200.0
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+        - group: "polymer_heavy"
+          force_constant: 4184.0
+    - name: "free_equilibration"
+      duration: 0.8
+      samples: 80
+      ensemble: "NPT"
+      temperature: 300.0
   production:
     ensemble: "NPT"
     duration: 100.0
@@ -153,8 +165,6 @@ simulation_phases:
     thermostat_timescale: 1.0
     barostat: "MC"
     barostat_frequency: 25
-  segments: 10
-
 # Output
 output:
   projects_directory: "."
@@ -189,8 +199,8 @@ gromacs/
 ├── {system}.top              # Topology (includes all molecule types)
 │
 ├── em.mdp                    # Energy minimization parameters
-├── eq_01_nvt.mdp             # NVT equilibration (stage 1)
-├── eq_02_npt.mdp             # NPT equilibration (stage 2, if applicable)
+├── eq_01_heating.mdp         # Heating stage
+├── eq_02_free_equilibration.mdp
 ├── prod.mdp                  # Production MD parameters
 │
 ├── posre_Protein.itp         # Position restraints for protein
@@ -265,12 +275,12 @@ set -e  # Exit on error
 $GMX grompp -f em.mdp -c LipA_SBMA-EGPMA_gromacs_run1.gro -p LipA_SBMA-EGPMA_gromacs_run1.top -o em.tpr
 $GMX mdrun -deffnm em -v
 
-# Equilibration stage 1 (NVT)
-$GMX grompp -f eq_01_nvt.mdp -c em.gro -p LipA_SBMA-EGPMA_gromacs_run1.top -r em.gro -o eq_01.tpr
+# Equilibration stage 1
+$GMX grompp -f eq_01_heating.mdp -c em.gro -p LipA_SBMA-EGPMA_gromacs_run1.top -r em.gro -o eq_01.tpr
 $GMX mdrun -deffnm eq_01 -v
 
-# Equilibration stage 2 (NPT) - if applicable
-$GMX grompp -f eq_02_npt.mdp -c eq_01.gro -p LipA_SBMA-EGPMA_gromacs_run1.top -r em.gro -o eq_02.tpr
+# Equilibration stage 2
+$GMX grompp -f eq_02_free_equilibration.mdp -c eq_01.gro -p LipA_SBMA-EGPMA_gromacs_run1.top -r em.gro -o eq_02.tpr
 $GMX mdrun -deffnm eq_02 -v
 
 # Production

@@ -206,8 +206,9 @@ OpenMMException: Particle coordinate is NaN
 2. Reduce time step:
    ```yaml
    simulation_phases:
-     equilibration:
-       time_step: 1.0    # Reduce from 2.0 fs
+      equilibration_stages:
+        - name: "heating"
+          time_step: 1.0    # Reduce from 2.0 fs
    ```
 
 3. Check initial structure for clashes in VMD/PyMOL
@@ -308,14 +309,8 @@ polyzymd submit -c config.yaml --preset al40    # Try different GPU type
 TIMEOUT in job output
 ```
 
-**Solution:** Reduce segment duration:
-
-```yaml
-simulation_phases:
-  production:
-    duration: 100.0
-  segments: 20    # More segments = shorter each
-```
+**Solution:** Use a shorter production duration for test runs or move to a
+longer-walltime preset. PolyzyMD segments production automatically.
 
 ### "Module not found in job"
 

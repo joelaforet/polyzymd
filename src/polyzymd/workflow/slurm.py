@@ -550,6 +550,7 @@ exit 0
             working_dir=working_dir,
             openff_logs_flag=openff_logs_flag,
             skip_build_flag=skip_build_flag,
+            FULL_CREDIT_LINE=FULL_CREDIT_LINE,
         )
 
     def save_script(

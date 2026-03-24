@@ -83,13 +83,33 @@ thermodynamics:
 # Simulation Phases
 # ============================================================================
 simulation_phases:
-  equilibration:
-    ensemble: "NVT"
-    duration: 1.0  # Longer equilibration for co-solvent
-    samples: 100
-    time_step: 2.0
-    thermostat: "LangevinMiddle"
-    thermostat_timescale: 1.0
+  equilibration_stages:
+    - name: "heating"
+      duration: 0.2
+      samples: 20
+      ensemble: "NVT"
+      temperature_start: 60.0
+      temperature_end: 298.0
+      temperature_increment: 1.0
+      temperature_interval: 1200.0
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+        - group: "ligand_heavy"
+          force_constant: 4184.0
+    - name: "solvent_relaxation"
+      duration: 0.3
+      samples: 30
+      ensemble: "NVT"
+      temperature: 298.0
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+    - name: "free_equilibration"
+      duration: 0.5  # Longer equilibration for co-solvent
+      samples: 50
+      ensemble: "NPT"
+      temperature: 298.0
   
   production:
     ensemble: "NPT"
@@ -101,8 +121,6 @@ simulation_phases:
     barostat: "MC"
     barostat_frequency: 25
   
-  segments: 5  # 5 segments of 10 ns each
-
 # ============================================================================
 # Output Configuration
 # ============================================================================

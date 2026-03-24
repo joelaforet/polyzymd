@@ -34,7 +34,7 @@ def compute_config_hash(config: "SimulationConfig") -> str:
     - output paths (for trajectory location)
 
     Excludes parameters that don't affect analysis of completed trajectories:
-    - simulation_phases (equilibration/production settings)
+    - simulation_phases (equilibration_stages/production settings)
     - force_field (already baked into trajectory)
 
     Parameters

@@ -802,14 +802,18 @@ def _build_phases_config(metadata: SimMetadata) -> dict:
 
     if metadata.equilibration:
         eq = metadata.equilibration
-        phases["equilibration"] = {
-            "ensemble": eq.ensemble,
-            "duration": eq.duration_ns,
-            "samples": eq.samples,
-            "time_step": eq.time_step_fs,
-            "thermostat": eq.thermostat,
-            "thermostat_timescale": 1.0,
-        }
+        phases["equilibration_stages"] = [
+            {
+                "name": "legacy_equilibration",
+                "ensemble": eq.ensemble,
+                "duration": eq.duration_ns,
+                "samples": eq.samples,
+                "time_step": eq.time_step_fs,
+                "temperature": eq.temperature_K,
+                "thermostat": eq.thermostat,
+                "thermostat_timescale": 1.0,
+            }
+        ]
 
     if metadata.production:
         prod = metadata.production

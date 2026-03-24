@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from polyzymd.config.schema import (
         EquilibrationStageConfig,
         SimulationConfig,
-        SimulationPhaseConfig,
         SimulationPhasesConfig,
     )
     from polyzymd.core.atom_groups import AtomGroupResolver
@@ -51,7 +50,7 @@ class SimulationRunner:
         ...     working_dir="output/",
         ... )
         >>> runner.minimize()
-        >>> runner.run_equilibration(temperature=300, duration_ns=0.5)
+        >>> runner.run_equilibration(temperature=300, config=sim_config.simulation_phases)
         >>> runner.run_production(temperature=300, duration_ns=100)
     """
 
@@ -231,211 +230,48 @@ class SimulationRunner:
     def run_equilibration(
         self,
         temperature: float,
-        duration_ns: Optional[float] = None,
-        num_samples: int = 10,
-        timestep_fs: float = 2.0,
-        friction: float = 1.0,
-        output_prefix: str = "equilibration",
-        config: Optional["SimulationPhasesConfig"] = None,
+        config: "SimulationPhasesConfig",
     ) -> Dict[str, Any]:
         """Run equilibration phase.
 
-        Supports two modes:
-        1. Parameter-based (legacy): Pass duration_ns, num_samples, etc.
-        2. Config-based: Pass config for automatic mode selection
-
-        When config is provided and uses staged equilibration, position
+        Staged equilibration is required. Position
         restraints and temperature ramping are handled automatically.
         Component information is derived from the topology's chain IDs.
 
         Args:
             temperature: Temperature in Kelvin
-            duration_ns: Duration in nanoseconds (required for legacy mode)
-            num_samples: Number of trajectory frames to save
-            timestep_fs: Time step in femtoseconds
-            friction: Friction coefficient in 1/ps
-            output_prefix: Prefix for output files
-            config: SimulationPhasesConfig for config-based dispatch
+            config: SimulationPhasesConfig containing equilibration stages
 
         Returns:
             Dictionary with equilibration results
-
-        Raises:
-            ValueError: If neither config nor duration_ns is provided
         """
-        # Config-based dispatch (preferred path)
-        if config is not None:
-            if config.uses_staged_equilibration:
-                # Multi-stage equilibration with position restraints
-                from polyzymd.core.atom_groups import AtomGroupResolver, SystemComponentInfo
+        from polyzymd.core.atom_groups import AtomGroupResolver, SystemComponentInfo
 
-                # Log all stages upfront for reproducibility
-                LOGGER.info(
-                    f"Starting multi-stage equilibration with "
-                    f"{len(config.equilibration_stages)} stages:"
-                )
-                for i, stage in enumerate(config.equilibration_stages):
-                    restraint_info = (
-                        ", ".join(
-                            f"{r.group}@{r.force_constant:.0f}" for r in stage.position_restraints
-                        )
-                        or "none"
-                    )
-                    if stage.is_temperature_ramping:
-                        temp_info = f"{stage.temperature_start}K -> {stage.temperature_end}K"
-                    else:
-                        temp_info = f"{stage.temperature}K"
-                    LOGGER.info(
-                        f"  Stage {i}: {stage.name} - {stage.duration} ns, "
-                        f"{stage.ensemble.value}, {temp_info}, restraints: [{restraint_info}]"
-                    )
-
-                component_info = SystemComponentInfo.from_topology(self._topology)
-                resolver = AtomGroupResolver(self._topology, component_info)
-
-                return self.run_staged_equilibration(
-                    stages=config.equilibration_stages,
-                    atom_group_resolver=resolver,
-                    target_temperature=temperature,
-                )
+        LOGGER.info(
+            f"Starting staged equilibration with {len(config.equilibration_stages)} stage(s):"
+        )
+        for i, stage in enumerate(config.equilibration_stages):
+            restraint_info = (
+                ", ".join(f"{r.group}@{r.force_constant:.0f}" for r in stage.position_restraints)
+                or "none"
+            )
+            if stage.is_temperature_ramping:
+                temp_info = f"{stage.temperature_start}K -> {stage.temperature_end}K"
             else:
-                # Simple equilibration via config
-                eq_config = config.equilibration
-                return self._run_simple_equilibration(
-                    temperature=temperature,
-                    duration_ns=eq_config.duration,
-                    num_samples=eq_config.samples,
-                    timestep_fs=eq_config.time_step or timestep_fs,
-                    friction=friction,
-                    output_prefix=output_prefix,
-                )
-
-        # Legacy parameter-based mode
-        if duration_ns is None:
-            raise ValueError(
-                "duration_ns is required when config is not provided. "
-                "Either pass duration_ns or pass a SimulationPhasesConfig."
+                temp_info = f"{stage.temperature}K"
+            LOGGER.info(
+                f"  Stage {i}: {stage.name} - {stage.duration} ns, "
+                f"{stage.ensemble.value}, {temp_info}, restraints: [{restraint_info}]"
             )
 
-        return self._run_simple_equilibration(
-            temperature=temperature,
-            duration_ns=duration_ns,
-            num_samples=num_samples,
-            timestep_fs=timestep_fs,
-            friction=friction,
-            output_prefix=output_prefix,
+        component_info = SystemComponentInfo.from_topology(self._topology)
+        resolver = AtomGroupResolver(self._topology, component_info)
+
+        return self.run_staged_equilibration(
+            stages=config.equilibration_stages,
+            atom_group_resolver=resolver,
+            target_temperature=temperature,
         )
-
-    def _run_simple_equilibration(
-        self,
-        temperature: float,
-        duration_ns: float,
-        num_samples: int = 10,
-        timestep_fs: float = 2.0,
-        friction: float = 1.0,
-        output_prefix: str = "equilibration",
-    ) -> Dict[str, Any]:
-        """Run simple NVT equilibration (internal implementation).
-
-        Args:
-            temperature: Temperature in Kelvin.
-            duration_ns: Duration in nanoseconds.
-            num_samples: Number of trajectory frames to save.
-            timestep_fs: Time step in femtoseconds.
-            friction: Friction coefficient in 1/ps.
-            output_prefix: Prefix for output files.
-
-        Returns:
-            Dictionary with phase results.
-        """
-        LOGGER.info(f"Starting equilibration: {duration_ns} ns at {temperature} K (NVT)")
-
-        # Remove any barostat for NVT
-        self._remove_barostat()
-
-        # Create output directory
-        phase_dir = self._working_dir / output_prefix
-        phase_dir.mkdir(exist_ok=True)
-
-        # Calculate steps
-        total_steps = int(duration_ns * 1e6 / timestep_fs)
-        report_interval = max(1, total_steps // num_samples)
-
-        # Create integrator and simulation
-        integrator = self._create_integrator(
-            temperature=temperature,
-            friction=friction,
-            timestep=timestep_fs,
-        )
-        platform = self._get_platform()
-
-        self._simulation = Simulation(self._topology, self._system, integrator, platform)
-        self._simulation.context.setPositions(self._current_positions)
-        self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)
-
-        # Add reporters
-        traj_path = phase_dir / f"{output_prefix}_trajectory.dcd"
-        state_path = phase_dir / f"{output_prefix}_state_data.csv"
-        pdb_path = phase_dir / f"{output_prefix}_topology.pdb"
-
-        self._simulation.reporters.append(DCDReporter(str(traj_path), report_interval))
-        self._simulation.reporters.append(
-            StateDataReporter(
-                str(state_path),
-                report_interval,
-                step=True,
-                time=True,
-                potentialEnergy=True,
-                kineticEnergy=True,
-                totalEnergy=True,
-                temperature=True,
-                volume=True,
-                density=True,
-                speed=True,
-            )
-        )
-
-        # Save topology
-        with open(pdb_path, "w") as f:
-            PDBFile.writeFile(
-                self._topology,
-                self._current_positions,
-                f,
-            )
-
-        # Run simulation
-        LOGGER.info(f"Running {total_steps} steps...")
-        self._simulation.step(total_steps)
-
-        # Get final state (including box vectors for potential NPT follow-up)
-        state = self._simulation.context.getState(
-            getPositions=True, getVelocities=True, getEnergy=True
-        )
-        self._current_positions = state.getPositions()
-        self._current_velocities = state.getVelocities()
-        self._current_box_vectors = state.getPeriodicBoxVectors()
-
-        # Save checkpoint
-        checkpoint_path = phase_dir / f"{output_prefix}_checkpoint.chk"
-        self._simulation.saveCheckpoint(str(checkpoint_path))
-
-        results = {
-            "phase": "equilibration",
-            "ensemble": "NVT",
-            "temperature_K": temperature,
-            "duration_ns": duration_ns,
-            "total_steps": total_steps,
-            "final_energy_kJ_mol": state.getPotentialEnergy().value_in_unit(
-                omm_unit.kilojoule_per_mole
-            ),
-            "trajectory_path": str(traj_path),
-            "checkpoint_path": str(checkpoint_path),
-        }
-
-        self._history["equilibration"] = results
-        LOGGER.info("Equilibration complete")
-
-        return results
 
     def run_equilibration_stage(
         self,

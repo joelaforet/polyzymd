@@ -109,13 +109,15 @@ thermodynamics:
   pressure: {PRESSURE}
 
 simulation_phases:
-  equilibration:
-    ensemble: "NVT"
-    duration: 0.001
-    samples: 5
-    time_step: {TIMESTEP_FS}
-    thermostat: "LangevinMiddle"
-    thermostat_timescale: 1.0
+  equilibration_stages:
+    - name: "test_equilibration"
+      ensemble: "NVT"
+      duration: 0.001
+      samples: 5
+      time_step: {TIMESTEP_FS}
+      temperature: {TEMPERATURE}
+      thermostat: "LangevinMiddle"
+      thermostat_timescale: 1.0
   production:
     ensemble: "NPT"
     duration: {TOTAL_PRODUCTION_NS}

@@ -91,13 +91,25 @@ thermodynamics:
 # Simulation Phases
 # ============================================================================
 simulation_phases:
-  equilibration:
-    ensemble: "NVT"
-    duration: 0.5  # nanoseconds
-    samples: 50  # frames to save
-    time_step: 2.0  # femtoseconds
-    thermostat: "LangevinMiddle"
-    thermostat_timescale: 1.0  # picoseconds
+  equilibration_stages:
+    - name: "heating"
+      duration: 0.1  # nanoseconds
+      samples: 10
+      ensemble: "NVT"
+      temperature_start: 60.0
+      temperature_end: 293.0
+      temperature_increment: 1.0
+      temperature_interval: 1200.0
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+        - group: "ligand_heavy"
+          force_constant: 4184.0
+    - name: "free_equilibration"
+      duration: 0.4  # nanoseconds
+      samples: 40
+      ensemble: "NPT"
+      temperature: 293.0
   
   production:
     ensemble: "NPT"
@@ -109,9 +121,6 @@ simulation_phases:
     barostat: "MC"  # Monte Carlo barostat
     barostat_frequency: 25  # steps between barostat updates
   
-  # Daisy-chain configuration
-  segments: 10  # Split production into 10 segments for HPC
-
 # ============================================================================
 # Output Configuration
 # ============================================================================

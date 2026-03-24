@@ -42,9 +42,9 @@ class TestFindTopologyPdb:
         assert result.name == "system_solvated.pdb"
 
     def test_finds_equilibration_topology(self, tmp_path):
-        eq_dir = tmp_path / "equilibration"
+        eq_dir = tmp_path / "equilibration_0_heating"
         eq_dir.mkdir()
-        (eq_dir / "equil_topology.pdb").write_text("ATOM ...")
+        (eq_dir / "equilibration_0_heating_topology.pdb").write_text("ATOM ...")
         result = _find_topology_pdb(tmp_path)
         assert "topology.pdb" in result.name
 
@@ -573,7 +573,6 @@ class TestRunInitialSegmentEquilibrationSkip:
         sim_config = MagicMock()
         sim_config.thermodynamics.temperature = 310.0
         sim_config.thermodynamics.pressure = 1.0
-        sim_config.simulation_phases.uses_staged_equilibration = True
         sim_config.simulation_phases.total_equilibration_duration = 1.5
         sim_config.restraints = []
 

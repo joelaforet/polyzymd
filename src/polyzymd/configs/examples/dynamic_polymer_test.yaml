@@ -108,13 +108,15 @@ thermodynamics:
 # Simulation Phases - SHORT DURATIONS FOR TESTING
 # ============================================================================
 simulation_phases:
-  equilibration:
-    ensemble: "NVT"
-    duration: 0.01  # 10 ps - very short for testing
-    samples: 10
-    time_step: 2.0
-    thermostat: "LangevinMiddle"
-    thermostat_timescale: 1.0
+  equilibration_stages:
+    - name: "test_equilibration"
+      duration: 0.01  # 10 ps - very short for testing
+      samples: 10
+      ensemble: "NVT"
+      temperature: 300.0
+      time_step: 2.0
+      thermostat: "LangevinMiddle"
+      thermostat_timescale: 1.0
   
   production:
     ensemble: "NPT"
@@ -126,8 +128,6 @@ simulation_phases:
     barostat: "MC"
     barostat_frequency: 25
   
-  segments: 1  # Single segment for testing
-
 # ============================================================================
 # Output Configuration
 # ============================================================================

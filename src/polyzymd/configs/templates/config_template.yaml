@@ -270,39 +270,13 @@ description: "Description of your simulation system"
 # thermostat options: LangevinMiddle (recommended), Langevin, Andersen
 # barostat options: MC (Monte Carlo), MCA (anisotropic)
 #
-# OPTION A: Simple equilibration (legacy)
-# Use this for straightforward equilibration without staged restraints.
+# Use staged equilibration for all simulations. This is the only supported
+# simulation config path and is the recommended workflow for stable builds.
 #
-# simulation_phases:
-#   equilibration:
-#     ensemble: "NVT"
-#     duration: 1.0                       # nanoseconds
-#     samples: 100                        # frames to save
-#     time_step: 2.0                      # femtoseconds
-#     thermostat: "LangevinMiddle"
-#     thermostat_timescale: 1.0           # picoseconds
-#   
-#   production:
-#     ensemble: "NPT"
-#     duration: 100.0                     # nanoseconds total
-#     samples: 2500                       # frames to save (total)
-#     time_step: 2.0                      # femtoseconds
-#     thermostat: "LangevinMiddle"
-#     thermostat_timescale: 1.0           # picoseconds
-#     barostat: "MC"
-#     barostat_frequency: 25              # steps between barostat moves
-#   
-#   # Daisy-chain: split production into segments for HPC job limits
-#   segments: 10                          # 10 segments = 10 ns each
-
-# ----------------------------------------------------------------------------
-# OPTION B: Multi-stage equilibration with position restraints (ADVANCED)
-# Use this for sophisticated equilibration protocols with:
+# Use this pattern for protocols with:
 #   - Temperature ramping (simulated annealing style heating)
 #   - Position restraints on specific atom groups
 #   - Staged release of restraints
-#
-# NOTE: Use EITHER equilibration OR equilibration_stages, not both.
 #
 # Available atom groups for position restraints:
 #   protein_heavy     : All non-hydrogen protein atoms
@@ -365,8 +339,6 @@ description: "Description of your simulation system"
 #     thermostat_timescale: 1.0
 #     barostat: "MC"
 #     barostat_frequency: 25
-#   
-#   segments: 10
 
 # ============================================================================
 # Output Configuration (REQUIRED)
