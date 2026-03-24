@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-03-24
+
+### Added
+
+- **Analysis workflow and CLI.** Added the `polyzymd analyze` command family with
+  YAML-driven setup and execution for RMSF, contacts, distances, catalytic triad,
+  and secondary-structure analyses, plus shared loading, alignment, PBC handling,
+  result models, and aggregation helpers. (`src/polyzymd/analysis/`)
+- **Comparison engine for multi-condition studies.** Added registry-based
+  comparators, typed comparison result models, shared statistical utilities, and
+  a generic `polyzymd compare run` workflow for RMSF, contacts, distances,
+  catalytic triad, exposure dynamics, binding free energy, polymer affinity,
+  and secondary structure. (`src/polyzymd/compare/`)
+- **Config-driven plotting stack.** Added `polyzymd compare plot-all`,
+  registry-based plot discovery, shared plot themes, and publication-oriented
+  plotters for RMSF, contacts, distances, catalytic triad, secondary structure,
+  binding free energy, exposure, and polymer affinity. (`src/polyzymd/compare/plotter.py`,
+  `src/polyzymd/compare/plotters/`)
+- **Secondary-structure comparison support.** Added DSSP-backed secondary
+  structure analysis, comparison results, and plotting so secondary structure is
+  part of the stable release analysis stack. (`src/polyzymd/analysis/secondary_structure/`,
+  `src/polyzymd/compare/comparators/secondary_structure.py`,
+  `src/polyzymd/compare/plotters/secondary_structure.py`)
+- **Comprehensive analysis documentation.** Added end-to-end tutorials,
+  cookbook-style guides, API pages, and extension guides covering analysis,
+  comparison, and plotting workflows. (`docs/source/tutorials/`,
+  `docs/source/api/compare.md`)
+
+### Changed
+
+- **Release presentation labeling for debated metrics.** Binding preference,
+  exposure dynamics, binding free energy, and polymer affinity remain available
+  from the CLI and plotting pipeline, but PolyzyMD now marks them explicitly as
+  experimental in command output, plot listings, generated text reports, figure
+  annotations, config templates, and user-facing docs. (`src/polyzymd/core/experimental.py`,
+  `src/polyzymd/compare/cli.py`, `src/polyzymd/compare/plotter.py`, `README.md`)
+- **Stable release scope for analysis demos.** The presentation-ready stable
+  comparison stack is now RMSF, contacts, distances, catalytic triad, and
+  secondary structure, while the debated science-facing metrics remain visible
+  but clearly labeled as experimental. (`README.md`,
+  `docs/source/tutorials/analysis_compare_conditions.md`)
+
+### Fixed
+
+- **Comparison result and plotting reliability.** Fixed multiple comparison and
+  plotting issues uncovered while building the release branch, including cached
+  result discovery, condition-specific result paths, partition-aware BFE plots,
+  shared-path bugs in the plot orchestrator, contacts/distances comparison edge
+  cases, and corrupted-trajectory handling in contacts/exposure workflows.
+  (`src/polyzymd/compare/`, `src/polyzymd/analysis/contacts/`,
+  `src/polyzymd/analysis/distances/`)
+
 ## [1.1.1] - 2026-03-23
 
 ### Fixed
