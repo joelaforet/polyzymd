@@ -141,11 +141,11 @@ The benchmark script is located at `scripts/benchmark_rmsf_3way.py` in the
 repository root. To reproduce:
 
 ```bash
-mamba run -n polyzymd-env python scripts/benchmark_rmsf_3way.py
+pixi run -e build python scripts/benchmark_rmsf_3way.py
 ```
 
 Requirements:
-- `polyzymd-env` conda environment (MDAnalysis, NumPy, scikit-learn, matplotlib)
+- PolyzyMD `build` pixi environment (MDAnalysis, NumPy, scikit-learn, matplotlib)
 - GROMACS >= 2020 (`gmx rmsf`) — configure the `GMX` variable at the top of the script
 - A simulation directory with topology (PDB) and trajectory (DCD) files
 

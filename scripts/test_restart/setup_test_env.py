@@ -27,14 +27,14 @@ Output structure::
 
 Usage::
 
-    # On the cluster, inside the polyzymd-env conda environment:
-    mamba run -n polyzymd-env python setup_test_env.py
+    # On the cluster, from the repository root:
+    pixi run -e cuda-12-4 python scripts/test_restart/setup_test_env.py
 
     # Or if already activated:
     python setup_test_env.py
 
 Requirements:
-    - OpenMM (available in polyzymd-env)
+    - OpenMM (available in the PolyzyMD pixi environments)
     - PolyzyMD installed (for progress file generation)
 
 Takes ~10s on GPU, ~30s on CPU.
@@ -463,8 +463,8 @@ def main():
     print(f"  {CONFIG_PATH}                    (PolyzyMD config)")
     print(f"  {WORKDIR}/")
     print(f"    solvated_system.pdb          ({pdb_path.stat().st_size // 1024} KB)")
-    print(f"    progress.json                (segment 0 complete)")
-    print(f"    production_0/")
+    print("    progress.json                (segment 0 complete)")
+    print("    production_0/")
     for fp in sorted(seg_dir.iterdir()):
         print(f"      {fp.name:<45} ({fp.stat().st_size // 1024} KB)")
     print()

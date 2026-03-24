@@ -5,25 +5,27 @@
 
 ## Environment
 
-**All simulation-stack commands MUST use the conda environment:**
+**All simulation-stack commands MUST use a PolyzyMD pixi environment:**
 
 ```bash
-mamba run -n polyzymd-env <command>
+pixi run -e <env> <command>
 ```
 
-The `polyzymd-env` environment contains OpenMM, OpenFF, MDAnalysis and other
-heavy dependencies that are conda-only. Never `pip install` these.
+The PolyzyMD pixi environments contain OpenMM, OpenFF, MDAnalysis and other
+heavy dependencies resolved from conda-forge. Never `pip install` these
+outside the managed pixi environment.
 
 **Quick commands:**
 
 | Task | Command |
 |------|---------|
-| Install (editable) | `mamba run -n polyzymd-env pip install -e ".[dev,docs]"` |
-| Run tests | `mamba run -n polyzymd-env pytest tests/ -v` |
+| Install env | `pixi install -e build` |
+| Activate shell | `pixi shell -e build` |
+| Run tests | `pixi run -e build pytest tests/ -v` |
 | Lint | `ruff check src/` |
 | Format | `black src/ --check` (or `black src/` to fix) |
-| Build docs | `mamba run -n polyzymd-env make -C docs clean html` |
-| Type check | `mamba run -n polyzymd-env mypy src/polyzymd` |
+| Build docs | `pixi run -e build make -C docs clean html` |
+| Type check | `pixi run -e build mypy src/polyzymd` |
 
 ## Git Workflow
 

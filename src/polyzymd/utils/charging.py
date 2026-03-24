@@ -139,8 +139,8 @@ class NAGLCharger(MoleculeCharger):
             from openff.toolkit.utils.nagl_wrapper import NAGLToolkitWrapper
         except ImportError as e:
             raise ImportError(
-                "NAGL is not installed. Install with: "
-                "mamba install -c conda-forge openff-nagl openff-nagl-models"
+                "NAGL is not installed. Install or update the PolyzyMD pixi environment "
+                "so openff-nagl and openff-nagl-models are available."
             ) from e
 
         # NAGL doesn't strictly require conformers but we generate one anyway
@@ -210,8 +210,8 @@ class EspalomaCharger(MoleculeCharger):
             from espaloma_charge.openff_wrapper import EspalomaChargeToolkitWrapper
         except ImportError as e:
             raise ImportError(
-                "espaloma-charge is not installed. Install with: "
-                "mamba install -c conda-forge espaloma-charge"
+                "espaloma-charge is not installed. Add it to your PolyzyMD pixi environment "
+                "or install it into the active pixi shell."
             ) from e
 
         # Espaloma requires a conformer

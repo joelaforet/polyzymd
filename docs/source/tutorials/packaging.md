@@ -7,7 +7,8 @@ This guide explains how PolyzyMD is structured as a Python package, the design d
 PolyzyMD is designed to be:
 
 - **pip-installable**: `pip install polyzymd`
-- **conda-installable**: `conda install -c conda-forge polyzymd` (planned)
+- **pixi-first for heavy scientific dependencies**: use `pixi install -e <env>`
+  for the reproducible OpenMM/OpenFF stack
 - **Testable in CI**: Works with GitHub Actions for automated testing
 - **Developer-friendly**: Clear structure for contributors
 
@@ -32,7 +33,7 @@ polyzymd/                    # Repository root
 │       └── ...
 ├── tests/                   # Test suite (outside the package)
 ├── docs/                    # Documentation
-├── devtools/                # Development tools (conda envs, etc.)
+├── devtools/                # Development tools and helper scripts
 ├── pyproject.toml           # Package metadata and build config
 ├── README.md
 └── LICENSE
@@ -142,11 +143,11 @@ This creates the `polyzymd` command that users can run from terminal.
 
 PolyzyMD depends on packages that are difficult or impossible to install via pip:
 
-- **OpenMM**: GPU-accelerated MD engine (requires conda)
-- **OpenFF Toolkit**: Force field tools (requires conda)
-- **RDKit**: Chemistry toolkit (pip or conda)
-- **PACKMOL**: Molecular packing (requires conda)
-- **AmberTools**: Optional, for AM1-BCC charging backend (requires conda)
+- **OpenMM**: GPU-accelerated MD engine (resolved from conda-forge via pixi)
+- **OpenFF Toolkit**: Force field tools (resolved from conda-forge via pixi)
+- **RDKit**: Chemistry toolkit (managed in the pixi environment)
+- **PACKMOL**: Molecular packing (resolved from conda-forge via pixi)
+- **AmberTools**: Optional, for AM1-BCC charging backend (resolved from conda-forge via pixi)
 
 If we list these in `dependencies`, `pip install polyzymd` will fail.
 
@@ -178,21 +179,20 @@ from polyzymd import SystemBuilder  # NOW imports OpenFF (fails if not installed
 
 ### Why This Matters
 
-1. **CI can run basic tests** without a full conda environment
+1. **CI can run basic tests** without a full simulation environment
 2. **Users can install** the package and see helpful error messages
 3. **Documentation builds** don't require simulation dependencies
 
 ### Recommended Installation
 
-We recommend users install via conda first, then pip:
+We recommend users install via pixi so the heavy scientific dependencies are
+resolved reproducibly from `pixi.toml`:
 
 ```bash
-# Install heavy dependencies via conda
-mamba install -c conda-forge openmm openff-toolkit openff-interchange \
-    openff-nagl openff-nagl-models packmol mbuild openbabel
-
-# Install polyzymd via pip
-pip install polyzymd
+git clone https://github.com/joelaforet/polyzymd.git
+cd polyzymd
+pixi install -e build
+pixi shell -e build
 ```
 
 ### Optional Charging Backends
@@ -204,9 +204,8 @@ For AM1-BCC charges, you can optionally install additional backends:
 
 #### AmberTools (sqm)
 
-```bash
-mamba install -c conda-forge ambertools
-```
+AmberTools is already included in the PolyzyMD pixi environments, so no extra
+installation step is usually required.
 
 Then use in your code:
 
@@ -266,7 +265,7 @@ jobs:
 
 #### Tier 2: Full CI (Runs Weekly or on Release)
 
-Comprehensive tests with full conda environment:
+Comprehensive tests with the full pixi-managed simulation environment:
 
 ```yaml
 # .github/workflows/full-test.yml
@@ -274,41 +273,25 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: mamba-org/setup-micromamba@v1
-        with:
-          environment-file: devtools/conda-envs/polyzymd-env.yml
-      
-      - run: pip install . --no-deps
-      - run: pytest tests/
+      - uses: prefix-dev/setup-pixi@v0
+      - run: pixi install -e build
+      - run: pixi run -e build pip install . --no-deps
+      - run: pixi run -e build pytest tests/
 ```
 
-### The Conda Environment File
+### The Pixi Manifest
 
-Located at `devtools/conda-envs/polyzymd-env.yml`:
+Environment definitions live in `pixi.toml`:
 
-```yaml
-name: polyzymd-test
-channels:
-  - conda-forge
-dependencies:
-  - python=3.11
-  - pip
-  - pytest
-  - pytest-cov
-  # Heavy simulation dependencies
-  - openmm>=8.0
-  - openff-toolkit>=0.16.0
-  - openff-interchange>=0.4.0
-  - openff-nagl>=0.3.0
-  - openff-nagl-models
-  - packmol
-  - mbuild
-  - openbabel
-  # Pip-only packages
-  - pip:
-    - rdkit
-    - polymerist
-  # etc.
+```toml
+[workspace]
+name = "polyzymd"
+channels = ["conda-forge"]
+
+[environments]
+build = { features = ["base", "build", "test", "docs"] }
+cuda-12-4 = { features = ["base", "cuda-12-4", "test", "docs"] }
+cuda-12-6 = { features = ["base", "cuda-12-6", "test", "docs"] }
 ```
 
 ---
@@ -413,11 +396,9 @@ polyzymd/
 │   └── workflows/
 │       ├── ci.yml           # Basic CI (lint, build, import tests)
 │       ├── release.yml      # Publish to PyPI on tag
-│       └── full-test.yml    # Full conda test suite
+│       └── full-test.yml    # Full pixi test suite
 │
-├── devtools/
-│   └── conda-envs/
-│       └── polyzymd-env.yml  # Conda environment for installation/testing
+├── devtools/                # Optional helper scripts / dev tooling
 │
 ├── docs/
 │   ├── source/
@@ -464,7 +445,7 @@ polyzymd/
 
 ### Don't
 
-- Don't list conda-only packages in pip `dependencies`
+- Don't assume pip alone can provision the full OpenMM/OpenFF stack
 - Don't eagerly import heavy modules at package init
 - Don't mix test artifacts with source code
 - Don't hardcode paths - use `importlib.resources` for data files

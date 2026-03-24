@@ -501,7 +501,7 @@ class TestMyCustomPlotter:
 
 ```bash
 # Run plot-all to test discovery and execution
-mamba run -n polyzymd-env polyzymd compare plot-all -f comparison.yaml
+pixi run -e build polyzymd compare plot-all -f comparison.yaml
 ```
 
 ## Common Patterns

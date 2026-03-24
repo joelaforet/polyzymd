@@ -18,27 +18,27 @@ Dependencies
 - PyYAML
 - biopandas (for protein atom name fixing)
 
-All available in the ``polyzymd-env`` conda environment.
+All available in the PolyzyMD ``build`` pixi environment.
 
 Usage
 -----
 ::
 
     # Single simulation
-    mamba run -n polyzymd-env python convert_legacy.py \\
+    pixi run -e build python convert_legacy.py \\
         /path/to/10A_RESTRAINT_LipA_..._run1 \\
         --output-dir /path/to/polyzymd_converted \\
         --reference-pdb /path/to/NH3_terminal_His_proton_updated.pdb
 
     # Batch: all simulations in a parent directory
-    mamba run -n polyzymd-env python convert_legacy.py \\
+    pixi run -e build python convert_legacy.py \\
         /path/to/PREPOLYZYMD_SIMULATIONS \\
         --output-dir /path/to/polyzymd_converted \\
         --reference-pdb /path/to/NH3_terminal_His_proton_updated.pdb \\
         --batch
 
     # Dry-run (preview only)
-    mamba run -n polyzymd-env python convert_legacy.py \\
+    pixi run -e build python convert_legacy.py \\
         /path/to/PREPOLYZYMD_SIMULATIONS \\
         --output-dir /path/to/polyzymd_converted \\
         --reference-pdb /path/to/NH3_terminal_His_proton_updated.pdb \\

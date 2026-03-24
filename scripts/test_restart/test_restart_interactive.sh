@@ -17,9 +17,8 @@
 #   8. check-progress: exits 0 when simulation is complete
 #
 # Prerequisites:
-#   1. polyzymd-env conda environment is active (or use mamba run)
-#   2. polyzymd installed from feature/smart-restart branch:
-#        mamba run -n polyzymd-env pip install -e ".[dev]"
+#   1. A PolyzyMD pixi shell is active, or pixi is available for `pixi run`
+#   2. PolyzyMD has been installed with `pixi install -e <env>`
 #   3. setup_test_env.py has been run to create test_restart_workdir/
 #
 # Usage:
@@ -31,13 +30,14 @@ set -euo pipefail
 WORKDIR="test_restart_workdir"
 CONFIG="test_config.yaml"
 
-# Use mamba run for safety, but also work if env is already active
+# Use pixi run for safety, but also work if a pixi shell is already active.
+PIXI_ENV="${PIXI_ENV:-build}"
 CMD_PREFIX=""
-if command -v mamba &>/dev/null && mamba env list 2>/dev/null | grep -q "polyzymd-env"; then
-    if [[ "${CONDA_DEFAULT_ENV:-}" == "polyzymd-env" ]]; then
+if command -v pixi &>/dev/null; then
+    if [[ -n "${PIXI_IN_SHELL:-}" ]]; then
         CMD_PREFIX=""
     else
-        CMD_PREFIX="mamba run --no-banner -n polyzymd-env"
+        CMD_PREFIX="pixi run -e ${PIXI_ENV}"
     fi
 fi
 

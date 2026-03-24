@@ -10,7 +10,7 @@ This guide covers installing PolyzyMD and its dependencies using
 
 ```{note}
 PolyzyMD's simulation stack (OpenMM, OpenFF Toolkit, etc.) is only available
-via conda-forge channels. Pixi handles this automatically — you do not need
+via conda-forge channels. Pixi handles this automatically - you do not need
 conda or mamba installed.
 ```
 
