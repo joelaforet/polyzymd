@@ -1,323 +1,213 @@
-# Comparing Conditions Across Simulations
+# How to Compare Simulation Conditions
 
-Statistically compare RMSF, contacts, distances, and other metrics across multiple simulation conditions
-with automated t-tests, effect size calculations, and ranking.
+Use this guide when you already have completed PolyzyMD simulations and want to
+compare conditions with the `polyzymd compare` workflow.
 
-```{note}
-**New to analysis?** Start with the individual quick start guides:
-- [RMSF Quick Start](analysis_rmsf_quickstart.md) for flexibility analysis
-- [Contacts Quick Start](analysis_contacts_quickstart.md) for polymer-protein contacts
-- [Distance Analysis Quick Start](analysis_distances_quickstart.md) for inter-atomic distances
+You will:
 
-Then return here to compare conditions.
-```
+- define a `comparison.yaml`
+- validate it
+- run stable comparisons
+- generate figures with `polyzymd compare plot-all`
 
 ```{important}
-For the presentation release, the stable comparison stack is **RMSF, contacts,
-distances, catalytic triad, and secondary structure**. Binding preference,
-exposure dynamics, binding free energy, and polymer affinity remain callable
-from the CLI and still generate plots, but PolyzyMD labels them explicitly as
-**experimental** in text output and on figures.
+For the `v1.2.0` presentation release, the stable comparison stack is RMSF,
+contacts, distances, catalytic triad, and secondary structure. Binding
+preference, exposure dynamics, binding free energy, and polymer affinity remain
+available, but PolyzyMD labels them as experimental.
 ```
 
-## TL;DR
-
-```bash
-# 1. Create comparison project
-polyzymd compare init my_polymer_study
-
-# 2. Edit the template (add your conditions)
-vim my_polymer_study/comparison.yaml
-
-# 3. Run comparisons
-cd my_polymer_study
-polyzymd compare run rmsf --eq-time 10ns      # Compare flexibility
-polyzymd compare run triad --eq-time 10ns     # Compare triad geometry (if defined)
-polyzymd compare run contacts --eq-time 10ns  # Compare polymer-protein contacts
-polyzymd compare run distances --eq-time 10ns # Compare inter-atomic distances
-
-# Output formats
-polyzymd compare run rmsf --format table     # Console table (default)
-polyzymd compare run rmsf --format markdown  # For documentation
-polyzymd compare run rmsf --format json      # Machine-readable
-
-# Experimental but available workflows
-polyzymd compare run exposure                # Experimental
-polyzymd compare binding-free-energy         # Experimental
-polyzymd compare polymer-affinity            # Experimental
+```{note}
+If you have not yet run per-condition analyses, start with
+[Tutorial: Analyze a Study from Finished Simulations](analysis_complete_workflow.md).
 ```
 
-## Overview
+## Before You Start
 
-The `polyzymd compare` module provides a streamlined workflow for comparing
-simulation conditions with proper statistical analysis. Instead of manually
-loading JSON files and running t-tests, you:
+Make sure each condition already has:
 
-1. **Define conditions** in a YAML file
-2. **Run one command** to get statistics
-3. **Get publication-ready output** with p-values, effect sizes, and rankings
+- a `config.yaml`
+- finished trajectories
+- per-condition analysis results from `polyzymd analyze run`
 
-### When to Use
+For metric-specific setup, use the individual analysis guides before comparing
+conditions.
 
-| Use `polyzymd compare` | Use manual analysis |
-|------------------------|---------------------|
-| Comparing 2+ conditions | Single condition analysis |
-| Need statistical tests | Just need RMSF values |
-| Want consistent formatting | Custom visualization |
-| Routine comparisons | One-off exploration |
-
-## Quick Start Workflow
-
-### Step 1: Initialize a Comparison Project
+## Step 1: Create a Comparison Workspace
 
 ```bash
-polyzymd compare init polymer_stability_study
+polyzymd compare init -n polymer_stability_study
+cd polymer_stability_study
 ```
 
 This creates:
 
-```
+```text
 polymer_stability_study/
-├── comparison.yaml    # Configuration template to edit
-├── results/           # Output JSON files (auto-populated)
-└── figures/           # Comparison plots (from polyzymd compare plot)
+├── comparison.yaml
+├── figures/
+├── results/
+└── structures/
 ```
 
-### Step 2: Edit comparison.yaml
+## Step 2: Define a Minimal `comparison.yaml`
 
-Open `comparison.yaml` and define your conditions:
+Start with one stable analysis. RMSF is a good first comparison because it has
+no extra structural dependencies.
 
 ```yaml
 name: "polymer_stability_study"
-description: "Effect of polymer composition on enzyme stability"
-
-# Control condition for relative comparisons (optional)
+description: "Effect of polymer composition on enzyme flexibility"
 control: "No Polymer"
 
 conditions:
   - label: "No Polymer"
-    config: "../projects/noPoly_LipA_DMSO/config.yaml"
+    config: "../noPoly_enzyme_DMSO/config.yaml"
     replicates: [1, 2, 3]
 
   - label: "100% SBMA"
-    config: "../projects/SBMA_100/config.yaml"
+    config: "../SBMA_100_enzyme_DMSO/config.yaml"
     replicates: [1, 2, 3]
 
   - label: "100% EGMA"
-    config: "../projects/EGMA_100/config.yaml"
+    config: "../EGMA_100_enzyme_DMSO/config.yaml"
     replicates: [1, 2, 3]
 
 defaults:
   equilibration_time: "10ns"
 
-# Analysis settings: WHAT to analyze (shared across conditions)
 analysis_settings:
   rmsf:
     selection: "protein and name CA"
 
-# Comparison settings: HOW to compare (must have entry for each analysis)
 comparison_settings:
-  rmsf: {}  # Empty is OK, but must be present
+  rmsf: {}
 ```
 
-### Step 3: Validate Configuration
+You can add other stable analyses later by extending `analysis_settings` and
+`comparison_settings`.
 
-Before running, check that all paths are correct:
+<!-- IMAGE OPPORTUNITY: Add an annotated `comparison.yaml` graphic showing the
+roles of `conditions`, `analysis_settings`, `comparison_settings`, and
+`plot_settings`. -->
+
+## Step 3: Validate the Config
 
 ```bash
 polyzymd compare validate
 ```
 
-Expected output:
+You should see a passing summary with the study name, condition count, and the
+configured analysis sections.
 
-```
-Validating: comparison.yaml
+## Step 4: Run Comparisons
 
-Validation PASSED
+### Run One Stable Comparison
 
-  Name: polymer_stability_study
-  Conditions: 3
-    - No Polymer (control): 3 replicates
-    - 100% SBMA: 3 replicates
-    - 100% EGMA: 3 replicates
-  Equilibration: 10ns
-  Selection: protein and name CA
-```
-
-### Step 4: Run Comparison
-
-`````{tab-set}
-````{tab-item} CLI (Recommended)
 ```bash
-polyzymd compare rmsf
+polyzymd compare run rmsf
 ```
 
-The module will:
-1. Load (or compute) RMSF for each condition
-2. Run statistical comparisons
-3. Display results and save to `results/`
-````
+This loads the existing per-condition results, performs the statistical
+comparison, prints a formatted summary, and writes JSON to `results/`.
 
-````{tab-item} Python
-```python
-from polyzymd.compare import ComparisonConfig, RMSFComparator
+### Run All Enabled Comparisons
 
-# Load configuration
-config = ComparisonConfig.from_yaml("comparison.yaml")
+Once you have multiple stable analyses configured, use:
 
-# Get RMSF settings from analysis_settings
-rmsf_settings = config.analysis_settings.get("rmsf")
-
-# Run RMSF comparison
-comparator = RMSFComparator(
-    config=config,
-    rmsf_settings=rmsf_settings,
-    equilibration="10ns",
-)
-result = comparator.compare()
-
-# Display results
-print(f"Most stable: {result.ranking[0]}")
-for cond in result.conditions:
-    print(f"{cond.label}: {cond.mean_rmsf:.3f} ± {cond.sem_rmsf:.3f} Å")
-
-# Save to JSON
-result.save("results/rmsf_comparison.json")
-```
-````
-`````
-
-## The comparison.yaml Configuration
-
-### Full Schema Reference
-
-```yaml
-# ============================================================================
-# Required Fields
-# ============================================================================
-
-# Project name (used in output filenames)
-name: "my_comparison"
-
-# At least 2 conditions required
-conditions:
-  - label: "Condition A"           # Display name (required)
-    config: "path/to/config.yaml"  # Simulation config (required)
-    replicates: [1, 2, 3]          # Which replicates (required)
-
-  - label: "Condition B"
-    config: "path/to/config.yaml"
-    replicates: [1, 2, 3]
-
-# ============================================================================
-# Optional Fields
-# ============================================================================
-
-# Description for documentation
-description: "What you're comparing"
-
-# Control condition for relative comparisons
-# - If set: all conditions compared vs control
-# - If null: all pairwise comparisons
-control: "Condition A"  # or null
-
-# Default analysis parameters (shared across all analyses)
-defaults:
-  equilibration_time: "10ns"        # Time to skip (used by all analyses)
-
-# ============================================================================
-# Analysis Settings (WHAT to analyze - applied to all conditions)
-# ============================================================================
-# Each key enables that analysis type. Presence of a section enables it.
-
-analysis_settings:
-  # RMSF Analysis
-  rmsf:
-    selection: "protein and name CA"  # Atoms for RMSF calculation
-    reference_mode: "centroid"        # centroid, average, frame, or external
-    # reference_frame: 500            # Required if reference_mode is "frame"
-    # reference_file: "/path/to/crystal.pdb"  # Required if reference_mode is "external"
-
-  # Catalytic triad comparison (required for `polyzymd compare triad`)
-  #
-  # IMPORTANT: Always use "protein and resid X" for protein residues!
-  # Residue numbers restart per chain, so bare "resid X" may match
-  # atoms from polymer or water chains, causing incorrect distances.
-  #
-  # catalytic_triad:
-  #   name: "enzyme_catalytic_triad"
-  #   threshold: 3.5
-  #   pairs:
-  #     - label: "Asp-His"
-  #       selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
-  #       selection_b: "protein and resid 156 and name ND1"
-
-  # Contacts comparison (required for `polyzymd compare contacts`)
-  # contacts:
-  #   polymer_selection: "resname SBM EGM"
-  #   cutoff: 4.5
-
-  # Distances comparison (required for `polyzymd compare distances`)
-  #
-  # IMPORTANT: Always use "protein and resid X" for protein residues!
-  # See warning above in catalytic_triad section.
-  #
-  # distances:
-  #   threshold: 3.5  # Global default threshold (Angstroms, optional)
-  #   pairs:
-  #     - label: "Catalytic H-bond"
-  #       selection_a: "protein and resid 77 and name OG"
-  #       selection_b: "protein and resid 133 and name NE2"
-  #       threshold: 3.5  # Per-pair threshold (optional, overrides global)
-  #     - label: "Lid Opening"
-  #       selection_a: "com(protein and resid 141-148)"
-  #       selection_b: "com(protein and resid 281-289)"
-  #       threshold: 15.0  # Different threshold for large-scale motion
-
-# ============================================================================
-# Comparison Settings (HOW to compare - statistical parameters)
-# ============================================================================
-# Each analysis in analysis_settings MUST have a corresponding entry here.
-# Use empty {} for analyses with no comparison-specific parameters.
-
-comparison_settings:
-  rmsf: {}  # No comparison-specific parameters
-
-  # catalytic_triad: {}
-
-  # contacts:
-  #   fdr_alpha: 0.05           # FDR for Benjamini-Hochberg correction
-  #   min_effect_size: 0.5      # Cohen's d threshold
-  #   top_residues: 10          # Top residues to show in console
-
-  # distances: {}  # No comparison-specific parameters
+```bash
+polyzymd compare run-all
 ```
 
-### Path Resolution
+If you want figures immediately afterward:
 
-Paths in `config:` can be:
-
-| Path Type | Example | Resolution |
-|-----------|---------|------------|
-| Relative | `../projects/foo/config.yaml` | Relative to comparison.yaml |
-| Absolute | `/home/user/sims/config.yaml` | Used as-is |
-
-### Replicate Specification
-
-```yaml
-# Single replicate
-replicates: [1]
-
-# Range
-replicates: [1, 2, 3]
-
-# Non-contiguous
-replicates: [1, 3, 5]
+```bash
+polyzymd compare run-all --plot
 ```
 
-## Understanding the Output
+## Step 5: Generate Figures
 
-### Console Table Format
+For a final smoke test of the comparison workspace:
+
+```bash
+polyzymd compare plot-all --list-available
+polyzymd compare plot-all
+```
+
+`--list-available` is useful because it shows which plot types are enabled and
+which ones are marked as experimental.
+
+## Step 6: Check the Outputs
+
+After a successful run, expect files like these:
+
+```text
+results/
+├── rmsf_comparison_polymer_stability_study.json
+├── contacts_comparison_polymer_stability_study.json
+├── distances_comparison_polymer_stability_study.json
+└── triad_comparison_polymer_stability_study.json
+
+figures/
+├── rmsf_comparison.png
+├── rmsf_profile.png
+├── triad_kde_panel.png
+└── ...
+```
+
+If your smoke test is `polyzymd compare plot-all`, success means:
+
+- the command completes without error
+- stable plots render normally
+- experimental plots, if enabled, render with explicit experimental labeling
+
+## Adding More Stable Analyses
+
+Common next additions to `comparison.yaml` are:
+
+- `contacts` for polymer coverage and contact fraction
+- `distances` for custom atom-pair distances
+- `catalytic_triad` for active-site geometry
+
+For end-to-end examples of these workflows, see:
+
+- [Run Contacts Analysis](analysis_contacts_quickstart.md)
+- [Run Distance Analysis](analysis_distances_quickstart.md)
+- [Run Catalytic Triad Analysis](analysis_triad_quickstart.md)
+
+## Experimental Workflows
+
+Experimental workflows remain available, but they are not the default path for
+the presentation release. Use them only when you explicitly want those metrics:
+
+- [Experimental: Analyze Binding Preference](analysis_binding_preference.md)
+- [Experimental: Analyze Binding Free Energy](analysis_binding_free_energy.md)
+- [Experimental: Analyze Polymer Affinity](analysis_polymer_affinity.md)
+- [Experimental: Analyze Exposure Dynamics](analysis_exposure_dynamics.md)
+
+## Troubleshooting
+
+### `config` path not found
+
+Paths in `comparison.yaml` are resolved relative to the location of
+`comparison.yaml`, not your current shell directory.
+
+### `No analyses are enabled`
+
+You need at least one section under `analysis_settings` and a matching entry
+under `comparison_settings`.
+
+### `plot-all` runs but expected figures are missing
+
+Check that the corresponding comparison JSON files already exist in `results/`
+and use `polyzymd compare plot-all --list-available` to verify the enabled plot
+types.
+
+## See Also
+
+- [Tutorial: Analyze a Study from Finished Simulations](analysis_complete_workflow.md)
+- [Comparison and Plotting Reference](../reference/analysis_comparison_reference.md)
+- [Statistical Best Practices for Analysis](analysis_statistics_best_practices.md)
 
 ```
 RMSF Comparison: polymer_stability_study

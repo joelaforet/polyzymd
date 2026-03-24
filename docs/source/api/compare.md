@@ -110,12 +110,15 @@
 
 ## Results
 
-```{eval-rst}
-.. automodule:: polyzymd.compare.results.comparison
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
+Common result modules live under `polyzymd.compare.results`.
+
+Stable result families include:
+
+- `polyzymd.compare.results.rmsf`
+- `polyzymd.compare.results.triad`
+- `polyzymd.compare.results.contacts`
+- `polyzymd.compare.results.distances`
+- `polyzymd.compare.results.secondary_structure`
 
 ```{eval-rst}
 .. automodule:: polyzymd.compare.results.binding_free_energy

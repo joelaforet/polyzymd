@@ -1,190 +1,117 @@
-# Installation
+# Install PolyzyMD with pixi
 
-This guide covers installing PolyzyMD and its dependencies using
-[pixi](https://pixi.sh), a fast, reproducible package manager.
+Use this page when you want a working PolyzyMD install quickly.
 
-## Prerequisites
-
-- **Linux x86-64** (the only platform with tested environments)
-- **pixi** (installed below)
+By the end of this guide, you will have a pixi-managed environment where
+`polyzymd --help` and `polyzymd info` run successfully.
 
 ```{note}
-PolyzyMD's simulation stack (OpenMM, OpenFF Toolkit, etc.) is only available
-via conda-forge channels. Pixi handles this automatically - you do not need
-conda or mamba installed.
+PolyzyMD's simulation stack depends on packages distributed through
+conda-forge. [pixi](https://pixi.sh) handles that solver stack for you, so you
+do not need conda or mamba installed separately.
 ```
 
-## Install pixi
+## Before You Start
 
-If you don't already have pixi:
+- Linux x86-64
+- Git
+- a shell where you can install `pixi`
+
+If you are setting up PolyzyMD on a GPU cluster, read this page first and then
+use the short HPC section below.
+
+## 1. Install pixi
+
+If `pixi` is not already available on your system:
 
 ```bash
 curl -fsSL https://pixi.sh/install.sh | sh
+source ~/.bashrc
 ```
 
-Then restart your shell or run `source ~/.bashrc` (or `~/.zshrc`).
-
-## User Installation (local / no GPU)
-
-Use the **build** environment for system building, validation, and PDB
-preparation on a local machine without a GPU.
+Check that it is available:
 
 ```bash
-# Clone the repository
+pixi --version
+```
+
+## 2. Install on a Local Machine
+
+The default local setup uses the `build` environment. This is the right choice
+for project scaffolding, validation, system building, documentation work, and
+most local development tasks.
+
+```bash
 git clone https://github.com/joelaforet/polyzymd.git
 cd polyzymd
 
-# Install the build environment
 pixi install -e build
-
-# Activate the environment
 pixi shell -e build
 
-# Verify installation
 polyzymd --help
 polyzymd info
 ```
 
-Inside the pixi shell, the `polyzymd` CLI is on PATH and works directly.
+If those last two commands work, your install is ready.
 
-### What works in the build environment
+<!-- IMAGE OPPORTUNITY: Add a terminal screenshot showing `pixi install -e
+build`, `pixi shell -e build`, and a successful `polyzymd info` output. -->
 
-| Command | Works? | Notes |
-|---------|--------|-------|
-| `polyzymd build` | Yes | System building (no GPU needed) |
-| `polyzymd validate` | Yes | Config validation |
-| `polyzymd init` | Yes | Project scaffolding |
-| `polyzymd info` | Yes | Version/dependency info |
-| `polyzymd clean-pdb` | Yes | PDB cleanup |
-| `polyzymd submit` | No | Requires a CUDA environment |
-| `polyzymd run-segment` | No | Requires a CUDA environment |
+## 3. If You Are Installing on HPC
 
-## HPC Installation
+Use one of the CUDA environments instead of `build`.
 
-```{warning}
-The SLURM presets in PolyzyMD are designed for **CU Boulder Alpine/Blanca**
-and **PSC Bridges2**. Other clusters will need custom presets — see
-{doc}`hpc_slurm` for details.
+```bash
+git clone https://github.com/joelaforet/polyzymd.git
+cd polyzymd
+
+# Pick the environment that matches your cluster
+pixi install -e cuda-12-6
+# or
+pixi install -e cuda-12-4
+
+pixi shell -e cuda-12-6
+polyzymd info
 ```
 
-On HPC clusters with GPUs, use one of the **CUDA environments**. Pick the
-environment that matches your cluster's CUDA driver version.
+Supported presets currently target CU Boulder Alpine/Blanca and PSC Bridges2.
+For submission details and cluster-specific notes, see
+{doc}`hpc_slurm`.
 
-### How to find your CUDA version
+### Choose the Right CUDA Environment
 
-On a GPU node, run:
+On a GPU node, check the driver version:
 
 ```bash
 nvidia-smi | head -1
 ```
 
-The driver version in the top-right maps to a maximum CUDA version:
+Use this mapping:
 
 | Cluster | CUDA driver | Environment |
 |---------|-------------|-------------|
 | PSC Bridges2 | 12.6 | `cuda-12-6` |
 | CU Boulder Blanca | 12.4 | `cuda-12-4` |
 
-### Setup steps
+## 4. Verify the Commands You Can Use
 
-```bash
-# 1. Install pixi (if not already installed)
-curl -fsSL https://pixi.sh/install.sh | sh
-source ~/.bashrc
+In the `build` environment, these commands should work directly:
 
-# 2. Clone the repo to your projects directory
-cd /projects/$USER
-git clone https://github.com/joelaforet/polyzymd.git
-cd polyzymd
+| Command | Works in `build`? | Notes |
+|---------|-------------------|-------|
+| `polyzymd init` | Yes | Project scaffolding |
+| `polyzymd build` | Yes | System building |
+| `polyzymd validate` | Yes | Config validation |
+| `polyzymd clean-pdb` | Yes | PDB cleanup |
+| `polyzymd info` | Yes | Version/dependency summary |
+| `polyzymd submit` | No | Requires a CUDA environment |
+| `polyzymd run-segment` | No | Requires a CUDA environment |
 
-# 3. Install the environment matching your cluster
-pixi install -e cuda-12-6    # Bridges2
-# or
-pixi install -e cuda-12-4    # CU Boulder Blanca
+## Common Installation Checks
 
-# 4. Verify installation (on a GPU node)
-pixi shell -e cuda-12-6
-polyzymd info
-```
+If something looks wrong, try these first:
 
-```{tip}
-You only need to run `pixi install` once. After that, `pixi shell -e <env>`
-is all you need to activate the environment in each new session.
-```
-
-### Submitting jobs
-
-Inside the pixi shell, submission works as usual:
-
-```bash
-pixi shell -e cuda-12-6
-
-polyzymd submit -c config.yaml \
-    --replicates 1-3 \
-    --preset aa100 \
-    --dry-run
-```
-
-The generated SLURM scripts automatically activate the correct pixi
-environment via `pixi shell-hook` — no `module load` or `conda activate`
-needed in job scripts.
-
-## Developer Installation
-
-For contributing to PolyzyMD or modifying the source code:
-
-```bash
-# Clone the repository
-git clone https://github.com/joelaforet/polyzymd.git
-cd polyzymd
-
-# Install the build environment (editable mode is automatic via pixi.toml)
-pixi install -e build
-
-# Activate
-pixi shell -e build
-
-# Run tests
-pytest tests/ -x -q --tb=short --ignore=tests/test_packmol.py
-
-# Run linting
-ruff check src/
-ruff format --check src/
-```
-
-PolyzyMD is installed in editable mode by default (configured in `pixi.toml`
-via `polyzymd = { path = ".", editable = true }`). Any source changes are
-immediately reflected without reinstalling.
-
-## Optional Dependencies
-
-### AmberTools
-
-AmberTools is included in all pixi environments by default (pinned to
-version 23.3 for compatibility with the OpenFF stack). No additional
-installation is needed.
-
-To use AM1-BCC charges via AmberTools in your configuration:
-
-```yaml
-substrate:
-  charge_method: "am1bcc"
-```
-
-### OpenEye Toolkit (commercial, faster AM1-BCC)
-
-If you have an OpenEye license, install the toolkit in your pixi environment:
-
-```bash
-pixi shell -e build
-pip install openeye-toolkits
-```
-
-## Common Installation Issues
-
-### "pixi: command not found"
-
-Make sure pixi is installed and on PATH:
+### `pixi: command not found`
 
 ```bash
 curl -fsSL https://pixi.sh/install.sh | sh
@@ -192,68 +119,31 @@ source ~/.bashrc
 which pixi
 ```
 
-### "polyzymd: command not found"
-
-Make sure you've activated the pixi environment:
+### `polyzymd: command not found`
 
 ```bash
-pixi shell -e build        # local use
-pixi shell -e cuda-12-6    # HPC use
-which polyzymd             # should show path inside .pixi/
+pixi shell -e build
+which polyzymd
 ```
 
-### pixi install fails on HPC login node
+### OpenMM cannot see CUDA
 
-Some HPC systems restrict network access on login nodes. Try:
-
-1. Use a compile/data-transfer node if available
-2. Or pre-download on a machine with internet access and `rsync` the
-   repository (including `.pixi/`) to the cluster
-
-### OpenMM can't find CUDA
-
-Make sure you're using the correct CUDA environment for your cluster:
+Make sure you activated the CUDA environment that matches your cluster:
 
 ```bash
-# Check your GPU's CUDA version
-nvidia-smi | head -1
-
-# Use the matching environment
-pixi shell -e cuda-12-6    # NOT cuda-12-4 on a 12.6 system
+pixi shell -e cuda-12-6
 python -c "import openmm; print(openmm.Platform.getPlatformByName('CUDA').getName())"
 ```
 
-### Adding support for a new cluster
+For broader installation and workflow issues, see {doc}`troubleshooting`.
 
-If your cluster has a different CUDA driver version, you can add a new
-environment to `pixi.toml` following the pattern of the existing CUDA
-features. See the comments in `pixi.toml` for instructions, or file a PR.
+## Contributor Setup
 
-## Updating PolyzyMD
+If you are modifying PolyzyMD itself, use the contributor environment guide:
 
-To update to the latest version:
+- {doc}`../contributor_guide/setup`
 
-```bash
-cd /path/to/polyzymd
-git pull
-pixi install -e <your-environment>
-```
+## Next Step
 
-Since PolyzyMD is installed in editable mode from the local clone,
-`git pull` picks up all code changes. Running `pixi install` again
-updates any changed conda dependencies.
-
-## Uninstalling
-
-```bash
-# Remove the pixi environments
-cd /path/to/polyzymd
-rm -rf .pixi
-
-# Or remove the entire clone
-rm -rf /path/to/polyzymd
-```
-
-## Next Steps
-
-Once installed, continue to the {doc}`quickstart` guide to run your first simulation.
+Continue to {doc}`quickstart` to create a project scaffold and run your first
+simulation.

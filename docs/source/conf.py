@@ -13,6 +13,10 @@ sys.path.insert(0, os.path.abspath("../../src"))
 # This allows autodoc to generate documentation without actually importing these
 # heavy dependencies (OpenMM, OpenFF, etc.) which require CUDA/GPU libraries
 autodoc_mock_imports = [
+    "MDAnalysis",
+    "MDAnalysis.analysis",
+    "MDAnalysis.analysis.base",
+    "MDAnalysis.lib",
     "openmm",
     "openff",
     "openff.toolkit",
@@ -34,7 +38,7 @@ autodoc_mock_imports = [
 project = "PolyzyMD"
 copyright = "2026, Joseph R. Laforet Jr."
 author = "Joseph R. Laforet Jr."
-release = "1.1.0"
+release = "1.2.0"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -127,7 +131,7 @@ html_theme_options = {
     "style_external_links": True,
     "collapse_navigation": False,
     "sticky_navigation": True,
-    "navigation_depth": 4,
+    "navigation_depth": 3,
     "includehidden": True,
     "titles_only": False,
 }

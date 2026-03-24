@@ -1,68 +1,79 @@
-# Contributing Guide
+# Contributing to PolyzyMD
 
-This guide covers how to contribute to PolyzyMD, with a focus on adding new solvents to the library.
+This guide is for developers and scientific contributors who want to make a
+small, reviewable change to PolyzyMD and submit it cleanly.
 
-## Contributing New Solvents
+## Start with the contributor environment
 
-The co-solvent library is designed to be easily extensible. Here's how to add a new solvent.
+Set up the project as described in {doc}`../contributor_guide/setup`.
 
-### Step 1: Add to the Co-solvent Library
+For most changes, your loop is:
 
-Edit `src/polyzymd/data/cosolvent_library.py` and add your solvent to `COSOLVENT_LIBRARY`:
+1. create a branch
+2. make one focused change
+3. run the relevant checks
+4. open a pull request with a clear explanation of why the change matters
 
-```python
-COSOLVENT_LIBRARY: Dict[str, CoSolventData] = {
-    # ... existing solvents ...
-    
-    "formamide": CoSolventData(
-        name="formamide",
-        smiles="C(=O)N",
-        density=1.133,           # g/mL from PubChem
-        residue_name="FOR",      # 3-letter code
-        pubchem_cid=713,         # For reference
-    ),
-}
-```
+## What good contributions look like
 
-**Requirements:**
-- **name**: Lowercase identifier (used in YAML configs)
-- **smiles**: Valid SMILES string (verify with RDKit or OpenEye)
-- **density**: Density in g/mL (required for volume fraction calculations)
-- **residue_name**: 3-letter code for PDB/topology files
-- **pubchem_cid**: PubChem Compound ID for traceability
+- one clear purpose per branch or PR
+- changes that follow existing patterns instead of introducing a parallel style
+- docs and tests updated when behavior changes
+- commands verified in a `pixi` environment
 
-### Step 2: Generate the Pre-computed SDF
+## Recommended verification commands
 
-Run the generator script to create the SDF file with embedded charges:
+From the repository root:
 
 ```bash
-pixi shell -e build
-cd /path/to/polyzymd
-python src/polyzymd/data/solvents/_generator.py
+pixi run -e build pytest tests/ -v
+pixi run -e build ruff check src/
+pixi run -e build make -C docs clean html
 ```
 
-This will:
-1. Load the molecule from SMILES
-2. Generate a 3D conformer
-3. Compute AM1BCC partial charges
-4. Save to `src/polyzymd/data/solvents/{name}.sdf`
+Run the narrowest useful subset for small changes, then run the broader set
+before opening a PR if your change touches core workflows.
 
-### Step 3: Verify the SDF
+## A concrete example: add a new co-solvent
 
-Check that the SDF was created correctly:
+One common contribution is extending the built-in co-solvent library.
+
+### 1. Add the library entry
+
+Edit `src/polyzymd/data/cosolvent_library.py` and add a new item to
+`COSOLVENT_LIBRARY`:
 
 ```python
-from openff.toolkit import Molecule
-
-mol = Molecule.from_file("src/polyzymd/data/solvents/formamide.sdf")
-print(f"Atoms: {mol.n_atoms}")
-print(f"Charges: {mol.partial_charges}")
-print(f"Residue: {mol.atoms[0].metadata.get('residue_name')}")
+"formamide": CoSolventData(
+    name="formamide",
+    smiles="C(=O)N",
+    density=1.133,
+    residue_name="FOR",
+    pubchem_cid=713,
+),
 ```
 
-### Step 4: Test the New Solvent
+Use:
 
-Create a test configuration using your new solvent:
+- a lowercase config name
+- a valid SMILES string
+- a literature or database-backed density
+- a stable three-letter residue name
+- a traceable external identifier such as PubChem CID
+
+### 2. Generate the solvent SDF
+
+Run the generator from the repository root:
+
+```bash
+pixi run -e build python src/polyzymd/data/solvents/_generator.py
+```
+
+This creates a charged SDF in `src/polyzymd/data/solvents/`.
+
+### 3. Test the new solvent in a config
+
+Add it to a simple config:
 
 ```yaml
 solvent:
@@ -74,99 +85,47 @@ solvent:
       volume_fraction: 0.10
 ```
 
-Run the build to verify it works:
+Then verify the build path:
 
 ```bash
-polyzymd build test_config.yaml --dry-run
+pixi run -e build polyzymd build -c test_config.yaml --dry-run
 ```
 
-### Step 5: Submit a Pull Request
+### 4. Include the right context in your PR
 
-1. Commit your changes:
-   - `src/polyzymd/data/cosolvent_library.py` (library entry)
-   - `src/polyzymd/data/solvents/{name}.sdf` (pre-computed charges)
+Call out:
 
-2. Include in your PR description:
-   - The solvent name and use case
-   - PubChem CID reference for density value
-   - Any special considerations (e.g., hydrogen bonding, coordination)
+- what you added
+- the source of the density or other chemical constants
+- any scientific caveats reviewers should know
+- the commands you ran to verify the change
 
-## SDF File Format
+## Other common contribution areas
 
-The SDF files in `src/polyzymd/data/solvents/` follow a specific format:
+- docs cleanup and reorganization
+- new analysis workflows or plotting support
+- new comparison metrics
+- HPC preset updates
+- packaging and release automation
 
-```
-molecule_name
-     RDKit          3D
+For extension-specific guidance, use the pages in
+{doc}`../contributor_guide/index`.
 
-  4  3  0  0  0  0  0  0  0  0999 V2000
-    0.0000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
-    ...
-M  CHG  ...
-M  END
-> <atom.dprop.PartialCharge>
--0.123456 0.234567 ...
+## Before opening a PR
 
-> <residue_name>
-DMS
+Check that your change:
 
-$$$$
-```
+- follows existing naming and file layout patterns
+- does not commit generated junk or local cache files
+- updates docs when user-facing behavior changes
+- keeps experimental analysis workflows clearly labeled as experimental
 
-Key elements:
-- **3D coordinates**: Generated conformer
-- **PartialCharge property**: AM1BCC charges for each atom
-- **residue_name property**: 3-letter residue code for topology
+## Related pages
 
-## Water Models
+- contributor environment: {doc}`../contributor_guide/setup`
+- architecture overview: {doc}`architecture`
+- packaging notes: {doc}`packaging`
 
-Water molecules use hardcoded literature charges (not AM1BCC) for accuracy:
-
-| Model | O Charge | H Charge | Source |
-|-------|----------|----------|--------|
-| TIP3P | -0.834 | +0.417 | Jorgensen et al., 1983 |
-| SPC/E | -0.8476 | +0.4238 | Berendsen et al., 1987 |
-
-To add a new water model, edit `src/polyzymd/data/solvent_molecules.py`:
-
-```python
-def _create_tip4pew_water() -> Molecule:
-    """Create TIP4P-Ew water with literature charges."""
-    mol = Molecule.from_smiles("O")
-    mol.generate_conformers(n_conformers=1)
-    
-    # TIP4P-Ew charges (note: virtual site not included)
-    charges = [-0.84844, 0.42422, 0.42422] * unit.elementary_charge
-    mol.partial_charges = charges
-    
-    for atom in mol.atoms:
-        atom.metadata["residue_name"] = "HOH"
-    
-    return mol
-```
-
-## Code Style
-
-- Follow PEP 8 and use `ruff` for linting
-- Add type hints for all function signatures
-- Include docstrings with Args/Returns sections
-- Keep lines under 100 characters
-
-## Testing
-
-Before submitting:
-
-```bash
-# Run linting
-ruff check src/
-
-# Run type checking (if available)
-mypy src/polyzymd/
-
-# Test the build process
-polyzymd build examples/enzyme_cosolvent.yaml --dry-run
-```
-
-## Questions?
-
-Open an issue on GitHub: https://github.com/joelaforet/polyzymd/issues
+<!-- IMAGE OPPORTUNITY: Add a contributor workflow figure showing `branch ->
+edit -> test -> docs build -> PR`, with a small inset for the co-solvent data
+path from library entry to generated SDF. -->
