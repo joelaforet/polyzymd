@@ -396,6 +396,14 @@ polyzymd run-gromacs -c config.yaml
 
 ## Post-Processing and Analysis
 
+```{note}
+The `polyzymd analyze` command family currently supports OpenMM-produced
+trajectories only (DCD format in PolyzyMD's standard directory layout).
+To analyze GROMACS trajectories, use native GROMACS tools as shown below,
+or MDAnalysis directly. GROMACS XTC trajectory support in `polyzymd analyze`
+is planned for v1.2.1 ([#47](https://github.com/joelaforet/polyzymd/issues/47)).
+```
+
 ### Extract Energy Data
 
 ```bash

@@ -136,6 +136,11 @@ def analyze() -> None:
     Or run individual analyses:
         polyzymd analyze rmsf -c config.yaml -r 1-5 --eq-time 100ns
         polyzymd analyze distances -c config.yaml -r 1 --pair "sel1 : sel2"
+
+    \b
+    Note: Analysis currently supports OpenMM-produced trajectories only
+    (DCD format in PolyzyMD's standard directory layout). GROMACS XTC
+    trajectory support is planned for v1.2.1 (see GitHub issue #47).
     """
     pass
 

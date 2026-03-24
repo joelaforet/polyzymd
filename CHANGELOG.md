@@ -55,7 +55,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shared-path bugs in the plot orchestrator, contacts/distances comparison edge
   cases, and corrupted-trajectory handling in contacts/exposure workflows.
   (`src/polyzymd/compare/`, `src/polyzymd/analysis/contacts/`,
-  `src/polyzymd/analysis/distances/`)
+   `src/polyzymd/analysis/distances/`)
+
+### Known Limitations
+
+- **Analysis supports OpenMM trajectories only.** The `polyzymd analyze`
+  commands expect DCD trajectories in PolyzyMD's standard directory layout.
+  GROMACS XTC trajectory support is planned for v1.2.1 (#47). Users running
+  GROMACS simulations should use native GROMACS analysis tools or MDAnalysis
+  directly until then.
 
 ## [1.1.1] - 2026-03-23
 

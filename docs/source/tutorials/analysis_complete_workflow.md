@@ -21,7 +21,9 @@ but they are not part of the main tutorial path.
 
 You need:
 
-- completed production trajectories for each condition
+- completed **OpenMM** production trajectories for each condition (DCD format
+  in PolyzyMD's standard directory layout; GROMACS XTC support is planned for
+  [v1.2.1](https://github.com/joelaforet/polyzymd/issues/47))
 - one `config.yaml` per condition
 - a topology such as `solvated_system.pdb` already produced during the build
 
