@@ -48,6 +48,7 @@ from polyzymd.compare.settings import (  # noqa: F401
     SecondaryStructureComparisonSettings,
     TriadPairSettings,
 )
+from polyzymd.core.branding import prepend_file_header
 
 # Backward-compatible aliases for analysis module
 # The analysis/triad module still imports these old names
@@ -1168,13 +1169,10 @@ def generate_comparison_template(name: str, eq_time: str = "10ns") -> str:
     str
         YAML template content
     """
-    return f"""\
-# ============================================================================
+    return prepend_file_header(f"""\
 # PolyzyMD Comparison Configuration
-# ============================================================================
 # Compare analyses across simulation conditions (e.g., polymer, temperature).
 # Docs: https://polyzymd.readthedocs.io/en/latest/
-# ============================================================================
 
 name: "{name}"
 description: "Comparison of simulation conditions"
@@ -1248,7 +1246,7 @@ analysis_settings:
   # Each pair can have its own threshold and display labels for above/below
   # states.  If threshold is omitted, the global threshold (default 3.5 Å)
   # is used.  If below_label / above_label are omitted, defaults are
-  # "Below {threshold}Å" / "Above {threshold}Å".
+  # "Below {{threshold}}Å" / "Above {{threshold}}Å".
   #
   # distances:
   #   threshold: 3.5                         # global default threshold
@@ -1476,4 +1474,4 @@ plot_settings:
   #   generate_individual_bars: true  # one bar chart per SS type
   #   generate_diff_heatmap: true  # Δ(helix persistence) vs control
   #   diff_colormap: "RdBu_r"     # diverging colormap for diff heatmap
-"""
+""")

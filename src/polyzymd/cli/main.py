@@ -22,6 +22,7 @@ from typing import Optional
 import click
 
 from polyzymd.cli.colors import colored_echo, setup_colored_logging
+from polyzymd.core.branding import SHORT_CREDIT_LINE, prepend_file_header
 
 # Bootstrap a minimal root handler so suppress_openff_logs() works at import
 # time.  setup_colored_logging() replaces this handler when the CLI runs.
@@ -30,6 +31,11 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 LOGGER = logging.getLogger("polyzymd")
+
+
+def _echo_branding(phase: str = "cli") -> None:
+    """Print short PolyzyMD branding for top-level user-facing commands."""
+    colored_echo(SHORT_CREDIT_LINE, phase=phase)
 
 
 def suppress_openff_logs() -> None:
@@ -708,6 +714,7 @@ def submit(
     # Resolve pixi environment: explicit flag > preset default
     resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "cuda-12-4")
 
+    _echo_branding("workflow")
     colored_echo(f"Loading configuration from: {config}", phase="workflow")
     colored_echo(f"Submitting jobs with preset: {preset}", phase="workflow")
     colored_echo(f"Pixi environment: {resolved_pixi_env}", phase="workflow")
@@ -1628,6 +1635,7 @@ def init(name: str) -> None:
 
     try:
         # Create directory structure
+        _echo_branding()
         colored_echo(f"Creating project directory: {name}/")
         project_dir.mkdir(parents=True)
         (project_dir / "structures").mkdir()
@@ -1642,9 +1650,13 @@ def init(name: str) -> None:
         with resources.as_file(template_path) as template_file:
             shutil.copy(template_file, config_dest)
 
+        config_dest.write_text(prepend_file_header(config_dest.read_text(), comment_prefix="#"))
+
         # Create placeholder files
         protein_placeholder = project_dir / "structures" / "place_protein_here.placeholder.txt"
-        protein_placeholder.write_text("""\
+        protein_placeholder.write_text(
+            prepend_file_header(
+                """\
 # ============================================================================
 # PLACEHOLDER: Place your protein PDB file here
 # ============================================================================
@@ -1664,10 +1676,15 @@ def init(name: str) -> None:
 #
 # Delete this placeholder file after adding your protein structure.
 # ============================================================================
-""")
+""",
+                comment_prefix="#",
+            )
+        )
 
         ligand_placeholder = project_dir / "structures" / "place_ligand_here.placeholder.txt"
-        ligand_placeholder.write_text("""\
+        ligand_placeholder.write_text(
+            prepend_file_header(
+                """\
 # ============================================================================
 # PLACEHOLDER: Place your ligand SDF file here (if using substrate)
 # ============================================================================
@@ -1688,7 +1705,10 @@ def init(name: str) -> None:
 # If you're not using a substrate, you can delete this placeholder
 # and comment out the 'substrate' section in config.yaml.
 # ============================================================================
-""")
+""",
+                comment_prefix="#",
+            )
+        )
 
         # Success message
         colored_echo()
@@ -1881,6 +1901,8 @@ def recover(
     """
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.simulation.progress import load_or_scan_progress, save_progress
+
+    _echo_branding("workflow")
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
@@ -2100,6 +2122,7 @@ def info() -> None:
     """Show PolyzyMD installation information."""
     from polyzymd import __version__
 
+    _echo_branding()
     colored_echo("PolyzyMD - Molecular Dynamics for Enzyme-Polymer Systems", phase="cli")
     colored_echo(f"Version: {__version__}", phase="cli")
     colored_echo("", phase="cli")

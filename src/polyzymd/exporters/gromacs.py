@@ -22,6 +22,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
+from polyzymd.core.branding import FULL_CREDIT_LINE, SHORT_CREDIT_LINE
+
 if TYPE_CHECKING:
     from openff.interchange import Interchange
     from openmm.app import Topology as OpenMMTopology
@@ -76,7 +78,7 @@ OPENFF_DEFAULTS = {
 WATER_COMPRESSIBILITY = 4.5e-5
 
 # Branding
-POLYZYMD_BRANDING = "Made by PolyzyMD, by Joseph R. Laforet Jr."
+POLYZYMD_BRANDING = FULL_CREDIT_LINE
 
 
 # =============================================================================
@@ -1339,6 +1341,7 @@ class RunScriptGenerator:
             'echo "========================================"',
             'echo "GROMACS Workflow for ${PREFIX}"',
             'echo "========================================"',
+            f'echo "{SHORT_CREDIT_LINE}"',
             'echo "Using GROMACS: $GMX"',
             'echo ""',
             "",

@@ -34,6 +34,7 @@ from polyzymd.compare.settings import (
     ContactsComparisonSettings,
     RMSFAnalysisSettings,
 )
+from polyzymd.core.branding import SHORT_CREDIT_LINE, prepend_file_header
 from polyzymd.core.experimental import (
     echo_experimental_warning,
     experimental_features_for_comparison_type,
@@ -43,6 +44,12 @@ from polyzymd.core.experimental import (
 )
 
 LOGGER = logging.getLogger("polyzymd.compare.cli")
+
+
+def _echo_branding() -> None:
+    """Print short PolyzyMD branding for top-level comparison commands."""
+    click.echo(SHORT_CREDIT_LINE)
+
 
 # ---------------------------------------------------------------------------
 # Mapping between comparator registry names and analysis_settings YAML keys.
@@ -143,6 +150,8 @@ def init(name: str, eq_time: str, output_dir: Optional[Path]):
         sys.exit(1)
 
     try:
+        _echo_branding()
+
         # Create directory structure
         project_dir.mkdir(parents=True)
         (project_dir / "results").mkdir()
@@ -172,7 +181,9 @@ Then reference it in comparison.yaml:
 The enzyme PDB should be the reference structure (e.g., from PDB or your
 prepared simulation input), NOT a trajectory frame.
 """
-        (project_dir / "structures" / "README.md").write_text(structures_readme)
+        (project_dir / "structures" / "README.md").write_text(
+            prepend_file_header(structures_readme, comment_prefix="#")
+        )
 
         # Generate and write template
         template_content = generate_comparison_template(name, eq_time)
@@ -1187,6 +1198,8 @@ def plot_all(
     """
     from polyzymd.compare.plotter import ComparisonPlotter, PlotterRegistry
 
+    _echo_branding()
+
     # Configure logging
     log_level = logging.WARNING if quiet else (logging.DEBUG if debug else logging.INFO)
     logging.basicConfig(
@@ -1621,6 +1634,8 @@ def run_all(
     """
     from polyzymd.analysis.core.logging_utils import setup_logging
     from polyzymd.compare.core.registry import ComparatorRegistry
+
+    _echo_branding()
 
     setup_logging(quiet=quiet, debug=debug)
 

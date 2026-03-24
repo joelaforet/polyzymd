@@ -20,6 +20,7 @@ from polyzymd.analysis.core.constants import (
     DEFAULT_DISTANCE_THRESHOLD,
     DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
 )
+from polyzymd.core.branding import prepend_file_header
 
 # =============================================================================
 # Individual Analysis Configurations
@@ -370,16 +371,13 @@ def generate_analysis_template(eq_time: str = "10ns") -> str:
     str
         YAML template content
     """
-    return f"""\
-# ============================================================================
+    return prepend_file_header(f"""\
 # PolyzyMD Analysis Configuration
-# ============================================================================
 # Configures which analyses to run for this simulation.
 # Must be in same directory as config.yaml.
 #
 # Run all enabled analyses: polyzymd analyze run
 # Docs: https://polyzymd.readthedocs.io/en/latest/
-# ============================================================================
 
 # Which replicates to analyze
 replicates: [1, 2, 3]
@@ -489,4 +487,4 @@ rmsf:
 #   # Surface exposure filtering
 #   # Only residues with relative SASA > threshold are considered
 #   surface_exposure_threshold: 0.2  # 20% of max theoretical SASA
-"""
+""")

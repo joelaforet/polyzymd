@@ -45,6 +45,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence, Type
 
+from polyzymd.core.branding import PLOT_WATERMARK
+
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
@@ -340,7 +342,7 @@ class BasePlotter(ABC):
             fig.text(
                 0.99,
                 0.01,
-                "Made by PolyzyMD",
+                PLOT_WATERMARK,
                 fontsize=7,
                 color="dimgray",
                 ha="right",

@@ -17,9 +17,15 @@ from typing import Optional
 
 import click
 
+from polyzymd.core.branding import SHORT_CREDIT_LINE
 from polyzymd.core.experimental import echo_experimental_warning
 
 LOGGER = logging.getLogger("polyzymd.analysis")
+
+
+def _echo_branding() -> None:
+    """Print short PolyzyMD branding for top-level analysis commands."""
+    click.echo(SHORT_CREDIT_LINE)
 
 
 # =============================================================================
@@ -165,6 +171,8 @@ def init(eq_time: str) -> None:
         polyzymd analyze init --eq-time 20ns
     """
     from polyzymd.analysis.config import generate_analysis_template
+
+    _echo_branding()
 
     cwd = Path.cwd()
     config_yaml = cwd / "config.yaml"
@@ -398,6 +406,8 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
     from polyzymd.compare.config import CatalyticTriadConfig as CompareTriadConfig
     from polyzymd.compare.config import TriadPairConfig as CompareTriadPairConfig
     from polyzymd.config.schema import SimulationConfig
+
+    _echo_branding()
 
     # Set up logging with colored output
     setup_logging(quiet=quiet, debug=debug)
