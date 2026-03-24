@@ -41,8 +41,6 @@ jobs:
       - name: Install package
         run: |
           pixi install -e build
-          pixi run -e build python -m pip install . --no-deps
-          pixi run -e build python -m pip list
 
       - name: Run tests
         run: |
