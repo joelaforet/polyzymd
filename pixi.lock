@@ -5141,8 +5141,8 @@ packages:
   requires_python: ~=3.11
 - pypi: ./
   name: polyzymd
-  version: 1.1.1
-  sha256: 48551b172946901509664caa0da0578b180b3478f7107be16a1a004254d5ee3c
+  version: 1.2.0
+  sha256: 36b864b491a0c7fd7ba3d84f2b8786a9d35631c358521d40450da8242bcf3302
   requires_dist:
   - pydantic>=2.0.0
   - pyyaml>=6.0
