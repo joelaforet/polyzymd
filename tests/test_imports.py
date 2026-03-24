@@ -129,9 +129,7 @@ class TestCoSolventVolumeValidation:
         """
         from polyzymd.config.schema import CoSolventSpec, SolventConfig
 
-        config = SolventConfig(
-            co_solvents=[CoSolventSpec(name="urea", concentration=2.0)]
-        )
+        config = SolventConfig(co_solvents=[CoSolventSpec(name="urea", concentration=2.0)])
         assert len(config.co_solvents) == 1
 
     def test_mixed_volume_fraction_and_concentration_cosolvents(self):
@@ -171,6 +169,40 @@ class TestCoSolventVolumeValidation:
             ]
         )
         assert len(config.co_solvents) == 2
+
+
+class TestSimulationPhasesConfig:
+    """Test staged equilibration requirements."""
+
+    def test_requires_equilibration_stages(self):
+        from pydantic import ValidationError
+
+        from polyzymd.config.schema import SimulationPhasesConfig, SimulationPhaseConfig
+
+        production = SimulationPhaseConfig(
+            ensemble="NPT",
+            duration=1.0,
+            samples=10,
+            time_step=2.0,
+        )
+
+        with pytest.raises(ValidationError, match="requires 'equilibration_stages'"):
+            SimulationPhasesConfig(production=production)
+
+    def test_rejects_empty_equilibration_stages(self):
+        from pydantic import ValidationError
+
+        from polyzymd.config.schema import SimulationPhasesConfig, SimulationPhaseConfig
+
+        production = SimulationPhaseConfig(
+            ensemble="NPT",
+            duration=1.0,
+            samples=10,
+            time_step=2.0,
+        )
+
+        with pytest.raises(ValidationError, match="must contain at least one stage"):
+            SimulationPhasesConfig(equilibration_stages=[], production=production)
 
 
 # ---------------------------------------------------------------------------

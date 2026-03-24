@@ -37,3 +37,19 @@ table.docutils td, table.docutils th {
 .wy-nav-content {
     max-width: 900px;
 }
+
+/* Prevent long genindex entries from spilling off the page */
+table.indextable {
+    table-layout: fixed;
+}
+
+table.indextable td,
+table.indextable th,
+table.indextable a {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.genindex-jumpbox {
+    overflow-wrap: anywhere;
+}

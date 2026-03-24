@@ -222,3 +222,6 @@ src/polyzymd/exporters/gmx_test_correct_outputs/
 
 # Legacy backup files
 *.bak
+
+# Agent local preferences (personal, not shared)
+CLAUDE.local.md

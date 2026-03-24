@@ -507,14 +507,24 @@ thermodynamics:
 
 ```yaml
 simulation_phases:
-  equilibration:
-    ensemble: "NVT"                      # NVT, NPT, or NVE
-    duration: 1.0                        # nanoseconds
-    samples: 100                         # frames to save
-    time_step: 2.0                       # femtoseconds
-    thermostat: "LangevinMiddle"
-    thermostat_timescale: 1.0            # picoseconds
-  
+  equilibration_stages:
+    - name: "heating"
+      duration: 0.2                      # nanoseconds
+      samples: 20                        # frames to save
+      ensemble: "NVT"
+      temperature_start: 60.0            # starting temperature (K)
+      temperature_end: 300.0             # final temperature (K)
+      temperature_increment: 1.0         # step size (K)
+      temperature_interval: 1200.0       # time between steps (fs)
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+    - name: "free_equilibration"
+      duration: 0.8                      # nanoseconds
+      samples: 80
+      ensemble: "NPT"
+      temperature: 300.0
+
   production:
     ensemble: "NPT"
     duration: 100.0                      # nanoseconds total
@@ -525,8 +535,10 @@ simulation_phases:
     barostat: "MC"                       # Monte Carlo barostat
     barostat_frequency: 25               # steps between barostat moves
   
-  segments: 10                           # Split production into segments
 ```
+
+PolyzyMD requires staged equilibration. Use one or more entries in
+`equilibration_stages` even for minimal workflows.
 
 ### Ensembles
 

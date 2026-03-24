@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "polyzymd"
-version = "1.1.1"
+version = "1.2.0"
 description = "Molecular dynamics simulation toolkit for enzyme-polymer systems"
 readme = "README.md"
 license = "MIT"
@@ -59,6 +59,7 @@ dependencies = [
     # Analysis
     "biopandas>=0.4.0",
     "scipy>=1.9.0",
+    "rust-sasa-python>=0.1.0",  # Fast SASA calculations for binding preference
 ]
 
 [project.optional-dependencies]

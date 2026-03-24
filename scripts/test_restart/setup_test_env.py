@@ -27,14 +27,14 @@ Output structure::
 
 Usage::
 
-    # On the cluster, inside the polyzymd-env conda environment:
-    mamba run -n polyzymd-env python setup_test_env.py
+    # On the cluster, from the repository root:
+    pixi run -e cuda-12-4 python scripts/test_restart/setup_test_env.py
 
     # Or if already activated:
     python setup_test_env.py
 
 Requirements:
-    - OpenMM (available in polyzymd-env)
+    - OpenMM (available in the PolyzyMD pixi environments)
     - PolyzyMD installed (for progress file generation)
 
 Takes ~10s on GPU, ~30s on CPU.
@@ -109,13 +109,15 @@ thermodynamics:
   pressure: {PRESSURE}
 
 simulation_phases:
-  equilibration:
-    ensemble: "NVT"
-    duration: 0.001
-    samples: 5
-    time_step: {TIMESTEP_FS}
-    thermostat: "LangevinMiddle"
-    thermostat_timescale: 1.0
+  equilibration_stages:
+    - name: "test_equilibration"
+      ensemble: "NVT"
+      duration: 0.001
+      samples: 5
+      time_step: {TIMESTEP_FS}
+      temperature: {TEMPERATURE}
+      thermostat: "LangevinMiddle"
+      thermostat_timescale: 1.0
   production:
     ensemble: "NPT"
     duration: {TOTAL_PRODUCTION_NS}
@@ -463,8 +465,8 @@ def main():
     print(f"  {CONFIG_PATH}                    (PolyzyMD config)")
     print(f"  {WORKDIR}/")
     print(f"    solvated_system.pdb          ({pdb_path.stat().st_size // 1024} KB)")
-    print(f"    progress.json                (segment 0 complete)")
-    print(f"    production_0/")
+    print("    progress.json                (segment 0 complete)")
+    print("    production_0/")
     for fp in sorted(seg_dir.iterdir()):
         print(f"      {fp.name:<45} ({fp.stat().st_size // 1024} KB)")
     print()

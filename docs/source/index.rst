@@ -1,103 +1,82 @@
 .. image:: _static/logo.png
    :alt: PolyzyMD Logo
    :align: center
-   :width: 400px
+   :width: 320px
 
 PolyzyMD Documentation
 ======================
 
-**PolyzyMD** is a molecular dynamics simulation toolkit for studying enzyme-polymer systems.
-It provides a streamlined workflow for setting up, running, and managing MD simulations
-on HPC clusters.
+PolyzyMD is a molecular dynamics toolkit for building, running, and analyzing
+enzyme-polymer simulations.
+
+Use this site by *need*:
+
+- Start here if you need to install PolyzyMD or run a first simulation.
+- Use Tutorials for guided, end-to-end learning.
+- Use How-To Guides for specific tasks such as SLURM submission, restraints,
+  polymers, GROMACS export, or condition comparisons.
+- Use Reference for command lookup, configuration details, benchmarks, and API
+  docs.
+- Use Explanation for concepts, rationale, interpretation, and best practices.
+- Use Contributor Guide for development architecture and extension workflows.
 
 .. note::
+
    PolyzyMD is under active development. If you encounter issues, please
    `open an issue <https://github.com/joelaforet/polyzymd/issues>`_ on GitHub.
 
-Features
---------
+.. note::
 
-- **YAML-based Configuration**: Define your entire simulation in a single, validated config file
-- **Automated System Building**: Combine enzymes, substrates, polymers, and solvents
-- **HPC Integration**: Self-resubmitting SLURM jobs with automatic checkpointing and recovery
-- **Flexible Restraints**: MDAnalysis-style atom selection for distance restraints
-- **OpenFF/OpenMM Backend**: Modern force fields and GPU-accelerated simulations
+   Stable analysis workflows for the `v1.2.0` release are RMSF, contacts,
+   distances, catalytic triad, and secondary structure. Binding preference,
+   exposure dynamics, binding free energy, and polymer affinity remain
+   available, but are documented as experimental.
 
-Quick Example
--------------
+Choose Your Path
+----------------
 
-.. code-block:: yaml
+- :doc:`Get Started <get_started/index>`
+  Install PolyzyMD with pixi and run your first simulation.
+- :doc:`Tutorials <tutorials/index>`
+  Follow guided, end-to-end workflows with clear success states.
+- :doc:`How-To Guides <how_to/index>`
+  Solve a specific task quickly without wading through background material.
+- :doc:`Reference <reference/index>`
+  Look up commands, config schema, API modules, and benchmark data.
+- :doc:`Explanation <explanation/index>`
+  Understand why workflows are structured the way they are and how to
+  interpret results.
+- :doc:`Contributor Guide <contributor_guide/index>`
+  Extend PolyzyMD, understand the architecture, and contribute safely.
 
-   name: "LipA_polymer_simulation"
-   
-   enzyme:
-     name: "LipA"
-     pdb_path: "structures/enzyme.pdb"
-   
-   polymers:
-     enabled: true
-     type_prefix: "SBMA-EGPMA"
-     monomers:
-       - label: "A"
-         probability: 0.98
-         name: "SBMA"
-       - label: "B"
-         probability: 0.02
-         name: "EGPMA"
-     length: 5
-     count: 2
-   
-    simulation_phases:
-      production:
-        duration: 100.0  # ns
+Common Workflows
+----------------
 
-.. code-block:: bash
+- Install locally and validate the CLI:
+  :doc:`Install PolyzyMD with pixi <tutorials/installation>`
+- Build and submit a first simulation:
+  :doc:`Run Your First PolyzyMD Simulation <tutorials/quickstart>`
+- Run a comparison study across multiple conditions:
+  :doc:`Compare Simulation Conditions <tutorials/analysis_compare_conditions>`
+- Generate comparison figures as a smoke test:
+  :doc:`Analyze a Multi-Condition Study <tutorials/analysis_complete_workflow>`
 
-   # Validate and submit
-   polyzymd validate -c config.yaml
-   polyzymd submit -c config.yaml --replicates 1-5 --preset aa100
-
-Getting Started
----------------
+.. IMAGE OPPORTUNITY: Add a single workflow schematic showing Build -> Submit ->
+   Analyze -> Compare -> Plot, with stable and experimental analysis branches.
+..
 
 .. toctree::
+   :hidden:
    :maxdepth: 2
-   :caption: Tutorials
 
-   tutorials/installation
-   tutorials/quickstart
-   tutorials/cli_reference
-   tutorials/colored_logging
-   tutorials/configuration
-   tutorials/equilibration
-   tutorials/restraints
-   tutorials/hpc_slurm
-   tutorials/benchmarks
-   tutorials/polymers
-   tutorials/dynamic_polymers
-   tutorials/gromacs_export
-   tutorials/residue_assignment
-   tutorials/architecture
-   tutorials/packaging
-   tutorials/troubleshooting
-   tutorials/broken_molecules_debugging
-   tutorials/contributing
+   Get Started <get_started/index>
+   Tutorials <tutorials/index>
+   How-To Guides <how_to/index>
+   Reference <reference/index>
+   Explanation <explanation/index>
+   Contributor Guide <contributor_guide/index>
 
-API Reference
--------------
-
-.. toctree::
-   :maxdepth: 2
-   :caption: API Documentation
-
-   api/overview
-   api/config
-   api/builders
-   api/simulation
-   api/workflow
-   api/core
-
-Indices and tables
+Indices and Tables
 ==================
 
 * :ref:`genindex`

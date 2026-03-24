@@ -22,6 +22,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
+from polyzymd.core.branding import FULL_CREDIT_LINE, SHORT_CREDIT_LINE
+
 if TYPE_CHECKING:
     from openff.interchange import Interchange
     from openmm.app import Topology as OpenMMTopology
@@ -76,7 +78,7 @@ OPENFF_DEFAULTS = {
 WATER_COMPRESSIBILITY = 4.5e-5
 
 # Branding
-POLYZYMD_BRANDING = "Made by PolyzyMD, by Joseph R. Laforet Jr."
+POLYZYMD_BRANDING = FULL_CREDIT_LINE
 
 
 # =============================================================================
@@ -406,52 +408,15 @@ class MDPGenerator:
     def generate_equilibration_stages(self) -> List[Tuple[str, MDPParameters]]:
         """Generate MDP parameters for all equilibration stages.
 
-        Supports both simple (single-stage) and staged equilibration modes
-        from the PolyzyMD config. For staged equilibration, generates one
-        MDP file per stage with appropriate naming.
+        Generates one MDP file per configured equilibration stage.
 
         Returns:
             List of (filename, MDPParameters) tuples. Filenames follow the
             pattern "eq_01_{name}.mdp", "eq_02_{name}.mdp", etc.
         """
-        phases = self._config.simulation_phases
-
-        if phases.uses_staged_equilibration:
-            return self._generate_staged_equilibration(phases.equilibration_stages)
-        else:
-            return self._generate_simple_equilibration(phases.equilibration)
-
-    def _generate_simple_equilibration(
-        self,
-        eq_config: "SimulationPhaseConfig",
-    ) -> List[Tuple[str, MDPParameters]]:
-        """Generate MDP for simple single-stage equilibration.
-
-        Args:
-            eq_config: SimulationPhaseConfig for equilibration.
-
-        Returns:
-            List containing single (filename, MDPParameters) tuple.
-        """
-        # Determine if NVT or NPT
-        is_npt = eq_config.ensemble.value == "NPT"
-        stage_name = "npt" if is_npt else "nvt"
-
-        params = self._create_equilibration_params(
-            name=stage_name,
-            duration_ns=eq_config.duration,
-            samples=eq_config.samples,
-            time_step_fs=eq_config.time_step,
-            temperature=self._temperature,
-            ensemble=eq_config.ensemble.value,
-            thermostat=eq_config.thermostat.value if eq_config.thermostat else "LangevinMiddle",
-            thermostat_timescale=eq_config.thermostat_timescale,
-            barostat=eq_config.barostat.value if eq_config.barostat else None,
-            is_first_stage=True,
-            continuation=False,
+        return self._generate_staged_equilibration(
+            self._config.simulation_phases.equilibration_stages
         )
-
-        return [(f"{stage_name}.mdp", params)]
 
     def _generate_staged_equilibration(
         self,
@@ -827,10 +792,6 @@ class PositionRestraintGenerator:
         """
         phases = config.simulation_phases
         posres_defines: Dict[str, str] = {}
-
-        if not phases.uses_staged_equilibration:
-            logger.info("No staged equilibration - skipping position restraints")
-            return posres_defines
 
         # Collect all unique (group, force_constant) pairs, keeping max fc
         restraints_needed: Dict[str, float] = {}
@@ -1339,6 +1300,7 @@ class RunScriptGenerator:
             'echo "========================================"',
             'echo "GROMACS Workflow for ${PREFIX}"',
             'echo "========================================"',
+            f'echo "{SHORT_CREDIT_LINE}"',
             'echo "Using GROMACS: $GMX"',
             'echo ""',
             "",

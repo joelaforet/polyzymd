@@ -29,6 +29,19 @@ Package Structure
     ├── core/             # Core utilities
     │   ├── parameters.py # Simulation parameters
     │   └── restraints.py # Restraint definitions
+    ├── analysis/         # Post-simulation trajectory analysis
+    │   ├── rmsf/         # Root Mean Square Fluctuation
+    │   ├── distances/    # Inter-atomic distance analysis
+    │   ├── triad/        # Catalytic triad integrity
+    │   ├── contacts/     # Polymer-protein contacts, binding preference
+    │   ├── sasa/         # Solvent Accessible Surface Area
+    │   ├── exposure/     # Chaperone-like exposure dynamics
+    │   ├── core/         # Statistics, autocorrelation, MetricType
+    │   └── results/      # Serializable result models
+    ├── compare/          # Multi-condition statistical comparison
+    │   ├── comparators/  # RMSF, contacts, triad, BFE, affinity, exposure
+    │   ├── results/      # Comparison result models
+    │   └── plotters/     # Publication-quality figures
     └── cli/              # Command-line interface
         └── main.py       # Click CLI
 
@@ -70,6 +83,23 @@ Restraints
 - :py:class:`~polyzymd.core.restraints.RestraintDefinition` - Restraint specification
 - :py:class:`~polyzymd.core.restraints.AtomSelection` - Atom selection
 - :py:class:`~polyzymd.core.restraints.RestraintFactory` - Create restraints from config
+
+Analysis
+~~~~~~~~
+
+- :py:class:`~polyzymd.analysis.rmsf.calculator.RMSFCalculator` - Per-residue RMSF
+- :py:class:`~polyzymd.analysis.distances.calculator.DistanceCalculator` - Inter-group distances
+- :py:class:`~polyzymd.analysis.triad.analyzer.CatalyticTriadAnalyzer` - Catalytic triad integrity
+- :py:class:`~polyzymd.analysis.contacts.calculator_parallel.ParallelContactAnalyzer` - Polymer-protein contacts
+- :py:class:`~polyzymd.analysis.results.base.BaseAnalysisResult` - Serializable result base class
+
+Comparison
+~~~~~~~~~~
+
+- :py:class:`~polyzymd.compare.core.base.BaseComparator` - Template Method comparator base
+- :py:class:`~polyzymd.compare.comparators.exposure.ExposureDynamicsComparator` - Chaperone analysis
+- :py:class:`~polyzymd.compare.comparators.binding_free_energy.BindingFreeEnergyComparator` - Per-contact ΔG_sel
+- :py:class:`~polyzymd.compare.comparators.polymer_affinity.PolymerAffinityScoreComparator` - Total interaction strength
 
 
 Quick Reference

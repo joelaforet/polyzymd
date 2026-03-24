@@ -856,26 +856,15 @@ class EquilibrationStageConfig(BaseModel):
 class SimulationPhasesConfig(BaseModel):
     """Configuration for all simulation phases.
 
-    Supports two equilibration modes (mutually exclusive):
-    1. Simple mode (legacy): Single equilibration phase via 'equilibration' field
-    2. Staged mode: Multi-stage protocol via 'equilibration_stages' field
-
     Attributes:
-        equilibration_stages: Multi-stage equilibration protocol (new)
-        equilibration: Simple single-stage equilibration (legacy)
+        equilibration_stages: Multi-stage equilibration protocol
         production: Production phase settings
     """
 
     model_config = ConfigDict(extra="ignore")
 
-    # Staged equilibration (new)
     equilibration_stages: Optional[List[EquilibrationStageConfig]] = Field(
         None, description="Multi-stage equilibration protocol with position restraints"
-    )
-
-    # Simple equilibration (legacy, for backwards compatibility)
-    equilibration: Optional[SimulationPhaseConfig] = Field(
-        None, description="Simple single-stage equilibration (legacy)"
     )
 
     production: SimulationPhaseConfig = Field(..., description="Production settings")
@@ -900,48 +889,34 @@ class SimulationPhasesConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_equilibration_mode(self) -> "SimulationPhasesConfig":
-        """Ensure exactly one equilibration mode is specified."""
-        has_stages = self.equilibration_stages is not None
-        has_simple = self.equilibration is not None
-
-        if has_stages and has_simple:
+        """Ensure staged equilibration is configured."""
+        if self.equilibration_stages is None:
             raise ValueError(
-                "Cannot specify both 'equilibration_stages' and 'equilibration'. "
-                "Use 'equilibration_stages' for multi-stage protocols, "
-                "or 'equilibration' for simple single-stage equilibration."
+                "PolyzyMD now requires 'equilibration_stages' in simulation_phases. "
+                "The legacy 'equilibration' block is no longer supported. "
+                "Convert your config to one or more staged equilibration entries."
             )
 
-        if not has_stages and not has_simple:
-            raise ValueError("Must specify either 'equilibration_stages' or 'equilibration'")
+        if len(self.equilibration_stages) == 0:
+            raise ValueError("'equilibration_stages' must contain at least one stage")
 
         return self
-
-    @property
-    def uses_staged_equilibration(self) -> bool:
-        """Check if using multi-stage equilibration."""
-        return self.equilibration_stages is not None
 
     @property
     def total_equilibration_duration(self) -> float:
         """Total equilibration duration in nanoseconds.
 
-        Works for both simple and staged equilibration modes.
-        For staged mode, returns the sum of all stage durations.
+        Returns the sum of all stage durations.
         """
-        if self.uses_staged_equilibration:
-            return sum(stage.duration for stage in self.equilibration_stages)
-        return self.equilibration.duration
+        return sum(stage.duration for stage in self.equilibration_stages)
 
     @property
     def total_equilibration_samples(self) -> int:
         """Total equilibration trajectory samples.
 
-        Works for both simple and staged equilibration modes.
-        For staged mode, returns the sum of all stage samples.
+        Returns the sum of all stage samples.
         """
-        if self.uses_staged_equilibration:
-            return sum(stage.samples for stage in self.equilibration_stages)
-        return self.equilibration.samples
+        return sum(stage.samples for stage in self.equilibration_stages)
 
 
 # =============================================================================

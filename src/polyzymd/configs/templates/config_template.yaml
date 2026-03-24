@@ -228,6 +228,7 @@ description: "Description of your simulation system"
 #   - lower_wall   : Only restrains if distance below threshold
 #
 # Selection syntax:
+#   protein         : All protein atoms (use to restrict to protein chain)
 #   resid N        : Residue number (1-indexed, matches PDB)
 #   resname XXX    : Residue name (e.g., LIG, SER)
 #   name XXX       : Atom name (e.g., CA, OG, C1)
@@ -235,11 +236,14 @@ description: "Description of your simulation system"
 #   index N        : Internal atom index (0-indexed)
 #   and/or         : Combine selections
 #
+# IMPORTANT: Residue numbers restart per chain. For protein residues,
+# always use "protein and resid X" to avoid matching polymer/water atoms.
+#
 # restraints:
 #   - type: "flat_bottom"
 #     name: "substrate_restraint"
 #     atom1:
-#       selection: "resid 100 and name OG"   # Example: Serine OG
+#       selection: "protein and resid 100 and name OG"   # Example: Serine OG
 #       description: "Catalytic residue"
 #     atom2:
 #       selection: "resname LIG and name C1"  # Example: Ligand carbon
@@ -266,39 +270,13 @@ description: "Description of your simulation system"
 # thermostat options: LangevinMiddle (recommended), Langevin, Andersen
 # barostat options: MC (Monte Carlo), MCA (anisotropic)
 #
-# OPTION A: Simple equilibration (legacy)
-# Use this for straightforward equilibration without staged restraints.
+# Use staged equilibration for all simulations. This is the only supported
+# simulation config path and is the recommended workflow for stable builds.
 #
-# simulation_phases:
-#   equilibration:
-#     ensemble: "NVT"
-#     duration: 1.0                       # nanoseconds
-#     samples: 100                        # frames to save
-#     time_step: 2.0                      # femtoseconds
-#     thermostat: "LangevinMiddle"
-#     thermostat_timescale: 1.0           # picoseconds
-#   
-#   production:
-#     ensemble: "NPT"
-#     duration: 100.0                     # nanoseconds total
-#     samples: 2500                       # frames to save (total)
-#     time_step: 2.0                      # femtoseconds
-#     thermostat: "LangevinMiddle"
-#     thermostat_timescale: 1.0           # picoseconds
-#     barostat: "MC"
-#     barostat_frequency: 25              # steps between barostat moves
-#   
-#   # Daisy-chain: split production into segments for HPC job limits
-#   segments: 10                          # 10 segments = 10 ns each
-
-# ----------------------------------------------------------------------------
-# OPTION B: Multi-stage equilibration with position restraints (ADVANCED)
-# Use this for sophisticated equilibration protocols with:
+# Use this pattern for protocols with:
 #   - Temperature ramping (simulated annealing style heating)
 #   - Position restraints on specific atom groups
 #   - Staged release of restraints
-#
-# NOTE: Use EITHER equilibration OR equilibration_stages, not both.
 #
 # Available atom groups for position restraints:
 #   protein_heavy     : All non-hydrogen protein atoms
@@ -361,8 +339,6 @@ description: "Description of your simulation system"
 #     thermostat_timescale: 1.0
 #     barostat: "MC"
 #     barostat_frequency: 25
-#   
-#   segments: 10
 
 # ============================================================================
 # Output Configuration (REQUIRED)

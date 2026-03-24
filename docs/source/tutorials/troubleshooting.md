@@ -206,8 +206,9 @@ OpenMMException: Particle coordinate is NaN
 2. Reduce time step:
    ```yaml
    simulation_phases:
-     equilibration:
-       time_step: 1.0    # Reduce from 2.0 fs
+      equilibration_stages:
+        - name: "heating"
+          time_step: 1.0    # Reduce from 2.0 fs
    ```
 
 3. Check initial structure for clashes in VMD/PyMOL
@@ -308,14 +309,8 @@ polyzymd submit -c config.yaml --preset al40    # Try different GPU type
 TIMEOUT in job output
 ```
 
-**Solution:** Reduce segment duration:
-
-```yaml
-simulation_phases:
-  production:
-    duration: 100.0
-  segments: 20    # More segments = shorter each
-```
+**Solution:** Use a shorter production duration for test runs or move to a
+longer-walltime preset. PolyzyMD segments production automatically.
 
 ### "Module not found in job"
 
@@ -408,6 +403,25 @@ ValueError: System state doesn't match checkpoint
 
 ---
 
+## Known Limitations
+
+### Analysis supports OpenMM trajectories only
+
+The `polyzymd analyze` command family currently expects OpenMM-produced
+trajectories (DCD format) in PolyzyMD's standard directory layout
+(`production_N/production_N_trajectory.dcd`). GROMACS XTC trajectories
+are not yet supported.
+
+**Workarounds:**
+
+- Use native GROMACS analysis tools (`gmx rms`, `gmx rmsf`, etc.)
+- Use MDAnalysis directly with your GROMACS topology and XTC files
+
+GROMACS trajectory support in `polyzymd analyze` is planned for v1.2.1
+([#47](https://github.com/joelaforet/polyzymd/issues/47)).
+
+---
+
 ## Getting Help
 
 ### Collect Debug Information
@@ -422,8 +436,8 @@ pixi list -e build | grep -E "openmm|openff|pydantic"
 # Configuration validation
 polyzymd validate -c config.yaml
 
-# Verbose mode
-polyzymd -v build -c config.yaml --dry-run
+# Debug mode for troubleshooting
+polyzymd --debug build -c config.yaml --dry-run
 
 # Enable OpenFF logs for debugging force field issues
 polyzymd --openff-logs build -c config.yaml

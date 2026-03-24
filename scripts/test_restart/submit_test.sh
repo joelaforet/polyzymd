@@ -25,15 +25,14 @@
 #
 # Prerequisites:
 #   1. On a Blanca login node or with access to blanca-shirts partition
-#   2. polyzymd-env conda environment exists
-#   3. polyzymd installed from feature/smart-restart branch:
-#        mamba run -n polyzymd-env pip install -e ".[dev]"
+#   2. A PolyzyMD pixi environment exists
+#   3. PolyzyMD is installed via `pixi install -e <env>`
 #   4. setup_test_env.py has already been run:
-#        mamba run -n polyzymd-env python setup_test_env.py
+#        pixi run -e cuda-12-4 python scripts/test_restart/setup_test_env.py
 #
 # Usage:
 #   cd /path/to/scripts/test_restart/
-#   mamba run -n polyzymd-env python setup_test_env.py   # if not already done
+#   pixi run -e cuda-12-4 python scripts/test_restart/setup_test_env.py   # if not already done
 #   bash submit_test.sh
 #
 # Output:
@@ -54,10 +53,12 @@ ACCOUNT="blanca-shirts"
 QOS="preemptable"
 EXCLUDE="bgpu-bortz1"
 WALL_TIME="00:05:00"          # 5 minutes per job invocation
-CONDA_ENV="polyzymd-env"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PIXI_ENV="${PIXI_ENV:-cuda-12-4}"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+PIXIMANIFEST="${REPO_ROOT}/pixi.toml"
 
 # Resolve paths
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="${SCRIPT_DIR}/test_restart_workdir"
 CONFIG="${SCRIPT_DIR}/test_config.yaml"
 SLURM_SCRIPT="${SCRIPT_DIR}/slurm_test_selfresubmit.sh"
@@ -79,7 +80,7 @@ fi
 if [ ! -d "$WORKDIR" ]; then
     echo "ERROR: $WORKDIR not found."
     echo "       Run setup_test_env.py first:"
-    echo "         mamba run -n polyzymd-env python setup_test_env.py"
+    echo "         pixi run -e ${PIXI_ENV} python scripts/test_restart/setup_test_env.py"
     exit 1
 fi
 
@@ -101,7 +102,7 @@ echo "  Account:      $ACCOUNT"
 echo "  QoS:          $QOS"
 echo "  Exclude:      $EXCLUDE"
 echo "  Wall time:    $WALL_TIME (per job invocation)"
-echo "  Conda env:    $CONDA_ENV"
+echo "  Pixi env:     $PIXI_ENV"
 echo "  Working dir:  $WORKDIR"
 echo "  Config:       $CONFIG"
 echo ""
@@ -139,11 +140,7 @@ echo "Hostname: \$(hostname)"
 echo ""
 
 # --- Environment setup ---
-module purge 2>/dev/null || true
-ml miniforge 2>/dev/null || true
-
-eval "\$(conda shell.bash hook)"
-conda activate ${CONDA_ENV}
+eval "\$(pixi shell-hook -e ${PIXI_ENV} --manifest-path ${PIXIMANIFEST})"
 
 # --- Signal forwarding (trap + background + wait) ---
 CHILD_PID=""
@@ -262,7 +259,7 @@ echo "View logs as they appear:"
 echo "  tail -f ${SCRIPT_DIR}/slurm-selfresubmit-*.out"
 echo ""
 echo "Check progress at any time:"
-echo "  mamba run -n $CONDA_ENV polyzymd check-progress -c $CONFIG -r 1 --scratch-dir $WORKDIR"
+echo "  pixi run -e $PIXI_ENV polyzymd check-progress -c $CONFIG -r 1 --scratch-dir $WORKDIR"
 echo ""
 echo "Cleanup when done:"
 echo "  rm -rf $WORKDIR $CONFIG $SLURM_SCRIPT ${SCRIPT_DIR}/slurm-selfresubmit-*.out"

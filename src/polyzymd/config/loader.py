@@ -15,6 +15,7 @@ from typing import Any, Dict, Union
 import yaml
 
 from polyzymd.config.schema import SimulationConfig
+from polyzymd.core.branding import prepend_file_header
 
 
 def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
@@ -171,6 +172,8 @@ def save_config(
     if relative_paths:
         data = _convert_paths_to_relative(data, path.parent.absolute())
 
+    header = prepend_file_header("", comment_prefix="#")
+
     # Custom YAML representer for cleaner output — use a local Dumper
     # subclass so we don't mutate the global yaml.Dumper state.
     class _CleanDumper(yaml.Dumper):
@@ -184,6 +187,7 @@ def save_config(
     _CleanDumper.add_representer(str, str_representer)
 
     with open(path, "w") as f:
+        f.write(header)
         yaml.dump(
             data,
             f,

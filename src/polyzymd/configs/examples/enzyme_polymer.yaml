@@ -111,13 +111,33 @@ thermodynamics:
 # Simulation Phases
 # ============================================================================
 simulation_phases:
-  equilibration:
-    ensemble: "NVT"
-    duration: 0.5
-    samples: 50
-    time_step: 2.0
-    thermostat: "LangevinMiddle"
-    thermostat_timescale: 1.0
+  equilibration_stages:
+    - name: "heating"
+      duration: 0.1
+      samples: 10
+      ensemble: "NVT"
+      temperature_start: 60.0
+      temperature_end: 293.0
+      temperature_increment: 1.0
+      temperature_interval: 1200.0
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+        - group: "polymer_heavy"
+          force_constant: 4184.0
+    - name: "polymer_relaxation"
+      duration: 0.2
+      samples: 20
+      ensemble: "NVT"
+      temperature: 293.0
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+    - name: "free_equilibration"
+      duration: 0.2
+      samples: 20
+      ensemble: "NPT"
+      temperature: 293.0
   
   production:
     ensemble: "NPT"
@@ -129,8 +149,6 @@ simulation_phases:
     barostat: "MC"
     barostat_frequency: 25
   
-  segments: 10  # 10 segments of 10 ns each
-
 # ============================================================================
 # Output Configuration
 # ============================================================================

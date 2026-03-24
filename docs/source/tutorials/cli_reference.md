@@ -9,7 +9,8 @@ All commands support these global options (placed **before** the subcommand name
 ```bash
 polyzymd --version        # Show version
 polyzymd --help           # Show help
-polyzymd -v <command>     # Verbose output (debug logging)
+polyzymd -q <command>     # Quiet mode (suppress INFO, show warnings/errors only)
+polyzymd --debug <command>  # Debug mode (show DEBUG logging for troubleshooting)
 polyzymd --openff-logs <command>  # Enable verbose OpenFF logs
 polyzymd --no-color <command>     # Disable colored output
 ```
@@ -41,8 +42,11 @@ polyzymd --openff-logs build -c config.yaml
 polyzymd --openff-logs run-gromacs -c config.yaml
 ```
 
-This is useful when:
-- Debugging force field parameter assignment issues
+**Quiet mode (`-q` / `--quiet`):** Suppress INFO messages, show only WARNING and ERROR with minimal format (timestamp + message only). Useful for scripting or reducing output clutter.
+
+**Debug mode (`--debug`):** Show DEBUG-level messages with full format. Useful for troubleshooting issues.
+
+**OpenFF logs:** OpenFF Interchange and Toolkit libraries are suppressed by default (they generate per-atom INFO messages during system building). Use `--openff-logs` to enable them for debugging force field issues.
 - Investigating charge assignment problems
 - Troubleshooting system building failures
 
@@ -609,6 +613,434 @@ Example configs: polyzymd/configs/examples/
 
 ---
 
+## polyzymd analyze
+
+Analyze MD trajectories with various metrics.
+
+```bash
+polyzymd analyze COMMAND [OPTIONS]
+
+Commands:
+  init       Initialize analysis.yaml in current directory
+  validate   Validate analysis.yaml configuration
+  run        Run all enabled analyses from analysis.yaml
+  rmsf       Compute RMSF (Root Mean Square Fluctuation) analysis
+  distances  Compute inter-atomic distance analysis
+```
+
+### polyzymd analyze init
+
+Initialize analysis configuration for a simulation project.
+
+```bash
+polyzymd analyze init [OPTIONS]
+
+Options:
+  --eq-time TEXT    Default equilibration time [default: 10ns]
+```
+
+Must be run from a directory containing `config.yaml`.
+
+#### Example
+
+```bash
+cd my_simulation_project
+polyzymd analyze init
+polyzymd analyze init --eq-time 20ns
+```
+
+### polyzymd analyze validate
+
+Validate an analysis.yaml configuration file without running analyses.
+
+```bash
+polyzymd analyze validate [OPTIONS]
+
+Options:
+  -f, --file PATH        Path to analysis.yaml [default: analysis.yaml]
+  --format [table|json]  Output format [default: table]
+```
+
+#### What It Checks
+
+- YAML syntax and structure
+- Required fields present
+- Replicates list is non-empty
+- Distance pairs defined if distances enabled
+- Triad pairs defined if catalytic_triad enabled
+- Contact selections defined if contacts enabled
+
+#### Example
+
+```bash
+# Basic validation
+polyzymd analyze validate
+
+# Validate specific file
+polyzymd analyze validate -f path/to/analysis.yaml
+
+# JSON output for CI integration
+polyzymd analyze validate --format json
+```
+
+**Output (success):**
+```
+Validating: /path/to/analysis.yaml
+
+✓ Configuration is valid
+
+  Replicates: [1, 2, 3]
+  Equilibration time: 10ns
+  Enabled analyses: rmsf, contacts
+```
+
+**Output (errors):**
+```
+Validating: /path/to/analysis.yaml
+
+✗ Configuration has errors
+
+  • No replicates specified
+  • Distance analysis enabled but no pairs defined
+```
+
+**JSON output:**
+```json
+{
+  "file": "/path/to/analysis.yaml",
+  "valid": true,
+  "errors": [],
+  "summary": {
+    "replicates": [1, 2, 3],
+    "equilibration_time": "10ns",
+    "enabled_analyses": ["rmsf", "contacts"]
+  }
+}
+```
+
+### polyzymd analyze rmsf
+
+Compute per-residue flexibility from MD trajectories.
+
+```bash
+polyzymd analyze rmsf --config <path> --replicates <range> [OPTIONS]
+polyzymd analyze rmsf -c <path> -r 1-5 --eq-time 100ns
+```
+
+#### Options
+
+| Option | Short | Required | Default | Description |
+|--------|-------|----------|---------|-------------|
+| `--config` | `-c` | Yes | - | Path to YAML configuration file |
+| `--replicates` | `-r` | No | "1" | Replicate specification: "1-5", "1,3,5", or "1" |
+| `--eq-time` | - | No | "0ns" | Equilibration time to skip: "100ns", "5000ps" |
+| `--selection` | - | No | "protein and name CA" | MDAnalysis selection for RMSF atoms |
+| `--reference-mode` | - | No | "centroid" | Reference structure: "centroid", "average", "frame", or "external" |
+| `--reference-frame` | - | No | - | Frame index when --reference-mode=frame (1-indexed) |
+| `--reference-file` | - | No | - | Path to external PDB when --reference-mode=external |
+| `--alignment-selection` | - | No | "protein and name CA" | Selection for trajectory alignment |
+| `--centroid-selection` | - | No | "protein" | Selection for centroid finding |
+| `--plot` | - | No | false | Generate plot after analysis |
+| `--recompute` | - | No | false | Force recompute even if cached |
+| `--output-dir` | `-o` | No | auto | Custom output directory |
+
+#### Reference Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `centroid` | Most populated conformational state (K-Means) | Equilibrium flexibility analysis |
+| `average` | Mathematical mean structure | Pure thermal fluctuations |
+| `frame` | User-specified frame number | Functional state analysis |
+| `external` | External PDB file (e.g., crystal structure) | Catalytic competence, condition-independent comparison |
+
+#### Example
+
+```bash
+# Basic RMSF analysis
+polyzymd analyze rmsf -c config.yaml -r 1 --eq-time 10ns
+
+# Multiple replicates with plot
+polyzymd analyze rmsf -c config.yaml -r 1-3 --eq-time 10ns --plot
+
+# Custom reference structure
+polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode average
+
+# Specific frame as reference (e.g., catalytically competent)
+polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode frame --reference-frame 500
+
+# External crystal structure as reference (condition-independent)
+polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode external \
+    --reference-file /path/to/crystal_structure.pdb
+```
+
+#### Output
+
+Results are saved in JSON format:
+
+```
+<projects_directory>/
+└── analysis/
+    └── rmsf/
+        ├── run_1/rmsf_eq10ns.json
+        ├── run_2/rmsf_eq10ns.json
+        └── aggregated/rmsf_reps1-3_eq10ns.json
+```
+
+---
+
+## polyzymd compare
+
+Compare analysis results across multiple simulation conditions with statistical testing.
+
+```bash
+polyzymd compare COMMAND [OPTIONS]
+
+Commands:
+  init      Initialize a new comparison project
+  rmsf      Compare RMSF across conditions
+  validate  Validate comparison configuration
+  show      Display saved comparison results
+  plot      Generate comparison plots
+```
+
+### polyzymd compare init
+
+Create a new comparison project with template configuration.
+
+```bash
+polyzymd compare init NAME [OPTIONS]
+
+Arguments:
+  NAME                   Project name (creates directory)
+
+Options:
+  --eq-time TEXT         Default equilibration time [default: 10ns]
+  -o, --output-dir PATH  Parent directory [default: current]
+```
+
+#### Example
+
+```bash
+polyzymd compare init polymer_study
+cd polymer_study
+# Edit comparison.yaml to add your conditions
+```
+
+### polyzymd compare rmsf
+
+Run statistical comparison of RMSF across conditions.
+
+```bash
+polyzymd compare rmsf [OPTIONS]
+```
+
+**Requires** an `analysis_settings.rmsf` section in comparison.yaml, with a
+corresponding `comparison_settings.rmsf` entry (can be empty `{}`).
+
+#### Options
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--file` | `-f` | comparison.yaml | Path to comparison config file |
+| `--eq-time` | - | from config | Override equilibration time |
+| `--override` | - | false | Enable CLI overrides for RMSF settings |
+| `--selection` | - | from config | Override atom selection (requires --override) |
+| `--reference-mode` | - | from config | Override reference mode (requires --override) |
+| `--reference-frame` | - | from config | Override reference frame (requires --override) |
+| `--reference-file` | - | from config | Override external PDB path (requires --override) |
+| `--recompute` | - | false | Force recompute RMSF |
+| `--format` | - | table | Output format: table, markdown, json |
+| `--output` | `-o` | - | Save formatted output to file |
+| `--quiet` | `-q` | false | Suppress INFO messages |
+| `--debug` | - | false | Enable DEBUG logging |
+
+#### Example
+
+```bash
+# Run comparison with default settings (uses analysis_settings.rmsf from YAML)
+polyzymd compare rmsf
+
+# Override equilibration time
+polyzymd compare rmsf --eq-time 20ns
+
+# Override RMSF settings (requires --override flag)
+polyzymd compare rmsf --override --selection "protein and name CA CB"
+
+# Output as markdown
+polyzymd compare rmsf --format markdown -o report.md
+```
+
+### polyzymd compare validate
+
+Validate a comparison.yaml configuration file without running analyses.
+
+```bash
+polyzymd compare validate [OPTIONS]
+
+Options:
+  -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
+  --format [table|json]  Output format [default: table]
+```
+
+#### What It Checks
+
+- YAML syntax and structure
+- Required fields present
+- At least 2 conditions defined
+- Condition labels are unique
+- Control label matches a condition (if specified)
+- Config files exist for each condition
+
+#### Example
+
+```bash
+# Basic validation
+polyzymd compare validate
+
+# Validate specific file
+polyzymd compare validate -f path/to/comparison.yaml
+
+# JSON output for CI integration
+polyzymd compare validate --format json
+```
+
+**Output (success):**
+```
+Validating: /path/to/comparison.yaml
+
+✓ Configuration is valid
+
+  Name: polymer_study
+  Conditions: 3
+    - WT, PEG, SBMA
+  Control: WT
+  Analysis sections: rmsf, catalytic_triad
+```
+
+**Output (errors):**
+```
+Validating: /path/to/comparison.yaml
+
+✗ Configuration has errors
+
+  • Control 'NoPolymer' not found in conditions: ['WT', 'PEG']
+  • Config file not found: /path/to/missing/config.yaml
+```
+
+**JSON output:**
+```json
+{
+  "file": "/path/to/comparison.yaml",
+  "valid": true,
+  "errors": [],
+  "summary": {
+    "name": "polymer_study",
+    "conditions_count": 3,
+    "condition_labels": ["WT", "PEG", "SBMA"],
+    "control": "WT",
+    "sections_configured": ["rmsf", "catalytic_triad"]
+  }
+}
+```
+
+### polyzymd compare show
+
+Display a previously saved comparison result.
+
+```bash
+polyzymd compare show RESULT_FILE [OPTIONS]
+
+Arguments:
+  RESULT_FILE                     Path to saved JSON result
+
+Options:
+  --format [table|markdown|json]  Output format [default: table]
+```
+
+### polyzymd compare plot
+
+Generate publication-ready plots from comparison results.
+
+```bash
+polyzymd compare plot RESULT_FILE [OPTIONS]
+
+Arguments:
+  RESULT_FILE                     Path to saved comparison JSON
+
+Options:
+  -o, --output-dir PATH           Output directory [default: figures/]
+  --format [png|pdf|svg]          Image format [default: png]
+  --dpi INTEGER                   Resolution for PNG [default: 150]
+  --summary / --no-summary        Generate summary panel [default: yes]
+  --show / --no-show              Display interactively [default: no]
+```
+
+#### Generated Plots
+
+| File | Description |
+|------|-------------|
+| `rmsf_comparison.png` | Bar chart of mean RMSF by condition |
+| `percent_change.png` | Bar chart of % change vs control |
+| `effect_sizes.png` | Forest plot of Cohen's d values |
+| `summary_panel.png` | Combined 3-panel summary figure |
+
+#### Example
+
+```bash
+# Generate all plots
+polyzymd compare plot results/rmsf_comparison_my_study.json
+
+# High resolution for publication
+polyzymd compare plot results/rmsf_comparison_my_study.json --dpi 300
+
+# PDF format with interactive preview
+polyzymd compare plot results/rmsf_comparison_my_study.json --format pdf --show
+```
+
+---
+
+## polyzymd plot
+
+Standalone plotting for analysis results (separate from `compare plot`).
+
+```bash
+polyzymd plot COMMAND [OPTIONS]
+
+Commands:
+  rmsf       Plot and compare RMSF results
+  distances  Plot and compare distance analysis results
+```
+
+### polyzymd plot rmsf
+
+Plot RMSF analysis results, optionally comparing multiple conditions.
+
+```bash
+polyzymd plot rmsf --inputs <files> [OPTIONS]
+
+Options:
+  --inputs PATH...    One or more RMSF result JSON files [required]
+  --labels TEXT...    Labels for each input (same order as inputs)
+  -o, --output PATH   Output file path
+  --format TEXT       Output format: png, pdf, svg [default: png]
+```
+
+#### Example
+
+```bash
+# Single condition
+polyzymd plot rmsf --inputs analysis/rmsf/run_1/rmsf_eq10ns.json
+
+# Compare two conditions
+polyzymd plot rmsf \
+    --inputs no_polymer/analysis/rmsf/aggregated/rmsf_reps1-3_eq10ns.json \
+             with_polymer/analysis/rmsf/aggregated/rmsf_reps1-3_eq10ns.json \
+    --labels "No Polymer" "With Polymer" \
+    -o comparison.png
+```
+
+---
+
 ## Environment Variables
 
 PolyzyMD expands environment variables in configuration paths:
@@ -645,3 +1077,5 @@ output:
 - {doc}`quickstart` - Getting started tutorial
 - {doc}`configuration` - Configuration file reference
 - {doc}`hpc_slurm` - HPC and SLURM guide
+- {doc}`analysis_rmsf_quickstart` - RMSF analysis tutorial
+- {doc}`analysis_compare_conditions` - Comparing simulation conditions
