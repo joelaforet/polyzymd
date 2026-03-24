@@ -316,7 +316,13 @@ class AffinityStackedBarPlotter(BasePlotter):
         plt.tight_layout()
 
         output_path = self._get_output_path(output_dir, "affinity_stacked_bars")
-        return [self._save_figure(fig, output_path)]
+        return [
+            self._save_figure(
+                fig,
+                output_path,
+                experimental_features=("polymer_affinity",),
+            )
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -497,6 +503,12 @@ class AffinityGroupBarPlotter(BasePlotter):
                 f"affinity_group_bars_{poly_type.lower()}" if n_poly > 1 else "affinity_group_bars"
             )
             output_path = self._get_output_path(output_dir, stem)
-            output_paths.append(self._save_figure(fig, output_path))
+            output_paths.append(
+                self._save_figure(
+                    fig,
+                    output_path,
+                    experimental_features=("polymer_affinity",),
+                )
+            )
 
         return output_paths

@@ -464,7 +464,13 @@ class BFEHeatmapPlotter(BasePlotter):
                     n_poly > 1,
                 )
                 output_path = self._get_output_path(output_dir, stem)
-                output_paths.append(self._save_figure(fig, output_path))
+                output_paths.append(
+                    self._save_figure(
+                        fig,
+                        output_path,
+                        experimental_features=("binding_free_energy",),
+                    )
+                )
 
         return output_paths
 
@@ -716,6 +722,12 @@ class BFEBarPlotter(BasePlotter):
                     n_poly > 1,
                 )
                 output_path = self._get_output_path(output_dir, stem)
-                output_paths.append(self._save_figure(fig, output_path))
+                output_paths.append(
+                    self._save_figure(
+                        fig,
+                        output_path,
+                        experimental_features=("binding_free_energy",),
+                    )
+                )
 
         return output_paths

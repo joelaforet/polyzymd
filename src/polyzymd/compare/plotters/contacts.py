@@ -532,7 +532,13 @@ class BindingPreferenceHeatmapPlotter(BasePlotter):
 
         # Save
         output_path = self._get_output_path(output_dir, "binding_preference_heatmap")
-        return [self._save_figure(fig, output_path)]
+        return [
+            self._save_figure(
+                fig,
+                output_path,
+                experimental_features=("contacts_binding_preference",),
+            )
+        ]
 
     def _load_binding_preference_results(
         self,
@@ -692,7 +698,13 @@ class BindingPreferenceBarPlotter(BasePlotter):
             output_path = self._get_output_path(
                 output_dir, f"binding_preference_bars_{poly_type.lower()}"
             )
-            output_paths.append(self._save_figure(fig, output_path))
+            output_paths.append(
+                self._save_figure(
+                    fig,
+                    output_path,
+                    experimental_features=("contacts_binding_preference",),
+                )
+            )
 
         return output_paths
 
@@ -867,7 +879,13 @@ class SystemCoverageHeatmapPlotter(BasePlotter):
 
         # Save
         output_path = self._get_output_path(output_dir, "system_coverage_heatmap")
-        return [self._save_figure(fig, output_path)]
+        return [
+            self._save_figure(
+                fig,
+                output_path,
+                experimental_features=("contacts_binding_preference",),
+            )
+        ]
 
     def _load_system_coverage_results(
         self,
@@ -1025,7 +1043,13 @@ class SystemCoverageBarPlotter(BasePlotter):
 
         # Save
         output_path = self._get_output_path(output_dir, "system_coverage_bars")
-        return [self._save_figure(fig, output_path)]
+        return [
+            self._save_figure(
+                fig,
+                output_path,
+                experimental_features=("contacts_binding_preference",),
+            )
+        ]
 
     def _load_system_coverage_results(
         self,
@@ -1244,7 +1268,11 @@ class UserPartitionBarPlotter(BasePlotter):
         # Save with partition-specific filename
         stem = f"user_partition_{partition_name}_bars"
         output_path = self._get_output_path(output_dir, stem)
-        saved = self._save_figure(fig, output_path)
+        saved = self._save_figure(
+            fig,
+            output_path,
+            experimental_features=("contacts_binding_preference",),
+        )
         logger.info(f"Saved user partition bar chart: {saved}")
         return [saved]
 

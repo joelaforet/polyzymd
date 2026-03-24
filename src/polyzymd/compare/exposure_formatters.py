@@ -7,6 +7,7 @@ for different output formats: console tables, Markdown, and JSON.
 from __future__ import annotations
 
 from polyzymd.compare.results.exposure import ExposureComparisonResult
+from polyzymd.core.experimental import prefix_experimental_output
 
 
 def format_exposure_console_table(
@@ -455,10 +456,12 @@ def format_exposure_result(
         If format is not recognized.
     """
     if format == "table":
-        return format_exposure_console_table(result, show_pairwise, show_anova)
+        formatted = format_exposure_console_table(result, show_pairwise, show_anova)
     elif format == "markdown":
-        return format_exposure_markdown(result, show_pairwise, show_anova)
+        formatted = format_exposure_markdown(result, show_pairwise, show_anova)
     elif format == "json":
-        return exposure_to_json(result)
+        formatted = exposure_to_json(result)
     else:
         raise ValueError(f"Unknown format: {format}. Use 'table', 'markdown', or 'json'.")
+
+    return prefix_experimental_output(formatted, ("exposure",), format)

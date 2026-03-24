@@ -1274,10 +1274,11 @@ analysis_settings:
   #   grouping: "aa_class"  # aa_class, secondary_structure, or none
   #   compute_residence_times: true
   #
-  #   # Binding Preference Analysis (enrichment by residue group)
+  #   # EXPERIMENTAL: Binding Preference Analysis (enrichment by residue group)
   #   # --------------------------------------------------------
   #   # Computes which residue types (aromatic, polar, etc.) are preferentially
   #   # contacted by the polymer, normalized by surface exposure.
+  #   # Definitions and interpretation may change after the presentation release.
   #   #
   #   # IMPORTANT: Place your enzyme PDB in the structures/ directory!
   #   # The path is relative to this comparison.yaml file.
@@ -1305,8 +1306,9 @@ analysis_settings:
   #   #     - lid_helix_5       # must be defined in protein_groups above
   #   #     - lid_helix_10
 
-  # Exposure Dynamics Analysis (chaperone-like polymer activity)
+  # EXPERIMENTAL: Exposure Dynamics Analysis (chaperone-like polymer activity)
   # Requires contacts analysis to be run first for each condition.
+  # Definitions and interpretation may change after the presentation release.
   # Run: polyzymd compare exposure
   #
   # exposure:
@@ -1321,9 +1323,10 @@ analysis_settings:
   #   probe_radius_nm: 0.14        # SASA probe radius (nm)
   #   n_sphere_points: 960         # number of sphere points for SASA computation
 
-  # Binding Free Energy Analysis (ΔG_sel via Boltzmann inversion)
+  # EXPERIMENTAL: Binding Free Energy Analysis (ΔG_sel via Boltzmann inversion)
   # Requires contacts analysis with compute_binding_preference: true to be run first.
   # Converts binding preference probabilities into ΔG_sel = -k_B·T·ln(contact_share / expected_share).
+  # Definitions and interpretation may change after the presentation release.
   # Run: polyzymd compare binding-free-energy
   #
   # binding_free_energy:
@@ -1331,9 +1334,10 @@ analysis_settings:
   #   surface_exposure_threshold: 0.2  # minimum relative SASA to be considered surface-exposed
   #   # protein_partitions: null   # optional: restrict to user-defined AA partitions
 
-  # Polymer Affinity Score (composite selectivity metric)
+  # EXPERIMENTAL: Polymer Affinity Score (composite selectivity metric)
   # Requires contacts analysis with compute_binding_preference: true.
   # Computes S = Σ N_pg × ΔG_sel_pg for each polymer composition.
+  # Definitions and interpretation may change after the presentation release.
   # Run: polyzymd compare polymer-affinity
   #
   # polymer_affinity:

@@ -15,6 +15,7 @@ from polyzymd.compare.results.binding_free_energy import (
     FreeEnergyEntry,
     FreeEnergyPairwiseEntry,
 )
+from polyzymd.core.experimental import prefix_experimental_output
 
 
 def format_bfe_console_table(result: BindingFreeEnergyResult) -> str:
@@ -51,7 +52,7 @@ def format_bfe_console_table(result: BindingFreeEnergyResult) -> str:
     lines.append("")
 
     # Per-condition summary table
-    lines.append(f"ΔG_sel Summary by Condition (sign: negative = preferential binding)")
+    lines.append("ΔG_sel Summary by Condition (sign: negative = preferential binding)")
     lines.append("-" * 80)
 
     for summary in result.conditions:
@@ -278,10 +279,12 @@ def format_bfe_result(
         If format is not recognized.
     """
     if format == "table":
-        return format_bfe_console_table(result)
+        formatted = format_bfe_console_table(result)
     elif format == "markdown":
-        return format_bfe_markdown(result)
+        formatted = format_bfe_markdown(result)
     elif format == "json":
-        return format_bfe_json(result)
+        formatted = format_bfe_json(result)
     else:
         raise ValueError(f"Unknown format '{format}'. Use 'table', 'markdown', or 'json'.")
+
+    return prefix_experimental_output(formatted, ("binding_free_energy",), format)

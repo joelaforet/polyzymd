@@ -17,6 +17,8 @@ from typing import Optional
 
 import click
 
+from polyzymd.core.experimental import echo_experimental_warning
+
 LOGGER = logging.getLogger("polyzymd.analysis")
 
 
@@ -390,12 +392,12 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
     """
     require_analysis_deps()
 
+    from polyzymd.analysis import CatalyticTriadAnalyzer, DistanceCalculator, RMSFCalculator
     from polyzymd.analysis.config import AnalysisConfig
-    from polyzymd.analysis import RMSFCalculator, DistanceCalculator, CatalyticTriadAnalyzer
     from polyzymd.analysis.core.logging_utils import setup_logging
-    from polyzymd.config.schema import SimulationConfig
     from polyzymd.compare.config import CatalyticTriadConfig as CompareTriadConfig
     from polyzymd.compare.config import TriadPairConfig as CompareTriadPairConfig
+    from polyzymd.config.schema import SimulationConfig
 
     # Set up logging with colored output
     setup_logging(quiet=quiet, debug=debug)
@@ -457,6 +459,9 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
     click.echo(f"Equilibration: {config.defaults.equilibration_time}")
     click.echo(f"Enabled analyses: {', '.join(enabled)}")
     click.echo()
+
+    if config.contacts.enabled and config.contacts.compute_binding_preference:
+        echo_experimental_warning(("contacts_binding_preference",))
 
     # Track results for summary
     completed = []
@@ -568,9 +573,9 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
         click.echo(click.style("Running contact analysis...", fg="blue"))
         click.echo(click.style("=" * 60, fg="blue"))
         try:
+            from polyzymd.analysis.common.selectors import MDAnalysisSelector
             from polyzymd.analysis.contacts import ParallelContactAnalyzer
             from polyzymd.analysis.contacts.aggregator import aggregate_contact_results
-            from polyzymd.analysis.common.selectors import MDAnalysisSelector
             from polyzymd.analysis.core.loader import (
                 TrajectoryLoader,
                 parse_time_string,
@@ -642,7 +647,7 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
                         if not enzyme_pdb.is_absolute():
                             enzyme_pdb = sim_config_path.parent / enzyme_pdb
 
-                        click.echo(f"    Computing binding preference...", nl=False)
+                        click.echo("    Computing binding preference...", nl=False)
                         bp_result = compute_binding_preference_from_config(
                             contact_result=result,
                             universe=universe,
@@ -1306,9 +1311,9 @@ def contacts(
     """
     require_analysis_deps()
 
+    from polyzymd.analysis.common.selectors import MDAnalysisSelector
     from polyzymd.analysis.contacts import ParallelContactAnalyzer
     from polyzymd.analysis.contacts.aggregator import aggregate_contact_results
-    from polyzymd.analysis.common.selectors import MDAnalysisSelector
     from polyzymd.analysis.core.loader import TrajectoryLoader, parse_time_string, time_to_frame
     from polyzymd.config.schema import SimulationConfig
 
@@ -1341,6 +1346,7 @@ def contacts(
     click.echo(f"  Grouping: {grouping}")
     if binding_preference:
         click.echo(f"  Binding preference: enabled (threshold={surface_threshold})")
+        echo_experimental_warning(("contacts_binding_preference",))
 
     # Parse equilibration time
     eq_value, eq_unit = parse_time_string(eq_time)
@@ -1418,10 +1424,10 @@ def contacts(
 
             from polyzymd.analysis.contacts import (
                 SurfaceExposureFilter,
-                compute_binding_preference,
-                resolve_protein_group_selections,
                 aggregate_binding_preference,
+                compute_binding_preference,
                 extract_polymer_composition,
+                resolve_protein_group_selections,
             )
 
             # Determine enzyme PDB path
@@ -1860,7 +1866,7 @@ def triad(
                     f"  Simultaneous contact: {result.overall_simultaneous_contact * 100:.1f} "
                     f"± {result.sem_simultaneous_contact * 100:.1f}%"
                 )
-                click.echo(f"  Per-replicate:")
+                click.echo("  Per-replicate:")
                 for rep, frac in zip(result.replicates, result.per_replicate_simultaneous):
                     click.echo(f"    Rep {rep}: {frac * 100:.1f}%")
 

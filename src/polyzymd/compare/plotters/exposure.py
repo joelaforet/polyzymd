@@ -201,15 +201,14 @@ class ExposureChaperoneFractionPlotter(BasePlotter):
         ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=t.tick_fontsize)
         self._apply_axis_style(
             ax,
-            title="Chaperone fraction across conditions
-(transient residues only)",
+            title="Chaperone fraction across conditions\n(transient residues only)",
             ylabel="Mean chaperone fraction",
         )
         ax.set_ylim(bottom=0)
         fig.tight_layout()
 
         output_path = self._get_output_path(output_dir, "exposure_chaperone_fraction")
-        return [self._save_figure(fig, output_path)]
+        return [self._save_figure(fig, output_path, experimental_features=("exposure",))]
 
 
 # ---------------------------------------------------------------------------
@@ -334,4 +333,4 @@ class ExposureEnrichmentHeatmapPlotter(BasePlotter):
         fig.tight_layout()
 
         output_path = self._get_output_path(output_dir, "exposure_enrichment_heatmap")
-        return [self._save_figure(fig, output_path)]
+        return [self._save_figure(fig, output_path, experimental_features=("exposure",))]

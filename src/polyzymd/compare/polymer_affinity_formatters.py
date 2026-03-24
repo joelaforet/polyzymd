@@ -11,6 +11,7 @@ from polyzymd.compare.results.polymer_affinity import (
     PolymerAffinityScoreResult,
     PolymerTypeScore,
 )
+from polyzymd.core.experimental import prefix_experimental_output
 
 # ---------------------------------------------------------------------------
 # Console (ASCII table) formatter
@@ -417,10 +418,12 @@ def format_affinity_result(
         If format is not recognized.
     """
     if format == "table":
-        return format_affinity_console_table(result)
+        formatted = format_affinity_console_table(result)
     elif format == "markdown":
-        return format_affinity_markdown(result)
+        formatted = format_affinity_markdown(result)
     elif format == "json":
-        return format_affinity_json(result)
+        formatted = format_affinity_json(result)
     else:
         raise ValueError(f"Unknown format '{format}'. Use 'table', 'markdown', or 'json'.")
+
+    return prefix_experimental_output(formatted, ("polymer_affinity",), format)

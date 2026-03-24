@@ -492,7 +492,7 @@ class CatalyticTriadComparisonSettings(BaseComparisonSettings):
 
 
 class BindingPreferenceFieldsMixin(BaseAnalysisSettings):
-    """Shared fields for binding preference analysis.
+    """Shared fields for experimental binding-preference-derived analyses.
 
     Both ``ContactsAnalysisSettings`` and ``BindingFreeEnergyAnalysisSettings``
     need identical fields for surface exposure, protein grouping, and polymer
@@ -518,7 +518,7 @@ class BindingPreferenceFieldsMixin(BaseAnalysisSettings):
         default=DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
         ge=0.0,
         le=1.0,
-        description="Relative SASA threshold for surface exposure (0.2 = 20%)",
+        description=("Experimental binding-preference threshold for surface exposure (0.2 = 20%)"),
     )
     enzyme_pdb_for_sasa: Optional[str] = Field(
         default=None,
@@ -605,7 +605,8 @@ class ContactsAnalysisSettings(BindingPreferenceFieldsMixin):
 
     # Binding preference settings
     compute_binding_preference: bool = Field(
-        default=False, description="Compute binding preference enrichment analysis"
+        default=False,
+        description=("Compute the experimental binding preference enrichment analysis"),
     )
     enrichment_normalization: str = Field(
         default="residue",
@@ -768,7 +769,7 @@ class ContactsComparisonSettings(BaseComparisonSettings):
 
 @AnalysisSettingsRegistry.register("exposure")
 class ExposureAnalysisSettings(BaseAnalysisSettings):
-    """Exposure dynamics analysis settings (dynamic SASA-based chaperone analysis).
+    """Experimental exposure dynamics settings (dynamic SASA-based chaperone analysis).
 
     Attributes
     ----------
@@ -804,7 +805,7 @@ class ExposureAnalysisSettings(BaseAnalysisSettings):
         default=DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
         ge=0.0,
         le=1.0,
-        description="Relative SASA threshold for exposed classification",
+        description="Experimental relative SASA threshold for exposed classification",
     )
     transient_lower: float = Field(
         default=0.2,
@@ -877,7 +878,7 @@ class ExposureComparisonSettings(BaseComparisonSettings):
 
 @AnalysisSettingsRegistry.register("binding_free_energy")
 class BindingFreeEnergyAnalysisSettings(BindingPreferenceFieldsMixin):
-    """Settings for binding free energy analysis via Boltzmann inversion.
+    """Experimental settings for binding free energy analysis via Boltzmann inversion.
 
     Computes the selectivity free energy:
 
@@ -908,13 +909,16 @@ class BindingFreeEnergyAnalysisSettings(BindingPreferenceFieldsMixin):
 
     units: str = Field(
         default="kT",
-        description="Energy units: 'kT' (default, dimensionless), 'kcal/mol', or 'kJ/mol'",
+        description=(
+            "Experimental output units: 'kT' (default, dimensionless), 'kcal/mol', or 'kJ/mol'"
+        ),
     )
     compute_binding_preference: bool = Field(
         default=True,
         description=(
-            "Compute binding preference from contacts data when cached results "
-            "are not found. Set to False to only load pre-existing results."
+            "Compute experimental binding preference from contacts data when "
+            "cached results are not found. Set to False to only load pre-existing "
+            "results."
         ),
     )
 
@@ -1002,7 +1006,7 @@ class BindingFreeEnergyComparisonSettings(BaseComparisonSettings):
 
 @AnalysisSettingsRegistry.register("polymer_affinity")
 class PolymerAffinityScoreSettings(BindingPreferenceFieldsMixin):
-    """Settings for polymer affinity score analysis.
+    """Experimental settings for polymer affinity score analysis.
 
     The polymer affinity score is a comparative metric that quantifies total
     polymer-protein interaction strength:
@@ -1039,8 +1043,9 @@ class PolymerAffinityScoreSettings(BindingPreferenceFieldsMixin):
     compute_binding_preference: bool = Field(
         default=True,
         description=(
-            "Compute binding preference from contacts data when cached results "
-            "are not found. Set to False to only load pre-existing results."
+            "Compute experimental binding preference from contacts data when "
+            "cached results are not found. Set to False to only load pre-existing "
+            "results."
         ),
     )
 

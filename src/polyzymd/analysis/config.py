@@ -21,7 +21,6 @@ from polyzymd.analysis.core.constants import (
     DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
 )
 
-
 # =============================================================================
 # Individual Analysis Configurations
 # =============================================================================
@@ -371,7 +370,7 @@ def generate_analysis_template(eq_time: str = "10ns") -> str:
     str
         YAML template content
     """
-    return f'''\
+    return f"""\
 # ============================================================================
 # PolyzyMD Analysis Configuration
 # ============================================================================
@@ -456,10 +455,11 @@ rmsf:
 #   compute_residence_times: true
 #
 #   # -------------------------------------------------------------------------
-#   # Binding Preference Analysis (Enrichment Ratios)
+#   # EXPERIMENTAL: Binding Preference Analysis (Enrichment Ratios)
 #   # -------------------------------------------------------------------------
 #   # Computes enrichment ratios to answer: "Does polymer type X preferentially
 #   # bind amino acid class Y?" Requires rust_sasa_python for surface exposure.
+#   # Definitions and interpretation may change after the presentation release.
 #   #
 #   # Enrichment > 1.0 = preferential binding
 #   # Enrichment = 1.0 = random/expected
@@ -489,4 +489,4 @@ rmsf:
 #   # Surface exposure filtering
 #   # Only residues with relative SASA > threshold are considered
 #   surface_exposure_threshold: 0.2  # 20% of max theoretical SASA
-'''
+"""

@@ -12,6 +12,7 @@ Note:
 from __future__ import annotations
 
 from polyzymd.compare.results import ContactsComparisonResult
+from polyzymd.core.experimental import prefix_experimental_output
 
 
 def format_contacts_console_table(
@@ -512,10 +513,14 @@ def format_contacts_result(
         If format is not recognized
     """
     if format == "table":
-        return format_contacts_console_table(result, show_pairwise, show_anova)
+        formatted = format_contacts_console_table(result, show_pairwise, show_anova)
     elif format == "markdown":
-        return format_contacts_markdown(result, show_pairwise, show_anova)
+        formatted = format_contacts_markdown(result, show_pairwise, show_anova)
     elif format == "json":
-        return contacts_to_json(result)
+        formatted = contacts_to_json(result)
     else:
         raise ValueError(f"Unknown format: {format}. Use 'table', 'markdown', or 'json'.")
+
+    if result.binding_preference and result.binding_preference.entries:
+        return prefix_experimental_output(formatted, ("contacts_binding_preference",), format)
+    return formatted

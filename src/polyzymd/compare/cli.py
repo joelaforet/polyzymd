@@ -34,6 +34,13 @@ from polyzymd.compare.settings import (
     ContactsComparisonSettings,
     RMSFAnalysisSettings,
 )
+from polyzymd.core.experimental import (
+    echo_experimental_warning,
+    experimental_features_for_comparison_type,
+    experimental_features_for_plot_type,
+    format_experimental_suffix,
+    normalize_experimental_features,
+)
 
 LOGGER = logging.getLogger("polyzymd.compare.cli")
 
@@ -708,6 +715,7 @@ def contacts(
     if contacts_analysis.compute_binding_preference:
         click.echo(f"  Surface threshold: {contacts_analysis.surface_exposure_threshold}")
         click.echo(f"  Enzyme PDB: {contacts_analysis.enzyme_pdb_for_sasa}")
+        echo_experimental_warning(("contacts_binding_preference",))
     if config.control:
         click.echo(f"Control: {config.control}")
     click.echo()
@@ -868,6 +876,8 @@ def exposure(
         click.echo("Recompute exposure: yes")
     click.echo()
 
+    echo_experimental_warning(("exposure",))
+
     # Run comparison
     try:
         comparator = ExposureDynamicsComparator(
@@ -965,7 +975,10 @@ def run_comparison(
         click.echo("Available comparison types:")
         for comp_type in available:
             comparator_cls = ComparatorRegistry.get(comp_type)
-            click.echo(f"  - {comp_type}: {comparator_cls.__name__}")
+            suffix = format_experimental_suffix(
+                experimental_features_for_comparison_type(comp_type)
+            )
+            click.echo(f"  - {comp_type}{suffix}: {comparator_cls.__name__}")
         return
 
     # Require comparison_type if not listing
@@ -1004,6 +1017,11 @@ def run_comparison(
             f"Add an analysis_settings.{settings_key} section to your comparison.yaml", err=True
         )
         sys.exit(1)
+
+    experimental_features = experimental_features_for_comparison_type(
+        comparison_type, analysis_settings
+    )
+    echo_experimental_warning(experimental_features)
 
     click.echo(f"Comparison: {config.name}")
     click.echo(f"Type: {comparison_type}")
@@ -1194,15 +1212,38 @@ def plot_all(
     if list_available:
         click.echo("Registered plot types:")
         for ptype in PlotterRegistry.list_available():
-            click.echo(f"  - {ptype}")
+            suffix = format_experimental_suffix(experimental_features_for_plot_type(ptype))
+            click.echo(f"  - {ptype}{suffix}")
         click.echo()
         click.echo("Available plots for enabled analyses:")
         available = plotter.list_available_plots()
         for atype, ptypes in available.items():
             click.echo(f"  {atype}:")
             for pt in ptypes:
-                click.echo(f"    - {pt}")
+                suffix = format_experimental_suffix(experimental_features_for_plot_type(pt))
+                click.echo(f"    - {pt}{suffix}")
         return
+
+    experimental_features: tuple[str, ...]
+    if plot_type:
+        experimental_features = experimental_features_for_plot_type(plot_type)
+    elif analysis_type:
+        comparison_type = ANALYSIS_TO_COMPARATOR.get(analysis_type, analysis_type)
+        analysis_settings = config.analysis_settings.get(analysis_type)
+        experimental_features = experimental_features_for_comparison_type(
+            comparison_type, analysis_settings
+        )
+    else:
+        feature_list: list[str] = []
+        for settings_key in config.analysis_settings.get_enabled_analyses():
+            comparison_type = ANALYSIS_TO_COMPARATOR.get(settings_key, settings_key)
+            analysis_settings = config.analysis_settings.get(settings_key)
+            feature_list.extend(
+                experimental_features_for_comparison_type(comparison_type, analysis_settings)
+            )
+        experimental_features = normalize_experimental_features(feature_list)
+
+    echo_experimental_warning(experimental_features)
 
     click.echo(f"Comparison: {config.name}")
     click.echo(f"Conditions: {len(config.conditions)}")
@@ -1356,6 +1397,8 @@ def binding_free_energy(
         click.echo(f"Control: {config.control}")
     click.echo()
 
+    echo_experimental_warning(("binding_free_energy",))
+
     # Run comparison
     try:
         comparator = BindingFreeEnergyComparator(
@@ -1477,6 +1520,8 @@ def polymer_affinity(
     if config.control:
         click.echo(f"Control: {config.control}")
     click.echo()
+
+    echo_experimental_warning(("polymer_affinity",))
 
     # Run comparison
     try:
@@ -1619,6 +1664,11 @@ def run_all(
         # Analysis settings (guaranteed non-None because get_enabled_analyses
         # only returns keys with a value).
         analysis_settings = config.analysis_settings.get(settings_key)
+        experimental_features = experimental_features_for_comparison_type(
+            comparator_name, analysis_settings
+        )
+        if experimental_features:
+            echo_experimental_warning(experimental_features)
 
         # Comparator class
         comparator_cls = ComparatorRegistry.get(comparator_name)

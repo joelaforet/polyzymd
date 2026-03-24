@@ -304,7 +304,12 @@ class BasePlotter(ABC):
         """
         return output_dir / f"{name}.{self.settings.format}"
 
-    def _save_figure(self, fig: "Figure", output_path: Path) -> Path:
+    def _save_figure(
+        self,
+        fig: "Figure",
+        output_path: Path,
+        experimental_features: Sequence[str] | None = None,
+    ) -> Path:
         """Save figure with settings.
 
         Parameters
@@ -313,6 +318,8 @@ class BasePlotter(ABC):
             Matplotlib figure to save
         output_path : Path
             Output file path
+        experimental_features : sequence of str or None, optional
+            Experimental feature ids to stamp onto the figure.
 
         Returns
         -------
@@ -321,7 +328,12 @@ class BasePlotter(ABC):
         """
         import matplotlib.pyplot as plt
 
+        from polyzymd.core.experimental import annotate_experimental_figure
+
         output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if experimental_features:
+            annotate_experimental_figure(fig, experimental_features)
 
         # Add watermark if enabled
         if self.theme.show_watermark:
