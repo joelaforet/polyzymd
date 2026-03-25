@@ -59,51 +59,17 @@ def _find_comparison_result(
     ExposureComparisonResult or None
         Loaded result, or None if not found.
     """
+    from polyzymd.compare.io.results import find_comparison_result
     from polyzymd.compare.results.exposure import ExposureComparisonResult
 
-    def _try_load_from_dir(directory: Path) -> Any | None:
-        """Attempt to load from any exposure_comparison*.json in *directory*."""
-        if not directory.is_dir():
-            return None
-        files = sorted(directory.glob("exposure_comparison*.json"))
-        if not files:
-            return None
-        result_file = max(files, key=lambda p: p.stat().st_mtime)
-        try:
-            loaded = ExposureComparisonResult.load(result_file)
-            log.debug(f"Loaded ExposureComparisonResult from {result_file}")
-            return loaded
-        except Exception as e:
-            log.debug(f"Could not load {result_file}: {e}")
-        return None
-
-    meta = data.get("__meta__")
-    if meta is not None:
-        results_dir = meta.get("results_dir")
-        if results_dir is not None:
-            result = _try_load_from_dir(Path(results_dir))
-            if result is not None:
-                return result
-            log.debug(f"No exposure result JSON in {results_dir} - falling back to heuristic")
-
-    for label in labels:
-        cond_data = data.get(label)
-        if cond_data is None:
-            continue
-        analysis_dir = cond_data.get("analysis_dir")
-        if analysis_dir is None:
-            continue
-        project_root = Path(analysis_dir).parent.parent
-        for candidate in [
-            project_root / "comparison" / "exposure_comparison.json",
-            project_root / "comparison" / "comparison_result.json",
-        ]:
-            if candidate.exists():
-                try:
-                    return ExposureComparisonResult.load(candidate)
-                except Exception as e:
-                    log.debug(f"Could not load {candidate}: {e}")
-    return None
+    return find_comparison_result(
+        data,
+        labels,
+        glob_patterns=["exposure_comparison*.json"],
+        loader=ExposureComparisonResult.load,
+        fallback_filenames=["exposure_comparison.json", "comparison_result.json"],
+        log=log,
+    )
 
 
 # ---------------------------------------------------------------------------

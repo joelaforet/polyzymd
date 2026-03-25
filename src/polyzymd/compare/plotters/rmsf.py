@@ -89,50 +89,28 @@ class RMSFComparisonPlotter(BasePlotter):
         plotter orchestrator).  Falls back to searching per-condition
         ``comparison/`` directories.
         """
+        from polyzymd.compare.io.results import find_comparison_result
         from polyzymd.compare.results.rmsf import RMSFComparisonResult
         from polyzymd.compare.results.rmsf_legacy import ComparisonResult
 
-        def _try_load(result_file: Path) -> Any | None:
+        def _try_load(path: Path) -> Any | None:
             try:
-                return RMSFComparisonResult.load(result_file)
+                return RMSFComparisonResult.load(path)
             except Exception:
                 try:
-                    return ComparisonResult.load(result_file)
+                    return ComparisonResult.load(path)
                 except Exception as e:
-                    logger.debug(f"Could not load {result_file}: {e}")
+                    logger.debug(f"Could not load {path}: {e}")
             return None
 
-        # --- Primary: __meta__.results_dir from the orchestrator ---
-        meta = data.get("__meta__")
-        if meta is not None:
-            results_dir = meta.get("results_dir")
-            if results_dir is not None:
-                rdir = Path(results_dir)
-                if rdir.is_dir():
-                    for f in sorted(rdir.glob("rmsf_comparison*.json")):
-                        loaded = _try_load(f)
-                        if loaded is not None:
-                            return loaded
-
-        # --- Fallback: per-condition heuristic ---
-        for label in labels:
-            cond_data = data.get(label)
-            if cond_data is None:
-                continue
-
-            analysis_dir = cond_data.get("analysis_dir")
-            if analysis_dir:
-                project_root = Path(analysis_dir).parent.parent
-                comparison_dir = project_root / "comparison"
-
-                for filename in ["rmsf_comparison.json", "comparison_result.json"]:
-                    result_file = comparison_dir / filename
-                    if result_file.exists():
-                        loaded = _try_load(result_file)
-                        if loaded is not None:
-                            return loaded
-
-        return None
+        return find_comparison_result(
+            data,
+            labels,
+            glob_patterns=["rmsf_comparison*.json"],
+            loader=_try_load,
+            fallback_filenames=["rmsf_comparison.json", "comparison_result.json"],
+            log=logger,
+        )
 
     def _plot_from_comparison_result(
         self,

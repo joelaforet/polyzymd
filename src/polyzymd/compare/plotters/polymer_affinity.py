@@ -64,65 +64,20 @@ def _find_affinity_result(
     PolymerAffinityScoreResult or None
         Loaded result, or None if not found.
     """
+    from polyzymd.compare.io.results import find_comparison_result
     from polyzymd.compare.results.polymer_affinity import PolymerAffinityScoreResult
 
-    _GLOBS = [
-        "polymer_affinity_comparison_*.json",
-        "affinity_comparison_*.json",
-    ]
-
-    def _try_load_from_dir(results_dir: Path) -> "PolymerAffinityScoreResult | None":
-        if not results_dir.is_dir():
-            return None
-        files: list[Path] = []
-        for pattern in _GLOBS:
-            files.extend(results_dir.glob(pattern))
-        if not files:
-            return None
-        result_file = max(files, key=lambda p: p.stat().st_mtime)
-        try:
-            result = PolymerAffinityScoreResult.load(result_file)
-            logger.debug(f"Loaded affinity result from {result_file}")
-            return result
-        except Exception as e:
-            logger.warning(f"Failed to load affinity result {result_file}: {e}")
-            return None
-
-    # Primary: __meta__.results_dir
-    meta = data.get("__meta__")
-    if meta is not None:
-        results_dir = meta.get("results_dir")
-        if results_dir is not None:
-            result = _try_load_from_dir(Path(results_dir))
-            if result is not None:
-                return result
-            logger.debug(f"No affinity result JSON in {results_dir} — falling back to heuristic")
-
-    # Fallback: navigate from condition config paths
-    candidate_dirs: list[Path] = []
-    for label in labels:
-        cond_data = data.get(label)
-        if cond_data is None:
-            continue
-        condition = cond_data.get("condition")
-        if condition is None:
-            continue
-        config_path = getattr(condition, "config", None)
-        if config_path is None:
-            continue
-        config_path = Path(config_path)
-        for candidate in [config_path.parent, config_path.parent.parent]:
-            results_dir = candidate / "results"
-            if results_dir.is_dir() and results_dir not in candidate_dirs:
-                candidate_dirs.append(results_dir)
-
-    for results_dir in candidate_dirs:
-        result = _try_load_from_dir(results_dir)
-        if result is not None:
-            return result
-
-    logger.info("No polymer affinity result JSON found — skipping affinity plots")
-    return None
+    return find_comparison_result(
+        data,
+        labels,
+        glob_patterns=[
+            "polymer_affinity_comparison_*.json",
+            "affinity_comparison_*.json",
+        ],
+        loader=PolymerAffinityScoreResult.load,
+        fallback_subdir="results",
+        log=logger,
+    )
 
 
 # ---------------------------------------------------------------------------

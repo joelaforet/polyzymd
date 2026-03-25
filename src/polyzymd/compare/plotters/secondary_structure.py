@@ -64,43 +64,17 @@ def _find_ss_comparison_result(
     -------
     SSComparisonResult or None
     """
+    from polyzymd.compare.io.results import find_comparison_result
     from polyzymd.compare.results.secondary_structure import SSComparisonResult
 
-    def _try_load(path: Path) -> Any | None:
-        try:
-            return SSComparisonResult.load(path)
-        except Exception as e:
-            log.debug(f"Could not load {path}: {e}")
-        return None
-
-    # Primary: __meta__.results_dir
-    meta = data.get("__meta__")
-    if meta is not None:
-        results_dir = meta.get("results_dir")
-        if results_dir is not None:
-            rdir = Path(results_dir)
-            if rdir.is_dir():
-                for f in sorted(rdir.glob("secondary_structure_comparison*.json")):
-                    loaded = _try_load(f)
-                    if loaded is not None:
-                        return loaded
-
-    # Fallback: per-condition heuristic
-    for label in labels:
-        cond_data = data.get(label)
-        if cond_data is None:
-            continue
-        analysis_dir = cond_data.get("analysis_dir")
-        if analysis_dir is None:
-            continue
-        project_root = Path(analysis_dir).parent.parent
-        candidate = project_root / "comparison" / "secondary_structure_comparison.json"
-        if candidate.exists():
-            loaded = _try_load(candidate)
-            if loaded is not None:
-                return loaded
-
-    return None
+    return find_comparison_result(
+        data,
+        labels,
+        glob_patterns=["secondary_structure_comparison*.json"],
+        loader=SSComparisonResult.load,
+        fallback_filenames=["secondary_structure_comparison.json"],
+        log=log,
+    )
 
 
 # SS integer encoding colors (0=coil/grey, 1=helix/red, 2=strand/blue)

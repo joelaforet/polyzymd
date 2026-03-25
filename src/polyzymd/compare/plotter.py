@@ -1008,16 +1008,12 @@ class ComparisonPlotter:
                 # Mirror _resolve_condition_output_dir() from BaseComparator.
                 analysis_dir: Path | None = None
                 if source_path is not None:
-                    from polyzymd.compare.comparators._utils import sanitize_label
+                    from polyzymd.compare.io.paths import resolve_condition_output_dir
 
-                    comparison_dir = source_path.parent
-                    candidate = (
-                        comparison_dir
-                        / "analysis"
-                        / sanitize_label(condition.label)
-                        / analysis_type
+                    candidate = resolve_condition_output_dir(
+                        source_path, condition.label, analysis_type
                     )
-                    if candidate.exists():
+                    if candidate is not None and candidate.exists():
                         analysis_dir = candidate
 
                 # --- Fallback: shared projects_directory ---

@@ -106,70 +106,20 @@ def _find_bfe_result(
     BindingFreeEnergyResult or None
         Loaded result, or None if not found.
     """
+    from polyzymd.compare.io.results import find_comparison_result
     from polyzymd.compare.results.binding_free_energy import BindingFreeEnergyResult
 
-    # Both naming conventions that may exist on disk
-    _BFE_GLOBS = [
-        "binding_free_energy_comparison_*.json",
-        "bfe_comparison_*.json",
-    ]
-
-    def _try_load_from_dir(results_dir: Path) -> "BindingFreeEnergyResult | None":
-        """Try loading the most recent BFE result JSON from a directory."""
-        if not results_dir.is_dir():
-            return None
-        bfe_files: list[Path] = []
-        for pattern in _BFE_GLOBS:
-            bfe_files.extend(results_dir.glob(pattern))
-        if not bfe_files:
-            return None
-        bfe_file = max(bfe_files, key=lambda p: p.stat().st_mtime)
-        try:
-            result = BindingFreeEnergyResult.load(bfe_file)
-            logger.debug(f"Loaded BFE result from {bfe_file}")
-            return result
-        except Exception as e:
-            logger.warning(f"Failed to load BFE result {bfe_file}: {e}")
-            return None
-
-    # --- Primary path: use __meta__.results_dir from the orchestrator ---
-    meta = data.get("__meta__")
-    if meta is not None:
-        results_dir = meta.get("results_dir")
-        if results_dir is not None:
-            result = _try_load_from_dir(Path(results_dir))
-            if result is not None:
-                return result
-            logger.debug(f"No BFE result JSON in {results_dir} — falling back to heuristic")
-
-    # --- Fallback: navigate from condition config paths ---
-    candidate_dirs: list[Path] = []
-
-    for label in labels:
-        cond_data = data.get(label)
-        if cond_data is None:
-            continue
-        condition = cond_data.get("condition")
-        if condition is None:
-            continue
-        config_path = getattr(condition, "config", None)
-        if config_path is None:
-            continue
-        config_path = Path(config_path)
-        # condition config lives in {project_root}/{condition_name}/...
-        # Try parent (condition dir) and grandparent (project root)
-        for candidate in [config_path.parent, config_path.parent.parent]:
-            results_dir = candidate / "results"
-            if results_dir.is_dir() and results_dir not in candidate_dirs:
-                candidate_dirs.append(results_dir)
-
-    for results_dir in candidate_dirs:
-        result = _try_load_from_dir(results_dir)
-        if result is not None:
-            return result
-
-    logger.info("No BFE result JSON found in any results/ directory - skipping BFE plots")
-    return None
+    return find_comparison_result(
+        data,
+        labels,
+        glob_patterns=[
+            "binding_free_energy_comparison_*.json",
+            "bfe_comparison_*.json",
+        ],
+        loader=BindingFreeEnergyResult.load,
+        fallback_subdir="results",
+        log=logger,
+    )
 
 
 def _sorted_groups(groups: list[str]) -> list[str]:

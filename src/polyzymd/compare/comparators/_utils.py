@@ -40,19 +40,13 @@ def find_analysis_dir(
     Path
         Analysis directory path (primary location, or fallback if it exists).
     """
-    # Primary location: projects_directory
-    primary_dir = sim_config.output.projects_directory / analysis_subdir
-    if primary_dir.exists():
-        return primary_dir
+    from polyzymd.compare.io.paths import resolve_analysis_dir
 
-    # Fallback: config file's parent directory
-    if cond_config_path is not None:
-        fallback_dir = cond_config_path.parent / analysis_subdir
-        if fallback_dir.exists():
-            return fallback_dir
-
-    # Return primary path even if doesn't exist (for error messages)
-    return primary_dir
+    return resolve_analysis_dir(
+        projects_dir=sim_config.output.projects_directory,
+        analysis_subdir=analysis_subdir,
+        cond_config_path=cond_config_path,
+    )
 
 
 def find_replicate_result(
@@ -174,13 +168,6 @@ def sanitize_label(label: str) -> str:
         Sanitized string safe for use as a directory name,
         e.g. ``"SBMA-EGMA_25pct"`` or ``"No_Polymer_Control"``.
     """
-    import re
+    from polyzymd.compare.io.paths import sanitize_label as _sanitize_label
 
-    s = label.strip()
-    s = s.replace("%", "pct")
-    s = s.replace(" ", "_")
-    # Keep only word chars (alphanumeric + underscore), hyphens, and dots
-    s = re.sub(r"[^\w\-.]", "_", s)
-    # Collapse consecutive underscores
-    s = re.sub(r"_+", "_", s)
-    return s.strip("_")
+    return _sanitize_label(label)

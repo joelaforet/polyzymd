@@ -739,13 +739,9 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
             Condition-specific output directory, or ``None`` for default
             behaviour.
         """
-        if self.config.source_path is None:
-            return None
+        from polyzymd.compare.io.paths import resolve_condition_output_dir
 
-        from polyzymd.compare.comparators._utils import sanitize_label
-
-        comparison_dir = self.config.source_path.parent
-        return comparison_dir / "analysis" / sanitize_label(label) / analysis_subdir
+        return resolve_condition_output_dir(self.config.source_path, label, analysis_subdir)
 
     # ========================================================================
     # Shared Implementation Methods (DRY)
