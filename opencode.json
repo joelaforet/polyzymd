@@ -1,0 +1,35 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "github-copilot/claude-opus-4.6",
+  "agent": {
+    "build": {
+      "mode": "primary",
+      "model": "github-copilot/claude-opus-4.6",
+      "description": "Coordinator agent. Delegates work to specialized subagents and enforces user review gates between phases.",
+      "prompt": "{file:.opencode/prompts/build.md}"
+    },
+    "plan": {
+      "mode": "primary",
+      "model": "github-copilot/gpt-5.4",
+      "description": "Read-only analysis and architecture planning. Cannot modify files.",
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "ask",
+          "git *": "allow",
+          "ruff *": "allow",
+          "pixi run *": "allow"
+        }
+      }
+    }
+  },
+  "instructions": [
+    ".opencode/instructions/code-style.md",
+    ".opencode/instructions/architecture.md",
+    ".opencode/instructions/environment.md",
+    ".opencode/instructions/testing.md",
+    ".opencode/instructions/analysis-module.md",
+    ".opencode/instructions/documentation.md",
+    ".opencode/instructions/known-issues.md"
+  ]
+}
