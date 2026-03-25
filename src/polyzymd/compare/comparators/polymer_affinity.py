@@ -144,6 +144,7 @@ class PolymerAffinityScoreComparator(
     """
 
     comparison_type: ClassVar[str] = "polymer_affinity"
+    uses_comparison_settings: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -154,11 +155,6 @@ class PolymerAffinityScoreComparator(
     ):
         super().__init__(config, analysis_settings, equilibration)
         self.comparison_settings = comparison_settings or PolymerAffinityScoreComparisonSettings()
-
-    @classmethod
-    def comparison_type_name(cls) -> str:
-        """Return the comparison type identifier."""
-        return "polymer_affinity"
 
     @property
     def metric_type(self) -> MetricType:

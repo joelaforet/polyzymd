@@ -80,11 +80,6 @@ class SecondaryStructureComparator(
         super().__init__(config, analysis_settings, equilibration)
         self.chain_id = analysis_settings.chain_id
 
-    @classmethod
-    def comparison_type_name(cls) -> str:
-        """Return the comparison type identifier."""
-        return "secondary_structure"
-
     @property
     def metric_type(self) -> MetricType:
         """SS content is a mean-based metric.

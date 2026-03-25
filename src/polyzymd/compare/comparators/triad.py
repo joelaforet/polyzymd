@@ -87,6 +87,7 @@ class TriadComparator(
     """
 
     comparison_type: ClassVar[str] = "triad"
+    analysis_settings_key: ClassVar[str] = "catalytic_triad"
 
     def __init__(
         self,
@@ -95,11 +96,6 @@ class TriadComparator(
         equilibration: str | None = None,
     ):
         super().__init__(config, analysis_settings, equilibration)
-
-    @classmethod
-    def comparison_type_name(cls) -> str:
-        """Return the comparison type identifier."""
-        return "triad"
 
     @property
     def metric_type(self) -> MetricType:

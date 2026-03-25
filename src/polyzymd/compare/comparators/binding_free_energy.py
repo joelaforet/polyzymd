@@ -139,6 +139,7 @@ class BindingFreeEnergyComparator(
     """
 
     comparison_type: ClassVar[str] = "binding_free_energy"
+    uses_comparison_settings: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -149,11 +150,6 @@ class BindingFreeEnergyComparator(
     ):
         super().__init__(config, analysis_settings, equilibration)
         self.comparison_settings = comparison_settings or BindingFreeEnergyComparisonSettings()
-
-    @classmethod
-    def comparison_type_name(cls) -> str:
-        """Return the comparison type identifier."""
-        return "binding_free_energy"
 
     @property
     def metric_type(self) -> MetricType:

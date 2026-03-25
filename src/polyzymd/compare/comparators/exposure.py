@@ -88,6 +88,7 @@ class ExposureDynamicsComparator(
     """
 
     comparison_type: ClassVar[str] = "exposure"
+    uses_comparison_settings: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -98,11 +99,6 @@ class ExposureDynamicsComparator(
     ):
         super().__init__(config, analysis_settings, equilibration)
         self.comparison_settings = comparison_settings or ExposureComparisonSettings()
-
-    @classmethod
-    def comparison_type_name(cls) -> str:
-        """Return the comparison type identifier."""
-        return "exposure"
 
     @property
     def metric_type(self) -> MetricType:

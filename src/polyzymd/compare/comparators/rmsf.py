@@ -92,11 +92,6 @@ class RMSFComparator(
         self.reference_frame = reference_frame_override or analysis_settings.reference_frame
         self.reference_file = reference_file_override or analysis_settings.reference_file
 
-    @classmethod
-    def comparison_type_name(cls) -> str:
-        """Return the comparison type identifier."""
-        return "rmsf"
-
     @property
     def metric_type(self) -> MetricType:
         """RMSF is a variance-based metric.

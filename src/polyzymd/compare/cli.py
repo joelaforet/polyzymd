@@ -52,31 +52,45 @@ def _echo_branding() -> None:
     echo_logo()
 
 
-# ---------------------------------------------------------------------------
-# Mapping between comparator registry names and analysis_settings YAML keys.
-# Used by both `run` and `run-all` commands.
-# ---------------------------------------------------------------------------
-SETTINGS_KEY_MAP: dict[str, str] = {
-    "rmsf": "rmsf",
-    "triad": "catalytic_triad",
-    "contacts": "contacts",
-    "distances": "distances",
-    "exposure": "exposure",
-    "binding_free_energy": "binding_free_energy",
-    "polymer_affinity": "polymer_affinity",
-    "secondary_structure": "secondary_structure",
-}
+def _comparator_name_for_settings_key(settings_key: str) -> str:
+    """Resolve the comparator registry name for a given analysis_settings key.
 
-# Reverse map: analysis_settings key → comparator registry name
-ANALYSIS_TO_COMPARATOR: dict[str, str] = {v: k for k, v in SETTINGS_KEY_MAP.items()}
+    Uses ``ComparatorRegistry.get_for_analysis_type()`` and reads back the
+    ``comparison_type`` ClassVar so that the rest of the CLI can use the
+    canonical comparator name for filenames, log messages, etc.
+
+    Parameters
+    ----------
+    settings_key : str
+        Analysis settings YAML key (e.g., ``"catalytic_triad"``).
+
+    Returns
+    -------
+    str
+        Comparator registry name (e.g., ``"triad"``).
+
+    Raises
+    ------
+    ValueError
+        Raised (by the registry) when no comparator matches.
+    """
+    from polyzymd.compare.core.registry import ComparatorRegistry
+
+    _ensure_all_comparators_registered()
+    comp_cls = ComparatorRegistry.get_for_analysis_type(settings_key)
+    return comp_cls.comparison_type_name()
 
 
-def _comparator_accepts_comparison_settings(comparator_cls: type) -> bool:
-    """Check whether a comparator's __init__ accepts a comparison_settings kwarg."""
-    import inspect
+def _ensure_all_comparators_registered() -> None:
+    """Import all comparator modules to ensure they register with ComparatorRegistry.
 
-    sig = inspect.signature(comparator_cls.__init__)
-    return "comparison_settings" in sig.parameters
+    Comparator classes register themselves as a side effect of import (via the
+    ``@ComparatorRegistry.register()`` decorator). In the CLI, most comparator
+    modules are only imported inside dedicated subcommand functions, so the
+    registry may be incomplete when generic commands (``run``, ``run-all``,
+    ``plot-all``) query it. This function triggers the necessary imports.
+    """
+    import polyzymd.compare.comparators  # noqa: F401
 
 
 @click.group()
@@ -981,6 +995,8 @@ def run_comparison(
     from polyzymd.analysis.core.logging_utils import setup_logging
     from polyzymd.compare.core.registry import ComparatorRegistry
 
+    _ensure_all_comparators_registered()
+
     # Handle --list flag
     if list_types:
         available = ComparatorRegistry.list_available()
@@ -1018,8 +1034,7 @@ def run_comparison(
     # Get the comparator class from registry
     comparator_cls = ComparatorRegistry.get(comparison_type)
 
-    # Get analysis settings for this comparison type
-    settings_key = SETTINGS_KEY_MAP.get(comparison_type, comparison_type)
+    settings_key = comparator_cls.config_settings_key()
 
     analysis_settings = config.analysis_settings.get(settings_key)
     if analysis_settings is None:
@@ -1046,17 +1061,11 @@ def run_comparison(
 
     # Create comparator and run
     try:
-        # Pass comparison_settings if the comparator accepts it
-        kwargs: dict = {
-            "config": config,
-            "analysis_settings": analysis_settings,
-            "equilibration": equilibration,
-        }
-        comparison_settings = config.comparison_settings.get(settings_key)
-        if _comparator_accepts_comparison_settings(comparator_cls):
-            kwargs["comparison_settings"] = comparison_settings
-
-        comparator = comparator_cls(**kwargs)
+        comparator = ComparatorRegistry.create_from_config(
+            settings_key=settings_key,
+            config=config,
+            equilibration=equilibration,
+        )
         result = comparator.compare(recompute=recompute)
     except Exception as e:
         click.echo(f"Error during comparison: {e}", err=True)
@@ -1242,7 +1251,10 @@ def plot_all(
     if plot_type:
         experimental_features = experimental_features_for_plot_type(plot_type)
     elif analysis_type:
-        comparison_type = ANALYSIS_TO_COMPARATOR.get(analysis_type, analysis_type)
+        try:
+            comparison_type = _comparator_name_for_settings_key(analysis_type)
+        except ValueError:
+            comparison_type = analysis_type
         analysis_settings = config.analysis_settings.get(analysis_type)
         experimental_features = experimental_features_for_comparison_type(
             comparison_type, analysis_settings
@@ -1250,7 +1262,10 @@ def plot_all(
     else:
         feature_list: list[str] = []
         for settings_key in config.analysis_settings.get_enabled_analyses():
-            comparison_type = ANALYSIS_TO_COMPARATOR.get(settings_key, settings_key)
+            try:
+                comparison_type = _comparator_name_for_settings_key(settings_key)
+            except ValueError:
+                comparison_type = settings_key
             analysis_settings = config.analysis_settings.get(settings_key)
             feature_list.extend(
                 experimental_features_for_comparison_type(comparison_type, analysis_settings)
@@ -1636,6 +1651,8 @@ def run_all(
     from polyzymd.analysis.core.logging_utils import setup_logging
     from polyzymd.compare.core.registry import ComparatorRegistry
 
+    _ensure_all_comparators_registered()
+
     _echo_branding()
 
     setup_logging(quiet=quiet, debug=debug)
@@ -1654,8 +1671,6 @@ def run_all(
         click.echo("No analyses are enabled in comparison.yaml.", err=True)
         sys.exit(1)
 
-    available_comparators = set(ComparatorRegistry.list_available())
-
     click.echo(f"Comparison: {config.name}")
     click.echo(f"Conditions: {len(config.conditions)}")
     click.echo(f"Equilibration: {equilibration}")
@@ -1668,9 +1683,9 @@ def run_all(
     skipped: list[str] = []
 
     for settings_key in enabled_analyses:
-        comparator_name = ANALYSIS_TO_COMPARATOR.get(settings_key, settings_key)
-
-        if comparator_name not in available_comparators:
+        try:
+            comparator_name = _comparator_name_for_settings_key(settings_key)
+        except ValueError:
             click.echo(f"  [{settings_key}] skipped — no registered comparator")
             skipped.append(settings_key)
             continue
@@ -1686,21 +1701,12 @@ def run_all(
         if experimental_features:
             echo_experimental_warning(experimental_features)
 
-        # Comparator class
-        comparator_cls = ComparatorRegistry.get(comparator_name)
-
-        # Build kwargs — pass comparison_settings only if accepted
-        kwargs: dict = {
-            "config": config,
-            "analysis_settings": analysis_settings,
-            "equilibration": equilibration,
-        }
-        comparison_settings = config.comparison_settings.get(settings_key)
-        if _comparator_accepts_comparison_settings(comparator_cls):
-            kwargs["comparison_settings"] = comparison_settings
-
         try:
-            comparator = comparator_cls(**kwargs)
+            comparator = ComparatorRegistry.create_from_config(
+                settings_key=settings_key,
+                config=config,
+                equilibration=equilibration,
+            )
             result = comparator.compare(recompute=recompute)
         except Exception as e:
             msg = str(e)

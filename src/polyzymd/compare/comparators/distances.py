@@ -113,11 +113,6 @@ class DistancesComparator(
             )
         super().__init__(config, analysis_settings, equilibration)
 
-    @classmethod
-    def comparison_type_name(cls) -> str:
-        """Return the comparison type identifier."""
-        return "distances"
-
     @property
     def metric_type(self) -> MetricType:
         """Distance analysis is a mean-based metric.

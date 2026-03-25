@@ -336,6 +336,8 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
 
     # Class variable - subclasses should override
     comparison_type: ClassVar[str] = "base"
+    analysis_settings_key: ClassVar[str | None] = None
+    uses_comparison_settings: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -348,16 +350,34 @@ class BaseComparator(ABC, Generic[TAnalysisSettings, TConditionData, TConditionS
         self.equilibration = equilibration or config.defaults.equilibration_time
 
     @classmethod
-    @abstractmethod
     def comparison_type_name(cls) -> str:
-        """Return the comparison type identifier (e.g., "rmsf", "contacts").
+        """Return the comparison type identifier.
+
+        Default implementation returns ``comparison_type``. Subclasses
+        no longer need to override this unless they need dynamic behaviour.
 
         Returns
         -------
         str
             Type identifier used in registry and CLI.
         """
-        ...
+        return cls.comparison_type
+
+    @classmethod
+    def config_settings_key(cls) -> str:
+        """Return the analysis_settings YAML key for this comparator.
+
+        Falls back to ``comparison_type`` when ``analysis_settings_key`` is
+        not set. Override ``analysis_settings_key`` on the class for cases
+        where the YAML key differs from the comparator name (e.g., TriadComparator
+        is registered as ``"triad"`` but its config section is ``"catalytic_triad"``).
+
+        Returns
+        -------
+        str
+            The analysis_settings key.
+        """
+        return cls.analysis_settings_key or cls.comparison_type
 
     @property
     @abstractmethod

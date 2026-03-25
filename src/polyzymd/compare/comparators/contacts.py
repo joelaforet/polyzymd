@@ -108,6 +108,7 @@ class ContactsComparator(
     """
 
     comparison_type: ClassVar[str] = "contacts"
+    uses_comparison_settings: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -118,11 +119,6 @@ class ContactsComparator(
     ):
         super().__init__(config, analysis_settings, equilibration)
         self.comparison_settings = comparison_settings or ContactsComparisonSettings()
-
-    @classmethod
-    def comparison_type_name(cls) -> str:
-        """Return the comparison type identifier."""
-        return "contacts"
 
     @property
     def metric_type(self) -> MetricType:
