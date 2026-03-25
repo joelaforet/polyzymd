@@ -53,13 +53,15 @@ from __future__ import annotations
 import logging
 import math
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
 from polyzymd import __version__
 from polyzymd.analysis.core.metric_type import MetricType
+from polyzymd.compare.comparators._binding_preference_comparator_mixin import (
+    BindingPreferenceComparatorMixin,
+)
 from polyzymd.compare.core.base import BaseComparator
 from polyzymd.compare.core.registry import ComparatorRegistry
 from polyzymd.compare.results.binding_free_energy import (
@@ -90,12 +92,13 @@ BFEConditionData = dict[str, Any]
 
 @ComparatorRegistry.register("binding_free_energy")
 class BindingFreeEnergyComparator(
+    BindingPreferenceComparatorMixin,
     BaseComparator[
         BindingFreeEnergyAnalysisSettings,
         BFEConditionData,
         FreeEnergyConditionSummary,
         BindingFreeEnergyResult,
-    ]
+    ],
 ):
     """Compare selectivity free energy (ΔG_sel) across simulation conditions.
 
@@ -162,6 +165,16 @@ class BindingFreeEnergyComparator(
             MetricType.MEAN_BASED
         """
         return MetricType.MEAN_BASED
+
+    def _binding_preference_settings_label(self) -> str:
+        """Return the settings section name for warning messages.
+
+        Returns
+        -------
+        str
+            Binding free energy settings label.
+        """
+        return "binding_free_energy"
 
     # =========================================================================
     # Main entry point — override compare() for custom result type
@@ -248,131 +261,6 @@ class BindingFreeEnergyComparator(
     # =========================================================================
     # Abstract method implementations
     # =========================================================================
-
-    def _load_or_compute(
-        self,
-        cond: "ConditionConfig",
-        recompute: bool,
-    ) -> BFEConditionData:
-        """Load cached binding preference data, computing it if missing.
-
-        Follows the same load-or-compute contract as every other comparator:
-
-        1. Try to load cached binding preference results from disk.
-        2. If no cached data exists and ``compute_binding_preference`` is True
-           (the default), compute binding preference from per-replicate
-           ``contacts_rep{N}.json`` files via the shared helper.
-        3. If compute is disabled, warn and return empty data.
-
-        The compute step requires per-replicate contacts files to already
-        exist. It does **not** trigger contacts computation.
-
-        Parameters
-        ----------
-        cond : ConditionConfig
-            Condition to load or compute.
-        recompute : bool
-            If True, skip cache and always recompute.
-
-        Returns
-        -------
-        dict
-            Raw binding preference data and temperature.
-        """
-        from polyzymd.compare.comparators._binding_preference_helpers import (
-            compute_condition_binding_preference,
-            resolve_enzyme_pdb,
-        )
-        from polyzymd.config.schema import SimulationConfig
-
-        logger.info(f"Loading binding preference for: {cond.label}")
-
-        sim_config = SimulationConfig.from_yaml(cond.config)
-
-        # Get temperature
-        temperature_K = float(sim_config.thermodynamics.temperature)
-
-        # Resolve condition-specific output directory (None in standalone mode)
-        condition_output_dir = self._resolve_condition_output_dir(cond.label, "contacts")
-
-        # Find analysis directory (contacts layer) — check condition dir first
-        analysis_dir = self._find_contacts_analysis_dir(
-            sim_config, cond, condition_output_dir=condition_output_dir
-        )
-
-        # Step 1: Try to load cached binding preference (unless recompute)
-        bp_result = None
-        if not recompute:
-            bp_result = self._try_load_cached_binding_preference(cond, analysis_dir)
-
-        if bp_result is not None:
-            logger.info(f"  Loaded binding preference for {cond.label} at {temperature_K} K")
-            return {
-                "bp_result": bp_result,
-                "temperature_K": temperature_K,
-                "cond_label": cond.label,
-                "config_path": str(cond.config),
-            }
-
-        # Step 2: Compute if enabled
-        compute_enabled = getattr(self.analysis_settings, "compute_binding_preference", True)
-        if compute_enabled:
-            logger.info(f"  No cached data for {cond.label}, computing binding preference...")
-
-            # Resolve settings, falling back to contacts settings if needed
-            settings = self._resolve_compute_settings()
-
-            enzyme_pdb = resolve_enzyme_pdb(
-                enzyme_pdb_setting=settings["enzyme_pdb_for_sasa"],
-                source_path=self.config.source_path,
-                sim_config=sim_config,
-            )
-
-            if enzyme_pdb is None or not enzyme_pdb.exists():
-                logger.warning(
-                    f"Cannot compute binding preference for '{cond.label}': "
-                    f"enzyme PDB not found. Set enzyme_pdb_for_sasa in "
-                    f"binding_free_energy or contacts analysis settings."
-                )
-            else:
-                bp_result = compute_condition_binding_preference(
-                    cond=cond,
-                    sim_config=sim_config,
-                    analysis_dir=analysis_dir,
-                    enzyme_pdb=enzyme_pdb,
-                    threshold=settings["surface_exposure_threshold"],
-                    include_default_aa_groups=settings["include_default_aa_groups"],
-                    custom_protein_groups=settings["protein_groups"],
-                    protein_partitions=settings["protein_partitions"],
-                    polymer_type_selections=settings["polymer_type_selections"],
-                )
-
-            if bp_result is not None:
-                logger.info(f"  Computed binding preference for {cond.label} at {temperature_K} K")
-                return {
-                    "bp_result": bp_result,
-                    "temperature_K": temperature_K,
-                    "cond_label": cond.label,
-                    "config_path": str(cond.config),
-                }
-            else:
-                logger.warning(
-                    f"Failed to compute binding preference for '{cond.label}'. "
-                    f"Ensure contacts_rep{{N}}.json files exist in {analysis_dir}."
-                )
-        else:
-            logger.warning(
-                f"No binding preference data found for '{cond.label}'. "
-                f"Set compute_binding_preference=true or run contacts analysis "
-                f"with binding preference enabled first."
-            )
-
-        return {
-            "bp_result": None,
-            "temperature_K": temperature_K,
-            "cond_label": cond.label,
-            "config_path": str(cond.config),
-        }
 
     def _build_condition_summary(
         self,
@@ -797,129 +685,3 @@ class BindingFreeEnergyComparator(
             )
 
         return pairwise
-
-    # =========================================================================
-    # Settings resolution (BFE settings with fallback to contacts settings)
-    # =========================================================================
-
-    def _resolve_compute_settings(self) -> dict[str, Any]:
-        """Resolve compute settings, falling back to contacts analysis settings.
-
-        BFE settings may omit fields like ``enzyme_pdb_for_sasa`` that are
-        typically configured in the contacts analysis section. This method
-        returns a unified dict, preferring BFE settings and falling back to
-        contacts settings from the same comparison.yaml.
-
-        Returns
-        -------
-        dict
-            Resolved settings for compute_condition_binding_preference().
-        """
-        bfe = self.analysis_settings
-
-        # Try to get contacts settings for fallback
-        contacts_settings = None
-        if hasattr(self.config, "analysis_settings"):
-            contacts_settings = self.config.analysis_settings.get("contacts")
-
-        def _get(attr: str, default: Any = None) -> Any:
-            """Get from BFE settings first, then contacts settings, then default."""
-            val = getattr(bfe, attr, None)
-            if val is not None:
-                return val
-            if contacts_settings is not None:
-                val = getattr(contacts_settings, attr, None)
-                if val is not None:
-                    return val
-            return default
-
-        return {
-            "enzyme_pdb_for_sasa": _get("enzyme_pdb_for_sasa"),
-            "surface_exposure_threshold": _get("surface_exposure_threshold", 0.2),
-            "include_default_aa_groups": _get("include_default_aa_groups", True),
-            "protein_groups": _get("protein_groups"),
-            "protein_partitions": _get("protein_partitions"),
-            "polymer_type_selections": _get("polymer_type_selections"),
-        }
-
-    # =========================================================================
-    # Cache loading helpers (mirrors ContactsComparator pattern)
-    # =========================================================================
-
-    def _find_contacts_analysis_dir(
-        self,
-        sim_config: Any,
-        cond: "ConditionConfig",
-        condition_output_dir: Path | None = None,
-    ) -> Path:
-        """Find the contacts analysis directory for a condition.
-
-        Checks locations in order:
-        1. condition_output_dir (condition-specific, comparison mode)
-        2. sim_config.output.projects_directory / analysis / contacts /
-        3. cond.config parent directory / analysis / contacts /
-
-        Parameters
-        ----------
-        sim_config : SimulationConfig
-            Simulation configuration.
-        cond : ConditionConfig
-            Condition configuration.
-        condition_output_dir : Path, optional
-            Condition-specific contacts output directory (from comparison
-            mode).  Checked first before falling back to
-            ``projects_directory``.
-
-        Returns
-        -------
-        Path
-            Analysis directory path.
-        """
-        # Check condition-specific path first (comparison mode)
-        if condition_output_dir is not None:
-            if condition_output_dir.exists():
-                return condition_output_dir
-            # In comparison mode, do NOT fall back to the shared
-            # projects_directory — all conditions share the same path.
-            # Return the condition-specific path (even if not yet created)
-            # so that downstream code computes and saves there.
-            return condition_output_dir
-
-        from polyzymd.compare.comparators._utils import find_analysis_dir
-
-        return find_analysis_dir(
-            sim_config,
-            analysis_subdir="analysis/contacts",
-            cond_config_path=Path(cond.config),
-        )
-
-    def _try_load_cached_binding_preference(
-        self,
-        cond: "ConditionConfig",
-        analysis_dir: Path,
-    ) -> "AggregatedBindingPreferenceResult | BindingPreferenceResult | None":
-        """Load cached binding preference results for a condition.
-
-        Searches for files in order of preference:
-        1. binding_preference_aggregated.json
-        2. binding_preference_aggregated_reps*.json (glob)
-        3. binding_preference.json (single replicate)
-        4. Per-replicate binding_preference_rep{N}.json → aggregate
-
-        Parameters
-        ----------
-        cond : ConditionConfig
-            Condition configuration.
-        analysis_dir : Path
-            Contacts analysis directory.
-
-        Returns
-        -------
-        AggregatedBindingPreferenceResult | BindingPreferenceResult | None
-            Loaded result, or None if not found.
-        """
-        from polyzymd.compare.comparators._binding_preference_helpers import (
-            try_load_cached_binding_preference,
-        )
-
-        return try_load_cached_binding_preference(cond, analysis_dir)
