@@ -14,6 +14,7 @@ from typing import Optional
 import click
 import yaml
 
+from polyzymd.cli.colors import echo_logo
 from polyzymd.compare.cli_utils import (
     common_compare_options,
     load_comparison_config,
@@ -47,8 +48,8 @@ LOGGER = logging.getLogger("polyzymd.compare.cli")
 
 
 def _echo_branding() -> None:
-    """Print short PolyzyMD branding for top-level comparison commands."""
-    click.echo(SHORT_CREDIT_LINE)
+    """Print the PolyzyMD ASCII logo for top-level comparison commands."""
+    echo_logo()
 
 
 # ---------------------------------------------------------------------------

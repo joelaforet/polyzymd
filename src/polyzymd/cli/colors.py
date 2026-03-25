@@ -440,3 +440,56 @@ def render_progress_bar(
     filled = int(fraction * width)
     bar = _FILLED_CHAR * filled + _EMPTY_CHAR * (width - filled)
     return _colorize(bar, status)
+
+
+# ---------------------------------------------------------------------------
+# ASCII logo rendering
+# ---------------------------------------------------------------------------
+
+# Logo color definitions: (RGB, xterm-256 index, basic ANSI code)
+_LOGO_GOLD = ((215, 185, 120), 179, "\033[33m")  # warm gold for "Polyzy"
+_LOGO_GREEN = ((80, 180, 120), 78, "\033[32m")  # forest green for "MD"
+_LOGO_DIM = ((145, 140, 120), 144, "\033[37m")  # muted tone for credit line
+
+
+def _logo_escape(color: tuple[tuple[int, int, int], int, str]) -> str:
+    """Return the ANSI open escape for a logo color tuple."""
+    support = get_color_support()
+    if support is TerminalColorSupport.NONE:
+        return ""
+    rgb, xterm, basic = color
+    if support is TerminalColorSupport.TRUECOLOR:
+        r, g, b = rgb
+        return f"\033[38;2;{r};{g};{b}m"
+    if support is TerminalColorSupport.EXTENDED:
+        return f"\033[38;5;{xterm}m"
+    return basic
+
+
+def echo_logo() -> None:
+    """Print the two-tone PolyzyMD ASCII logo to stdout.
+
+    "Polyzy" is rendered in warm gold and "MD" in forest green,
+    matching the project's visual branding.  Color output respects
+    the current ``TerminalColorSupport`` level (including ``NO_COLOR``).
+    """
+    from polyzymd.core.branding import (
+        CREDIT_LINE,
+        LOGO_GAP,
+        LOGO_MD_LINES,
+        LOGO_POLYZY_LINES,
+    )
+
+    gold = _logo_escape(_LOGO_GOLD)
+    green = _logo_escape(_LOGO_GREEN)
+    dim = _logo_escape(_LOGO_DIM)
+    reset = "\033[0m" if get_color_support() is not TerminalColorSupport.NONE else ""
+
+    indent = "  "
+    for left, right in zip(LOGO_POLYZY_LINES, LOGO_MD_LINES):
+        click.echo(f"{indent}{gold}{left}{reset}{LOGO_GAP}{green}{right}{reset}")
+
+    # Blank line then centered credit
+    click.echo()
+    logo_width = len(LOGO_POLYZY_LINES[0]) + len(LOGO_GAP) + len(LOGO_MD_LINES[0])
+    click.echo(f"{indent}{dim}{CREDIT_LINE:^{logo_width}}{reset}")

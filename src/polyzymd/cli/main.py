@@ -21,7 +21,7 @@ from typing import Optional
 
 import click
 
-from polyzymd.cli.colors import colored_echo, setup_colored_logging
+from polyzymd.cli.colors import colored_echo, echo_logo, setup_colored_logging
 from polyzymd.core.branding import SHORT_CREDIT_LINE, prepend_file_header
 
 # Bootstrap a minimal root handler so suppress_openff_logs() works at import
@@ -34,8 +34,8 @@ LOGGER = logging.getLogger("polyzymd")
 
 
 def _echo_branding(phase: str = "cli") -> None:
-    """Print short PolyzyMD branding for top-level user-facing commands."""
-    colored_echo(SHORT_CREDIT_LINE, phase=phase)
+    """Print the PolyzyMD ASCII logo for top-level user-facing commands."""
+    echo_logo()
 
 
 def suppress_openff_logs() -> None:
