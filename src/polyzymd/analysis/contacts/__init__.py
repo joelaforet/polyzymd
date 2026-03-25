@@ -108,6 +108,7 @@ References
        https://doi.org/10.1021/ct0502864
 """
 
+from polyzymd.analysis.contacts._configured_adapter import ConfiguredContactsAnalyzer
 from polyzymd.analysis.contacts.binding_preference import (
     AggregatedBindingPreferenceEntry,
     AggregatedBindingPreferenceResult,
@@ -163,6 +164,7 @@ __all__ = [
     # Calculators
     "ContactAnalyzer",
     "ParallelContactAnalyzer",
+    "ConfiguredContactsAnalyzer",
     # Surface Exposure
     "ResidueExposure",
     "SurfaceExposureResult",

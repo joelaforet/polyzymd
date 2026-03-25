@@ -153,9 +153,9 @@ class BaseAnalyzer(ABC):
     Current Status
     --------------
     Existing analyzers (``RMSFCalculator``, ``ContactAnalyzer``, etc.) predate
-    this ABC and do not yet inherit from it.  New analyzers are encouraged to
-    follow this interface.  Forced migration of existing analyzers is deferred
-    to avoid high-risk refactoring.
+    this ABC.  Migration to this interface is now underway, with analyzers
+    progressively adopting this contract and registering with
+    ``AnalyzerRegistry``.
 
     See Also
     --------
@@ -239,7 +239,6 @@ class BaseAnalyzer(ABC):
         ...
 
     @property
-    @abstractmethod
     def label(self) -> str:
         """Human-readable label for this analyzer.
 
@@ -248,7 +247,7 @@ class BaseAnalyzer(ABC):
         str
             Display label for reports and logs.
         """
-        ...
+        return self.analysis_type()
 
 
 # ============================================================================

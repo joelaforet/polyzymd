@@ -36,6 +36,7 @@ import numpy as np
 
 from polyzymd.analysis.core.config_hash import compute_config_hash, validate_config_hash
 from polyzymd.analysis.core.loader import TrajectoryLoader, convert_time, parse_time_string
+from polyzymd.analysis.core.registry import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
 from polyzymd.analysis.results.base import get_polyzymd_version
 from polyzymd.analysis.secondary_structure.results import (
     SS_CHAR_TO_INT,
@@ -54,7 +55,8 @@ def _chain_letter_to_index(chain_id: str) -> int:
     return ord(chain_id.upper()) - ord("A")
 
 
-class SecondaryStructureCalculator:
+@AnalyzerRegistry.register("secondary_structure")
+class SecondaryStructureCalculator(BaseAnalyzer):
     """Calculator for DSSP secondary structure analysis.
 
     This class handles the complete secondary structure analysis workflow:
@@ -109,6 +111,46 @@ class SecondaryStructureCalculator:
         # Initialize loader (for trajectory path discovery)
         self._loader = TrajectoryLoader(config)
         self._config_hash = compute_config_hash(config)
+
+    @classmethod
+    def analysis_type(cls) -> str:
+        """Return the unique identifier for this analyzer.
+
+        Returns
+        -------
+        str
+            Analysis type identifier.
+        """
+        return "secondary_structure"
+
+    @classmethod
+    def from_config(
+        cls,
+        analysis_settings: BaseAnalysisSettings,
+        sim_config: "SimulationConfig",
+        equilibration: str = "0ns",
+    ) -> "SecondaryStructureCalculator":
+        """Create a secondary structure calculator from analysis settings.
+
+        Parameters
+        ----------
+        analysis_settings : BaseAnalysisSettings
+            Secondary-structure-compatible settings object.
+        sim_config : SimulationConfig
+            Simulation configuration for trajectory loading.
+        equilibration : str, optional
+            Equilibration time to skip.
+
+        Returns
+        -------
+        SecondaryStructureCalculator
+            Configured secondary structure calculator.
+        """
+        return cls(
+            config=sim_config,
+            chain_id=getattr(analysis_settings, "chain_id", "A"),
+            equilibration=equilibration,
+        )
 
     # ------------------------------------------------------------------
     # Public interface

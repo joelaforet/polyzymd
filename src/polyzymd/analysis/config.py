@@ -199,6 +199,21 @@ class ContactsConfig(BaseModel):
     enzyme_pdb_for_sasa: Optional[str] = None
 
 
+class SecondaryStructureConfig(BaseModel):
+    """Configuration for secondary structure (DSSP) analysis.
+
+    Attributes
+    ----------
+    enabled : bool
+        Whether to run secondary structure analysis
+    chain_id : str
+        Chain ID for the protein chain (default: "A")
+    """
+
+    enabled: bool = False
+    chain_id: str = "A"
+
+
 # =============================================================================
 # Main Analysis Configuration
 # =============================================================================
@@ -236,6 +251,8 @@ class AnalysisConfig(BaseModel):
         Catalytic triad analysis configuration
     contacts : ContactsConfig
         Polymer-protein contact analysis configuration
+    secondary_structure : SecondaryStructureConfig
+        Secondary structure analysis configuration
 
     Examples
     --------
@@ -250,6 +267,7 @@ class AnalysisConfig(BaseModel):
     distances: DistancesConfig = Field(default_factory=DistancesConfig)
     catalytic_triad: CatalyticTriadConfig = Field(default_factory=CatalyticTriadConfig)
     contacts: ContactsConfig = Field(default_factory=ContactsConfig)
+    secondary_structure: SecondaryStructureConfig = Field(default_factory=SecondaryStructureConfig)
 
     @field_validator("replicates", mode="before")
     @classmethod
@@ -324,6 +342,8 @@ class AnalysisConfig(BaseModel):
             enabled.append("catalytic_triad")
         if self.contacts.enabled:
             enabled.append("contacts")
+        if self.secondary_structure.enabled:
+            enabled.append("secondary_structure")
         return enabled
 
     def validate_config(self) -> list[str]:
@@ -487,4 +507,11 @@ rmsf:
 #   # Surface exposure filtering
 #   # Only residues with relative SASA > threshold are considered
 #   surface_exposure_threshold: 0.2  # 20% of max theoretical SASA
+
+# ============================================================================
+# Secondary Structure Analysis
+# ============================================================================
+# secondary_structure:
+#   enabled: false
+#   chain_id: "A"
 """)

@@ -65,6 +65,7 @@ from polyzymd.analysis.core.loader import (
     parse_time_string,
     time_to_frame,
 )
+from polyzymd.analysis.core.registry import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
 from polyzymd.analysis.core.statistics import (
     aggregate_per_residue_stats,
     aggregate_region_stats,
@@ -87,7 +88,8 @@ except ImportError:
 LOGGER = logging.getLogger(__name__)
 
 
-class RMSFCalculator:
+@AnalyzerRegistry.register("rmsf")
+class RMSFCalculator(BaseAnalyzer):
     """Calculator for RMSF analysis with trajectory alignment.
 
     This class handles the complete RMSF analysis workflow:
@@ -212,6 +214,49 @@ class RMSFCalculator:
         # Initialize loader
         self._loader = TrajectoryLoader(config)
         self._config_hash = compute_config_hash(config)
+
+    @classmethod
+    def analysis_type(cls) -> str:
+        """Return the unique identifier for this analyzer.
+
+        Returns
+        -------
+        str
+            Analysis type identifier.
+        """
+        return "rmsf"
+
+    @classmethod
+    def from_config(
+        cls,
+        analysis_settings: BaseAnalysisSettings,
+        sim_config: "SimulationConfig",
+        equilibration: str = "0ns",
+    ) -> "RMSFCalculator":
+        """Create an RMSF calculator from analysis settings.
+
+        Parameters
+        ----------
+        analysis_settings : BaseAnalysisSettings
+            RMSF-compatible settings object.
+        sim_config : SimulationConfig
+            Simulation configuration for trajectory loading.
+        equilibration : str, optional
+            Equilibration time to skip.
+
+        Returns
+        -------
+        RMSFCalculator
+            Configured RMSF calculator.
+        """
+        return cls(
+            config=sim_config,
+            selection=getattr(analysis_settings, "selection", "protein and name CA"),
+            equilibration=equilibration,
+            reference_mode=getattr(analysis_settings, "reference_mode", "centroid"),
+            reference_frame=getattr(analysis_settings, "reference_frame", None),
+            reference_file=getattr(analysis_settings, "reference_file", None),
+        )
 
     def compute(
         self,

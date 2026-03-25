@@ -67,19 +67,43 @@ This installs MDAnalysis and matplotlib.
 # Lazy imports to avoid loading MDAnalysis unless needed
 def __getattr__(name):
     """Lazy import of analysis components."""
-    if name == "RMSFCalculator":
-        from polyzymd.analysis.rmsf import RMSFCalculator
+    analyzer_class_names = {
+        "RMSFCalculator": "rmsf",
+        "DistanceCalculator": "distances",
+        "CatalyticTriadAnalyzer": "catalytic_triad",
+        "SecondaryStructureCalculator": "secondary_structure",
+    }
 
-        return RMSFCalculator
-    elif name == "DistanceCalculator":
-        from polyzymd.analysis.distances import DistanceCalculator
+    if name in analyzer_class_names:
+        from polyzymd.analysis._registry_bootstrap import ensure_all_analyzers_registered
+        from polyzymd.analysis.core.registry import AnalyzerRegistry
 
-        return DistanceCalculator
-    elif name == "CatalyticTriadAnalyzer":
-        from polyzymd.analysis.triad import CatalyticTriadAnalyzer
+        ensure_all_analyzers_registered()
+        try:
+            return AnalyzerRegistry.get(analyzer_class_names[name])
+        except ValueError:
+            if name == "RMSFCalculator":
+                from polyzymd.analysis.rmsf import RMSFCalculator
 
-        return CatalyticTriadAnalyzer
-    elif name == "TrajectoryLoader":
+                return RMSFCalculator
+            if name == "DistanceCalculator":
+                from polyzymd.analysis.distances import DistanceCalculator
+
+                return DistanceCalculator
+            if name == "CatalyticTriadAnalyzer":
+                from polyzymd.analysis.triad import CatalyticTriadAnalyzer
+
+                return CatalyticTriadAnalyzer
+            from polyzymd.analysis.secondary_structure import SecondaryStructureCalculator
+
+            return SecondaryStructureCalculator
+
+    if name == "ConfiguredContactsAnalyzer":
+        from polyzymd.analysis.contacts._configured_adapter import ConfiguredContactsAnalyzer
+
+        return ConfiguredContactsAnalyzer
+
+    if name == "TrajectoryLoader":
         from polyzymd.analysis.core.loader import TrajectoryLoader
 
         return TrajectoryLoader
@@ -134,10 +158,6 @@ def __getattr__(name):
         from polyzymd.analysis.contacts.aggregator import aggregate_contact_results
 
         return aggregate_contact_results
-    elif name == "SecondaryStructureCalculator":
-        from polyzymd.analysis.secondary_structure import SecondaryStructureCalculator
-
-        return SecondaryStructureCalculator
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -158,6 +178,7 @@ __all__ = [
     "ResidueContactData",
     "ContactResult",
     "aggregate_contact_results",
+    "ConfiguredContactsAnalyzer",
     # Loading
     "TrajectoryLoader",
     # Config validation

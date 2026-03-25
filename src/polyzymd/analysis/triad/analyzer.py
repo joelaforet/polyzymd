@@ -41,6 +41,7 @@ from polyzymd.analysis.core.loader import (
     parse_time_string,
     time_to_frame,
 )
+from polyzymd.analysis.core.registry import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
 from polyzymd.analysis.core.statistics import compute_sem
 from polyzymd.analysis.distances.calculator import DistanceCalculator
 from polyzymd.analysis.results.base import get_polyzymd_version
@@ -57,7 +58,8 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class CatalyticTriadAnalyzer:
+@AnalyzerRegistry.register("catalytic_triad")
+class CatalyticTriadAnalyzer(BaseAnalyzer):
     """Analyzer for catalytic triad/active site geometry.
 
     This class handles the complete triad analysis workflow:
@@ -136,6 +138,62 @@ class CatalyticTriadAnalyzer:
             equilibration=equilibration,
             thresholds=triad_config.threshold,
         )
+
+    @classmethod
+    def analysis_type(cls) -> str:
+        """Return the unique identifier for this analyzer.
+
+        Returns
+        -------
+        str
+            Analysis type identifier.
+        """
+        return "catalytic_triad"
+
+    @classmethod
+    def from_config(
+        cls,
+        analysis_settings: BaseAnalysisSettings,
+        sim_config: "SimulationConfig",
+        equilibration: str = "0ns",
+    ) -> "CatalyticTriadAnalyzer":
+        """Create a catalytic triad analyzer from analysis settings.
+
+        Parameters
+        ----------
+        analysis_settings : BaseAnalysisSettings
+            Triad-compatible settings object.
+        sim_config : SimulationConfig
+            Simulation configuration for trajectory loading.
+        equilibration : str, optional
+            Equilibration time to skip.
+
+        Returns
+        -------
+        CatalyticTriadAnalyzer
+            Configured catalytic triad analyzer.
+        """
+        from polyzymd.compare.config import CatalyticTriadConfig as CompareTriadConfig
+        from polyzymd.compare.config import TriadPairConfig as CompareTriadPairConfig
+
+        if isinstance(analysis_settings, CompareTriadConfig):
+            triad_config = analysis_settings
+        else:
+            triad_pairs = [
+                CompareTriadPairConfig(
+                    label=pair.label,
+                    selection_a=pair.selection_a,
+                    selection_b=pair.selection_b,
+                )
+                for pair in analysis_settings.pairs
+            ]
+            triad_config = CompareTriadConfig(
+                name=getattr(analysis_settings, "name", "catalytic_triad"),
+                threshold=getattr(analysis_settings, "threshold", 3.5),
+                pairs=triad_pairs,
+            )
+
+        return cls(config=sim_config, triad_config=triad_config, equilibration=equilibration)
 
     def validate_selections(self, replicate: int = 1) -> None:
         """Validate all triad selections against a replicate's topology.

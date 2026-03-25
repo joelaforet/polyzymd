@@ -43,6 +43,7 @@ from polyzymd.analysis.core.loader import (
     time_to_frame,
 )
 from polyzymd.analysis.core.pbc import minimum_image_distance
+from polyzymd.analysis.core.registry import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
 from polyzymd.analysis.core.selections import (
     get_position,
     parse_selection_string,
@@ -130,7 +131,8 @@ def _make_pair_label(sel1: str, sel2: str) -> str:
     return f"{l1}-{l2}"
 
 
-class DistanceCalculator:
+@AnalyzerRegistry.register("distances")
+class DistanceCalculator(BaseAnalyzer):
     """Calculator for distance analysis with proper statistics.
 
     This class handles distance analysis workflow:
@@ -255,6 +257,43 @@ class DistanceCalculator:
         # Initialize loader
         self._loader = TrajectoryLoader(config)
         self._config_hash = compute_config_hash(config)
+
+    @classmethod
+    def analysis_type(cls) -> str:
+        """Return the unique identifier for this analyzer.
+
+        Returns
+        -------
+        str
+            Analysis type identifier.
+        """
+        return "distances"
+
+    @classmethod
+    def from_config(
+        cls,
+        analysis_settings: BaseAnalysisSettings,
+        sim_config: "SimulationConfig",
+        equilibration: str = "0ns",
+    ) -> "DistanceCalculator":
+        """Create a distance calculator from analysis settings.
+
+        Parameters
+        ----------
+        analysis_settings : BaseAnalysisSettings
+            Distances-compatible settings object.
+        sim_config : SimulationConfig
+            Simulation configuration for trajectory loading.
+        equilibration : str, optional
+            Equilibration time to skip.
+
+        Returns
+        -------
+        DistanceCalculator
+            Configured distance calculator.
+        """
+        pairs = [(pair.selection_a, pair.selection_b) for pair in analysis_settings.pairs]
+        return cls(config=sim_config, pairs=pairs, equilibration=equilibration)
 
     def compute(
         self,
