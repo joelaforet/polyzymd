@@ -257,6 +257,37 @@ class RMSFAnalysis(Analysis):
             ),
         }
 
+    def format(self, result: Any, output_format: str = "text") -> str:
+        """Format RMSF comparison result for CLI display.
+
+        Parameters
+        ----------
+        result : ComparisonResult or BaseModel
+            Comparison result to format.
+        output_format : str
+            ``"text"``, ``"markdown"``, or ``"json"``.
+
+        Returns
+        -------
+        str
+            Formatted output.
+        """
+        from polyzymd.analyses.base import ComparisonResult
+        from polyzymd.analyses.stats import format_scalar_comparison
+
+        if isinstance(result, ComparisonResult):
+            return format_scalar_comparison(
+                result,
+                title="RMSF Comparison",
+                metric_label="Mean RMSF",
+                metric_unit="A",
+                metric_key="mean_rmsf",
+                output_format=output_format,
+                higher_is_better=False,
+            )
+        # Fall back to legacy formatter for old result types
+        return self._legacy_format(result, output_format)
+
     def _deserialize_result(self, path: Path) -> Any:
         """Load an aggregated RMSF result from JSON.
 

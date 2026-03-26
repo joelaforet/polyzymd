@@ -321,6 +321,37 @@ class CatalyticTriadAnalysis(Analysis):
             ),
         }
 
+    def format(self, result: Any, output_format: str = "text") -> str:
+        """Format catalytic triad comparison result for CLI display.
+
+        Parameters
+        ----------
+        result : ComparisonResult or BaseModel
+            Comparison result to format.
+        output_format : str
+            ``"text"``, ``"markdown"``, or ``"json"``.
+
+        Returns
+        -------
+        str
+            Formatted output.
+        """
+        from polyzymd.analyses.base import ComparisonResult
+        from polyzymd.analyses.stats import format_scalar_comparison
+
+        if isinstance(result, ComparisonResult):
+            return format_scalar_comparison(
+                result,
+                title="Catalytic Triad Comparison",
+                metric_label="Simultaneous Contact",
+                metric_unit="%",
+                metric_key="simultaneous_contact_fraction",
+                output_format=output_format,
+                higher_is_better=True,
+            )
+        # Fall back to legacy formatter for old result types
+        return self._legacy_format(result, output_format)
+
     def _deserialize_result(self, path: Path) -> Any:
         """Load an aggregated triad result from JSON.
 
