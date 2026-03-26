@@ -8,7 +8,7 @@ caching, dependency ordering, and CLI wiring.
 How to Add a New Analysis
 -------------------------
 1. Create ``src/polyzymd/analyses/<name>.py`` (or a sub-package).
-2. Define a ``Settings`` model (Pydantic v2 ``BaseModel``).
+2. Define a ``Settings`` model (Pydantic v2 ``BaseModel``) as an inner class.
 3. Subclass :class:`Analysis` and implement the required methods.
 4. Done — the framework discovers it via ``pkgutil``.
 
@@ -20,8 +20,9 @@ Required methods::
 Optional overrides (sensible defaults provided)::
 
     filter_conditions(conditions)     -> list[Condition]
-    compare(ctx)                      -> BaseModel | None
+    compare(ctx)                      -> ComparisonResult | BaseModel | None
     plot(ctx)                         -> list[Path]
+    format(result, output_format)     -> str
     extract_metrics(summary)          -> dict[str, MetricValue]
 
 See Also
@@ -33,15 +34,17 @@ analyses.orchestrator : Framework engine for running analyses.
 
 from __future__ import annotations
 
+import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Self, Sequence
+
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from pydantic import BaseModel
-
     from polyzymd.compare.config import ComparisonConfig, ConditionConfig
     from polyzymd.config.schema import SimulationConfig
 
@@ -270,6 +273,179 @@ class MetricValue:
 
 
 # ---------------------------------------------------------------------------
+# ComparisonResult — base Pydantic model for all comparison outputs
+# ---------------------------------------------------------------------------
+
+
+class ConditionSummary(BaseModel):
+    """Summary statistics for one condition in a scalar comparison.
+
+    For simple scalar analyses (RMSF, catalytic_triad, secondary_structure),
+    dynamic ``<metric>_mean``, ``<metric>_sem``, and
+    ``<metric>_replicate_values`` fields are added via ``model_extra``.
+
+    Attributes
+    ----------
+    label : str
+        Condition display name.
+    n_replicates : int
+        Number of replicates included.
+    """
+
+    model_config = {"extra": "allow"}
+
+    label: str
+    n_replicates: int = 0
+
+
+class PairwiseResult(BaseModel):
+    """Statistical comparison between two conditions for one metric.
+
+    Attributes
+    ----------
+    condition_a : str
+        Label of first condition (typically control/reference).
+    condition_b : str
+        Label of second condition (typically treatment).
+    metric : str
+        Name of the metric being compared.
+    t_statistic : float
+        T-test statistic.
+    p_value : float
+        Two-tailed p-value.
+    cohens_d : float
+        Effect size (Cohen's d).
+    effect_size_interpretation : str
+        ``"negligible"``, ``"small"``, ``"medium"``, or ``"large"``.
+    direction : str
+        Interpretation of change (e.g. ``"stabilizing"``).
+    significant : bool
+        Whether p < 0.05.
+    percent_change : float
+        Percent change from condition_a to condition_b.
+    """
+
+    condition_a: str
+    condition_b: str
+    metric: str = "default"
+    t_statistic: float
+    p_value: float
+    cohens_d: float
+    effect_size_interpretation: str
+    direction: str
+    significant: bool
+    percent_change: float
+
+
+class ANOVAResult(BaseModel):
+    """One-way ANOVA result for one metric.
+
+    Attributes
+    ----------
+    metric : str
+        Name of the metric tested.
+    f_statistic : float
+        F-statistic from ANOVA.
+    p_value : float
+        P-value for the test.
+    significant : bool
+        Whether p < 0.05.
+    """
+
+    metric: str = "default"
+    f_statistic: float
+    p_value: float
+    significant: bool
+
+
+class ComparisonResult(BaseModel):
+    """Serializable result of a cross-condition comparison.
+
+    This is the **universal** comparison output model.  The default
+    :meth:`Analysis.compare` returns an instance of this class.  Complex
+    analyses (contacts, distances, exposure, BFE, polymer_affinity) may
+    return their own typed Pydantic models — as long as those models have
+    a ``.save()`` method, the framework handles them identically.
+
+    The CLI calls ``result.save(path)`` and ``analysis.format(result)``
+    for every comparison, so all result objects must support these two
+    operations.
+
+    Attributes
+    ----------
+    analysis_type : str
+        Analysis identifier (e.g. ``"rmsf"``).
+    name : str
+        Comparison project name.
+    control_label : str | None
+        Control condition label.
+    conditions : list[ConditionSummary]
+        Per-condition summary statistics.
+    pairwise_comparisons : list[PairwiseResult]
+        Pairwise statistical tests.
+    anova : list[ANOVAResult] | None
+        ANOVA results (``None`` if < 3 conditions).
+    ranking : list[str]
+        Condition labels ranked by primary metric (best first).
+    rankings_by_metric : dict[str, list[str]] | None
+        Per-metric rankings for multi-metric analyses.
+    equilibration_time : str
+        Equilibration time used.
+    created_at : str
+        ISO 8601 timestamp.
+    polyzymd_version : str
+        PolyzyMD version string.
+    """
+
+    analysis_type: str
+    name: str
+    control_label: str | None = None
+    conditions: list[ConditionSummary] = []
+    pairwise_comparisons: list[PairwiseResult] = []
+    anova: list[ANOVAResult] | None = None
+    ranking: list[str] = []
+    rankings_by_metric: dict[str, list[str]] | None = None
+    equilibration_time: str = "0ns"
+    created_at: str = ""
+    polyzymd_version: str = ""
+
+    def save(self, path: Path | str) -> Path:
+        """Save result to JSON file.
+
+        Parameters
+        ----------
+        path : Path or str
+            Output path.
+
+        Returns
+        -------
+        Path
+            Path to saved file.
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self.model_dump_json(indent=2))
+        return path
+
+    @classmethod
+    def load(cls, path: Path | str) -> Self:
+        """Load result from JSON file.
+
+        Parameters
+        ----------
+        path : Path or str
+            Path to JSON file.
+
+        Returns
+        -------
+        Self
+            Loaded result.
+        """
+        path = Path(path)
+        return cls.model_validate_json(path.read_text())
+
+
+# ---------------------------------------------------------------------------
 # Analysis ABC
 # ---------------------------------------------------------------------------
 
@@ -279,7 +455,7 @@ class Analysis(ABC):
 
     Subclasses represent a complete analysis lifecycle: per-replicate
     computation, aggregation across replicates, cross-condition comparison,
-    and plotting.
+    plotting, and CLI formatting.
 
     Class Variables
     ---------------
@@ -392,13 +568,17 @@ class Analysis(ABC):
         """
         return list(conditions)
 
-    def compare(self, ctx: ComparisonContext) -> Any:
+    def compare(self, ctx: ComparisonContext) -> ComparisonResult | Any | None:
         """Compare results across conditions.
 
         The default implementation uses :meth:`extract_metrics` to build
-        a scalar comparison with t-tests, ANOVA, and rankings.  Override
-        this entirely for multi-metric, per-pair, or entry-table
-        comparisons.
+        a scalar comparison with t-tests, ANOVA, and rankings, returning
+        a :class:`ComparisonResult`.
+
+        Override this entirely for multi-metric, per-pair, or entry-table
+        comparisons that return a custom Pydantic model (e.g.
+        ``ContactsComparisonResult``).  The only contract is that the
+        returned object must have a ``.save(path)`` method.
 
         Parameters
         ----------
@@ -407,7 +587,7 @@ class Analysis(ABC):
 
         Returns
         -------
-        BaseModel or None
+        ComparisonResult or BaseModel or None
             Comparison result, or ``None`` if comparison is not supported.
         """
         from polyzymd.analyses.stats import default_scalar_comparison
@@ -475,6 +655,35 @@ class Analysis(ABC):
         """
         return []
 
+    def format(self, result: Any, output_format: str = "text") -> str:
+        """Format a comparison result for CLI display.
+
+        Override to provide analysis-specific formatted output.  The
+        default implementation delegates to the legacy formatter map
+        (``_FORMATTER_MAP`` in ``compare/cli.py``).  Once all analyses
+        implement ``format()`` natively, the legacy formatter map will
+        be removed.
+
+        Parameters
+        ----------
+        result : ComparisonResult or BaseModel
+            The comparison result to format.
+        output_format : str
+            Output format: ``"text"``, ``"json"``, or ``"markdown"``.
+
+        Returns
+        -------
+        str
+            Formatted string ready for CLI display.
+        """
+        if output_format == "json":
+            if hasattr(result, "model_dump_json"):
+                return result.model_dump_json(indent=2)
+            return json.dumps(result, indent=2, default=str)
+
+        # Default: fall back to legacy formatters (will be removed after migration)
+        return self._legacy_format(result, output_format)
+
     # === Framework hooks (override only if you know what you're doing) ===
 
     def _load_aggregated_result(self, aggregated_dir: Path) -> Any:
@@ -525,6 +734,76 @@ class Analysis(ABC):
             f"{type(self).__name__} must implement _deserialize_result() "
             f"or override compare() entirely."
         )
+
+    def _legacy_format(self, result: Any, output_format: str) -> str:
+        """Delegate to the legacy formatter map.
+
+        This is a transitional method.  Once all analyses override
+        ``format()`` directly, this will be removed.
+
+        Parameters
+        ----------
+        result : BaseModel
+            Comparison result.
+        output_format : str
+            Output format string.
+
+        Returns
+        -------
+        str
+            Formatted output.
+        """
+        import importlib
+
+        _FORMATTER_MAP: dict[str, tuple[str, str]] = {
+            "rmsf": ("polyzymd.compare.formatters", "format_result"),
+            "catalytic_triad": (
+                "polyzymd.compare.triad_formatters",
+                "format_triad_result",
+            ),
+            "contacts": (
+                "polyzymd.compare.contacts_formatters",
+                "format_contacts_result",
+            ),
+            "distances": (
+                "polyzymd.compare.distances_formatters",
+                "format_distances_result",
+            ),
+            "exposure": (
+                "polyzymd.compare.exposure_formatters",
+                "format_exposure_result",
+            ),
+            "binding_free_energy": (
+                "polyzymd.compare.binding_free_energy_formatters",
+                "format_bfe_result",
+            ),
+            "polymer_affinity": (
+                "polyzymd.compare.polymer_affinity_formatters",
+                "format_affinity_result",
+            ),
+            "secondary_structure": (
+                "polyzymd.compare.formatters",
+                "format_result",
+            ),
+        }
+
+        entry = _FORMATTER_MAP.get(self.name)
+        if entry is None:
+            # No legacy formatter — return a simple summary
+            if hasattr(result, "model_dump_json"):
+                return result.model_dump_json(indent=2)
+            return str(result)
+
+        mod_path, func_name = entry
+        try:
+            mod = importlib.import_module(mod_path)
+            formatter = getattr(mod, func_name)
+            return formatter(result, format=output_format)
+        except Exception as exc:
+            logger.warning(f"Legacy formatter for {self.name} failed: {exc}")
+            if hasattr(result, "model_dump_json"):
+                return result.model_dump_json(indent=2)
+            return str(result)
 
     # === Utility methods (available to all subclasses) ===
 

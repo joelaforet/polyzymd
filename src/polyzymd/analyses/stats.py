@@ -26,7 +26,13 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from polyzymd.analyses.base import MetricValue
+from polyzymd.analyses.base import (
+    ANOVAResult,
+    ComparisonResult,
+    ConditionSummary,
+    MetricValue,
+    PairwiseResult,
+)
 
 logger = logging.getLogger("polyzymd.analyses")
 
@@ -70,7 +76,7 @@ def interpret_direction(
 def pairwise_comparisons(
     metrics_by_condition: dict[str, MetricValue],
     control_label: str | None = None,
-) -> list[dict[str, Any]]:
+) -> list[PairwiseResult]:
     """Compute pairwise statistical comparisons for a single metric.
 
     Parameters
@@ -83,11 +89,8 @@ def pairwise_comparisons(
 
     Returns
     -------
-    list[dict[str, Any]]
-        Each dict contains: ``condition_a``, ``condition_b``, ``metric``,
-        ``t_statistic``, ``p_value``, ``cohens_d``,
-        ``effect_size_interpretation``, ``direction``, ``significant``,
-        ``percent_change``.
+    list[PairwiseResult]
+        Pairwise comparison results.
     """
     from polyzymd.compare.statistics import (
         cohens_d,
@@ -96,7 +99,7 @@ def pairwise_comparisons(
     )
 
     labels = list(metrics_by_condition.keys())
-    results: list[dict[str, Any]] = []
+    results: list[PairwiseResult] = []
 
     pairs: list[tuple[str, str]]
     if control_label and control_label in metrics_by_condition:
@@ -116,18 +119,18 @@ def pairwise_comparisons(
         direction = interpret_direction(pct, mv_a.direction_labels)
 
         results.append(
-            {
-                "condition_a": label_a,
-                "condition_b": label_b,
-                "metric": mv_a.name,
-                "t_statistic": ttest.t_statistic,
-                "p_value": ttest.p_value,
-                "cohens_d": effect.cohens_d,
-                "effect_size_interpretation": effect.interpretation,
-                "direction": direction,
-                "significant": ttest.significant,
-                "percent_change": pct,
-            }
+            PairwiseResult(
+                condition_a=label_a,
+                condition_b=label_b,
+                metric=mv_a.name,
+                t_statistic=ttest.t_statistic,
+                p_value=ttest.p_value,
+                cohens_d=effect.cohens_d,
+                effect_size_interpretation=effect.interpretation,
+                direction=direction,
+                significant=ttest.significant,
+                percent_change=pct,
+            )
         )
 
     return results
@@ -141,7 +144,7 @@ def pairwise_comparisons(
 def anova_test(
     metrics_by_condition: dict[str, MetricValue],
     metric_name: str = "default",
-) -> dict[str, Any] | None:
+) -> ANOVAResult | None:
     """Run one-way ANOVA across conditions for a single metric.
 
     Parameters
@@ -149,13 +152,12 @@ def anova_test(
     metrics_by_condition : dict[str, MetricValue]
         Mapping ``condition_label -> MetricValue``.
     metric_name : str
-        Label for the metric in the result dict.
+        Label for the metric in the result.
 
     Returns
     -------
-    dict[str, Any] | None
-        Dict with ``metric``, ``f_statistic``, ``p_value``, ``significant``.
-        ``None`` if fewer than 3 conditions.
+    ANOVAResult | None
+        ANOVA result, or ``None`` if fewer than 3 conditions.
     """
     if len(metrics_by_condition) < 3:
         return None
@@ -165,12 +167,12 @@ def anova_test(
     groups = [mv.replicate_values for mv in metrics_by_condition.values()]
     result = one_way_anova(*groups)
 
-    return {
-        "metric": metric_name,
-        "f_statistic": result.f_statistic,
-        "p_value": result.p_value,
-        "significant": result.significant,
-    }
+    return ANOVAResult(
+        metric=metric_name,
+        f_statistic=result.f_statistic,
+        p_value=result.p_value,
+        significant=result.significant,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +221,7 @@ def default_scalar_comparison(
     metrics_by_condition: dict[str, dict[str, MetricValue]],
     control_label: str | None = None,
     equilibration: str = "0ns",
-) -> dict[str, Any]:
+) -> ComparisonResult:
     """Run the standard scalar comparison pipeline.
 
     This is the default implementation used by :meth:`Analysis.compare`
@@ -247,12 +249,9 @@ def default_scalar_comparison(
 
     Returns
     -------
-    dict[str, Any]
-        Serializable comparison result with keys: ``analysis_type``,
-        ``name``, ``control_label``, ``conditions``, ``pairwise_comparisons``,
-        ``anova``, ``ranking``, ``equilibration_time``, ``created_at``,
-        ``polyzymd_version``.  This can be persisted directly or wrapped
-        in an analysis-specific result model.
+    ComparisonResult
+        Structured, serializable comparison result with ``.save()``
+        and ``.load()`` methods.
     """
     from polyzymd import __version__
 
@@ -260,8 +259,8 @@ def default_scalar_comparison(
     first_cond = next(iter(metrics_by_condition.values()))
     metric_names = list(first_cond.keys())
 
-    all_pairwise: list[dict[str, Any]] = []
-    all_anova: list[dict[str, Any]] = []
+    all_pairwise: list[PairwiseResult] = []
+    all_anova: list[ANOVAResult] = []
     all_rankings: dict[str, list[str]] = {}
 
     for metric_name in metric_names:
@@ -287,31 +286,29 @@ def default_scalar_comparison(
         all_rankings[metric_name] = rank_conditions(per_cond)
 
     # Build condition summaries
-    condition_summaries = []
+    condition_summaries: list[ConditionSummary] = []
     for label, metrics in metrics_by_condition.items():
-        summary: dict[str, Any] = {"label": label}
+        extra: dict[str, Any] = {}
         for metric_name, mv in metrics.items():
-            summary[f"{metric_name}_mean"] = mv.mean
-            summary[f"{metric_name}_sem"] = mv.sem
-            summary[f"{metric_name}_replicate_values"] = mv.replicate_values
-        summary["n_replicates"] = (
-            len(next(iter(metrics.values())).replicate_values) if metrics else 0
-        )
-        condition_summaries.append(summary)
+            extra[f"{metric_name}_mean"] = mv.mean
+            extra[f"{metric_name}_sem"] = mv.sem
+            extra[f"{metric_name}_replicate_values"] = mv.replicate_values
+        n_reps = len(next(iter(metrics.values())).replicate_values) if metrics else 0
+        condition_summaries.append(ConditionSummary(label=label, n_replicates=n_reps, **extra))
 
     # Use the first metric's ranking as the primary ranking
     primary_ranking = all_rankings.get(metric_names[0], []) if metric_names else []
 
-    return {
-        "analysis_type": analysis_name,
-        "name": project_name,
-        "control_label": control_label,
-        "conditions": condition_summaries,
-        "pairwise_comparisons": all_pairwise,
-        "anova": all_anova if all_anova else None,
-        "ranking": primary_ranking,
-        "rankings_by_metric": all_rankings if len(metric_names) > 1 else None,
-        "equilibration_time": equilibration,
-        "created_at": datetime.now().isoformat(),
-        "polyzymd_version": __version__,
-    }
+    return ComparisonResult(
+        analysis_type=analysis_name,
+        name=project_name,
+        control_label=control_label,
+        conditions=condition_summaries,
+        pairwise_comparisons=all_pairwise,
+        anova=all_anova if all_anova else None,
+        ranking=primary_ranking,
+        rankings_by_metric=all_rankings if len(metric_names) > 1 else None,
+        equilibration_time=equilibration,
+        created_at=datetime.now().isoformat(),
+        polyzymd_version=__version__,
+    )

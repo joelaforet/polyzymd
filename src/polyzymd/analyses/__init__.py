@@ -37,9 +37,13 @@ See :mod:`polyzymd.analyses.base` for the full contract.
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
+    ANOVAResult,
     ComparisonContext,
+    ComparisonResult,
     Condition,
+    ConditionSummary,
     MetricValue,
+    PairwiseResult,
     PlotContext,
     ReplicateContext,
 )
@@ -56,12 +60,16 @@ from polyzymd.analyses.orchestrator import (
 )
 
 __all__ = [
-    # Base class + contexts
+    # Base class + contexts + result models
     "Analysis",
     "AggregateContext",
+    "ANOVAResult",
     "ComparisonContext",
+    "ComparisonResult",
     "Condition",
+    "ConditionSummary",
     "MetricValue",
+    "PairwiseResult",
     "PlotContext",
     "ReplicateContext",
     # Discovery

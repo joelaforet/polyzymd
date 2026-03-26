@@ -44,6 +44,7 @@ _SKIP_MODULES = frozenset(
         "stats",
         "discovery",
         "orchestrator",
+        "runner",
         "config",
     }
 )
