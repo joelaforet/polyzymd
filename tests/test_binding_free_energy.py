@@ -424,153 +424,6 @@ class TestFreeEnergyPairwiseEntry:
 
 
 # ---------------------------------------------------------------------------
-# BindingFreeEnergyComparator Helper Tests (no I/O)
-# ---------------------------------------------------------------------------
-
-
-class TestBindingFreeEnergyComparatorHelpers:
-    """Test comparator helper methods using synthetic data."""
-
-    def _make_comparator(self, units: str = "kT"):
-        """Build a comparator without requiring real config files."""
-        from unittest.mock import MagicMock
-
-        from polyzymd.compare.comparators.binding_free_energy import BindingFreeEnergyComparator
-        from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
-
-        config = MagicMock()
-        config.name = "test"
-        config.conditions = []
-        config.control = None
-
-        analysis_settings = BindingFreeEnergyAnalysisSettings(units=units)
-        comparator = BindingFreeEnergyComparator(config, analysis_settings)
-        return comparator
-
-    def test_metric_type_is_mean_based(self):
-        from polyzymd.analysis.core.metric_type import MetricType
-
-        comp = self._make_comparator()
-        assert comp.metric_type == MetricType.MEAN_BASED
-
-    def test_rank_summaries_most_negative_first(self):
-        comp = self._make_comparator()
-        entries_a = [_make_entry(contact_share=0.30, expected_share=0.10)]  # strongly negative
-        entries_b = [_make_entry(contact_share=0.10, expected_share=0.10)]  # ~0
-        s_a = _make_condition_summary(label="A (preferred)", entries=entries_a)
-        s_b = _make_condition_summary(label="B (neutral)", entries=entries_b)
-        ranked = comp._rank_summaries([s_b, s_a])
-        assert ranked[0].label == "A (preferred)"
-
-    def test_interpret_direction_negative(self):
-        comp = self._make_comparator()
-        assert "favorable" in comp._interpret_direction(-0.5)
-
-    def test_interpret_direction_positive(self):
-        comp = self._make_comparator()
-        assert "favorable" in comp._interpret_direction(0.5)
-
-    def test_interpret_direction_zero(self):
-        comp = self._make_comparator()
-        assert "unchanged" in comp._interpret_direction(0.0)
-
-    def test_compare_condition_pair_same_temperature(self):
-        """Same-temperature pair should have t-stats when n_reps >= 2."""
-        comp = self._make_comparator()
-
-        entries_a = [
-            _make_entry(
-                delta_G_per_replicate=[-1.2, -1.4, -1.1],
-                n_replicates=3,
-            )
-        ]
-        entries_b = [
-            _make_entry(
-                delta_G_per_replicate=[-0.5, -0.6, -0.7],
-                n_replicates=3,
-            )
-        ]
-        sa = _make_condition_summary(label="A", temperature_K=300.0, entries=entries_a)
-        sb = _make_condition_summary(label="B", temperature_K=300.0, entries=entries_b)
-
-        pairwise = comp._compare_condition_pair(sa, sb)
-        assert len(pairwise) == 1
-        pw = pairwise[0]
-        assert not pw.cross_temperature
-        assert pw.t_statistic is not None
-        assert pw.p_value is not None
-
-    def test_compare_condition_pair_cross_temperature_suppresses_stats(self):
-        """Cross-temperature pair should have no t-stats."""
-        comp = self._make_comparator()
-
-        entries_a = [_make_entry(delta_G_per_replicate=[-1.2, -1.4, -1.1], n_replicates=3)]
-        entries_b = [_make_entry(delta_G_per_replicate=[-0.5, -0.6, -0.7], n_replicates=3)]
-        sa = _make_condition_summary(label="A", temperature_K=300.0, entries=entries_a)
-        sb = _make_condition_summary(label="B", temperature_K=320.0, entries=entries_b)
-
-        pairwise = comp._compare_condition_pair(sa, sb)
-        assert len(pairwise) == 1
-        pw = pairwise[0]
-        assert pw.cross_temperature
-        assert pw.t_statistic is None
-        assert pw.p_value is None
-
-    def test_entry_from_agg_bp_entry_zero_contact_share_returns_none(self):
-        """Entry with contact_share=0 should return None."""
-        from unittest.mock import MagicMock
-
-        comp = self._make_comparator()
-        entry = MagicMock()
-        entry.mean_contact_share = 0.0
-        entry.expected_share = 0.10
-        entry.sem_contact_share = 0.01
-        entry.per_replicate_enrichments = []
-        entry.partition_element = "aromatic"
-
-        result = comp._entry_from_agg_bp_entry(
-            entry, "SBM", "aa_class", KB_KCAL * T_REF, "kcal/mol", T_REF
-        )
-        assert result is None
-
-    def test_entry_from_agg_bp_entry_zero_expected_share_returns_none(self):
-        """Entry with expected_share=0 should return None."""
-        from unittest.mock import MagicMock
-
-        comp = self._make_comparator()
-        entry = MagicMock()
-        entry.mean_contact_share = 0.20
-        entry.expected_share = 0.0
-        entry.sem_contact_share = 0.01
-        entry.per_replicate_enrichments = []
-        entry.partition_element = "aromatic"
-
-        result = comp._entry_from_agg_bp_entry(
-            entry, "SBM", "aa_class", KB_KCAL * T_REF, "kcal/mol", T_REF
-        )
-        assert result is None
-
-    def test_entry_from_agg_bp_entry_per_replicate_nan_for_negative_ratio(self):
-        """Enrichment_rep + 1 <= 0 should produce NaN in delta_G_per_replicate."""
-        from unittest.mock import MagicMock
-
-        comp = self._make_comparator()
-        entry = MagicMock()
-        entry.mean_contact_share = 0.20
-        entry.expected_share = 0.10
-        entry.sem_contact_share = 0.0
-        entry.per_replicate_enrichments = [-1.5]  # ratio = -0.5 → NaN
-        entry.partition_element = "aromatic"
-        entry.n_exposed_in_group = 0
-
-        result = comp._entry_from_agg_bp_entry(
-            entry, "SBM", "aa_class", KB_KCAL * T_REF, "kcal/mol", T_REF
-        )
-        assert result is not None
-        assert math.isnan(result.delta_G_per_replicate[0])
-
-
-# ---------------------------------------------------------------------------
 # Formatter Tests
 # ---------------------------------------------------------------------------
 
@@ -696,12 +549,7 @@ class TestBindingFreeEnergyFormatters:
 
 
 class TestRegistration:
-    """Test that BFE types are registered properly."""
-
-    def test_comparator_registered(self):
-        from polyzymd.compare.core.registry import ComparatorRegistry
-
-        assert ComparatorRegistry.is_registered("binding_free_energy")
+    """Test that BFE components are properly registered and importable."""
 
     def test_analysis_settings_registered(self):
         from polyzymd.analysis.core.registry import AnalysisSettingsRegistry
@@ -712,11 +560,6 @@ class TestRegistration:
         from polyzymd.analysis.core.registry import ComparisonSettingsRegistry
 
         assert ComparisonSettingsRegistry.is_registered("binding_free_energy")
-
-    def test_comparators_init_exports(self):
-        from polyzymd.compare.comparators import BindingFreeEnergyComparator
-
-        assert BindingFreeEnergyComparator is not None
 
     def test_results_module_importable(self):
         from polyzymd.compare.results.binding_free_energy import (
@@ -732,8 +575,6 @@ class TestRegistration:
         assert FreeEnergyPairwiseEntry is not None
 
     def test_formatters_importable(self):
-        from polyzymd.compare.binding_free_energy_formatters import (
-            format_bfe_result,
-        )
+        from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
 
-        assert format_bfe_result is not None
+        assert callable(format_bfe_result)

@@ -12,12 +12,15 @@ Tests cover:
 
 from __future__ import annotations
 
+import importlib
 import json
 import math
 import tempfile
 from pathlib import Path
 
 import pytest
+
+importlib.import_module("polyzymd.compare.config")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -495,153 +498,6 @@ class TestAffinityScorePairwiseEntry:
 
 
 # ---------------------------------------------------------------------------
-# Comparator Helper Tests (no I/O)
-# ---------------------------------------------------------------------------
-
-
-class TestPolymerAffinityComparatorHelpers:
-    """Test comparator helper methods using synthetic data."""
-
-    def _make_comparator(self):
-        """Build a comparator without requiring real config files."""
-        from unittest.mock import MagicMock
-
-        from polyzymd.compare.comparators.polymer_affinity import PolymerAffinityScoreComparator
-        from polyzymd.compare.settings import PolymerAffinityScoreSettings
-
-        config = MagicMock()
-        config.name = "test"
-        config.conditions = []
-        config.control = None
-
-        analysis_settings = PolymerAffinityScoreSettings()
-        comparator = PolymerAffinityScoreComparator(config, analysis_settings)
-        return comparator
-
-    def test_metric_type_is_mean_based(self):
-        from polyzymd.analysis.core.metric_type import MetricType
-
-        comp = self._make_comparator()
-        assert comp.metric_type == MetricType.MEAN_BASED
-
-    def test_rank_summaries_most_negative_first(self):
-        comp = self._make_comparator()
-        entries_a = [_make_entry(contact_share=0.40, expected_share=0.10)]  # strongly negative
-        entries_b = [_make_entry(contact_share=0.10, expected_share=0.10)]  # ~0
-        s_a = _make_condition_summary(label="A (preferred)", entries=entries_a)
-        s_b = _make_condition_summary(label="B (neutral)", entries=entries_b)
-        ranked = comp._rank_summaries([s_b, s_a])
-        # Most negative total score first
-        assert ranked[0].label == "A (preferred)"
-
-    def test_compare_total_scores_same_temperature(self):
-        """Same-temperature pair should have t-stats when n_reps >= 2."""
-        comp = self._make_comparator()
-        entries_a = [
-            _make_entry(
-                affinity_score_per_replicate=[-8.0, -9.0, -7.5],
-                n_replicates=3,
-            )
-        ]
-        entries_b = [
-            _make_entry(
-                affinity_score_per_replicate=[-4.0, -5.0, -3.5],
-                n_replicates=3,
-            )
-        ]
-        sa = _make_condition_summary(label="A", temperature_K=363.0, entries=entries_a)
-        sb = _make_condition_summary(label="B", temperature_K=363.0, entries=entries_b)
-
-        pw = comp._compare_total_scores(sa, sb)
-        assert not pw.cross_temperature
-        assert pw.t_statistic is not None
-        assert pw.p_value is not None
-
-    def test_compare_total_scores_cross_temperature_suppresses_stats(self):
-        """Cross-temperature pair should have no t-stats."""
-        comp = self._make_comparator()
-        entries_a = [
-            _make_entry(
-                affinity_score_per_replicate=[-8.0, -9.0, -7.5],
-                n_replicates=3,
-            )
-        ]
-        entries_b = [
-            _make_entry(
-                affinity_score_per_replicate=[-4.0, -5.0, -3.5],
-                n_replicates=3,
-            )
-        ]
-        sa = _make_condition_summary(label="A", temperature_K=363.0, entries=entries_a)
-        sb = _make_condition_summary(label="B", temperature_K=293.0, entries=entries_b)
-
-        pw = comp._compare_total_scores(sa, sb)
-        assert pw.cross_temperature
-        assert pw.t_statistic is None
-        assert pw.p_value is None
-
-    def test_aggregate_polymer_type_scores(self):
-        """Should group entries by polymer type and sum scores."""
-        comp = self._make_comparator()
-        entries = [
-            _make_entry(
-                polymer_type="SBM",
-                protein_group="aromatic",
-                n_contacts=3.0,
-                contact_share=0.30,
-                expected_share=0.10,
-            ),
-            _make_entry(
-                polymer_type="SBM",
-                protein_group="polar",
-                n_contacts=2.0,
-                contact_share=0.15,
-                expected_share=0.20,
-            ),
-            _make_entry(
-                polymer_type="EGM",
-                protein_group="aromatic",
-                n_contacts=4.0,
-                contact_share=0.25,
-                expected_share=0.10,
-            ),
-        ]
-        pts_list = comp._aggregate_polymer_type_scores(entries)
-        assert len(pts_list) == 2
-
-        # Find SBM and EGM
-        sbm_pts = next(p for p in pts_list if p.polymer_type == "SBM")
-        egm_pts = next(p for p in pts_list if p.polymer_type == "EGM")
-
-        assert len(sbm_pts.group_contributions) == 2
-        assert len(egm_pts.group_contributions) == 1
-
-        # SBM total should be sum of its entries
-        expected_sbm = sum(e.affinity_score for e in entries[:2] if e.affinity_score is not None)
-        assert abs(sbm_pts.total_score - expected_sbm) < 1e-10
-
-    def test_direction_labels(self):
-        """Check direction label property exists."""
-        comp = self._make_comparator()
-        labels = comp._direction_labels
-        assert len(labels) == 3
-        assert "affinity" in labels[0].lower()
-
-    def test_get_mean_value(self):
-        """_get_mean_value should return total score."""
-        comp = self._make_comparator()
-        summary = _make_condition_summary()
-        assert comp._get_mean_value(summary) == summary.total_score
-
-    def test_get_replicate_values_with_data(self):
-        """_get_replicate_values should return per-replicate total scores."""
-        comp = self._make_comparator()
-        summary = _make_condition_summary()
-        reps = comp._get_replicate_values(summary)
-        assert len(reps) == len(summary.total_score_per_replicate)
-
-
-# ---------------------------------------------------------------------------
 # Formatter Tests
 # ---------------------------------------------------------------------------
 
@@ -789,11 +645,6 @@ class TestPolymerAffinityFormatters:
 class TestRegistration:
     """Test that polymer affinity types are registered properly."""
 
-    def test_comparator_registered(self):
-        from polyzymd.compare.core.registry import ComparatorRegistry
-
-        assert ComparatorRegistry.is_registered("polymer_affinity")
-
     def test_analysis_settings_registered(self):
         from polyzymd.analysis.core.registry import AnalysisSettingsRegistry
 
@@ -813,16 +664,6 @@ class TestRegistration:
         from polyzymd.compare.plotter import PlotterRegistry
 
         assert PlotterRegistry.is_registered("affinity_group_bars")
-
-    def test_plot_settings_registered(self):
-        from polyzymd.analysis.core.registry import PlotSettingsRegistry
-
-        assert PlotSettingsRegistry.is_registered("polymer_affinity")
-
-    def test_comparators_init_exports(self):
-        from polyzymd.compare.comparators import PolymerAffinityScoreComparator
-
-        assert PolymerAffinityScoreComparator is not None
 
     def test_results_module_importable(self):
         from polyzymd.compare.results.polymer_affinity import (
@@ -863,14 +704,12 @@ class TestRegistration:
 
     def test_compare_init_exports(self):
         from polyzymd.compare import (
-            PolymerAffinityScoreComparator,
             PolymerAffinityScoreComparisonSettings,
             PolymerAffinityScoreResult,
             PolymerAffinityScoreSettings,
             format_affinity_result,
         )
 
-        assert PolymerAffinityScoreComparator is not None
         assert PolymerAffinityScoreResult is not None
         assert PolymerAffinityScoreSettings is not None
         assert PolymerAffinityScoreComparisonSettings is not None
@@ -880,6 +719,11 @@ class TestRegistration:
         from polyzymd.compare.plotters import polymer_affinity
 
         assert polymer_affinity is not None
+
+    def test_plot_settings_registered(self):
+        from polyzymd.analysis.core.registry import PlotSettingsRegistry
+
+        assert PlotSettingsRegistry.is_registered("polymer_affinity")
 
 
 # ---------------------------------------------------------------------------
