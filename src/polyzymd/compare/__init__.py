@@ -8,12 +8,10 @@ from typing import Any
 _MODULE_EXPORTS: dict[str, list[str]] = {
     "polyzymd.compare.core.base": [
         "ANOVASummary",
-        "BaseComparator",
         "BaseComparisonResult",
         "BaseConditionSummary",
         "PairwiseComparison",
     ],
-    "polyzymd.compare.core.registry": ["ComparatorRegistry"],
     "polyzymd.compare.config": ["ComparisonConfig", "ConditionConfig"],
     "polyzymd.compare.settings": [
         "RMSFAnalysisSettings",
@@ -27,11 +25,6 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         "PolymerAffinityScoreSettings",
         "PolymerAffinityScoreComparisonSettings",
     ],
-    "polyzymd.compare.comparators.rmsf": ["RMSFComparator"],
-    "polyzymd.compare.comparators.triad": ["TriadComparator"],
-    "polyzymd.compare.comparators.contacts": ["ContactsComparator"],
-    "polyzymd.compare.comparators.binding_free_energy": ["BindingFreeEnergyComparator"],
-    "polyzymd.compare.comparators.polymer_affinity": ["PolymerAffinityScoreComparator"],
     "polyzymd.compare.formatters": [
         "format_console_table",
         "format_markdown",
@@ -75,14 +68,15 @@ _EXPORTS = {
 }
 
 __all__ = [
-    "BaseComparator",
+    # core result models
+    "ANOVASummary",
     "BaseComparisonResult",
     "BaseConditionSummary",
     "PairwiseComparison",
-    "ANOVASummary",
-    "ComparatorRegistry",
+    # config
     "ComparisonConfig",
     "ConditionConfig",
+    # settings
     "RMSFAnalysisSettings",
     "RMSFComparisonSettings",
     "CatalyticTriadAnalysisSettings",
@@ -91,41 +85,38 @@ __all__ = [
     "ContactsComparisonSettings",
     "BindingFreeEnergyAnalysisSettings",
     "BindingFreeEnergyComparisonSettings",
-    "RMSFComparator",
-    "ComparisonResult",
+    "PolymerAffinityScoreSettings",
+    "PolymerAffinityScoreComparisonSettings",
+    # formatters
     "format_console_table",
     "format_markdown",
     "format_result",
     "to_json",
-    "TriadComparator",
-    "TriadComparisonResult",
-    "TriadConditionSummary",
     "format_triad_console_table",
     "format_triad_markdown",
     "format_triad_result",
     "triad_to_json",
-    "ContactsComparator",
-    "ContactsComparisonResult",
-    "ContactsConditionSummary",
-    "ContactsPairwiseComparison",
-    "AggregateComparisonResult",
     "format_contacts_console_table",
     "format_contacts_markdown",
     "format_contacts_result",
     "contacts_to_json",
-    "BindingFreeEnergyComparator",
+    "format_bfe_result",
+    "format_affinity_result",
+    # result models
+    "ComparisonResult",
+    "TriadComparisonResult",
+    "TriadConditionSummary",
+    "ContactsComparisonResult",
+    "ContactsConditionSummary",
+    "ContactsPairwiseComparison",
+    "AggregateComparisonResult",
     "BindingFreeEnergyResult",
     "FreeEnergyConditionSummary",
     "FreeEnergyEntry",
     "FreeEnergyPairwiseEntry",
-    "format_bfe_result",
-    "PolymerAffinityScoreComparator",
     "PolymerAffinityScoreResult",
     "AffinityScoreConditionSummary",
     "AffinityScorePairwiseEntry",
-    "PolymerAffinityScoreSettings",
-    "PolymerAffinityScoreComparisonSettings",
-    "format_affinity_result",
 ]
 
 
