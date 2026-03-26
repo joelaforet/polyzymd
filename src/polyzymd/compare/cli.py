@@ -41,47 +41,6 @@ def _echo_branding() -> None:
     echo_logo()
 
 
-def _comparator_name_for_settings_key(settings_key: str) -> str:
-    """Resolve the comparator registry name for a given analysis_settings key.
-
-    Uses ``ComparatorRegistry.get_for_analysis_type()`` and reads back the
-    ``comparison_type`` ClassVar so that the rest of the CLI can use the
-    canonical comparator name for filenames, log messages, etc.
-
-    Parameters
-    ----------
-    settings_key : str
-        Analysis settings YAML key (e.g., ``"catalytic_triad"``).
-
-    Returns
-    -------
-    str
-        Comparator registry name (e.g., ``"triad"``).
-
-    Raises
-    ------
-    ValueError
-        Raised (by the registry) when no comparator matches.
-    """
-    from polyzymd.compare.core.registry import ComparatorRegistry
-
-    _ensure_all_comparators_registered()
-    comp_cls = ComparatorRegistry.get_for_analysis_type(settings_key)
-    return comp_cls.comparison_type_name()
-
-
-def _ensure_all_comparators_registered() -> None:
-    """Import all comparator modules to ensure they register with ComparatorRegistry.
-
-    Comparator classes register themselves as a side effect of import (via the
-    ``@ComparatorRegistry.register()`` decorator). In the CLI, most comparator
-    modules are only imported inside dedicated subcommand functions, so the
-    registry may be incomplete when generic commands (``run``, ``run-all``,
-    ``plot-all``) query it. This function triggers the necessary imports.
-    """
-    import polyzymd.compare.comparators  # noqa: F401
-
-
 @click.group()
 def compare():
     """Compare analysis results across simulation conditions.
@@ -94,14 +53,15 @@ def compare():
     Workflow:
     1. polyzymd compare init -n <name>   # Create project with template
     2. Edit comparison.yaml              # Add your conditions
-    3. polyzymd compare rmsf             # Run comparison
+    3. polyzymd compare run <analysis>   # Run a single comparison
+    4. polyzymd compare run-all          # Run all enabled comparisons
 
     \b
     Example:
         polyzymd compare init -n polymer_study
         cd polymer_study
         vim comparison.yaml  # Add your conditions
-        polyzymd compare rmsf --eq-time 10ns
+        polyzymd compare run rmsf --eq-time 10ns
     """
     pass
 
@@ -613,10 +573,7 @@ def plot_all(
     if plot_type:
         experimental_features = experimental_features_for_plot_type(plot_type)
     elif analysis_type:
-        try:
-            comparison_type = _comparator_name_for_settings_key(analysis_type)
-        except ValueError:
-            comparison_type = analysis_type
+        comparison_type = analysis_type
         analysis_settings = config.analysis_settings.get(analysis_type)
         experimental_features = experimental_features_for_comparison_type(
             comparison_type, analysis_settings
@@ -624,10 +581,7 @@ def plot_all(
     else:
         feature_list: list[str] = []
         for settings_key in config.analysis_settings.get_enabled_analyses():
-            try:
-                comparison_type = _comparator_name_for_settings_key(settings_key)
-            except ValueError:
-                comparison_type = settings_key
+            comparison_type = settings_key
             analysis_settings = config.analysis_settings.get(settings_key)
             feature_list.extend(
                 experimental_features_for_comparison_type(comparison_type, analysis_settings)
