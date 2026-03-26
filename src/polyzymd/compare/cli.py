@@ -972,9 +972,9 @@ def run_comparison(
     debug: bool,
     list_types: bool,
 ):
-    """Run a comparison using the registry pattern.
+    """Run a comparison using the analysis plugin system.
 
-    This is a generic command that can run any registered comparison type.
+    This is a generic command that can run any discovered analysis plugin.
     Use --list to see available comparison types.
 
     \b
@@ -992,21 +992,18 @@ def run_comparison(
         polyzymd compare run exposure --format json
         polyzymd compare run --list
     """
+    from polyzymd.analyses.discovery import get_analysis, list_all_names, list_analyses
+    from polyzymd.analyses.orchestrator import run_comparison as _run_pipeline
     from polyzymd.analysis.core.logging_utils import setup_logging
-    from polyzymd.compare.core.registry import ComparatorRegistry
-
-    _ensure_all_comparators_registered()
 
     # Handle --list flag
     if list_types:
-        available = ComparatorRegistry.list_available()
+        analyses = list_analyses()
         click.echo("Available comparison types:")
-        for comp_type in available:
-            comparator_cls = ComparatorRegistry.get(comp_type)
-            suffix = format_experimental_suffix(
-                experimental_features_for_comparison_type(comp_type)
-            )
-            click.echo(f"  - {comp_type}{suffix}: {comparator_cls.__name__}")
+        for name, cls in analyses.items():
+            aliases = ", ".join(cls.aliases) if cls.aliases else ""
+            suffix = f" (aliases: {aliases})" if aliases else ""
+            click.echo(f"  - {name}{suffix}: {cls.__name__}")
         return
 
     # Require comparison_type if not listing
@@ -1018,9 +1015,11 @@ def run_comparison(
     # Set up logging
     setup_logging(quiet=quiet, debug=debug)
 
-    # Check if comparison type is registered
-    available = ComparatorRegistry.list_available()
-    if comparison_type not in available:
+    # Look up the analysis plugin
+    try:
+        analysis_cls = get_analysis(comparison_type)
+    except KeyError:
+        available = list_all_names()
         click.echo(f"Error: Unknown comparison type '{comparison_type}'", err=True)
         click.echo(f"Available types: {', '.join(available)}", err=True)
         click.echo("", err=True)
@@ -1028,45 +1027,23 @@ def run_comparison(
         sys.exit(1)
 
     config = load_comparison_config(config_file)
-
     validate_and_report(config)
 
-    # Get the comparator class from registry
-    comparator_cls = ComparatorRegistry.get(comparison_type)
-
-    settings_key = comparator_cls.config_settings_key()
-
-    analysis_settings = config.analysis_settings.get(settings_key)
-    if analysis_settings is None:
-        click.echo(f"Error: No '{settings_key}' in analysis_settings section", err=True)
-        click.echo("", err=True)
-        click.echo(
-            f"Add an analysis_settings.{settings_key} section to your comparison.yaml", err=True
-        )
-        sys.exit(1)
-
-    experimental_features = experimental_features_for_comparison_type(
-        comparison_type, analysis_settings
-    )
-    echo_experimental_warning(experimental_features)
-
     click.echo(f"Comparison: {config.name}")
-    click.echo(f"Type: {comparison_type}")
+    click.echo(f"Type: {analysis_cls.name}")
     click.echo(f"Conditions: {len(config.conditions)}")
 
-    # Build equilibration
     equilibration = eq_time or config.defaults.equilibration_time
     click.echo(f"Equilibration: {equilibration}")
     click.echo()
 
-    # Create comparator and run
+    # Run the full pipeline (compute replicates -> aggregate -> compare -> plot)
+    analysis = analysis_cls()
     try:
-        comparator = ComparatorRegistry.create_from_config(
-            settings_key=settings_key,
-            config=config,
-            equilibration=equilibration,
+        pipeline_result = _run_pipeline(
+            analysis, config, recompute=recompute, equilibration=equilibration
         )
-        result = comparator.compare(recompute=recompute)
+        result = pipeline_result["comparison"]
     except Exception as e:
         click.echo(f"Error during comparison: {e}", err=True)
         if debug:
@@ -1075,48 +1052,29 @@ def run_comparison(
             traceback.print_exc()
         sys.exit(1)
 
+    if result is None:
+        click.echo("Warning: comparison returned no result (not enough data?).", err=True)
+        sys.exit(1)
+
     # Save JSON result
     results_dir = config_file.parent / "results"
     results_dir.mkdir(exist_ok=True)
-    json_path = results_dir / f"{comparison_type}_comparison_{config.name.replace(' ', '_')}.json"
+    json_path = results_dir / f"{analysis_cls.name}_comparison_{config.name.replace(' ', '_')}.json"
     result.save(json_path)
     click.echo(f"Saved result: {json_path}")
     click.echo()
 
-    # Format output based on comparison type
+    # Format and display — delegates to the plugin's format() method
+    # Map CLI "table" format to plugin "text" format
+    fmt = "text" if output_format == "table" else output_format
     try:
-        if comparison_type == "rmsf":
-            formatted = format_result(result, format=output_format)
-        elif comparison_type == "triad":
-            from polyzymd.compare.triad_formatters import format_triad_result
-
-            formatted = format_triad_result(result, format=output_format)
-        elif comparison_type == "contacts":
-            from polyzymd.compare.contacts_formatters import format_contacts_result
-
-            formatted = format_contacts_result(result, format=output_format)
-        elif comparison_type == "distances":
-            from polyzymd.compare.distances_formatters import format_distances_result
-
-            formatted = format_distances_result(result, format=output_format)
-        elif comparison_type == "exposure":
-            from polyzymd.compare.exposure_formatters import format_exposure_result
-
-            formatted = format_exposure_result(result, format=output_format)
-        elif comparison_type == "binding_free_energy":
-            from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
-
-            formatted = format_bfe_result(result, format=output_format)
-        elif comparison_type == "polymer_affinity":
-            from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
-
-            formatted = format_affinity_result(result, format=output_format)
-        else:
-            # Generic JSON output for unknown types
-            formatted = result.model_dump_json(indent=2)
+        formatted = analysis.format(result, output_format=fmt)
     except Exception as e:
         click.echo(f"Warning: Could not format result: {e}", err=True)
-        formatted = result.model_dump_json(indent=2)
+        if hasattr(result, "model_dump_json"):
+            formatted = result.model_dump_json(indent=2)
+        else:
+            formatted = str(result)
 
     click.echo(formatted)
 
@@ -1633,7 +1591,7 @@ def run_all(
     """Run ALL comparisons defined in comparison.yaml.
 
     Iterates over every enabled analysis in the config and runs the
-    corresponding comparator.  Results are saved as JSON to the
+    corresponding analysis plugin.  Results are saved as JSON to the
     ``results/`` directory next to the config file.
 
     \b
@@ -1648,10 +1606,9 @@ def run_all(
         polyzymd compare run-all -f comparison.yaml --eq-time 10ns
         polyzymd compare run-all --recompute --plot
     """
+    from polyzymd.analyses.discovery import get_analysis
+    from polyzymd.analyses.orchestrator import run_comparison as _run_pipeline
     from polyzymd.analysis.core.logging_utils import setup_logging
-    from polyzymd.compare.core.registry import ComparatorRegistry
-
-    _ensure_all_comparators_registered()
 
     _echo_branding()
 
@@ -1677,37 +1634,28 @@ def run_all(
     click.echo(f"Enabled analyses: {', '.join(enabled_analyses)}")
     click.echo()
 
-    # --- Run each comparator ------------------------------------------------
+    # --- Run each analysis plugin -------------------------------------------
     succeeded: list[str] = []
     failed: list[tuple[str, str]] = []
     skipped: list[str] = []
 
     for settings_key in enabled_analyses:
+        # Resolve plugin — try the settings_key directly as an analysis name
         try:
-            comparator_name = _comparator_name_for_settings_key(settings_key)
-        except ValueError:
-            click.echo(f"  [{settings_key}] skipped — no registered comparator")
+            analysis_cls = get_analysis(settings_key)
+        except KeyError:
+            click.echo(f"  [{settings_key}] skipped — no registered analysis plugin")
             skipped.append(settings_key)
             continue
 
-        click.echo(f"  [{settings_key}] running {comparator_name} comparison ...")
-
-        # Analysis settings (guaranteed non-None because get_enabled_analyses
-        # only returns keys with a value).
-        analysis_settings = config.analysis_settings.get(settings_key)
-        experimental_features = experimental_features_for_comparison_type(
-            comparator_name, analysis_settings
-        )
-        if experimental_features:
-            echo_experimental_warning(experimental_features)
+        click.echo(f"  [{settings_key}] running {analysis_cls.name} comparison ...")
 
         try:
-            comparator = ComparatorRegistry.create_from_config(
-                settings_key=settings_key,
-                config=config,
-                equilibration=equilibration,
+            analysis = analysis_cls()
+            pipeline_result = _run_pipeline(
+                analysis, config, recompute=recompute, equilibration=equilibration
             )
-            result = comparator.compare(recompute=recompute)
+            result = pipeline_result["comparison"]
         except Exception as e:
             msg = str(e)
             click.echo(f"  [{settings_key}] FAILED: {msg}", err=True)
@@ -1718,12 +1666,17 @@ def run_all(
             failed.append((settings_key, msg))
             continue
 
+        if result is None:
+            click.echo(f"  [{settings_key}] skipped — no comparison result")
+            skipped.append(settings_key)
+            continue
+
         # Save JSON result
         json_path = (
-            results_dir / f"{comparator_name}_comparison_{config.name.replace(' ', '_')}.json"
+            results_dir / f"{analysis_cls.name}_comparison_{config.name.replace(' ', '_')}.json"
         )
         result.save(json_path)
-        click.echo(f"  [{settings_key}] saved → {json_path}")
+        click.echo(f"  [{settings_key}] saved -> {json_path}")
         succeeded.append(settings_key)
 
     # --- Summary ------------------------------------------------------------

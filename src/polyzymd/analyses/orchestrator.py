@@ -269,6 +269,7 @@ def run_comparison(
     analysis: Analysis,
     config: "ComparisonConfig",
     recompute: bool = False,
+    equilibration: str | None = None,
 ) -> dict[str, Any]:
     """Run the full comparison pipeline for one analysis type.
 
@@ -287,6 +288,9 @@ def run_comparison(
         Comparison configuration.
     recompute : bool
         Force recomputation.
+    equilibration : str or None
+        Override equilibration time.  If ``None``, uses
+        ``config.defaults.equilibration_time``.
 
     Returns
     -------
@@ -295,7 +299,7 @@ def run_comparison(
     """
     from polyzymd.compare.io.paths import sanitize_label
 
-    equilibration = config.defaults.equilibration_time
+    equilibration = equilibration or config.defaults.equilibration_time
     analysis_root = (
         config.source_path.parent / "analysis" if config.source_path else Path("analysis")
     )
@@ -405,6 +409,7 @@ def run_all_comparisons(
     config: "ComparisonConfig",
     analysis_names: list[str] | None = None,
     recompute: bool = False,
+    equilibration: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Run comparisons for multiple (or all enabled) analysis types.
 
@@ -418,6 +423,9 @@ def run_all_comparisons(
         Analysis names to run.  ``None`` = run all enabled in config.
     recompute : bool
         Force recomputation.
+    equilibration : str or None
+        Override equilibration time.  If ``None``, uses
+        ``config.defaults.equilibration_time``.
 
     Returns
     -------
@@ -447,7 +455,9 @@ def run_all_comparisons(
         logger.info(f"Running {analysis.name} comparison")
         logger.info(f"{'=' * 60}")
         try:
-            results[analysis.name] = run_comparison(analysis, config, recompute)
+            results[analysis.name] = run_comparison(
+                analysis, config, recompute, equilibration=equilibration
+            )
         except Exception as e:
             logger.error(f"{analysis.name} comparison failed: {e}")
             results[analysis.name] = {"error": str(e)}
