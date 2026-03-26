@@ -473,9 +473,7 @@ class DistancesAnalysis(Analysis):
             )
 
         if len(summaries) < 2:
-            logger.warning(
-                f"distances: fewer than 2 conditions have results — skipping comparison."
-            )
+            logger.warning("distances: fewer than 2 conditions have results — skipping comparison.")
             return None
 
         # Resolve effective control

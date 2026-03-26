@@ -297,7 +297,7 @@ class ExposureAnalysis(Analysis):
         )
 
         return ExposureComparisonResult(
-            name=f"exposure_comparison",
+            name="exposure_comparison",
             metric="chaperone_fraction",
             control_label=effective_control,
             conditions=summaries,
