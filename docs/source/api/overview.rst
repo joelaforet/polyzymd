@@ -29,7 +29,7 @@ Package Structure
     ├── core/             # Core utilities
     │   ├── parameters.py # Simulation parameters
     │   └── restraints.py # Restraint definitions
-    ├── analysis/         # Post-simulation trajectory analysis
+    ├── analysis/         # Per-condition trajectory calculators
     │   ├── rmsf/         # Root Mean Square Fluctuation
     │   ├── distances/    # Inter-atomic distance analysis
     │   ├── triad/        # Catalytic triad integrity
@@ -38,10 +38,17 @@ Package Structure
     │   ├── exposure/     # Chaperone-like exposure dynamics
     │   ├── core/         # Statistics, autocorrelation, MetricType
     │   └── results/      # Serializable result models
-    ├── compare/          # Multi-condition statistical comparison
-    │   ├── comparators/  # RMSF, contacts, triad, BFE, affinity, exposure
-    │   ├── results/      # Comparison result models
-    │   └── plotters/     # Publication-quality figures
+    ├── analyses/         # ★ Plugin system — unified analysis lifecycle
+    │   ├── base.py       # Analysis ABC, context objects, result models
+    │   ├── discovery.py  # pkgutil-based auto-discovery
+    │   ├── orchestrator.py  # Framework engine
+    │   ├── stats.py      # Shared statistical utilities
+    │   └── *.py          # One file per analysis plugin
+    ├── compare/          # Statistics, formatters, plotters, config, IO
+    │   ├── statistics.py # t-tests, ANOVA, Cohen's d
+    │   ├── formatters.py # CLI output formatters
+    │   ├── plotters/     # Publication-quality figures
+    │   └── config.py     # ComparisonConfig, plot settings
     └── cli/              # Command-line interface
         └── main.py       # Click CLI
 
@@ -96,10 +103,11 @@ Analysis
 Comparison
 ~~~~~~~~~~
 
-- :py:class:`~polyzymd.compare.core.base.BaseComparator` - Template Method comparator base
-- :py:class:`~polyzymd.compare.comparators.exposure.ExposureDynamicsComparator` - Chaperone analysis
-- :py:class:`~polyzymd.compare.comparators.binding_free_energy.BindingFreeEnergyComparator` - Per-contact ΔG_sel
-- :py:class:`~polyzymd.compare.comparators.polymer_affinity.PolymerAffinityScoreComparator` - Total interaction strength
+- :py:class:`~polyzymd.analyses.base.Analysis` - Plugin base class for all analyses
+- :py:class:`~polyzymd.analyses.base.ComparisonResult` - Universal comparison result model
+- :py:class:`~polyzymd.analyses.base.MetricValue` - Scalar metric descriptor
+- :py:class:`~polyzymd.analyses.base.ReplicateContext` - Context for per-replicate computation
+- :py:class:`~polyzymd.analyses.base.ComparisonContext` - Context for cross-condition comparison
 
 
 Quick Reference

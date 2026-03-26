@@ -23,8 +23,9 @@ src/polyzymd/
 |- builders/
 |- simulation/
 |- workflow/
-|- analysis/
-|- compare/
+|- analysis/     # per-condition calculators (compute layer)
+|- analyses/     # ★ plugin system — unified analysis lifecycle
+|- compare/      # statistics, formatters, plotters, config, IO
 |- exporters/
 |- core/
 `- utils/
@@ -60,11 +61,23 @@ generation, resubmission, and recovery flows.
 ### `analysis/`
 
 Computes post-simulation metrics for individual conditions or trajectories.
+This is the **compute layer** with calculators like `RMSFCalculator`,
+`DistanceCalculator`, `ParallelContactAnalyzer`, etc.
+
+### `analyses/`
+
+The **plugin system** — the primary extension point for contributors. Each
+analysis plugin wraps an `analysis/` calculator into a unified lifecycle:
+compute → aggregate → compare → plot → format.
+
+To add a new analysis, create ONE file in `analyses/` that subclasses
+`Analysis`. See {doc}`extending_analyses` for the full guide.
 
 ### `compare/`
 
-Aggregates results across conditions, applies statistics, and generates
-comparison-ready outputs and plots.
+Provides shared comparison infrastructure: statistics (t-tests, ANOVA,
+Cohen's d), formatters, plotters, and configuration. The `analyses/` plugins
+delegate cross-condition comparison to this package.
 
 ### `core/` and `utils/`
 
@@ -102,11 +115,12 @@ Modules that depend on OpenMM or MDAnalysis often import those packages inside
 functions or methods instead of at module import time. This keeps lightweight
 CLI operations usable even when optional heavy dependencies are absent.
 
-### Registry-based extension points
+### Plugin-based extension points
 
-Analysis, comparison, and plotting workflows are designed to be extensible.
-Instead of modifying a central switch statement, new implementations are usually
-registered through the existing registry patterns.
+Analysis is the primary extensibility axis. New analysis types are added by
+creating a single file in `analyses/` that subclasses `Analysis`. The
+framework discovers plugins automatically via `pkgutil` — no registries,
+no decorators, no imports needed.
 
 ### Separation between per-condition and cross-condition work
 
@@ -121,8 +135,8 @@ roles separate helps maintain both code clarity and scientific interpretation.
 | add or validate config fields | `src/polyzymd/config/` |
 | change build behavior | `src/polyzymd/builders/` |
 | change run or restart behavior | `src/polyzymd/simulation/` and `src/polyzymd/workflow/` |
-| add an analysis type | `src/polyzymd/analysis/` |
-| add a comparison workflow | `src/polyzymd/compare/` |
+| add an analysis type | `src/polyzymd/analyses/` (plugin) wrapping `src/polyzymd/analysis/` (calculator) |
+| add comparison statistics | `src/polyzymd/compare/` |
 | add or change CLI commands | `src/polyzymd/cli/` |
 
 ## A practical mental model
@@ -141,9 +155,10 @@ into module-level details or API reference pages.
 ## Related pages
 
 - contributor workflows: {doc}`contributing`
+- extending analyses: {doc}`extending_analyses`
 - SLURM usage: {doc}`hpc_slurm`
 - API details: {doc}`../api/overview`
 
 <!-- IMAGE OPPORTUNITY: Add a left-to-right architecture diagram showing
-`config -> builders -> simulation/workflow -> analysis -> compare -> plots`,
-with extension points called out at `analysis`, `compare`, and `workflow`. -->
+`config -> builders -> simulation/workflow -> analysis -> analyses -> compare -> plots`,
+with extension points called out at `analyses` and `workflow`. -->

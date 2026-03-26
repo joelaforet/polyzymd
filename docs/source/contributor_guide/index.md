@@ -12,8 +12,12 @@ PolyzyMD, understand the codebase, or add new capabilities.
 
 ## Extension Workflows
 
-- [Extend Comparison Workflows](../tutorials/extending_comparators.md)
-- [Extend Plotting Workflows](../tutorials/extending_plotters.md)
+- **[Extend the Analysis Framework](../tutorials/extending_analyses.md)** —
+  how to add a new analysis type as a plugin (primary guide)
+- [Extend Comparison Workflows (Legacy)](../tutorials/extending_comparators.md) —
+  old `BaseComparator` system, kept for reference
+- [Extend Plotting Workflows (Legacy)](../tutorials/extending_plotters.md) —
+  old `PlotterRegistry` system, kept for reference
 
 ## Contributor Mindset
 
@@ -22,7 +26,7 @@ or project maintenance patterns. For command lookup, switch to
 [Reference](../reference/index.md).
 
 <!-- IMAGE OPPORTUNITY: Add a high-level package architecture diagram showing
-config -> builders -> simulation -> workflow -> analysis -> compare. -->
+config -> builders -> simulation -> workflow -> analysis -> analyses -> compare. -->
 
 ```{toctree}
 :hidden:
@@ -31,6 +35,7 @@ config -> builders -> simulation -> workflow -> analysis -> compare. -->
 Contributing to PolyzyMD <../tutorials/contributing>
 Set Up a Contributor Environment <setup>
 Packaging and Distribution Notes <../tutorials/packaging>
-Extend Comparison Workflows <../tutorials/extending_comparators>
-Extend Plotting Workflows <../tutorials/extending_plotters>
+Extend the Analysis Framework <../tutorials/extending_analyses>
+Extend Comparison Workflows (Legacy) <../tutorials/extending_comparators>
+Extend Plotting Workflows (Legacy) <../tutorials/extending_plotters>
 ```

@@ -1,4 +1,17 @@
-# Extending the Plotter Framework
+# Extending the Plotter Framework (Legacy)
+
+```{deprecated} 1.3.0
+This guide documents the **old** ``BasePlotter`` / ``PlotterRegistry``
+system.  New analyses should implement the ``plot()`` method directly in
+their ``Analysis`` subclass using the **plugin system** in ``analyses/``.
+
+**See:** {doc}`extending_analyses` — the current guide for adding analysis
+types, including plotting.
+
+The ``compare/plotters/`` package still exists and is used by some legacy
+plugins, but new plotting code should go into your plugin's ``plot()``
+method.
+```
 
 This guide shows developers how to create custom plotters using PolyzyMD's registry-based framework. The framework follows the **Open-Closed Principle** (open for extension, closed for modification) and provides automatic discovery of plotter implementations.
 

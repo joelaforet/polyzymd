@@ -1,4 +1,18 @@
-# Extending the Comparison Framework
+# Extending the Comparison Framework (Legacy)
+
+```{deprecated} 1.3.0
+This guide documents the **old** ``BaseComparator`` / ``ComparatorRegistry``
+system.  Those classes have been removed.  New analyses should use the
+**plugin system** in ``analyses/`` instead.
+
+**See:** {doc}`extending_analyses` — the current guide for adding analysis
+types.
+
+The content below is preserved for reference only.  The ``compare/``
+package still provides statistics, formatters, and plotters that the new
+plugin system delegates to, but you no longer need to write comparators
+or register them manually.
+```
 
 This guide shows developers how to create custom comparators and analyzers using PolyzyMD's object-oriented framework. The framework follows the **Open-Closed Principle** (open for extension, closed for modification) and uses the **Template Method** design pattern for DRY comparison logic.
 

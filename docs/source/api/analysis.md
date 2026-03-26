@@ -2,8 +2,12 @@
 
 This page is the entry point for the analysis-side API.
 
-PolyzyMD analysis code is organized around a small shared core plus
-analysis-specific implementations for stable and experimental workflows.
+PolyzyMD analysis code is organized into two packages:
+
+| Package | Role |
+|---------|------|
+| `polyzymd.analysis` | Per-condition **calculators** (RMSF, distances, contacts, etc.) |
+| `polyzymd.analyses` | **Plugin system** — unified analysis lifecycle (see [Analyses Plugin API](analyses.md)) |
 
 ## Core Analysis Interfaces
 
@@ -23,12 +27,18 @@ and serialized result objects.
 - `polyzymd.analysis.triad`
 - `polyzymd.analysis.secondary_structure`
 
+## Plugin System
+
+For the unified analysis lifecycle (compute → aggregate → compare → plot →
+format), see the [Analyses Plugin API](analyses.md).
+
 ## Related Documentation
 
+- [Analyses Plugin API](analyses.md)
 - [Configuration API](config.md)
 - [Compare API](compare.md)
 - [API Overview](overview.rst)
-- [Analyze a Multi-Condition Study](../tutorials/analysis_complete_workflow.md)
+- [Extending the Analysis Framework](../tutorials/extending_analyses.md)
 
 ## Notes
 
@@ -40,4 +50,4 @@ and serialized result objects.
   clearly labeled there.
 
 <!-- IMAGE OPPORTUNITY: Add a compact analysis architecture diagram showing
-analysis core -> per-condition analysis -> comparison -> plot generation. -->
+analysis core -> analyses plugin -> comparison -> plot generation. -->

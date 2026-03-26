@@ -19,6 +19,7 @@ configuration fields, API signatures, defaults, or benchmark data.
 - [Workflow API](../api/workflow.md)
 - [Core API](../api/core.md)
 - [Analysis API](../api/analysis.md)
+- [Analyses Plugin API](../api/analyses.md)
 - [Compare API](../api/compare.md)
 
 ## When Not to Use This Section
@@ -44,5 +45,6 @@ Simulation API <../api/simulation>
 Workflow API <../api/workflow>
 Core API <../api/core>
 Analysis API <../api/analysis>
+Analyses Plugin API <../api/analyses>
 Compare API <../api/compare>
 ```
