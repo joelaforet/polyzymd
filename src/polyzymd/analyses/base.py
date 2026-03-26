@@ -474,22 +474,58 @@ class Analysis(ABC):
 
     Examples
     --------
-    Minimal analysis plugin::
+    **Simple plugin** using the default comparison pipeline (t-tests,
+    ANOVA, ranking).  Implement ``extract_metrics()`` and
+    ``_deserialize_result()``::
 
-        class RMSFAnalysis(Analysis):
-            name = "rmsf"
+        from polyzymd.analyses.base import (
+            AggregateContext, Analysis, MetricValue, ReplicateContext,
+        )
+        from pydantic import BaseModel
+
+        class RgAnalysis(Analysis):
+            name = "rg"
 
             class Settings(BaseModel):
                 selection: str = "protein and name CA"
 
             def compute_replicate(self, ctx, replicate):
+                import MDAnalysis as mda
+                import numpy as np
+                # Use ctx.sim_config, ctx.settings — never load configs yourself
                 ...
+                return {"mean_rg": float(np.mean(rg_values)), "replicate": replicate}
 
             def aggregate(self, ctx, results):
-                ...
+                import numpy as np
+                values = [r["mean_rg"] for r in results]
+                return {"mean_rg": float(np.mean(values)),
+                        "sem_rg": float(np.std(values, ddof=1) / np.sqrt(len(values))),
+                        "replicate_values": values}
 
             def extract_metrics(self, summary):
-                return {"mean_rmsf": MetricValue(...)}
+                return {"mean_rg": MetricValue(
+                    name="mean_rg", mean=summary["mean_rg"],
+                    sem=summary["sem_rg"],
+                    replicate_values=summary["replicate_values"],
+                    higher_is_better=False,
+                    direction_labels=("compacting", "unchanged", "expanding"),
+                )}
+
+            def _deserialize_result(self, path):
+                import json
+                return json.loads(path.read_text())
+
+    **Custom compare plugin** — override ``compare()`` entirely for
+    multi-metric or entry-table analyses.  See ``analyses/contacts.py``
+    or ``analyses/distances.py`` for full examples.
+
+    See Also
+    --------
+    analyses.stats : ``default_scalar_comparison()``, ``format_scalar_comparison()``
+    analyses.discovery : How the framework discovers plugins automatically.
+    analyses.orchestrator : How the framework runs the lifecycle.
+    tutorials/extending_analyses.md : Step-by-step contributor guide.
     """
 
     # --- Class variables (subclasses MUST set name and Settings) ---
@@ -729,10 +765,28 @@ class Analysis(ABC):
         -------
         BaseModel
             Deserialized result.
+
+        Raises
+        ------
+        NotImplementedError
+            If neither ``_deserialize_result()`` nor ``compare()`` is
+            overridden.  This is a common mistake — if you implement
+            ``extract_metrics()`` for the default comparison path, you
+            MUST also implement ``_deserialize_result()`` so the
+            framework can load your aggregated JSON results.
         """
         raise NotImplementedError(
             f"{type(self).__name__} must implement _deserialize_result() "
-            f"or override compare() entirely."
+            f"or override compare() entirely.  "
+            f"If you implement extract_metrics() for the default comparison "
+            f"pipeline, you also need _deserialize_result(path) to load your "
+            f"aggregated result from JSON.  Example:\n"
+            f"    def _deserialize_result(self, path):\n"
+            f"        import json\n"
+            f"        return json.loads(path.read_text())\n"
+            f"Or use your Pydantic model:\n"
+            f"    def _deserialize_result(self, path):\n"
+            f"        return MyAggregatedResult.model_validate_json(path.read_text())"
         )
 
     def _legacy_format(self, result: Any, output_format: str) -> str:
