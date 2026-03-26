@@ -627,12 +627,13 @@ class ExposureAnalysis(Analysis):
             topology_path = traj_info.topology_file
             trajectory_paths = traj_info.trajectory_files
 
-            # Analysis dir for this replicate
+            # Analysis dir for this replicate — use run_N convention
+            # (matches orchestrator's output_dir layout used by all plugins)
             analysis_dir: Path
             if exposure_analysis_dir is not None:
-                analysis_dir = exposure_analysis_dir / f"rep{replicate}"
+                analysis_dir = exposure_analysis_dir / f"run_{replicate}"
             else:
-                analysis_dir = Path(f"/tmp/exposure_rep{replicate}")
+                analysis_dir = Path(f"/tmp/exposure_run_{replicate}")
 
             # SASA config
             sasa_config = SASAConfig(
