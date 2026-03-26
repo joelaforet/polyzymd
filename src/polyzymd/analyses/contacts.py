@@ -1095,14 +1095,14 @@ class ContactsAnalysis(Analysis):
         BindingPreferenceComparisonSummary or None
             Cross-condition comparison summary, or None if unavailable.
         """
-        from polyzymd.analysis.contacts.binding_preference import (
-            AggregatedBindingPreferenceResult,
-            BindingPreferenceResult,
-        )
-        from polyzymd.compare.comparators._binding_preference_helpers import (
+        from polyzymd.analyses._binding_preference_helpers import (
             compute_condition_binding_preference,
             resolve_enzyme_pdb,
             try_load_cached_binding_preference,
+        )
+        from polyzymd.analysis.contacts.binding_preference import (
+            AggregatedBindingPreferenceResult,
+            BindingPreferenceResult,
         )
 
         settings = ctx.settings

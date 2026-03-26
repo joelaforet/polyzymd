@@ -491,7 +491,7 @@ class PolymerAffinityAnalysis(Analysis):
         -------
         AggregatedBindingPreferenceResult | BindingPreferenceResult | None
         """
-        from polyzymd.compare.comparators._binding_preference_helpers import (
+        from polyzymd.analyses._binding_preference_helpers import (
             compute_condition_binding_preference,
             resolve_enzyme_pdb,
             try_load_cached_binding_preference,
