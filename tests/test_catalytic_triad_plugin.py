@@ -796,8 +796,8 @@ class TestTriadLifecycle:
             equilibration="10ns",
         )
 
-        assert result["analysis_type"] == "catalytic_triad"
-        assert len(result["conditions"]) == 2
-        assert len(result["pairwise_comparisons"]) >= 1
-        # Ranking: higher contact fraction first (100% SBMA should rank before No Polymer)
-        assert result["ranking"][0] == "100% SBMA"
+        assert result.analysis_type == "catalytic_triad"
+        assert len(result.conditions) == 2
+        assert len(result.pairwise_comparisons) >= 1
+        # Higher triad score = better, so 100% SBMA should rank first
+        assert result.ranking[0] == "100% SBMA"

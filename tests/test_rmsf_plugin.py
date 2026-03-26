@@ -616,8 +616,8 @@ class TestRMSFLifecycle:
             equilibration="10ns",
         )
 
-        assert result["analysis_type"] == "rmsf"
-        assert len(result["conditions"]) == 2
-        assert len(result["pairwise_comparisons"]) >= 1
+        assert result.analysis_type == "rmsf"
+        assert len(result.conditions) == 2
+        assert len(result.pairwise_comparisons) >= 1
         # Ranking: lower RMSF first (100% SBMA should rank before No Polymer)
-        assert result["ranking"][0] == "100% SBMA"
+        assert result.ranking[0] == "100% SBMA"

@@ -319,15 +319,15 @@ class TestStats:
         results = pairwise_comparisons(metrics, control_label="Control")
         # Should have 2 comparisons: Control vs A, Control vs B
         assert len(results) == 2
-        assert all(r["condition_a"] == "Control" for r in results)
-        assert {r["condition_b"] for r in results} == {"Treatment A", "Treatment B"}
-        # All should have required keys
+        assert all(r.condition_a == "Control" for r in results)
+        assert {r.condition_b for r in results} == {"Treatment A", "Treatment B"}
+        # All should have required fields
         for r in results:
-            assert "t_statistic" in r
-            assert "p_value" in r
-            assert "cohens_d" in r
-            assert "percent_change" in r
-            assert "significant" in r
+            assert hasattr(r, "t_statistic")
+            assert hasattr(r, "p_value")
+            assert hasattr(r, "cohens_d")
+            assert hasattr(r, "percent_change")
+            assert hasattr(r, "significant")
 
     def test_pairwise_comparisons_all_pairs(self):
         from polyzymd.analyses.stats import pairwise_comparisons
@@ -351,9 +351,9 @@ class TestStats:
         }
         result = anova_test(metrics, "test_metric")
         assert result is not None
-        assert "f_statistic" in result
-        assert "p_value" in result
-        assert result["significant"] is True  # These groups are very different
+        assert hasattr(result, "f_statistic")
+        assert hasattr(result, "p_value")
+        assert result.significant is True  # These groups are very different
 
     def test_anova_test_too_few_conditions(self):
         from polyzymd.analyses.stats import anova_test
@@ -405,11 +405,11 @@ class TestStats:
             control_label="Control",
             equilibration="10ns",
         )
-        assert result["analysis_type"] == "test"
-        assert result["name"] == "Test Project"
-        assert len(result["pairwise_comparisons"]) == 1
-        assert result["anova"] is None  # Only 2 conditions
-        assert result["ranking"] == ["Control", "Treatment"] or result["ranking"] == [
+        assert result.analysis_type == "test"
+        assert result.name == "Test Project"
+        assert len(result.pairwise_comparisons) == 1
+        assert result.anova is None  # Only 2 conditions
+        assert result.ranking == ["Control", "Treatment"] or result.ranking == [
             "Treatment",
             "Control",
         ]
