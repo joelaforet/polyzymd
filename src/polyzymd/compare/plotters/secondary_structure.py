@@ -193,7 +193,7 @@ class SSTimelineHeatmapPlotter(BasePlotter):
             plt.tight_layout()
 
             # Sanitize label for filename
-            from polyzymd.compare.comparators._utils import sanitize_label
+            from polyzymd.compare.io.paths import sanitize_label
 
             safe_label = sanitize_label(label)
             output_path = self._get_output_path(output_dir, f"ss_timeline_{safe_label}")

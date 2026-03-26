@@ -1,25 +1,6 @@
-"""Comparator implementations.
+"""Legacy comparators package — now empty.
 
-This module provides comparator classes that inherit from BaseComparator.
-Each comparator is automatically registered with ComparatorRegistry.
+All comparison logic has been migrated to the plugin-based ``analyses`` package.
+This package is retained only to avoid breaking existing imports during the
+transition period.
 """
-
-from polyzymd.compare.comparators.binding_free_energy import BindingFreeEnergyComparator
-from polyzymd.compare.comparators.contacts import ContactsComparator
-from polyzymd.compare.comparators.distances import DistancesComparator
-from polyzymd.compare.comparators.exposure import ExposureDynamicsComparator
-from polyzymd.compare.comparators.polymer_affinity import PolymerAffinityScoreComparator
-from polyzymd.compare.comparators.rmsf import RMSFComparator
-from polyzymd.compare.comparators.secondary_structure import SecondaryStructureComparator
-from polyzymd.compare.comparators.triad import TriadComparator
-
-__all__ = [
-    "BindingFreeEnergyComparator",
-    "ContactsComparator",
-    "DistancesComparator",
-    "ExposureDynamicsComparator",
-    "PolymerAffinityScoreComparator",
-    "RMSFComparator",
-    "SecondaryStructureComparator",
-    "TriadComparator",
-]
