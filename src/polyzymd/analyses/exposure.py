@@ -726,9 +726,15 @@ class ExposureAnalysis(Analysis):
         result_filename = f"contacts_rep{replicate}.json"
 
         if contacts_dir is not None:
+            # Flat path (legacy layout)
             cond_path = contacts_dir / result_filename
             if cond_path.exists():
                 return cond_path
+
+            # Orchestrator layout: run_<N>/ subdirectory per replicate
+            run_path = contacts_dir / f"run_{replicate}" / result_filename
+            if run_path.exists():
+                return run_path
 
         return None
 
