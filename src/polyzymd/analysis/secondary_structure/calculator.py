@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 
+from polyzymd.analysis.core.aggregation import collect_replicate_results
 from polyzymd.analysis.core.config_hash import compute_config_hash, validate_config_hash
 from polyzymd.analysis.core.loader import TrajectoryLoader, convert_time, parse_time_string
 from polyzymd.analysis.core.registry import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
@@ -358,8 +359,6 @@ class SecondaryStructureCalculator(BaseAnalyzer):
         Missing or problematic replicates are skipped with a warning.
         At least 2 successful replicates are required for aggregation.
         """
-        requested_replicates = list(replicates)
-
         if output_dir is None:
             output_dir = (
                 self.config.output.projects_directory
@@ -371,44 +370,15 @@ class SecondaryStructureCalculator(BaseAnalyzer):
         # Derive per-replicate output base from aggregated output_dir
         per_rep_base = output_dir.parent
 
-        # Compute individual replicates with error handling
-        individual_results: list[SecondaryStructureResult] = []
-        successful_replicates: list[int] = []
-        failed_replicates: list[int] = []
-
-        for rep in requested_replicates:
-            try:
-                rep_output_dir = per_rep_base / f"run_{rep}"
-                result = self.compute(
-                    replicate=rep,
-                    save=save,
-                    output_dir=rep_output_dir,
-                    recompute=recompute,
-                )
-                individual_results.append(result)
-                successful_replicates.append(rep)
-            except FileNotFoundError as e:
-                LOGGER.warning(f"Skipping replicate {rep}: trajectory data not found. {e}")
-                failed_replicates.append(rep)
-            except Exception as e:
-                LOGGER.warning(f"Skipping replicate {rep}: analysis failed with error: {e}")
-                failed_replicates.append(rep)
-
-        # Check we have enough replicates
-        if len(individual_results) < 2:
-            raise ValueError(
-                f"Aggregation requires at least 2 successful replicates, but only "
-                f"{len(individual_results)} succeeded. "
-                f"Failed replicates: {failed_replicates}"
-            )
-
-        # Warn if some replicates were skipped
-        if failed_replicates:
-            LOGGER.warning(
-                f"Aggregating {len(successful_replicates)} of "
-                f"{len(requested_replicates)} requested replicates. "
-                f"Skipped: {failed_replicates}"
-            )
+        collection = collect_replicate_results(
+            self.compute,
+            replicates,
+            output_dir_base=per_rep_base,
+            save=save,
+            recompute=recompute,
+        )
+        individual_results: list[SecondaryStructureResult] = collection.results
+        successful_replicates = collection.successful_replicates
 
         n_reps = len(individual_results)
 

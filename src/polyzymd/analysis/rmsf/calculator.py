@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Literal, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+from polyzymd.analysis.core.aggregation import collect_replicate_results
 from polyzymd.analysis.core.alignment import (
     AlignmentConfig,
     align_trajectory,
@@ -550,54 +551,26 @@ class RMSFCalculator(BaseAnalyzer):
         Missing or problematic replicates are skipped with a warning.
         At least 2 successful replicates are required for aggregation.
         """
-        requested_replicates = list(replicates)
-
         if output_dir is None:
             output_dir = self.config.output.projects_directory / "analysis" / "rmsf" / "aggregated"
 
-        # Compute individual replicates with error handling
-        individual_results: list[RMSFResult] = []
-        successful_replicates: list[int] = []
-        failed_replicates: list[int] = []
-        # Track actual save paths for source_result_files
-        replicate_result_paths: list[str] = []
-
-        # Derive per-replicate output base from aggregated output_dir:
-        # output_dir is e.g. .../rmsf/aggregated/, go up one level for .../rmsf/
+        # Derive per-replicate output base from aggregated output_dir
         per_rep_base = output_dir.parent
 
-        for rep in requested_replicates:
-            try:
-                rep_output_dir = per_rep_base / f"run_{rep}"
-                result = self.compute(
-                    replicate=rep, save=save, output_dir=rep_output_dir, recompute=recompute
-                )
-                individual_results.append(result)
-                successful_replicates.append(rep)
-                replicate_result_paths.append(str(rep_output_dir / self._make_result_filename()))
-            except FileNotFoundError as e:
-                LOGGER.warning(f"Skipping replicate {rep}: trajectory data not found. {e}")
-                failed_replicates.append(rep)
-            except Exception as e:
-                LOGGER.warning(f"Skipping replicate {rep}: analysis failed with error: {e}")
-                failed_replicates.append(rep)
+        collection = collect_replicate_results(
+            self.compute,
+            replicates,
+            output_dir_base=per_rep_base,
+            save=save,
+            recompute=recompute,
+        )
+        individual_results: list[RMSFResult] = collection.results
+        replicates = collection.successful_replicates
 
-        # Check we have enough replicates
-        if len(individual_results) < 2:
-            raise ValueError(
-                f"Aggregation requires at least 2 successful replicates, but only "
-                f"{len(individual_results)} succeeded. Failed replicates: {failed_replicates}"
-            )
-
-        # Warn if some replicates were skipped
-        if failed_replicates:
-            LOGGER.warning(
-                f"Aggregating {len(successful_replicates)} of {len(requested_replicates)} "
-                f"requested replicates. Skipped: {failed_replicates}"
-            )
-
-        # Use successful_replicates for the rest of the method
-        replicates = successful_replicates
+        # Build source_result_files from successful replicates
+        replicate_result_paths = [
+            str(per_rep_base / f"run_{rep}" / self._make_result_filename()) for rep in replicates
+        ]
 
         # Collect per-residue values from all replicates
         per_replicate_rmsf = [np.array(r.rmsf_values) for r in individual_results]
