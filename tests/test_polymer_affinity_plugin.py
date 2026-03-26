@@ -235,9 +235,9 @@ class TestFilterConditions:
 
         analysis = PolymerAffinityAnalysis()
         mock_sim_poly = MagicMock()
-        mock_sim_poly.polymer = MagicMock()  # has polymer
+        mock_sim_poly.polymers = MagicMock(enabled=True)  # has polymer
 
-        mock_sim_no_poly = MagicMock(spec=[])  # no polymer, no topology
+        mock_sim_no_poly = MagicMock(spec=[])  # no polymers, no topology, no attrs
 
         conditions = [
             Condition(
@@ -263,7 +263,7 @@ class TestFilterConditions:
 
         analysis = PolymerAffinityAnalysis()
         mock_sim = MagicMock()
-        mock_sim.polymer = MagicMock()
+        mock_sim.polymers = MagicMock(enabled=True)
 
         conditions = [
             Condition(
@@ -1275,7 +1275,7 @@ class TestConditionHasPolymer:
         from polyzymd.analyses.polymer_affinity import _condition_has_polymer
 
         mock_sim = MagicMock()
-        mock_sim.polymer = MagicMock()  # has polymer
+        mock_sim.polymers = MagicMock(enabled=True)  # has polymer
 
         cond = Condition(
             label="test",
@@ -1304,7 +1304,7 @@ class TestConditionHasPolymer:
         from polyzymd.analyses.polymer_affinity import _condition_has_polymer
 
         mock_sim = MagicMock()
-        mock_sim.polymer = None
+        mock_sim.polymers = None
         # Also check topology path
         mock_sim.topology = MagicMock()
         mock_sim.topology.chains = []
@@ -1322,7 +1322,7 @@ class TestConditionHasPolymer:
         from polyzymd.analyses.polymer_affinity import _condition_has_polymer
 
         mock_sim = MagicMock()
-        mock_sim.polymer = None
+        mock_sim.polymers = None
 
         chain_c = MagicMock()
         chain_c.chain_id = "C"

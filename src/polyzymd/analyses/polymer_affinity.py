@@ -1182,6 +1182,13 @@ class _CondProxy:
 def _condition_has_polymer(cond: Condition) -> bool:
     """Check whether a condition's simulation includes polymer chains.
 
+    Uses three detection strategies in order:
+
+    1. ``sim_config.polymers`` — fast check for polymer builder section.
+    2. ``sim_config.topology.chains`` — check for chain C in topology model.
+    3. MDAnalysis topology inspection — load ``solvated_system.pdb`` and
+       check for atoms matching ``chainID C``.
+
     Parameters
     ----------
     cond : Condition
@@ -1194,16 +1201,45 @@ def _condition_has_polymer(cond: Condition) -> bool:
     """
     sim_config = cond.sim_config
 
-    # Check if polymer builder section exists and is non-empty
-    if hasattr(sim_config, "polymer") and sim_config.polymer is not None:
-        return True
+    # Check 1: polymers builder section exists, is non-None, and enabled
+    polymers = getattr(sim_config, "polymers", None)
+    if polymers is not None:
+        enabled = getattr(polymers, "enabled", True)
+        if enabled:
+            return True
 
-    # Check for chain C in topology (convention: A=protein, B=substrate, C=polymer)
+    # Check 2: chain C in topology model
     if hasattr(sim_config, "topology"):
         topo = sim_config.topology
         if hasattr(topo, "chains") and topo.chains:
             chain_ids = [c.chain_id if hasattr(c, "chain_id") else c for c in topo.chains]
             if "C" in chain_ids:
                 return True
+
+    # Check 3: MDAnalysis topology inspection (same approach as contacts plugin)
+    try:
+        for rep in cond.replicates:
+            run_dir = sim_config.get_working_directory(rep)
+            topology_path = run_dir / "solvated_system.pdb"
+
+            if not topology_path.exists():
+                continue
+
+            try:
+                import MDAnalysis as mda
+
+                universe = mda.Universe(str(topology_path))
+                polymer_atoms = universe.select_atoms("chainID C")
+                if len(polymer_atoms) > 0:
+                    logger.debug(f"  {cond.label} rep {rep}: {len(polymer_atoms)} polymer atoms")
+                    return True
+                else:
+                    logger.debug(f"  {cond.label} rep {rep}: 0 polymer atoms")
+            except Exception as e:
+                logger.warning(f"  Error checking {cond.label} rep {rep}: {e}")
+                continue
+    except (AttributeError, TypeError):
+        # sim_config may not have get_working_directory (e.g. in tests)
+        pass
 
     return False
