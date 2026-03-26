@@ -476,6 +476,13 @@ def _resolve_settings(analysis: Analysis, config: "ComparisonConfig") -> Any:
     Tries the new ``plugins:`` section first, then falls back to the
     legacy ``analysis_settings`` / ``comparison_settings`` split.
 
+    When using the legacy format, both ``analysis_settings.<name>`` and
+    ``comparison_settings.<name>`` are merged into the plugin's unified
+    ``Settings`` class.  This is necessary because the old format split
+    "what to compute" (analysis_settings) from "how to compare"
+    (comparison_settings), but the new plugin system uses a single
+    ``Settings`` model for both.
+
     Parameters
     ----------
     analysis : Analysis
@@ -490,15 +497,42 @@ def _resolve_settings(analysis: Analysis, config: "ComparisonConfig") -> Any:
     """
     # Future: try config.plugins.get(analysis.name) first
 
-    # Legacy fallback: try analysis_settings container
-    legacy = getattr(config, "analysis_settings", None)
-    if legacy is not None:
-        settings_data = legacy.get(analysis.name)
-        if settings_data is not None:
-            # settings_data is already a BaseAnalysisSettings instance
-            # We could convert to the new Settings class, but for now
-            # pass it through — the analysis can handle both types
-            return settings_data
+    # Legacy fallback: merge analysis_settings + comparison_settings
+    merged: dict[str, Any] = {}
+
+    legacy_analysis = getattr(config, "analysis_settings", None)
+    if legacy_analysis is not None:
+        settings_obj = legacy_analysis.get(analysis.name)
+        if settings_obj is not None:
+            # Dump to dict, dropping None values so defaults aren't overridden
+            merged.update({k: v for k, v in settings_obj.model_dump().items() if v is not None})
+
+    legacy_comparison = getattr(config, "comparison_settings", None)
+    if legacy_comparison is not None:
+        comp_obj = legacy_comparison.get(analysis.name)
+        if comp_obj is not None:
+            merged.update({k: v for k, v in comp_obj.model_dump().items() if v is not None})
+
+    if merged:
+        # Filter to only fields the plugin's Settings class recognises,
+        # since legacy models may contain extra fields that would cause
+        # Pydantic validation errors.
+        known_fields = set(analysis.Settings.model_fields.keys())
+        filtered = {k: v for k, v in merged.items() if k in known_fields}
+
+        try:
+            return analysis.Settings.model_validate(filtered)
+        except Exception:
+            # If validation fails, log and fall back to passing the legacy
+            # analysis settings through directly (best-effort).
+            logger.warning(
+                f"{analysis.name}: could not construct Settings from legacy config — "
+                f"falling back to raw analysis_settings object"
+            )
+            if legacy_analysis is not None:
+                raw = legacy_analysis.get(analysis.name)
+                if raw is not None:
+                    return raw
 
     # If nothing found, return default settings
     return analysis.Settings()
