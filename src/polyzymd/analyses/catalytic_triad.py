@@ -5,9 +5,12 @@ distances and a simultaneous contact fraction (all pairs below threshold
 in the same frame).  Aggregates across replicates with SEM and uses the
 default scalar comparison pipeline.
 
-This plugin delegates heavy computation to
-:class:`polyzymd.analysis.triad.analyzer.CatalyticTriadAnalyzer` and wraps
-the existing plotter classes for figure generation.
+All heavy computation is now inlined:
+- Per-pair distance computation delegates to ``DistanceCalculator`` (will be
+  inlined when the distances plugin is migrated in Phase 4d).
+- Simultaneous contact fraction and autocorrelation analysis are computed
+  directly in this plugin.
+- Aggregation uses utilities from ``analyses.shared``.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
+import numpy as np
 from pydantic import BaseModel, Field, field_validator
 
 from polyzymd.analyses.base import (
@@ -114,10 +118,9 @@ class CatalyticTriadSettings(BaseModel):
 class CatalyticTriadAnalysis(Analysis):
     """Catalytic triad analysis: active-site geometry from MD trajectories.
 
-    This plugin wraps :class:`~polyzymd.analysis.triad.analyzer.CatalyticTriadAnalyzer`
-    for per-replicate computation, aggregates simultaneous contact fraction
-    across replicates, and uses the default scalar comparison pipeline via
-    :meth:`extract_metrics`.
+    Computes per-pair distances (delegated to ``DistanceCalculator``) and
+    derives a simultaneous contact fraction — the percentage of frames
+    where ALL pairs are below the threshold at the same time.
 
     The ``compare()`` method is NOT overridden — it uses the default
     implementation which calls ``extract_metrics()`` to get
@@ -145,8 +148,9 @@ class CatalyticTriadAnalysis(Analysis):
     ) -> Any:
         """Compute triad analysis for a single replicate.
 
-        Converts plugin settings to a ``CatalyticTriadConfig`` and delegates
-        to :class:`~polyzymd.analysis.triad.analyzer.CatalyticTriadAnalyzer`.
+        Creates a ``DistanceCalculator`` with the triad pair selections,
+        computes per-pair distances, then derives the simultaneous contact
+        fraction and applies autocorrelation analysis.
 
         Parameters
         ----------
@@ -160,22 +164,186 @@ class CatalyticTriadAnalysis(Analysis):
         TriadResult
             Per-replicate triad result.
         """
-        from polyzymd.analysis.triad.analyzer import CatalyticTriadAnalyzer
+        from polyzymd.analyses.shared import (
+            TrajectoryLoader,
+            estimate_correlation_time,
+            parse_time_string,
+        )
+        from polyzymd.analyses.shared.config_hash import (
+            compute_config_hash,
+            validate_config_hash,
+        )
+        from polyzymd.analyses.shared.diagnostics import (
+            get_selection_diagnostics,
+            warn_if_multi_chain_selection,
+        )
+        from polyzymd.analyses.shared.selections import parse_selection_string
+        from polyzymd.analysis.distances.calculator import DistanceCalculator
+        from polyzymd.analysis.results.base import get_polyzymd_version
+        from polyzymd.analysis.results.triad import TriadResult
 
-        triad_config = self._settings_to_config(ctx.settings)
+        settings = ctx.settings
+        sim_config = ctx.sim_config
+        output_dir = ctx.output_dir
 
-        analyzer = CatalyticTriadAnalyzer(
-            config=ctx.sim_config,
-            triad_config=triad_config,
+        # Parse equilibration time
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+
+        # Initialise loader and config hash
+        loader = TrajectoryLoader(sim_config)
+        config_hash = compute_config_hash(sim_config)
+
+        # Check cache
+        result_file = output_dir / _make_result_filename(settings, eq_value, eq_unit)
+        if not ctx.recompute and result_file.exists():
+            logger.info(f"Loading cached triad result from {result_file}")
+            result = TriadResult.load(result_file)
+            validate_config_hash(result.config_hash, sim_config)
+            return result
+
+        logger.info(f"Computing triad analysis '{settings.name}' for replicate {replicate}")
+
+        # Validate selections upfront
+        u = loader.load_universe(replicate)
+        for pair in settings.pairs:
+            for sel_label, selection in [
+                ("selection_a", pair.selection_a),
+                ("selection_b", pair.selection_b),
+            ]:
+                parsed = parse_selection_string(selection)
+                atoms = u.select_atoms(parsed.selection)
+                if len(atoms) == 0:
+                    diag = get_selection_diagnostics(
+                        u, selection, context=f"For pair '{pair.label}' ({sel_label})"
+                    )
+                    raise ValueError(f"Selection '{selection}' matched no atoms.\n\n{diag}")
+                warn_if_multi_chain_selection(
+                    atoms, selection, f"for triad pair '{pair.label}' ({sel_label})"
+                )
+        del u  # release universe; DistanceCalculator will reload
+
+        # Build DistanceCalculator with the triad pair selections
+        pair_selections = settings.get_pair_selections()
+        distance_calc = DistanceCalculator(
+            config=sim_config,
+            pairs=pair_selections,
             equilibration=ctx.equilibration,
+            thresholds=settings.threshold,
         )
 
-        result = analyzer.compute(
+        # Compute per-pair distances (don't save individual pair result files)
+        distance_result = distance_calc.compute(
             replicate=replicate,
-            save=True,
-            output_dir=ctx.output_dir,
+            save=False,
             recompute=ctx.recompute,
+            store_distributions=True,  # Need full arrays for simultaneous contact
         )
+
+        # Update pair labels from triad config and collect distance arrays
+        pair_results = []
+        pair_distances_arrays = []
+
+        for i, pr in enumerate(distance_result.pair_results):
+            pr_updated = pr.model_copy(
+                update={
+                    "pair_label": settings.pairs[i].label,
+                    "replicate": replicate,
+                }
+            )
+            pair_results.append(pr_updated)
+
+            if pr.distances is not None:
+                pair_distances_arrays.append(np.array(pr.distances))
+            else:
+                raise ValueError(
+                    f"Distance array not available for pair {i}. "
+                    "This shouldn't happen — store_distributions=True was set."
+                )
+
+        # ----- Simultaneous contact fraction -----
+        n_frames_used = distance_result.n_frames_used
+        threshold = settings.threshold
+
+        # Frame-by-frame AND of all pairs below threshold
+        all_below = np.ones(n_frames_used, dtype=bool)
+        for dist_arr in pair_distances_arrays:
+            all_below &= dist_arr < threshold
+
+        simultaneous_fraction = float(all_below.mean())
+        n_frames_simultaneous = int(all_below.sum())
+
+        logger.info(
+            f"  Simultaneous contact: {simultaneous_fraction * 100:.1f}% "
+            f"({n_frames_simultaneous}/{n_frames_used} frames)"
+        )
+
+        # ----- Autocorrelation analysis for contact timeseries -----
+        contact_timeseries = all_below.astype(np.float64)
+
+        sim_contact_sem = None
+        sim_contact_tau = None
+        sim_contact_tau_unit = None
+        sim_contact_n_ind = None
+        sim_contact_warning = None
+
+        if n_frames_used >= 20:
+            try:
+                timestep = loader.get_timestep(replicate, unit="ps")
+                tau_result = estimate_correlation_time(
+                    contact_timeseries,
+                    timestep=timestep,
+                    timestep_unit="ps",
+                    method="integration",
+                    n_frames=n_frames_used,
+                )
+                sim_contact_tau = tau_result.tau
+                sim_contact_tau_unit = tau_result.tau_unit
+                sim_contact_n_ind = tau_result.n_independent
+                sim_contact_warning = tau_result.warning
+
+                if sim_contact_n_ind > 0:
+                    p = simultaneous_fraction
+                    sim_contact_sem = float(np.sqrt(p * (1 - p) / sim_contact_n_ind))
+
+                logger.debug(
+                    f"  Contact autocorrelation: τ={sim_contact_tau:.1f} "
+                    f"{sim_contact_tau_unit}, n_ind={sim_contact_n_ind}, "
+                    f"SEM={sim_contact_sem:.3f}"
+                )
+            except Exception as e:
+                logger.warning(f"Autocorrelation analysis for contact timeseries failed: {e}")
+                p = simultaneous_fraction
+                sim_contact_sem = float(np.sqrt(p * (1 - p) / n_frames_used))
+
+        # ----- Build result -----
+        result = TriadResult(
+            config_hash=config_hash,
+            polyzymd_version=get_polyzymd_version(),
+            replicate=replicate,
+            equilibration_time=eq_value,
+            equilibration_unit=eq_unit,
+            selection_string="; ".join(
+                f"({p.selection_a} : {p.selection_b})" for p in settings.pairs
+            ),
+            triad_name=settings.name,
+            triad_description=settings.description,
+            pair_results=pair_results,
+            threshold=threshold,
+            simultaneous_contact_fraction=simultaneous_fraction,
+            n_frames_simultaneous=n_frames_simultaneous,
+            simultaneous_contact_timeseries=None,
+            sim_contact_sem=sim_contact_sem,
+            sim_contact_correlation_time=sim_contact_tau,
+            sim_contact_correlation_time_unit=sim_contact_tau_unit,
+            sim_contact_n_independent=sim_contact_n_ind,
+            sim_contact_warning=sim_contact_warning,
+            n_frames_total=distance_result.n_frames_total,
+            n_frames_used=n_frames_used,
+        )
+
+        # Save
+        result.save(result_file)
+        logger.info(f"Saved triad result to {result_file}")
 
         return result
 
@@ -202,10 +370,8 @@ class CatalyticTriadAnalysis(Analysis):
         TriadAggregatedResult
             Aggregated result.
         """
-        import numpy as np
-
-        from polyzymd.analysis.core.aggregation import aggregate_distance_pair_stats
-        from polyzymd.analysis.core.statistics import compute_sem
+        from polyzymd.analyses.shared.aggregation import aggregate_distance_pair_stats
+        from polyzymd.analyses.shared.statistics import compute_sem
         from polyzymd.analysis.results.base import get_polyzymd_version
         from polyzymd.analysis.results.distances import DistancePairAggregatedResult
         from polyzymd.analysis.results.triad import TriadAggregatedResult
@@ -440,46 +606,6 @@ class CatalyticTriadAnalysis(Analysis):
     # === Private helpers ===
 
     @staticmethod
-    def _settings_to_config(settings: Any) -> Any:
-        """Convert plugin settings to a ``CatalyticTriadConfig``.
-
-        Handles both ``CatalyticTriadSettings`` (new) and legacy
-        ``CatalyticTriadAnalysisSettings`` (old) objects.
-
-        Parameters
-        ----------
-        settings : BaseModel
-            Plugin settings or legacy settings.
-
-        Returns
-        -------
-        CatalyticTriadConfig
-            Config object expected by ``CatalyticTriadAnalyzer``.
-        """
-        from polyzymd.compare.config import CatalyticTriadConfig, TriadPairConfig
-
-        # If it's already the config type, pass through
-        if isinstance(settings, CatalyticTriadConfig):
-            return settings
-
-        # Convert from plugin settings or any settings with pairs
-        pairs = [
-            TriadPairConfig(
-                label=p.label,
-                selection_a=p.selection_a,
-                selection_b=p.selection_b,
-            )
-            for p in settings.pairs
-        ]
-
-        return CatalyticTriadConfig(
-            name=getattr(settings, "name", "catalytic_triad"),
-            threshold=getattr(settings, "threshold", 3.5),
-            pairs=pairs,
-            description=getattr(settings, "description", None),
-        )
-
-    @staticmethod
     def _make_aggregated_filename(
         replicates: tuple[int, ...] | Sequence[int],
         first_result: Any,
@@ -493,3 +619,15 @@ class CatalyticTriadAnalysis(Analysis):
             rep_str = "reps" + "_".join(map(str, reps))
         name_safe = first_result.triad_name.replace(" ", "_").replace("/", "-")
         return f"triad_{name_safe}_{rep_str}_{eq_str}.json"
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_result_filename(settings: CatalyticTriadSettings, eq_value: float, eq_unit: str) -> str:
+    """Generate filename for single-replicate result JSON."""
+    eq_str = f"eq{eq_value:.0f}{eq_unit}"
+    name_safe = settings.name.replace(" ", "_").replace("/", "-")
+    return f"triad_{name_safe}_{eq_str}.json"

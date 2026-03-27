@@ -32,7 +32,6 @@ from polyzymd.analyses.catalytic_triad import (
     TriadPairSettings,
 )
 
-
 # ============================================================================
 # Fixtures
 # ============================================================================
@@ -251,56 +250,97 @@ class TestCatalyticTriadSettings:
 
 
 # ============================================================================
-# Test: _settings_to_config
-# ============================================================================
-
-
-class TestSettingsToConfig:
-    """Test converting plugin settings to CatalyticTriadConfig."""
-
-    def test_converts_plugin_settings(self, default_settings):
-        from polyzymd.compare.config import CatalyticTriadConfig
-
-        config = CatalyticTriadAnalysis._settings_to_config(default_settings)
-
-        assert isinstance(config, CatalyticTriadConfig)
-        assert config.name == "LipA_triad"
-        assert config.threshold == 3.5
-        assert len(config.pairs) == 2
-        assert config.pairs[0].label == "Asp133-His156"
-        assert config.description == "Ser-His-Asp catalytic triad"
-
-    def test_passes_through_config(self):
-        """If settings is already a CatalyticTriadConfig, pass through."""
-        from polyzymd.compare.config import CatalyticTriadConfig, TriadPairConfig
-
-        config = CatalyticTriadConfig(
-            name="test",
-            pairs=[
-                TriadPairConfig(label="p1", selection_a="resid 1", selection_b="resid 2"),
-            ],
-        )
-
-        result = CatalyticTriadAnalysis._settings_to_config(config)
-        assert result is config
-
-
-# ============================================================================
 # Test: compute_replicate
 # ============================================================================
 
 
-class TestComputeReplicate:
-    """Test CatalyticTriadAnalysis.compute_replicate delegates to analyzer."""
+def _make_mock_distance_result(n_pairs: int = 2, n_frames: int = 1000):
+    """Create a mock DistanceResult with *real* DistancePairResult objects.
 
-    @patch("polyzymd.analysis.triad.analyzer.CatalyticTriadAnalyzer")
-    def test_delegates_to_analyzer(
-        self, MockAnalyzer, triad_analysis, condition, tmp_path, default_settings
+    Uses genuine ``DistancePairResult`` instances so that ``model_copy()``
+    works correctly and ``TriadResult`` Pydantic validation passes.
+    """
+    import numpy as np
+
+    from polyzymd.analysis.results.distances import DistancePairResult
+
+    mock_result = MagicMock()
+    mock_result.n_frames_total = n_frames + 200
+    mock_result.n_frames_used = n_frames
+
+    pair_results = []
+    for i in range(n_pairs):
+        rng = np.random.default_rng(42 + i)
+        dists = rng.normal(3.2, 0.8, n_frames).tolist()
+
+        pr = DistancePairResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string=f"resid {100 + i} and name OD1 : resid {200 + i} and name ND1",
+            pair_label=f"orig_pair_{i}",
+            selection1=f"resid {100 + i} and name OD1",
+            selection2=f"resid {200 + i} and name ND1",
+            distances=dists,
+            mean_distance=float(np.mean(dists)),
+            std_distance=float(np.std(dists)),
+            median_distance=float(np.median(dists)),
+            min_distance=float(np.min(dists)),
+            max_distance=float(np.max(dists)),
+            sem_distance=0.1,
+            threshold=3.5,
+            fraction_below_threshold=float(np.mean(np.array(dists) < 3.5)),
+            kde_peak=2.8 + 0.1 * i,
+            n_frames_total=n_frames + 200,
+            n_frames_used=n_frames,
+        )
+        pair_results.append(pr)
+
+    mock_result.pair_results = pair_results
+    return mock_result
+
+
+class TestComputeReplicate:
+    """Test CatalyticTriadAnalysis.compute_replicate with inlined computation."""
+
+    @patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1")
+    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
+    @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
+    @patch("polyzymd.analyses.shared.TrajectoryLoader")
+    @patch("polyzymd.analysis.distances.calculator.DistanceCalculator")
+    def test_computes_triad_inline(
+        self,
+        MockDistCalc,
+        MockLoader,
+        mock_hash,
+        mock_validate_hash,
+        mock_version,
+        triad_analysis,
+        condition,
+        tmp_path,
+        default_settings,
     ):
-        mock_result = _make_mock_triad_result(replicate=1)
-        mock_analyzer_inst = MagicMock()
-        mock_analyzer_inst.compute.return_value = mock_result
-        MockAnalyzer.return_value = mock_analyzer_inst
+        """compute_replicate should use DistanceCalculator and compute simultaneous contact."""
+        import numpy as np
+
+        # Mock TrajectoryLoader
+        mock_loader_inst = MagicMock()
+        MockLoader.return_value = mock_loader_inst
+        mock_u = MagicMock()
+        # Make select_atoms return non-empty for validation
+        mock_atoms = MagicMock()
+        mock_atoms.__len__ = MagicMock(return_value=1)
+        mock_u.select_atoms.return_value = mock_atoms
+        mock_loader_inst.load_universe.return_value = mock_u
+        mock_loader_inst.get_timestep.return_value = 10.0
+
+        # Mock DistanceCalculator
+        mock_dist_result = _make_mock_distance_result(n_pairs=2, n_frames=1000)
+        mock_dist_inst = MagicMock()
+        mock_dist_inst.compute.return_value = mock_dist_result
+        MockDistCalc.return_value = mock_dist_inst
 
         ctx = ReplicateContext(
             condition=condition,
@@ -308,26 +348,61 @@ class TestComputeReplicate:
             sim_config=condition.sim_config,
             output_dir=tmp_path / "run_1",
             equilibration="10ns",
-            recompute=False,
+            recompute=True,  # skip cache check
             settings=default_settings,
         )
 
         result = triad_analysis.compute_replicate(ctx, 1)
 
-        assert result is mock_result
-        MockAnalyzer.assert_called_once()
-        mock_analyzer_inst.compute.assert_called_once_with(
-            replicate=1,
-            save=True,
-            output_dir=tmp_path / "run_1",
-            recompute=False,
-        )
+        # Verify DistanceCalculator was created with correct args
+        MockDistCalc.assert_called_once()
+        call_kwargs = MockDistCalc.call_args
+        assert call_kwargs.kwargs["config"] is condition.sim_config
+        assert len(call_kwargs.kwargs["pairs"]) == 2
 
-    @patch("polyzymd.analysis.triad.analyzer.CatalyticTriadAnalyzer")
+        # Verify result has expected triad fields
+        assert result.replicate == 1
+        assert result.triad_name == "LipA_triad"
+        assert result.threshold == 3.5
+        assert len(result.pair_results) == 2
+        # Pair labels should be updated from settings
+        assert result.pair_results[0].pair_label == "Asp133-His156"
+        assert result.pair_results[1].pair_label == "His156-Ser77"
+        # Simultaneous contact fraction should be computed
+        assert 0.0 <= result.simultaneous_contact_fraction <= 1.0
+        assert result.n_frames_used == 1000
+
+    @patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1")
+    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
+    @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
+    @patch("polyzymd.analyses.shared.TrajectoryLoader")
+    @patch("polyzymd.analysis.distances.calculator.DistanceCalculator")
     def test_passes_recompute_flag(
-        self, MockAnalyzer, triad_analysis, condition, tmp_path, default_settings
+        self,
+        MockDistCalc,
+        MockLoader,
+        mock_hash,
+        mock_validate_hash,
+        mock_version,
+        triad_analysis,
+        condition,
+        tmp_path,
+        default_settings,
     ):
-        MockAnalyzer.return_value.compute.return_value = _make_mock_triad_result(2)
+        """recompute flag should be passed to DistanceCalculator.compute()."""
+        mock_loader_inst = MagicMock()
+        MockLoader.return_value = mock_loader_inst
+        mock_u = MagicMock()
+        mock_atoms = MagicMock()
+        mock_atoms.__len__ = MagicMock(return_value=1)
+        mock_u.select_atoms.return_value = mock_atoms
+        mock_loader_inst.load_universe.return_value = mock_u
+        mock_loader_inst.get_timestep.return_value = 10.0
+
+        mock_dist_result = _make_mock_distance_result(n_pairs=2, n_frames=500)
+        mock_dist_inst = MagicMock()
+        mock_dist_inst.compute.return_value = mock_dist_result
+        MockDistCalc.return_value = mock_dist_inst
 
         ctx = ReplicateContext(
             condition=condition,
@@ -341,42 +416,62 @@ class TestComputeReplicate:
 
         triad_analysis.compute_replicate(ctx, 2)
 
-        MockAnalyzer.return_value.compute.assert_called_once_with(
+        mock_dist_inst.compute.assert_called_once_with(
             replicate=2,
-            save=True,
-            output_dir=tmp_path / "run_2",
+            save=False,
             recompute=True,
+            store_distributions=True,
         )
 
-    @patch("polyzymd.analysis.triad.analyzer.CatalyticTriadAnalyzer")
-    def test_handles_legacy_settings(self, MockAnalyzer, triad_analysis, condition, tmp_path):
-        """Legacy CatalyticTriadAnalysisSettings should work via _settings_to_config."""
-        mock_result = _make_mock_triad_result(1)
-        MockAnalyzer.return_value.compute.return_value = mock_result
+    @patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1")
+    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
+    @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
+    @patch("polyzymd.analyses.shared.TrajectoryLoader")
+    @patch("polyzymd.analysis.distances.calculator.DistanceCalculator")
+    def test_caches_result_file(
+        self,
+        MockDistCalc,
+        MockLoader,
+        mock_hash,
+        mock_validate_hash,
+        mock_version,
+        triad_analysis,
+        condition,
+        tmp_path,
+        default_settings,
+    ):
+        """Result should be saved to the output directory."""
+        mock_loader_inst = MagicMock()
+        MockLoader.return_value = mock_loader_inst
+        mock_u = MagicMock()
+        mock_atoms = MagicMock()
+        mock_atoms.__len__ = MagicMock(return_value=1)
+        mock_u.select_atoms.return_value = mock_atoms
+        mock_loader_inst.load_universe.return_value = mock_u
+        mock_loader_inst.get_timestep.return_value = 10.0
 
-        # Simulate legacy settings object
-        legacy = MagicMock()
-        legacy.name = "LipA_triad"
-        legacy.threshold = 3.5
-        legacy.description = None
-        legacy_pair = MagicMock()
-        legacy_pair.label = "pair1"
-        legacy_pair.selection_a = "resid 1"
-        legacy_pair.selection_b = "resid 2"
-        legacy.pairs = [legacy_pair]
+        mock_dist_result = _make_mock_distance_result(n_pairs=2, n_frames=100)
+        mock_dist_inst = MagicMock()
+        mock_dist_inst.compute.return_value = mock_dist_result
+        MockDistCalc.return_value = mock_dist_inst
 
+        output_dir = tmp_path / "run_1"
         ctx = ReplicateContext(
             condition=condition,
             replicate=1,
             sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_1",
+            output_dir=output_dir,
             equilibration="10ns",
-            recompute=False,
-            settings=legacy,
+            recompute=True,
+            settings=default_settings,
         )
 
-        result = triad_analysis.compute_replicate(ctx, 1)
-        assert result is mock_result
+        triad_analysis.compute_replicate(ctx, 1)
+
+        # Check that result JSON was written
+        json_files = list(output_dir.glob("*.json"))
+        assert len(json_files) == 1
+        assert "triad_LipA_triad_eq10ns.json" in json_files[0].name
 
 
 # ============================================================================
@@ -743,35 +838,67 @@ class TestPlot:
 class TestTriadLifecycle:
     """Test the full compute -> aggregate -> compare lifecycle."""
 
-    @patch("polyzymd.analysis.triad.analyzer.CatalyticTriadAnalyzer")
+    @patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1")
+    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
+    @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
+    @patch("polyzymd.analyses.shared.TrajectoryLoader")
+    @patch("polyzymd.analysis.distances.calculator.DistanceCalculator")
     def test_run_analysis_lifecycle(
-        self, MockAnalyzer, triad_analysis, condition, tmp_path, default_settings
+        self,
+        MockDistCalc,
+        MockLoader,
+        mock_hash,
+        mock_validate_hash,
+        mock_version,
+        triad_analysis,
+        condition,
+        tmp_path,
+        default_settings,
     ):
         """Test compute_replicate -> aggregate via run_analysis()."""
         from polyzymd.analyses.orchestrator import run_analysis
 
-        mock_results = {
-            rep: _make_mock_triad_result(rep, sim_contact=0.6 + 0.05 * rep) for rep in (1, 2, 3)
-        }
+        # Mock TrajectoryLoader (shared by all replicates)
+        mock_loader_inst = MagicMock()
+        MockLoader.return_value = mock_loader_inst
+        mock_u = MagicMock()
+        mock_atoms = MagicMock()
+        mock_atoms.__len__ = MagicMock(return_value=1)
+        mock_u.select_atoms.return_value = mock_atoms
+        mock_loader_inst.load_universe.return_value = mock_u
+        mock_loader_inst.get_timestep.return_value = 10.0
 
-        def mock_compute(replicate, save=True, output_dir=None, recompute=False):
-            return mock_results[replicate]
+        def make_dist_result_for_replicate(*args, **kwargs):
+            return _make_mock_distance_result(n_pairs=2, n_frames=100)
 
-        MockAnalyzer.return_value.compute = mock_compute
+        mock_dist_inst = MagicMock()
+        mock_dist_inst.compute.side_effect = make_dist_result_for_replicate
+        MockDistCalc.return_value = mock_dist_inst
 
-        with patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"):
-            output_dir = tmp_path / "analysis" / "no_polymer" / "catalytic_triad"
-            result = run_analysis(
-                triad_analysis,
-                condition,
-                settings=default_settings,
-                equilibration="10ns",
-                output_dir=output_dir,
-            )
+        output_dir = tmp_path / "analysis" / "no_polymer" / "catalytic_triad"
+        result = run_analysis(
+            triad_analysis,
+            condition,
+            settings=default_settings,
+            equilibration="10ns",
+            output_dir=output_dir,
+        )
 
+        # Verify orchestrator called compute for each replicate
+        assert mock_dist_inst.compute.call_count == 3
+
+        # Verify aggregate produced a valid result
         assert result.n_replicates == 3
-        assert result.per_replicate_simultaneous == pytest.approx([0.65, 0.70, 0.75])
-        assert MockAnalyzer.call_count == 3
+        assert result.replicates == [1, 2, 3]
+        assert result.triad_name == "LipA_triad"
+        assert len(result.pair_results) == 2
+        assert len(result.per_replicate_simultaneous) == 3
+        # All replicates used the same random seed → same fraction, so all should be equal
+        for val in result.per_replicate_simultaneous:
+            assert 0.0 <= val <= 1.0
+        assert result.overall_simultaneous_contact == pytest.approx(
+            sum(result.per_replicate_simultaneous) / 3, abs=0.01
+        )
 
     def test_extract_metrics_feeds_default_compare(self, triad_analysis):
         """Verify extract_metrics output is compatible with default_scalar_comparison."""
