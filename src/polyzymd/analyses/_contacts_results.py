@@ -13,8 +13,6 @@ Key design decisions:
 - JSON serialization via BaseAnalysisResult for interoperability
 - Separation of data storage from visualization/aggregation
 
-Moved from ``polyzymd.analysis.contacts.results`` during the
-analyses-package consolidation (Phase 5 Tier 2).
 """
 
 from __future__ import annotations

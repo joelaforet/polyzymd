@@ -1,7 +1,6 @@
 """Shared infrastructure for analysis plugins.
 
-This package provides reusable utilities extracted from the legacy
-``polyzymd.analysis.core`` and ``polyzymd.analysis.common`` packages.
+This package provides reusable utilities for analysis plugins.
 All analysis plugins should import shared infrastructure from here.
 
 Sub-modules

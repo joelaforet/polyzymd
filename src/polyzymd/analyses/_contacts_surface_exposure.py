@@ -12,9 +12,6 @@ The surface exposure threshold determines which residues are considered
 A threshold of 0.2 means residues with at least 20% of their theoretical
 maximum surface area exposed are considered surface-accessible.
 
-Moved from ``polyzymd.analysis.contacts.surface_exposure`` during the
-analyses-package consolidation (Phase 5 Tier 2).
-
 Examples
 --------
 >>> from polyzymd.analyses._contacts_surface_exposure import SurfaceExposureFilter

@@ -15,9 +15,6 @@ Key design decisions:
 - Preserve per-replicate data for detailed analysis
 - Warn if N_eff < 10 per LiveCoMS recommendations
 
-Moved from ``polyzymd.analysis.contacts.aggregator`` during the
-analyses-package consolidation (Phase 5 Tier 2).
-
 References
 ----------
 - Chodera et al. (2007) J. Chem. Theory Comput. 3:26 (statistical inefficiency)

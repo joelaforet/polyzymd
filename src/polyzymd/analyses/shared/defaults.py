@@ -3,9 +3,8 @@
 This module provides ``AnalysisDefaults``, a small Pydantic model that
 holds parameters applied to every analysis type (e.g., equilibration time).
 
-Previously lived in ``polyzymd.analysis.config``.  Relocated here during
-the Phase 3 OCP-compliance refactor so that ``compare/`` can import it
-without depending on the legacy ``analysis/`` package.
+Provides shared defaults so that ``compare/`` can import common
+parameters without depending on plugin internals.
 """
 
 from __future__ import annotations

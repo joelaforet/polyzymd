@@ -688,8 +688,7 @@ class ContactsAnalysis(Analysis):
     ) -> Any:
         """Aggregate contact results across replicates for one condition.
 
-        Uses :func:`~polyzymd.analysis.contacts.aggregator.aggregate_contact_results`
-        (to be migrated in Tier 2).
+        Uses :func:`aggregate_contact_results` from the contacts aggregator.
 
         Parameters
         ----------

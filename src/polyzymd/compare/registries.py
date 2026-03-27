@@ -20,11 +20,8 @@ Base classes
 
 Note
 ----
-Previously these lived in ``polyzymd.analysis.core.registry``.  They were
-relocated here as part of the OCP-compliance refactor (Phase 3) so that
-the ``compare`` package — the sole consumer — owns the infrastructure and
-the dependency direction flows ``compare → analyses`` rather than
-``compare → analysis``.
+The ``compare`` package owns these registries as the sole consumer,
+keeping the dependency direction ``compare → analyses``.
 """
 
 from __future__ import annotations
