@@ -1,53 +1,30 @@
 """Molecular selector abstractions for analysis modules.
 
-This module provides a unified interface for selecting atoms, residues, or
-molecular groups from an MDAnalysis Universe. Selectors enable:
-
-1. Consistent selection logic across different analysis types
-2. Configurable protein/polymer/solvent selection
-3. Support for arbitrary user-defined selections
-4. Proximity-based selections (e.g., "residues near active site")
-
-The Strategy pattern is used so users can define custom selectors by
-subclassing MolecularSelector.
-
-Examples
---------
->>> from polyzymd.analysis.common.selectors import ProteinResidues, PolymerChains
->>>
->>> # Select all protein residues
->>> protein_selector = ProteinResidues()
->>> protein_residues = protein_selector.select(universe)
->>>
->>> # Select polymer chains by type
->>> polymer_selector = PolymerResiduesByType(residue_names=["SBM", "EGP"])
->>> polymer_residues = polymer_selector.select(universe)
->>>
->>> # Select protein residues near catalytic triad
->>> triad_selector = ProteinResiduesNearReference(
-...     reference_selection="resid 77 133 156",
-...     cutoff=5.0
-... )
->>> nearby_residues = triad_selector.select(universe)
+.. deprecated::
+    This package has moved to ``polyzymd.analyses.shared.selectors``.
+    This shim re-exports all symbols for backward compatibility with legacy
+    ``analysis/`` code. New code should import from the canonical location.
 """
 
-from polyzymd.analysis.common.selectors.base import (
+from polyzymd.analyses.shared.selectors.base import (  # noqa: F401
     CompositeSelector,
     MDAnalysisSelector,
     MolecularSelector,
     SelectionResult,
 )
-from polyzymd.analysis.common.selectors.polymer import (
+from polyzymd.analyses.shared.selectors.polymer import (  # noqa: F401
     PolymerChains,
     PolymerResiduesByType,
+    PolymerSegments,
 )
-from polyzymd.analysis.common.selectors.protein import (
+from polyzymd.analyses.shared.selectors.protein import (  # noqa: F401
     ProteinResidues,
     ProteinResiduesByGroup,
     ProteinResiduesNearReference,
 )
-from polyzymd.analysis.common.selectors.solvent import (
+from polyzymd.analyses.shared.selectors.solvent import (  # noqa: F401
     CosolventMolecules,
+    IonSelector,
     SolventMolecules,
     SubstrateMolecule,
 )
@@ -65,8 +42,10 @@ __all__ = [
     # Polymer
     "PolymerChains",
     "PolymerResiduesByType",
+    "PolymerSegments",
     # Solvent/Substrate
     "SolventMolecules",
     "CosolventMolecules",
     "SubstrateMolecule",
+    "IonSelector",
 ]

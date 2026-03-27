@@ -331,7 +331,7 @@ class AffinityGroupBarPlotter(BasePlotter):
         """
         import matplotlib.pyplot as plt
 
-        from polyzymd.analysis.common.aa_classification import CANONICAL_AA_CLASS_ORDER
+        from polyzymd.analyses.shared.aa_classification import CANONICAL_AA_CLASS_ORDER
 
         t = self.theme
 

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 import numpy as np
 
-from polyzymd.analysis.common.aa_classification import CANONICAL_AA_CLASS_ORDER
+from polyzymd.analyses.shared.aa_classification import CANONICAL_AA_CLASS_ORDER
 from polyzymd.compare.plotter import BasePlotter, PlotterRegistry
 from polyzymd.compare.plotters._contacts_shared import (
     _load_aggregated_contact_results,

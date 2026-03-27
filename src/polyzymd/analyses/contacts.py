@@ -291,7 +291,7 @@ class ContactsAnalysis(Analysis):
         """
         import MDAnalysis as mda
 
-        from polyzymd.analysis.common.selectors import MDAnalysisSelector
+        from polyzymd.analyses.shared.selectors import MDAnalysisSelector
         from polyzymd.analysis.contacts.calculator_parallel import ParallelContactAnalyzer
         from polyzymd.analysis.core.loader import TrajectoryLoader, convert_time, parse_time_string
 

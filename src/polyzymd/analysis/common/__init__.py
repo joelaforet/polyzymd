@@ -1,16 +1,17 @@
 """Common infrastructure for analysis modules.
 
-This package provides shared components used across multiple analysis modules:
+.. deprecated::
+    This package has moved to ``polyzymd.analyses.shared``.
+    Sub-packages:
+    - ``aa_classification`` -> ``polyzymd.analyses.shared.aa_classification``
+    - ``selectors`` -> ``polyzymd.analyses.shared.selectors``
+    - ``groupings`` -> ``polyzymd.analyses.shared.groupings``
 
-- **selectors**: Molecular selection abstractions (protein, polymer, solvent, etc.)
-- **groupings**: Residue classification systems (amino acid types, custom groups)
-- **aa_classification**: Amino acid properties (maxASA, classifications, selections)
-
-These components enable consistent, extensible analysis across different
-molecular systems while maintaining separation of concerns.
+    This shim re-exports all symbols for backward compatibility with legacy
+    ``analysis/`` code. New code should import from the canonical locations.
 """
 
-from polyzymd.analysis.common.aa_classification import (
+from polyzymd.analyses.shared.aa_classification import (
     AA_CLASS_RESIDUES,
     AA_CLASSIFICATION_TABLE,
     DEFAULT_AA_CLASS_SELECTIONS,
@@ -22,12 +23,12 @@ from polyzymd.analysis.common.aa_classification import (
     get_residues_for_class,
     get_selection_for_class,
 )
-from polyzymd.analysis.common.groupings import (
+from polyzymd.analyses.shared.groupings import (
     CustomGrouping,
     ProteinAAClassification,
     ResidueGrouping,
 )
-from polyzymd.analysis.common.selectors import (
+from polyzymd.analyses.shared.selectors import (
     CosolventMolecules,
     MolecularSelector,
     PolymerChains,

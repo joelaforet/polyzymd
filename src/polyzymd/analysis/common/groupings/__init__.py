@@ -1,26 +1,11 @@
 """Residue grouping abstractions for analysis modules.
 
-This module provides classification systems for residues:
-
-- ResidueGrouping: Abstract base class for residue classification
-- ProteinAAClassification: Standard amino acid classification
-- CustomGrouping: User-defined classification scheme
-
-Examples
---------
->>> from polyzymd.analysis.common.groupings import ProteinAAClassification
->>>
->>> # Classify amino acids
->>> grouping = ProteinAAClassification()
->>> print(grouping.classify("PHE"))  # "aromatic"
->>> print(grouping.classify("LYS"))  # "charged_positive"
->>>
->>> # Get all residues in a group
->>> aromatics = grouping.get_residues_in_group("aromatic")
->>> # Returns: ["PHE", "TRP", "TYR", "HIS"]
+.. deprecated::
+    This package has moved to ``polyzymd.analyses.shared.groupings``.
+    This shim re-exports all symbols for backward compatibility.
 """
 
-from polyzymd.analysis.common.groupings.base import (
+from polyzymd.analyses.shared.groupings.base import (  # noqa: F401
     CustomGrouping,
     ProteinAAClassification,
     ResidueGrouping,
