@@ -237,8 +237,8 @@ class BasePlotter(ABC):
         most common pattern for contact, RMSF, and distance plotters.
 
         **Strategy B (cross-condition)**: Search for a pre-computed
-        comparison result (e.g. ``comparison/exposure_comparison.json``)
-        relative to analysis paths and load it once.  Exposure plotters
+        comparison result (typically ``comparison/<analysis>/result.json``)
+        relative to analysis paths and load it once. Exposure plotters
         use this approach because their data is produced by a comparator
         that already spans all conditions.
 
@@ -253,9 +253,9 @@ class BasePlotter(ABC):
             - "replicates": list[int] of replicate numbers
 
             **IMPORTANT**: Plotters must load their own analysis results from
-            ``analysis_dir``, ``aggregated_dir``, or a sibling ``comparison/``
-            directory.  The orchestrator does NOT pass pre-loaded results via
-            kwargs.
+            ``analysis_dir``, ``aggregated_dir``, or the comparison cache under
+            ``comparison/<analysis>/``. The orchestrator does NOT pass pre-loaded
+            results via kwargs.
         labels : sequence of str
             Condition labels in desired display order
         output_dir : Path
@@ -850,7 +850,7 @@ class ComparisonPlotter:
             Mapping of analysis_type -> list of plot_type names
         """
         result = {}
-        enabled = self.config.analysis_settings.get_enabled_analyses()
+        enabled = self.config.plugins.get_enabled_plugins()
 
         for analysis_type in enabled:
             plotters = PlotterRegistry.get_plotters_for_analysis(
@@ -874,7 +874,7 @@ class ComparisonPlotter:
         and generates all registered plot types for each.
         """
         generated = []
-        enabled = self.config.analysis_settings.get_enabled_analyses()
+        enabled = self.config.plugins.get_enabled_plugins()
 
         logger.info(f"Generating plots for {len(enabled)} analysis types")
         logger.info(f"Output directory: {self._output_dir}")
@@ -980,19 +980,27 @@ class ComparisonPlotter:
 
             The ``__meta__`` entry contains:
             - ``comparison_source_path``: Path to comparison.yaml (or None)
-            - ``results_dir``: Path to results/ adjacent to comparison.yaml (or None)
+            - ``comparison_dir``: Path to comparison/ adjacent to comparison.yaml (or None)
+            - ``comparison_result_path``: Canonical per-analysis JSON path (or None)
         """
         from polyzymd.config.schema import SimulationConfig
 
         data: dict[str, Any] = {}
 
         # Provide comparison-level metadata so cross-condition plotters
-        # (e.g., BFE) can locate results/ without heuristic path guessing.
+        # can locate canonical comparison caches without heuristic guessing.
         source_path = self.config.source_path
-        results_dir = source_path.parent / "results" if source_path is not None else None
+        comparison_dir = source_path.parent / "comparison" if source_path is not None else None
+        legacy_results_dir = source_path.parent / "results" if source_path is not None else None
         data["__meta__"] = {
             "comparison_source_path": source_path,
-            "results_dir": results_dir,
+            "comparison_dir": comparison_dir,
+            "comparison_result_path": (
+                comparison_dir / analysis_type / "result.json"
+                if comparison_dir is not None
+                else None
+            ),
+            "results_dir": legacy_results_dir,
         }
 
         for condition in self.config.conditions:

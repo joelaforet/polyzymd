@@ -85,8 +85,8 @@ class RMSFComparisonPlotter(BasePlotter):
     ) -> Any | None:
         """Try to find a pre-computed RMSF comparison result.
 
-        Primary lookup uses ``__meta__["results_dir"]`` (populated by the
-        plotter orchestrator).  Falls back to searching per-condition
+        Primary lookup uses canonical comparison metadata populated by the
+        plotter orchestrator. Falls back to searching per-condition
         ``comparison/`` directories.
         """
         from polyzymd.compare.io.results import find_comparison_result
@@ -108,6 +108,7 @@ class RMSFComparisonPlotter(BasePlotter):
             labels,
             glob_patterns=["rmsf_comparison*.json"],
             loader=_try_load,
+            analysis_type="rmsf",
             fallback_filenames=["rmsf_comparison.json", "comparison_result.json"],
             log=logger,
         )
@@ -290,10 +291,10 @@ class RMSFProfilePlotter(BasePlotter):
     with optional error bands, highlighted residues (e.g., active site),
     and a secondary structure annotation bar below the RMSF profile.
 
-    The SS annotation bar uses the reference PDB specified in
-    ``analysis_settings.rmsf.reference_file``.  If the reference PDB is
-    not available or mdtraj is not installed, the plot falls back to a
-    single-panel layout without the annotation bar.
+        The SS annotation bar uses the reference PDB specified in
+        ``plugins.rmsf.reference_file``. If the reference PDB is
+        not available or mdtraj is not installed, the plot falls back to a
+        single-panel layout without the annotation bar.
     """
 
     @classmethod
@@ -418,7 +419,7 @@ class RMSFProfilePlotter(BasePlotter):
     def _load_reference_ss(self, data: dict[str, Any]) -> dict | None:
         """Load reference SS assignment from the crystal/input PDB.
 
-        Reads ``analysis_settings.rmsf.reference_file`` from the comparison
+        Reads ``plugins.rmsf.reference_file`` from the comparison
         config and runs mdtraj DSSP on it to get per-residue SS assignments.
 
         Returns
@@ -437,7 +438,7 @@ class RMSFProfilePlotter(BasePlotter):
             from polyzymd.compare.config import ComparisonConfig
 
             comp_config = ComparisonConfig.from_yaml(source_path)
-            rmsf_settings = comp_config.analysis_settings.get("rmsf")
+            rmsf_settings = comp_config.plugins.get("rmsf")
             if rmsf_settings is None:
                 return None
             reference_file = getattr(rmsf_settings, "reference_file", None)

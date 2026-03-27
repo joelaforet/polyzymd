@@ -15,6 +15,7 @@ def find_comparison_result(
     glob_patterns: list[str],
     loader: Callable[[Path], T],
     *,
+    analysis_type: str | None = None,
     fallback_subdir: str = "comparison",
     fallback_filenames: list[str] | None = None,
     log: logging.Logger | None = None,
@@ -23,9 +24,10 @@ def find_comparison_result(
 
     Implements the standard two-phase discovery strategy used by all plotters:
 
-    1. Primary search in ``data["__meta__"]["results_dir"]`` for files matching
-       ``glob_patterns`` and load the most recently modified one
-    2. Fallback search via per-condition path navigation into ``fallback_subdir``
+    1. Primary search in ``data["__meta__"]`` using canonical comparison metadata
+       (exact ``comparison_result_path`` first, then ``comparison_dir``)
+    2. Legacy search in ``data["__meta__"]["results_dir"]``
+    3. Fallback search via per-condition path navigation into ``fallback_subdir``
 
     Parameters
     ----------
@@ -37,6 +39,9 @@ def find_comparison_result(
         Glob patterns to search for result JSON files.
     loader : Callable[[Path], T]
         Loader function that reads and returns a result object.
+    analysis_type : str | None, optional
+        Analysis type used to check the canonical
+        ``comparison/<analysis_type>/result.json`` location first.
     fallback_subdir : str, optional
         Subdirectory name to search in fallback mode, by default ``"comparison"``.
     fallback_filenames : list[str] | None, optional
@@ -54,6 +59,29 @@ def find_comparison_result(
 
     meta = data.get("__meta__")
     if meta is not None:
+        comparison_result_path = meta.get("comparison_result_path")
+        if comparison_result_path is not None:
+            loaded = _try_load_exact(Path(comparison_result_path), loader, log)
+            if loaded is not None:
+                return loaded
+            log.debug(
+                f"Could not load comparison result from {comparison_result_path} - trying fallback"
+            )
+
+        comparison_dir = meta.get("comparison_dir")
+        if comparison_dir is not None:
+            loaded = _try_load_from_comparison_root(
+                Path(comparison_dir),
+                analysis_type,
+                glob_patterns,
+                loader,
+                log,
+                fallback_filenames=fallback_filenames,
+            )
+            if loaded is not None:
+                return loaded
+            log.debug(f"No matching result JSON in {comparison_dir} - trying legacy paths")
+
         results_dir = meta.get("results_dir")
         if results_dir is not None:
             loaded = _try_load_from_dir(Path(results_dir), glob_patterns, loader, log)
@@ -75,18 +103,14 @@ def find_comparison_result(
             if candidate not in searched and candidate.is_dir():
                 searched.add(candidate)
 
-                if fallback_filenames is not None:
-                    for filename in fallback_filenames:
-                        file_path = candidate / filename
-                        if file_path.exists():
-                            try:
-                                result = loader(file_path)
-                                log.debug(f"Loaded result from {file_path}")
-                                return result
-                            except Exception as exc:  # noqa: BLE001
-                                log.debug(f"Could not load {file_path}: {exc}")
-
-                loaded = _try_load_from_dir(candidate, glob_patterns, loader, log)
+                loaded = _try_load_from_comparison_root(
+                    candidate,
+                    analysis_type,
+                    glob_patterns,
+                    loader,
+                    log,
+                    fallback_filenames=fallback_filenames,
+                )
                 if loaded is not None:
                     return loaded
 
@@ -99,11 +123,68 @@ def find_comparison_result(
                     candidate = parent / fallback_subdir
                     if candidate not in searched and candidate.is_dir():
                         searched.add(candidate)
-                        loaded = _try_load_from_dir(candidate, glob_patterns, loader, log)
+                        loaded = _try_load_from_comparison_root(
+                            candidate,
+                            analysis_type,
+                            glob_patterns,
+                            loader,
+                            log,
+                            fallback_filenames=fallback_filenames,
+                        )
                         if loaded is not None:
                             return loaded
 
     return None
+
+
+def canonical_comparison_result_path(results_dir: Path, analysis_type: str) -> Path:
+    """Return the canonical comparison result path for one analysis."""
+    return results_dir / analysis_type / "result.json"
+
+
+def _try_load_exact(path: Path, loader: Callable[[Path], T], log: logging.Logger) -> T | None:
+    """Try loading one exact file path."""
+    if not path.exists():
+        return None
+
+    try:
+        result = loader(path)
+        log.debug(f"Loaded result from {path}")
+        return result
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"Could not load {path}: {exc}")
+        return None
+
+
+def _try_load_from_comparison_root(
+    comparison_dir: Path,
+    analysis_type: str | None,
+    glob_patterns: list[str],
+    loader: Callable[[Path], T],
+    log: logging.Logger,
+    *,
+    fallback_filenames: list[str] | None = None,
+) -> T | None:
+    """Try canonical comparison paths before legacy filename searches."""
+    if not comparison_dir.is_dir():
+        return None
+
+    if analysis_type is not None:
+        loaded = _try_load_exact(
+            canonical_comparison_result_path(comparison_dir, analysis_type),
+            loader,
+            log,
+        )
+        if loaded is not None:
+            return loaded
+
+    if fallback_filenames is not None:
+        for filename in fallback_filenames:
+            loaded = _try_load_exact(comparison_dir / filename, loader, log)
+            if loaded is not None:
+                return loaded
+
+    return _try_load_from_dir(comparison_dir, glob_patterns, loader, log)
 
 
 def _try_load_from_dir(

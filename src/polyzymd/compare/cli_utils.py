@@ -39,7 +39,7 @@ def common_compare_options(func):
         "output_path",
         type=click.Path(path_type=Path),
         default=None,
-        help="Save output to file. Also saves JSON result to results/ directory.",
+        help="Save output to file. JSON comparison results are cached under comparison/.",
     )
     @click.option(
         "--format",

@@ -427,7 +427,7 @@ class DistanceStateBarsPlotter(BasePlotter):
     replicate dot overlay.
 
     Labels for the two states come from ``DistancePairSettings.below_label``
-    and ``DistancePairSettings.above_label`` in ``analysis_settings.distances``.
+    and ``DistancePairSettings.above_label`` in ``plugins.distances``.
     When not set, they default to ``"Below {threshold}Å"`` / ``"Above {threshold}Å"``.
     """
 
@@ -450,7 +450,7 @@ class DistanceStateBarsPlotter(BasePlotter):
         if not self.settings.distances.generate_state_bars:
             return False
         # Cache analysis settings so plot() can access pair labels/thresholds
-        self._distances_settings = comparison_config.analysis_settings.get("distances")
+        self._distances_settings = comparison_config.plugins.get("distances")
         return True
 
     def plot(
@@ -732,7 +732,7 @@ class DistanceStateBarsPlotter(BasePlotter):
             from polyzymd.compare.config import ComparisonConfig
 
             comp_config = ComparisonConfig.from_yaml(source_path)
-            dist_settings = comp_config.analysis_settings.get("distances")
+            dist_settings = comp_config.plugins.get("distances")
             if dist_settings is not None:
                 return getattr(dist_settings, "pairs", None)
         except Exception as exc:

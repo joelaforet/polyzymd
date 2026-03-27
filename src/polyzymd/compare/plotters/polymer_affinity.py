@@ -7,9 +7,9 @@ This module provides registered plotters for the polymer affinity score:
 - AffinityGroupBarPlotter: Per-group breakdown comparing conditions,
   one figure per polymer type.
 
-Both plotters load a ``PolymerAffinityScoreResult`` JSON saved by the
-``polyzymd compare polymer-affinity`` command (in ``results/`` adjacent to
-``comparison.yaml``).
+Both plotters load a ``PolymerAffinityScoreResult`` JSON from the canonical
+``comparison/polymer_affinity/result.json`` cache, with legacy filename
+fallbacks for older comparison projects.
 
 Physics interpretation
 ----------------------
@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 def _find_affinity_result(
     data: dict[str, Any], labels: Sequence[str]
 ) -> "PolymerAffinityScoreResult | None":
-    """Find and load PolymerAffinityScoreResult from the results/ directory.
+    """Find and load PolymerAffinityScoreResult from the comparison cache.
 
     Searches for JSON files matching the naming conventions produced by the
     ``polymer-affinity`` CLI subcommand or the generic ``run`` command.
@@ -55,7 +55,7 @@ def _find_affinity_result(
     ----------
     data : dict
         Mapping of condition_label -> condition data dict, plus an optional
-        ``"__meta__"`` key with ``results_dir``.
+        ``"__meta__"`` key with canonical comparison metadata.
     labels : sequence of str
         Condition labels in display order.
 
@@ -75,7 +75,7 @@ def _find_affinity_result(
             "affinity_comparison_*.json",
         ],
         loader=PolymerAffinityScoreResult.load,
-        fallback_subdir="results",
+        analysis_type="polymer_affinity",
         log=logger,
     )
 
@@ -93,8 +93,7 @@ class AffinityStackedBarPlotter(BasePlotter):
     colored by polymer type contribution. This gives a quick overview of
     which polymer types contribute most to the total interaction strength.
 
-    Loads ``PolymerAffinityScoreResult`` from ``results/`` adjacent to
-    ``comparison.yaml``.
+    Loads ``PolymerAffinityScoreResult`` from the canonical comparison cache.
     """
 
     @classmethod
@@ -295,7 +294,7 @@ class AffinityGroupBarPlotter(BasePlotter):
     - Error bars: SEM on per-group affinity score
     - Reference line at score = 0
 
-    Loads ``PolymerAffinityScoreResult`` from ``results/``.
+    Loads ``PolymerAffinityScoreResult`` from the canonical comparison cache.
     """
 
     @classmethod

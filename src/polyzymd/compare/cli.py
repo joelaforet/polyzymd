@@ -91,7 +91,7 @@ def init(name: str, eq_time: str, output_dir: Optional[Path]):
     Creates a new directory NAME containing:
       - comparison.yaml: Template configuration file to edit
       - structures/: Directory for shared structure files (enzyme PDB)
-      - results/: Directory for comparison result JSON files
+      - comparison/: Directory for comparison result JSON files
       - figures/: Directory for comparison plots
 
     \b
@@ -118,7 +118,7 @@ def init(name: str, eq_time: str, output_dir: Optional[Path]):
 
         # Create directory structure
         project_dir.mkdir(parents=True)
-        (project_dir / "results").mkdir()
+        (project_dir / "comparison").mkdir()
         (project_dir / "figures").mkdir()
         (project_dir / "structures").mkdir()
 
@@ -137,7 +137,7 @@ calculation used in binding preference analysis:
 
 Then reference it in comparison.yaml:
 
-    analysis_settings:
+    plugins:
       contacts:
         compute_binding_preference: true
         enzyme_pdb_for_sasa: "structures/enzyme.pdb"
@@ -248,7 +248,7 @@ def validate(config_file: Path, output_format: str):
             "conditions_count": len(config.conditions),
             "condition_labels": [c.label for c in config.conditions],
             "control": config.control,
-            "sections_configured": config.analysis_settings.get_enabled_analyses(),
+            "sections_configured": config.plugins.get_enabled_plugins(),
         }
 
     except yaml.YAMLError as e:
@@ -420,12 +420,9 @@ def run_comparison(
         click.echo("Warning: comparison returned no result (not enough data?).", err=True)
         sys.exit(1)
 
-    # Save JSON result
-    results_dir = config_file.parent / "results"
-    results_dir.mkdir(exist_ok=True)
-    json_path = results_dir / f"{analysis_cls.name}_comparison_{config.name.replace(' ', '_')}.json"
-    result.save(json_path)
-    click.echo(f"Saved result: {json_path}")
+    json_path = pipeline_result.get("comparison_path")
+    if json_path is not None:
+        click.echo(f"Saved result: {json_path}")
     click.echo()
 
     # Format and display — delegates to the plugin's format() method
@@ -574,15 +571,15 @@ def plot_all(
         experimental_features = experimental_features_for_plot_type(plot_type)
     elif analysis_type:
         comparison_type = analysis_type
-        analysis_settings = config.analysis_settings.get(analysis_type)
+        analysis_settings = config.plugins.get(analysis_type)
         experimental_features = experimental_features_for_comparison_type(
             comparison_type, analysis_settings
         )
     else:
         feature_list: list[str] = []
-        for settings_key in config.analysis_settings.get_enabled_analyses():
+        for settings_key in config.plugins.get_enabled_plugins():
             comparison_type = settings_key
-            analysis_settings = config.analysis_settings.get(settings_key)
+            analysis_settings = config.plugins.get(settings_key)
             feature_list.extend(
                 experimental_features_for_comparison_type(comparison_type, analysis_settings)
             )
@@ -678,8 +675,8 @@ def run_all(
     """Run ALL comparisons defined in comparison.yaml.
 
     Iterates over every enabled analysis in the config and runs the
-    corresponding analysis plugin.  Results are saved as JSON to the
-    ``results/`` directory next to the config file.
+    corresponding analysis plugin. Results are saved under
+    ``comparison/<analysis>/result.json`` next to the config file.
 
     \b
     Workflow:
@@ -706,11 +703,8 @@ def run_all(
     validate_and_report(config)
 
     equilibration = eq_time or config.defaults.equilibration_time
-    results_dir = Path(config_file).resolve().parent / "results"
-    results_dir.mkdir(exist_ok=True)
-
     # --- Discover enabled analyses ------------------------------------------
-    enabled_analyses = config.analysis_settings.get_enabled_analyses()
+    enabled_analyses = config.plugins.get_enabled_plugins()
     if not enabled_analyses:
         click.echo("No analyses are enabled in comparison.yaml.", err=True)
         sys.exit(1)
@@ -758,11 +752,7 @@ def run_all(
             skipped.append(settings_key)
             continue
 
-        # Save JSON result
-        json_path = (
-            results_dir / f"{analysis_cls.name}_comparison_{config.name.replace(' ', '_')}.json"
-        )
-        result.save(json_path)
+        json_path = pipeline_result.get("comparison_path")
         click.echo(f"  [{settings_key}] saved -> {json_path}")
         succeeded.append(settings_key)
 

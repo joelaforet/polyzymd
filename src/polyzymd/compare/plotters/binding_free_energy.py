@@ -5,9 +5,9 @@ analysis:
 - BFEHeatmapPlotter: ΔG_sel heatmap with rows = AA groups, columns = conditions
 - BFEBarPlotter: Grouped bar chart of ΔG_sel by AA residue class
 
-Both plotters load a ``BindingFreeEnergyResult`` JSON saved by the
-``polyzymd compare binding-free-energy`` command (in ``results/`` adjacent to
-``comparison.yaml``) rather than per-condition analysis directories.
+Both plotters load a ``BindingFreeEnergyResult`` JSON from the canonical
+``comparison/binding_free_energy/result.json`` cache (with legacy filename
+fallbacks) rather than per-condition analysis directories.
 
 Partition-aware plotting
 ------------------------
@@ -34,7 +34,7 @@ Diverging colormap (RdBu_r by default) is centered at 0.0:
 - White (zero)     → neutral
 - Red  (positive)  → avoidance
 
-Units are whatever was specified in analysis_settings.binding_free_energy.units
+Units are whatever was specified in ``plugins.binding_free_energy.units``
 (kT by default — dimensionless, in units of k_bT).
 """
 
@@ -78,10 +78,10 @@ def _unit_label_mpl(units: str) -> str:
 def _find_bfe_result(
     data: dict[str, Any], labels: Sequence[str]
 ) -> "BindingFreeEnergyResult | None":
-    """Find and load BindingFreeEnergyResult from the results/ directory.
+    """Find and load BindingFreeEnergyResult from the comparison cache.
 
-    The BFE result JSON lives adjacent to ``comparison.yaml`` under
-    ``results/``.  Two naming conventions exist:
+    The canonical cache path is ``comparison/binding_free_energy/result.json``.
+    Older workflows may still leave legacy files with these names:
 
     - ``binding_free_energy_comparison_{name}.json`` (generic ``run_comparison``)
     - ``bfe_comparison_{name}.json`` (dedicated ``compare binding-free-energy``)
@@ -89,7 +89,7 @@ def _find_bfe_result(
     Both are searched.  The most recently modified match wins.
 
     The orchestrator provides a ``__meta__`` entry in *data* with the
-    ``results_dir`` path (derived from ``comparison.yaml``'s location).
+    ``comparison_dir`` path (derived from ``comparison.yaml``'s location).
     This is the primary lookup.  If ``__meta__`` is absent we fall back
     to heuristic navigation from condition config paths.
 
@@ -97,7 +97,7 @@ def _find_bfe_result(
     ----------
     data : dict
         Mapping of condition_label -> condition data dict, plus an optional
-        ``"__meta__"`` key with ``results_dir``.
+        ``"__meta__"`` key with canonical comparison metadata.
     labels : sequence of str
         Condition labels in display order.
 
@@ -117,7 +117,7 @@ def _find_bfe_result(
             "bfe_comparison_*.json",
         ],
         loader=BindingFreeEnergyResult.load,
-        fallback_subdir="results",
+        analysis_type="binding_free_energy",
         log=logger,
     )
 
@@ -192,9 +192,9 @@ class BFEHeatmapPlotter(BasePlotter):
     and titles match the previous single-partition behavior for backward
     compatibility.
 
-    Loads ``BindingFreeEnergyResult`` from ``results/`` adjacent to
-    ``comparison.yaml`` (accepts both ``binding_free_energy_comparison_*.json``
-    and ``bfe_comparison_*.json`` naming conventions).
+    Loads ``BindingFreeEnergyResult`` from the canonical comparison cache,
+    while still accepting legacy ``binding_free_energy_comparison_*.json``
+    and ``bfe_comparison_*.json`` filenames.
 
     Sign convention
     ---------------
@@ -465,9 +465,9 @@ class BFEBarPlotter(BasePlotter):
     When only a single partition exists, filenames and titles match the
     previous single-partition behavior for backward compatibility.
 
-    Loads ``BindingFreeEnergyResult`` from ``results/`` adjacent to
-    ``comparison.yaml`` (accepts both ``binding_free_energy_comparison_*.json``
-    and ``bfe_comparison_*.json`` naming conventions).
+    Loads ``BindingFreeEnergyResult`` from the canonical comparison cache,
+    while still accepting legacy ``binding_free_energy_comparison_*.json``
+    and ``bfe_comparison_*.json`` filenames.
     """
 
     @classmethod

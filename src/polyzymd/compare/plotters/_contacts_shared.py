@@ -419,7 +419,7 @@ def _load_partition_definitions(
         log.warning(f"Failed to load comparison config from {source_path}: {e}")
         return {}, {}
 
-    contacts_settings = config.analysis_settings.get("contacts")
+    contacts_settings = config.plugins.get("contacts")
     if contacts_settings is None:
         log.debug("No contacts analysis settings in comparison config")
         return {}, {}

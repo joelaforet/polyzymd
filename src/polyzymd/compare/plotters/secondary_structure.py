@@ -48,7 +48,7 @@ def _find_ss_comparison_result(
 ) -> Any | None:
     """Try to locate a saved SSComparisonResult JSON.
 
-    Primary lookup uses ``__meta__["results_dir"]``.  Falls back to
+    Primary lookup uses canonical comparison metadata. Falls back to
     per-condition analysis paths.
 
     Parameters
@@ -72,6 +72,7 @@ def _find_ss_comparison_result(
         labels,
         glob_patterns=["secondary_structure_comparison*.json"],
         loader=SSComparisonResult.load,
+        analysis_type="secondary_structure",
         fallback_filenames=["secondary_structure_comparison.json"],
         log=log,
     )

@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from polyzymd.compare.io import (
+    canonical_comparison_result_path,
     find_comparison_result,
     resolve_aggregated_dir,
     resolve_analysis_dir,
@@ -227,6 +228,43 @@ class TestFindComparisonResult:
             labels=["cond_a"],
             glob_patterns=["*_comparison.json"],
             loader=loader,
+        )
+
+        assert result == {"loaded_from": result_file}
+        loader.assert_called_once_with(result_file)
+
+    def test_finds_result_in_meta_comparison_result_path(self, tmp_path: Path) -> None:
+        """Load exact canonical path from ``__meta__.comparison_result_path`` first."""
+        result_file = self._touch_json(tmp_path / "comparison" / "contacts" / "result.json")
+
+        loader = MagicMock(return_value={"loaded_from": result_file})
+        data = {"__meta__": {"comparison_result_path": result_file}}
+
+        result = find_comparison_result(
+            data,
+            labels=["cond_a"],
+            glob_patterns=["*_comparison.json"],
+            loader=loader,
+            analysis_type="contacts",
+        )
+
+        assert result == {"loaded_from": result_file}
+        loader.assert_called_once_with(result_file)
+
+    def test_finds_result_in_meta_comparison_dir(self, tmp_path: Path) -> None:
+        """Load canonical ``comparison/<analysis>/result.json`` before glob matches."""
+        comparison_dir = tmp_path / "comparison"
+        result_file = self._touch_json(canonical_comparison_result_path(comparison_dir, "contacts"))
+
+        loader = MagicMock(return_value={"loaded_from": result_file})
+        data = {"__meta__": {"comparison_dir": comparison_dir}}
+
+        result = find_comparison_result(
+            data,
+            labels=["cond_a"],
+            glob_patterns=["*_comparison.json"],
+            loader=loader,
+            analysis_type="contacts",
         )
 
         assert result == {"loaded_from": result_file}

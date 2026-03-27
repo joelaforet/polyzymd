@@ -39,9 +39,9 @@ def _find_comparison_result(
 ) -> Any | None:
     """Try to locate a saved ExposureComparisonResult JSON.
 
-    Primary lookup uses ``__meta__["results_dir"]`` (the ``results/``
-    directory adjacent to ``comparison.yaml``).  Falls back to searching
-    ``comparison/`` directories relative to per-condition analysis paths.
+    Primary lookup uses canonical comparison metadata populated from
+    ``comparison.yaml``. Falls back to searching ``comparison/``
+    directories relative to per-condition analysis paths.
 
     Parameters
     ----------
@@ -67,6 +67,7 @@ def _find_comparison_result(
         labels,
         glob_patterns=["exposure_comparison*.json"],
         loader=ExposureComparisonResult.load,
+        analysis_type="exposure",
         fallback_filenames=["exposure_comparison.json", "comparison_result.json"],
         log=log,
     )
