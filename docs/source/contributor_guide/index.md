@@ -13,11 +13,8 @@ PolyzyMD, understand the codebase, or add new capabilities.
 ## Extension Workflows
 
 - **[Extend the Analysis Framework](../tutorials/extending_analyses.md)** —
-  how to add a new analysis type as a plugin (primary guide)
-- [Extend Comparison Workflows (Legacy)](../tutorials/extending_comparators.md) —
-  old `BaseComparator` system, kept for reference
-- [Extend Plotting Workflows (Legacy)](../tutorials/extending_plotters.md) —
-  old `PlotterRegistry` system, kept for reference
+  how to add a new analysis type in one file, including compute, comparison,
+  formatting, and plotting
 
 ## Contributor Mindset
 
@@ -36,6 +33,6 @@ Contributing to PolyzyMD <../tutorials/contributing>
 Set Up a Contributor Environment <setup>
 Packaging and Distribution Notes <../tutorials/packaging>
 Extend the Analysis Framework <../tutorials/extending_analyses>
-Extend Comparison Workflows (Legacy) <../tutorials/extending_comparators>
-Extend Plotting Workflows (Legacy) <../tutorials/extending_plotters>
+Comparison Logic in an Analysis Plugin <../tutorials/extending_comparators>
+Plotting in an Analysis Plugin <../tutorials/extending_plotters>
 ```

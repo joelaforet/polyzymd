@@ -12,7 +12,7 @@ Binding free energy analysis is a **post-processing step**. It requires:
 1. Completed contacts analysis with
    [`compute_binding_preference: true`](analysis_binding_preference.md)
 2. Cached binding preference files on disk (produced automatically by `polyzymd
-   compare contacts`)
+   compare run contacts`)
 ```
 
 ```{warning}
@@ -132,8 +132,6 @@ plugins:
   binding_free_energy:
     units: "kcal/mol"              # or "kJ/mol"
     surface_exposure_threshold: 0.2
-
-  binding_free_energy:
     fdr_alpha: 0.05
 ```
 
@@ -351,7 +349,9 @@ The JSON file can be reloaded for downstream processing:
 ```python
 from polyzymd.compare.results.binding_free_energy import BindingFreeEnergyResult
 
-result = BindingFreeEnergyResult.load("binding_free_energy_20260221_143000.json")
+result = BindingFreeEnergyResult.load(
+    "comparison/binding_free_energy/result.json"
+)
 
 # Access per-condition data
 for summary in result.conditions:
@@ -434,8 +434,6 @@ plugins:
 
   binding_free_energy:
     units: "kcal/mol"
-
-  binding_free_energy:
     fdr_alpha: 0.05
 ```
 
@@ -513,4 +511,4 @@ within thermal noise.
 - [Contacts Analysis Quick Start](analysis_contacts_quickstart.md) — basic contacts
 - [Statistics Best Practices](analysis_statistics_best_practices.md) — replicate planning
 - [Comparing Conditions](analysis_compare_conditions.md) — multi-condition workflows
-- [Extending Comparators](extending_comparators.md) — add custom comparators
+- [Extending the Analysis Framework](extending_analyses.md) — add a new plugin

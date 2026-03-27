@@ -2,8 +2,8 @@
 
 This guide shows you how to add a new analysis type to PolyzyMD in one file.
 By the end, you will have a working analysis plugin that can compute metrics
-per replicate, aggregate across replicates, compare conditions with
-statistics, and display results on the CLI.
+per replicate, aggregate across replicates, compare conditions, generate
+figures, and display results on the CLI.
 
 ```{note}
 This guide covers the **plugin system** in ``analyses/``.
@@ -20,8 +20,17 @@ API docs.
 
 ## Overview
 
-Every analysis in PolyzyMD is a single class in `src/polyzymd/analyses/` that
-subclasses `Analysis`. The framework handles:
+Every community extension in PolyzyMD should start as a single class in
+`src/polyzymd/analyses/` that subclasses `Analysis`.
+
+The goal is simple contributor ergonomics:
+
+- one file to review
+- one settings model to configure
+- one class to discover from the CLI
+- one PR that adds compute, comparison, and plots together
+
+The framework handles:
 
 - **Discovery**: `pkgutil`-based auto-discovery — no registries or imports
 - **Replicate iteration**: Calls your `compute_replicate()` for each run
@@ -32,7 +41,16 @@ subclasses `Analysis`. The framework handles:
 
 You implement the science. The framework does the plumbing.
 
-## Quick Start: 5-Minute Plugin
+If you already have working MDAnalysis code for a metric, the usual path is:
+
+1. move that logic into `compute_replicate()`
+2. summarize replicates in `aggregate()`
+3. either expose scalar metrics with `extract_metrics()` or write a custom `compare()`
+4. add `plot()` if the analysis needs figures
+
+That is the whole extension model.
+
+## Quick Start: One-File Plugin
 
 Create `src/polyzymd/analyses/rg.py`:
 
@@ -123,6 +141,26 @@ That's it. The plugin is now:
 - Automatically compared with t-tests, ANOVA, and ranking
 
 ## Step-by-Step Guide
+
+## Mental Model
+
+Think of one plugin file as a complete analysis package:
+
+- `Settings` answers "what can users configure?"
+- `compute_replicate()` answers "how do I analyze one trajectory?"
+- `aggregate()` answers "how do I summarize replicates for one condition?"
+- `compare()` answers "how do I compare conditions?"
+- `plot()` answers "what figures should this analysis produce?"
+- `format()` answers "what should the CLI print?"
+
+For many analyses, you only need:
+
+- `Settings`
+- `compute_replicate()`
+- `aggregate()`
+- `extract_metrics()`
+
+The framework can do the rest.
 
 ### Step 1: Choose Your Analysis Name
 
@@ -265,11 +303,12 @@ def compare(self, ctx: ComparisonContext) -> MyComparisonResult:
     ...
 ```
 
-See `analyses/contacts.py` or `analyses/distances.py` for full examples.
+See `src/polyzymd/analyses/contacts.py` or `src/polyzymd/analyses/distances.py`
+for full examples.
 
 ### Step 6: Add Plots (Optional)
 
-Override `plot()` to generate matplotlib figures:
+Override `plot()` to generate matplotlib figures from your plugin:
 
 ```python
 def plot(self, ctx: PlotContext) -> list[Path]:
@@ -323,7 +362,7 @@ plot(ctx)                             →  [figure paths]
 format(result, "text")                →  CLI output string
 ```
 
-## Plugin Checklist
+## Contributor Checklist
 
 When creating a new analysis plugin:
 
@@ -339,6 +378,17 @@ When creating a new analysis plugin:
 - [ ] (Optional) `format()` — CLI display
 - [ ] Tests: `tests/test_analyses_<name>.py`
 - [ ] Verify: `pixi run -e build pytest tests/ -v -k <name>`
+
+## What a Good Community PR Looks Like
+
+A strong contribution usually includes:
+
+- one new plugin file in `src/polyzymd/analyses/`
+- one focused test file
+- one short docs update showing the `plugins:` config block
+- figures only if they add real scientific value
+
+Aim for a plugin that another MDAnalysis user can understand in one read.
 
 ## Anti-Patterns to Avoid
 

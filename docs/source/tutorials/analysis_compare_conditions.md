@@ -200,7 +200,7 @@ If your smoke test is `polyzymd compare plot-all`, success means:
 ## Programmatic Use
 
 If you need to run the comparison pipeline from Python, use the plugin
-orchestrator rather than the removed legacy comparator classes:
+orchestrator directly:
 
 ```python
 from pathlib import Path

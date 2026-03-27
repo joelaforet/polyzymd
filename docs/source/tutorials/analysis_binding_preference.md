@@ -477,9 +477,8 @@ residues could be counted in multiple groups.
 ```
 
 ```{note}
-The legacy `entries` field is retained for backwards compatibility with
-visualization tools. For programmatic access, use the `binding_preference`
-field with its partition-based structure.
+For programmatic access, prefer the `binding_preference` field with its
+partition-based structure.
 ```
 
 ## Statistical Treatment

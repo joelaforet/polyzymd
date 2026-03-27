@@ -1,190 +1,80 @@
 # Compare Module
 
-## Core
+This page maps the current `polyzymd.compare` package.
 
-```{eval-rst}
-.. automodule:: polyzymd.compare.core.base
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
+The comparison framework is now driven by plugins in `polyzymd.analyses`.
+The `polyzymd.compare` package provides shared building blocks that those
+plugins can reuse for configuration, statistics, result models, formatting, and
+plotting.
 
-```{eval-rst}
-.. automodule:: polyzymd.compare.core.registry
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
+## Where to Start
 
-## Configuration
+- New plugin author: [Extending the Analysis Framework](../tutorials/extending_analyses.md)
+- Plugin system API: [Analyses Plugin System API](analyses.md)
+- User workflow: [How to Compare Simulation Conditions](../tutorials/analysis_compare_conditions.md)
 
-```{eval-rst}
-.. automodule:: polyzymd.compare.config
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
+## Package Map
 
-## Settings
+### Configuration and CLI
 
-```{eval-rst}
-.. automodule:: polyzymd.compare.settings
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
+- `polyzymd.compare.config` - `ComparisonConfig`, condition models, plot settings
+- `polyzymd.compare.settings` - shared settings models used by comparison features
+- `polyzymd.compare.cli` - `polyzymd compare` subcommands
+- `polyzymd.compare.cli_utils` - config loading and validation helpers
 
-## Statistics
+### Statistics and IO
 
-```{eval-rst}
-.. automodule:: polyzymd.compare.statistics
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
+- `polyzymd.compare.statistics` - t-tests, ANOVA, effect sizes, ranking helpers
+- `polyzymd.compare.io.results` - canonical comparison result discovery and loading
+- `polyzymd.compare.io.paths` - comparison and figure path helpers
 
-## Comparators
-
-### Contacts
-
-```{eval-rst}
-.. automodule:: polyzymd.compare.comparators.contacts
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
-
-### RMSF
-
-```{eval-rst}
-.. automodule:: polyzymd.compare.comparators.rmsf
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
-
-### Triad
-
-```{eval-rst}
-.. automodule:: polyzymd.compare.comparators.triad
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
-
-### Distances
-
-```{eval-rst}
-.. automodule:: polyzymd.compare.comparators.distances
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
-
-### Exposure Dynamics
-
-```{eval-rst}
-.. automodule:: polyzymd.compare.comparators.exposure
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
-
-### Binding Free Energy
-
-```{eval-rst}
-.. automodule:: polyzymd.compare.comparators.binding_free_energy
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
-
-### Polymer Affinity Score
-
-```{eval-rst}
-.. automodule:: polyzymd.compare.comparators.polymer_affinity
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
-
-## Results
-
-Common result modules live under `polyzymd.compare.results`.
-
-Stable result families include:
+### Result Models
 
 - `polyzymd.compare.results.rmsf`
 - `polyzymd.compare.results.triad`
 - `polyzymd.compare.results.contacts`
 - `polyzymd.compare.results.distances`
 - `polyzymd.compare.results.secondary_structure`
+- `polyzymd.compare.results.binding_free_energy`
+- `polyzymd.compare.results.exposure`
+- `polyzymd.compare.results.polymer_affinity`
 
-```{eval-rst}
-.. automodule:: polyzymd.compare.results.binding_free_energy
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
+### Formatting Helpers
 
-```{eval-rst}
-.. automodule:: polyzymd.compare.results.exposure
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
+- `polyzymd.compare.formatters`
+- `polyzymd.compare.contacts_formatters`
+- `polyzymd.compare.distances_formatters`
+- `polyzymd.compare.exposure_formatters`
+- `polyzymd.compare.triad_formatters`
+- `polyzymd.compare.binding_free_energy_formatters`
+- `polyzymd.compare.polymer_affinity_formatters`
 
-```{eval-rst}
-.. automodule:: polyzymd.compare.results.polymer_affinity
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
+### Plotting Helpers
 
-## Formatters
+- `polyzymd.compare.plotter` - shared plotter base classes and registry
+- `polyzymd.compare.plotters.rmsf`
+- `polyzymd.compare.plotters.triad`
+- `polyzymd.compare.plotters.contacts`
+- `polyzymd.compare.plotters.contacts_binding_preference`
+- `polyzymd.compare.plotters.contacts_coverage`
+- `polyzymd.compare.plotters.contacts_grouped_bars`
+- `polyzymd.compare.plotters.contacts_profiles`
+- `polyzymd.compare.plotters.distances`
+- `polyzymd.compare.plotters.secondary_structure`
+- `polyzymd.compare.plotters.exposure`
+- `polyzymd.compare.plotters.binding_free_energy`
+- `polyzymd.compare.plotters.polymer_affinity`
 
-```{eval-rst}
-.. automodule:: polyzymd.compare.binding_free_energy_formatters
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
+## How This Fits Together
 
-```{eval-rst}
-.. automodule:: polyzymd.compare.polymer_affinity_formatters
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
+- A plugin in `polyzymd.analyses` owns the user-facing workflow for one analysis.
+- The orchestrator resolves `plugins:` settings from `comparison.yaml`.
+- Shared compare-layer models and utilities live in `polyzymd.compare`.
+- Canonical comparison caches are written under `comparison/<analysis>/result.json`.
+- Plotting helpers rediscover cached comparison data from disk.
 
-## Plotters
+## Related Pages
 
-```{eval-rst}
-.. automodule:: polyzymd.compare.plotters.binding_free_energy
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
-
-```{eval-rst}
-.. automodule:: polyzymd.compare.plotters.exposure
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
-
-```{eval-rst}
-.. automodule:: polyzymd.compare.plotters.polymer_affinity
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
-
-## CLI
-
-```{eval-rst}
-.. automodule:: polyzymd.compare.cli
-   :members:
-   :undoc-members:
-   :show-inheritance:
-```
+- [API Overview](overview.rst)
+- [Analyses Plugin System API](analyses.md)
+- [Analysis Calculator API](analysis.md)

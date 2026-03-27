@@ -407,7 +407,7 @@ Reload for downstream processing:
 ```python
 from polyzymd.compare.results.polymer_affinity import PolymerAffinityScoreResult
 
-result = PolymerAffinityScoreResult.load("polymer_affinity_score_20260228_120000.json")
+result = PolymerAffinityScoreResult.load("comparison/polymer_affinity/result.json")
 
 # Access per-condition scores
 for summary in result.conditions:
@@ -469,4 +469,4 @@ indicate a cache or configuration mismatch.
 - [Contacts Analysis Quick Start](analysis_contacts_quickstart.md) — basic contact computation
 - [Statistics Best Practices](analysis_statistics_best_practices.md) — replicate planning
 - [Comparing Conditions](analysis_compare_conditions.md) — multi-condition workflows
-- [Extending Comparators](extending_comparators.md) — add custom comparators
+- [Extending the Analysis Framework](extending_analyses.md) — add a new plugin
