@@ -33,6 +33,8 @@ defaults
     AnalysisDefaults model (equilibration_time).
 logging_utils
     Colored terminal logging.
+plotting
+    Shared plotting helpers (axis styling, figure saving, grouped bars, etc.).
 """
 
 from __future__ import annotations
