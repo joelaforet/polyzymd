@@ -52,8 +52,8 @@ from typing import TYPE_CHECKING, Any, Sequence
 from polyzymd.analyses.shared.aa_classification import CANONICAL_AA_CLASS_ORDER
 
 if TYPE_CHECKING:
-    from polyzymd.analysis.contacts.aggregator import AggregatedContactResult
-    from polyzymd.analysis.contacts.binding_preference import (
+    from polyzymd.analyses._contacts_aggregator import AggregatedContactResult
+    from polyzymd.analyses._contacts_binding_preference import (
         AggregatedBindingPreferenceResult,
         AggregatedSystemCoverageResult,
     )
@@ -213,7 +213,7 @@ def _load_binding_preference_results(
     dict
         Mapping of label -> AggregatedBindingPreferenceResult
     """
-    from polyzymd.analysis.contacts.binding_preference import AggregatedBindingPreferenceResult
+    from polyzymd.analyses._contacts_binding_preference import AggregatedBindingPreferenceResult
 
     results: dict[str, AggregatedBindingPreferenceResult] = {}
 
@@ -270,7 +270,7 @@ def _load_system_coverage_results(
     dict
         Mapping of label -> AggregatedSystemCoverageResult
     """
-    from polyzymd.analysis.contacts.binding_preference import (
+    from polyzymd.analyses._contacts_binding_preference import (
         AggregatedBindingPreferenceResult,
         AggregatedSystemCoverageResult,
     )
@@ -332,7 +332,7 @@ def _load_aggregated_contact_results(
     dict
         Mapping of label -> AggregatedContactResult
     """
-    from polyzymd.analysis.contacts.aggregator import AggregatedContactResult
+    from polyzymd.analyses._contacts_aggregator import AggregatedContactResult
 
     results: dict[str, AggregatedContactResult] = {}
 

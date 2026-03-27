@@ -16,7 +16,7 @@ from polyzymd.compare.plotter import BasePlotter, PlotterRegistry
 from polyzymd.compare.plotters._contacts_shared import _load_system_coverage_results
 
 if TYPE_CHECKING:
-    from polyzymd.analysis.contacts.binding_preference import AggregatedSystemCoverageResult
+    from polyzymd.analyses._contacts_binding_preference import AggregatedSystemCoverageResult
     from polyzymd.compare.config import ComparisonConfig
 
 logger = logging.getLogger(__name__)

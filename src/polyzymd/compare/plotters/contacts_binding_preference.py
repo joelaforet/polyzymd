@@ -21,7 +21,7 @@ from polyzymd.compare.plotters._contacts_shared import (
 )
 
 if TYPE_CHECKING:
-    from polyzymd.analysis.contacts.binding_preference import AggregatedBindingPreferenceResult
+    from polyzymd.analyses._contacts_binding_preference import AggregatedBindingPreferenceResult
     from polyzymd.compare.config import ComparisonConfig
 
 logger = logging.getLogger(__name__)
