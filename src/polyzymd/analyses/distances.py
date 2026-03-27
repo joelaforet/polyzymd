@@ -4,24 +4,36 @@ Computes inter-atomic distances from MD trajectories for one or more
 atom pairs, aggregates across replicates with SEM, and performs per-pair
 cross-condition comparisons with t-tests, ANOVA, and rankings.
 
-This plugin delegates heavy computation to
-:class:`polyzymd.analysis.distances.calculator.DistanceCalculator`
-and wraps the existing plotter classes for figure generation.
+This plugin contains the **full distance calculation implementation**,
+including trajectory loading, PBC-aware distance computation, KDE-based
+distribution analysis, autocorrelation-corrected uncertainty, and
+threshold-based contact analysis.
 
 Unlike single-scalar analyses (RMSF, catalytic_triad), distances has **no
 single primary metric** — each distance pair is compared independently since
 averaging unrelated distances (e.g. H-bond distance + lid-opening distance)
 is not semantically meaningful.  Therefore ``compare()`` is overridden
 entirely and ``extract_metrics()`` is not used.
+
+Cross-plugin API
+----------------
+The :class:`DistanceCalculator` class is also used by the catalytic triad
+plugin (``analyses/catalytic_triad.py``) for computing inter-residue
+distances of the catalytic triad.  Import it as::
+
+    from polyzymd.analyses.distances import DistanceCalculator
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
+import numpy as np
+from numpy.typing import NDArray
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.analyses.base import (
@@ -33,18 +45,80 @@ from polyzymd.analyses.base import (
 )
 
 if TYPE_CHECKING:
+    from MDAnalysis.core.universe import Universe
+
     from polyzymd.analysis.results.distances import (
         DistanceAggregatedResult,
+        DistancePairResult,
         DistanceResult,
     )
     from polyzymd.compare.results.distances import (
         DistanceComparisonResult,
     )
+    from polyzymd.config.schema import SimulationConfig
 
 logger = logging.getLogger("polyzymd.analyses.distances")
 
 # Default threshold from the existing settings module
 DEFAULT_DISTANCE_THRESHOLD = 3.5
+
+
+# ---------------------------------------------------------------------------
+# Helper functions (migrated from analysis/distances/calculator.py)
+# ---------------------------------------------------------------------------
+
+
+def _selection_to_label(selection: str) -> str:
+    """Convert MDAnalysis selection to filename-safe label.
+
+    Handles special syntax like midpoint() and com().
+
+    Examples
+    --------
+    >>> _selection_to_label("resid 77 and name OG")
+    "resid77_OG"
+    >>> _selection_to_label("protein and resid 133 and name NE2")
+    "resid133_NE2"
+    >>> _selection_to_label("midpoint(resid 133 and name OD1 OD2)")
+    "resid133_mid"
+    """
+    from polyzymd.analyses.shared.selections import parse_selection_string
+
+    parsed = parse_selection_string(selection)
+    inner_selection = parsed.selection
+
+    # Remove common keywords
+    label = inner_selection.lower()
+    label = re.sub(r"\b(and|or|not|protein)\b", "", label)
+    # Extract resid and name
+    resid_match = re.search(r"resid\s*(\d+)", label)
+    name_match = re.search(r"name\s+(\w+)", label)
+
+    parts = []
+    if resid_match:
+        parts.append(f"resid{resid_match.group(1)}")
+
+    # Use mode-specific suffix for special syntax
+    if parsed.mode.value == "midpoint":
+        parts.append("mid")
+    elif parsed.mode.value == "com":
+        parts.append("com")
+    elif name_match:
+        parts.append(name_match.group(1).upper())
+
+    if parts:
+        return "_".join(parts)
+
+    # Fallback: sanitize the whole string
+    label = re.sub(r"[^a-z0-9]+", "_", label)
+    return label.strip("_")
+
+
+def _make_pair_label(sel1: str, sel2: str) -> str:
+    """Create human-readable label for a distance pair."""
+    l1 = _selection_to_label(sel1)
+    l2 = _selection_to_label(sel2)
+    return f"{l1}-{l2}"
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +262,7 @@ class DistancesSettings(BaseModel):
         AlignmentConfig
             Configuration for trajectory alignment.
         """
-        from polyzymd.analysis.core.alignment import AlignmentConfig
+        from polyzymd.analyses.shared.alignment import AlignmentConfig
 
         return AlignmentConfig(
             enabled=self.align_trajectory,
@@ -199,6 +273,527 @@ class DistancesSettings(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# DistanceCalculator — public API for cross-plugin use
+# ---------------------------------------------------------------------------
+
+
+class DistanceCalculator:
+    """Calculator for distance analysis with proper statistics.
+
+    This class handles the distance analysis workflow:
+    1. Load trajectories from config
+    2. Apply equilibration offset
+    3. Optionally align trajectory to remove rotational drift
+    4. Compute PBC-aware distances for specified atom pairs
+    5. Calculate distributions and statistics
+
+    This is the authoritative implementation, used both by the distances
+    plugin's ``compute_replicate()`` and by the catalytic triad plugin.
+
+    Parameters
+    ----------
+    config : SimulationConfig
+        PolyzyMD simulation configuration.
+    pairs : sequence of tuple[str, str]
+        List of ``(selection1, selection2)`` pairs to analyze.
+    equilibration : str, optional
+        Equilibration time to skip. Default is ``"0ns"``.
+    thresholds : sequence of float or float, optional
+        Distance thresholds for contact analysis (Angstroms).
+    use_pbc : bool, optional
+        If True (default), use periodic boundary conditions.
+    alignment : AlignmentConfig, optional
+        Trajectory alignment configuration.
+    """
+
+    def __init__(
+        self,
+        config: "SimulationConfig",
+        pairs: Sequence[tuple[str, str]],
+        equilibration: str = "0ns",
+        thresholds: Sequence[float | None] | float | None = None,
+        use_pbc: bool = True,
+        alignment: Any | None = None,
+    ) -> None:
+        from polyzymd.analyses.shared.alignment import AlignmentConfig
+        from polyzymd.analyses.shared.config_hash import compute_config_hash
+        from polyzymd.analyses.shared.loader import (
+            TrajectoryLoader,
+            _require_mdanalysis,
+            parse_time_string,
+        )
+
+        _require_mdanalysis("distance analysis")
+
+        self.config = config
+        self.pairs = list(pairs)
+
+        # Normalize thresholds to a list matching pairs length
+        if thresholds is None:
+            self.thresholds: list[float | None] = [None] * len(self.pairs)
+        elif isinstance(thresholds, (int, float)):
+            self.thresholds = [float(thresholds)] * len(self.pairs)
+        else:
+            thresholds_list = list(thresholds)
+            if len(thresholds_list) != len(self.pairs):
+                raise ValueError(
+                    f"thresholds length ({len(thresholds_list)}) must match "
+                    f"pairs length ({len(self.pairs)})"
+                )
+            self.thresholds = thresholds_list
+
+        # PBC and alignment settings
+        self._use_pbc = use_pbc
+        self._alignment = alignment if alignment is not None else AlignmentConfig()
+
+        # Parse equilibration time
+        eq_value, eq_unit = parse_time_string(equilibration)
+        self.equilibration_time = eq_value
+        self.equilibration_unit = eq_unit
+
+        # Initialize loader
+        self._loader = TrajectoryLoader(config)
+        self._config_hash = compute_config_hash(config)
+
+    def compute(
+        self,
+        replicate: int,
+        save: bool = True,
+        output_dir: Path | None = None,
+        recompute: bool = False,
+        store_distributions: bool = True,
+    ) -> "DistanceResult":
+        """Compute distances for a single replicate.
+
+        Parameters
+        ----------
+        replicate : int
+            Replicate number (1-indexed).
+        save : bool, optional
+            If True (default), save result to JSON.
+        output_dir : Path, optional
+            Directory to save results.
+        recompute : bool, optional
+            If True, recompute even if cached.
+        store_distributions : bool, optional
+            If True (default), store full distance arrays.
+
+        Returns
+        -------
+        DistanceResult
+            Distance analysis results.
+        """
+        from polyzymd.analyses.shared.config_hash import validate_config_hash
+        from polyzymd.analyses.shared.diagnostics import validate_equilibration_time
+        from polyzymd.analyses.shared.loader import convert_time, time_to_frame
+        from polyzymd.analysis.results.base import get_polyzymd_version
+        from polyzymd.analysis.results.distances import DistanceResult
+
+        if output_dir is None:
+            output_dir = (
+                self.config.output.projects_directory
+                / "analysis"
+                / "distances"
+                / f"run_{replicate}"
+            )
+
+        result_file = output_dir / self._make_result_filename()
+
+        # Check cache
+        if not recompute and result_file.exists():
+            logger.info(f"Loading cached result from {result_file}")
+            result = DistanceResult.load(result_file)
+            validate_config_hash(result.config_hash, self.config)
+            result = self._update_threshold_if_needed(result)
+            return result
+
+        logger.info(f"Computing distances for replicate {replicate}")
+
+        # Load universe
+        u = self._loader.load_universe(replicate)
+        traj_info = self._loader.get_trajectory_info(replicate)
+
+        # Get timestep and determine start frame
+        timestep = self._loader.get_timestep(replicate, unit="ps")
+        eq_time_ps = convert_time(self.equilibration_time, self.equilibration_unit, "ps")
+        start_frame = time_to_frame(eq_time_ps, "ps", timestep, "ps")
+
+        n_frames_total = len(u.trajectory)
+        n_frames_used = n_frames_total - start_frame
+
+        # Validate equilibration time against trajectory length
+        eq_time_ns = convert_time(self.equilibration_time, self.equilibration_unit, "ns")
+        traj_time_ns = (n_frames_total * timestep) / 1000.0
+        is_valid, eq_message = validate_equilibration_time(eq_time_ns, traj_time_ns)
+        if not is_valid:
+            raise ValueError(eq_message)
+        if eq_message:
+            logger.warning(eq_message)
+
+        logger.info(
+            f"Trajectory: {n_frames_total} frames, using {n_frames_used} after equilibration"
+        )
+
+        # Apply trajectory alignment if configured
+        from polyzymd.analyses.shared.alignment import align_trajectory
+
+        ref_frame = None
+        if self._alignment.enabled:
+            ref_frame = align_trajectory(
+                u,
+                self._alignment,
+                start_frame=start_frame,
+                stop_frame=n_frames_total,
+            )
+
+        # Log PBC status
+        if self._use_pbc:
+            logger.info("Using PBC-aware distance calculation (minimum image convention)")
+        else:
+            logger.debug("PBC disabled; using simple Euclidean distances")
+
+        # Compute distances for each pair
+        pair_results = []
+        for idx, (sel1, sel2) in enumerate(self.pairs):
+            pr = self._compute_pair(
+                u,
+                sel1,
+                sel2,
+                start_frame,
+                timestep=timestep,
+                store_distribution=store_distributions,
+                threshold=self.thresholds[idx],
+            )
+            pair_results.append(pr)
+
+            if pr.sem_distance is not None:
+                logger.info(
+                    f"  {pr.pair_label}: {pr.mean_distance:.2f} "
+                    f"± {pr.sem_distance:.2f} Å "
+                    f"(SEM, n_ind={pr.n_independent_frames})"
+                )
+            else:
+                logger.info(f"  {pr.pair_label}: {pr.mean_distance:.2f} ± {pr.std_distance:.2f} Å")
+
+        # Create result
+        selection_strs = [f"({s1} : {s2})" for s1, s2 in self.pairs]
+        combined_selection = "; ".join(selection_strs)
+
+        result = DistanceResult(
+            config_hash=self._config_hash,
+            polyzymd_version=get_polyzymd_version(),
+            replicate=replicate,
+            equilibration_time=self.equilibration_time,
+            equilibration_unit=self.equilibration_unit,
+            selection_string=combined_selection,
+            pair_results=pair_results,
+            n_frames_total=n_frames_total,
+            n_frames_used=n_frames_used,
+            trajectory_files=[str(f) for f in traj_info.trajectory_files],
+        )
+
+        if save:
+            result.save(result_file)
+            logger.info(f"Saved result to {result_file}")
+
+        return result
+
+    def _update_threshold_if_needed(self, result: "DistanceResult") -> "DistanceResult":
+        """Update contact fractions if thresholds changed since caching.
+
+        If the cached result used different thresholds than currently
+        requested and the distances array is available, recompute
+        ``fraction_below_threshold`` from the stored distances.
+
+        Parameters
+        ----------
+        result : DistanceResult
+            Cached result to potentially update.
+
+        Returns
+        -------
+        DistanceResult
+            Updated result (or original if no changes needed).
+        """
+        if all(t is None for t in self.thresholds):
+            return result
+
+        updated_pairs = []
+        any_updated = False
+
+        for idx, pr in enumerate(result.pair_results):
+            expected_threshold = self.thresholds[idx] if idx < len(self.thresholds) else None
+            cached_threshold = pr.threshold
+            needs_update = cached_threshold != expected_threshold
+
+            if needs_update and expected_threshold is not None:
+                if pr.distances is not None and len(pr.distances) > 0:
+                    distances_arr = np.array(pr.distances)
+                    new_fraction = float(np.mean(distances_arr < expected_threshold))
+                    logger.info(
+                        f"Recomputing contact fraction for {pr.pair_label} "
+                        f"(threshold: {cached_threshold} -> {expected_threshold})"
+                    )
+                    pr = pr.model_copy(
+                        update={
+                            "threshold": expected_threshold,
+                            "fraction_below_threshold": new_fraction,
+                        }
+                    )
+                    any_updated = True
+                else:
+                    logger.warning(
+                        f"Cannot update threshold for {pr.pair_label}: "
+                        f"distances not stored. Use --recompute to recalculate."
+                    )
+
+            updated_pairs.append(pr)
+
+        if any_updated:
+            return result.model_copy(update={"pair_results": updated_pairs})
+
+        return result
+
+    def _compute_pair(
+        self,
+        u: "Universe",
+        sel1: str,
+        sel2: str,
+        start_frame: int,
+        timestep: float = 1.0,
+        store_distribution: bool = True,
+        threshold: float | None = None,
+    ) -> "DistancePairResult":
+        """Compute distances for a single pair with KDE and autocorrelation.
+
+        Parameters
+        ----------
+        u : Universe
+            MDAnalysis Universe.
+        sel1 : str
+            First selection (supports midpoint() and com() syntax).
+        sel2 : str
+            Second selection (supports midpoint() and com() syntax).
+        start_frame : int
+            First frame to use (after equilibration).
+        timestep : float
+            Time between frames in ps.
+        store_distribution : bool
+            Whether to store full distance array.
+        threshold : float, optional
+            Distance threshold for contact analysis (Angstroms).
+
+        Returns
+        -------
+        DistancePairResult
+            Distance analysis results with KDE and autocorrelation statistics.
+        """
+        from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
+        from polyzymd.analyses.shared.diagnostics import (
+            get_selection_diagnostics,
+            warn_if_multi_chain_selection,
+        )
+        from polyzymd.analyses.shared.pbc import minimum_image_distance
+        from polyzymd.analyses.shared.selections import (
+            get_position,
+            parse_selection_string,
+        )
+        from polyzymd.analysis.results.base import get_polyzymd_version
+        from polyzymd.analysis.results.distances import DistancePairResult
+
+        # Parse selections (handle midpoint/com syntax)
+        parsed1 = parse_selection_string(sel1)
+        parsed2 = parse_selection_string(sel2)
+
+        atoms1 = u.select_atoms(parsed1.selection)
+        atoms2 = u.select_atoms(parsed2.selection)
+
+        if len(atoms1) == 0:
+            diag = get_selection_diagnostics(u, sel1)
+            raise ValueError(f"Selection '{sel1}' matched no atoms.\n\n{diag}")
+        if len(atoms2) == 0:
+            diag = get_selection_diagnostics(u, sel2)
+            raise ValueError(f"Selection '{sel2}' matched no atoms.\n\n{diag}")
+
+        # Warn if selections span multiple chains (common user error)
+        pair_label = _make_pair_label(sel1, sel2)
+        warn_if_multi_chain_selection(atoms1, sel1, f"for distance pair '{pair_label}'")
+        warn_if_multi_chain_selection(atoms2, sel2, f"for distance pair '{pair_label}'")
+
+        # Compute distances over trajectory
+        distances: list[float] = []
+        n_frames_total = len(u.trajectory)
+
+        for i, ts in enumerate(u.trajectory):
+            if i < start_frame:
+                continue
+
+            pos1 = get_position(atoms1, parsed1.mode)
+            pos2 = get_position(atoms2, parsed2.mode)
+
+            if self._use_pbc:
+                box = ts.dimensions
+                dist = minimum_image_distance(pos1, pos2, box)
+            else:
+                dist = float(np.linalg.norm(pos2 - pos1))
+            distances.append(dist)
+
+        distances_arr = np.array(distances, dtype=np.float64)
+        n_frames_used = len(distances_arr)
+
+        # Compute basic statistics
+        mean_dist = float(np.mean(distances_arr))
+        std_dist = float(np.std(distances_arr))
+        median_dist = float(np.median(distances_arr))
+        min_dist = float(np.min(distances_arr))
+        max_dist = float(np.max(distances_arr))
+
+        # Threshold analysis
+        fraction_below = None
+        if threshold is not None:
+            fraction_below = float(np.mean(distances_arr < threshold))
+
+        # Compute histogram
+        hist_counts, hist_edges = np.histogram(distances_arr, bins=50)
+
+        # ========================================
+        # KDE analysis for mode estimation
+        # ========================================
+        kde_x = None
+        kde_y = None
+        kde_peak = None
+        kde_bandwidth = None
+
+        try:
+            from scipy.stats import gaussian_kde
+
+            has_scipy = True
+        except ImportError:
+            has_scipy = False
+
+        if has_scipy and len(distances_arr) > 10:
+            try:
+                kde = gaussian_kde(distances_arr)
+                std_val = float(np.std(distances_arr))
+                kde_bandwidth = float(kde.factor) * std_val
+
+                x_min = max(0, min_dist - 0.5)
+                x_max = max_dist + 0.5
+                kde_x_arr = np.linspace(x_min, x_max, 200)
+                kde_y_arr = kde(kde_x_arr)
+
+                kde_x = kde_x_arr.tolist()
+                kde_y = kde_y_arr.tolist()
+
+                peak_idx = int(np.argmax(kde_y_arr))
+                kde_peak = float(kde_x_arr[peak_idx])
+
+                logger.debug(f"KDE peak (mode): {kde_peak:.2f} Å")
+            except Exception as e:
+                logger.warning(f"KDE computation failed: {e}")
+
+        # ========================================
+        # Autocorrelation analysis
+        # ========================================
+        sem_distance = None
+        correlation_time = None
+        correlation_time_unit = None
+        n_independent_frames = None
+        statistical_inefficiency = None
+        autocorrelation_warning = None
+
+        if len(distances_arr) >= 20:
+            try:
+                tau_result = estimate_correlation_time(
+                    distances_arr,
+                    timestep=timestep,
+                    timestep_unit="ps",
+                    method="integration",
+                    n_frames=n_frames_used,
+                )
+
+                correlation_time = tau_result.tau
+                correlation_time_unit = tau_result.tau_unit
+                n_independent_frames = tau_result.n_independent
+                statistical_inefficiency = tau_result.statistical_inefficiency
+                autocorrelation_warning = tau_result.warning
+
+                if n_independent_frames > 0:
+                    sem_distance = float(std_dist / np.sqrt(n_independent_frames))
+
+                logger.debug(
+                    f"Autocorrelation: τ={correlation_time:.1f} "
+                    f"{correlation_time_unit}, n_ind={n_independent_frames}, "
+                    f"SEM={sem_distance:.3f} Å"
+                )
+            except Exception as e:
+                logger.warning(f"Autocorrelation analysis failed: {e}")
+                sem_distance = float(std_dist / np.sqrt(n_frames_used))
+
+        return DistancePairResult(
+            config_hash=self._config_hash,
+            polyzymd_version=get_polyzymd_version(),
+            replicate=None,
+            equilibration_time=self.equilibration_time,
+            equilibration_unit=self.equilibration_unit,
+            selection_string=f"{sel1} : {sel2}",
+            pair_label=_make_pair_label(sel1, sel2),
+            selection1=sel1,
+            selection2=sel2,
+            distances=distances if store_distribution else None,
+            mean_distance=mean_dist,
+            std_distance=std_dist,
+            median_distance=median_dist,
+            min_distance=min_dist,
+            max_distance=max_dist,
+            sem_distance=sem_distance,
+            correlation_time=correlation_time,
+            correlation_time_unit=correlation_time_unit,
+            n_independent_frames=n_independent_frames,
+            statistical_inefficiency=statistical_inefficiency,
+            autocorrelation_warning=autocorrelation_warning,
+            threshold=threshold,
+            fraction_below_threshold=fraction_below,
+            histogram_edges=hist_edges.tolist(),
+            histogram_counts=hist_counts.tolist(),
+            kde_x=kde_x,
+            kde_y=kde_y,
+            kde_peak=kde_peak,
+            kde_bandwidth=kde_bandwidth,
+            n_frames_total=n_frames_total,
+            n_frames_used=n_frames_used,
+        )
+
+    def _make_result_filename(self) -> str:
+        """Generate filename for result JSON.
+
+        Includes analysis settings that affect results to ensure cache
+        invalidation when settings change.
+        """
+        eq_str = f"eq{self.equilibration_time:.0f}{self.equilibration_unit}"
+
+        if self.pairs:
+            pair_label = _make_pair_label(*self.pairs[0])
+            if len(self.pairs) > 1:
+                pair_label += f"_and{len(self.pairs) - 1}more"
+        else:
+            pair_label = "nopairs"
+
+        settings_parts = []
+        pbc_str = "pbc" if self._use_pbc else "nopbc"
+        settings_parts.append(pbc_str)
+
+        if self._alignment.enabled:
+            align_str = f"align-{self._alignment.reference_mode}"
+        else:
+            align_str = "noalign"
+        settings_parts.append(align_str)
+
+        settings_suffix = "_".join(settings_parts)
+        return f"distances_{pair_label}_{eq_str}_{settings_suffix}.json"
+
+
+# ---------------------------------------------------------------------------
 # Plugin
 # ---------------------------------------------------------------------------
 
@@ -206,10 +801,10 @@ class DistancesSettings(BaseModel):
 class DistancesAnalysis(Analysis):
     """Distances analysis: inter-atomic distances from MD trajectories.
 
-    This plugin wraps :class:`~polyzymd.analysis.distances.calculator.DistanceCalculator`
-    for per-replicate computation, aggregates across replicates, and performs
-    per-pair cross-condition comparison with dual metrics (mean distance and
-    fraction below threshold).
+    This plugin performs full distance computation inline (no delegation
+    to legacy calculator classes), aggregates across replicates, and
+    performs per-pair cross-condition comparison with dual metrics (mean
+    distance and fraction below threshold).
 
     The ``compare()`` method is **fully overridden** because:
 
@@ -241,7 +836,8 @@ class DistancesAnalysis(Analysis):
     ) -> Any:
         """Compute distances for a single replicate.
 
-        Delegates to :class:`~polyzymd.analysis.distances.calculator.DistanceCalculator`.
+        Constructs a :class:`DistanceCalculator` from the framework context
+        and delegates to its ``compute()`` method.
 
         Parameters
         ----------
@@ -255,8 +851,6 @@ class DistancesAnalysis(Analysis):
         DistanceResult
             Per-replicate distance result.
         """
-        from polyzymd.analysis.distances.calculator import DistanceCalculator
-
         settings = ctx.settings
 
         pairs = settings.get_pair_selections()
@@ -304,9 +898,7 @@ class DistancesAnalysis(Analysis):
         DistanceAggregatedResult
             Aggregated result with per-pair statistics and SEM.
         """
-        import numpy as np
-
-        from polyzymd.analysis.core.aggregation import aggregate_distance_pair_stats
+        from polyzymd.analyses.shared.aggregation import aggregate_distance_pair_stats
         from polyzymd.analysis.results.base import get_polyzymd_version
         from polyzymd.analysis.results.distances import (
             DistanceAggregatedResult,

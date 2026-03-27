@@ -309,7 +309,7 @@ class TestComputeReplicate:
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
     @patch("polyzymd.analyses.shared.TrajectoryLoader")
-    @patch("polyzymd.analysis.distances.calculator.DistanceCalculator")
+    @patch("polyzymd.analyses.distances.DistanceCalculator")
     def test_computes_triad_inline(
         self,
         MockDistCalc,
@@ -376,7 +376,7 @@ class TestComputeReplicate:
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
     @patch("polyzymd.analyses.shared.TrajectoryLoader")
-    @patch("polyzymd.analysis.distances.calculator.DistanceCalculator")
+    @patch("polyzymd.analyses.distances.DistanceCalculator")
     def test_passes_recompute_flag(
         self,
         MockDistCalc,
@@ -427,7 +427,7 @@ class TestComputeReplicate:
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
     @patch("polyzymd.analyses.shared.TrajectoryLoader")
-    @patch("polyzymd.analysis.distances.calculator.DistanceCalculator")
+    @patch("polyzymd.analyses.distances.DistanceCalculator")
     def test_caches_result_file(
         self,
         MockDistCalc,
@@ -842,7 +842,7 @@ class TestTriadLifecycle:
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
     @patch("polyzymd.analyses.shared.TrajectoryLoader")
-    @patch("polyzymd.analysis.distances.calculator.DistanceCalculator")
+    @patch("polyzymd.analyses.distances.DistanceCalculator")
     def test_run_analysis_lifecycle(
         self,
         MockDistCalc,

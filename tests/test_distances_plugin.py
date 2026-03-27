@@ -273,7 +273,7 @@ class TestComputeReplicate:
 
         mock_result = _make_mock_distance_result(replicate=1, n_pairs=1)
 
-        with patch("polyzymd.analysis.distances.calculator.DistanceCalculator") as MockCalc:
+        with patch("polyzymd.analyses.distances.DistanceCalculator") as MockCalc:
             MockCalc.return_value.compute.return_value = mock_result
             result = analysis.compute_replicate(ctx, 1)
 
@@ -328,7 +328,7 @@ class TestComputeReplicate:
 
         mock_result = _make_mock_distance_result(replicate=1, n_pairs=1)
 
-        with patch("polyzymd.analysis.distances.calculator.DistanceCalculator") as MockCalc:
+        with patch("polyzymd.analyses.distances.DistanceCalculator") as MockCalc:
             MockCalc.return_value.compute.return_value = mock_result
             analysis.compute_replicate(ctx, 1)
 
@@ -409,7 +409,9 @@ class TestAggregate:
 
         mock_results = self._make_mock_results(n_reps=3, n_pairs=2)
 
-        with patch("polyzymd.analysis.core.aggregation.aggregate_distance_pair_stats") as mock_agg:
+        with patch(
+            "polyzymd.analyses.shared.aggregation.aggregate_distance_pair_stats"
+        ) as mock_agg:
             # Create mock return for aggregate_distance_pair_stats
             mock_stats = MagicMock()
             mock_stats.mean_stats.mean = 3.5
@@ -471,7 +473,9 @@ class TestAggregate:
 
         mock_results = self._make_mock_results(n_reps=2, n_pairs=1)
 
-        with patch("polyzymd.analysis.core.aggregation.aggregate_distance_pair_stats") as mock_agg:
+        with patch(
+            "polyzymd.analyses.shared.aggregation.aggregate_distance_pair_stats"
+        ) as mock_agg:
             mock_stats = MagicMock()
             mock_stats.mean_stats.mean = 3.5
             mock_stats.mean_stats.sem = 0.05
@@ -1104,7 +1108,7 @@ class TestLifecycle:
                 settings=settings,
             )
             mock_result = _make_mock_distance_result(replicate=rep, n_pairs=1)
-            with patch("polyzymd.analysis.distances.calculator.DistanceCalculator") as MockCalc:
+            with patch("polyzymd.analyses.distances.DistanceCalculator") as MockCalc:
                 MockCalc.return_value.compute.return_value = mock_result
                 result = analysis.compute_replicate(ctx, rep)
                 rep_results.append(result)
@@ -1120,7 +1124,9 @@ class TestLifecycle:
             settings=settings,
         )
 
-        with patch("polyzymd.analysis.core.aggregation.aggregate_distance_pair_stats") as mock_agg:
+        with patch(
+            "polyzymd.analyses.shared.aggregation.aggregate_distance_pair_stats"
+        ) as mock_agg:
             mock_stats = MagicMock()
             mock_stats.mean_stats.mean = 3.5
             mock_stats.mean_stats.sem = 0.05

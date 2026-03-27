@@ -164,6 +164,7 @@ class CatalyticTriadAnalysis(Analysis):
         TriadResult
             Per-replicate triad result.
         """
+        from polyzymd.analyses.distances import DistanceCalculator
         from polyzymd.analyses.shared import (
             TrajectoryLoader,
             estimate_correlation_time,
@@ -178,7 +179,6 @@ class CatalyticTriadAnalysis(Analysis):
             warn_if_multi_chain_selection,
         )
         from polyzymd.analyses.shared.selections import parse_selection_string
-        from polyzymd.analysis.distances.calculator import DistanceCalculator
         from polyzymd.analysis.results.base import get_polyzymd_version
         from polyzymd.analysis.results.triad import TriadResult
 
