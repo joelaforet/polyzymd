@@ -646,12 +646,12 @@ class TestRegistration:
     """Test that polymer affinity types are registered properly."""
 
     def test_analysis_settings_registered(self):
-        from polyzymd.analysis.core.registry import AnalysisSettingsRegistry
+        from polyzymd.compare.registries import AnalysisSettingsRegistry
 
         assert AnalysisSettingsRegistry.is_registered("polymer_affinity")
 
     def test_comparison_settings_registered(self):
-        from polyzymd.analysis.core.registry import ComparisonSettingsRegistry
+        from polyzymd.compare.registries import ComparisonSettingsRegistry
 
         assert ComparisonSettingsRegistry.is_registered("polymer_affinity")
 
@@ -721,7 +721,7 @@ class TestRegistration:
         assert polymer_affinity is not None
 
     def test_plot_settings_registered(self):
-        from polyzymd.analysis.core.registry import PlotSettingsRegistry
+        from polyzymd.compare.registries import PlotSettingsRegistry
 
         assert PlotSettingsRegistry.is_registered("polymer_affinity")
 

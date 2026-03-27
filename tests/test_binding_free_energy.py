@@ -552,12 +552,12 @@ class TestRegistration:
     """Test that BFE components are properly registered and importable."""
 
     def test_analysis_settings_registered(self):
-        from polyzymd.analysis.core.registry import AnalysisSettingsRegistry
+        from polyzymd.compare.registries import AnalysisSettingsRegistry
 
         assert AnalysisSettingsRegistry.is_registered("binding_free_energy")
 
     def test_comparison_settings_registered(self):
-        from polyzymd.analysis.core.registry import ComparisonSettingsRegistry
+        from polyzymd.compare.registries import ComparisonSettingsRegistry
 
         assert ComparisonSettingsRegistry.is_registered("binding_free_energy")
 

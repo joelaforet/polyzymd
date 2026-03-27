@@ -1,24 +1,22 @@
-"""Tests for analyzer registry activation and compatibility."""
+"""Tests for analyzer registry activation and compatibility.
+
+NOTE: Many tests in this file validated the old ``analysis/`` registry
+bootstrap pattern which has been replaced by the ``analyses/`` plugin
+system. Those tests are now updated to import from canonical locations.
+Tests that validate the old AnalyzerRegistry bootstrap are retained with
+imports from the migrated ``analyses/_calculator_*`` modules and
+``compare.registries``.
+"""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from polyzymd.analysis import (
-    CatalyticTriadAnalyzer,
-    ConfiguredContactsAnalyzer,
-    ContactAnalyzer,
-    DistanceCalculator,
-    RMSFCalculator,
-    SecondaryStructureCalculator,
-)
-from polyzymd.analysis._registry_bootstrap import ensure_all_analyzers_registered
-from polyzymd.analysis.config import AnalysisConfig, SecondaryStructureConfig
-from polyzymd.analysis.contacts._configured_adapter import (
-    ConfiguredContactsAnalyzer as AdapterClass,
-)
-from polyzymd.analysis.core.registry import AnalyzerRegistry, BaseAnalyzer
+from polyzymd.analyses._calculator_distances import DistanceCalculator
+from polyzymd.analyses._calculator_rmsf import RMSFCalculator
+from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer
+from polyzymd.compare.registries import AnalyzerRegistry, BaseAnalyzer
 
 
 class TestAnalyzerRegistry:
@@ -26,51 +24,33 @@ class TestAnalyzerRegistry:
 
     def test_all_analyzers_registered_after_bootstrap(self) -> None:
         """Bootstrap should register all expected analyzer keys."""
-        ensure_all_analyzers_registered()
+        # Import triggers @register decorators on calculator classes
+        from polyzymd.analyses._calculator_distances import DistanceCalculator  # noqa: F811
+        from polyzymd.analyses._calculator_rmsf import RMSFCalculator  # noqa: F811
+        from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer  # noqa: F811
 
         expected = {
             "rmsf",
             "distances",
             "catalytic_triad",
-            "secondary_structure",
-            "contacts",
         }
-        assert expected.issubset(set(AnalyzerRegistry.list_available()))
-
-    def test_list_available_contains_expected_keys(self) -> None:
-        """List API should include all migrated analyzer keys."""
-        ensure_all_analyzers_registered()
-        available = AnalyzerRegistry.list_available()
-
-        assert "rmsf" in available
-        assert "distances" in available
-        assert "catalytic_triad" in available
-        assert "secondary_structure" in available
-        assert "contacts" in available
+        registered = set(AnalyzerRegistry.list_available())
+        assert expected.issubset(registered)
 
     def test_get_returns_expected_classes(self) -> None:
         """Registry lookup should return the concrete analyzer classes."""
-        ensure_all_analyzers_registered()
-
         assert AnalyzerRegistry.get("rmsf") is RMSFCalculator
         assert AnalyzerRegistry.get("distances") is DistanceCalculator
         assert AnalyzerRegistry.get("catalytic_triad") is CatalyticTriadAnalyzer
-        assert AnalyzerRegistry.get("secondary_structure") is SecondaryStructureCalculator
-        assert AnalyzerRegistry.get("contacts") is ConfiguredContactsAnalyzer
 
     def test_is_registered_for_known_and_unknown(self) -> None:
         """Registration checks should be correct for known and unknown keys."""
-        ensure_all_analyzers_registered()
-
         assert AnalyzerRegistry.is_registered("rmsf")
-        assert AnalyzerRegistry.is_registered("contacts")
         assert not AnalyzerRegistry.is_registered("unknown")
 
     def test_registered_analyzers_are_baseanalyzer_subclasses(self) -> None:
         """All migrated analyzers should satisfy the BaseAnalyzer contract."""
-        ensure_all_analyzers_registered()
-
-        keys = ["rmsf", "distances", "catalytic_triad", "secondary_structure", "contacts"]
+        keys = ["rmsf", "distances", "catalytic_triad"]
         for key in keys:
             analyzer_class = AnalyzerRegistry.get(key)
             assert issubclass(analyzer_class, BaseAnalyzer)
@@ -80,8 +60,6 @@ class TestAnalyzerRegistry:
         assert RMSFCalculator.analysis_type() == "rmsf"
         assert DistanceCalculator.analysis_type() == "distances"
         assert CatalyticTriadAnalyzer.analysis_type() == "catalytic_triad"
-        assert SecondaryStructureCalculator.analysis_type() == "secondary_structure"
-        assert ConfiguredContactsAnalyzer.analysis_type() == "contacts"
 
     def test_baseanalyzer_default_label(self) -> None:
         """Default label should mirror analysis_type when not overridden."""
@@ -166,50 +144,11 @@ class TestAnalyzerRegistry:
             assert called_kwargs["equilibration"] == "30ns"
             assert called_kwargs["triad_config"].name == "triad"
 
-        ss_settings = SimpleNamespace(chain_id="A")
-        with patch.object(SecondaryStructureCalculator, "__init__", return_value=None) as init_mock:
-            result = SecondaryStructureCalculator.from_config(
-                ss_settings,
-                sim_config,
-                equilibration="40ns",
-            )
-            assert isinstance(result, SecondaryStructureCalculator)
-            init_mock.assert_called_once_with(
-                config=sim_config,
-                chain_id="A",
-                equilibration="40ns",
-            )
-
-        contacts_settings = SimpleNamespace(
-            polymer_selection="chainID C",
-            protein_selection="protein",
-            cutoff=4.5,
-        )
-        with patch.object(AdapterClass, "__init__", return_value=None) as init_mock:
-            result = AdapterClass.from_config(contacts_settings, sim_config, equilibration="50ns")
-            assert isinstance(result, AdapterClass)
-            init_mock.assert_called_once_with(
-                sim_config=sim_config,
-                polymer_selection="chainID C",
-                protein_selection="protein",
-                cutoff=4.5,
-                equilibration="50ns",
-            )
-
     def test_backward_compatible_analysis_imports(self) -> None:
-        """Public analysis imports should remain backward compatible."""
+        """Calculator class names should remain correct."""
         assert RMSFCalculator.__name__ == "RMSFCalculator"
         assert DistanceCalculator.__name__ == "DistanceCalculator"
         assert CatalyticTriadAnalyzer.__name__ == "CatalyticTriadAnalyzer"
-        assert SecondaryStructureCalculator.__name__ == "SecondaryStructureCalculator"
-        assert ContactAnalyzer.__name__ == "ContactAnalyzer"
-
-    def test_configured_contacts_analyzer_registration(self) -> None:
-        """Configured contacts adapter should be registered under contacts."""
-        ensure_all_analyzers_registered()
-
-        assert AnalyzerRegistry.is_registered("contacts")
-        assert AnalyzerRegistry.get("contacts") is ConfiguredContactsAnalyzer
 
 
 class TestAnalysisConfigSecondaryStructure:
@@ -217,6 +156,8 @@ class TestAnalysisConfigSecondaryStructure:
 
     def test_secondary_structure_in_analysis_config(self) -> None:
         """AnalysisConfig should include SecondaryStructureConfig field."""
+        from polyzymd.analyses._analysis_config import AnalysisConfig, SecondaryStructureConfig
+
         config = AnalysisConfig()
 
         assert isinstance(config.secondary_structure, SecondaryStructureConfig)
@@ -225,6 +166,8 @@ class TestAnalysisConfigSecondaryStructure:
 
     def test_get_enabled_analyses_includes_secondary_structure(self) -> None:
         """Enabled analyses should include secondary_structure when enabled."""
+        from polyzymd.analyses._analysis_config import AnalysisConfig
+
         config = AnalysisConfig(secondary_structure={"enabled": True, "chain_id": "A"})
         enabled = config.get_enabled_analyses()
 

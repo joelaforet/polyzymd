@@ -987,7 +987,7 @@ class TestDeserializeResult:
 
         mock_result = MagicMock()
         with patch(
-            "polyzymd.analysis.contacts.aggregator.AggregatedContactResult.load",
+            "polyzymd.analyses._contacts_aggregator.AggregatedContactResult.load",
             return_value=mock_result,
         ):
             result = analysis._deserialize_result(tmp_path / "test.json")

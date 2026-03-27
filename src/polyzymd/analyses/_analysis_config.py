@@ -15,7 +15,7 @@ from typing import Optional
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
-from polyzymd.analysis.core.constants import (
+from polyzymd.analyses.shared.constants import (
     DEFAULT_CONTACT_CUTOFF,
     DEFAULT_DISTANCE_THRESHOLD,
     DEFAULT_SURFACE_EXPOSURE_THRESHOLD,

@@ -24,37 +24,37 @@ from typing import TYPE_CHECKING, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from polyzymd.analysis.core.aggregation import (
+from polyzymd.analyses._results_base import get_polyzymd_version
+from polyzymd.analyses._results_distances import (
+    DistanceAggregatedResult,
+    DistancePairAggregatedResult,
+    DistancePairResult,
+    DistanceResult,
+)
+from polyzymd.analyses.shared.aggregation import (
     aggregate_distance_pair_stats,
     collect_replicate_results,
 )
-from polyzymd.analysis.core.alignment import AlignmentConfig, align_trajectory
-from polyzymd.analysis.core.autocorrelation import (
+from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
+from polyzymd.analyses.shared.autocorrelation import (
     compute_acf,
     estimate_correlation_time,
 )
-from polyzymd.analysis.core.config_hash import compute_config_hash, validate_config_hash
-from polyzymd.analysis.core.diagnostics import validate_equilibration_time
-from polyzymd.analysis.core.loader import (
+from polyzymd.analyses.shared.config_hash import compute_config_hash, validate_config_hash
+from polyzymd.analyses.shared.diagnostics import validate_equilibration_time
+from polyzymd.analyses.shared.loader import (
     TrajectoryLoader,
     _require_mdanalysis,
     convert_time,
     parse_time_string,
     time_to_frame,
 )
-from polyzymd.analysis.core.pbc import minimum_image_distance
-from polyzymd.analysis.core.registry import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
-from polyzymd.analysis.core.selections import (
+from polyzymd.analyses.shared.pbc import minimum_image_distance
+from polyzymd.analyses.shared.selections import (
     get_position,
     parse_selection_string,
 )
-from polyzymd.analysis.results.base import get_polyzymd_version
-from polyzymd.analysis.results.distances import (
-    DistanceAggregatedResult,
-    DistancePairAggregatedResult,
-    DistancePairResult,
-    DistanceResult,
-)
+from polyzymd.compare.registries import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
 
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
@@ -655,12 +655,12 @@ class DistanceCalculator(BaseAnalyzer):
         atoms2 = u.select_atoms(parsed2.selection)
 
         if len(atoms1) == 0:
-            from polyzymd.analysis.core.diagnostics import get_selection_diagnostics
+            from polyzymd.analyses.shared.diagnostics import get_selection_diagnostics
 
             diag = get_selection_diagnostics(u, sel1)
             raise ValueError(f"Selection '{sel1}' matched no atoms.\n\n{diag}")
         if len(atoms2) == 0:
-            from polyzymd.analysis.core.diagnostics import get_selection_diagnostics
+            from polyzymd.analyses.shared.diagnostics import get_selection_diagnostics
 
             diag = get_selection_diagnostics(u, sel2)
             raise ValueError(f"Selection '{sel2}' matched no atoms.\n\n{diag}")
@@ -668,7 +668,7 @@ class DistanceCalculator(BaseAnalyzer):
         # Warn if selections span multiple chains (common user error)
         # Residue numbers restart per chain, so "resid 141-148" may match
         # atoms from protein, polymer, AND water chains
-        from polyzymd.analysis.core.diagnostics import warn_if_multi_chain_selection
+        from polyzymd.analyses.shared.diagnostics import warn_if_multi_chain_selection
 
         pair_label = _make_pair_label(sel1, sel2)
         warn_if_multi_chain_selection(atoms1, sel1, f"for distance pair '{pair_label}'")

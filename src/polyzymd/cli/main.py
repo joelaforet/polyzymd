@@ -2168,7 +2168,7 @@ def info() -> None:
 
 def _register_optional_command_groups() -> None:
     """Register analysis/compare command groups only when optional deps are importable."""
-    from polyzymd.analysis.cli import analyze, plot
+    from polyzymd.analyses.cli import analyze, plot
     from polyzymd.compare.cli import compare
 
     cli.add_command(analyze)

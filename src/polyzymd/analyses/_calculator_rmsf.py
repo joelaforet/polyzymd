@@ -46,34 +46,34 @@ from typing import TYPE_CHECKING, Literal, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from polyzymd.analysis.core.aggregation import collect_replicate_results
-from polyzymd.analysis.core.alignment import (
+from polyzymd.analyses._results_base import get_polyzymd_version
+from polyzymd.analyses._results_rmsf import RMSFAggregatedResult, RMSFResult
+from polyzymd.analyses.shared.aggregation import collect_replicate_results
+from polyzymd.analyses.shared.alignment import (
     AlignmentConfig,
     align_trajectory,
 )
-from polyzymd.analysis.core.autocorrelation import (
+from polyzymd.analyses.shared.autocorrelation import (
     compute_acf,
     estimate_correlation_time,
     get_independent_indices,
 )
-from polyzymd.analysis.core.centroid import ReferenceMode
-from polyzymd.analysis.core.config_hash import compute_config_hash, validate_config_hash
-from polyzymd.analysis.core.diagnostics import validate_equilibration_time
-from polyzymd.analysis.core.loader import (
+from polyzymd.analyses.shared.centroid import ReferenceMode
+from polyzymd.analyses.shared.config_hash import compute_config_hash, validate_config_hash
+from polyzymd.analyses.shared.diagnostics import validate_equilibration_time
+from polyzymd.analyses.shared.loader import (
     TrajectoryLoader,
     _require_mdanalysis,
     convert_time,
     parse_time_string,
     time_to_frame,
 )
-from polyzymd.analysis.core.registry import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
-from polyzymd.analysis.core.statistics import (
+from polyzymd.analyses.shared.statistics import (
     aggregate_per_residue_stats,
     aggregate_region_stats,
     compute_sem,
 )
-from polyzymd.analysis.results.base import get_polyzymd_version
-from polyzymd.analysis.results.rmsf import RMSFAggregatedResult, RMSFResult
+from polyzymd.compare.registries import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
 
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
@@ -313,7 +313,7 @@ class RMSFCalculator(BaseAnalyzer):
         # Get atom selection for RMSF
         atoms = u.select_atoms(self.selection)
         if len(atoms) == 0:
-            from polyzymd.analysis.core.diagnostics import get_selection_diagnostics
+            from polyzymd.analyses.shared.diagnostics import get_selection_diagnostics
 
             diag = get_selection_diagnostics(u, self.selection)
             raise ValueError(f"Selection '{self.selection}' matched no atoms.\n\n{diag}")

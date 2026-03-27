@@ -115,7 +115,7 @@ def plot_triad_kde_panel(
 
     Examples
     --------
-    >>> from polyzymd.analysis.results.triad import TriadResult
+    >>> from polyzymd.analyses._results_triad import TriadResult
     >>> results = [TriadResult.load("cond1/triad.json"), TriadResult.load("cond2/triad.json")]
     >>> fig = plot_triad_kde_panel(results, labels=["Control", "Treatment"])
     >>> fig.savefig("triad_kde.png")

@@ -39,11 +39,11 @@ calculation. The enrichment formula is purely based on protein surface availabil
 
 Examples
 --------
->>> from polyzymd.analysis.contacts.binding_preference import (
+>>> from polyzymd.analyses._contacts_binding_preference import (
 ...     compute_binding_preference,
 ...     extract_polymer_composition,
 ... )
->>> from polyzymd.analysis.contacts.surface_exposure import SurfaceExposureFilter
+>>> from polyzymd.analyses._contacts_surface_exposure import SurfaceExposureFilter
 >>>
 >>> # Load contact results and compute surface exposure
 >>> contact_result = ContactResult.load("contacts.json")
@@ -90,9 +90,9 @@ from polyzymd.analyses.shared.aa_classification import DEFAULT_AA_CLASS_SELECTIO
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
+    from polyzymd.analyses._analysis_config import ContactsConfig
     from polyzymd.analyses._contacts_results import ContactResult
     from polyzymd.analyses._contacts_surface_exposure import SurfaceExposureResult
-    from polyzymd.analysis.config import ContactsConfig
 
 logger = logging.getLogger(__name__)
 
@@ -3586,7 +3586,7 @@ def resolve_protein_groups_from_surface_exposure(
 
     Examples
     --------
-    >>> from polyzymd.analysis.contacts.surface_exposure import SurfaceExposureFilter
+    >>> from polyzymd.analyses._contacts_surface_exposure import SurfaceExposureFilter
     >>> filter = SurfaceExposureFilter(threshold=0.2)
     >>> surface_result = filter.calculate("enzyme.pdb")
     >>> # Get default AA groups + custom active_site group
@@ -3886,7 +3886,7 @@ def compute_binding_preference_from_config(
 
     Examples
     --------
-    >>> from polyzymd.analysis.config import ContactsConfig
+    >>> from polyzymd.analyses._analysis_config import ContactsConfig
     >>> config = ContactsConfig(
     ...     compute_binding_preference=True,
     ...     surface_exposure_threshold=0.2,

@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 
-from polyzymd.analysis.core.loader import _require_matplotlib
+from polyzymd.analyses.shared.loader import _require_matplotlib
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
-    from polyzymd.analysis.results.distances import (
+    from polyzymd.analyses._results_distances import (
         DistanceAggregatedResult,
         DistancePairAggregatedResult,
         DistancePairResult,

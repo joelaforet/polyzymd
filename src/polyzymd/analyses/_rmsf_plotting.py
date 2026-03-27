@@ -12,13 +12,13 @@ from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 
-from polyzymd.analysis.core.loader import _require_matplotlib
+from polyzymd.analyses.shared.loader import _require_matplotlib
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
-    from polyzymd.analysis.results.rmsf import RMSFAggregatedResult, RMSFResult
+    from polyzymd.analyses._results_rmsf import RMSFAggregatedResult, RMSFResult
 
 # Matplotlib is optional
 try:
@@ -65,7 +65,7 @@ def plot_rmsf(
     """
     _require_matplotlib()
 
-    from polyzymd.analysis.results.rmsf import RMSFAggregatedResult, RMSFResult
+    from polyzymd.analyses._results_rmsf import RMSFAggregatedResult, RMSFResult
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(12, 4))

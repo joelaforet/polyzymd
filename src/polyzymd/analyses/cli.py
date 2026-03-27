@@ -21,7 +21,7 @@ from polyzymd.cli.colors import echo_logo
 from polyzymd.core.branding import SHORT_CREDIT_LINE
 from polyzymd.core.experimental import echo_experimental_warning
 
-LOGGER = logging.getLogger("polyzymd.analysis")
+LOGGER = logging.getLogger("polyzymd.analyses")
 
 
 def _echo_branding() -> None:
@@ -176,7 +176,7 @@ def init(eq_time: str) -> None:
         polyzymd analyze init
         polyzymd analyze init --eq-time 20ns
     """
-    from polyzymd.analysis.config import generate_analysis_template
+    from polyzymd.analyses._analysis_config import generate_analysis_template
 
     _echo_branding()
 
@@ -291,7 +291,7 @@ def validate(config_file: Path, output_format: str):
 
     # Try to load and validate
     try:
-        from polyzymd.analysis.config import AnalysisConfig
+        from polyzymd.analyses._analysis_config import AnalysisConfig
 
         config = AnalysisConfig.from_yaml(config_file)
 
@@ -406,9 +406,11 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
     """
     require_analysis_deps()
 
-    from polyzymd.analysis import CatalyticTriadAnalyzer, DistanceCalculator, RMSFCalculator
-    from polyzymd.analysis.config import AnalysisConfig
-    from polyzymd.analysis.core.logging_utils import setup_logging
+    from polyzymd.analyses._analysis_config import AnalysisConfig
+    from polyzymd.analyses._calculator_distances import DistanceCalculator
+    from polyzymd.analyses._calculator_rmsf import RMSFCalculator
+    from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer
+    from polyzymd.analyses.shared.logging_utils import setup_logging
     from polyzymd.compare.config import CatalyticTriadConfig as CompareTriadConfig
     from polyzymd.compare.config import TriadPairConfig as CompareTriadPairConfig
     from polyzymd.config.schema import SimulationConfig
@@ -589,14 +591,14 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
         click.echo(click.style("Running contact analysis...", fg="blue"))
         click.echo(click.style("=" * 60, fg="blue"))
         try:
-            from polyzymd.analysis.common.selectors import MDAnalysisSelector
-            from polyzymd.analysis.contacts import ParallelContactAnalyzer
-            from polyzymd.analysis.contacts.aggregator import aggregate_contact_results
-            from polyzymd.analysis.core.loader import (
+            from polyzymd.analyses._contacts_aggregator import aggregate_contact_results
+            from polyzymd.analyses.contacts import ParallelContactAnalyzer
+            from polyzymd.analyses.shared.loader import (
                 TrajectoryLoader,
                 parse_time_string,
                 time_to_frame,
             )
+            from polyzymd.analyses.shared.selectors import MDAnalysisSelector
 
             # Parse equilibration time
             eq_value, eq_unit = parse_time_string(config.defaults.equilibration_time)
@@ -651,7 +653,7 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
 
                     # Compute binding preference if enabled
                     if config.contacts.compute_binding_preference:
-                        from polyzymd.analysis.contacts import (
+                        from polyzymd.analyses._contacts_binding_preference import (
                             compute_binding_preference_from_config,
                         )
 
@@ -704,7 +706,9 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
 
                     # Aggregate binding preference
                     if binding_pref_results:
-                        from polyzymd.analysis.contacts import aggregate_binding_preference
+                        from polyzymd.analyses._contacts_binding_preference import (
+                            aggregate_binding_preference,
+                        )
 
                         agg_bp = aggregate_binding_preference(binding_pref_results)
                         agg_bp_file = (
@@ -857,7 +861,7 @@ def rmsf(
     """
     require_analysis_deps()
 
-    from polyzymd.analysis import RMSFCalculator
+    from polyzymd.analyses._calculator_rmsf import RMSFCalculator
     from polyzymd.config.schema import SimulationConfig
 
     # Validate reference-mode and reference-frame combination
@@ -936,7 +940,7 @@ def rmsf(
             # Generate plot if requested
             if plot:
                 require_matplotlib()
-                from polyzymd.analysis.rmsf import plot_rmsf
+                from polyzymd.analyses._rmsf_plotting import plot_rmsf
 
                 fig, ax = plot_rmsf(result)
                 plot_dir = sim_config.output.projects_directory / "plots" / "rmsf"
@@ -965,7 +969,7 @@ def rmsf(
             # Generate plot if requested
             if plot:
                 require_matplotlib()
-                from polyzymd.analysis.rmsf import plot_rmsf
+                from polyzymd.analyses._rmsf_plotting import plot_rmsf
 
                 fig, ax = plot_rmsf(result, show_error=True)
                 plot_dir = sim_config.output.projects_directory / "plots" / "rmsf"
@@ -1066,7 +1070,7 @@ def distances(
     """
     require_analysis_deps()
 
-    from polyzymd.analysis import DistanceCalculator
+    from polyzymd.analyses._calculator_distances import DistanceCalculator
     from polyzymd.config.schema import SimulationConfig
 
     # Parse inputs
@@ -1136,7 +1140,7 @@ def distances(
             # Generate plot if requested
             if plot:
                 require_matplotlib()
-                from polyzymd.analysis.distances import plot_distance_histogram
+                from polyzymd.analyses._distances_plotting import plot_distance_histogram
 
                 plot_dir = sim_config.output.projects_directory / "plots" / "distances"
                 plot_dir.mkdir(parents=True, exist_ok=True)
@@ -1168,7 +1172,7 @@ def distances(
             # Generate plot if requested
             if plot:
                 require_matplotlib()
-                from polyzymd.analysis.distances import plot_contact_fraction_bar
+                from polyzymd.analyses._distances_plotting import plot_contact_fraction_bar
 
                 plot_dir = sim_config.output.projects_directory / "plots" / "distances"
                 plot_dir.mkdir(parents=True, exist_ok=True)
@@ -1327,10 +1331,10 @@ def contacts(
     """
     require_analysis_deps()
 
-    from polyzymd.analysis.common.selectors import MDAnalysisSelector
-    from polyzymd.analysis.contacts import ParallelContactAnalyzer
-    from polyzymd.analysis.contacts.aggregator import aggregate_contact_results
-    from polyzymd.analysis.core.loader import TrajectoryLoader, parse_time_string, time_to_frame
+    from polyzymd.analyses._contacts_aggregator import aggregate_contact_results
+    from polyzymd.analyses.contacts import ParallelContactAnalyzer
+    from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string, time_to_frame
+    from polyzymd.analyses.shared.selectors import MDAnalysisSelector
     from polyzymd.config.schema import SimulationConfig
 
     # Parse inputs
@@ -1438,13 +1442,13 @@ def contacts(
             click.echo()
             click.echo("Computing binding preference...")
 
-            from polyzymd.analysis.contacts import (
-                SurfaceExposureFilter,
+            from polyzymd.analyses._contacts_binding_preference import (
                 aggregate_binding_preference,
                 compute_binding_preference,
                 extract_polymer_composition,
                 resolve_protein_group_selections,
             )
+            from polyzymd.analyses._contacts_surface_exposure import SurfaceExposureFilter
 
             # Determine enzyme PDB path
             if enzyme_pdb:
@@ -1559,7 +1563,9 @@ def contacts(
 
             # Aggregate and save binding preference if computed
             if binding_pref_results:
-                from polyzymd.analysis.contacts import aggregate_binding_preference
+                from polyzymd.analyses._contacts_binding_preference import (
+                    aggregate_binding_preference,
+                )
 
                 agg_bp = aggregate_binding_preference(binding_pref_results)
                 bp_file = (
@@ -1747,7 +1753,7 @@ def triad(
     """
     require_analysis_deps()
 
-    from polyzymd.analysis.triad import CatalyticTriadAnalyzer
+    from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer
     from polyzymd.compare.config import ComparisonConfig
     from polyzymd.config.loader import load_config
 
@@ -1980,7 +1986,7 @@ def plot_rmsf_cmd(
     """
     require_matplotlib()
 
-    from polyzymd.analysis.results.rmsf import RMSFAggregatedResult, RMSFResult
+    from polyzymd.analyses._results_rmsf import RMSFAggregatedResult, RMSFResult
 
     # Load results
     results = []
@@ -2013,11 +2019,11 @@ def plot_rmsf_cmd(
 
     # Create plot
     if len(results) == 1:
-        from polyzymd.analysis.rmsf import plot_rmsf
+        from polyzymd.analyses._rmsf_plotting import plot_rmsf
 
         fig, ax = plot_rmsf(results[0], show_error=show_error, label=label_list[0])
     else:
-        from polyzymd.analysis.rmsf import plot_rmsf_comparison
+        from polyzymd.analyses._rmsf_plotting import plot_rmsf_comparison
 
         fig, ax = plot_rmsf_comparison(results, labels=label_list, show_error=show_error)
 
@@ -2104,7 +2110,7 @@ def plot_distances_cmd(
     """
     require_matplotlib()
 
-    from polyzymd.analysis.results.distances import DistanceAggregatedResult, DistanceResult
+    from polyzymd.analyses._results_distances import DistanceAggregatedResult, DistanceResult
 
     # Load results
     results = []
@@ -2138,7 +2144,7 @@ def plot_distances_cmd(
 
     if len(results) == 1:
         # Single result - plot histogram for each pair
-        from polyzymd.analysis.distances import plot_distance_histogram
+        from polyzymd.analyses._distances_plotting import plot_distance_histogram
 
         result = results[0]
         if hasattr(result, "pair_results"):
@@ -2163,7 +2169,7 @@ def plot_distances_cmd(
 
     else:
         # Multiple results - comparison plot
-        from polyzymd.analysis.distances import plot_distance_comparison
+        from polyzymd.analyses._distances_plotting import plot_distance_comparison
 
         fig, ax = plot_distance_comparison(results, labels=label_list, threshold=threshold)
         if title:

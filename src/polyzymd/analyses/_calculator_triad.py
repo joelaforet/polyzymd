@@ -25,32 +25,32 @@ from typing import TYPE_CHECKING, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from polyzymd.analysis.core.aggregation import (
+from polyzymd.analyses._calculator_distances import DistanceCalculator
+from polyzymd.analyses._results_base import get_polyzymd_version
+from polyzymd.analyses._results_distances import (
+    DistancePairAggregatedResult,
+    DistancePairResult,
+)
+from polyzymd.analyses._results_triad import TriadAggregatedResult, TriadResult
+from polyzymd.analyses.shared.aggregation import (
     aggregate_distance_pair_stats,
     collect_replicate_results,
 )
-from polyzymd.analysis.core.autocorrelation import estimate_correlation_time
-from polyzymd.analysis.core.config_hash import compute_config_hash, validate_config_hash
-from polyzymd.analysis.core.diagnostics import (
+from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
+from polyzymd.analyses.shared.config_hash import compute_config_hash, validate_config_hash
+from polyzymd.analyses.shared.diagnostics import (
     get_selection_diagnostics,
     validate_equilibration_time,
 )
-from polyzymd.analysis.core.loader import (
+from polyzymd.analyses.shared.loader import (
     TrajectoryLoader,
     convert_time,
     parse_time_string,
     time_to_frame,
 )
-from polyzymd.analysis.core.registry import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
-from polyzymd.analysis.core.statistics import compute_sem
-from polyzymd.analysis.distances.calculator import DistanceCalculator
-from polyzymd.analysis.results.base import get_polyzymd_version
-from polyzymd.analysis.results.distances import (
-    DistancePairAggregatedResult,
-    DistancePairResult,
-)
-from polyzymd.analysis.results.triad import TriadAggregatedResult, TriadResult
+from polyzymd.analyses.shared.statistics import compute_sem
 from polyzymd.compare.config import CatalyticTriadConfig
+from polyzymd.compare.registries import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
 
 if TYPE_CHECKING:
     from polyzymd.config.schema import SimulationConfig
@@ -222,7 +222,7 @@ class CatalyticTriadAnalyzer(BaseAnalyzer):
                 ("selection_b", pair.selection_b),
             ]:
                 # Handle special syntax (midpoint, com)
-                from polyzymd.analysis.core.selections import parse_selection_string
+                from polyzymd.analyses.shared.selections import parse_selection_string
 
                 parsed = parse_selection_string(selection)
                 atoms = u.select_atoms(parsed.selection)
@@ -236,7 +236,7 @@ class CatalyticTriadAnalyzer(BaseAnalyzer):
                     raise ValueError(f"Selection '{selection}' matched no atoms.\n\n{diag}")
 
                 # Warn if selection spans multiple chains (common user error)
-                from polyzymd.analysis.core.diagnostics import warn_if_multi_chain_selection
+                from polyzymd.analyses.shared.diagnostics import warn_if_multi_chain_selection
 
                 warn_if_multi_chain_selection(
                     atoms, selection, f"for triad pair '{pair.label}' ({sel_name})"
