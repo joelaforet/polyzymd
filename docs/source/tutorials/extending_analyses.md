@@ -18,40 +18,92 @@ inside ``analyses/``) are implementation details — you do not need to touch th
 - Understanding of the PolyzyMD chain convention (A=protein, B=substrate,
   C=polymer)
 
-## Overview
+## How the Plugin System Works
 
-Every community extension in PolyzyMD should start as a single class in
-`src/polyzymd/analyses/` that subclasses `Analysis`.
+Every analysis in PolyzyMD is a single class that subclasses `Analysis` and
+lives in `src/polyzymd/analyses/`. The framework discovers plugins
+automatically — no registry edits, no imports, no boilerplate. You drop a file,
+and the CLI can run it.
 
-The goal is simple contributor ergonomics:
+The lifecycle for each analysis is:
 
-- one file to review
-- one settings model to configure
-- one class to discover from the CLI
-- one PR that adds compute, comparison, and plots together
+```text
+For each condition:
+  For each replicate:
+    result = compute_replicate(ctx, replicate)    # your code
+  aggregated = aggregate(ctx, [replicate_results])  # your code
 
-The framework handles:
+filter_conditions(conditions)  →  filtered list
+compare(ctx)                   →  ComparisonResult
+plot(ctx)                      →  [figure paths]
+format(result, "text")         →  CLI output string
+```
 
-- **Discovery**: `pkgutil`-based auto-discovery — no registries or imports
-- **Replicate iteration**: Calls your `compute_replicate()` for each run
-- **Result saving**: Fallback auto-save if your plugin doesn't save itself
-- **Aggregation**: Calls your `aggregate()` for each condition
-- **Comparison**: Default t-tests/ANOVA or your custom `compare()` override
-- **Plotting**: Your optional `plot()` override
-- **CLI wiring**: `polyzymd compare run <name>` works automatically
+You implement the science (compute, aggregate). The framework provides
+discovery, replicate iteration, result saving, comparison statistics, and CLI
+wiring.
 
-You implement the science. The framework does the plumbing.
+## Anatomy of a Plugin
 
-If you already have working MDAnalysis code for a metric, the usual path is:
+Before seeing the full code, here is what each piece does and why it exists.
 
-1. move that logic into `compute_replicate()`
-2. summarize replicates in `aggregate()`
-3. either expose scalar metrics with `extract_metrics()` or write a custom `compare()`
-4. add `plot()` if the analysis needs figures
+### `name` (required)
 
-That is the whole extension model.
+A unique, lowercase string identifier. Used in CLI commands
+(`polyzymd compare run rg`), config files, and output directories.
 
-## Quick Start: One-File Plugin
+### `Settings` (required)
+
+A Pydantic v2 `BaseModel` inner class. Users configure your analysis through
+the `plugins:` section of `comparison.yaml`, and the framework deserializes
+those settings into your `Settings` model. Provide sensible defaults for every
+field so the analysis works out of the box.
+
+### `compute_replicate(ctx, replicate)` (required)
+
+Runs once per replicate per condition. The framework passes a
+`ReplicateContext` containing everything you need: the loaded
+`SimulationConfig`, your `Settings`, output paths, and equilibration time. Use
+`TrajectoryLoader` from `analyses/shared/` to load trajectories — it handles
+topology discovery, trajectory segment daisy-chaining, timestep detection, and
+equilibration skipping.
+
+Return a dict or Pydantic model. The framework collects these for `aggregate()`.
+
+### `aggregate(ctx, results)` (required)
+
+Runs once per condition after all replicates complete. Receives the list of
+objects your `compute_replicate()` returned. Compute summary statistics
+(mean, SEM) and return the aggregated result. The framework auto-saves this
+to `ctx.result_path`.
+
+### `extract_metrics(summary)` (optional, but recommended)
+
+Exposes scalar metrics for the **default comparison path**. Return a dict of
+`MetricValue` objects, and the framework automatically runs t-tests, computes
+Cohen's d, runs ANOVA (≥3 conditions), and ranks conditions. This is the
+simplest way to get a fully statistical comparison — no need to implement
+`compare()`.
+
+### `compare(ctx)` (optional override)
+
+Override only for complex multi-metric or entry-table comparisons. If you
+implement `extract_metrics()`, you do **not** need to touch `compare()`.
+
+### `plot(ctx)` (optional)
+
+Generate matplotlib figures. Use `self._load_aggregated_result(agg_dir)` to
+load each condition's data. Return a list of figure paths.
+
+### `format(result, output_format)` (optional)
+
+Custom CLI display. Use `format_scalar_comparison()` from `analyses.stats`
+for formatted tables with rankings, effect sizes, and significance stars.
+
+## The Complete Example
+
+Here is a single, complete plugin file that uses real framework utilities.
+This is the pattern you should follow for new analyses.
 
 Create `src/polyzymd/analyses/rg.py`:
 
@@ -60,17 +112,24 @@ Create `src/polyzymd/analyses/rg.py`:
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, ClassVar, Sequence
 
+import numpy as np
 from pydantic import BaseModel, Field
 
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
     MetricValue,
+    PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.shared import TrajectoryLoader, parse_time_string, convert_time
+from polyzymd.analyses.stats import format_scalar_comparison
+
+logger = logging.getLogger(__name__)
 
 
 class RgAnalysis(Analysis):
@@ -79,10 +138,18 @@ class RgAnalysis(Analysis):
     name: ClassVar[str] = "rg"
 
     class Settings(BaseModel):
-        """Settings for radius of gyration analysis."""
+        """Settings for radius of gyration analysis.
+
+        Attributes
+        ----------
+        selection : str
+            MDAnalysis selection string for atoms to include in Rg
+            calculation. Defaults to C-alpha atoms.
+        """
+
         selection: str = Field(
             default="protein and name CA",
-            description="MDAnalysis selection string for atoms to include",
+            description="MDAnalysis atom selection for Rg calculation",
         )
 
     # --- Required methods ---
@@ -90,30 +157,45 @@ class RgAnalysis(Analysis):
     def compute_replicate(
         self, ctx: ReplicateContext, replicate: int
     ) -> dict[str, Any]:
-        """Compute mean Rg for one replicate."""
+        """Compute mean Rg for one replicate.
+
+        Uses TrajectoryLoader for topology discovery, trajectory segment
+        daisy-chaining, and equilibration frame skipping.
+        """
+        # Lazy-import heavy third-party dependency
         import MDAnalysis as mda
-        import numpy as np
 
-        sim_config = ctx.sim_config
-        run_dir = sim_config.get_working_directory(replicate)
-        topology = run_dir / "solvated_system.pdb"
-        trajs = sorted(run_dir.glob("production_*/*_trajectory.dcd"))
+        # Use TrajectoryLoader — handles topology, trajectory segments,
+        # timestep detection, and equilibration offset
+        loader = TrajectoryLoader(ctx.sim_config)
+        u = loader.load_universe(replicate)
 
-        u = mda.Universe(str(topology), [str(t) for t in trajs])
+        # Convert equilibration time to frame offset
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+        timestep_ps = loader.get_timestep(replicate, unit="ps")
+        eq_time_ps = convert_time(eq_value, eq_unit, "ps")
+        start_frame = int(eq_time_ps / timestep_ps)
+
+        # Compute Rg over production frames
         atoms = u.select_atoms(ctx.settings.selection)
+        rg_values = []
+        for ts in u.trajectory[start_frame:]:
+            rg_values.append(atoms.radius_of_gyration())
 
-        rg_values = [atoms.radius_of_gyration() for _ in u.trajectory]
         return {
             "mean_rg": float(np.mean(rg_values)),
+            "std_rg": float(np.std(rg_values)),
+            "n_frames": len(rg_values),
             "replicate": replicate,
         }
 
     def aggregate(
         self, ctx: AggregateContext, results: Sequence[Any]
     ) -> dict[str, Any]:
-        """Average Rg across replicates with SEM."""
-        import numpy as np
+        """Average Rg across replicates with SEM.
 
+        The framework auto-saves the return value to ctx.result_path.
+        """
         values = [r["mean_rg"] for r in results]
         return {
             "mean_rg": float(np.mean(values)),
@@ -121,287 +203,121 @@ class RgAnalysis(Analysis):
             "replicate_values": values,
         }
 
-    # --- Required for default comparison path ---
+    # --- Default comparison path ---
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
-        """Expose Rg as a scalar metric for automatic t-tests and ANOVA."""
+        """Expose Rg as a scalar metric for automatic t-tests and ANOVA.
+
+        Returning MetricValue with higher_is_better=False tells the
+        framework that lower Rg ranks better (more compact protein).
+        """
         return {
             "mean_rg": MetricValue(
                 name="mean_rg",
                 mean=summary["mean_rg"],
                 sem=summary["sem_rg"],
                 replicate_values=summary["replicate_values"],
-                higher_is_better=False,  # lower Rg = more compact
+                higher_is_better=False,
                 direction_labels=("compacting", "unchanged", "expanding"),
             ),
         }
 
-    def _deserialize_result(self, path: Path) -> dict[str, Any]:
-        """Load an aggregated result from JSON."""
-        return json.loads(path.read_text())
+    # --- Optional: plots ---
+
+    def plot(self, ctx: PlotContext) -> list[Path]:
+        """Generate an Rg bar chart comparing conditions."""
+        import matplotlib.pyplot as plt
+
+        labels = []
+        means = []
+        sems = []
+
+        for cond in ctx.conditions:
+            agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
+            summary = self._load_aggregated_result(agg_dir)
+            if summary is None:
+                continue
+            labels.append(cond.label)
+            means.append(summary["mean_rg"])
+            sems.append(summary["sem_rg"])
+
+        if not labels:
+            return []
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.bar(labels, means, yerr=sems, capsize=5, color="steelblue")
+        ax.set_ylabel("Radius of Gyration (Å)")
+        ax.set_title("Rg Comparison Across Conditions")
+
+        output_path = ctx.output_dir / "rg_comparison.png"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        return [output_path]
+
+    # --- Optional: CLI formatting ---
+
+    def format(self, result: Any, output_format: str = "text") -> str:
+        """Format comparison result for CLI display."""
+        from polyzymd.analyses.base import ComparisonResult
+
+        if isinstance(result, ComparisonResult):
+            return format_scalar_comparison(
+                result,
+                title="Radius of Gyration Comparison",
+                metric_label="Mean Rg",
+                metric_unit="Å",
+                metric_key="mean_rg",
+                output_format=output_format,
+                higher_is_better=False,
+            )
+        return super().format(result, output_format)
 ```
 
-That's it. The plugin is now:
+That file is the complete plugin. It is now:
 
 - Discovered by `polyzymd.analyses.list_analyses()`
 - Runnable via `polyzymd compare run rg -f comparison.yaml`
 - Automatically compared with t-tests, ANOVA, and ranking
+- Plotted and formatted on the CLI
 
-```{important}
-The quick-start above is **complete and working**. Every method shown is
-required for the default comparison path. If you remove `_deserialize_result()`,
-the default `compare()` will raise `NotImplementedError` when it tries to load
-your aggregated results from disk. If you remove `extract_metrics()`, the
-default comparison will produce no results.
-```
+## Import Rules
 
-## Mental Model
+The import structure in the example above is intentional. Getting imports
+wrong causes subtle test failures, so follow these rules:
 
-Think of one plugin file as a complete analysis package:
+**Module-level imports** (top of file):
 
-- `Settings` answers "what can users configure?"
-- `compute_replicate()` answers "how do I analyze one trajectory?"
-- `aggregate()` answers "how do I summarize replicates for one condition?"
-- `compare()` answers "how do I compare conditions?"
-- `plot()` answers "what figures should this analysis produce?"
-- `format()` answers "what should the CLI print?"
+- Standard library (`json`, `logging`, `pathlib`)
+- NumPy — imported at module level because it's available in all environments
+- Framework utilities from `analyses/shared/` (`TrajectoryLoader`,
+  `parse_time_string`, `convert_time`, `AlignmentConfig`, etc.)
+- Framework base classes from `analyses/base` and `analyses/stats`
 
-For many analyses, you only need:
+**Lazy imports inside methods** (inside `compute_replicate`, `plot`, etc.):
 
-- `Settings`
-- `compute_replicate()`
-- `aggregate()`
-- `extract_metrics()` + `_deserialize_result()`
-
-The framework handles comparison, result saving, and CLI wiring automatically.
-
-## Step-by-Step Guide
-
-### Step 1: Choose Your Analysis Name
-
-The `name` class variable is used in CLI commands, config files, and output
-directories. Pick a short, descriptive, lowercase string:
+- `MDAnalysis` / `mdtraj` — heavy simulation libraries
+- `matplotlib` / `seaborn` — plotting libraries
+- Any package that may not be installed in all environments
 
 ```python
-name: ClassVar[str] = "rg"  # Used as: polyzymd compare run rg
-```
+# At module level — always available, needed for @patch targets in tests
+from polyzymd.analyses.shared import TrajectoryLoader, parse_time_string, convert_time
 
-You can also set aliases:
-
-```python
-aliases: ClassVar[tuple[str, ...]] = ("radius_of_gyration",)
-```
-
-### Step 2: Define Your Settings
-
-Settings are a Pydantic v2 `BaseModel` defined as an inner class. They are
-parsed from the `plugins:` section of `comparison.yaml`:
-
-```python
-class Settings(BaseModel):
-    """Settings for Rg analysis."""
-    selection: str = Field(
-        default="protein and name CA",
-        description="MDAnalysis atom selection",
-    )
-    skip_first_ns: float = Field(
-        default=0.0,
-        description="Skip this many ns from start of trajectory",
-    )
-```
-
-In `comparison.yaml`:
-
-```yaml
-plugins:
-  rg:
-    selection: "protein and name CA"
-    skip_first_ns: 10.0
-```
-
-### Step 3: Implement `compute_replicate()`
-
-This runs once per replicate per condition. Use the context object — never
-load configs yourself:
-
-```python
-def compute_replicate(
-    self, ctx: ReplicateContext, replicate: int
-) -> dict[str, Any]:
-    # Use framework-provided context
-    sim_config = ctx.sim_config        # SimulationConfig (already loaded)
-    settings = ctx.settings            # Your Settings model
-    output_dir = ctx.output_dir        # Where to write per-replicate results
-    equilibration = ctx.equilibration  # e.g. "10ns"
-
-    # Lazy-import heavy dependencies
+# Inside methods — heavy deps that may not be installed
+def compute_replicate(self, ctx, replicate):
     import MDAnalysis as mda
+    ...
 
-    # Load trajectory
-    run_dir = sim_config.get_working_directory(replicate)
-    topology = run_dir / "solvated_system.pdb"
-    trajs = sorted(run_dir.glob("production_*/*_trajectory.dcd"))
-
-    u = mda.Universe(str(topology), [str(t) for t in trajs])
-    # ... compute your metric ...
-
-    return {"my_metric": value, "replicate": replicate}
-```
-
-**Key rules:**
-- Always use `ctx.sim_config`, never `SimulationConfig.from_yaml(...)` yourself
-- Always use `ctx.settings` for your analysis parameters
-- Lazy-import MDAnalysis, OpenMM, numpy inside the method
-- Return a dict or Pydantic model — the framework collects these for `aggregate()`
-
-```{tip}
-For production plugins, use `TrajectoryLoader` from `analyses/shared/` instead
-of loading trajectories manually. It handles topology discovery, daisy-chain
-trajectory segments, timestep parsing, and equilibration skipping. See
-{ref}`shared-utilities` below.
-```
-
-### Step 4: Implement `aggregate()`
-
-This runs once per condition after all replicates complete:
-
-```python
-def aggregate(
-    self, ctx: AggregateContext, results: Sequence[Any]
-) -> dict[str, Any]:
-    import numpy as np
-
-    values = [r["my_metric"] for r in results]
-    return {
-        "mean_value": float(np.mean(values)),
-        "sem_value": float(np.std(values, ddof=1) / np.sqrt(len(values))),
-        "replicate_values": values,
-    }
-```
-
-The `results` list contains exactly the objects your `compute_replicate()`
-returned for each successful replicate.
-
-```{note}
-**Result saving convention.** Existing plugins save results to disk
-themselves — typically to a custom-named file for per-replicate caching
-(e.g. `rmsf_eq10ns.json`) and to `ctx.result_path` for aggregated results.
-The orchestrator has a **fallback** auto-save that writes to
-`ctx.result_path` only if the file doesn't already exist, so if your
-plugin saves manually the fallback is a no-op.
-
-For simple plugins that return plain dicts, you *can* skip manual saves
-and let the fallback handle it.  But if you want per-replicate caching
-with custom filenames (the established pattern), save explicitly.
-```
-
-### Step 5: Choose Your Comparison Path
-
-You have two options:
-
-#### Option A: Default Comparison (Recommended for Single-Metric Analyses)
-
-Implement `extract_metrics()` to expose scalar metrics. The framework
-automatically runs t-tests, ANOVA, Cohen's d, and ranking:
-
-```python
-def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
-    return {
-        "my_metric": MetricValue(
-            name="my_metric",
-            mean=summary["mean_value"],
-            sem=summary["sem_value"],
-            replicate_values=summary["replicate_values"],
-            higher_is_better=True,  # or False if lower is better
-            direction_labels=("decreased", "unchanged", "increased"),
-        ),
-    }
-```
-
-If using this path, you **must** also implement `_deserialize_result()` so the
-framework can load your aggregated results from disk during comparison:
-
-```python
-def _deserialize_result(self, path: Path) -> dict[str, Any]:
-    import json
-    return json.loads(path.read_text())
-```
-
-```{warning}
-This is the most common contributor mistake. If you implement
-`extract_metrics()` but forget `_deserialize_result()`, the default
-`compare()` will raise `NotImplementedError` at runtime with a helpful error
-message telling you exactly what to add.
-```
-
-#### Option B: Custom Comparison
-
-Override `compare()` entirely for multi-metric or complex analyses:
-
-```python
-def compare(self, ctx: ComparisonContext) -> MyComparisonResult:
-    # Load results, compute custom statistics, return your Pydantic model
-    # The returned object must have a .save(path) method
+def plot(self, ctx):
+    import matplotlib.pyplot as plt
     ...
 ```
 
-See `src/polyzymd/analyses/contacts.py` or `src/polyzymd/analyses/distances.py`
-for full examples.
-
-### Step 6: Add Plots (Optional)
-
-Override `plot()` to generate matplotlib figures from your plugin:
-
-```python
-def plot(self, ctx: PlotContext) -> list[Path]:
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    # Load aggregated results for each condition
-    for cond in ctx.conditions:
-        agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
-        summary = self._load_aggregated_result(agg_dir)
-        if summary is not None:
-            # ... plot data from summary ...
-            pass
-
-    output_path = ctx.output_dir / f"{self.name}_comparison.png"
-    fig.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return [output_path]
-```
-
-```{note}
-`PlotContext` provides paths and conditions but does not carry pre-loaded
-aggregated results. Use `self._load_aggregated_result(agg_dir)` (inherited
-from `Analysis`) to load each condition's data from the `aggregated/`
-directory. This keeps memory usage low for analyses with large results.
-```
-
-### Step 7: Add CLI Formatting (Optional)
-
-Override `format()` for custom CLI output:
-
-```python
-def format(self, result: Any, output_format: str = "text") -> str:
-    from polyzymd.analyses.base import ComparisonResult
-    from polyzymd.analyses.stats import format_scalar_comparison
-
-    if isinstance(result, ComparisonResult):
-        return format_scalar_comparison(
-            result,
-            title="My Analysis Comparison",
-            metric_label="My Metric",
-            metric_unit="Å",
-            metric_key="my_metric",
-            output_format=output_format,
-        )
-    return super().format(result, output_format)
-```
-
-For the default comparison path, `format_scalar_comparison()` already produces
-well-formatted tables with rankings, effect sizes, and significance stars.
+**Why this matters for testing:** When you mock `TrajectoryLoader` in tests,
+you write `@patch("polyzymd.analyses.rg.TrajectoryLoader")`. This replaces
+the module-level name. If `TrajectoryLoader` were imported lazily inside the
+method, the patch target would be different and harder to mock correctly.
 
 ## Context Objects Reference
 
@@ -415,75 +331,95 @@ or discover paths themselves:
 | `ComparisonContext` | `compare()` | `.conditions`, `.analysis_dirs`, `.results_dir`, `.effective_control`, `.settings`, `.recompute` |
 | `PlotContext` | `plot()` | `.conditions`, `.analysis_dirs`, `.output_dir`, `.settings`, `.plot_settings` |
 
-## Method Lifecycle
+## Choosing Your Comparison Path
 
-```text
-For each condition:
-  For each replicate:
-    result = compute_replicate(ctx, replicate)
-    if plugin didn't save: framework saves to ctx.result_path  ← fallback
-  aggregated = aggregate(ctx, [replicate_results])
-  if plugin didn't save: framework saves to ctx.result_path    ← fallback
+### Path A: Default Scalar Comparison (recommended)
 
-filter_conditions(conditions)         →  filtered conditions list
-compare(ctx)                          →  ComparisonResult
-plot(ctx)                             →  [figure paths]
-format(result, "text")                →  CLI output string
-```
+Implement `extract_metrics()` and you get t-tests, Cohen's d, ANOVA, and
+ranking for free. This is what the example above does.
 
-(shared-utilities)=
-## Shared Utilities (`analyses/shared/`)
+The framework loads aggregated results from disk automatically using
+`json.loads()` (for dict results) or your `AggregatedResultClass` (for
+Pydantic model results). You do **not** need to implement
+`_deserialize_result()`.
 
-The `analyses/shared/` package provides reusable infrastructure that all
-plugins can use. You are not required to use these — the quick-start example
-works without them — but they handle common tasks correctly and save you
-from re-implementing boilerplate.
+### Path B: Custom Comparison
 
-### TrajectoryLoader
-
-The most important shared utility. Handles topology discovery, daisy-chain
-trajectory segments, timestep detection, and equilibration frame skipping:
+Override `compare()` entirely for multi-metric or entry-table analyses:
 
 ```python
-from polyzymd.analyses.shared import TrajectoryLoader, parse_time_string, convert_time
-
-def compute_replicate(self, ctx, replicate):
-    loader = TrajectoryLoader(ctx.sim_config)
-    u = loader.load_universe(replicate)
-
-    # Parse equilibration time and convert to frames
-    eq_value, eq_unit = parse_time_string(ctx.equilibration)
-    timestep_ps = loader.get_timestep(replicate, unit="ps")
-    eq_time_ps = convert_time(eq_value, eq_unit, "ps")
-    start_frame = int(eq_time_ps / timestep_ps)
-
-    atoms = u.select_atoms(ctx.settings.selection)
-    for ts in u.trajectory[start_frame:]:
-        # ... per-frame computation ...
+def compare(self, ctx: ComparisonContext) -> MyComparisonResult:
+    # Load results, compute custom statistics, return your Pydantic model
+    # The returned object must have a .save(path) method
+    ...
 ```
 
-### Other Available Utilities
+See `src/polyzymd/analyses/contacts.py` or `src/polyzymd/analyses/distances.py`
+for full examples.
 
-| Module | What It Provides |
-|--------|-----------------|
-| `shared.loader` | `TrajectoryLoader`, `parse_time_string`, `convert_time`, `time_to_frame` |
-| `shared.alignment` | `AlignmentConfig`, `align_trajectory` — trajectory alignment with multiple reference modes |
-| `shared.statistics` | `compute_sem`, `aggregate_per_residue_stats`, `weighted_mean_with_sem` |
-| `shared.autocorrelation` | `compute_acf`, `estimate_correlation_time`, `statistical_inefficiency` |
-| `shared.selections` | Extended selection syntax: `midpoint(...)`, `com(...)` |
-| `shared.aggregation` | `collect_replicate_results`, `aggregate_distance_pair_stats` |
-| `shared.pbc` | `minimum_image_distance`, `pairwise_distances_pbc` |
-| `shared.constants` | `DEFAULT_CONTACT_CUTOFF`, `DEFAULT_DISTANCE_THRESHOLD` |
+## Loading Results in `plot()`
 
-Import directly or via the convenience re-exports:
+`PlotContext` provides paths and conditions but does **not** carry pre-loaded
+aggregated results. Use `self._load_aggregated_result(agg_dir)` — inherited
+from `Analysis` — to load each condition's data:
 
 ```python
-from polyzymd.analyses.shared import TrajectoryLoader, compute_sem, AlignmentConfig
+def plot(self, ctx: PlotContext) -> list[Path]:
+    import matplotlib.pyplot as plt
+
+    for cond in ctx.conditions:
+        agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
+        summary = self._load_aggregated_result(agg_dir)
+        if summary is not None:
+            # summary is a dict (or your AggregatedResultClass instance)
+            # ... plot data from summary ...
 ```
+
+`_load_aggregated_result()` looks for `result.json` in the aggregated
+directory, falling back to the most recent `*.json` file. It deserializes
+using `AggregatedResultClass` if set, otherwise `json.loads()`. Returns
+`None` if no file is found.
+
+## Formatting with `format_scalar_comparison()`
+
+For analyses using the default comparison path, `format_scalar_comparison()`
+from `analyses.stats` produces formatted tables with rankings, effect sizes,
+and significance stars:
+
+```python
+from polyzymd.analyses.stats import format_scalar_comparison
+
+def format(self, result: Any, output_format: str = "text") -> str:
+    from polyzymd.analyses.base import ComparisonResult
+
+    if isinstance(result, ComparisonResult):
+        return format_scalar_comparison(
+            result,
+            title="My Analysis Comparison",
+            metric_label="My Metric",      # column header in output tables
+            metric_unit="Å",               # appended to values
+            metric_key="my_metric",        # key prefix in ConditionSummary extra fields
+            output_format=output_format,   # "text", "markdown", or "json"
+            higher_is_better=True,         # affects interpretation wording
+        )
+    return super().format(result, output_format)
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `result` | `ComparisonResult` | The result to format |
+| `title` | `str` | Display title (e.g. `"RMSF Comparison"`) |
+| `metric_label` | `str` | Human-readable metric name for table headers |
+| `metric_unit` | `str` | Unit string appended to values (e.g. `"Å"`) |
+| `metric_key` | `str \| None` | Key prefix in `ConditionSummary` extra fields; auto-detected if `None` |
+| `output_format` | `str` | `"text"`, `"markdown"`, or `"json"` |
+| `higher_is_better` | `bool` | Affects interpretation wording |
 
 ## Return Types: Dicts vs Pydantic Models
 
-The quick-start example returns plain Python dicts from `compute_replicate()`
+The example above returns plain Python dicts from `compute_replicate()`
 and `aggregate()`. This is the **recommended approach for new plugins** — it
 is simpler, requires less code, and the framework handles serialization
 automatically via `json.dumps()`.
@@ -506,20 +442,26 @@ result models defined in private `_results_*.py` files. These inherit from
 `BaseAnalysisResult` in `analyses/_results_base.py`, which provides
 `save()`/`load()` methods and optional NPZ sidecar support for large arrays.
 
-If you want to follow this pattern:
+If you follow this pattern:
 
 1. Define your result models in `analyses/_results_<name>.py`
-2. Inherit from `BaseAnalysisResult` (for per-replicate) and
-   `AggregatedResultMixin` (for aggregated results)
+2. Inherit from `BaseAnalysisResult`
 3. Return model instances from `compute_replicate()` and `aggregate()`
-4. Your `_deserialize_result()` becomes:
-   ```python
-   def _deserialize_result(self, path: Path) -> MyAggregatedResult:
-       return MyAggregatedResult.model_validate_json(path.read_text())
-   ```
+4. Set `AggregatedResultClass` on your plugin class:
 
-This is an **optional upgrade** — dicts work perfectly for the default
-comparison pipeline.
+```python
+from polyzymd.analyses._results_rg import RgAggregatedResult
+
+class RgAnalysis(Analysis):
+    name: ClassVar[str] = "rg"
+    AggregatedResultClass = RgAggregatedResult
+    ...
+```
+
+The framework uses `AggregatedResultClass` to deserialize aggregated results
+from disk — trying `.load(path)` first (if available), then
+`.model_validate_json()`. For plain-dict plugins, no class variable is needed;
+the framework falls back to `json.loads()`.
 
 ## A Note on the `compare/` Package
 
@@ -531,6 +473,50 @@ these because they were written during an earlier version of the architecture.
 plotting logic in your plugin's `plot()` method and your formatting in
 `format()`. Everything can live in a single file.
 
+(shared-utilities)=
+## Shared Utilities (`analyses/shared/`)
+
+The `analyses/shared/` package provides reusable infrastructure that all
+plugins can use. The example above uses `TrajectoryLoader`, `parse_time_string`,
+and `convert_time`. Here is the full set of available utilities:
+
+### TrajectoryLoader
+
+The most important shared utility. Handles topology discovery, daisy-chain
+trajectory segments, timestep detection, and equilibration frame skipping:
+
+```python
+from polyzymd.analyses.shared import TrajectoryLoader, parse_time_string, convert_time
+
+loader = TrajectoryLoader(ctx.sim_config)
+u = loader.load_universe(replicate)
+
+# Convert equilibration time to frame offset
+eq_value, eq_unit = parse_time_string(ctx.equilibration)
+timestep_ps = loader.get_timestep(replicate, unit="ps")
+eq_time_ps = convert_time(eq_value, eq_unit, "ps")
+start_frame = int(eq_time_ps / timestep_ps)
+```
+
+### Other Available Utilities
+
+| Module | What It Provides |
+|--------|-----------------|
+| `shared.loader` | `TrajectoryLoader`, `parse_time_string`, `convert_time`, `time_to_frame` |
+| `shared.alignment` | `AlignmentConfig`, `align_trajectory` — trajectory alignment with multiple reference modes |
+| `shared.statistics` | `compute_sem`, `aggregate_per_residue_stats`, `weighted_mean_with_sem` |
+| `shared.autocorrelation` | `compute_acf`, `estimate_correlation_time`, `statistical_inefficiency` |
+| `shared.selections` | Extended selection syntax: `midpoint(...)`, `com(...)` |
+| `shared.aggregation` | `collect_replicate_results`, `aggregate_distance_pair_stats` |
+| `shared.pbc` | `minimum_image_distance`, `pairwise_distances_pbc` |
+| `shared.constants` | `DEFAULT_CONTACT_CUTOFF`, `DEFAULT_DISTANCE_THRESHOLD` |
+
+Import directly or via the convenience re-exports:
+
+```python
+from polyzymd.analyses.shared import TrajectoryLoader, compute_sem, AlignmentConfig
+```
+
 ## Contributor Checklist
 
 When creating a new analysis plugin:
@@ -538,10 +524,10 @@ When creating a new analysis plugin:
 - [ ] File: `src/polyzymd/analyses/<name>.py`
 - [ ] `name: ClassVar[str]` — unique, lowercase, used in CLI
 - [ ] `Settings` inner class — Pydantic v2 BaseModel with defaults
-- [ ] `compute_replicate()` — returns dict or Pydantic model per replicate
-- [ ] `aggregate()` — returns dict or Pydantic model per condition; save to `ctx.result_path` or let fallback handle it
+- [ ] `compute_replicate()` — uses `TrajectoryLoader`, returns dict or Pydantic model
+- [ ] `aggregate()` — returns dict or Pydantic model; framework auto-saves to `ctx.result_path`
 - [ ] Choose comparison path:
-  - [ ] Default: implement `extract_metrics()` **and** `_deserialize_result()`
+  - [ ] Default: implement `extract_metrics()` — framework handles deserialization
   - [ ] Custom: override `compare()` returning a model with `.save()`
 - [ ] (Optional) `plot()` — matplotlib figures, load data via `self._load_aggregated_result()`
 - [ ] (Optional) `format()` — CLI display via `format_scalar_comparison()`
@@ -575,32 +561,16 @@ def compute_replicate(self, ctx, replicate):
     sim_config = ctx.sim_config  # Already loaded by framework
 ```
 
-### Don't forget `_deserialize_result()` when using default compare
-
-If you implement `extract_metrics()` but not `_deserialize_result()`, the
-default `compare()` will raise `NotImplementedError` when it tries to load
-your aggregated results. The error message tells you exactly what to add.
-
 ### Understand the result-saving convention
 
-Existing plugins save results to disk explicitly — using custom filenames for
-per-replicate caching and `ctx.result_path` for aggregated results. The
-orchestrator has a **fallback** that writes to `ctx.result_path` only if
-the file doesn't already exist.
+The framework auto-saves return values from `compute_replicate()` and
+`aggregate()` to `ctx.result_path`. For simple plugins, just return your dict
+and the framework handles the rest.
 
-For a minimal plugin, you can skip manual saves and rely on the fallback:
-
-```python
-# Simple — let the fallback auto-save handle it
-def aggregate(self, ctx, results):
-    return {"mean": 15.0}
-```
-
-For caching with equilibration-aware filenames (the established pattern),
-save explicitly like existing plugins do:
+For caching with equilibration-aware filenames (the established pattern in
+existing plugins), save explicitly:
 
 ```python
-# Explicit save — matches rmsf.py, contacts.py, etc.
 def aggregate(self, ctx, results):
     agg = {"mean": 15.0}
     target_path = ctx.result_path
@@ -622,6 +592,10 @@ def compute_replicate(self, ctx, replicate):
     import MDAnalysis as mda
 ```
 
+Framework utilities from `analyses/shared/` are imported at **module level** —
+they are always available and must be patchable in tests. Only heavy
+*third-party* dependencies (MDAnalysis, mdtraj, matplotlib) go inside methods.
+
 ### Don't create files in `compare/`
 
 New plugins should keep all logic in a single file. The `compare/plotters/`
@@ -632,10 +606,9 @@ reasons. New plugins should implement `plot()` and `format()` inline.
 
 | Plugin | Complexity | Comparison | Good Example Of |
 |--------|-----------|------------|-----------------|
-| `rg.py` | Simple | Default (extract_metrics) | Minimal complete plugin with plots |
-| `secondary_structure.py` | Simple | Default (extract_metrics) | Wraps existing calculator |
+| `secondary_structure.py` | Simple | Default (extract_metrics) | Wraps existing calculator, uses AggregatedResultClass |
 | `rmsf.py` | Simple | Default (extract_metrics) | Default compare with formatting |
-| `catalytic_triad.py` | Simple | Default (extract_metrics) | Custom compute with triad geometry |
+| `catalytic_triad.py` | Medium | Default (extract_metrics) | Custom compute with triad geometry |
 | `contacts.py` | Complex | Custom (override compare) | Multi-metric comparison, condition filtering |
 | `distances.py` | Complex | Custom (override compare) | Entry-table comparison results |
 
@@ -666,7 +639,7 @@ from polyzymd.analyses.base import (
 )
 
 
-class TestMyPluginDiscovery:
+class TestRgDiscovery:
     """Test that the plugin is discoverable."""
 
     def test_discovered(self):
@@ -683,7 +656,7 @@ class TestMyPluginDiscovery:
         assert settings.selection == "protein and name CA"
 
 
-class TestMyPluginMetrics:
+class TestRgMetrics:
     """Test metric extraction for default comparison."""
 
     def test_extract_metrics(self):
@@ -702,8 +675,8 @@ class TestMyPluginMetrics:
 
 ### Testing `compute_replicate()` with mocked trajectories
 
-`compute_replicate()` requires MDAnalysis and trajectory files. Mock the
-`TrajectoryLoader` (or MDAnalysis Universe) to test compute logic without
+`compute_replicate()` requires MDAnalysis and trajectory files. Mock
+`TrajectoryLoader` at the **module level** to test compute logic without
 real data:
 
 ```python
@@ -712,7 +685,7 @@ from unittest.mock import MagicMock, patch
 from polyzymd.analyses.base import ReplicateContext
 
 
-class TestMyPluginCompute:
+class TestRgCompute:
     """Test compute_replicate with mocked trajectories."""
 
     @patch("polyzymd.analyses.rg.TrajectoryLoader")
@@ -768,12 +741,18 @@ class TestMyPluginCompute:
         assert result["replicate"] == 1
 ```
 
+Note the mock target: `@patch("polyzymd.analyses.rg.TrajectoryLoader")`. This
+works because `TrajectoryLoader` is imported at module level in `rg.py`. If it
+were imported lazily inside the method, you would need to patch
+`polyzymd.analyses.shared.loader.TrajectoryLoader` instead — which is
+fragile and non-obvious.
+
 ### Testing `aggregate()`
 
 Aggregation takes plain data and needs no mocks:
 
 ```python
-class TestMyPluginAggregate:
+class TestRgAggregate:
     """Test aggregation across replicates."""
 
     def test_aggregate(self, tmp_path):
