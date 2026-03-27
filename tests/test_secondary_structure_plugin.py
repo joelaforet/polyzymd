@@ -32,7 +32,6 @@ from polyzymd.analyses.secondary_structure import (
     SecondaryStructureSettings,
 )
 
-
 # ============================================================================
 # Fixtures
 # ============================================================================
@@ -193,11 +192,73 @@ class TestSettings:
 
 
 class TestComputeReplicate:
-    """Test compute_replicate delegation to SecondaryStructureCalculator."""
+    """Test compute_replicate performs inline DSSP computation."""
 
-    def test_delegates_to_calculator(self, ss_analysis, default_settings, condition, tmp_path):
-        """compute_replicate should instantiate and call the calculator."""
-        mock_result = _make_mock_ss_result(replicate=1)
+    def _make_mock_mdtraj_traj(self, n_frames: int = 200, n_residues: int = 5, n_atoms: int = 50):
+        """Create a mock mdtraj Trajectory object."""
+        mock_traj = MagicMock()
+        mock_traj.n_frames = n_frames
+        mock_traj.n_atoms = n_atoms
+        mock_traj.n_residues = n_residues
+
+        # Mock topology
+        mock_top = MagicMock()
+        mock_top.select.return_value = np.arange(n_atoms)
+        mock_residues = []
+        for i in range(n_residues):
+            res = MagicMock()
+            res.resSeq = i + 1
+            res.name = "ALA"
+            mock_residues.append(res)
+        mock_top.residues = mock_residues
+        mock_traj.topology = mock_top
+
+        # atom_slice returns another mock trajectory with same topology
+        sliced = MagicMock()
+        sliced.n_frames = n_frames
+        sliced.n_atoms = n_atoms
+        sliced.n_residues = n_residues
+        sliced.topology = mock_top
+        # Slicing (for equilibration skip) returns another mock
+        sliced.__getitem__ = MagicMock(return_value=sliced)
+        mock_traj.atom_slice.return_value = sliced
+
+        return mock_traj, sliced
+
+    @patch("polyzymd.analyses.secondary_structure.validate_config_hash")
+    @patch("polyzymd.analyses.secondary_structure.compute_config_hash", return_value="abc123")
+    @patch("polyzymd.analyses.secondary_structure.TrajectoryLoader")
+    def test_computes_ss_inline(
+        self,
+        MockLoader,
+        mock_hash,
+        mock_validate_hash,
+        ss_analysis,
+        default_settings,
+        condition,
+        tmp_path,
+    ):
+        """compute_replicate should perform DSSP computation inline."""
+        mock_loader_inst = MagicMock()
+        MockLoader.return_value = mock_loader_inst
+
+        traj_info = MagicMock()
+        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
+        traj_info.topology_file = Path("/fake/topology.pdb")
+        mock_loader_inst.get_trajectory_info.return_value = traj_info
+        mock_loader_inst.get_timestep.return_value = 10.0  # 10 ps
+
+        mock_traj, mock_protein_traj = self._make_mock_mdtraj_traj(n_frames=200, n_residues=5)
+
+        # Create DSSP output: (n_frames, n_residues) of characters
+        dssp_raw = np.array([["H", "E", "C", "H", "C"]] * 200)
+        # Encode: H=1, E=2, C=0
+        ss_matrix = np.zeros((200, 5), dtype=np.int8)
+        ss_matrix[:, 0] = 1  # H
+        ss_matrix[:, 1] = 2  # E
+        ss_matrix[:, 2] = 0  # C
+        ss_matrix[:, 3] = 1  # H
+        ss_matrix[:, 4] = 0  # C
 
         ctx = ReplicateContext(
             condition=condition,
@@ -209,29 +270,60 @@ class TestComputeReplicate:
             settings=default_settings,
         )
 
-        with patch(
-            "polyzymd.analysis.secondary_structure.calculator.SecondaryStructureCalculator"
-        ) as MockCalc:
-            instance = MockCalc.return_value
-            instance.compute.return_value = mock_result
-
+        with (
+            patch(
+                "mdtraj.load",
+                return_value=mock_traj,
+            ),
+            patch(
+                "mdtraj.compute_dssp",
+                return_value=dssp_raw,
+            ),
+            patch(
+                "polyzymd.analyses.secondary_structure._encode_dssp_matrix",
+                return_value=ss_matrix,
+            ),
+            patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"),
+        ):
             result = ss_analysis.compute_replicate(ctx, replicate=1)
 
-            MockCalc.assert_called_once_with(
-                config=condition.sim_config,
-                chain_id="A",
-                equilibration="200ns",
-            )
-            instance.compute.assert_called_once_with(
-                replicate=1,
-                save=True,
-                output_dir=ctx.output_dir,
-                recompute=False,
-            )
-            assert result is mock_result
+        # Verify result has SS data
+        assert result.replicate == 1
+        assert result.n_residues == 5
+        assert result.overall_helix_fraction == pytest.approx(0.4)  # 2 of 5 residues
+        assert result.overall_strand_fraction == pytest.approx(0.2)  # 1 of 5
+        assert result.overall_coil_fraction == pytest.approx(0.4)  # 2 of 5
+        # Verify TrajectoryLoader was used
+        MockLoader.assert_called_once_with(condition.sim_config)
 
-    def test_custom_chain_id(self, ss_analysis, custom_settings, condition, tmp_path):
-        """compute_replicate should pass through the custom chain_id."""
+    @patch("polyzymd.analyses.secondary_structure.validate_config_hash")
+    @patch("polyzymd.analyses.secondary_structure.compute_config_hash", return_value="abc123")
+    @patch("polyzymd.analyses.secondary_structure.TrajectoryLoader")
+    def test_custom_chain_id(
+        self,
+        MockLoader,
+        mock_hash,
+        mock_validate_hash,
+        ss_analysis,
+        custom_settings,
+        condition,
+        tmp_path,
+    ):
+        """compute_replicate should use the custom chain_id for chain selection."""
+        mock_loader_inst = MagicMock()
+        MockLoader.return_value = mock_loader_inst
+
+        traj_info = MagicMock()
+        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
+        traj_info.topology_file = Path("/fake/topology.pdb")
+        mock_loader_inst.get_trajectory_info.return_value = traj_info
+        mock_loader_inst.get_timestep.return_value = 10.0
+
+        mock_traj, mock_protein_traj = self._make_mock_mdtraj_traj(n_frames=200, n_residues=5)
+
+        dssp_raw = np.array([["C", "C", "C", "C", "C"]] * 200)
+        ss_matrix = np.zeros((200, 5), dtype=np.int8)
+
         ctx = ReplicateContext(
             condition=condition,
             replicate=2,
@@ -242,25 +334,26 @@ class TestComputeReplicate:
             settings=custom_settings,
         )
 
-        with patch(
-            "polyzymd.analysis.secondary_structure.calculator.SecondaryStructureCalculator"
-        ) as MockCalc:
-            instance = MockCalc.return_value
-            instance.compute.return_value = _make_mock_ss_result(replicate=2)
+        with (
+            patch(
+                "mdtraj.load",
+                return_value=mock_traj,
+            ),
+            patch(
+                "mdtraj.compute_dssp",
+                return_value=dssp_raw,
+            ),
+            patch(
+                "polyzymd.analyses.secondary_structure._encode_dssp_matrix",
+                return_value=ss_matrix,
+            ),
+            patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"),
+        ):
+            result = ss_analysis.compute_replicate(ctx, replicate=2)
 
-            ss_analysis.compute_replicate(ctx, replicate=2)
-
-            MockCalc.assert_called_once_with(
-                config=condition.sim_config,
-                chain_id="B",
-                equilibration="100ns",
-            )
-            instance.compute.assert_called_once_with(
-                replicate=2,
-                save=True,
-                output_dir=ctx.output_dir,
-                recompute=True,
-            )
+        # Verify chain B (index 1) was used for selection
+        mock_traj.topology.select.assert_any_call("chainid 1")
+        assert result.selection_string == "chainid 1 (chain B)"
 
 
 # ============================================================================

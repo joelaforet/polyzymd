@@ -5,9 +5,8 @@ aggregates persistence fractions across replicates, compares conditions via the
 default scalar comparison pipeline (primary metric: helix fraction), and produces
 comparison plots (timeline heatmaps, content bars, persistence diff heatmaps).
 
-This plugin delegates heavy computation to
-:class:`polyzymd.analysis.secondary_structure.SecondaryStructureCalculator`
-and wraps the existing plotter classes for figure generation.
+All heavy computation is self-contained — no delegation to legacy
+``analysis.secondary_structure`` calculator classes.
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
+import numpy as np
 from pydantic import BaseModel, Field
 
 from polyzymd.analyses.base import (
@@ -25,6 +25,8 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.shared.config_hash import compute_config_hash, validate_config_hash
+from polyzymd.analyses.shared.loader import TrajectoryLoader, convert_time, parse_time_string
 
 if TYPE_CHECKING:
     from polyzymd.analysis.secondary_structure.results import (
@@ -33,6 +35,9 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger("polyzymd.analyses.secondary_structure")
+
+# Canonical mapping between DSSP letters and integer codes
+SS_CHAR_TO_INT: dict[str, int] = {"C": 0, "H": 1, "E": 2}
 
 
 # ---------------------------------------------------------------------------
@@ -64,11 +69,14 @@ class SecondaryStructureSettings(BaseModel):
 class SecondaryStructureAnalysis(Analysis):
     """Secondary structure analysis: DSSP from MD trajectories.
 
-    This plugin wraps
-    :class:`~polyzymd.analysis.secondary_structure.SecondaryStructureCalculator`
-    for per-replicate computation, aggregates persistence fractions with proper
-    SEM, and uses the default scalar comparison pipeline (t-tests, ANOVA,
-    ranking) via :meth:`extract_metrics`.
+    Performs the complete secondary structure workflow inline:
+
+    1. Load trajectory from config (via mdtraj)
+    2. Select protein chain and skip equilibration frames
+    3. Compute DSSP assignments using ``mdtraj.compute_dssp(simplified=True)``
+    4. Encode assignments as integer matrix and compute persistence fractions
+    5. Save per-replicate result (JSON + NPZ sidecar)
+    6. Aggregate across replicates with mean/SEM of persistence
 
     The ``compare()`` method is NOT overridden — it uses the default
     implementation which calls ``extract_metrics()`` to get
@@ -99,8 +107,9 @@ class SecondaryStructureAnalysis(Analysis):
     ) -> Any:
         """Compute DSSP secondary structure for a single replicate.
 
-        Delegates to
-        :class:`~polyzymd.analysis.secondary_structure.SecondaryStructureCalculator`.
+        Performs trajectory loading (via mdtraj), chain selection,
+        equilibration skipping, DSSP calculation, and persistence
+        fraction computation inline.
 
         Parameters
         ----------
@@ -114,22 +123,154 @@ class SecondaryStructureAnalysis(Analysis):
         SecondaryStructureResult
             Per-replicate secondary structure result.
         """
-        from polyzymd.analysis.secondary_structure.calculator import SecondaryStructureCalculator
+        from polyzymd.analysis.results.base import get_polyzymd_version
+        from polyzymd.analysis.secondary_structure.results import SecondaryStructureResult
 
         settings = ctx.settings
+        sim_config = ctx.sim_config
 
-        calc = SecondaryStructureCalculator(
-            config=ctx.sim_config,
-            chain_id=getattr(settings, "chain_id", "A"),
-            equilibration=ctx.equilibration,
+        chain_id = getattr(settings, "chain_id", "A")
+
+        # Parse equilibration time
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+
+        # Initialize loader and config hash
+        loader = TrajectoryLoader(sim_config)
+        config_hash = compute_config_hash(sim_config)
+
+        # Determine output path and check cache
+        output_dir = ctx.output_dir
+        eq_str = f"eq{eq_value:.0f}{eq_unit}"
+        result_prefix = f"secondary_structure_{eq_str}"
+        result_file = output_dir / f"{result_prefix}.json"
+
+        if not ctx.recompute and result_file.exists():
+            logger.info(f"Loading cached SS result from {result_file}")
+            result = SecondaryStructureResult.load(result_file)
+            validate_config_hash(result.config_hash, sim_config)
+            return result
+
+        logger.info(f"Computing secondary structure for replicate {replicate}")
+
+        # =================================================================
+        # Load trajectory with mdtraj
+        # =================================================================
+        import mdtraj as md
+
+        traj_info = loader.get_trajectory_info(replicate)
+        traj_files_str = [str(f) for f in traj_info.trajectory_files]
+        topology_path = str(traj_info.topology_file)
+
+        traj = md.load(traj_files_str, top=topology_path)
+        logger.info(f"Loaded trajectory: {traj.n_frames} frames, {traj.n_atoms} atoms")
+
+        # =================================================================
+        # Select protein chain
+        # =================================================================
+        chain_idx = _chain_letter_to_index(chain_id)
+        protein_indices = traj.topology.select(f"chainid {chain_idx}")
+        if len(protein_indices) == 0:
+            # Fallback: try selecting all protein atoms
+            protein_indices = traj.topology.select("protein")
+            logger.warning(
+                f"Chain '{chain_id}' not found; falling back to "
+                f"'protein' selection ({len(protein_indices)} atoms)"
+            )
+
+        protein_traj = traj.atom_slice(protein_indices)
+        logger.info(
+            f"Protein sub-trajectory: {protein_traj.n_atoms} atoms, "
+            f"{protein_traj.n_residues} residues"
         )
 
-        result = calc.compute(
+        # =================================================================
+        # Skip equilibration frames
+        # =================================================================
+        n_frames_total = protein_traj.n_frames
+        # Use TrajectoryLoader for reliable timestep (mdtraj often has
+        # incorrect time metadata for legacy DCD files)
+        timestep_ps = loader.get_timestep(replicate)
+        eq_time_ps = convert_time(eq_value, eq_unit, "ps")
+        start_frame = int(eq_time_ps / timestep_ps) if timestep_ps > 0 else 0
+        start_frame = min(start_frame, n_frames_total - 1)
+
+        if start_frame > 0:
+            protein_traj = protein_traj[start_frame:]
+            logger.info(
+                f"Skipped {start_frame} equilibration frames "
+                f"({eq_time_ps / 1000:.1f} ns), "
+                f"{protein_traj.n_frames} frames remaining"
+            )
+
+        n_frames = protein_traj.n_frames
+
+        # =================================================================
+        # Compute DSSP
+        # =================================================================
+        dssp_raw = md.compute_dssp(protein_traj, simplified=True)
+        # dssp_raw is (n_frames, n_residues) of single-char strings: H, E, C
+
+        logger.info(f"DSSP complete: {dssp_raw.shape[0]} frames x {dssp_raw.shape[1]} residues")
+
+        # =================================================================
+        # Integer-encode the matrix
+        # =================================================================
+        ss_matrix = _encode_dssp_matrix(dssp_raw)
+        n_residues = ss_matrix.shape[1]
+
+        # =================================================================
+        # Compute persistence fractions (per-residue)
+        # =================================================================
+        persistence_coil = (ss_matrix == 0).mean(axis=0).tolist()
+        persistence_helix = (ss_matrix == 1).mean(axis=0).tolist()
+        persistence_strand = (ss_matrix == 2).mean(axis=0).tolist()
+
+        # =================================================================
+        # Compute overall content fractions
+        # =================================================================
+        total_entries = ss_matrix.size
+        overall_coil = float(np.sum(ss_matrix == 0)) / total_entries
+        overall_helix = float(np.sum(ss_matrix == 1)) / total_entries
+        overall_strand = float(np.sum(ss_matrix == 2)) / total_entries
+
+        # =================================================================
+        # Collect residue metadata
+        # =================================================================
+        protein_top = protein_traj.topology
+        residue_ids = [res.resSeq for res in protein_top.residues]
+        residue_names = [res.name.upper() for res in protein_top.residues]
+
+        # =================================================================
+        # Build result
+        # =================================================================
+        result = SecondaryStructureResult(
+            config_hash=config_hash,
+            polyzymd_version=get_polyzymd_version(),
             replicate=replicate,
-            save=True,
-            output_dir=ctx.output_dir,
-            recompute=ctx.recompute,
+            equilibration_time=eq_value,
+            equilibration_unit=eq_unit,
+            selection_string=f"chainid {chain_idx} (chain {chain_id})",
+            n_frames=n_frames,
+            n_residues=n_residues,
+            residue_ids=residue_ids,
+            residue_names=residue_names,
+            persistence_coil=persistence_coil,
+            persistence_helix=persistence_helix,
+            persistence_strand=persistence_strand,
+            overall_helix_fraction=overall_helix,
+            overall_strand_fraction=overall_strand,
+            overall_coil_fraction=overall_coil,
         )
+
+        # Save JSON + NPZ sidecar
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        json_path = result.save_with_matrix(
+            directory=output_dir,
+            matrix=ss_matrix,
+            filename_prefix=result_prefix,
+        )
+        logger.info(f"Saved SS result to {json_path}")
 
         return result
 
@@ -156,8 +297,6 @@ class SecondaryStructureAnalysis(Analysis):
         SecondaryStructureAggregatedResult
             Aggregated result with mean/SEM across replicates.
         """
-        import numpy as np
-
         from polyzymd.analysis.results.base import get_polyzymd_version
         from polyzymd.analysis.secondary_structure.results import (
             SecondaryStructureAggregatedResult,
@@ -418,3 +557,38 @@ class SecondaryStructureAnalysis(Analysis):
         else:
             rep_str = "reps" + "_".join(map(str, reps))
         return f"secondary_structure_{rep_str}_{eq_str}.json"
+
+
+# ---------------------------------------------------------------------------
+# Private helper functions (extracted from legacy calculator)
+# ---------------------------------------------------------------------------
+
+
+def _chain_letter_to_index(chain_id: str) -> int:
+    """Convert chain letter (A, B, C...) to 0-indexed integer for mdtraj."""
+    return ord(chain_id.upper()) - ord("A")
+
+
+def _encode_dssp_matrix(dssp_raw: np.ndarray) -> np.ndarray:
+    """Convert character DSSP matrix to integer encoding.
+
+    Parameters
+    ----------
+    dssp_raw : np.ndarray
+        Character array from ``mdtraj.compute_dssp()``, shape
+        ``(n_frames, n_residues)`` with values ``'H'``, ``'E'``,
+        ``'C'`` (or ``'NA'`` for non-protein residues).
+
+    Returns
+    -------
+    np.ndarray
+        Integer-encoded matrix, shape ``(n_frames, n_residues)``,
+        dtype ``int8``.  Encoding: 0=C, 1=H, 2=E.
+    """
+    n_frames, n_residues = dssp_raw.shape
+    matrix = np.zeros((n_frames, n_residues), dtype=np.int8)
+
+    for char, code in SS_CHAR_TO_INT.items():
+        matrix[dssp_raw == char] = code
+
+    return matrix
