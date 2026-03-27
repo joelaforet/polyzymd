@@ -1119,22 +1119,6 @@ class PolymerAffinityAnalysis(Analysis):
             p_value=p_val,
         )
 
-    def _deserialize_result(self, path: Path) -> Any:
-        """Load a polymer affinity result from JSON.
-
-        Parameters
-        ----------
-        path : Path
-            Path to JSON file.
-
-        Returns
-        -------
-        PolymerAffinityScoreResult
-        """
-        from polyzymd.compare.results.polymer_affinity import PolymerAffinityScoreResult
-
-        return PolymerAffinityScoreResult.load(path)
-
 
 # ---------------------------------------------------------------------------
 # Module-level helpers

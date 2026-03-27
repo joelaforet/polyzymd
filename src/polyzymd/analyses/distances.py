@@ -44,11 +44,12 @@ from polyzymd.analyses.base import (
     ReplicateContext,
 )
 
+from polyzymd.analyses._results_distances import DistanceAggregatedResult
+
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
     from polyzymd.analyses._results_distances import (
-        DistanceAggregatedResult,
         DistancePairResult,
         DistanceResult,
     )
@@ -823,6 +824,7 @@ class DistancesAnalysis(Analysis):
 
     name: ClassVar[str] = "distances"
     Settings: ClassVar[type] = DistancesSettings
+    AggregatedResultClass: ClassVar[type] = DistanceAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
@@ -1280,25 +1282,6 @@ class DistancesAnalysis(Analysis):
         from polyzymd.compare.distances_formatters import format_distances_result
 
         return format_distances_result(result, format=self._normalize_output_format(output_format))
-
-    # === Framework hooks ===
-
-    def _deserialize_result(self, path: Path) -> Any:
-        """Load an aggregated distance result from JSON.
-
-        Parameters
-        ----------
-        path : Path
-            Path to the JSON result file.
-
-        Returns
-        -------
-        DistanceAggregatedResult
-            Loaded result.
-        """
-        from polyzymd.analyses._results_distances import DistanceAggregatedResult
-
-        return DistanceAggregatedResult.load(path)
 
     @staticmethod
     def _normalize_output_format(output_format: str) -> str:

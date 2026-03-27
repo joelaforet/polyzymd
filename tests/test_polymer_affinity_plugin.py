@@ -1343,11 +1343,15 @@ class TestConditionHasPolymer:
 
 
 class TestDeserialization:
-    def test_deserialize_result(self, tmp_path):
+    def test_deserialize_result_fallback_to_json(self, tmp_path):
+        """Without AggregatedResultClass, _deserialize_result returns a dict via json.loads."""
         from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
         from polyzymd.compare.results.polymer_affinity import PolymerAffinityScoreResult
 
         analysis = PolymerAffinityAnalysis()
+
+        # AggregatedResultClass should not be set for comparator-only plugins
+        assert analysis.AggregatedResultClass is None
 
         result = PolymerAffinityScoreResult(
             name="test",
@@ -1358,5 +1362,5 @@ class TestDeserialization:
         result.save(path)
 
         loaded = analysis._deserialize_result(path)
-        assert isinstance(loaded, PolymerAffinityScoreResult)
-        assert loaded.name == "test"
+        assert isinstance(loaded, dict)
+        assert loaded["name"] == "test"

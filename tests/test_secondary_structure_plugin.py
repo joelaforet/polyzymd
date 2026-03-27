@@ -1,7 +1,7 @@
 """Tests for the secondary structure analysis plugin.
 
 Tests the SecondaryStructureAnalysis class: discovery, aliases, settings,
-compute_replicate, aggregate, extract_metrics, _deserialize_result,
+compute_replicate, aggregate, extract_metrics, AggregatedResultClass,
 _make_aggregated_filename, plot delegation, and the full lifecycle via
 the orchestrator.
 
@@ -517,26 +517,32 @@ class TestExtractMetrics:
 
 
 # ============================================================================
-# _deserialize_result tests
+# AggregatedResultClass and _deserialize_result tests
 # ============================================================================
 
 
 class TestDeserializeResult:
-    """Test loading aggregated results from JSON."""
+    """Test loading aggregated results via AggregatedResultClass."""
+
+    def test_aggregated_result_class_set(self, ss_analysis):
+        """AggregatedResultClass should be SecondaryStructureAggregatedResult."""
+        from polyzymd.analyses._results_secondary_structure import (
+            SecondaryStructureAggregatedResult,
+        )
+
+        assert ss_analysis.AggregatedResultClass is SecondaryStructureAggregatedResult
 
     def test_loads_via_result_class(self, ss_analysis, tmp_path):
-        """_deserialize_result should use SecondaryStructureAggregatedResult.load()."""
+        """_deserialize_result should use AggregatedResultClass.load()."""
         fake_path = tmp_path / "agg.json"
 
-        with patch(
-            "polyzymd.analyses._results_secondary_structure.SecondaryStructureAggregatedResult"
-        ) as MockCls:
-            mock_loaded = MagicMock()
-            MockCls.load.return_value = mock_loaded
-
+        mock_loaded = MagicMock()
+        with patch.object(
+            ss_analysis.AggregatedResultClass, "load", return_value=mock_loaded
+        ) as mock_load:
             result = ss_analysis._deserialize_result(fake_path)
 
-            MockCls.load.assert_called_once_with(fake_path)
+            mock_load.assert_called_once_with(fake_path)
             assert result is mock_loaded
 
 
@@ -920,7 +926,7 @@ class TestLifecycle:
     def test_aggregated_result_can_be_loaded_back(
         self, ss_analysis, default_settings, condition, tmp_path
     ):
-        """Saved aggregated result should be loadable via _deserialize_result."""
+        """Saved aggregated result should be loadable via AggregatedResultClass."""
         results = [_make_mock_ss_result(r) for r in (1, 2, 3)]
 
         agg_ctx = AggregateContext(

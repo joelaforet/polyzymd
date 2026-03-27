@@ -1,7 +1,7 @@
 """Tests for the catalytic triad analysis plugin.
 
 Tests the CatalyticTriadAnalysis class: discovery, aliases, settings,
-compute_replicate, aggregate, extract_metrics, _deserialize_result,
+compute_replicate, aggregate, extract_metrics, AggregatedResultClass,
 _settings_to_config, _make_aggregated_filename, plot delegation, and the
 full lifecycle via the orchestrator.
 
@@ -586,21 +586,27 @@ class TestExtractMetrics:
 
 
 # ============================================================================
-# Test: _deserialize_result
+# Test: AggregatedResultClass and _deserialize_result
 # ============================================================================
 
 
 class TestDeserializeResult:
-    """Test CatalyticTriadAnalysis._deserialize_result."""
+    """Test CatalyticTriadAnalysis.AggregatedResultClass and _deserialize_result."""
+
+    def test_aggregated_result_class_set(self, triad_analysis):
+        """AggregatedResultClass should be TriadAggregatedResult."""
+        from polyzymd.analyses._results_triad import TriadAggregatedResult
+
+        assert triad_analysis.AggregatedResultClass is TriadAggregatedResult
 
     def test_loads_aggregated_result(self, triad_analysis, tmp_path):
-        with patch("polyzymd.analyses._results_triad.TriadAggregatedResult") as MockAgg:
-            mock_loaded = MagicMock()
-            MockAgg.load.return_value = mock_loaded
-
+        mock_loaded = MagicMock()
+        with patch.object(
+            triad_analysis.AggregatedResultClass, "load", return_value=mock_loaded
+        ) as mock_load:
             result = triad_analysis._deserialize_result(tmp_path / "test.json")
 
-            MockAgg.load.assert_called_once_with(tmp_path / "test.json")
+            mock_load.assert_called_once_with(tmp_path / "test.json")
             assert result is mock_loaded
 
 

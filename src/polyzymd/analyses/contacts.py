@@ -46,14 +46,13 @@ from polyzymd.analyses.base import (
     ReplicateContext,
 )
 
+from polyzymd.analyses._contacts_aggregator import AggregatedContactResult
+
 if TYPE_CHECKING:
     from MDAnalysis.core.groups import AtomGroup, Residue
     from MDAnalysis.core.universe import Universe
     from numpy.typing import NDArray
 
-    from polyzymd.analyses._contacts_aggregator import (
-        AggregatedContactResult,
-    )
     from polyzymd.analyses._contacts_results import ContactResult
     from polyzymd.compare.results.contacts import ContactsComparisonResult
 
@@ -592,6 +591,7 @@ class ContactsAnalysis(Analysis):
 
     name: ClassVar[str] = "contacts"
     Settings: ClassVar[type] = ContactsSettings
+    AggregatedResultClass: ClassVar[type] = AggregatedContactResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
@@ -1006,25 +1006,6 @@ class ContactsAnalysis(Analysis):
         from polyzymd.compare.contacts_formatters import format_contacts_result
 
         return format_contacts_result(result, format=self._normalize_output_format(output_format))
-
-    # === Framework hooks ===
-
-    def _deserialize_result(self, path: Path) -> Any:
-        """Load an aggregated contact result from JSON.
-
-        Parameters
-        ----------
-        path : Path
-            Path to the JSON result file.
-
-        Returns
-        -------
-        AggregatedContactResult
-            Loaded result.
-        """
-        from polyzymd.analyses._contacts_aggregator import AggregatedContactResult
-
-        return AggregatedContactResult.load(path)
 
     @staticmethod
     def _normalize_output_format(output_format: str) -> str:

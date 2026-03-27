@@ -1,7 +1,7 @@
 """Tests for the distances analysis plugin.
 
 Covers discovery, settings, compute_replicate, aggregate, compare (full override),
-plot delegation, _deserialize_result, _make_aggregated_filename, and lifecycle.
+plot delegation, AggregatedResultClass, _make_aggregated_filename, and lifecycle.
 """
 
 from __future__ import annotations
@@ -816,12 +816,18 @@ class TestComparePair:
 
 
 # ---------------------------------------------------------------------------
-# _deserialize_result
+# AggregatedResultClass and _deserialize_result
 # ---------------------------------------------------------------------------
 
 
 class TestDeserializeResult:
-    """_deserialize_result loads via DistanceAggregatedResult.load()."""
+    """AggregatedResultClass loads via DistanceAggregatedResult.load()."""
+
+    def test_aggregated_result_class_set(self):
+        from polyzymd.analyses._results_distances import DistanceAggregatedResult
+        from polyzymd.analyses.distances import DistancesAnalysis
+
+        assert DistancesAnalysis.AggregatedResultClass is DistanceAggregatedResult
 
     def test_loads_via_result_class(self, tmp_path):
         from polyzymd.analyses.distances import DistancesAnalysis
@@ -829,9 +835,8 @@ class TestDeserializeResult:
         analysis = DistancesAnalysis()
 
         mock_result = MagicMock()
-        with patch(
-            "polyzymd.analyses._results_distances.DistanceAggregatedResult.load",
-            return_value=mock_result,
+        with patch.object(
+            analysis.AggregatedResultClass, "load", return_value=mock_result
         ) as mock_load:
             result = analysis._deserialize_result(tmp_path / "test.json")
 

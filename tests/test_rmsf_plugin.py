@@ -1,7 +1,7 @@
 """Tests for the RMSF analysis plugin (Phase B).
 
 Tests the RMSFAnalysis class: discovery, settings, compute_replicate,
-aggregate, extract_metrics, _deserialize_result, and the full lifecycle
+aggregate, extract_metrics, AggregatedResultClass, and the full lifecycle
 via the orchestrator.
 
 Heavy dependencies (MDAnalysis, trajectories) are mocked.
@@ -504,22 +504,28 @@ class TestExtractMetrics:
 
 
 # ============================================================================
-# Test: _deserialize_result
+# Test: AggregatedResultClass and _deserialize_result
 # ============================================================================
 
 
 class TestDeserializeResult:
-    """Test RMSFAnalysis._deserialize_result."""
+    """Test RMSFAnalysis.AggregatedResultClass and _deserialize_result."""
+
+    def test_aggregated_result_class_set(self, rmsf_analysis):
+        """AggregatedResultClass should be RMSFAggregatedResult."""
+        from polyzymd.analyses._results_rmsf import RMSFAggregatedResult
+
+        assert rmsf_analysis.AggregatedResultClass is RMSFAggregatedResult
 
     def test_loads_aggregated_result(self, rmsf_analysis, tmp_path):
         """Test that _deserialize_result loads via RMSFAggregatedResult.load()."""
-        with patch("polyzymd.analyses._results_rmsf.RMSFAggregatedResult") as MockAgg:
-            mock_loaded = MagicMock()
-            MockAgg.load.return_value = mock_loaded
-
+        mock_loaded = MagicMock()
+        with patch.object(
+            rmsf_analysis.AggregatedResultClass, "load", return_value=mock_loaded
+        ) as mock_load:
             result = rmsf_analysis._deserialize_result(tmp_path / "test.json")
 
-            MockAgg.load.assert_called_once_with(tmp_path / "test.json")
+            mock_load.assert_called_once_with(tmp_path / "test.json")
             assert result is mock_loaded
 
 

@@ -2,7 +2,7 @@
 
 Covers discovery, settings, compute_replicate, aggregate, compare (full override),
 filter_conditions, binding preference sub-pipeline, plot delegation,
-_deserialize_result, and per-replicate metric helpers.
+AggregatedResultClass, and per-replicate metric helpers.
 """
 
 from __future__ import annotations
@@ -973,12 +973,18 @@ class TestANOVA:
 
 
 # ---------------------------------------------------------------------------
-# _deserialize_result
+# AggregatedResultClass and _deserialize_result
 # ---------------------------------------------------------------------------
 
 
 class TestDeserializeResult:
-    """Test _deserialize_result hook."""
+    """Test AggregatedResultClass and _deserialize_result hook."""
+
+    def test_aggregated_result_class_set(self):
+        from polyzymd.analyses._contacts_aggregator import AggregatedContactResult
+        from polyzymd.analyses.contacts import ContactsAnalysis
+
+        assert ContactsAnalysis.AggregatedResultClass is AggregatedContactResult
 
     def test_deserialize_delegates_to_load(self, tmp_path):
         from polyzymd.analyses.contacts import ContactsAnalysis
@@ -986,10 +992,7 @@ class TestDeserializeResult:
         analysis = ContactsAnalysis()
 
         mock_result = MagicMock()
-        with patch(
-            "polyzymd.analyses._contacts_aggregator.AggregatedContactResult.load",
-            return_value=mock_result,
-        ):
+        with patch.object(analysis.AggregatedResultClass, "load", return_value=mock_result):
             result = analysis._deserialize_result(tmp_path / "test.json")
 
         assert result is mock_result

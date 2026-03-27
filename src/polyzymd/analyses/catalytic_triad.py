@@ -30,8 +30,10 @@ from polyzymd.analyses.base import (
     ReplicateContext,
 )
 
+from polyzymd.analyses._results_triad import TriadAggregatedResult
+
 if TYPE_CHECKING:
-    from polyzymd.analyses._results_triad import TriadAggregatedResult, TriadResult
+    from polyzymd.analyses._results_triad import TriadResult
 
 logger = logging.getLogger("polyzymd.analyses.catalytic_triad")
 
@@ -135,6 +137,7 @@ class CatalyticTriadAnalysis(Analysis):
 
     name: ClassVar[str] = "catalytic_triad"
     Settings: ClassVar[type] = CatalyticTriadSettings
+    AggregatedResultClass: ClassVar[type] = TriadAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ("triad",)
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
@@ -516,23 +519,6 @@ class CatalyticTriadAnalysis(Analysis):
                 higher_is_better=True,
             )
         return super().format(result, output_format)
-
-    def _deserialize_result(self, path: Path) -> Any:
-        """Load an aggregated triad result from JSON.
-
-        Parameters
-        ----------
-        path : Path
-            Path to the JSON result file.
-
-        Returns
-        -------
-        TriadAggregatedResult
-            Loaded result.
-        """
-        from polyzymd.analyses._results_triad import TriadAggregatedResult
-
-        return TriadAggregatedResult.load(path)
 
     def plot(self, ctx: PlotContext) -> list[Path]:
         """Generate triad comparison plots.

@@ -28,9 +28,12 @@ from polyzymd.analyses.base import (
 from polyzymd.analyses.shared.config_hash import compute_config_hash, validate_config_hash
 from polyzymd.analyses.shared.loader import TrajectoryLoader, convert_time, parse_time_string
 
+from polyzymd.analyses._results_secondary_structure import (
+    SecondaryStructureAggregatedResult,
+)
+
 if TYPE_CHECKING:
     from polyzymd.analyses._results_secondary_structure import (
-        SecondaryStructureAggregatedResult,
         SecondaryStructureResult,
     )
 
@@ -94,6 +97,7 @@ class SecondaryStructureAnalysis(Analysis):
 
     name: ClassVar[str] = "secondary_structure"
     Settings: ClassVar[type] = SecondaryStructureSettings
+    AggregatedResultClass: ClassVar[type] = SecondaryStructureAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ("ss",)
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
@@ -427,25 +431,6 @@ class SecondaryStructureAnalysis(Analysis):
                 higher_is_better=True,
             )
         return super().format(result, output_format)
-
-    def _deserialize_result(self, path: Path) -> Any:
-        """Load an aggregated secondary structure result from JSON.
-
-        Parameters
-        ----------
-        path : Path
-            Path to the JSON result file.
-
-        Returns
-        -------
-        SecondaryStructureAggregatedResult
-            Loaded result.
-        """
-        from polyzymd.analyses._results_secondary_structure import (
-            SecondaryStructureAggregatedResult,
-        )
-
-        return SecondaryStructureAggregatedResult.load(path)
 
     def plot(self, ctx: PlotContext) -> list[Path]:
         """Generate secondary structure comparison plots.

@@ -871,22 +871,6 @@ class BindingFreeEnergyAnalysis(Analysis):
 
         return pairwise
 
-    def _deserialize_result(self, path: Path) -> Any:
-        """Load a BFE comparison result from JSON.
-
-        Parameters
-        ----------
-        path : Path
-            Path to JSON file.
-
-        Returns
-        -------
-        BindingFreeEnergyResult
-        """
-        from polyzymd.compare.results.binding_free_energy import BindingFreeEnergyResult
-
-        return BindingFreeEnergyResult.load(path)
-
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------

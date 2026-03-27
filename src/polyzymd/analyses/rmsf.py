@@ -46,10 +46,12 @@ from polyzymd.analyses.shared.loader import (
 )
 from polyzymd.analyses.shared.statistics import aggregate_per_residue_stats, compute_sem
 
+from polyzymd.analyses._results_rmsf import RMSFAggregatedResult
+
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
-    from polyzymd.analyses._results_rmsf import RMSFAggregatedResult, RMSFResult
+    from polyzymd.analyses._results_rmsf import RMSFResult
 
 logger = logging.getLogger("polyzymd.analyses.rmsf")
 
@@ -142,6 +144,7 @@ class RMSFAnalysis(Analysis):
 
     name: ClassVar[str] = "rmsf"
     Settings: ClassVar[type] = RMSFSettings
+    AggregatedResultClass: ClassVar[type] = RMSFAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
@@ -509,23 +512,6 @@ class RMSFAnalysis(Analysis):
                 higher_is_better=False,
             )
         return super().format(result, output_format)
-
-    def _deserialize_result(self, path: Path) -> Any:
-        """Load an aggregated RMSF result from JSON.
-
-        Parameters
-        ----------
-        path : Path
-            Path to the JSON result file.
-
-        Returns
-        -------
-        RMSFAggregatedResult
-            Loaded result.
-        """
-        from polyzymd.analyses._results_rmsf import RMSFAggregatedResult
-
-        return RMSFAggregatedResult.load(path)
 
     def plot(self, ctx: PlotContext) -> list[Path]:
         """Generate RMSF comparison and profile plots.

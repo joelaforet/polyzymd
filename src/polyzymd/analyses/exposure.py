@@ -785,19 +785,3 @@ class ExposureAnalysis(Analysis):
             significant=ttest.significant,
             percent_change=pct,
         )
-
-    def _deserialize_result(self, path: Path) -> Any:
-        """Load an exposure comparison result from JSON.
-
-        Parameters
-        ----------
-        path : Path
-            Path to JSON file.
-
-        Returns
-        -------
-        ExposureComparisonResult
-        """
-        from polyzymd.compare.results.exposure import ExposureComparisonResult
-
-        return ExposureComparisonResult.load(path)
