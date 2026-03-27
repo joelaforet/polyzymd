@@ -222,6 +222,10 @@ class SecondaryStructureConfig(BaseModel):
 class AnalysisDefaults(BaseModel):
     """Default parameters applied to all analyses.
 
+    .. deprecated::
+        Relocated to ``polyzymd.analyses.shared.defaults.AnalysisDefaults``.
+        This class is kept as a re-export for backward compatibility.
+
     Attributes
     ----------
     equilibration_time : str

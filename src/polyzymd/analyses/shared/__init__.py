@@ -30,6 +30,8 @@ metric_type
     Metric type classification for autocorrelation handling.
 constants
     Shared default values (cutoffs, thresholds).
+defaults
+    AnalysisDefaults model (equilibration_time).
 logging_utils
     Colored terminal logging.
 """
@@ -39,7 +41,6 @@ from __future__ import annotations
 # Re-export the most commonly used symbols for convenience.
 # Plugins can do:  from polyzymd.analyses.shared import TrajectoryLoader, AlignmentConfig
 # or import specific sub-modules directly.
-
 from polyzymd.analyses.shared.alignment import (
     AlignmentConfig,
     ReferenceMode,
@@ -47,9 +48,9 @@ from polyzymd.analyses.shared.alignment import (
     get_alignment_description,
 )
 from polyzymd.analyses.shared.autocorrelation import (
+    MIN_RECOMMENDED_N_INDEPENDENT,
     ACFResult,
     CorrelationTimeResult,
-    MIN_RECOMMENDED_N_INDEPENDENT,
     check_statistical_reliability,
     compute_acf,
     estimate_correlation_time,
@@ -63,6 +64,7 @@ from polyzymd.analyses.shared.constants import (
     DEFAULT_DISTANCE_THRESHOLD,
     DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
 )
+from polyzymd.analyses.shared.defaults import AnalysisDefaults
 from polyzymd.analyses.shared.loader import (
     TrajectoryInfo,
     TrajectoryLoader,
@@ -120,4 +122,6 @@ __all__ = [
     "DEFAULT_CONTACT_CUTOFF",
     "DEFAULT_DISTANCE_THRESHOLD",
     "DEFAULT_SURFACE_EXPOSURE_THRESHOLD",
+    # Defaults
+    "AnalysisDefaults",
 ]

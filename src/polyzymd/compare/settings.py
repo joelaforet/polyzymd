@@ -24,12 +24,12 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from pydantic import Field, field_validator, model_validator
 
-from polyzymd.analysis.core.constants import (
+from polyzymd.analyses.shared.constants import (
     DEFAULT_CONTACT_CUTOFF,
     DEFAULT_DISTANCE_THRESHOLD,
     DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
 )
-from polyzymd.analysis.core.registry import (
+from polyzymd.compare.registries import (
     AnalysisSettingsRegistry,
     BaseAnalysisSettings,
     BaseComparisonSettings,
@@ -37,7 +37,7 @@ from polyzymd.analysis.core.registry import (
 )
 
 if TYPE_CHECKING:
-    from polyzymd.analysis.core.alignment import AlignmentConfig
+    from polyzymd.analyses.shared.alignment import AlignmentConfig
 
 # ============================================================================
 # RMSF Settings
@@ -343,7 +343,7 @@ class DistancesAnalysisSettings(BaseAnalysisSettings):
         -----
         Import is done inside the method to avoid circular imports.
         """
-        from polyzymd.analysis.core.alignment import AlignmentConfig
+        from polyzymd.analyses.shared.alignment import AlignmentConfig
 
         return AlignmentConfig(
             enabled=self.align_trajectory,

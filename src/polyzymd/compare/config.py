@@ -9,8 +9,8 @@ from typing import Any, ClassVar
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from polyzymd.analysis.config import AnalysisDefaults
-from polyzymd.analysis.core.registry import BasePlotSettings, PlotSettingsRegistry
+from polyzymd.analyses.shared.defaults import AnalysisDefaults
+from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
 
 # Import settings to trigger registration
 from polyzymd.compare.settings import (  # noqa: F401
