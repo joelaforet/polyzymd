@@ -26,7 +26,7 @@ import pytest
 # Ensure src/ is on the path when running directly or via pytest from repo root
 sys.path.insert(0, "src")
 
-from polyzymd.analysis.exposure.enrichment import (
+from polyzymd.analyses._exposure_enrichment import (
     ChaperoneEnrichmentResult,
     GroupEnrichmentEntry,
     _EPS,
@@ -855,7 +855,7 @@ class TestRealDataSanity:
     @pytest.fixture
     def real_sasa(self):
         import pathlib
-        from polyzymd.analysis.sasa.trajectory import SASATrajectoryResult
+        from polyzymd.analyses._sasa_trajectory import SASATrajectoryResult
 
         sasa_dir = (
             pathlib.Path(self.TEST_DATA_BASE)

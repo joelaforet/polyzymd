@@ -1,50 +1,29 @@
-"""Exposure dynamics analysis module.
+"""Backward-compatibility re-export shim for exposure analysis module.
 
-Provides tools to classify protein residue exposure stability from MD
-trajectories and detect chaperone-like interaction events between polymer
-and transiently exposed protein residues.
-
-Key classes
------------
-ExposureConfig
-    Configuration (thresholds, min event length).
-ExposureDynamicsResult
-    Per-residue exposure dynamics result (serialisable to JSON).
-ResidueExposureSummary
-    Per-residue summary: stability, event counts, polymer breakdown.
-ChaperoneEnrichmentResult
-    Dynamic enrichment of polymer types toward AA groups.
-
-Key functions
--------------
-analyze_exposure_dynamics
-    Top-level orchestrator: SASA + contacts → ExposureDynamicsResult.
-compute_chaperone_enrichment
-    Compute enrichment scores for a single trajectory.
-classify_residue_stability
-    Classify a single residue as stably-exposed, stably-buried, or transient.
-detect_events
-    Detect chaperone and unassisted events for all residues.
+Canonical locations are now under ``polyzymd.analyses._exposure_*``.
+This package re-exports all public names so that existing
+``from polyzymd.analysis.exposure import ...`` statements continue to work.
+Will be removed in Phase 7.
 """
 
-from polyzymd.analysis.exposure.chaperone import (
+from polyzymd.analyses._exposure_chaperone import (
     ChaperoneDetectionResult,
     ChaperoneEvent,
     UnassistedRefoldingEvent,
     detect_events,
     detect_events_for_residue,
 )
-from polyzymd.analysis.exposure.classification import (
+from polyzymd.analyses._exposure_classification import (
     classify_all_residues,
     classify_residue_stability,
 )
-from polyzymd.analysis.exposure.config import ExposureConfig
-from polyzymd.analysis.exposure.dynamics import (
+from polyzymd.analyses._exposure_config import ExposureConfig
+from polyzymd.analyses._exposure_dynamics import (
     ExposureDynamicsResult,
     ResidueExposureSummary,
     analyze_exposure_dynamics,
 )
-from polyzymd.analysis.exposure.enrichment import (
+from polyzymd.analyses._exposure_enrichment import (
     ChaperoneEnrichmentResult,
     GroupEnrichmentEntry,
     compute_chaperone_enrichment,

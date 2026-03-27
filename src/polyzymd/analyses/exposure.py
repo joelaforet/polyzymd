@@ -41,10 +41,10 @@ from polyzymd.analyses.base import (
 )
 
 if TYPE_CHECKING:
+    from polyzymd.analyses._exposure_dynamics import ExposureDynamicsResult
+    from polyzymd.analyses._exposure_enrichment import ChaperoneEnrichmentResult
+    from polyzymd.analyses._sasa_trajectory import SASATrajectoryResult
     from polyzymd.analysis.contacts.results import ContactResult
-    from polyzymd.analysis.exposure.dynamics import ExposureDynamicsResult
-    from polyzymd.analysis.exposure.enrichment import ChaperoneEnrichmentResult
-    from polyzymd.analysis.sasa.trajectory import SASATrajectoryResult
 
 logger = logging.getLogger("polyzymd.analyses.exposure")
 
@@ -181,7 +181,7 @@ class ExposureAnalysis(Analysis):
             Comparison result, or ``None`` if fewer than 2 valid conditions.
         """
         from polyzymd import __version__
-        from polyzymd.analysis.core.statistics import compute_sem
+        from polyzymd.analyses.shared.statistics import compute_sem
         from polyzymd.compare.core.base import ANOVASummary, PairwiseComparison
         from polyzymd.compare.results.exposure import (
             ExposureComparisonResult,
@@ -423,17 +423,17 @@ class ExposureAnalysis(Analysis):
         -------
         ExposureConditionSummary
         """
-        from polyzymd.analysis.contacts.results import ContactResult
-        from polyzymd.analysis.core.loader import TrajectoryLoader
-        from polyzymd.analysis.core.statistics import compute_sem
-        from polyzymd.analysis.exposure.config import ExposureConfig
-        from polyzymd.analysis.exposure.dynamics import (
+        from polyzymd.analyses._exposure_config import ExposureConfig
+        from polyzymd.analyses._exposure_dynamics import (
             ExposureDynamicsResult,
             analyze_exposure_dynamics,
         )
-        from polyzymd.analysis.exposure.enrichment import compute_chaperone_enrichment
-        from polyzymd.analysis.sasa.config import SASAConfig
-        from polyzymd.analysis.sasa.trajectory import compute_trajectory_sasa
+        from polyzymd.analyses._exposure_enrichment import compute_chaperone_enrichment
+        from polyzymd.analyses._sasa_config import SASAConfig
+        from polyzymd.analyses._sasa_trajectory import compute_trajectory_sasa
+        from polyzymd.analyses.shared.loader import TrajectoryLoader
+        from polyzymd.analyses.shared.statistics import compute_sem
+        from polyzymd.analysis.contacts.results import ContactResult
         from polyzymd.compare.results.exposure import ExposureConditionSummary
 
         logger.info(f"  Processing condition: {cond.label}")
@@ -565,16 +565,16 @@ class ExposureAnalysis(Analysis):
         -------
         tuple[ExposureDynamicsResult, ChaperoneEnrichmentResult] or None
         """
-        from polyzymd.analysis.contacts.results import ContactResult
-        from polyzymd.analysis.core.loader import TrajectoryLoader
-        from polyzymd.analysis.exposure.config import ExposureConfig
-        from polyzymd.analysis.exposure.dynamics import (
+        from polyzymd.analyses._exposure_config import ExposureConfig
+        from polyzymd.analyses._exposure_dynamics import (
             ExposureDynamicsResult,
             analyze_exposure_dynamics,
         )
-        from polyzymd.analysis.exposure.enrichment import compute_chaperone_enrichment
-        from polyzymd.analysis.sasa.config import SASAConfig
-        from polyzymd.analysis.sasa.trajectory import compute_trajectory_sasa
+        from polyzymd.analyses._exposure_enrichment import compute_chaperone_enrichment
+        from polyzymd.analyses._sasa_config import SASAConfig
+        from polyzymd.analyses._sasa_trajectory import compute_trajectory_sasa
+        from polyzymd.analyses.shared.loader import TrajectoryLoader
+        from polyzymd.analysis.contacts.results import ContactResult
 
         # Find cached ContactResult
         contact_result_path = self._find_contact_result(contacts_analysis_dir, replicate)

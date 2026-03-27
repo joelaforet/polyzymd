@@ -1,24 +1,13 @@
-"""SASA trajectory analysis module.
+"""Backward-compatibility re-export shim for SASA analysis module.
 
-Provides per-frame, per-residue solvent-accessible surface area computation
-using MDTraj's shrake_rupley algorithm. SASA is computed on protein-only
-trajectories to measure intrinsic exposure independent of polymer position.
-
-Key classes
------------
-SASATrajectoryResult
-    Per-frame, per-residue SASA with classification helpers.
-SASAConfig
-    Pydantic configuration model.
-
-Key functions
--------------
-compute_trajectory_sasa
-    Compute (or load cached) trajectory SASA.
+Canonical locations are now under ``polyzymd.analyses._sasa_*``.
+This package re-exports all public names so that existing
+``from polyzymd.analysis.sasa import ...`` statements continue to work.
+Will be removed in Phase 7.
 """
 
-from polyzymd.analysis.sasa.config import SASAConfig
-from polyzymd.analysis.sasa.trajectory import SASATrajectoryResult, compute_trajectory_sasa
+from polyzymd.analyses._sasa_config import SASAConfig
+from polyzymd.analyses._sasa_trajectory import SASATrajectoryResult, compute_trajectory_sasa
 
 __all__ = [
     "SASAConfig",
