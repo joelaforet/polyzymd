@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Optional, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -75,15 +75,15 @@ class DistancePairSettings(BaseModel):
     label: str = Field(..., description="Human-readable label for this pair")
     selection_a: str = Field(..., description="First atom/point selection")
     selection_b: str = Field(..., description="Second atom/point selection")
-    threshold: Optional[float] = Field(
+    threshold: float | None = Field(
         default=None,
         description="Per-pair threshold (Angstroms). Falls back to global threshold.",
     )
-    below_label: Optional[str] = Field(
+    below_label: str | None = Field(
         default=None,
         description='Display label for "below threshold" state.',
     )
-    above_label: Optional[str] = Field(
+    above_label: str | None = Field(
         default=None,
         description='Display label for "above threshold" state.',
     )
@@ -111,7 +111,7 @@ class DistancesSettings(BaseModel):
         Reference frame (1-indexed) when ``alignment_mode="frame"``.
     """
 
-    threshold: Optional[float] = Field(
+    threshold: float | None = Field(
         default=DEFAULT_DISTANCE_THRESHOLD,
         description="Global distance threshold for contact analysis (Angstroms)",
     )
@@ -135,7 +135,7 @@ class DistancesSettings(BaseModel):
         default="centroid",
         description="Reference mode: centroid, average, or frame",
     )
-    alignment_frame: Optional[int] = Field(
+    alignment_frame: int | None = Field(
         default=None,
         description="Reference frame (1-indexed) when alignment_mode='frame'",
     )

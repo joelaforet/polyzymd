@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Optional, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -121,7 +121,7 @@ class ContactsSettings(BaseModel):
         default=DEFAULT_CONTACT_CUTOFF,
         description="Contact distance cutoff in Angstroms",
     )
-    polymer_types: Optional[list[str]] = Field(
+    polymer_types: list[str] | None = Field(
         default=None, description="Filter by polymer residue names"
     )
     grouping: str = Field(
@@ -141,7 +141,7 @@ class ContactsSettings(BaseModel):
         default=0.2,
         description="Relative SASA threshold for surface-exposed residues",
     )
-    enzyme_pdb_for_sasa: Optional[str] = Field(
+    enzyme_pdb_for_sasa: str | None = Field(
         default=None,
         description="Path to enzyme PDB for SASA calculation",
     )
@@ -149,15 +149,15 @@ class ContactsSettings(BaseModel):
         default=True,
         description="Include default AA class groupings",
     )
-    protein_groups: Optional[dict[str, list[int]]] = Field(
+    protein_groups: dict[str, list[int]] | None = Field(
         default=None,
         description="Custom protein groups as {name: [resid, ...]}",
     )
-    protein_partitions: Optional[dict[str, list[str]]] = Field(
+    protein_partitions: dict[str, list[str]] | None = Field(
         default=None,
         description="Custom partitions as {partition_name: [group1, ...]}",
     )
-    polymer_type_selections: Optional[dict[str, str]] = Field(
+    polymer_type_selections: dict[str, str] | None = Field(
         default=None,
         description="Custom polymer type selections as {name: 'MDAnalysis selection'}",
     )

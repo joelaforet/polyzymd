@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Optional, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -79,7 +79,7 @@ class CatalyticTriadSettings(BaseModel):
         default=3.5,
         description="Contact threshold in Angstroms",
     )
-    description: Optional[str] = Field(
+    description: str | None = Field(
         default=None,
         description="Description of the active site",
     )

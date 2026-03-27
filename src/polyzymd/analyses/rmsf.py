@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Optional, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -60,11 +60,11 @@ class RMSFSettings(BaseModel):
         default="centroid",
         description="Reference structure mode: centroid, average, frame, or external",
     )
-    reference_frame: Optional[int] = Field(
+    reference_frame: int | None = Field(
         default=None,
         description="Frame number if reference_mode is 'frame' (1-indexed)",
     )
-    reference_file: Optional[str] = Field(
+    reference_file: str | None = Field(
         default=None,
         description="Path to external PDB file if reference_mode is 'external'",
     )
