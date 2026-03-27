@@ -13,6 +13,17 @@ plugins, but new plotting code should go into your plugin's ``plot()``
 method.
 ```
 
+```{important}
+Do not follow the implementation steps on this page for new work.
+
+Use {doc}`extending_analyses` instead. New contributor extensions should:
+
+- implement plotting in the plugin's `plot()` method
+- read comparison caches from canonical paths such as
+  `comparison/<analysis>/result.json` when needed
+- treat this page as archival background only
+```
+
 This guide shows developers how to create custom plotters using PolyzyMD's registry-based framework. The framework follows the **Open-Closed Principle** (open for extension, closed for modification) and provides automatic discovery of plotter implementations.
 
 ```{note}

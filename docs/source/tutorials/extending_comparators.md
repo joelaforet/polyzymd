@@ -14,6 +14,17 @@ plugin system delegates to, but you no longer need to write comparators
 or register them manually.
 ```
 
+```{important}
+Do not follow the implementation steps on this page for new work.
+
+Use {doc}`extending_analyses` instead. New contributor extensions should:
+
+- add one `Analysis` subclass in `src/polyzymd/analyses/`
+- configure settings through `plugins:` in `comparison.yaml`
+- let the orchestrator write canonical comparison caches under
+  `comparison/<analysis>/result.json`
+```
+
 This guide shows developers how to create custom comparators and analyzers using PolyzyMD's object-oriented framework. The framework follows the **Open-Closed Principle** (open for extension, closed for modification) and uses the **Template Method** design pattern for DRY comparison logic.
 
 ```{note}
