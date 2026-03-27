@@ -10,24 +10,29 @@ src/polyzymd/
 ├── simulation/   # OpenMM simulation execution
 ├── workflow/     # Orchestration layer
 ├── core/         # Shared base classes and types
-├── analysis/     # Per-condition analysis calculators (compute layer)
 ├── analyses/     # ★ Plugin system — unified analysis lifecycle
-├── compare/      # Statistics, formatters, plotters, config, IO
+│   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
+│   ├── _*.py     #   Private compute layer (calculators, result models)
+│   └── *.py      #   Public plugin files (one per analysis type)
+├── compare/      # Cross-condition statistics, legacy formatters/plotters, config, IO
 ├── exporters/    # Format converters (GROMACS, etc.)
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
 └── configs/      # Default YAML configuration files
 ```
 
-### `analysis/` vs `analyses/` (important distinction)
+### Inside `analyses/`
 
-| Package | Role |
-|---------|------|
-| `analysis/` | Per-condition calculators, results, aggregation — the **compute** layer. Contains `RMSFCalculator`, `DistanceCalculator`, `ParallelContactAnalyzer`, etc. |
-| `analyses/` | **Plugin system** — wraps `analysis/` calculators into a unified lifecycle (compute → aggregate → compare → plot → format). **Primary extension point for contributors.** |
+| Layer | Files | Role |
+|-------|-------|------|
+| **Plugins** (public) | `rmsf.py`, `contacts.py`, `rg.py`, etc. | One class per analysis type — the extension point |
+| **Compute** (private) | `_calculator_*.py`, `_results_*.py` | Per-condition calculators and result models |
+| **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics |
+| **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Plugin ABC, auto-discovery, lifecycle runner |
 
-New analysis types are added as plugins in `analyses/`. The `analysis/` package
-provides the underlying computation that plugins delegate to.
+New analysis types are added as plugins in `analyses/`. The private
+`_calculator_*.py` modules provide underlying computation that some plugins
+delegate to; new plugins can compute directly in `compute_replicate()`.
 
 ## Chain Convention (Critical)
 
@@ -111,24 +116,26 @@ class AnalysisConfig(BaseModel):
 
 1. Create `src/polyzymd/analyses/<name>.py`
 2. Subclass `Analysis` with `name`, `Settings`, `compute_replicate()`, `aggregate()`
-3. Optionally implement `extract_metrics()`, `compare()`, `plot()`, `format()`
-4. Test with `pixi run -e build pytest tests/ -v -k <name>`
-5. The CLI automatically discovers it via `polyzymd compare run <name>`
+3. For default comparison: implement `extract_metrics()` **and** `_deserialize_result()`
+4. Optionally implement `plot()`, `format()`
+5. Test with `pixi run -e build pytest tests/test_<name>_plugin.py -v`
+6. The CLI automatically discovers it via `polyzymd compare run <name>`
 
-See `analyses/base.py` for the full contract and `analysis-module.md` for
-detailed patterns.
+See `analyses/base.py` for the full contract, `analysis-module.md` for
+detailed patterns, and `docs/source/tutorials/extending_analyses.md` for the
+contributor tutorial.
 
 ### Adding a new per-condition calculator
 
-1. Create a new module under `analysis/` (e.g., `analysis/hbonds/`)
-2. Define result models inheriting from `BaseAnalysisResult`
+1. Create a private `_calculator_<name>.py` module in `analyses/`
+2. Define result models inheriting from `BaseAnalysisResult` (in `_results_<name>.py`)
 3. Implement the calculator with `from_config()` factory method
 4. Create an `analyses/<name>.py` plugin to expose it through the CLI
 
 ### Adding comparison statistics or formatters
 
-The `compare/` package provides shared infrastructure:
-- `compare/statistics.py` — statistical functions (t-tests, ANOVA, Cohen's d)
-- `compare/formatters.py` — CLI output formatters
-- `compare/plotters/` — matplotlib visualization
-- `compare/config.py` — `ComparisonConfig`, plot settings
+The `compare/` package provides shared statistical infrastructure. New plugins
+should NOT create files in `compare/` — keep plotting and formatting inline
+in the plugin's `plot()` and `format()` methods. The `compare/plotters/` and
+`compare/results/` directories are used by existing plugins for historical
+reasons only.

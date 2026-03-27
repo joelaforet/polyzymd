@@ -30,7 +30,7 @@ pixi run -e build pytest tests/ -v -k "secondary_structure"
 When adding tests:
 
 1. Place unit tests in `tests/` directory
-2. Name files `test_<module>.py` (e.g., `tests/test_analyses_my_plugin.py`)
+2. Name files `test_<name>_plugin.py` (e.g., `tests/test_rg_plugin.py`)
 3. Use pytest conventions (`test_` prefix for functions/methods)
 4. Mock heavy dependencies (OpenMM, MDAnalysis) for unit tests
 5. Use `@pytest.mark.slow` for tests requiring simulation data
@@ -43,24 +43,34 @@ When adding a new analysis plugin in `analyses/`, write tests that cover:
 1. **Discovery**: Plugin is found by `list_analyses()` and `get_analysis()`
 2. **Class variables**: `name` and `Settings` are set correctly
 3. **Settings validation**: Pydantic model validates/rejects correctly
-4. **compute_replicate()**: Returns expected structure (mock MDAnalysis)
-5. **aggregate()**: Combines replicate results correctly
+4. **compute_replicate()**: Returns expected structure (mock TrajectoryLoader / MDAnalysis)
+5. **aggregate()**: Combines replicate results correctly (no mocks needed)
 6. **extract_metrics()**: Returns correct `MetricValue` instances (if using default compare)
-7. **compare()**: Produces a valid comparison result
-8. **format()**: Generates readable CLI output
+7. **_deserialize_result()**: Loads JSON back correctly (if using default compare)
+8. **compare()**: Produces a valid `ComparisonResult`
+9. **format()**: Generates readable CLI output
 
 Example test structure for a plugin:
 
 ```python
-import pytest
+import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+import pytest
+
 from polyzymd.analyses import get_analysis, list_analyses
-from polyzymd.analyses.base import MetricValue
+from polyzymd.analyses.base import (
+    AggregateContext,
+    Condition,
+    MetricValue,
+    ReplicateContext,
+)
 
 
-class TestMyPlugin:
-    """Tests for my_analysis plugin."""
+class TestMyPluginDiscovery:
+    """Tests for discovery and class-level attributes."""
 
     def test_discovered(self):
         """Plugin should be discovered automatically."""
@@ -77,7 +87,84 @@ class TestMyPlugin:
         settings = cls.Settings()
         assert settings.selection == "protein and name CA"
 
-    def test_extract_metrics_returns_metric_values(self):
+
+class TestMyPluginCompute:
+    """Test compute_replicate with mocked trajectories."""
+
+    @patch("polyzymd.analyses.my_analysis.TrajectoryLoader")
+    def test_computes_metric(self, MockLoader, tmp_path):
+        cls = get_analysis("my_analysis")
+        analysis = cls()
+        settings = cls.Settings()
+
+        # Mock TrajectoryLoader and Universe
+        mock_loader = MagicMock()
+        MockLoader.return_value = mock_loader
+        mock_universe = MagicMock()
+        mock_atoms = MagicMock()
+        mock_atoms.__len__ = MagicMock(return_value=100)
+        mock_universe.select_atoms.return_value = mock_atoms
+        mock_trajectory = MagicMock()
+        mock_trajectory.__len__ = MagicMock(return_value=50)
+        mock_trajectory.__getitem__ = MagicMock(return_value=range(50))
+        mock_universe.trajectory = mock_trajectory
+        mock_loader.load_universe.return_value = mock_universe
+        mock_loader.get_timestep.return_value = 10.0
+
+        condition = Condition(
+            label="Test",
+            config_path=Path("/fake/config.yaml"),
+            replicates=(1,),
+            sim_config=MagicMock(),
+        )
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="0ns",
+            recompute=True,
+            settings=settings,
+        )
+
+        result = analysis.compute_replicate(ctx, replicate=1)
+        assert isinstance(result, dict)
+
+
+class TestMyPluginAggregate:
+    """Test aggregation — no mocks needed."""
+
+    def test_aggregate(self, tmp_path):
+        cls = get_analysis("my_analysis")
+        analysis = cls()
+        condition = Condition(
+            label="Test",
+            config_path=Path("/fake/config.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2, 3),
+            output_dir=tmp_path / "aggregated",
+            equilibration="10ns",
+            settings=cls.Settings(),
+        )
+
+        results = [
+            {"my_metric": 15.0, "replicate": 1},
+            {"my_metric": 15.5, "replicate": 2},
+            {"my_metric": 14.8, "replicate": 3},
+        ]
+
+        agg = analysis.aggregate(ctx, results)
+        assert "replicate_values" in agg
+
+
+class TestMyPluginMetrics:
+    """Test metric extraction for default comparison."""
+
+    def test_extract_metrics(self):
         cls = get_analysis("my_analysis")
         analysis = cls()
         summary = {"mean_value": 1.5, "sem_value": 0.1, "replicate_values": [1.4, 1.6]}

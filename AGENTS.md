@@ -45,24 +45,29 @@ src/polyzymd/
 ├── simulation/   # OpenMM simulation runners
 ├── workflow/     # Orchestration (build → simulate → analyze)
 ├── core/         # Base classes, shared types
-├── analysis/     # Per-condition analysis calculators (RMSF, contacts, etc.)
 ├── analyses/     # ★ Plugin system — unified analysis lifecycle (primary extension point)
-├── compare/      # Statistics, formatters, plotters, config, IO
+│   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
+│   ├── _*.py     #   Private compute layer (calculators, result models)
+│   └── *.py      #   Public plugin files (one per analysis type)
+├── compare/      # Cross-condition statistics, legacy formatters/plotters, config, IO
 ├── exporters/    # GROMACS/other format exporters
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
 └── configs/      # Default YAML configs
 ```
 
-### `analysis/` vs `analyses/` (important distinction)
+### Inside `analyses/`
 
-| Package | Role |
-|---------|------|
-| `analysis/` | Per-condition calculators, results, aggregation — the **compute** layer |
-| `analyses/` | Plugin system — wraps `analysis/` calculators into a unified lifecycle (compute → aggregate → compare → plot → format) |
+| Layer | Files | Role |
+|-------|-------|------|
+| **Plugins** (public) | `rmsf.py`, `contacts.py`, `rg.py`, etc. | One class per analysis type — the **extension point** for contributors |
+| **Compute** (private) | `_calculator_*.py`, `_results_*.py` | Per-condition calculators and result models used internally by plugins |
+| **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics, autocorrelation — reusable across plugins |
+| **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Plugin ABC, auto-discovery, lifecycle runner, default comparison utilities |
 
-New analysis types are added as **plugins in `analyses/`**. The `analysis/`
-package provides the underlying computation that plugins delegate to.
+New analysis types are added as **plugins in `analyses/`**. The private
+`_calculator_*.py` modules provide underlying computation that some plugins
+delegate to; new plugins can compute directly in `compute_replicate()`.
 
 ## Key Patterns
 
@@ -83,17 +88,21 @@ subclass `Analysis`:
 | `Analysis` base class | `analyses/base.py` | Full contract: required methods, optional overrides, context objects |
 | Plugin discovery | `analyses/discovery.py` | How auto-discovery works, naming rules |
 | Orchestrator | `analyses/orchestrator.py` | How the framework runs your plugin |
-| Simplest example | `analyses/secondary_structure.py` | Uses default `compare()` — minimal override |
+| Shared utilities | `analyses/shared/` | `TrajectoryLoader`, alignment, statistics, autocorrelation |
+| Simplest example | `analyses/rg.py` | Complete minimal plugin with default compare + plots |
 | Stats utilities | `analyses/stats.py` | `default_scalar_comparison()`, `format_scalar_comparison()` |
+| Contributor tutorial | `docs/source/tutorials/extending_analyses.md` | Step-by-step guide with test examples |
 
 Key rules:
 
 - **Required class variables**: `name` (str) and `Settings` (Pydantic BaseModel)
 - **Required methods**: `compute_replicate(ctx, replicate)` and `aggregate(ctx, results)`
 - **Optional overrides**: `compare()`, `plot()`, `format()`, `extract_metrics()`, `filter_conditions()`
-- **Default compare path**: Implement `extract_metrics()` to return `dict[str, MetricValue]` — the framework does t-tests, ANOVA, ranking automatically
+- **Default compare path**: Implement `extract_metrics()` **and** `_deserialize_result()` — the framework does t-tests, ANOVA, ranking automatically
 - **Custom compare path**: Override `compare()` entirely for multi-metric or entry-table analyses
 - **Auto-discovery**: Drop a `.py` file in `analyses/` — no imports, no registries, no bootstrap
+- **Result saving**: Existing plugins save results explicitly; the orchestrator has a fallback auto-save if the plugin doesn't
+- **No `compare/` files needed**: New plugins keep all logic inline; `compare/plotters/` and `compare/results/` are used by existing plugins for historical reasons
 
 ### Quick Example — Minimal Plugin
 
@@ -101,6 +110,8 @@ Key rules:
 """Radius of gyration analysis plugin."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, ClassVar, Sequence
 
 from pydantic import BaseModel
@@ -148,6 +159,9 @@ class RgAnalysis(Analysis):
                 direction_labels=("compacting", "unchanged", "expanding"),
             )
         }
+
+    def _deserialize_result(self, path: Path) -> dict[str, Any]:
+        return json.loads(path.read_text())
 ```
 
 ## Design Principles (Critical for Contributors)
@@ -199,11 +213,12 @@ def compute_replicate(self, ctx, replicate):
 
 ### When Adding New Features
 
-1. **Start with `analyses/base.py`** — read the class docstring
-2. **Pick your complexity level**: simple (use default compare) or custom (override compare)
-3. **Study a matching example**: `secondary_structure.py` for simple, `contacts.py` for custom
-4. **Write your plugin** in `analyses/<name>.py`
-5. **Test**: `pixi run -e build pytest tests/ -v -k <name>`
+1. **Read the tutorial**: `docs/source/tutorials/extending_analyses.md`
+2. **Read `analyses/base.py`** — the class docstring defines the full contract
+3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
+4. **Study a matching example**: `rg.py` for simplest, `rmsf.py` for simple, `contacts.py` for custom
+5. **Write your plugin** in `analyses/<name>.py` — keep all logic in one file
+6. **Test**: `pixi run -e build pytest tests/test_<name>_plugin.py -v`
 
 ## Code Style
 

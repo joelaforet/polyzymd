@@ -2,28 +2,19 @@
 
 ## Overview
 
-PolyzyMD analysis is split across two packages:
-
-| Package | Role |
-|---------|------|
-| `analysis/` | Per-condition calculators, results, aggregation — the **compute** layer |
-| `analyses/` | **Plugin system** — unified lifecycle (compute → aggregate → compare → plot → format) |
-
-New analysis types are added as **plugins in `analyses/`**. The `analysis/`
-package provides the underlying computation that plugins delegate to.
-
-## Plugin System (`analyses/`)
-
-### Module Structure
+The analysis system lives in the `analyses/` package:
 
 ```
 src/polyzymd/analyses/
-├── __init__.py             # Public API: get_analysis, list_analyses, run_comparison
 ├── base.py                 # Analysis ABC, context objects, result models
 ├── discovery.py            # pkgutil-based auto-discovery
 ├── orchestrator.py         # Framework engine: compute → aggregate → compare → plot
 ├── stats.py                # default_scalar_comparison(), format_scalar_comparison()
-├── rmsf.py                 # RMSF plugin (simplest default-compare example)
+├── shared/                 # Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
+├── _calculator_*.py        # Private per-condition calculators (compute layer)
+├── _results_*.py           # Private result models (Pydantic BaseModel subclasses)
+├── rg.py                   # Rg plugin (simplest complete example)
+├── rmsf.py                 # RMSF plugin (default compare with formatting)
 ├── catalytic_triad.py      # Catalytic triad plugin (default compare)
 ├── secondary_structure.py  # Secondary structure plugin (default compare)
 ├── distances.py            # Distances plugin (custom compare)
@@ -32,6 +23,10 @@ src/polyzymd/analyses/
 ├── binding_free_energy.py  # Binding free energy plugin (custom compare)
 └── polymer_affinity.py     # Polymer affinity plugin (custom compare)
 ```
+
+The private `_calculator_*.py` modules provide underlying computation that
+some plugins delegate to. New plugins can compute directly in
+`compute_replicate()` — there is no separate `analysis/` package.
 
 ### How to Add a New Analysis
 
@@ -67,11 +62,11 @@ class MyAnalysis(Analysis):
 
 ### Two Comparison Paths
 
-**Simple path** (RMSF, catalytic_triad, secondary_structure):
+**Simple path** (rg, RMSF, catalytic_triad, secondary_structure):
 - Implement `extract_metrics()` to return `dict[str, MetricValue]`
-- Framework handles t-tests, ANOVA, ranking, and formatting automatically
-- Also implement `_deserialize_result()` so the default `compare()` can load
+- Implement `_deserialize_result()` so the default `compare()` can load
   aggregated JSON results
+- Framework handles t-tests, ANOVA, ranking, and formatting automatically
 
 **Custom path** (contacts, distances, exposure, BFE, polymer_affinity):
 - Override `compare()` entirely — return your own Pydantic model with `.save()`
@@ -83,10 +78,28 @@ Plugins receive framework-provided context objects — never load configs yourse
 
 | Context | Passed To | Key Attributes |
 |---------|-----------|----------------|
-| `ReplicateContext` | `compute_replicate()` | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute` |
-| `AggregateContext` | `aggregate()` | `.condition`, `.replicates`, `.output_dir`, `.settings` |
+| `ReplicateContext` | `compute_replicate()` | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute`, `.result_path` |
+| `AggregateContext` | `aggregate()` | `.condition`, `.replicates`, `.output_dir`, `.settings`, `.result_path` |
 | `ComparisonContext` | `compare()` | `.conditions`, `.analysis_dirs`, `.results_dir`, `.effective_control`, `.settings` |
 | `PlotContext` | `plot()` | `.conditions`, `.analysis_dirs`, `.output_dir`, `.settings`, `.plot_settings` |
+
+### Result Saving
+
+Existing plugins save results to disk explicitly — using custom filenames
+for per-replicate caching (e.g. `rmsf_eq10ns.json`) and `ctx.result_path`
+for aggregated results. The orchestrator has a **fallback** auto-save that
+writes to `ctx.result_path` only if the file doesn't already exist.
+
+Simple plugins can skip manual saves and rely on the fallback. Plugins that
+want equilibration-aware caching should save explicitly (see `rmsf.py`,
+`rg.py` for the pattern).
+
+### Return Types: Dicts vs Pydantic Models
+
+Both plain dicts and Pydantic `BaseModel` instances are supported as return
+types from `compute_replicate()` and `aggregate()`. Dicts are recommended
+for new plugins; Pydantic models are useful for complex results that need
+validation or NPZ sidecar storage.
 
 ### Important: `_deserialize_result()` Footgun
 
@@ -107,12 +120,14 @@ by how they should handle autocorrelated MD data:
 | **MEAN_BASED** | Use ALL frames | Correct SEM with N_eff = N/g | Contact fraction, triad proximity |
 | **VARIANCE_BASED** | Subsample by 2τ | Standard formula on independent samples | RMSF, fluctuation metrics |
 
-This classification lives in `analysis/core/metric_type.py` and is used by the
-underlying calculators in `analysis/`, not directly by the plugin system.
+This classification lives in `analyses/shared/metric_type.py` and is used by
+the underlying calculators (`_calculator_*.py`), not directly by the plugin
+system.
 
-## Compute Layer (`analysis/`)
+## Compute Layer (Private `_calculator_*.py` Modules)
 
-The `analysis/` package provides calculators that plugins delegate to:
+The private modules inside `analyses/` provide calculators that some plugins
+delegate to:
 
 ### Key Classes
 
@@ -135,6 +150,7 @@ to detect changes. **Known issue:** the hash mismatch warning currently prints
 
 | Plugin | Default compare? | Primary metric |
 |--------|-----------------|----------------|
+| `rg` | Yes | `mean_rg` (lower = more compact) |
 | `rmsf` | Yes | `mean_rmsf` (lower = more stable) |
 | `catalytic_triad` | Yes | `mean_triad_proximity` (lower = closer) |
 | `secondary_structure` | Yes | `helix_fraction` (higher = more structured) |
