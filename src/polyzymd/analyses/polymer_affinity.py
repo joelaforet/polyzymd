@@ -492,6 +492,7 @@ class PolymerAffinityAnalysis(Analysis):
         AggregatedBindingPreferenceResult | BindingPreferenceResult | None
         """
         from polyzymd.analyses._binding_preference_helpers import (
+            CondProxy,
             compute_condition_binding_preference,
             resolve_enzyme_pdb,
             try_load_cached_binding_preference,
@@ -504,7 +505,7 @@ class PolymerAffinityAnalysis(Analysis):
             contacts_analysis_dir = pa_analysis_dir.parent / "contacts"
 
         # Build a minimal cond-like object for the helpers
-        cond_proxy = _CondProxy(label=cond.label, config=str(cond.config_path))
+        cond_proxy = CondProxy(label=cond.label, config=str(cond.config_path))
 
         # Try cached first
         if not ctx.recompute and contacts_analysis_dir is not None:
@@ -1149,29 +1150,6 @@ class PolymerAffinityAnalysis(Analysis):
         from polyzymd.compare.results.polymer_affinity import PolymerAffinityScoreResult
 
         return PolymerAffinityScoreResult.load(path)
-
-
-# ---------------------------------------------------------------------------
-# Minimal proxy for ConditionConfig API used by binding preference helpers
-# ---------------------------------------------------------------------------
-
-
-class _CondProxy:
-    """Minimal proxy that satisfies the ConditionConfig interface used by
-    ``_binding_preference_helpers.try_load_cached_binding_preference`` and
-    ``compute_condition_binding_preference``.
-
-    Parameters
-    ----------
-    label : str
-        Condition label.
-    config : str
-        Path to simulation config YAML.
-    """
-
-    def __init__(self, label: str, config: str) -> None:
-        self.label = label
-        self.config = config
 
 
 # ---------------------------------------------------------------------------

@@ -474,6 +474,7 @@ class BindingFreeEnergyAnalysis(Analysis):
         AggregatedBindingPreferenceResult | BindingPreferenceResult | None
         """
         from polyzymd.analyses._binding_preference_helpers import (
+            CondProxy,
             compute_condition_binding_preference,
             resolve_enzyme_pdb,
             try_load_cached_binding_preference,
@@ -486,7 +487,7 @@ class BindingFreeEnergyAnalysis(Analysis):
             contacts_analysis_dir = bfe_analysis_dir.parent / "contacts"
 
         # Build a minimal cond-like object for the helpers
-        cond_proxy = _CondProxy(label=cond.label, config=str(cond.config_path))
+        cond_proxy = CondProxy(label=cond.label, config=str(cond.config_path))
 
         # Try cached first
         if not ctx.recompute and contacts_analysis_dir is not None:
@@ -904,23 +905,6 @@ class BindingFreeEnergyAnalysis(Analysis):
 
 
 # ---------------------------------------------------------------------------
-# Minimal proxy for ConditionConfig API used by mixin helpers
 # ---------------------------------------------------------------------------
-
-
-class _CondProxy:
-    """Minimal proxy that satisfies the ConditionConfig interface used by
-    ``_binding_preference_helpers.try_load_cached_binding_preference`` and
-    ``compute_condition_binding_preference``.
-
-    Parameters
-    ----------
-    label : str
-        Condition label.
-    config : str
-        Path to simulation config YAML.
-    """
-
-    def __init__(self, label: str, config: str) -> None:
-        self.label = label
-        self.config = config
+# Module-level polymer detection
+# ---------------------------------------------------------------------------

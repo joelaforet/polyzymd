@@ -36,6 +36,32 @@ if TYPE_CHECKING:
 logger = logging.getLogger("polyzymd.analyses")
 
 
+# ---------------------------------------------------------------------------
+# Minimal proxy for ConditionConfig API
+# ---------------------------------------------------------------------------
+
+
+class CondProxy:
+    """Minimal proxy satisfying the ``ConditionConfig`` interface.
+
+    Used by :func:`try_load_cached_binding_preference` and
+    :func:`compute_condition_binding_preference` so that analysis plugins
+    can pass lightweight ``Condition`` dataclass fields without importing
+    the full ``ConditionConfig``.
+
+    Parameters
+    ----------
+    label : str
+        Condition label.
+    config : str
+        Path to simulation config YAML.
+    """
+
+    def __init__(self, label: str, config: str) -> None:
+        self.label = label
+        self.config = config
+
+
 def find_enzyme_pdb(sim_config: Any) -> Path | None:
     """Find enzyme PDB file from simulation config.
 

@@ -1228,15 +1228,15 @@ class TestLifecycle:
 
 
 # ===========================================================================
-# _CondProxy
+# CondProxy (shared helper — main test in test_bfe_plugin.py)
 # ===========================================================================
 
 
 class TestCondProxy:
     def test_cond_proxy_attributes(self):
-        from polyzymd.analyses.polymer_affinity import _CondProxy
+        from polyzymd.analyses._binding_preference_helpers import CondProxy
 
-        proxy = _CondProxy(label="A", config="/tmp/a.yaml")
+        proxy = CondProxy(label="A", config="/tmp/a.yaml")
         assert proxy.label == "A"
         assert proxy.config == "/tmp/a.yaml"
 
