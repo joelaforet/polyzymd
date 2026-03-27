@@ -52,6 +52,15 @@ class ToyAggregatedResult(BaseModel):
     replicate_values: list[float]
     n_replicates: int
 
+    def save(self, path: Path) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self.model_dump_json(indent=2))
+        return path
+
+    @classmethod
+    def load(cls, path: Path) -> "ToyAggregatedResult":
+        return cls.model_validate_json(path.read_text())
+
 
 class ToyAnalysis(Analysis):
     """Concrete analysis for testing the plugin system."""
@@ -89,6 +98,9 @@ class ToyAnalysis(Analysis):
                 direction_labels=("stabilizing", "unchanged", "destabilizing"),
             )
         }
+
+    def _deserialize_result(self, path: Path) -> ToyAggregatedResult:
+        return ToyAggregatedResult.load(path)
 
 
 class ToyDependentAnalysis(Analysis):
@@ -202,6 +214,7 @@ class TestAnalysisABC:
             results_dir=Path("/tmp/results"),
             output_dir=Path("/tmp/figures"),
             settings=ToySettings(),
+            comparison_path=Path("/tmp/results/result.json"),
         )
         assert toy_analysis.plot(ctx) == []
 
@@ -239,6 +252,7 @@ class TestContextObjects:
             equilibration="10ns",
             recompute=False,
             settings=toy_settings,
+            result_path=Path("/tmp/run_1/result.json"),
         )
         assert ctx.replicate == 1
         assert ctx.equilibration == "10ns"
@@ -261,6 +275,7 @@ class TestContextObjects:
             equilibration="10ns",
             settings=ToySettings(),
             recompute=False,
+            result_path=Path("/tmp/results/result.json"),
         )
         assert ctx.effective_control == "Control"
 
@@ -276,6 +291,7 @@ class TestContextObjects:
             equilibration="0ns",
             settings=ToySettings(),
             recompute=False,
+            result_path=Path("/tmp/result.json"),
         )
         assert ctx.effective_control is None
 
@@ -591,6 +607,31 @@ class TestOrchestrator:
         assert len(result.replicate_values) == 3
         # Check aggregated dir was created
         assert (tmp_path / "aggregated").exists()
+        assert (tmp_path / "run_1" / "result.json").exists()
+        assert (tmp_path / "aggregated" / "result.json").exists()
+
+    def test_compare_only_analysis_skips_compute_and_aggregate(
+        self, toy_condition, toy_settings, tmp_path
+    ):
+        from polyzymd.analyses.orchestrator import run_analysis
+
+        class CompareOnlyAnalysis(Analysis):
+            name: ClassVar[str] = "compare_only"
+            Settings: ClassVar[type] = ToySettings
+            has_compute_stage: ClassVar[bool] = False
+            has_aggregate_stage: ClassVar[bool] = False
+
+        analysis = CompareOnlyAnalysis()
+        result = run_analysis(
+            analysis,
+            toy_condition,
+            toy_settings,
+            equilibration="0ns",
+            output_dir=tmp_path,
+        )
+
+        assert result is None
+        assert not (tmp_path / "aggregated").exists()
 
 
 # ============================================================================

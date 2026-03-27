@@ -285,12 +285,12 @@ class CatalyticTriadAnalysis(Analysis):
             source_result_files=[],  # Not tracked in plugin mode
         )
 
-        # Save
-        filename = self._make_aggregated_filename(ctx.replicates, first)
-        result_file = ctx.output_dir / filename
-        ctx.output_dir.mkdir(parents=True, exist_ok=True)
-        agg_result.save(result_file)
-        logger.info(f"Saved aggregated triad result to {result_file}")
+        target_path = ctx.result_path
+        if target_path is None:
+            filename = self._make_aggregated_filename(ctx.replicates, first)
+            target_path = ctx.output_dir / filename
+        self.save_result(agg_result, target_path)
+        logger.info(f"Saved aggregated triad result to {target_path}")
 
         return agg_result
 
@@ -349,8 +349,7 @@ class CatalyticTriadAnalysis(Analysis):
                 output_format=output_format,
                 higher_is_better=True,
             )
-        # Fall back to legacy formatter for old result types
-        return self._legacy_format(result, output_format)
+        return super().format(result, output_format)
 
     def _deserialize_result(self, path: Path) -> Any:
         """Load an aggregated triad result from JSON.
@@ -485,23 +484,7 @@ class CatalyticTriadAnalysis(Analysis):
         replicates: tuple[int, ...] | Sequence[int],
         first_result: Any,
     ) -> str:
-        """Generate filename for the aggregated result JSON.
-
-        Matches the naming convention of ``CatalyticTriadAnalyzer`` for
-        backward compatibility.
-
-        Parameters
-        ----------
-        replicates : tuple[int, ...] | Sequence[int]
-            Replicate numbers included.
-        first_result : TriadResult
-            First per-replicate result (for metadata).
-
-        Returns
-        -------
-        str
-            Filename like ``triad_LipA_triad_reps1-5_eq100ns.json``.
-        """
+        """Backward-compatible filename helper retained for tests."""
         eq_str = f"eq{first_result.equilibration_time:.0f}{first_result.equilibration_unit}"
         reps = sorted(replicates)
         if reps == list(range(reps[0], reps[-1] + 1)):

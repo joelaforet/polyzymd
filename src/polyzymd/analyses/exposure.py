@@ -152,38 +152,8 @@ class ExposureAnalysis(Analysis):
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ("contacts",)
     min_replicates: ClassVar[int] = 2
-
-    # === Compute (no-op — comparator-only) ===
-
-    def compute_replicate(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-    ) -> None:
-        """No-op — exposure dynamics is comparator-only.
-
-        All per-replicate computation (SASA, dynamics, enrichment) is
-        orchestrated within ``compare()`` because the pipeline requires
-        both SASA and contacts data simultaneously.
-
-        Returns
-        -------
-        None
-        """
-        return None
-
-    def aggregate(
-        self,
-        ctx: AggregateContext,
-        results: Sequence[Any],
-    ) -> None:
-        """No-op — exposure dynamics is comparator-only.
-
-        Returns
-        -------
-        None
-        """
-        return None
+    has_compute_stage: ClassVar[bool] = False
+    has_aggregate_stage: ClassVar[bool] = False
 
     # === Compare (full override) ===
 
@@ -406,11 +376,21 @@ class ExposureAnalysis(Analysis):
 
         return plots
 
+    def format(self, result: Any, output_format: str = "text") -> str:
+        """Format exposure comparison results without legacy dispatch."""
+        from polyzymd.compare.exposure_formatters import format_exposure_result
+
+        return format_exposure_result(result, format=self._normalize_output_format(output_format))
+
     # === extract_metrics (empty — full compare() override) ===
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
         """Return empty dict — exposure uses full compare() override."""
         return {}
+
+    @staticmethod
+    def _normalize_output_format(output_format: str) -> str:
+        return "table" if output_format == "text" else output_format
 
     # === Private helpers ===
 

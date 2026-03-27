@@ -174,24 +174,8 @@ class BindingFreeEnergyAnalysis(Analysis):
     aliases: ClassVar[tuple[str, ...]] = ("bfe",)
     dependencies: ClassVar[tuple[str, ...]] = ("contacts",)
     min_replicates: ClassVar[int] = 1
-
-    # === Compute (no-op — comparator-only) ===
-
-    def compute_replicate(
-        self,
-        ctx: ReplicateContext,
-        replicate: int,
-    ) -> None:
-        """No-op — BFE is a post-processing comparator-only analysis."""
-        return None
-
-    def aggregate(
-        self,
-        ctx: AggregateContext,
-        results: Sequence[Any],
-    ) -> None:
-        """No-op — BFE is a post-processing comparator-only analysis."""
-        return None
+    has_compute_stage: ClassVar[bool] = False
+    has_aggregate_stage: ClassVar[bool] = False
 
     # === Compare (full override) ===
 
@@ -249,24 +233,16 @@ class BindingFreeEnergyAnalysis(Analysis):
             {e.protein_group for s in condition_summaries for e in s.entries}
         )
 
-        # Step 3: Temperature groups
+        # Step 3: Temperature grouping
         temp_groups: dict[float, list[str]] = {}
         for s in condition_summaries:
             temp_groups.setdefault(s.temperature_K, []).append(s.label)
         mixed_temperatures = len(temp_groups) > 1
 
-        if mixed_temperatures:
-            logger.warning(
-                f"Conditions span {len(temp_groups)} temperatures: "
-                + ", ".join(f"{t}K ({len(labels)} conds)" for t, labels in temp_groups.items())
-                + ". Cross-temperature pairwise statistics will be suppressed."
-            )
-
         # Step 4: Pairwise comparisons
         pairwise = self._compute_pairwise(condition_summaries, ctx.effective_control)
 
         # Step 5: Build result
-        temp_groups_str = {str(k): v for k, v in temp_groups.items()}
         if settings.units == "kT":
             formula = "ΔG_sel = -ln(contact_share / expected_share)  [units: k_bT]"
         else:
@@ -277,7 +253,7 @@ class BindingFreeEnergyAnalysis(Analysis):
             units=settings.units,
             formula=formula,
             mixed_temperatures=mixed_temperatures,
-            temperature_groups=temp_groups_str,
+            temperature_groups={str(k): v for k, v in temp_groups.items()},
             conditions=condition_summaries,
             pairwise_comparisons=pairwise,
             polymer_types=all_polymer_types,
@@ -354,11 +330,21 @@ class BindingFreeEnergyAnalysis(Analysis):
 
         return plots
 
+    def format(self, result: Any, output_format: str = "text") -> str:
+        """Format binding free energy results without legacy dispatch."""
+        from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
+
+        return format_bfe_result(result, format=self._normalize_output_format(output_format))
+
     # === extract_metrics (empty — full compare() override) ===
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
         """Return empty dict — BFE uses full compare() override."""
         return {}
+
+    @staticmethod
+    def _normalize_output_format(output_format: str) -> str:
+        return "table" if output_format == "text" else output_format
 
     # === Private helpers ===
 
@@ -816,8 +802,6 @@ class BindingFreeEnergyAnalysis(Analysis):
         summary_b: Any,
     ) -> list[Any]:
         """Compare two conditions for all shared (polymer_type, protein_group) pairs.
-
-        Cross-temperature pairs have t-test statistics suppressed.
 
         Parameters
         ----------

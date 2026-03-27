@@ -338,6 +338,8 @@ class ContactsAnalysis(Analysis):
             ctx.output_dir.mkdir(parents=True, exist_ok=True)
             output_file = ctx.output_dir / f"contacts_rep{replicate}.json"
             result.save(output_file)
+            if ctx.result_path is not None:
+                self.save_result(result, ctx.result_path)
             logger.info(f"  Saved: {output_file}")
 
             return result
@@ -378,6 +380,8 @@ class ContactsAnalysis(Analysis):
         rep_range = f"{reps[0]}-{reps[-1]}"
         agg_file = ctx.output_dir / f"contacts_aggregated_reps{rep_range}.json"
         agg_result.save(agg_file)
+        if ctx.result_path is not None:
+            self.save_result(agg_result, ctx.result_path)
         logger.info(f"  Saved aggregated contacts: {agg_file}")
 
         return agg_result
@@ -663,6 +667,12 @@ class ContactsAnalysis(Analysis):
 
         return plots
 
+    def format(self, result: Any, output_format: str = "text") -> str:
+        """Format contacts comparison results without legacy dispatch."""
+        from polyzymd.compare.contacts_formatters import format_contacts_result
+
+        return format_contacts_result(result, format=self._normalize_output_format(output_format))
+
     # === Framework hooks ===
 
     def _deserialize_result(self, path: Path) -> Any:
@@ -681,6 +691,10 @@ class ContactsAnalysis(Analysis):
         from polyzymd.analysis.contacts.aggregator import AggregatedContactResult
 
         return AggregatedContactResult.load(path)
+
+    @staticmethod
+    def _normalize_output_format(output_format: str) -> str:
+        return "table" if output_format == "text" else output_format
 
     # === Private helpers: condition filtering ===
 

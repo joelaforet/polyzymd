@@ -1,16 +1,4 @@
-"""Configuration schema for comparison projects.
-
-This module defines the YAML schema for comparison.yaml files that
-specify which simulation conditions to compare.
-
-The schema has two main sections:
-- analysis_settings: Defines WHAT analyses to run (shared across conditions)
-- comparison_settings: Defines HOW to compare (statistical parameters)
-
-Both sections use a registry-based approach for extensibility. New analysis
-types can be added by registering with AnalysisSettingsRegistry and
-ComparisonSettingsRegistry (see polyzymd.compare.settings).
-"""
+"""Configuration schema for comparison projects."""
 
 from __future__ import annotations
 
@@ -22,14 +10,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.analysis.config import AnalysisDefaults
-from polyzymd.analysis.core.registry import (
-    AnalysisSettingsRegistry,
-    BaseAnalysisSettings,
-    BaseComparisonSettings,
-    BasePlotSettings,
-    ComparisonSettingsRegistry,
-    PlotSettingsRegistry,
-)
+from polyzymd.analysis.core.registry import BasePlotSettings, PlotSettingsRegistry
 
 # Import settings to trigger registration
 from polyzymd.compare.settings import (  # noqa: F401
@@ -100,169 +81,64 @@ class ConditionConfig(BaseModel):
 # ============================================================================
 
 
-class AnalysisSettingsContainer(BaseModel):
-    """Container for analysis settings (WHAT to analyze).
-
-    Uses dynamic attribute access to support any registered analysis type
-    without hardcoding field names.
-    """
+class PluginSettingsContainer(BaseModel):
+    """Container for unified plugin settings keyed by analysis name."""
 
     model_config = {"extra": "allow"}
 
     def __init__(self, **data: Any):
-        """Initialize with dynamic analysis settings.
+        """Initialize plugin settings using discovered analysis classes."""
+        from polyzymd.analyses.discovery import get_analysis
 
-        Parameters
-        ----------
-        **data : Any
-            Analysis settings keyed by analysis type name.
-        """
-        # Parse each setting using the registry
-        parsed_settings: dict[str, BaseAnalysisSettings] = {}
+        parsed_settings: dict[str, Any] = {}
         for key, value in data.items():
             if value is None:
                 continue
             key_lower = key.lower()
-            if AnalysisSettingsRegistry.is_registered(key_lower):
-                settings_class = AnalysisSettingsRegistry.get(key_lower)
-                if isinstance(value, dict):
-                    parsed_settings[key_lower] = settings_class(**value)
-                elif isinstance(value, BaseAnalysisSettings):
-                    parsed_settings[key_lower] = value
-                else:
-                    raise ValueError(
-                        f"Invalid value for {key}: expected dict or {settings_class.__name__}"
-                    )
-            else:
+            try:
+                analysis_cls = get_analysis(key_lower)
+            except KeyError:
                 logger.warning(f"Unknown analysis type '{key}' - skipping")
+                continue
+
+            settings_class = analysis_cls.Settings
+            if isinstance(value, settings_class):
+                parsed_settings[key_lower] = value
+            elif isinstance(value, dict):
+                parsed_settings[key_lower] = settings_class.model_validate(value)
+            elif hasattr(value, "model_dump"):
+                parsed_settings[key_lower] = settings_class.model_validate(value.model_dump())
+            else:
+                raise ValueError(
+                    f"Invalid value for {key}: expected dict or {settings_class.__name__}"
+                )
 
         super().__init__(**parsed_settings)
 
-    def get(self, analysis_type: str) -> BaseAnalysisSettings | None:
-        """Get settings for a specific analysis type.
-
-        Parameters
-        ----------
-        analysis_type : str
-            Analysis type identifier (e.g., "rmsf", "contacts").
-
-        Returns
-        -------
-        BaseAnalysisSettings or None
-            Settings for the analysis type, or None if not configured.
-        """
+    def get(self, analysis_type: str) -> Any | None:
+        """Get settings for a specific analysis type."""
         return getattr(self, analysis_type.lower(), None)
 
-    def get_enabled_analyses(self) -> list[str]:
-        """Get list of enabled analysis types.
-
-        Returns
-        -------
-        list[str]
-            Names of configured analyses (presence implies enabled).
-
-        Notes
-        -----
-        Uses actual model data from comparison.yaml rather than relying on
-        a registry. This makes comparison.yaml the source of truth for which
-        analyses are enabled.
-        """
-        # Use actual model data - if an analysis section exists and has a value, it's enabled
+    def get_enabled_plugins(self) -> list[str]:
+        """Get the configured plugin names."""
         return [key for key, value in self.model_dump().items() if value is not None]
 
     def to_analysis_yaml_dict(self, replicates: list[int], eq_time: str) -> dict[str, Any]:
-        """Convert to analysis.yaml-compatible dictionary.
-
-        Parameters
-        ----------
-        replicates : list[int]
-            Replicate numbers for the analysis.yaml.
-        eq_time : str
-            Equilibration time for the analysis.yaml.
-
-        Returns
-        -------
-        dict[str, Any]
-            Dictionary suitable for writing to analysis.yaml.
-        """
+        """Convert unified plugin settings to analysis.yaml-compatible data."""
         result: dict[str, Any] = {
             "replicates": replicates,
             "defaults": {"equilibration_time": eq_time},
         }
-        for analysis_type in self.get_enabled_analyses():
+        for analysis_type in self.get_enabled_plugins():
             settings = self.get(analysis_type)
             if settings is not None:
-                result[analysis_type] = settings.to_analysis_yaml_dict()
-        return result
-
-
-class ComparisonSettingsContainer(BaseModel):
-    """Container for comparison settings (HOW to compare).
-
-    Uses dynamic attribute access to support any registered comparison type.
-    Each analysis type in analysis_settings must have a corresponding entry
-    here (can be empty dict) to enable comparison.
-    """
-
-    model_config = {"extra": "allow"}
-
-    def __init__(self, **data: Any):
-        """Initialize with dynamic comparison settings.
-
-        Parameters
-        ----------
-        **data : Any
-            Comparison settings keyed by analysis type name.
-        """
-        # Parse each setting using the registry
-        parsed_settings: dict[str, BaseComparisonSettings] = {}
-        for key, value in data.items():
-            if value is None:
-                continue
-            key_lower = key.lower()
-            if ComparisonSettingsRegistry.is_registered(key_lower):
-                settings_class = ComparisonSettingsRegistry.get(key_lower)
-                if isinstance(value, dict):
-                    parsed_settings[key_lower] = settings_class(**value)
-                elif isinstance(value, BaseComparisonSettings):
-                    parsed_settings[key_lower] = value
+                if hasattr(settings, "to_analysis_yaml_dict"):
+                    result[analysis_type] = settings.to_analysis_yaml_dict()
+                elif hasattr(settings, "model_dump"):
+                    result[analysis_type] = settings.model_dump(exclude_none=True)
                 else:
-                    raise ValueError(
-                        f"Invalid value for {key}: expected dict or {settings_class.__name__}"
-                    )
-            else:
-                logger.warning(f"Unknown comparison type '{key}' - skipping")
-
-        super().__init__(**parsed_settings)
-
-    def get(self, analysis_type: str) -> BaseComparisonSettings | None:
-        """Get settings for a specific comparison type.
-
-        Parameters
-        ----------
-        analysis_type : str
-            Analysis type identifier (e.g., "rmsf", "contacts").
-
-        Returns
-        -------
-        BaseComparisonSettings or None
-            Comparison settings, or None if not configured.
-        """
-        return getattr(self, analysis_type.lower(), None)
-
-    def get_enabled_comparisons(self) -> list[str]:
-        """Get list of enabled comparison types.
-
-        Returns
-        -------
-        list[str]
-            Names of configured comparisons.
-        """
-        enabled = []
-        for analysis_type in ComparisonSettingsRegistry.list_available():
-            if self.get(analysis_type) is not None:
-                enabled.append(analysis_type)
-        return enabled
+                    result[analysis_type] = settings
+        return result
 
 
 # ============================================================================
@@ -913,11 +789,10 @@ class ComparisonConfig(BaseModel):
     """Schema for comparison.yaml configuration files.
 
     A comparison config defines multiple simulation conditions to compare,
-    along with analysis settings and comparison-specific parameters.
+    along with unified plugin settings and plot customization.
 
-    The schema follows a three-section pattern:
-    - analysis_settings: WHAT to analyze (shared across conditions)
-    - comparison_settings: HOW to compare (statistical parameters)
+    The schema follows a two-section pattern:
+    - plugins: unified analysis settings keyed by plugin name
     - plot_settings: HOW to visualize (plot customization)
 
     Attributes
@@ -932,10 +807,8 @@ class ComparisonConfig(BaseModel):
         List of conditions to compare
     defaults : AnalysisDefaults
         Default analysis parameters (equilibration_time)
-    analysis_settings : AnalysisSettingsContainer
-        Analysis parameters (WHAT to analyze)
-    comparison_settings : ComparisonSettingsContainer
-        Comparison parameters (HOW to compare)
+    plugins : PluginSettingsContainer
+        Unified plugin parameters for compute, compare, and plot-aware metadata.
     plot_settings : PlotSettings
         Plot customization (HOW to visualize)
 
@@ -946,8 +819,8 @@ class ComparisonConfig(BaseModel):
     "Polymer Stabilization Study"
     >>> for cond in config.conditions:
     ...     print(f"{cond.label}: {cond.config}")
-    >>> print("Enabled analyses:", config.analysis_settings.get_enabled_analyses())
-    >>> rmsf_settings = config.analysis_settings.get("rmsf")
+    >>> print("Enabled analyses:", config.plugins.get_enabled_plugins())
+    >>> rmsf_settings = config.plugins.get("rmsf")
     >>> if rmsf_settings:
     ...     print(f"RMSF selection: {rmsf_settings.selection}")
     """
@@ -957,50 +830,19 @@ class ComparisonConfig(BaseModel):
     control: str | None = None
     conditions: list[ConditionConfig]
     defaults: AnalysisDefaults = Field(default_factory=AnalysisDefaults)
-    analysis_settings: AnalysisSettingsContainer = Field(default_factory=AnalysisSettingsContainer)
-    comparison_settings: ComparisonSettingsContainer = Field(
-        default_factory=ComparisonSettingsContainer
-    )
+    plugins: PluginSettingsContainer = Field(default_factory=PluginSettingsContainer)
     plot_settings: PlotSettings = Field(default_factory=PlotSettings)
     source_path: Path | None = Field(default=None, exclude=True)
 
-    @field_validator("analysis_settings", mode="before")
+    @field_validator("plugins", mode="before")
     @classmethod
-    def parse_analysis_settings(cls, v: Any) -> AnalysisSettingsContainer:
-        """Parse analysis_settings from dict or container."""
+    def parse_plugin_settings(cls, v: Any) -> PluginSettingsContainer:
+        """Parse unified plugin settings from dict or container."""
         if v is None:
-            return AnalysisSettingsContainer()
+            return PluginSettingsContainer()
         if isinstance(v, dict):
-            return AnalysisSettingsContainer(**v)
+            return PluginSettingsContainer(**v)
         return v
-
-    @field_validator("comparison_settings", mode="before")
-    @classmethod
-    def parse_comparison_settings(cls, v: Any) -> ComparisonSettingsContainer:
-        """Parse comparison_settings from dict or container."""
-        if v is None:
-            return ComparisonSettingsContainer()
-        if isinstance(v, dict):
-            return ComparisonSettingsContainer(**v)
-        return v
-
-    @model_validator(mode="after")
-    def validate_comparison_coverage(self) -> "ComparisonConfig":
-        """Validate that comparison_settings covers all analysis_settings.
-
-        Each analysis type in analysis_settings must have a corresponding
-        entry in comparison_settings (can be empty {}).
-        """
-        enabled_analyses = self.analysis_settings.get_enabled_analyses()
-        enabled_comparisons = self.comparison_settings.get_enabled_comparisons()
-
-        missing = set(enabled_analyses) - set(enabled_comparisons)
-        if missing:
-            raise ValueError(
-                f"Missing comparison_settings for: {sorted(missing)}. "
-                f"Add 'comparison_settings.{list(missing)[0]}: {{}}' to enable comparison."
-            )
-        return self
 
     @classmethod
     def from_yaml(cls, path: Path | str) -> "ComparisonConfig":
@@ -1112,16 +954,6 @@ class ComparisonConfig(BaseModel):
             if not cond.config.exists():
                 errors.append(f"Config not found for '{cond.label}': {cond.config}")
 
-        # Check analysis/comparison coverage
-        enabled_analyses = self.analysis_settings.get_enabled_analyses()
-        enabled_comparisons = self.comparison_settings.get_enabled_comparisons()
-        missing = set(enabled_analyses) - set(enabled_comparisons)
-        if missing:
-            errors.append(
-                f"Missing comparison_settings for: {sorted(missing)}. "
-                f"Add comparison_settings entries for these analyses."
-            )
-
         return errors
 
     def generate_analysis_yaml(self, condition: ConditionConfig) -> str:
@@ -1137,7 +969,7 @@ class ComparisonConfig(BaseModel):
         str
             YAML content for the analysis.yaml file.
         """
-        data = self.analysis_settings.to_analysis_yaml_dict(
+        data = self.plugins.to_analysis_yaml_dict(
             replicates=condition.replicates,
             eq_time=self.defaults.equilibration_time,
         )
@@ -1201,12 +1033,11 @@ defaults:
   equilibration_time: "{eq_time}"
 
 # ============================================================================
-# Analysis Settings (WHAT to analyze - applied to all conditions)
+# Plugins (unified analysis settings)
 # ============================================================================
 # Define which analyses to run. Presence of a section enables that analysis.
-# Running `polyzymd compare analyze` will run these for each condition.
 
-analysis_settings:
+plugins:
   # RMSF Analysis
   rmsf:
     selection: "protein and name CA"
@@ -1347,34 +1178,6 @@ analysis_settings:
   #   # protein_partitions:        # same format as contacts.protein_partitions
   #   #   lid_helices:
   #   #     - lid_helix_5
-
-# ============================================================================
-# Comparison Settings (HOW to compare - statistical parameters)
-# ============================================================================
-# Each analysis in analysis_settings MUST have a corresponding entry here.
-# Use empty {{}} for analyses with no comparison-specific parameters.
-
-comparison_settings:
-  rmsf: {{}}  # No comparison-specific parameters
-
-  # secondary_structure: {{}}     # No comparison-specific parameters
-
-  # catalytic_triad: {{}}
-
-  # distances: {{}}
-
-  # contacts:
-  #   fdr_alpha: 0.05           # FDR for Benjamini-Hochberg correction
-  #   min_effect_size: 0.5      # Cohen's d threshold (0.2=small, 0.5=medium, 0.8=large)
-  #   top_residues: 10          # Number of top residues to show in console
-
-  # exposure: {{}}              # No comparison-specific parameters for exposure
-
-  # binding_free_energy:
-  #   fdr_alpha: 0.05           # FDR for Benjamini-Hochberg correction
-
-  # polymer_affinity:
-  #   fdr_alpha: 0.05           # FDR for Benjamini-Hochberg correction
 
 # ============================================================================
 # Plot Settings (HOW to visualize - figure customization)

@@ -377,12 +377,12 @@ class DistancesAnalysis(Analysis):
             source_result_files=[],  # Not tracked in plugin mode
         )
 
-        # Save
-        filename = self._make_aggregated_filename(ctx.replicates, first)
-        result_file = ctx.output_dir / filename
-        ctx.output_dir.mkdir(parents=True, exist_ok=True)
-        agg_result.save(result_file)
-        logger.info(f"Saved aggregated distances to {result_file}")
+        target_path = ctx.result_path
+        if target_path is None:
+            filename = self._make_aggregated_filename(ctx.replicates, first)
+            target_path = ctx.output_dir / filename
+        self.save_result(agg_result, target_path)
+        logger.info(f"Saved aggregated distances to {target_path}")
 
         return agg_result
 
@@ -683,6 +683,12 @@ class DistancesAnalysis(Analysis):
 
         return plots
 
+    def format(self, result: Any, output_format: str = "text") -> str:
+        """Format distance comparison results without legacy dispatch."""
+        from polyzymd.compare.distances_formatters import format_distances_result
+
+        return format_distances_result(result, format=self._normalize_output_format(output_format))
+
     # === Framework hooks ===
 
     def _deserialize_result(self, path: Path) -> Any:
@@ -701,6 +707,10 @@ class DistancesAnalysis(Analysis):
         from polyzymd.analysis.results.distances import DistanceAggregatedResult
 
         return DistanceAggregatedResult.load(path)
+
+    @staticmethod
+    def _normalize_output_format(output_format: str) -> str:
+        return "table" if output_format == "text" else output_format
 
     # === Private helpers ===
 
@@ -816,23 +826,7 @@ class DistancesAnalysis(Analysis):
         replicates: tuple[int, ...] | Sequence[int],
         first_result: Any,
     ) -> str:
-        """Generate filename for aggregated result JSON.
-
-        Matches the naming convention of ``DistanceCalculator`` for backward
-        compatibility.
-
-        Parameters
-        ----------
-        replicates : tuple[int, ...] | Sequence[int]
-            Replicate numbers included.
-        first_result : DistanceResult
-            First per-replicate result (for metadata).
-
-        Returns
-        -------
-        str
-            Filename like ``distances_reps1-5_eq100ns_pbc_align-centroid.json``.
-        """
+        """Backward-compatible filename helper retained for tests."""
         eq_str = f"eq{first_result.equilibration_time:.0f}{first_result.equilibration_unit}"
         reps = sorted(replicates)
         if reps == list(range(reps[0], reps[-1] + 1)):

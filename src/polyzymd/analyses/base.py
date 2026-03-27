@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -118,6 +118,8 @@ class ReplicateContext:
         If ``True``, ignore cached results and recompute.
     settings : BaseModel
         Analysis-specific settings (the analysis's ``Settings`` class).
+    result_path : Path
+        Canonical cache path for the per-replicate result.
     """
 
     condition: Condition
@@ -127,6 +129,7 @@ class ReplicateContext:
     equilibration: str
     recompute: bool
     settings: Any  # BaseModel — the analysis's Settings class
+    result_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -146,6 +149,8 @@ class AggregateContext:
         Equilibration time string.
     settings : BaseModel
         Analysis-specific settings.
+    result_path : Path
+        Canonical cache path for the aggregated result.
     """
 
     condition: Condition
@@ -153,6 +158,7 @@ class AggregateContext:
     output_dir: Path
     equilibration: str
     settings: Any
+    result_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -177,13 +183,15 @@ class ComparisonContext:
         Mapping ``condition_label -> analysis_dir`` (contains ``run_N/``
         and ``aggregated/``).
     results_dir : Path
-        Where to write comparison result JSON.
+        Analysis-specific comparison directory.
     equilibration : str
         Equilibration time string.
     settings : BaseModel
         Analysis-specific settings.
     recompute : bool
         Whether to force recomputation.
+    result_path : Path
+        Canonical cache path for the comparison result.
     """
 
     name: str
@@ -195,6 +203,7 @@ class ComparisonContext:
     equilibration: str
     settings: Any
     recompute: bool
+    result_path: Path | None = None
 
     @property
     def effective_control(self) -> str | None:
@@ -223,6 +232,8 @@ class PlotContext:
         Analysis-specific settings.
     plot_settings : BaseModel | None
         Global plot settings (theme, DPI, format, etc.).
+    comparison_path : Path | None
+        Canonical comparison result path for this analysis.
     """
 
     conditions: list[Condition]
@@ -231,6 +242,7 @@ class PlotContext:
     output_dir: Path
     settings: Any
     plot_settings: Any = None
+    comparison_path: Path | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -462,15 +474,17 @@ class Analysis(ABC):
     name : str
         Unique identifier used in config files and CLI (e.g. ``"rmsf"``).
     Settings : type[BaseModel]
-        Pydantic model for this analysis's settings.  Parsed from the
-        ``plugins:`` section of ``comparison.yaml`` (or from the legacy
-        ``analysis_settings`` / ``comparison_settings`` split).
+        Pydantic model for this analysis's settings.
     aliases : tuple[str, ...]
         Alternative CLI names (e.g. ``("triad",)`` for ``catalytic_triad``).
     dependencies : tuple[str, ...]
         Names of analyses that must run before this one (topological sort).
     min_replicates : int
         Minimum successful replicates required for aggregation.
+    has_compute_stage : bool
+        Whether the framework should run ``compute_replicate()``.
+    has_aggregate_stage : bool
+        Whether the framework should run ``aggregate()``.
 
     Examples
     --------
@@ -534,10 +548,11 @@ class Analysis(ABC):
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
+    has_compute_stage: ClassVar[bool] = True
+    has_aggregate_stage: ClassVar[bool] = True
 
-    # === Required methods ===
+    # === Lifecycle methods ===
 
-    @abstractmethod
     def compute_replicate(
         self,
         ctx: ReplicateContext,
@@ -558,8 +573,13 @@ class Analysis(ABC):
             A Pydantic model with per-replicate results.  The exact type
             is analysis-specific (e.g. ``RMSFResult``).
         """
+        if not type(self).has_compute_stage:
+            return None
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement compute_replicate() "
+            "or set has_compute_stage = False."
+        )
 
-    @abstractmethod
     def aggregate(
         self,
         ctx: AggregateContext,
@@ -581,6 +601,11 @@ class Analysis(ABC):
             Aggregated result, or ``None`` if aggregation is not
             meaningful for this analysis.
         """
+        if not type(self).has_aggregate_stage:
+            return None
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement aggregate() or set has_aggregate_stage = False."
+        )
 
     # === Optional methods (have sensible defaults) ===
 
@@ -694,11 +719,9 @@ class Analysis(ABC):
     def format(self, result: Any, output_format: str = "text") -> str:
         """Format a comparison result for CLI display.
 
-        Override to provide analysis-specific formatted output.  The
-        default implementation delegates to the legacy formatter map
-        (``_FORMATTER_MAP`` in ``compare/cli.py``).  Once all analyses
-        implement ``format()`` natively, the legacy formatter map will
-        be removed.
+        Override to provide analysis-specific formatted output. The
+        default implementation returns JSON when possible and otherwise
+        falls back to ``str(result)``.
 
         Parameters
         ----------
@@ -716,9 +739,7 @@ class Analysis(ABC):
             if hasattr(result, "model_dump_json"):
                 return result.model_dump_json(indent=2)
             return json.dumps(result, indent=2, default=str)
-
-        # Default: fall back to legacy formatters (will be removed after migration)
-        return self._legacy_format(result, output_format)
+        return str(result)
 
     # === Framework hooks (override only if you know what you're doing) ===
 
@@ -742,6 +763,9 @@ class Analysis(ABC):
         """
         if not aggregated_dir.exists():
             return None
+        canonical = self.aggregate_result_path(aggregated_dir)
+        if canonical.exists():
+            return self._deserialize_result(canonical)
         json_files = sorted(aggregated_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
         if not json_files:
             return None
@@ -789,77 +813,36 @@ class Analysis(ABC):
             f"        return MyAggregatedResult.model_validate_json(path.read_text())"
         )
 
-    def _legacy_format(self, result: Any, output_format: str) -> str:
-        """Delegate to the legacy formatter map.
-
-        This is a transitional method.  Once all analyses override
-        ``format()`` directly, this will be removed.
-
-        Parameters
-        ----------
-        result : BaseModel
-            Comparison result.
-        output_format : str
-            Output format string.
-
-        Returns
-        -------
-        str
-            Formatted output.
-        """
-        import importlib
-
-        _FORMATTER_MAP: dict[str, tuple[str, str]] = {
-            "rmsf": ("polyzymd.compare.formatters", "format_result"),
-            "catalytic_triad": (
-                "polyzymd.compare.triad_formatters",
-                "format_triad_result",
-            ),
-            "contacts": (
-                "polyzymd.compare.contacts_formatters",
-                "format_contacts_result",
-            ),
-            "distances": (
-                "polyzymd.compare.distances_formatters",
-                "format_distances_result",
-            ),
-            "exposure": (
-                "polyzymd.compare.exposure_formatters",
-                "format_exposure_result",
-            ),
-            "binding_free_energy": (
-                "polyzymd.compare.binding_free_energy_formatters",
-                "format_bfe_result",
-            ),
-            "polymer_affinity": (
-                "polyzymd.compare.polymer_affinity_formatters",
-                "format_affinity_result",
-            ),
-            "secondary_structure": (
-                "polyzymd.compare.formatters",
-                "format_result",
-            ),
-        }
-
-        entry = _FORMATTER_MAP.get(self.name)
-        if entry is None:
-            # No legacy formatter — return a simple summary
-            if hasattr(result, "model_dump_json"):
-                return result.model_dump_json(indent=2)
-            return str(result)
-
-        mod_path, func_name = entry
-        try:
-            mod = importlib.import_module(mod_path)
-            formatter = getattr(mod, func_name)
-            return formatter(result, format=output_format)
-        except Exception as exc:
-            logger.warning(f"Legacy formatter for {self.name} failed: {exc}")
-            if hasattr(result, "model_dump_json"):
-                return result.model_dump_json(indent=2)
-            return str(result)
-
     # === Utility methods (available to all subclasses) ===
+
+    @staticmethod
+    def replicate_result_path(output_dir: Path) -> Path:
+        """Return the canonical per-replicate cache path."""
+        return output_dir / "result.json"
+
+    @staticmethod
+    def aggregate_result_path(output_dir: Path) -> Path:
+        """Return the canonical aggregated cache path."""
+        return output_dir / "result.json"
+
+    def comparison_result_path(self, results_dir: Path) -> Path:
+        """Return the canonical comparison cache path."""
+        return results_dir / "result.json"
+
+    def figures_output_dir(self, figures_root: Path) -> Path:
+        """Return the analysis-specific figure directory."""
+        return figures_root / self.name
+
+    def save_result(self, result: Any, path: Path) -> Path:
+        """Save a result object to disk using a common contract."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if hasattr(result, "save"):
+            return result.save(path)
+        if hasattr(result, "model_dump_json"):
+            path.write_text(result.model_dump_json(indent=2))
+            return path
+        path.write_text(json.dumps(result, indent=2, default=str))
+        return path
 
     def resolve_output_dir(
         self,
@@ -887,20 +870,11 @@ class Analysis(ABC):
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Validate that subclasses set required class variables."""
         super().__init_subclass__(**kwargs)
-        # Skip validation if the class still has unimplemented abstract methods.
-        # Note: __init_subclass__ fires before ABCMeta sets __abstractmethods__,
-        # so we check whether the required abstract methods are still abstract
-        # by looking for them in the class dict or checking if they were
-        # overridden with concrete implementations.
-        _required_abstracts = ("compute_replicate", "aggregate")
-        has_new_abstract = any(
+        if cls is Analysis:
+            return
+        if any(
             getattr(getattr(cls, name, None), "__isabstractmethod__", False) for name in dir(cls)
-        )
-        still_abstract = any(
-            getattr(getattr(cls, name, None), "__isabstractmethod__", False)
-            for name in _required_abstracts
-        )
-        if still_abstract or has_new_abstract:
+        ):
             return
         if not hasattr(cls, "name") or not isinstance(cls.name, str):
             raise TypeError(
@@ -909,6 +883,11 @@ class Analysis(ABC):
         if not hasattr(cls, "Settings"):
             raise TypeError(
                 f"Analysis subclass {cls.__name__} must define 'Settings' as a ClassVar[type]."
+            )
+        if not cls.has_compute_stage and cls.has_aggregate_stage:
+            raise TypeError(
+                f"Analysis subclass {cls.__name__} cannot set has_aggregate_stage=True "
+                "when has_compute_stage=False."
             )
 
     def __repr__(self) -> str:

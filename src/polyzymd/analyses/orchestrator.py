@@ -98,6 +98,7 @@ def _run_replicates(
     for rep in condition.replicates:
         rep_dir = output_dir / f"run_{rep}"
         rep_dir.mkdir(parents=True, exist_ok=True)
+        result_path = analysis.replicate_result_path(rep_dir)
 
         ctx = ReplicateContext(
             condition=condition,
@@ -107,10 +108,13 @@ def _run_replicates(
             equilibration=equilibration,
             recompute=recompute,
             settings=settings,
+            result_path=result_path,
         )
 
         try:
             result = analysis.compute_replicate(ctx, rep)
+            if result is not None and not result_path.exists():
+                analysis.save_result(result, result_path)
             results.append(result)
             successful.append(rep)
         except FileNotFoundError as e:
@@ -179,14 +183,23 @@ def run_analysis(
         f"Running {analysis.name} for '{condition.label}' (replicates {list(condition.replicates)})"
     )
 
+    if not analysis.has_compute_stage:
+        logger.info(f"{analysis.name}: skipping compute stage for '{condition.label}'")
+        return None
+
     # 1. Compute per-replicate
     results, successful, failed = _run_replicates(
         analysis, condition, settings, equilibration, output_dir, recompute
     )
 
+    if not analysis.has_aggregate_stage:
+        logger.info(f"{analysis.name}: skipping aggregate stage for '{condition.label}'")
+        return None
+
     # 2. Aggregate
     agg_dir = output_dir / "aggregated"
     agg_dir.mkdir(parents=True, exist_ok=True)
+    agg_result_path = analysis.aggregate_result_path(agg_dir)
 
     agg_ctx = AggregateContext(
         condition=condition,
@@ -194,9 +207,12 @@ def run_analysis(
         output_dir=agg_dir,
         equilibration=equilibration,
         settings=settings,
+        result_path=agg_result_path,
     )
 
     aggregated = analysis.aggregate(agg_ctx, results)
+    if aggregated is not None and not agg_result_path.exists():
+        analysis.save_result(aggregated, agg_result_path)
     logger.info(f"  Aggregated {len(results)} replicates for '{condition.label}'")
 
     return aggregated
@@ -353,8 +369,9 @@ def run_comparison(
         raise ValueError(f"{analysis.name}: fewer than 2 conditions succeeded analysis.")
 
     # 4. Compare
-    results_dir = analysis_root.parent / "comparison"
+    results_dir = analysis_root.parent / "comparison" / analysis.name
     results_dir.mkdir(parents=True, exist_ok=True)
+    comparison_result_path = analysis.comparison_result_path(results_dir)
 
     # Resolve effective control
     control_label = config.control
@@ -374,12 +391,15 @@ def run_comparison(
         equilibration=equilibration,
         settings=settings,
         recompute=recompute,
+        result_path=comparison_result_path,
     )
 
     comparison_result = analysis.compare(comp_ctx)
+    if comparison_result is not None:
+        analysis.save_result(comparison_result, comparison_result_path)
 
     # 5. Plot
-    figures_dir = analysis_root.parent / "figures"
+    figures_dir = analysis.figures_output_dir(analysis_root.parent / "figures")
     figures_dir.mkdir(parents=True, exist_ok=True)
 
     plot_ctx = PlotContext(
@@ -389,6 +409,7 @@ def run_comparison(
         output_dir=figures_dir,
         settings=settings,
         plot_settings=getattr(config, "plot_settings", None),
+        comparison_path=comparison_result_path,
     )
 
     plots = analysis.plot(plot_ctx)
@@ -396,6 +417,7 @@ def run_comparison(
     return {
         "aggregated": aggregated_results,
         "comparison": comparison_result,
+        "comparison_path": comparison_result_path,
         "plots": plots,
     }
 
@@ -435,7 +457,7 @@ def run_all_comparisons(
     from polyzymd.analyses.discovery import get_analysis
 
     if analysis_names is None:
-        # Use whatever is enabled in the config's analysis_settings
+        # Use whatever is enabled in the unified plugin config
         analysis_names = _get_enabled_from_config(config)
 
     # Instantiate and sort
@@ -473,15 +495,7 @@ def run_all_comparisons(
 def _resolve_settings(analysis: Analysis, config: "ComparisonConfig") -> Any:
     """Extract analysis-specific settings from the comparison config.
 
-    Tries the new ``plugins:`` section first, then falls back to the
-    legacy ``analysis_settings`` / ``comparison_settings`` split.
-
-    When using the legacy format, both ``analysis_settings.<name>`` and
-    ``comparison_settings.<name>`` are merged into the plugin's unified
-    ``Settings`` class.  This is necessary because the old format split
-    "what to compute" (analysis_settings) from "how to compare"
-    (comparison_settings), but the new plugin system uses a single
-    ``Settings`` model for both.
+    Uses the unified plugin settings from comparison config.
 
     Parameters
     ----------
@@ -495,52 +509,25 @@ def _resolve_settings(analysis: Analysis, config: "ComparisonConfig") -> Any:
     BaseModel
         Settings instance (the analysis's ``Settings`` class).
     """
-    # Future: try config.plugins.get(analysis.name) first
+    plugin_settings = getattr(config, "plugins", None)
+    if plugin_settings is None:
+        return analysis.Settings()
 
-    # Legacy fallback: merge analysis_settings + comparison_settings
-    merged: dict[str, Any] = {}
-
-    legacy_analysis = getattr(config, "analysis_settings", None)
-    if legacy_analysis is not None:
-        settings_obj = legacy_analysis.get(analysis.name)
-        if settings_obj is not None:
-            # Dump to dict, dropping None values so defaults aren't overridden
-            merged.update({k: v for k, v in settings_obj.model_dump().items() if v is not None})
-
-    legacy_comparison = getattr(config, "comparison_settings", None)
-    if legacy_comparison is not None:
-        comp_obj = legacy_comparison.get(analysis.name)
-        if comp_obj is not None:
-            merged.update({k: v for k, v in comp_obj.model_dump().items() if v is not None})
-
-    if merged:
-        # Filter to only fields the plugin's Settings class recognises,
-        # since legacy models may contain extra fields that would cause
-        # Pydantic validation errors.
-        known_fields = set(analysis.Settings.model_fields.keys())
-        filtered = {k: v for k, v in merged.items() if k in known_fields}
-
-        try:
-            return analysis.Settings.model_validate(filtered)
-        except Exception:
-            # If validation fails, log and fall back to passing the legacy
-            # analysis settings through directly (best-effort).
-            logger.warning(
-                f"{analysis.name}: could not construct Settings from legacy config — "
-                f"falling back to raw analysis_settings object"
-            )
-            if legacy_analysis is not None:
-                raw = legacy_analysis.get(analysis.name)
-                if raw is not None:
-                    return raw
-
-    # If nothing found, return default settings
-    return analysis.Settings()
+    settings_obj = plugin_settings.get(analysis.name)
+    if settings_obj is None:
+        return analysis.Settings()
+    if isinstance(settings_obj, analysis.Settings):
+        return settings_obj
+    if isinstance(settings_obj, dict):
+        return analysis.Settings.model_validate(settings_obj)
+    if hasattr(settings_obj, "model_dump"):
+        return analysis.Settings.model_validate(settings_obj.model_dump())
+    return analysis.Settings.model_validate(settings_obj)
 
 
 def _get_enabled_from_config(config: "ComparisonConfig") -> list[str]:
-    """Get list of enabled analysis names from legacy config format."""
-    analysis_settings = getattr(config, "analysis_settings", None)
-    if analysis_settings is not None and hasattr(analysis_settings, "get_enabled_analyses"):
-        return analysis_settings.get_enabled_analyses()
+    """Get list of enabled analysis names from unified plugin config."""
+    plugins = getattr(config, "plugins", None)
+    if plugins is not None and hasattr(plugins, "get_enabled_plugins"):
+        return plugins.get_enabled_plugins()
     return []
