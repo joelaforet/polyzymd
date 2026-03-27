@@ -24,7 +24,7 @@ Ignoring correlation in MD analysis leads to:
 ```
 
 PolyzyMD automatically handles these issues using methods from the
-`polyzymd.analysis.core.autocorrelation` module.
+`polyzymd.analyses.shared.autocorrelation` module.
 
 ---
 
@@ -41,7 +41,7 @@ $$C(\tau) = \frac{\langle (x(t) - \mu)(x(t+\tau) - \mu) \rangle}{\sigma^2}$$
 - $C(\tau) \to 0$ as $\tau \to \infty$ (decorrelation at long times)
 
 ```python
-from polyzymd.analysis.core.autocorrelation import compute_acf
+from polyzymd.analyses.shared.autocorrelation import compute_acf
 
 # Compute ACF from a timeseries (e.g., RMSD, distance)
 acf_result = compute_acf(
@@ -65,7 +65,7 @@ method for noisy data):
 $$\tau = \int_0^{\infty} C(t) \, dt$$
 
 ```python
-from polyzymd.analysis.core.autocorrelation import estimate_correlation_time
+from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
 
 tau_result = estimate_correlation_time(
     acf_result,
@@ -238,7 +238,7 @@ correlated frames would systematically underestimate protein flexibility.
 Always examine the correlation time relative to your trajectory length:
 
 ```python
-from polyzymd.analysis.core.autocorrelation import (
+from polyzymd.analyses.shared.autocorrelation import (
     compute_acf,
     estimate_correlation_time,
     check_statistical_reliability,
@@ -332,7 +332,7 @@ Additional references:
 
 ## API Reference
 
-The statistical functions are available in `polyzymd.analysis.core.autocorrelation`:
+The statistical functions are available in `polyzymd.analyses.shared.autocorrelation`:
 
 | Function | Description |
 |----------|-------------|

@@ -82,13 +82,13 @@ polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns
 ```python
 from pathlib import Path
 from polyzymd.config import SimulationConfig
-from polyzymd.analysis.contacts import ContactAnalyzer
+from polyzymd.analyses.contacts import ParallelContactAnalyzer
 
 # Load simulation config
 config = SimulationConfig.from_yaml("config.yaml")
 
 # Create analyzer with parameters
-analyzer = ContactAnalyzer(
+analyzer = ParallelContactAnalyzer(
     config=config,
     replicate=1,
     equilibration_time="10ns",
@@ -196,15 +196,15 @@ polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
 ```python
 from pathlib import Path
 from polyzymd.config import SimulationConfig
-from polyzymd.analysis.contacts import ContactAnalyzer
-from polyzymd.analysis.contacts.aggregation import aggregate_contact_results
+from polyzymd.analyses.contacts import ParallelContactAnalyzer
+from polyzymd.analyses._contacts_aggregator import aggregate_contact_results
 
 config = SimulationConfig.from_yaml("config.yaml")
 
 # Analyze multiple replicates
 results = []
 for rep in [1, 2, 3]:
-    analyzer = ContactAnalyzer(
+    analyzer = ParallelContactAnalyzer(
         config=config,
         replicate=rep,
         equilibration_time="10ns",
@@ -277,11 +277,11 @@ polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns --residence-times
 ````{tab-item} Python
 ```python
 from polyzymd.config import SimulationConfig
-from polyzymd.analysis.contacts import ContactAnalyzer
+from polyzymd.analyses.contacts import ParallelContactAnalyzer
 
 config = SimulationConfig.from_yaml("config.yaml")
 
-analyzer = ContactAnalyzer(
+analyzer = ParallelContactAnalyzer(
     config=config,
     replicate=1,
     equilibration_time="10ns",
@@ -341,14 +341,14 @@ polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns --residence-times
 ````{tab-item} Python
 ```python
 from polyzymd.config import SimulationConfig
-from polyzymd.analysis.contacts import ContactAnalyzer
-from polyzymd.analysis.contacts.aggregation import aggregate_contact_results
+from polyzymd.analyses.contacts import ParallelContactAnalyzer
+from polyzymd.analyses._contacts_aggregator import aggregate_contact_results
 
 config = SimulationConfig.from_yaml("config.yaml")
 
 results = []
 for rep in [1, 2, 3]:
-    analyzer = ContactAnalyzer(
+    analyzer = ParallelContactAnalyzer(
         config=config,
         replicate=rep,
         equilibration_time="10ns",
@@ -477,12 +477,12 @@ polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns \
 ````{tab-item} Python
 ```python
 from polyzymd.config import SimulationConfig
-from polyzymd.analysis.contacts import ContactAnalyzer
+from polyzymd.analyses.contacts import ParallelContactAnalyzer
 
 config = SimulationConfig.from_yaml("config.yaml")
 
 # Analyze only SBMA monomers
-sbma_analyzer = ContactAnalyzer(
+sbma_analyzer = ParallelContactAnalyzer(
     config=config,
     replicate=1,
     equilibration_time="10ns",
@@ -491,7 +491,7 @@ sbma_analyzer = ContactAnalyzer(
 sbma_result = sbma_analyzer.analyze()
 
 # Analyze only EGMA monomers
-egma_analyzer = ContactAnalyzer(
+egma_analyzer = ParallelContactAnalyzer(
     config=config,
     replicate=1,
     equilibration_time="10ns",
@@ -549,12 +549,12 @@ polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns \
 ````{tab-item} Python
 ```python
 from polyzymd.config import SimulationConfig
-from polyzymd.analysis.contacts import ContactAnalyzer
+from polyzymd.analyses.contacts import ParallelContactAnalyzer
 
 config = SimulationConfig.from_yaml("config.yaml")
 
 # Analyze contacts with aromatic residues only
-aromatic_analyzer = ContactAnalyzer(
+aromatic_analyzer = ParallelContactAnalyzer(
     config=config,
     replicate=1,
     equilibration_time="10ns",
@@ -563,7 +563,7 @@ aromatic_analyzer = ContactAnalyzer(
 aromatic_result = aromatic_analyzer.analyze()
 
 # Analyze contacts with active site region
-active_site_analyzer = ContactAnalyzer(
+active_site_analyzer = ParallelContactAnalyzer(
     config=config,
     replicate=1,
     equilibration_time="10ns",
@@ -593,7 +593,7 @@ The `interaction_matrix()` method computes contact metrics for each combination
 of polymer type and protein amino acid class:
 
 ```python
-from polyzymd.analysis.contacts.results import ContactResult
+from polyzymd.analyses._contacts_results import ContactResult
 
 result = ContactResult.load("analysis/contacts/contacts_rep1.json")
 

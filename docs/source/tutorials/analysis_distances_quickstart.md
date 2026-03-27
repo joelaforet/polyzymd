@@ -163,7 +163,7 @@ Use `DistanceCalculator` for programmatic analysis:
 
 ```python
 from polyzymd.config.schema import SimulationConfig
-from polyzymd.analysis import DistanceCalculator
+from polyzymd.analyses.distances import DistanceCalculator
 
 # Load configuration
 config = SimulationConfig.from_yaml("config.yaml")
@@ -411,7 +411,7 @@ Plots are saved to `<projects_directory>/plots/distances/`.
 Use the plotting functions for custom figures:
 
 ```python
-from polyzymd.analysis.distances import (
+from polyzymd.analyses._distances_plotting import (
     plot_distance_histogram,
     plot_distance_timeseries,
     plot_distance_comparison,
@@ -526,7 +526,7 @@ distances:
 
 ````{tab-item} Python
 ```python
-from polyzymd.analysis import DistanceCalculator
+from polyzymd.analyses.distances import DistanceCalculator
 
 # PBC enabled by default
 calc = DistanceCalculator(
@@ -589,8 +589,8 @@ distances:
 
 ````{tab-item} Python
 ```python
-from polyzymd.analysis import DistanceCalculator
-from polyzymd.analysis.core.alignment import AlignmentConfig
+from polyzymd.analyses.distances import DistanceCalculator
+from polyzymd.analyses.shared.alignment import AlignmentConfig
 
 # Default: align to centroid using CA atoms
 calc = DistanceCalculator(

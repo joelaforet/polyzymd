@@ -338,11 +338,11 @@ polyzymd compare run exposure -f comparison.yaml
 
 ```python
 from pathlib import Path
-from polyzymd.analysis.sasa.trajectory import SASATrajectoryResult
-from polyzymd.analysis.contacts.results import ContactResult
-from polyzymd.analysis.exposure.enrichment import compute_chaperone_enrichment
-from polyzymd.analysis.exposure.dynamics import analyze_exposure_dynamics
-from polyzymd.analysis.exposure.config import ExposureConfig
+from polyzymd.analyses._sasa_trajectory import SASATrajectoryResult
+from polyzymd.analyses._contacts_results import ContactResult
+from polyzymd.analyses._exposure_enrichment import compute_chaperone_enrichment
+from polyzymd.analyses._exposure_dynamics import analyze_exposure_dynamics
+from polyzymd.analyses._exposure_config import ExposureConfig
 
 # Load per-frame SASA (computed previously)
 sasa_result = SASATrajectoryResult.load("analysis/rep1/sasa/")

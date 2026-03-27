@@ -182,8 +182,8 @@ Then compare the JSON outputs manually or load both in Python for analysis.
 Use `interaction_matrix()` to get a complete polymer×AA-class breakdown:
 
 ```python
-from polyzymd.analysis.contacts.results import ContactResult
-from polyzymd.analysis.common.groupings import CustomGrouping
+from polyzymd.analyses._contacts_results import ContactResult
+from polyzymd.analyses.shared.groupings import CustomGrouping
 
 # Load a contacts result (analyzed with all polymer types)
 result = ContactResult.load("analysis/contacts/contacts_rep1.json")
@@ -301,7 +301,7 @@ JSON result in Python.
 Use `coverage_by_group()` for a complete breakdown:
 
 ```python
-from polyzymd.analysis.contacts.results import ContactResult
+from polyzymd.analyses._contacts_results import ContactResult
 
 result = ContactResult.load("analysis/contacts/contacts_rep1.json")
 
@@ -347,7 +347,7 @@ PolyzyMD uses `ProteinAAClassification` which groups amino acids as:
 Define your own residue groupings (Python only):
 
 ```python
-from polyzymd.analysis.common.groupings import CustomGrouping
+from polyzymd.analyses.shared.groupings import CustomGrouping
 
 # Custom grouping for hydrophobicity
 hydrophobicity_grouping = CustomGrouping.from_groups({
@@ -425,7 +425,7 @@ Contact Analysis Complete
 Use `residence_time_summary()` for detailed statistics:
 
 ```python
-from polyzymd.analysis.contacts.results import ContactResult
+from polyzymd.analyses._contacts_results import ContactResult
 
 result = ContactResult.load("analysis/contacts/contacts_rep1.json")
 
@@ -569,7 +569,7 @@ Then compare JSON outputs in Python or manually.
 Use `ProteinResiduesNearReference` for proximity-based selection:
 
 ```python
-from polyzymd.analysis.common.selectors import ProteinResiduesNearReference
+from polyzymd.analyses.shared.selectors import ProteinResiduesNearReference
 
 # Select protein residues within 8 A of the catalytic triad
 active_site_selector = ProteinResiduesNearReference(
@@ -578,9 +578,9 @@ active_site_selector = ProteinResiduesNearReference(
 )
 
 # Use in analysis (programmatic API)
-from polyzymd.analysis.contacts import ContactAnalyzer
+from polyzymd.analyses.contacts import ParallelContactAnalyzer
 
-analyzer = ContactAnalyzer(
+analyzer = ParallelContactAnalyzer(
     universe=universe,
     protein_selector=active_site_selector,
     # ... other parameters
@@ -595,7 +595,7 @@ analyzer = ContactAnalyzer(
 After running both analyses, compare the results:
 
 ```python
-from polyzymd.analysis.contacts.results import ContactResult
+from polyzymd.analyses._contacts_results import ContactResult
 
 active_site = ContactResult.load("analysis/contacts_active_site/contacts_rep1.json")
 surface = ContactResult.load("analysis/contacts_surface/contacts_rep1.json")
@@ -634,13 +634,13 @@ This requires combining multiple selection criteria.
 ### Python Approach: CompositeSelector
 
 ```python
-from polyzymd.analysis.common.selectors import (
+from polyzymd.analyses.shared.selectors import (
     PolymerResiduesByType,
     ProteinResiduesByGroup,
     ProteinResiduesNearReference,
     CompositeSelector,
 )
-from polyzymd.analysis.common.groupings import ProteinAAClassification
+from polyzymd.analyses.shared.groupings import ProteinAAClassification
 
 # 1. Polymer selector: zwitterionic monomers only
 polymer_selector = PolymerResiduesByType(
@@ -666,9 +666,9 @@ aromatic_near_active_site = CompositeSelector(
 )
 
 # 5. Use in analysis
-from polyzymd.analysis.contacts import ContactAnalyzer
+from polyzymd.analyses.contacts import ParallelContactAnalyzer
 
-analyzer = ContactAnalyzer(
+analyzer = ParallelContactAnalyzer(
     universe=universe,
     polymer_selector=polymer_selector,
     protein_selector=aromatic_near_active_site,
@@ -727,7 +727,7 @@ polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
 
 ````{tab-item} Python
 ```python
-from polyzymd.analysis.common.selectors import ProteinResiduesNearReference
+from polyzymd.analyses.shared.selectors import ProteinResiduesNearReference
 
 # Select residues NOT near the active site (surface only)
 surface_residues = ProteinResiduesNearReference(
@@ -737,9 +737,9 @@ surface_residues = ProteinResiduesNearReference(
 )
 
 # Use in analysis
-from polyzymd.analysis.contacts import ContactAnalyzer
+from polyzymd.analyses.contacts import ParallelContactAnalyzer
 
-analyzer = ContactAnalyzer(
+analyzer = ParallelContactAnalyzer(
     universe=universe,
     protein_selector=surface_residues,
     cutoff=4.5,
@@ -819,9 +819,9 @@ polymer type prefers (+) or avoids (-).
 
 ````{tab-item} Python
 ```python
-from polyzymd.analysis.contacts import ContactResult
-from polyzymd.analysis.contacts.binding_preference import compute_binding_preference
-from polyzymd.analysis.contacts.surface_exposure import SurfaceExposureFilter
+from polyzymd.analyses._contacts_results import ContactResult
+from polyzymd.analyses._contacts_binding_preference import compute_binding_preference
+from polyzymd.analyses._contacts_surface_exposure import SurfaceExposureFilter
 
 # Load contacts and compute surface exposure
 contacts = ContactResult.load("analysis/contacts/contacts_rep1.json")
@@ -919,10 +919,10 @@ SBM (SBMA):
 
 ```python
 # Results
-from polyzymd.analysis.contacts.results import ContactResult
+from polyzymd.analyses._contacts_results import ContactResult
 
 # Selectors
-from polyzymd.analysis.common.selectors import (
+from polyzymd.analyses.shared.selectors import (
     PolymerResiduesByType,
     ProteinResiduesByGroup,
     ProteinResiduesNearReference,
@@ -931,7 +931,7 @@ from polyzymd.analysis.common.selectors import (
 )
 
 # Groupings
-from polyzymd.analysis.common.groupings import (
+from polyzymd.analyses.shared.groupings import (
     ProteinAAClassification,
     CustomGrouping,
 )

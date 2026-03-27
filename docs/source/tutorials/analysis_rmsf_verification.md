@@ -33,12 +33,12 @@ $$
 
 The RMSF and RMSD calculations live in a single file:
 
-- **RMSF:** [`_compute_rmsf()`](https://github.com/joelaforet/polyzymd/blob/feature/analysis-module/src/polyzymd/analysis/rmsf/calculator.py#L633-L683)
-  in `src/polyzymd/analysis/rmsf/calculator.py` (lines 633--683).
+- **RMSF:** [`_compute_rmsf()`](https://github.com/joelaforet/polyzymd/blob/feature/analysis-module/src/polyzymd/analyses/_calculator_rmsf.py#L633-L683)
+  in `src/polyzymd/analyses/_calculator_rmsf.py` (lines 633--683).
   Two-pass algorithm: (1) compute average positions from selected frames
   (or use external reference), (2) accumulate squared deviations.
 
-- **RMSD:** [`_compute_rmsd_timeseries()`](https://github.com/joelaforet/polyzymd/blob/feature/analysis-module/src/polyzymd/analysis/rmsf/calculator.py#L613-L631)
+- **RMSD:** [`_compute_rmsd_timeseries()`](https://github.com/joelaforet/polyzymd/blob/feature/analysis-module/src/polyzymd/analyses/_calculator_rmsf.py#L613-L631)
   in the same file (lines 613--631). Used internally for autocorrelation
   analysis, not exposed to users.
 

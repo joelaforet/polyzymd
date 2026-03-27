@@ -135,7 +135,7 @@ roles separate helps maintain both code clarity and scientific interpretation.
 | add or validate config fields | `src/polyzymd/config/` |
 | change build behavior | `src/polyzymd/builders/` |
 | change run or restart behavior | `src/polyzymd/simulation/` and `src/polyzymd/workflow/` |
-| add an analysis type | `src/polyzymd/analyses/` (plugin) wrapping `src/polyzymd/analysis/` (calculator) |
+| add an analysis type | `src/polyzymd/analyses/` (plugin, with private `_calculator_*.py` modules for computation) |
 | add comparison statistics | `src/polyzymd/compare/` |
 | add or change CLI commands | `src/polyzymd/cli/` |
 

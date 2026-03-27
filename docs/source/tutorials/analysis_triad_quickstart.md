@@ -229,7 +229,7 @@ workflows:
 
 ```python
 from polyzymd.compare.config import ComparisonConfig
-from polyzymd.analysis.triad import CatalyticTriadAnalyzer
+from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer
 from polyzymd.config.loader import load_config
 
 # Load comparison configuration

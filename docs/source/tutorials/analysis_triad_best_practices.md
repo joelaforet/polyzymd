@@ -605,7 +605,7 @@ system should be equilibrated before triad analysis.
 ```python
 from polyzymd.config.loader import load_config
 from polyzymd.compare.config import ComparisonConfig
-from polyzymd.analysis.triad import CatalyticTriadAnalyzer
+from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer
 
 # Load configs
 comp_config = ComparisonConfig.from_yaml("comparison.yaml")
@@ -649,7 +649,7 @@ if result.sim_contact_correlation_time:
 ### Loading Saved Results
 
 ```python
-from polyzymd.analysis.results.triad import TriadResult, TriadAggregatedResult
+from polyzymd.analyses._results_triad import TriadResult, TriadAggregatedResult
 
 # Load single replicate result
 result = TriadResult.load("analysis/triad/run_1/triad_LipA_eq100ns.json")
