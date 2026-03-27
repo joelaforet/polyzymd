@@ -51,10 +51,10 @@ if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
     from numpy.typing import NDArray
 
-    from polyzymd.analysis.contacts.aggregator import (
+    from polyzymd.analyses._contacts_aggregator import (
         AggregatedContactResult,
     )
-    from polyzymd.analysis.contacts.results import ContactResult
+    from polyzymd.analyses._contacts_results import ContactResult
     from polyzymd.compare.results.contacts import ContactsComparisonResult
 
 logger = logging.getLogger("polyzymd.analyses.contacts")
@@ -248,7 +248,7 @@ class ParallelContactAnalyzer:
         ContactResult
             Complete contact analysis results.
         """
-        from polyzymd.analysis.contacts.results import (
+        from polyzymd.analyses._contacts_results import (
             ContactResult,
             PolymerSegmentContacts,
             ResidueContactData,
@@ -703,7 +703,7 @@ class ContactsAnalysis(Analysis):
         AggregatedContactResult
             Aggregated result with per-residue statistics.
         """
-        from polyzymd.analysis.contacts.aggregator import aggregate_contact_results
+        from polyzymd.analyses._contacts_aggregator import aggregate_contact_results
 
         logger.info(f"  Aggregating {len(results)} replicates...")
         agg_result = aggregate_contact_results(list(results))
@@ -1022,7 +1022,7 @@ class ContactsAnalysis(Analysis):
         AggregatedContactResult
             Loaded result.
         """
-        from polyzymd.analysis.contacts.aggregator import AggregatedContactResult
+        from polyzymd.analyses._contacts_aggregator import AggregatedContactResult
 
         return AggregatedContactResult.load(path)
 
@@ -1605,8 +1605,8 @@ class ContactsAnalysis(Analysis):
             extract_polymer_composition,
             resolve_protein_groups_from_surface_exposure,
         )
-        from polyzymd.analysis.contacts.results import ContactResult
-        from polyzymd.analysis.contacts.surface_exposure import SurfaceExposureFilter
+        from polyzymd.analyses._contacts_results import ContactResult
+        from polyzymd.analyses._contacts_surface_exposure import SurfaceExposureFilter
 
         threshold = getattr(settings, "surface_exposure_threshold", 0.2)
         include_defaults = getattr(settings, "include_default_aa_groups", True)

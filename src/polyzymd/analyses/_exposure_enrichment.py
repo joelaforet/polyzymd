@@ -48,7 +48,7 @@ from polyzymd.analysis.results.base import BaseAnalysisResult
 
 if TYPE_CHECKING:
     from polyzymd.analyses._sasa_trajectory import SASATrajectoryResult
-    from polyzymd.analysis.contacts.results import ContactResult
+    from polyzymd.analyses._contacts_results import ContactResult
 
 logger = logging.getLogger(__name__)
 

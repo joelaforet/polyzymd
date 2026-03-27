@@ -198,8 +198,8 @@ def compute_condition_binding_preference(
         extract_polymer_composition,
         resolve_protein_groups_from_surface_exposure,
     )
-    from polyzymd.analysis.contacts.results import ContactResult
-    from polyzymd.analysis.contacts.surface_exposure import SurfaceExposureFilter
+    from polyzymd.analyses._contacts_results import ContactResult
+    from polyzymd.analyses._contacts_surface_exposure import SurfaceExposureFilter
 
     # --- Step 1: Compute surface exposure ---
     try:

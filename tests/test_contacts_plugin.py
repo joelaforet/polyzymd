@@ -346,7 +346,7 @@ class TestAggregate:
         mock_agg = _make_mock_agg_result(n_replicates=3)
 
         with patch(
-            "polyzymd.analysis.contacts.aggregator.aggregate_contact_results",
+            "polyzymd.analyses._contacts_aggregator.aggregate_contact_results",
             return_value=mock_agg,
         ) as mock_fn:
             result = analysis.aggregate(ctx, mock_results)
@@ -382,7 +382,7 @@ class TestAggregate:
         mock_agg = _make_mock_agg_result(n_replicates=2)
 
         with patch(
-            "polyzymd.analysis.contacts.aggregator.aggregate_contact_results",
+            "polyzymd.analyses._contacts_aggregator.aggregate_contact_results",
             return_value=mock_agg,
         ):
             analysis.aggregate(ctx, mock_results)
