@@ -27,7 +27,6 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.rmsf import RMSFAnalysis, RMSFSettings
 
-
 # ============================================================================
 # Fixtures
 # ============================================================================
@@ -161,14 +160,79 @@ class TestRMSFSettings:
 
 
 class TestComputeReplicate:
-    """Test RMSFAnalysis.compute_replicate delegates to RMSFCalculator."""
+    """Test RMSFAnalysis.compute_replicate performs inline RMSF computation."""
 
-    @patch("polyzymd.analysis.rmsf.calculator.RMSFCalculator")
-    def test_delegates_to_calculator(self, MockCalc, rmsf_analysis, condition, tmp_path):
-        mock_result = _make_mock_rmsf_result(replicate=1)
-        mock_calc_instance = MagicMock()
-        mock_calc_instance.compute.return_value = mock_result
-        MockCalc.return_value = mock_calc_instance
+    def _make_mock_universe(self, n_frames: int = 200, n_atoms: int = 5):
+        """Create a mock MDAnalysis Universe for RMSF tests."""
+        import numpy as np
+
+        mock_u = MagicMock()
+
+        # Mock trajectory
+        mock_traj = MagicMock()
+        mock_traj.__len__ = MagicMock(return_value=n_frames)
+        # Make trajectory iterable (for slicing and iteration)
+        mock_frames = []
+        for i in range(n_frames):
+            ts = MagicMock()
+            ts.frame = i
+            mock_frames.append(ts)
+        mock_traj.__getitem__ = MagicMock(
+            side_effect=lambda x: mock_frames[x] if isinstance(x, int) else mock_frames
+        )
+        mock_traj.__iter__ = MagicMock(return_value=iter(mock_frames))
+        mock_u.trajectory = mock_traj
+
+        # Mock atom selection
+        mock_atoms = MagicMock()
+        mock_atoms.__len__ = MagicMock(return_value=n_atoms)
+        # Each call to .positions returns random positions
+        mock_atoms.positions = np.random.rand(n_atoms, 3).astype(np.float32)
+        mock_atoms.indices = np.arange(n_atoms)
+
+        # Mock residues
+        mock_residues = []
+        for i in range(n_atoms):
+            res = MagicMock()
+            res.resid = i + 1
+            res.resname = "ALA"
+            mock_residues.append(res)
+        mock_atoms.residues = mock_residues
+
+        mock_u.select_atoms = MagicMock(return_value=mock_atoms)
+
+        return mock_u
+
+    @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
+    @patch("polyzymd.analyses.rmsf.validate_equilibration_time", return_value=(True, ""))
+    @patch("polyzymd.analyses.rmsf.validate_config_hash")
+    @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
+    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
+    def test_computes_rmsf_inline(
+        self,
+        MockLoader,
+        mock_hash,
+        mock_validate_hash,
+        mock_eq_validate,
+        mock_align,
+        rmsf_analysis,
+        condition,
+        tmp_path,
+    ):
+        """Test that compute_replicate performs RMSF calculation inline."""
+        import numpy as np
+
+        # Setup mock loader
+        mock_loader_inst = MagicMock()
+        MockLoader.return_value = mock_loader_inst
+
+        mock_u = self._make_mock_universe(n_frames=200, n_atoms=5)
+        mock_loader_inst.load_universe.return_value = mock_u
+
+        traj_info = MagicMock()
+        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
+        mock_loader_inst.get_trajectory_info.return_value = traj_info
+        mock_loader_inst.get_timestep.return_value = 10.0  # 10 ps
 
         settings = RMSFSettings()
         ctx = ReplicateContext(
@@ -181,32 +245,59 @@ class TestComputeReplicate:
             settings=settings,
         )
 
-        result = rmsf_analysis.compute_replicate(ctx, 1)
+        # Patch _compute_rmsf and _compute_rmsd_timeseries to avoid real iteration
+        with (
+            patch(
+                "polyzymd.analyses.rmsf._compute_rmsf",
+                return_value=np.array([1.0, 1.5, 2.0, 1.2, 1.8]),
+            ),
+            patch(
+                "polyzymd.analyses.rmsf._compute_rmsd_timeseries", return_value=np.random.rand(100)
+            ),
+            patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"),
+        ):
+            result = rmsf_analysis.compute_replicate(ctx, 1)
 
-        assert result is mock_result
-        MockCalc.assert_called_once_with(
-            config=condition.sim_config,
-            selection="protein and name CA",
-            equilibration="10ns",
-            reference_mode="centroid",
-            reference_frame=None,
-            reference_file=None,
-        )
-        mock_calc_instance.compute.assert_called_once_with(
-            replicate=1,
-            save=True,
-            output_dir=tmp_path / "run_1",
-            recompute=False,
-        )
+        # Verify result has RMSF data
+        assert result.replicate == 1
+        assert len(result.rmsf_values) == 5
+        assert result.selection_string == "protein and name CA"
+        # Verify the loader was used (not the old calculator)
+        MockLoader.assert_called_once_with(condition.sim_config)
+        mock_loader_inst.load_universe.assert_called_once_with(1)
 
-    @patch("polyzymd.analysis.rmsf.calculator.RMSFCalculator")
-    def test_passes_custom_settings(self, MockCalc, rmsf_analysis, condition, tmp_path):
-        MockCalc.return_value.compute.return_value = _make_mock_rmsf_result(1)
+    @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
+    @patch("polyzymd.analyses.rmsf.validate_equilibration_time", return_value=(True, ""))
+    @patch("polyzymd.analyses.rmsf.validate_config_hash")
+    @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
+    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
+    def test_passes_custom_settings(
+        self,
+        MockLoader,
+        mock_hash,
+        mock_validate_hash,
+        mock_eq_validate,
+        mock_align,
+        rmsf_analysis,
+        condition,
+        tmp_path,
+    ):
+        """Custom settings (selection, reference_mode) are used by the inline computation."""
+        import numpy as np
+
+        mock_loader_inst = MagicMock()
+        MockLoader.return_value = mock_loader_inst
+        mock_u = self._make_mock_universe(n_frames=200, n_atoms=5)
+        mock_loader_inst.load_universe.return_value = mock_u
+
+        traj_info = MagicMock()
+        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
+        mock_loader_inst.get_trajectory_info.return_value = traj_info
+        mock_loader_inst.get_timestep.return_value = 10.0
 
         settings = RMSFSettings(
             selection="backbone",
-            reference_mode="frame",
-            reference_frame=100,
+            reference_mode="average",
         )
         ctx = ReplicateContext(
             condition=condition,
@@ -218,27 +309,54 @@ class TestComputeReplicate:
             settings=settings,
         )
 
-        rmsf_analysis.compute_replicate(ctx, 2)
+        with (
+            patch(
+                "polyzymd.analyses.rmsf._compute_rmsf",
+                return_value=np.array([1.0, 1.5, 2.0, 1.2, 1.8]),
+            ),
+            patch(
+                "polyzymd.analyses.rmsf._compute_rmsd_timeseries", return_value=np.random.rand(100)
+            ),
+            patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"),
+        ):
+            result = rmsf_analysis.compute_replicate(ctx, 2)
 
-        MockCalc.assert_called_once_with(
-            config=condition.sim_config,
-            selection="backbone",
-            equilibration="5ns",
-            reference_mode="frame",
-            reference_frame=100,
-            reference_file=None,
-        )
-        MockCalc.return_value.compute.assert_called_once_with(
-            replicate=2,
-            save=True,
-            output_dir=tmp_path / "run_2",
-            recompute=True,
-        )
+        # Verify custom selection was used
+        mock_u.select_atoms.assert_called_with("backbone")
+        # Verify alignment was called with average mode
+        mock_align.assert_called_once()
+        call_args = mock_align.call_args
+        alignment_config = call_args[0][1]
+        assert alignment_config.reference_mode == "average"
 
-    @patch("polyzymd.analysis.rmsf.calculator.RMSFCalculator")
-    def test_handles_legacy_settings(self, MockCalc, rmsf_analysis, condition, tmp_path):
-        """Legacy RMSFAnalysisSettings from old config should work via getattr."""
-        MockCalc.return_value.compute.return_value = _make_mock_rmsf_result(1)
+    @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
+    @patch("polyzymd.analyses.rmsf.validate_equilibration_time", return_value=(True, ""))
+    @patch("polyzymd.analyses.rmsf.validate_config_hash")
+    @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
+    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
+    def test_handles_legacy_settings(
+        self,
+        MockLoader,
+        mock_hash,
+        mock_validate_hash,
+        mock_eq_validate,
+        mock_align,
+        rmsf_analysis,
+        condition,
+        tmp_path,
+    ):
+        """Legacy settings objects (e.g. MagicMock with attrs) should work via getattr."""
+        import numpy as np
+
+        mock_loader_inst = MagicMock()
+        MockLoader.return_value = mock_loader_inst
+        mock_u = self._make_mock_universe(n_frames=200, n_atoms=5)
+        mock_loader_inst.load_universe.return_value = mock_u
+
+        traj_info = MagicMock()
+        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
+        mock_loader_inst.get_trajectory_info.return_value = traj_info
+        mock_loader_inst.get_timestep.return_value = 10.0
 
         # Simulate legacy settings with same attributes
         legacy_settings = MagicMock()
@@ -246,6 +364,8 @@ class TestComputeReplicate:
         legacy_settings.reference_mode = "average"
         legacy_settings.reference_frame = None
         legacy_settings.reference_file = None
+        legacy_settings.alignment_selection = "protein and name CA"
+        legacy_settings.centroid_selection = "protein"
 
         ctx = ReplicateContext(
             condition=condition,
@@ -257,16 +377,21 @@ class TestComputeReplicate:
             settings=legacy_settings,
         )
 
-        rmsf_analysis.compute_replicate(ctx, 1)
+        with (
+            patch(
+                "polyzymd.analyses.rmsf._compute_rmsf",
+                return_value=np.array([1.0, 1.5, 2.0, 1.2, 1.8]),
+            ),
+            patch(
+                "polyzymd.analyses.rmsf._compute_rmsd_timeseries", return_value=np.random.rand(100)
+            ),
+            patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"),
+        ):
+            result = rmsf_analysis.compute_replicate(ctx, 1)
 
-        MockCalc.assert_called_once_with(
-            config=condition.sim_config,
-            selection="protein and name CA",
-            equilibration="10ns",
-            reference_mode="average",
-            reference_frame=None,
-            reference_file=None,
-        )
+        # Verify it completed successfully with legacy settings
+        assert result.replicate == 1
+        assert result.selection_string == "protein and name CA"
 
 
 # ============================================================================
@@ -559,23 +684,93 @@ class TestRMSFLifecycle:
     through the RMSF plugin. Heavy deps are mocked.
     """
 
-    @patch("polyzymd.analysis.rmsf.calculator.RMSFCalculator")
-    def test_run_analysis_lifecycle(self, MockCalc, rmsf_analysis, condition, tmp_path):
+    @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
+    @patch("polyzymd.analyses.rmsf.validate_equilibration_time", return_value=(True, ""))
+    @patch("polyzymd.analyses.rmsf.validate_config_hash")
+    @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
+    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
+    def test_run_analysis_lifecycle(
+        self,
+        MockLoader,
+        mock_hash,
+        mock_validate_hash,
+        mock_eq_validate,
+        mock_align,
+        rmsf_analysis,
+        condition,
+        tmp_path,
+    ):
         """Test compute_replicate -> aggregate via run_analysis()."""
+        import numpy as np
+
         from polyzymd.analyses.orchestrator import run_analysis
 
-        # Create mock results for each replicate
-        mock_results = {
-            rep: _make_mock_rmsf_result(rep, mean_rmsf=1.0 + 0.1 * rep) for rep in (1, 2, 3)
+        # Create a fresh mock loader instance for each call
+        mock_loader_inst = MagicMock()
+        MockLoader.return_value = mock_loader_inst
+
+        # Track which replicate we're on so we can vary mean_rmsf
+        call_count = {"n": 0}
+        rmsf_by_rep = {
+            1: [1.0, 1.2, 1.4, 1.0, 0.9],
+            2: [1.1, 1.3, 1.5, 1.1, 1.0],
+            3: [1.2, 1.4, 1.6, 1.2, 1.1],
         }
 
-        def mock_compute(replicate, save=True, output_dir=None, recompute=False):
-            return mock_results[replicate]
+        def make_mock_universe(*args, **kwargs):
+            """Return a mock Universe with 200 frames and 5 atoms."""
+            mock_u = MagicMock()
+            mock_traj = MagicMock()
+            mock_traj.__len__ = MagicMock(return_value=200)
+            mock_frames = [MagicMock(frame=i) for i in range(200)]
+            mock_traj.__getitem__ = MagicMock(
+                side_effect=lambda x: mock_frames[x] if isinstance(x, int) else mock_frames
+            )
+            mock_traj.__iter__ = MagicMock(return_value=iter(mock_frames))
+            mock_u.trajectory = mock_traj
 
-        MockCalc.return_value.compute = mock_compute
+            mock_atoms = MagicMock()
+            mock_atoms.__len__ = MagicMock(return_value=5)
+            mock_atoms.positions = np.random.rand(5, 3).astype(np.float32)
+            mock_atoms.indices = np.arange(5)
+            mock_residues = []
+            for i in range(5):
+                res = MagicMock()
+                res.resid = i + 1
+                res.resname = "ALA"
+                mock_residues.append(res)
+            mock_atoms.residues = mock_residues
+            mock_u.select_atoms = MagicMock(return_value=mock_atoms)
+            return mock_u
 
-        # Let real aggregation functions run, only mock version
-        with patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"):
+        mock_loader_inst.load_universe = MagicMock(side_effect=make_mock_universe)
+
+        traj_info = MagicMock()
+        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
+        mock_loader_inst.get_trajectory_info.return_value = traj_info
+        mock_loader_inst.get_timestep.return_value = 10.0
+
+        # _compute_rmsf returns different values per call to vary per-replicate means
+        rmsf_values_sequence = [
+            np.array(rmsf_by_rep[1]),
+            np.array(rmsf_by_rep[2]),
+            np.array(rmsf_by_rep[3]),
+        ]
+        rmsf_call_idx = {"n": 0}
+
+        def mock_compute_rmsf(*args, **kwargs):
+            idx = rmsf_call_idx["n"]
+            rmsf_call_idx["n"] += 1
+            return rmsf_values_sequence[idx]
+
+        with (
+            patch("polyzymd.analyses.rmsf._compute_rmsf", side_effect=mock_compute_rmsf),
+            patch(
+                "polyzymd.analyses.rmsf._compute_rmsd_timeseries",
+                return_value=np.random.rand(100),
+            ),
+            patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"),
+        ):
             output_dir = tmp_path / "analysis" / "no_polymer" / "rmsf"
             result = run_analysis(
                 rmsf_analysis,
@@ -587,9 +782,12 @@ class TestRMSFLifecycle:
 
         # Verify we got an aggregated result
         assert result.n_replicates == 3
-        assert result.per_replicate_mean_rmsf == [1.1, 1.2, 1.3]
-        # Calculator should have been called 3 times (one per replicate)
-        assert MockCalc.call_count == 3
+        # Per-replicate means should match np.mean of each rmsf array
+        expected_means = [float(np.mean(rmsf_by_rep[r])) for r in (1, 2, 3)]
+        for actual, expected in zip(result.per_replicate_mean_rmsf, expected_means):
+            assert actual == pytest.approx(expected, abs=0.01)
+        # Loader should have been called 3 times (once per replicate)
+        assert MockLoader.call_count == 3
 
     def test_extract_metrics_feeds_default_compare(self, rmsf_analysis):
         """Verify extract_metrics output is compatible with default_scalar_comparison."""
