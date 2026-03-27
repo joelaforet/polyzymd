@@ -1,0 +1,123 @@
+"""Shared infrastructure for analysis plugins.
+
+This package provides reusable utilities extracted from the legacy
+``polyzymd.analysis.core`` and ``polyzymd.analysis.common`` packages.
+All analysis plugins should import shared infrastructure from here.
+
+Sub-modules
+-----------
+loader
+    Trajectory loading, time parsing, frame conversion.
+alignment
+    Trajectory alignment (centroid/average/frame/external).
+centroid
+    K-Means centroid frame finding, reference mode dispatch.
+statistics
+    SEM, per-residue/region aggregation, weighted mean.
+aggregation
+    Replicate collection, distance pair aggregation.
+autocorrelation
+    ACF, correlation time, statistical inefficiency.
+pbc
+    Minimum image distance, PBC-aware distance matrix.
+selections
+    Extended selection syntax (midpoint, COM), position retrieval.
+diagnostics
+    Selection diagnostics, equilibration validation.
+config_hash
+    Config hashing for cache validation.
+metric_type
+    Metric type classification for autocorrelation handling.
+constants
+    Shared default values (cutoffs, thresholds).
+logging_utils
+    Colored terminal logging.
+"""
+
+from __future__ import annotations
+
+# Re-export the most commonly used symbols for convenience.
+# Plugins can do:  from polyzymd.analyses.shared import TrajectoryLoader, AlignmentConfig
+# or import specific sub-modules directly.
+
+from polyzymd.analyses.shared.alignment import (
+    AlignmentConfig,
+    ReferenceMode,
+    align_trajectory,
+    get_alignment_description,
+)
+from polyzymd.analyses.shared.autocorrelation import (
+    ACFResult,
+    CorrelationTimeResult,
+    MIN_RECOMMENDED_N_INDEPENDENT,
+    check_statistical_reliability,
+    compute_acf,
+    estimate_correlation_time,
+    get_independent_indices,
+    n_effective,
+    statistical_inefficiency,
+    statistical_inefficiency_multiple,
+)
+from polyzymd.analyses.shared.constants import (
+    DEFAULT_CONTACT_CUTOFF,
+    DEFAULT_DISTANCE_THRESHOLD,
+    DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
+)
+from polyzymd.analyses.shared.loader import (
+    TrajectoryInfo,
+    TrajectoryLoader,
+    convert_time,
+    parse_time_string,
+    time_to_frame,
+)
+from polyzymd.analyses.shared.pbc import (
+    minimum_image_distance,
+    pairwise_distances_pbc,
+)
+from polyzymd.analyses.shared.statistics import (
+    PerResidueStats,
+    StatResult,
+    aggregate_per_residue_stats,
+    aggregate_region_stats,
+    compute_sem,
+    weighted_mean_with_sem,
+)
+
+__all__ = [
+    # Loader
+    "TrajectoryInfo",
+    "TrajectoryLoader",
+    "parse_time_string",
+    "convert_time",
+    "time_to_frame",
+    # Alignment
+    "AlignmentConfig",
+    "ReferenceMode",
+    "align_trajectory",
+    "get_alignment_description",
+    # Statistics
+    "StatResult",
+    "PerResidueStats",
+    "compute_sem",
+    "aggregate_per_residue_stats",
+    "aggregate_region_stats",
+    "weighted_mean_with_sem",
+    # Autocorrelation
+    "ACFResult",
+    "CorrelationTimeResult",
+    "MIN_RECOMMENDED_N_INDEPENDENT",
+    "compute_acf",
+    "estimate_correlation_time",
+    "get_independent_indices",
+    "statistical_inefficiency",
+    "statistical_inefficiency_multiple",
+    "n_effective",
+    "check_statistical_reliability",
+    # PBC
+    "minimum_image_distance",
+    "pairwise_distances_pbc",
+    # Constants
+    "DEFAULT_CONTACT_CUTOFF",
+    "DEFAULT_DISTANCE_THRESHOLD",
+    "DEFAULT_SURFACE_EXPOSURE_THRESHOLD",
+]
