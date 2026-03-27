@@ -67,6 +67,7 @@ class ToyAnalysis(Analysis):
 
     name: ClassVar[str] = "toy"
     Settings: ClassVar[type] = ToySettings
+    AggregatedResultClass: ClassVar[type] = ToyAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ("toy_alias",)
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
@@ -98,9 +99,6 @@ class ToyAnalysis(Analysis):
                 direction_labels=("stabilizing", "unchanged", "destabilizing"),
             )
         }
-
-    def _deserialize_result(self, path: Path) -> ToyAggregatedResult:
-        return ToyAggregatedResult.load(path)
 
 
 class ToyDependentAnalysis(Analysis):

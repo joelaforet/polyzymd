@@ -14,8 +14,8 @@ How to Add a New Analysis
 
 Required methods::
 
-    compute_replicate(ctx, replicate) -> BaseModel
-    aggregate(ctx, results)           -> BaseModel | None
+    compute_replicate(ctx, replicate) -> dict | BaseModel
+    aggregate(ctx, results)           -> dict | BaseModel | None
 
 Optional overrides (sensible defaults provided)::
 
@@ -24,6 +24,12 @@ Optional overrides (sensible defaults provided)::
     plot(ctx)                         -> list[Path]
     format(result, output_format)     -> str
     extract_metrics(summary)          -> dict[str, MetricValue]
+
+Notes
+-----
+The orchestrator auto-saves results returned by ``compute_replicate()``
+and ``aggregate()`` to disk.  Plugins should **not** save results
+manually — just return the data.
 
 See Also
 --------
@@ -234,6 +240,22 @@ class PlotContext:
         Global plot settings (theme, DPI, format, etc.).
     comparison_path : Path | None
         Canonical comparison result path for this analysis.
+
+    Notes
+    -----
+    ``PlotContext`` does **not** carry pre-loaded aggregated results.
+    Use ``self._load_aggregated_result(agg_dir)`` (inherited from
+    :class:`Analysis`) inside your ``plot()`` method to load each
+    condition's data from the ``aggregated/`` directory.  This keeps
+    memory usage low for analyses with large result objects.
+
+    Example::
+
+        def plot(self, ctx: PlotContext) -> list[Path]:
+            for cond in ctx.conditions:
+                agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
+                summary = self._load_aggregated_result(agg_dir)
+                # ... plot data from summary ...
     """
 
     conditions: list[Condition]
@@ -475,6 +497,25 @@ class Analysis(ABC):
         Unique identifier used in config files and CLI (e.g. ``"rmsf"``).
     Settings : type[BaseModel]
         Pydantic model for this analysis's settings.
+    AggregatedResultClass : type[BaseModel] | None
+        Optional Pydantic model class for aggregated results.  When set,
+        the default :meth:`_deserialize_result` uses this class's
+        ``.load(path)`` method (if available) or
+        ``.model_validate_json()`` to load aggregated results from disk.
+        When ``None`` (the default), aggregated results are loaded as
+        plain dicts via ``json.loads()``.
+
+        Setting this class variable replaces the need to override
+        :meth:`_deserialize_result` in most cases.
+
+        Example::
+
+            from polyzymd.analyses._results_rmsf import RMSFAggregatedResult
+
+            class RMSFAnalysis(Analysis):
+                name = "rmsf"
+                AggregatedResultClass = RMSFAggregatedResult
+                ...
     aliases : tuple[str, ...]
         Alternative CLI names (e.g. ``("triad",)`` for ``catalytic_triad``).
     dependencies : tuple[str, ...]
@@ -489,8 +530,8 @@ class Analysis(ABC):
     Examples
     --------
     **Simple plugin** using the default comparison pipeline (t-tests,
-    ANOVA, ranking).  Implement ``extract_metrics()`` and
-    ``_deserialize_result()``::
+    ANOVA, ranking).  Implement ``extract_metrics()`` — the framework
+    deserializes aggregated results automatically via ``json.loads()``::
 
         from polyzymd.analyses.base import (
             AggregateContext, Analysis, MetricValue, ReplicateContext,
@@ -526,9 +567,14 @@ class Analysis(ABC):
                     direction_labels=("compacting", "unchanged", "expanding"),
                 )}
 
-            def _deserialize_result(self, path):
-                import json
-                return json.loads(path.read_text())
+    If your aggregated results use a typed Pydantic model, set
+    ``AggregatedResultClass`` to have the framework deserialize into
+    that model automatically instead of returning a plain dict::
+
+        class RgAnalysis(Analysis):
+            name = "rg"
+            AggregatedResultClass = RgAggregatedResult  # has .load(path) or model_validate_json
+            ...
 
     **Custom compare plugin** — override ``compare()`` entirely for
     multi-metric or entry-table analyses.  See ``analyses/contacts.py``
@@ -545,6 +591,7 @@ class Analysis(ABC):
     # --- Class variables (subclasses MUST set name and Settings) ---
     name: ClassVar[str]
     Settings: ClassVar[type]  # type[BaseModel]
+    AggregatedResultClass: ClassVar[type | None] = None
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
@@ -569,9 +616,19 @@ class Analysis(ABC):
 
         Returns
         -------
-        BaseModel
-            A Pydantic model with per-replicate results.  The exact type
-            is analysis-specific (e.g. ``RMSFResult``).
+        dict or BaseModel
+            Per-replicate results.  Can be a plain dict (simplest) or a
+            Pydantic ``BaseModel``.  The framework serializes both via
+            ``save_result()`` — dicts are written as JSON, models use
+            ``model_dump_json()``.
+
+        Notes
+        -----
+        The orchestrator has a **fallback** that saves the return value
+        to ``ctx.result_path`` only if the file doesn't already exist.
+        Existing plugins save explicitly for custom per-replicate
+        caching (e.g. ``rmsf_eq10ns.json``).  Simple plugins can skip
+        manual saves and rely on the fallback.
         """
         if not type(self).has_compute_stage:
             return None
@@ -591,15 +648,24 @@ class Analysis(ABC):
         ----------
         ctx : AggregateContext
             Framework-provided context (paths, replicates, settings).
-        results : Sequence[BaseModel]
+        results : Sequence[dict | BaseModel]
             Per-replicate results from :meth:`compute_replicate`.
             Guaranteed to have at least ``min_replicates`` entries.
 
         Returns
         -------
-        BaseModel or None
+        dict or BaseModel or None
             Aggregated result, or ``None`` if aggregation is not
-            meaningful for this analysis.
+            meaningful for this analysis.  Can be a plain dict or a
+            Pydantic ``BaseModel``.
+
+        Notes
+        -----
+        The orchestrator has a **fallback** that saves the return value
+        to ``ctx.result_path`` only if the file doesn't already exist.
+        Existing plugins save to ``ctx.result_path`` explicitly in
+        ``aggregate()`` (see ``rmsf.py``, ``contacts.py``).  Simple
+        plugins can skip manual saves and rely on the fallback.
         """
         if not type(self).has_aggregate_stage:
             return None
@@ -684,9 +750,15 @@ class Analysis(ABC):
         you override ``compare()`` entirely, you do not need to implement
         this.
 
+        The default ``compare()`` loads aggregated results via
+        :meth:`_load_aggregated_result`, which uses
+        ``AggregatedResultClass`` (if set) or falls back to
+        ``json.loads()``.  You do **not** need to implement
+        ``_deserialize_result()`` unless you need custom loading logic.
+
         Parameters
         ----------
-        summary : BaseModel
+        summary : dict or BaseModel
             Aggregated result (from :meth:`aggregate`).
 
         Returns
@@ -746,10 +818,17 @@ class Analysis(ABC):
     def _load_aggregated_result(self, aggregated_dir: Path) -> Any:
         """Load the aggregated result from disk.
 
-        The default implementation globs for ``*.json`` in
-        *aggregated_dir* and loads the most recent file using the
-        analysis's result class.  Override if your result uses a
-        non-standard storage format (e.g. NPZ sidecar).
+        The default implementation looks for ``result.json`` in
+        *aggregated_dir* (via :meth:`aggregate_result_path`), falling
+        back to the most recent ``*.json`` file.  Override if your
+        result uses a non-standard storage format (e.g. NPZ sidecar).
+
+        This method is useful in :meth:`plot` to load each condition's
+        aggregated data::
+
+            for cond in ctx.conditions:
+                agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
+                summary = self._load_aggregated_result(agg_dir)
 
         Parameters
         ----------
@@ -758,7 +837,7 @@ class Analysis(ABC):
 
         Returns
         -------
-        BaseModel or None
+        dict or BaseModel or None
             Loaded result, or ``None`` if no file found.
         """
         if not aggregated_dir.exists():
@@ -775,10 +854,13 @@ class Analysis(ABC):
     def _deserialize_result(self, path: Path) -> Any:
         """Load a result from a JSON file.
 
-        Override if your result class needs special deserialization.
-        The default implementation raises ``NotImplementedError`` —
-        subclasses that rely on the default ``compare()`` must implement
-        this OR override ``compare()`` entirely.
+        The default implementation uses :attr:`AggregatedResultClass` if
+        set (trying ``.load(path)`` first, then
+        ``.model_validate_json()``), and falls back to
+        ``json.loads(path.read_text())`` for plain-dict results.
+
+        Override only if your result needs non-standard deserialization
+        (e.g. NPZ sidecars, custom migrations).
 
         Parameters
         ----------
@@ -787,31 +869,17 @@ class Analysis(ABC):
 
         Returns
         -------
-        BaseModel
+        dict or BaseModel
             Deserialized result.
-
-        Raises
-        ------
-        NotImplementedError
-            If neither ``_deserialize_result()`` nor ``compare()`` is
-            overridden.  This is a common mistake — if you implement
-            ``extract_metrics()`` for the default comparison path, you
-            MUST also implement ``_deserialize_result()`` so the
-            framework can load your aggregated JSON results.
         """
-        raise NotImplementedError(
-            f"{type(self).__name__} must implement _deserialize_result() "
-            f"or override compare() entirely.  "
-            f"If you implement extract_metrics() for the default comparison "
-            f"pipeline, you also need _deserialize_result(path) to load your "
-            f"aggregated result from JSON.  Example:\n"
-            f"    def _deserialize_result(self, path):\n"
-            f"        import json\n"
-            f"        return json.loads(path.read_text())\n"
-            f"Or use your Pydantic model:\n"
-            f"    def _deserialize_result(self, path):\n"
-            f"        return MyAggregatedResult.model_validate_json(path.read_text())"
-        )
+        cls = type(self).AggregatedResultClass
+        if cls is not None:
+            # Prefer .load() (which handles file I/O), fall back to model_validate_json
+            if hasattr(cls, "load"):
+                return cls.load(path)
+            if hasattr(cls, "model_validate_json"):
+                return cls.model_validate_json(path.read_text())
+        return json.loads(path.read_text())
 
     # === Utility methods (available to all subclasses) ===
 
