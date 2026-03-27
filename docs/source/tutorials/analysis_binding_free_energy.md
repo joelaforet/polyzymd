@@ -117,7 +117,7 @@ conditions:
     config: "../egma_100/config.yaml"
     replicates: [1, 2, 3]
 
-analysis_settings:
+plugins:
   contacts:
     name: "polymer_contacts"
     polymer_selection: "resname SBM EGM"
@@ -133,7 +133,6 @@ analysis_settings:
     units: "kcal/mol"              # or "kJ/mol"
     surface_exposure_threshold: 0.2
 
-comparison_settings:
   binding_free_energy:
     fdr_alpha: 0.05
 ```
@@ -141,7 +140,7 @@ comparison_settings:
 ### Step 2: Run contacts analysis first (if not already done)
 
 ```bash
-polyzymd compare contacts -f comparison.yaml
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 This generates the cached binding preference files under each condition's
@@ -150,7 +149,7 @@ This generates the cached binding preference files under each condition's
 ### Step 3: Run binding free energy analysis
 
 ```bash
-polyzymd compare binding-free-energy -f comparison.yaml
+polyzymd compare run binding_free_energy -f comparison.yaml
 ```
 
 ## Example Output
@@ -216,7 +215,7 @@ values may still be real but require larger replicate sets to distinguish from n
 
 ## Configuration Reference
 
-### `analysis_settings.binding_free_energy`
+### `plugins.binding_free_energy`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -224,16 +223,12 @@ values may still be real but require larger replicate sets to distinguish from n
 | `surface_exposure_threshold` | float | `0.2` | Minimum relative SASA to consider a residue exposed (0.0–1.0) |
 | `protein_partitions` | dict | `null` | Custom named partitions (see below) |
 
-### `comparison_settings.binding_free_energy`
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `fdr_alpha` | float | `0.05` | Benjamini-Hochberg FDR threshold for pairwise t-tests |
+`fdr_alpha` is configured in the same `plugins.binding_free_energy` block.
 
 ### Full YAML Example
 
 ```yaml
-analysis_settings:
+plugins:
   binding_free_energy:
     units: "kcal/mol"
     surface_exposure_threshold: 0.2
@@ -246,22 +241,18 @@ analysis_settings:
         - lid_helix_5
         - lid_helix_10
 
-comparison_settings:
-  binding_free_energy:
     fdr_alpha: 0.05
 ```
 
 ## CLI Reference
 
 ```
-polyzymd compare binding-free-energy [OPTIONS]
+polyzymd compare run binding_free_energy [OPTIONS]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `-f, --file PATH` | Path to `comparison.yaml` (default: `comparison.yaml`) |
-| `--units [kcal/mol\|kJ/mol]` | Override energy units |
-| `--fdr-alpha FLOAT` | Override FDR alpha (default: 0.05) |
 | `--recompute` | Force recompute (clears binding preference cache) |
 | `--format [table\|markdown\|json]` | Output format (default: `table`) |
 | `-o, --output PATH` | Save output to file |
@@ -273,22 +264,20 @@ polyzymd compare binding-free-energy [OPTIONS]
 
 ```bash
 # Default: table output to console
-polyzymd compare binding-free-energy -f comparison.yaml
+polyzymd compare run binding_free_energy -f comparison.yaml
 
-# kJ/mol units
-polyzymd compare binding-free-energy --units kJ/mol
+# Units are configured in plugins.binding_free_energy.units
 
 # Save markdown report
-polyzymd compare binding-free-energy --format markdown -o report.md
+polyzymd compare run binding_free_energy --format markdown -o report.md
 
 # JSON for downstream processing
-polyzymd compare binding-free-energy --format json -o bfe_result.json
+polyzymd compare run binding_free_energy --format json -o bfe_result.json
 
-# Stricter p-value threshold
-polyzymd compare binding-free-energy --fdr-alpha 0.01
+# Tune units/fdr_alpha in comparison.yaml, then rerun
 
 # Verbose debugging
-polyzymd compare binding-free-energy --debug
+polyzymd compare run binding_free_energy --debug
 ```
 
 ## Custom Protein Partitions
@@ -298,7 +287,7 @@ amino acid class groups. Define custom groups in the contacts settings, then
 group them into named partitions in the binding free energy settings.
 
 ```yaml
-analysis_settings:
+plugins:
   contacts:
     compute_binding_preference: true
     include_default_aa_groups: true
@@ -348,14 +337,13 @@ for cross-temperature pairs, since k_BT differs.
 ## Output File Location
 
 When you use `-o / --output`, the formatted report is saved to the specified
-path. A JSON copy of the result is also saved to the comparison's `results/`
-directory:
+path. The canonical JSON cache is saved to `comparison/binding_free_energy/result.json`:
 
 ```
 project/
-└── comparison_results/
+└── comparison/
     └── binding_free_energy/
-        └── binding_free_energy_YYYYMMDD_HHMMSS.json
+        └── result.json
 ```
 
 The JSON file can be reloaded for downstream processing:
@@ -435,7 +423,7 @@ conditions:
     config: "../egma_100/config.yaml"
     replicates: [1, 2, 3, 4, 5]
 
-analysis_settings:
+plugins:
   contacts:
     polymer_selection: "resname SBM EGM"
     cutoff: 4.5
@@ -447,7 +435,6 @@ analysis_settings:
   binding_free_energy:
     units: "kcal/mol"
 
-comparison_settings:
   binding_free_energy:
     fdr_alpha: 0.05
 ```
@@ -456,10 +443,10 @@ comparison_settings:
 
 ```bash
 # Step 1: Generate binding preference data
-polyzymd compare contacts -f comparison.yaml
+polyzymd compare run contacts -f comparison.yaml
 
 # Step 2: Compute ΔG_sel
-polyzymd compare binding-free-energy -f comparison.yaml --format markdown -o bfe_report.md
+polyzymd compare run binding_free_energy -f comparison.yaml --format markdown -o bfe_report.md
 ```
 
 ### Interpretation Table
@@ -473,13 +460,13 @@ polyzymd compare binding-free-energy -f comparison.yaml --format markdown -o bfe
 
 ## Troubleshooting
 
-### "No 'binding_free_energy' in analysis_settings"
+### "No 'binding_free_energy' plugin configured"
 
 Ensure your `comparison.yaml` has a `binding_free_energy:` block under
-`analysis_settings`:
+`plugins`:
 
 ```yaml
-analysis_settings:
+plugins:
   contacts:
     compute_binding_preference: true
     # ... other contacts settings
@@ -492,7 +479,7 @@ analysis_settings:
 The binding preference cache files are missing. Run contacts analysis first:
 
 ```bash
-polyzymd compare contacts -f comparison.yaml
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 If the files still aren't found, check that `compute_binding_preference: true`

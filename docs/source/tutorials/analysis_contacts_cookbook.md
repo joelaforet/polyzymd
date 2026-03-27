@@ -79,20 +79,21 @@ conditions:
     config: "../sbma_100/config.yaml"
     replicates: [1, 2, 3]
 
-contacts:
-  name: "polymer_contacts"
-  polymer_selection: "resname SBM EGM"  # 3-char residue names
-  protein_selection: "protein"
-  cutoff: 4.5
-  contact_criteria: "heavy_atom"        # distance | heavy_atom | any_atom
-  fdr_alpha: 0.05                       # For statistical corrections
-  min_effect_size: 0.5                  # Cohen's d threshold
-  top_residues: 10                      # Top residues in output table
+plugins:
+  contacts:
+    name: "polymer_contacts"
+    polymer_selection: "resname SBM EGM"  # 3-char residue names
+    protein_selection: "protein"
+    cutoff: 4.5
+    contact_criteria: "heavy_atom"        # distance | heavy_atom | any_atom
+    fdr_alpha: 0.05                       # For statistical corrections
+    min_effect_size: 0.5                  # Cohen's d threshold
+    top_residues: 10                      # Top residues in output table
 ```
 
 **Run with:**
 ```bash
-polyzymd compare contacts -f comparison.yaml
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 **Best for:** Multi-condition experiments, statistical comparisons, publication figures.
@@ -137,18 +138,19 @@ conditions:
     config: "../egma_100/config.yaml"
     replicates: [1, 2, 3]
 
-contacts:
-  name: "polymer_aa_preferences"
-  polymer_selection: "resname SBM EGM"
-  protein_selection: "protein"
-  cutoff: 4.5
-  contact_criteria: "heavy_atom"
-  fdr_alpha: 0.05
-  top_residues: 15
+plugins:
+  contacts:
+    name: "polymer_aa_preferences"
+    polymer_selection: "resname SBM EGM"
+    protein_selection: "protein"
+    cutoff: 4.5
+    contact_criteria: "heavy_atom"
+    fdr_alpha: 0.05
+    top_residues: 15
 ```
 
 ```bash
-polyzymd compare contacts -f comparison.yaml --format markdown
+polyzymd compare run contacts -f comparison.yaml --format markdown
 ```
 
 The output shows per-residue contact fractions with statistical significance 
@@ -241,7 +243,7 @@ In this example:
 
 ```{tip}
 For statistical comparison across multiple replicates/conditions, use 
-`polyzymd compare contacts` with custom polymer selections.
+`polyzymd compare run contacts` with custom polymer selections.
 ```
 
 ---
@@ -791,7 +793,7 @@ conditions:
     config: "../egma_100/config.yaml"
     replicates: [1, 2, 3]
 
-analysis_settings:
+plugins:
   contacts:
     polymer_selection: "resname SBM EGM"
     cutoff: 4.5
@@ -808,7 +810,7 @@ analysis_settings:
 ```
 
 ```bash
-polyzymd compare contacts -f comparison.yaml
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 The output includes an enrichment table showing which AA classes each

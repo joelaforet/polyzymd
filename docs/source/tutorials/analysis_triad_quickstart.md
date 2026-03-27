@@ -337,25 +337,26 @@ conditions:
 defaults:
   equilibration_time: "100ns"
 
-catalytic_triad:
-  name: "LipA_catalytic_triad"
-  threshold: 3.5
-  pairs:
-    - label: "Asp133-His156"
-      selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
-      selection_b: "protein and resid 156 and name ND1"
-    - label: "His156-Ser77"
-      selection_a: "protein and resid 156 and name NE2"
-      selection_b: "protein and resid 77 and name OG"
+plugins:
+  catalytic_triad:
+    name: "LipA_catalytic_triad"
+    threshold: 3.5
+    pairs:
+      - label: "Asp133-His156"
+        selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
+        selection_b: "protein and resid 156 and name ND1"
+      - label: "His156-Ser77"
+        selection_a: "protein and resid 156 and name NE2"
+        selection_b: "protein and resid 77 and name OG"
 ```
 
 ```bash
 # Run comparison with automatic t-tests, effect sizes, and ranking
-polyzymd compare triad -f comparison.yaml
+polyzymd compare run triad -f comparison.yaml
 
 # Output formats
-polyzymd compare triad -f comparison.yaml --format markdown  # For docs
-polyzymd compare triad -f comparison.yaml --format json      # Machine-readable
+polyzymd compare run triad -f comparison.yaml --format markdown  # For docs
+polyzymd compare run triad -f comparison.yaml --format json      # Machine-readable
 ```
 
 **Output includes:**
@@ -369,15 +370,15 @@ See [Comparing Conditions](analysis_compare_conditions.md) for the full guide.
 ````
 
 ````{tab-item} CLI
-Run analysis on each condition separately, then use `polyzymd compare show`:
+Run analysis on each condition separately, then run the comparison pipeline:
 
 ```bash
 # Step 1: Analyze each condition
 polyzymd analyze triad -c comparison.yaml --condition "No Polymer"
 polyzymd analyze triad -c comparison.yaml --condition "With Polymer"
 
-# Step 2: Run comparison (uses cached triad results)
-polyzymd compare triad -f comparison.yaml
+# Step 2: Run comparison (uses cached triad results when available)
+polyzymd compare run triad -f comparison.yaml
 ```
 
 The comparison command automatically loads cached results if available,
@@ -385,17 +386,20 @@ so you don't recompute triad analysis.
 ````
 
 ````{tab-item} Python
-Use `TriadComparator` for programmatic comparison with full statistical output:
+Use the analysis orchestrator for programmatic comparison:
 
 ```python
-from polyzymd.compare import ComparisonConfig, TriadComparator
+from polyzymd.analyses.discovery import get_analysis
+from polyzymd.analyses.orchestrator import run_comparison
+from polyzymd.compare.config import ComparisonConfig
 
-# Load comparison configuration (must have catalytic_triad: section)
+# Load comparison configuration (must have plugins.catalytic_triad section)
 config = ComparisonConfig.from_yaml("comparison.yaml")
 
 # Run comparison (computes triad analysis if not cached)
-comparator = TriadComparator(config, equilibration="100ns")
-result = comparator.compare()
+analysis = get_analysis("triad")()
+pipeline_result = run_comparison(analysis, config, equilibration="100ns")
+result = pipeline_result["comparison"]
 
 # Access results
 print(f"Ranking (best triad first): {result.ranking}")
@@ -412,8 +416,8 @@ for comp in result.pairwise_comparisons:
           f"{comp.percent_change:+.1f}%, p={comp.p_value:.4f}{sig}, "
           f"d={comp.cohens_d:.2f}")
 
-# Save result for later
-result.save("results/triad_comparison.json")
+# Canonical cache path written by the orchestrator
+print(pipeline_result["comparison_path"])
 ```
 
 **Example output:**

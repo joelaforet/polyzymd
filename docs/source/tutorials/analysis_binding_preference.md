@@ -12,7 +12,7 @@ configuration.
 
 ```{warning}
 Binding preference is currently labeled **experimental** in the presentation
-release. The workflow remains available from `polyzymd compare contacts`, and
+release. The workflow remains available from `polyzymd compare run contacts`, and
 its plots are still generated, but CLI output and figures are explicitly marked
 experimental because definitions and interpretation may still change.
 ```
@@ -148,7 +148,7 @@ conditions:
     config: "../egma_100/config.yaml"
     replicates: [1, 2, 3]
 
-analysis_settings:
+plugins:
   contacts:
     name: "polymer_contacts"
     polymer_selection: "resname SBM EGM"
@@ -165,7 +165,7 @@ analysis_settings:
 Then run the comparison:
 
 ```bash
-polyzymd compare contacts -f comparison.yaml
+polyzymd compare run contacts -f comparison.yaml
 ```
 ````
 
@@ -176,10 +176,10 @@ in YAML.
 
 ```bash
 # Run comparison (binding preference enabled in YAML)
-polyzymd compare contacts -f comparison.yaml
+polyzymd compare run contacts -f comparison.yaml
 
 # View results in markdown format
-polyzymd compare contacts -f comparison.yaml --format markdown
+polyzymd compare run contacts -f comparison.yaml --format markdown
 ```
 ````
 
@@ -241,7 +241,7 @@ print(f"  Enrichment: {entry.enrichment:+.2f}")
 
 ### Example Output
 
-When you run `polyzymd compare contacts` with binding preference enabled, you'll
+When you run `polyzymd compare run contacts` with binding preference enabled, you'll
 see output like this after an experimental warning banner:
 
 ```
@@ -311,7 +311,7 @@ polymer selection. You can explicitly define polymer types with custom
 selections:
 
 ```yaml
-analysis_settings:
+plugins:
   contacts:
     polymer_selection: "chainID C"
     compute_binding_preference: true
@@ -333,7 +333,7 @@ This is useful when:
 You can define custom protein groups to analyze specific regions of interest:
 
 ```yaml
-analysis_settings:
+plugins:
   contacts:
     compute_binding_preference: true
     surface_exposure_threshold: 0.2
@@ -543,7 +543,7 @@ conditions:
     config: "../copolymer_50_50/config.yaml"
     replicates: [1, 2, 3]
 
-analysis_settings:
+plugins:
   contacts:
     polymer_selection: "resname SBM EGM"
     cutoff: 4.5
@@ -563,7 +563,7 @@ analysis_settings:
 ### Run Analysis
 
 ```bash
-polyzymd compare contacts -f comparison.yaml
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 ### Interpretation Framework
@@ -742,7 +742,7 @@ regions into mutually exclusive groups:
 ````{tab-item} YAML
 ```yaml
 # comparison.yaml
-analysis_settings:
+plugins:
   contacts:
     # First, define individual protein groups (can overlap)
     protein_groups:
@@ -1048,7 +1048,7 @@ config load time.
 ## Visualization
 
 Both binding preference and system coverage generate publication-ready plots
-when you run `polyzymd compare contacts`. These plots are automatically
+when you run `polyzymd compare run contacts`. These plots are automatically
 enabled by default but can be controlled via `plot_settings`.
 
 ### Available Plots

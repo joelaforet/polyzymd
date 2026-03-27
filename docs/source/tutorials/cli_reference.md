@@ -797,10 +797,10 @@ polyzymd compare COMMAND [OPTIONS]
 
 Commands:
   init      Initialize a new comparison project
-  rmsf      Compare RMSF across conditions
+  run       Run a comparison by analysis type
+  run-all   Run all enabled comparisons
   validate  Validate comparison configuration
-  show      Display saved comparison results
-  plot      Generate comparison plots
+  plot-all  Generate comparison plots from a workspace
 ```
 
 ### polyzymd compare init
@@ -826,16 +826,15 @@ cd polymer_study
 # Edit comparison.yaml to add your conditions
 ```
 
-### polyzymd compare rmsf
+### polyzymd compare run rmsf
 
 Run statistical comparison of RMSF across conditions.
 
 ```bash
-polyzymd compare rmsf [OPTIONS]
+polyzymd compare run rmsf [OPTIONS]
 ```
 
-**Requires** an `analysis_settings.rmsf` section in comparison.yaml, with a
-corresponding `comparison_settings.rmsf` entry (can be empty `{}`).
+**Requires** a `plugins.rmsf` section in `comparison.yaml`.
 
 #### Options
 
@@ -857,17 +856,17 @@ corresponding `comparison_settings.rmsf` entry (can be empty `{}`).
 #### Example
 
 ```bash
-# Run comparison with default settings (uses analysis_settings.rmsf from YAML)
-polyzymd compare rmsf
+# Run comparison with default settings (uses plugins.rmsf from YAML)
+polyzymd compare run rmsf
 
 # Override equilibration time
-polyzymd compare rmsf --eq-time 20ns
+polyzymd compare run rmsf --eq-time 20ns
 
 # Override RMSF settings (requires --override flag)
-polyzymd compare rmsf --override --selection "protein and name CA CB"
+polyzymd compare run rmsf --selection "protein and name CA CB"
 
 # Output as markdown
-polyzymd compare rmsf --format markdown -o report.md
+polyzymd compare run rmsf --format markdown -o report.md
 ```
 
 ### polyzymd compare validate
@@ -943,58 +942,34 @@ Validating: /path/to/comparison.yaml
 }
 ```
 
-### polyzymd compare show
+### polyzymd compare plot-all
 
-Display a previously saved comparison result.
-
-```bash
-polyzymd compare show RESULT_FILE [OPTIONS]
-
-Arguments:
-  RESULT_FILE                     Path to saved JSON result
-
-Options:
-  --format [table|markdown|json]  Output format [default: table]
-```
-
-### polyzymd compare plot
-
-Generate publication-ready plots from comparison results.
+Generate configured plots from a comparison workspace.
 
 ```bash
-polyzymd compare plot RESULT_FILE [OPTIONS]
-
-Arguments:
-  RESULT_FILE                     Path to saved comparison JSON
+polyzymd compare plot-all [OPTIONS]
 
 Options:
-  -o, --output-dir PATH           Output directory [default: figures/]
-  --format [png|pdf|svg]          Image format [default: png]
-  --dpi INTEGER                   Resolution for PNG [default: 150]
-  --summary / --no-summary        Generate summary panel [default: yes]
-  --show / --no-show              Display interactively [default: no]
+  -f, --file PATH                 Path to comparison.yaml [default: comparison.yaml]
+  -o, --output-dir PATH           Override plot output directory
+  -a, --analysis TEXT             Plot one analysis type only
+  -p, --plot-type TEXT            Plot one registered plot type only
+  --list-available                List registered/available plots and exit
+  -q, --quiet                     Suppress INFO messages
+  --debug                         Enable DEBUG logging
 ```
-
-#### Generated Plots
-
-| File | Description |
-|------|-------------|
-| `rmsf_comparison.png` | Bar chart of mean RMSF by condition |
-| `percent_change.png` | Bar chart of % change vs control |
-| `effect_sizes.png` | Forest plot of Cohen's d values |
-| `summary_panel.png` | Combined 3-panel summary figure |
 
 #### Example
 
 ```bash
-# Generate all plots
-polyzymd compare plot results/rmsf_comparison_my_study.json
+# Generate all configured plots
+polyzymd compare plot-all
 
-# High resolution for publication
-polyzymd compare plot results/rmsf_comparison_my_study.json --dpi 300
+# High-level availability check
+polyzymd compare plot-all --list-available
 
-# PDF format with interactive preview
-polyzymd compare plot results/rmsf_comparison_my_study.json --format pdf --show
+# One analysis only
+polyzymd compare plot-all -a rmsf
 ```
 
 ---

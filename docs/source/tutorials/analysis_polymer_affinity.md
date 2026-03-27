@@ -206,11 +206,11 @@ The affinity score should always be interpreted alongside:
 ### Step 1: Ensure binding preference data exists
 
 Polymer affinity analysis reads cached binding preference files. These are
-produced automatically by `polyzymd compare contacts`:
+produced automatically by `polyzymd compare run contacts`:
 
 ```yaml
 # comparison.yaml
-analysis_settings:
+plugins:
   contacts:
     compute_binding_preference: true
     surface_exposure_threshold: 0.2
@@ -220,7 +220,7 @@ analysis_settings:
 
 ```bash
 # Generate binding preference cache (if not already done)
-polyzymd compare contacts -f comparison.yaml
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 ### Step 2: Add polymer affinity settings (optional)
@@ -230,19 +230,16 @@ suitable for most use cases. To customize:
 
 ```yaml
 # comparison.yaml
-analysis_settings:
+plugins:
   polymer_affinity:
     surface_exposure_threshold: 0.2
-
-comparison_settings:
-  polymer_affinity:
     fdr_alpha: 0.05
 ```
 
 ### Step 3: Run polymer affinity analysis
 
 ```bash
-polyzymd compare polymer-affinity -f comparison.yaml
+polyzymd compare run polymer_affinity -f comparison.yaml
 ```
 
 ## Example Output
@@ -306,7 +303,7 @@ meaningful.
 
 ## Configuration Reference
 
-### `analysis_settings.polymer_affinity`
+### `plugins.polymer_affinity`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -316,16 +313,12 @@ meaningful.
 | `cutoff` | float | `4.5` | Contact distance cutoff (Angstroms) |
 | `compute_binding_preference` | bool | `true` | Must be true for affinity analysis |
 
-### `comparison_settings.polymer_affinity`
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `fdr_alpha` | float | `0.05` | Benjamini-Hochberg FDR threshold |
+`fdr_alpha` is configured in the same `plugins.polymer_affinity` block.
 
 ## CLI Reference
 
 ```
-polyzymd compare polymer-affinity [OPTIONS]
+polyzymd compare run polymer_affinity [OPTIONS]
 ```
 
 | Option | Description |
@@ -342,13 +335,13 @@ polyzymd compare polymer-affinity [OPTIONS]
 
 ```bash
 # Default: console table
-polyzymd compare polymer-affinity -f comparison.yaml
+polyzymd compare run polymer_affinity -f comparison.yaml
 
 # Save markdown report
-polyzymd compare polymer-affinity --format markdown -o affinity_report.md
+polyzymd compare run polymer_affinity --format markdown -o affinity_report.md
 
 # JSON for downstream processing
-polyzymd compare polymer-affinity --format json -o affinity_result.json
+polyzymd compare run polymer_affinity --format json -o affinity_result.json
 ```
 
 ## Per-Replicate Computation
@@ -400,12 +393,13 @@ Per-condition scores are always shown — they are valid within each temperature
 
 ## Output File Location
 
-Results are saved to the comparison's `results/` directory:
+Results are saved to the canonical comparison cache:
 
 ```
 comparison_output/
-└── results/
-    └── polymer_affinity_score_YYYYMMDD_HHMMSS.json
+└── comparison/
+    └── polymer_affinity/
+        └── result.json
 ```
 
 Reload for downstream processing:
@@ -442,7 +436,7 @@ for pair in result.pairwise_comparisons:
 Run contacts analysis with binding preference enabled first:
 
 ```bash
-polyzymd compare contacts -f comparison.yaml
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 Ensure `compute_binding_preference: true` is set in your contacts analysis

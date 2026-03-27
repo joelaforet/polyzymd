@@ -181,22 +181,22 @@ conditions:
 defaults:
   equilibration_time: "10ns"
 
-# RMSF-specific settings (required for polyzymd compare rmsf)
-rmsf:
-  selection: "protein and name CA"
-  reference_mode: "centroid"
-  # For external reference mode, use:
-  # reference_mode: "external"
-  # reference_file: "/path/to/crystal_structure.pdb"
+plugins:
+  rmsf:
+    selection: "protein and name CA"
+    reference_mode: "centroid"
+    # For external reference mode, use:
+    # reference_mode: "external"
+    # reference_file: "/path/to/crystal_structure.pdb"
 ```
 
 ```bash
 # Run comparison with automatic t-tests, effect sizes, and ranking
-polyzymd compare rmsf -f comparison.yaml
+polyzymd compare run rmsf -f comparison.yaml
 
 # Output formats
-polyzymd compare rmsf -f comparison.yaml --format markdown  # For docs
-polyzymd compare rmsf -f comparison.yaml --format json      # Machine-readable
+polyzymd compare run rmsf -f comparison.yaml --format markdown  # For docs
+polyzymd compare run rmsf -f comparison.yaml --format json      # Machine-readable
 ```
 
 **Output includes:**
@@ -210,7 +210,7 @@ See [Comparing Conditions](analysis_compare_conditions.md) for the full guide.
 ````
 
 ````{tab-item} CLI
-Run analysis on each condition separately, then use `polyzymd compare show`:
+Run analysis on each condition separately, then use the comparison pipeline:
 
 ```bash
 # Step 1: Analyze each condition
@@ -221,9 +221,9 @@ polyzymd analyze rmsf -c with_polymer/config.yaml -r 1-3 --eq-time 10ns
 polyzymd compare init my_comparison
 # Edit my_comparison/comparison.yaml to point to your configs
 
-# Step 3: Run comparison (uses cached RMSF results)
+# Step 3: Run comparison (uses cached RMSF results when available)
 cd my_comparison
-polyzymd compare rmsf
+polyzymd compare run rmsf
 ```
 
 The comparison command automatically loads cached results if available, 
@@ -231,21 +231,20 @@ so you don't recompute RMSF.
 ````
 
 ````{tab-item} Python
-Use `RMSFComparator` for programmatic comparison with full statistical output:
+Use the analysis orchestrator for programmatic comparison:
 
 ```python
-from polyzymd.compare import ComparisonConfig, RMSFComparator
+from polyzymd.analyses.discovery import get_analysis
+from polyzymd.analyses.orchestrator import run_comparison
+from polyzymd.compare.config import ComparisonConfig
 
-# Load comparison configuration (must have rmsf: section)
+# Load comparison configuration (must have plugins.rmsf section)
 config = ComparisonConfig.from_yaml("comparison.yaml")
 
 # Run comparison (computes RMSF if not cached)
-comparator = RMSFComparator(
-    config=config,
-    rmsf_config=config.rmsf,
-    equilibration="10ns",
-)
-result = comparator.compare()
+analysis = get_analysis("rmsf")()
+pipeline_result = run_comparison(analysis, config, equilibration="10ns")
+result = pipeline_result["comparison"]
 
 # Access results
 print(f"Ranking (most stable first): {result.ranking}")
@@ -260,8 +259,8 @@ for comp in result.pairwise_comparisons:
           f"{comp.percent_change:+.1f}%, p={comp.p_value:.4f}{sig}, "
           f"d={comp.cohens_d:.2f}")
 
-# Save result for later
-result.save("results/rmsf_comparison.json")
+# Canonical cache path written by the orchestrator
+print(pipeline_result["comparison_path"])
 ```
 
 **Example output:**

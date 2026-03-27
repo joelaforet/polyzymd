@@ -37,7 +37,7 @@ Package Structure
     │   ├── sasa/         # Solvent Accessible Surface Area
     │   ├── exposure/     # Chaperone-like exposure dynamics
     │   ├── core/         # Statistics, autocorrelation, MetricType
-    │   └── results/      # Serializable result models
+    │   └── results/      # Serializable result model classes
     ├── analyses/         # ★ Plugin system — unified analysis lifecycle
     │   ├── base.py       # Analysis ABC, context objects, result models
     │   ├── discovery.py  # pkgutil-based auto-discovery

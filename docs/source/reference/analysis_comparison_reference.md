@@ -1,7 +1,7 @@
 # Comparison and Plotting Reference
 
-Use this page when you need lookup information for `polyzymd compare`,
-`comparison.yaml`, output files, or the plotting workflow.
+Use this page when you need quick lookup information for `polyzymd compare`,
+`comparison.yaml`, output paths, or plotting behavior.
 
 ## Comparison Project Layout
 
@@ -10,13 +10,10 @@ Use this page when you need lookup information for `polyzymd compare`,
 ```text
 my_study/
 ├── comparison.yaml
-├── results/
+├── comparison/
 ├── figures/
 └── structures/
 ```
-
-<!-- IMAGE OPPORTUNITY: Add an annotated project-tree graphic showing where
-comparison configuration, results JSON, and figures are written. -->
 
 ## Core `comparison.yaml` Fields
 
@@ -33,15 +30,12 @@ conditions:
 defaults:
   equilibration_time: "10ns"
 
-analysis_settings:
+plugins:
   rmsf:
     selection: "protein and name CA"
-
-comparison_settings:
-  rmsf: {}
 ```
 
-## Stable Analysis Keys
+## Stable Plugin Keys
 
 Stable release workflows for `v1.2.0`:
 
@@ -60,8 +54,8 @@ Experimental but still available:
 
 ## Path Rules
 
-- Relative paths in `config:` are resolved relative to `comparison.yaml`
-- Absolute paths are used as-is
+- relative paths in `config:` are resolved relative to `comparison.yaml`
+- absolute paths are used as-is
 - `replicates` must be an explicit list such as `[1, 2, 3]`
 
 ## Commands
@@ -70,8 +64,9 @@ Experimental but still available:
 |---------|---------|
 | `polyzymd compare init -n NAME` | Create a comparison workspace |
 | `polyzymd compare validate` | Check `comparison.yaml` before running |
-| `polyzymd compare run TYPE` | Run a single comparison through the registry |
-| `polyzymd compare run-all` | Run every enabled comparison in one pass |
+| `polyzymd compare run TYPE` | Run one analysis plugin |
+| `polyzymd compare run --list` | List available comparison types and aliases |
+| `polyzymd compare run-all` | Run every enabled plugin in one pass |
 | `polyzymd compare plot-all` | Generate configured figures |
 | `polyzymd compare plot-all --list-available` | List available plots and experimental labels |
 
@@ -89,9 +84,9 @@ polyzymd compare plot-all
 ## Experimental Commands
 
 ```bash
-polyzymd compare exposure
-polyzymd compare binding-free-energy
-polyzymd compare polymer-affinity
+polyzymd compare run exposure
+polyzymd compare run binding_free_energy
+polyzymd compare run polymer_affinity
 ```
 
 These remain callable, but PolyzyMD labels them as experimental in CLI output,
@@ -99,18 +94,18 @@ docs, and generated figures.
 
 ## Output Locations
 
-- comparison JSON files are written to `results/`
+- comparison JSON files are written to `comparison/<analysis>/result.json`
 - figures are written under the configured `plot_settings.output_dir`
 - default project scaffolds create a `figures/` directory next to
   `comparison.yaml`
 
-Typical result filenames:
+Typical comparison cache paths:
 
 ```text
-results/rmsf_comparison_<study>.json
-results/contacts_comparison_<study>.json
-results/distances_comparison_<study>.json
-results/triad_comparison_<study>.json
+comparison/rmsf/result.json
+comparison/contacts/result.json
+comparison/distances/result.json
+comparison/catalytic_triad/result.json
 ```
 
 ## Plotting Smoke Test

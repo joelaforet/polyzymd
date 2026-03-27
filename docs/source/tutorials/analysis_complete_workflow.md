@@ -173,7 +173,7 @@ conditions:
 defaults:
   equilibration_time: "10ns"
 
-analysis_settings:
+plugins:
   rmsf:
     selection: "protein and name CA"
     reference_mode: "average"
@@ -200,12 +200,6 @@ analysis_settings:
     protein_selection: "protein"
     cutoff: 4.5
     compute_residence_times: true
-
-comparison_settings:
-  rmsf: {}
-  catalytic_triad: {}
-  distances: {}
-  contacts: {}
 ```
 
 ## Step 5: Validate the Comparison Config
@@ -225,7 +219,8 @@ For the tutorial, use the batch runner:
 polyzymd compare run-all
 ```
 
-This runs every enabled comparison and writes JSON results into `results/`.
+This runs every enabled comparison and writes canonical cache files into
+`comparison/<analysis>/result.json`.
 
 If you prefer to inspect one comparison first, a good sanity check is:
 
@@ -254,11 +249,15 @@ At this point you should have:
 ```text
 polymer_stabilization_study/
 ├── comparison.yaml
-├── results/
-│   ├── rmsf_comparison_polymer_stabilization_study.json
-│   ├── contacts_comparison_polymer_stabilization_study.json
-│   ├── distances_comparison_polymer_stabilization_study.json
-│   └── triad_comparison_polymer_stabilization_study.json
+├── comparison/
+│   ├── rmsf/
+│   │   └── result.json
+│   ├── contacts/
+│   │   └── result.json
+│   ├── distances/
+│   │   └── result.json
+│   └── catalytic_triad/
+│       └── result.json
 └── figures/
     ├── rmsf_comparison.png
     ├── rmsf_profile.png
@@ -266,8 +265,8 @@ polymer_stabilization_study/
     └── ...
 ```
 
-That is the tutorial success state: the comparison JSON exists, the figures
-exist, and `polyzymd compare plot-all` completes without error.
+That is the tutorial success state: the canonical comparison caches exist, the
+figures exist, and `polyzymd compare plot-all` completes without error.
 
 ## What to Do Next
 

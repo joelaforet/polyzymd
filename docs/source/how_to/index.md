@@ -36,7 +36,7 @@ Experimental workflows:
 - [Broken Molecule Debugging](../tutorials/broken_molecules_debugging.md)
 
 <!-- IMAGE OPPORTUNITY: Add an annotated comparison project tree showing
-`comparison.yaml`, `results/`, and `figures/`, or an example SLURM submission
+`comparison.yaml`, `comparison/`, and `figures/`, or an example SLURM submission
 flow diagram for HPC users. -->
 
 ```{toctree}

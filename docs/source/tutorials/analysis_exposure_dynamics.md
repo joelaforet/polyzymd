@@ -214,7 +214,7 @@ enrichments).
 If you change the threshold, you must recompute:
 
 ```bash
-polyzymd compare exposure -f comparison.yaml --recompute-sasa
+polyzymd compare run exposure -f comparison.yaml --recompute
 ```
 
 Comparing enrichment values computed with different thresholds is not valid.
@@ -270,7 +270,7 @@ contact events. The cutoff used is recorded in each `contacts_rep*.json` under
 must also recompute exposure dynamics to maintain consistency.
 
 ```{note}
-The default contact cutoff in `analysis_settings.contacts.cutoff` is 4.5 Å,
+The default contact cutoff in `plugins.contacts.cutoff` is 4.5 Å,
 but cached results from earlier runs may use 4.0 Å. Always check
 `criteria_cutoff` in the contacts JSON if you suspect a mismatch. See [Troubleshooting](troubleshooting.md) for details.
 ```
@@ -311,7 +311,7 @@ conditions:
     config: "../egma_100/config.yaml"
     replicates: [1, 2, 3]
 
-analysis_settings:
+plugins:
   contacts:
     name: "polymer_contacts"
     polymer_selection: "chainID C"
@@ -330,7 +330,7 @@ analysis_settings:
 Then run:
 
 ```bash
-polyzymd compare exposure -f comparison.yaml
+polyzymd compare run exposure -f comparison.yaml
 ```
 ````
 
@@ -539,7 +539,7 @@ downstream functional assays.
 ### ExposureComparisonSettings
 
 No comparison-specific parameters beyond analysis settings defaults. Specify
-only `analysis_settings.exposure` in `comparison.yaml`.
+only `plugins.exposure` in `comparison.yaml`.
 
 ---
 
@@ -815,7 +815,7 @@ in `sasa_trajectory.npz`. If input trajectories or contact results change,
 the cache is stale. Force recomputation with:
 
 ```bash
-polyzymd compare exposure -f comparison.yaml --recompute-sasa --recompute-exposure
+polyzymd compare run exposure -f comparison.yaml --recompute
 ```
 
 Or delete the cache directories manually:
