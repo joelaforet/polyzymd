@@ -286,15 +286,7 @@ class ExposureAnalysis(Analysis):
         ranked_transient = sorted(summaries, key=lambda s: s.mean_transient_fraction, reverse=True)
 
         # Build excluded list from context
-        excluded_labels = (
-            [
-                c.label
-                for c in getattr(ctx, "_all_conditions", [])
-                if c.label not in {s.label for s in summaries}
-            ]
-            if hasattr(ctx, "_all_conditions")
-            else []
-        )
+        excluded_labels = [c.label for c in ctx.excluded_conditions]
 
         return ExposureComparisonResult(
             name="exposure_comparison",
