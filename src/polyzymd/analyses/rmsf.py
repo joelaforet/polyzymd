@@ -49,7 +49,7 @@ from polyzymd.analyses.shared.statistics import aggregate_per_residue_stats, com
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
-    from polyzymd.analysis.results.rmsf import RMSFAggregatedResult, RMSFResult
+    from polyzymd.analyses._results_rmsf import RMSFAggregatedResult, RMSFResult
 
 logger = logging.getLogger("polyzymd.analyses.rmsf")
 
@@ -170,8 +170,8 @@ class RMSFAnalysis(Analysis):
         RMSFResult
             Per-replicate RMSF result.
         """
-        from polyzymd.analysis.results.base import get_polyzymd_version
-        from polyzymd.analysis.results.rmsf import RMSFResult
+        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses._results_rmsf import RMSFResult
 
         settings = ctx.settings
         sim_config = ctx.sim_config
@@ -403,8 +403,8 @@ class RMSFAnalysis(Analysis):
         RMSFAggregatedResult
             Aggregated result with per-residue and overall statistics.
         """
-        from polyzymd.analysis.results.base import get_polyzymd_version
-        from polyzymd.analysis.results.rmsf import RMSFAggregatedResult
+        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses._results_rmsf import RMSFAggregatedResult
 
         settings = ctx.settings
 
@@ -523,7 +523,7 @@ class RMSFAnalysis(Analysis):
         RMSFAggregatedResult
             Loaded result.
         """
-        from polyzymd.analysis.results.rmsf import RMSFAggregatedResult
+        from polyzymd.analyses._results_rmsf import RMSFAggregatedResult
 
         return RMSFAggregatedResult.load(path)
 

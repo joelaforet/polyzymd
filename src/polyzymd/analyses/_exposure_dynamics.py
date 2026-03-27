@@ -33,7 +33,7 @@ from polyzymd.analyses._exposure_classification import (
     ResidueStability,
     classify_residue_stability,
 )
-from polyzymd.analysis.results.base import BaseAnalysisResult
+from polyzymd.analyses._results_base import BaseAnalysisResult
 
 if TYPE_CHECKING:
     from polyzymd.analyses._contacts_results import ContactResult

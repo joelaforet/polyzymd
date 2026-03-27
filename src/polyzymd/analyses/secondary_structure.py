@@ -29,7 +29,7 @@ from polyzymd.analyses.shared.config_hash import compute_config_hash, validate_c
 from polyzymd.analyses.shared.loader import TrajectoryLoader, convert_time, parse_time_string
 
 if TYPE_CHECKING:
-    from polyzymd.analysis.secondary_structure.results import (
+    from polyzymd.analyses._results_secondary_structure import (
         SecondaryStructureAggregatedResult,
         SecondaryStructureResult,
     )
@@ -123,8 +123,8 @@ class SecondaryStructureAnalysis(Analysis):
         SecondaryStructureResult
             Per-replicate secondary structure result.
         """
-        from polyzymd.analysis.results.base import get_polyzymd_version
-        from polyzymd.analysis.secondary_structure.results import SecondaryStructureResult
+        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses._results_secondary_structure import SecondaryStructureResult
 
         settings = ctx.settings
         sim_config = ctx.sim_config
@@ -297,8 +297,8 @@ class SecondaryStructureAnalysis(Analysis):
         SecondaryStructureAggregatedResult
             Aggregated result with mean/SEM across replicates.
         """
-        from polyzymd.analysis.results.base import get_polyzymd_version
-        from polyzymd.analysis.secondary_structure.results import (
+        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses._results_secondary_structure import (
             SecondaryStructureAggregatedResult,
         )
 
@@ -441,7 +441,7 @@ class SecondaryStructureAnalysis(Analysis):
         SecondaryStructureAggregatedResult
             Loaded result.
         """
-        from polyzymd.analysis.secondary_structure.results import (
+        from polyzymd.analyses._results_secondary_structure import (
             SecondaryStructureAggregatedResult,
         )
 

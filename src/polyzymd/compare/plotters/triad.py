@@ -79,7 +79,7 @@ class TriadKDEPanelPlotter(BasePlotter):
         list[Path]
             Paths to generated plot files
         """
-        from polyzymd.analysis.triad.plotting import plot_triad_kde_panel_pooled
+        from polyzymd.analyses._triad_plotting import plot_triad_kde_panel_pooled
 
         # Pool distances across replicates for each condition
         condition_distances, pair_labels, threshold = self._pool_distances(data, labels)
@@ -270,7 +270,7 @@ class TriadThresholdBarsPlotter(BasePlotter):
         list[Path]
             Paths to generated plot files
         """
-        from polyzymd.analysis.triad.plotting import plot_triad_threshold_bars
+        from polyzymd.analyses._triad_plotting import plot_triad_threshold_bars
 
         # Load aggregated results for each condition
         aggregated_results = self._load_aggregated_results(data, labels)
@@ -316,7 +316,7 @@ class TriadThresholdBarsPlotter(BasePlotter):
         dict
             Mapping of label -> TriadAggregatedResult-like dict
         """
-        from polyzymd.analysis.results.triad import TriadAggregatedResult
+        from polyzymd.analyses._results_triad import TriadAggregatedResult
 
         results: dict[str, Any] = {}
 

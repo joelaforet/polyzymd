@@ -31,7 +31,7 @@ from polyzymd.analyses.base import (
 )
 
 if TYPE_CHECKING:
-    from polyzymd.analysis.results.triad import TriadAggregatedResult, TriadResult
+    from polyzymd.analyses._results_triad import TriadAggregatedResult, TriadResult
 
 logger = logging.getLogger("polyzymd.analyses.catalytic_triad")
 
@@ -164,6 +164,8 @@ class CatalyticTriadAnalysis(Analysis):
         TriadResult
             Per-replicate triad result.
         """
+        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses._results_triad import TriadResult
         from polyzymd.analyses.distances import DistanceCalculator
         from polyzymd.analyses.shared import (
             TrajectoryLoader,
@@ -179,8 +181,6 @@ class CatalyticTriadAnalysis(Analysis):
             warn_if_multi_chain_selection,
         )
         from polyzymd.analyses.shared.selections import parse_selection_string
-        from polyzymd.analysis.results.base import get_polyzymd_version
-        from polyzymd.analysis.results.triad import TriadResult
 
         settings = ctx.settings
         sim_config = ctx.sim_config
@@ -370,11 +370,11 @@ class CatalyticTriadAnalysis(Analysis):
         TriadAggregatedResult
             Aggregated result.
         """
+        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses._results_distances import DistancePairAggregatedResult
+        from polyzymd.analyses._results_triad import TriadAggregatedResult
         from polyzymd.analyses.shared.aggregation import aggregate_distance_pair_stats
         from polyzymd.analyses.shared.statistics import compute_sem
-        from polyzymd.analysis.results.base import get_polyzymd_version
-        from polyzymd.analysis.results.distances import DistancePairAggregatedResult
-        from polyzymd.analysis.results.triad import TriadAggregatedResult
 
         settings = ctx.settings
         first = results[0]
@@ -530,7 +530,7 @@ class CatalyticTriadAnalysis(Analysis):
         TriadAggregatedResult
             Loaded result.
         """
-        from polyzymd.analysis.results.triad import TriadAggregatedResult
+        from polyzymd.analyses._results_triad import TriadAggregatedResult
 
         return TriadAggregatedResult.load(path)
 

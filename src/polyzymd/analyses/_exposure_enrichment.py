@@ -44,7 +44,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field
 
-from polyzymd.analysis.results.base import BaseAnalysisResult
+from polyzymd.analyses._results_base import BaseAnalysisResult
 
 if TYPE_CHECKING:
     from polyzymd.analyses._contacts_results import ContactResult

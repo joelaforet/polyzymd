@@ -24,7 +24,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from polyzymd.analysis.core.constants import DEFAULT_SURFACE_EXPOSURE_THRESHOLD
+from polyzymd.analyses.shared.constants import DEFAULT_SURFACE_EXPOSURE_THRESHOLD
 
 if TYPE_CHECKING:
     from polyzymd.analyses._contacts_binding_preference import (

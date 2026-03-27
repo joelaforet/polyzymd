@@ -25,8 +25,8 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from polyzymd.analyses._results_base import BaseAnalysisResult
 from polyzymd.analyses.shared.groupings import ResidueGrouping
-from polyzymd.analysis.results.base import BaseAnalysisResult
 
 
 class ContactEvent(BaseModel):

@@ -283,7 +283,7 @@ class TestComputeReplicate:
                 "polyzymd.analyses.secondary_structure._encode_dssp_matrix",
                 return_value=ss_matrix,
             ),
-            patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"),
+            patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
         ):
             result = ss_analysis.compute_replicate(ctx, replicate=1)
 
@@ -347,7 +347,7 @@ class TestComputeReplicate:
                 "polyzymd.analyses.secondary_structure._encode_dssp_matrix",
                 return_value=ss_matrix,
             ),
-            patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"),
+            patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
         ):
             result = ss_analysis.compute_replicate(ctx, replicate=2)
 
@@ -379,7 +379,7 @@ class TestAggregate:
         )
 
         with patch(
-            "polyzymd.analysis.results.base.get_polyzymd_version",
+            "polyzymd.analyses._results_base.get_polyzymd_version",
             return_value="0.0.0-test",
         ):
             agg = ss_analysis.aggregate(agg_ctx, results)
@@ -425,7 +425,7 @@ class TestAggregate:
         )
 
         with patch(
-            "polyzymd.analysis.results.base.get_polyzymd_version",
+            "polyzymd.analyses._results_base.get_polyzymd_version",
             return_value="0.0.0-test",
         ):
             ss_analysis.aggregate(agg_ctx, results)
@@ -448,7 +448,7 @@ class TestAggregate:
         )
 
         with patch(
-            "polyzymd.analysis.results.base.get_polyzymd_version",
+            "polyzymd.analyses._results_base.get_polyzymd_version",
             return_value="0.0.0-test",
         ):
             agg = ss_analysis.aggregate(agg_ctx, results)
@@ -529,7 +529,7 @@ class TestDeserializeResult:
         fake_path = tmp_path / "agg.json"
 
         with patch(
-            "polyzymd.analysis.secondary_structure.results.SecondaryStructureAggregatedResult"
+            "polyzymd.analyses._results_secondary_structure.SecondaryStructureAggregatedResult"
         ) as MockCls:
             mock_loaded = MagicMock()
             MockCls.load.return_value = mock_loaded
@@ -902,7 +902,7 @@ class TestLifecycle:
         )
 
         with patch(
-            "polyzymd.analysis.results.base.get_polyzymd_version",
+            "polyzymd.analyses._results_base.get_polyzymd_version",
             return_value="0.0.0-test",
         ):
             agg = ss_analysis.aggregate(agg_ctx, mock_results)
@@ -932,7 +932,7 @@ class TestLifecycle:
         )
 
         with patch(
-            "polyzymd.analysis.results.base.get_polyzymd_version",
+            "polyzymd.analyses._results_base.get_polyzymd_version",
             return_value="0.0.0-test",
         ):
             agg = ss_analysis.aggregate(agg_ctx, results)

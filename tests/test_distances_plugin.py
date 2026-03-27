@@ -431,7 +431,7 @@ class TestAggregate:
             mock_agg.return_value = mock_stats
 
             with patch(
-                "polyzymd.analysis.results.base.get_polyzymd_version",
+                "polyzymd.analyses._results_base.get_polyzymd_version",
                 return_value="1.0.0-test",
             ):
                 result = analysis.aggregate(ctx, mock_results)
@@ -490,7 +490,7 @@ class TestAggregate:
             mock_agg.return_value = mock_stats
 
             with patch(
-                "polyzymd.analysis.results.base.get_polyzymd_version",
+                "polyzymd.analyses._results_base.get_polyzymd_version",
                 return_value="1.0.0-test",
             ):
                 analysis.aggregate(ctx, mock_results)
@@ -830,7 +830,7 @@ class TestDeserializeResult:
 
         mock_result = MagicMock()
         with patch(
-            "polyzymd.analysis.results.distances.DistanceAggregatedResult.load",
+            "polyzymd.analyses._results_distances.DistanceAggregatedResult.load",
             return_value=mock_result,
         ) as mock_load:
             result = analysis._deserialize_result(tmp_path / "test.json")
@@ -1141,7 +1141,7 @@ class TestLifecycle:
             mock_agg.return_value = mock_stats
 
             with patch(
-                "polyzymd.analysis.results.base.get_polyzymd_version",
+                "polyzymd.analyses._results_base.get_polyzymd_version",
                 return_value="1.0.0-test",
             ):
                 agg_result = analysis.aggregate(agg_ctx, rep_results)

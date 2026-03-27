@@ -262,7 +262,7 @@ def _make_mock_distance_result(n_pairs: int = 2, n_frames: int = 1000):
     """
     import numpy as np
 
-    from polyzymd.analysis.results.distances import DistancePairResult
+    from polyzymd.analyses._results_distances import DistancePairResult
 
     mock_result = MagicMock()
     mock_result.n_frames_total = n_frames + 200
@@ -305,7 +305,7 @@ def _make_mock_distance_result(n_pairs: int = 2, n_frames: int = 1000):
 class TestComputeReplicate:
     """Test CatalyticTriadAnalysis.compute_replicate with inlined computation."""
 
-    @patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1")
+    @patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1")
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
     @patch("polyzymd.analyses.shared.TrajectoryLoader")
@@ -372,7 +372,7 @@ class TestComputeReplicate:
         assert 0.0 <= result.simultaneous_contact_fraction <= 1.0
         assert result.n_frames_used == 1000
 
-    @patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1")
+    @patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1")
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
     @patch("polyzymd.analyses.shared.TrajectoryLoader")
@@ -423,7 +423,7 @@ class TestComputeReplicate:
             store_distributions=True,
         )
 
-    @patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1")
+    @patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1")
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
     @patch("polyzymd.analyses.shared.TrajectoryLoader")
@@ -495,7 +495,7 @@ class TestAggregate:
             settings=default_settings,
         )
 
-        with patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"):
+        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
             result = triad_analysis.aggregate(ctx, results)
 
         assert result.n_replicates == 3
@@ -522,7 +522,7 @@ class TestAggregate:
             settings=default_settings,
         )
 
-        with patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"):
+        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
             triad_analysis.aggregate(ctx, results)
 
         json_files = list(agg_dir.glob("*.json"))
@@ -543,7 +543,7 @@ class TestAggregate:
             settings=default_settings,
         )
 
-        with patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"):
+        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
             result = triad_analysis.aggregate(ctx, results)
 
         assert result.per_replicate_simultaneous == pytest.approx([0.6, 0.7, 0.8])
@@ -594,7 +594,7 @@ class TestDeserializeResult:
     """Test CatalyticTriadAnalysis._deserialize_result."""
 
     def test_loads_aggregated_result(self, triad_analysis, tmp_path):
-        with patch("polyzymd.analysis.results.triad.TriadAggregatedResult") as MockAgg:
+        with patch("polyzymd.analyses._results_triad.TriadAggregatedResult") as MockAgg:
             mock_loaded = MagicMock()
             MockAgg.load.return_value = mock_loaded
 
@@ -838,7 +838,7 @@ class TestPlot:
 class TestTriadLifecycle:
     """Test the full compute -> aggregate -> compare lifecycle."""
 
-    @patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1")
+    @patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1")
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
     @patch("polyzymd.analyses.shared.TrajectoryLoader")

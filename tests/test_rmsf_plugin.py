@@ -254,7 +254,7 @@ class TestComputeReplicate:
             patch(
                 "polyzymd.analyses.rmsf._compute_rmsd_timeseries", return_value=np.random.rand(100)
             ),
-            patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"),
+            patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
         ):
             result = rmsf_analysis.compute_replicate(ctx, 1)
 
@@ -317,7 +317,7 @@ class TestComputeReplicate:
             patch(
                 "polyzymd.analyses.rmsf._compute_rmsd_timeseries", return_value=np.random.rand(100)
             ),
-            patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"),
+            patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
         ):
             result = rmsf_analysis.compute_replicate(ctx, 2)
 
@@ -385,7 +385,7 @@ class TestComputeReplicate:
             patch(
                 "polyzymd.analyses.rmsf._compute_rmsd_timeseries", return_value=np.random.rand(100)
             ),
-            patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"),
+            patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
         ):
             result = rmsf_analysis.compute_replicate(ctx, 1)
 
@@ -416,7 +416,7 @@ class TestAggregate:
         )
 
         # Patch only get_polyzymd_version (non-essential) and let real functions run
-        with patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"):
+        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
             result = rmsf_analysis.aggregate(ctx, results)
 
         # Verify the result has correct attributes
@@ -440,7 +440,7 @@ class TestAggregate:
             settings=RMSFSettings(),
         )
 
-        with patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"):
+        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
             rmsf_analysis.aggregate(ctx, results)
 
         # Check that a file was saved
@@ -460,7 +460,7 @@ class TestAggregate:
             settings=RMSFSettings(),
         )
 
-        with patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"):
+        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
             result = rmsf_analysis.aggregate(ctx, results)
 
         assert result.per_replicate_mean_rmsf == [1.1, 1.2, 1.3]
@@ -513,7 +513,7 @@ class TestDeserializeResult:
 
     def test_loads_aggregated_result(self, rmsf_analysis, tmp_path):
         """Test that _deserialize_result loads via RMSFAggregatedResult.load()."""
-        with patch("polyzymd.analysis.results.rmsf.RMSFAggregatedResult") as MockAgg:
+        with patch("polyzymd.analyses._results_rmsf.RMSFAggregatedResult") as MockAgg:
             mock_loaded = MagicMock()
             MockAgg.load.return_value = mock_loaded
 
@@ -769,7 +769,7 @@ class TestRMSFLifecycle:
                 "polyzymd.analyses.rmsf._compute_rmsd_timeseries",
                 return_value=np.random.rand(100),
             ),
-            patch("polyzymd.analysis.results.base.get_polyzymd_version", return_value="1.2.1"),
+            patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
         ):
             output_dir = tmp_path / "analysis" / "no_polymer" / "rmsf"
             result = run_analysis(
