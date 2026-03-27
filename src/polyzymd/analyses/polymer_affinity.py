@@ -65,7 +65,7 @@ from polyzymd.analyses.base import (
 )
 
 if TYPE_CHECKING:
-    from polyzymd.analysis.contacts.binding_preference import (
+    from polyzymd.analyses._contacts_binding_preference import (
         AggregatedBindingPreferenceEntry,
         AggregatedBindingPreferenceResult,
         BindingPreferenceResult,
@@ -572,7 +572,7 @@ class PolymerAffinityAnalysis(Analysis):
             Mapping of replicate number to list of ``BindingPreferenceEntry``
             objects, or None if files unavailable.
         """
-        from polyzymd.analysis.contacts.binding_preference import (
+        from polyzymd.analyses._contacts_binding_preference import (
             BindingPreferenceResult,
         )
 
@@ -624,7 +624,7 @@ class PolymerAffinityAnalysis(Analysis):
         list[AffinityScoreEntry]
             One entry per (polymer_type, protein_group) pair.
         """
-        from polyzymd.analysis.contacts.binding_preference import (
+        from polyzymd.analyses._contacts_binding_preference import (
             AggregatedBindingPreferenceResult,
         )
 

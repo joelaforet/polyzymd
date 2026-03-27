@@ -41,10 +41,10 @@ from polyzymd.analyses.base import (
 )
 
 if TYPE_CHECKING:
+    from polyzymd.analyses._contacts_results import ContactResult
     from polyzymd.analyses._exposure_dynamics import ExposureDynamicsResult
     from polyzymd.analyses._exposure_enrichment import ChaperoneEnrichmentResult
     from polyzymd.analyses._sasa_trajectory import SASATrajectoryResult
-    from polyzymd.analyses._contacts_results import ContactResult
 
 logger = logging.getLogger("polyzymd.analyses.exposure")
 
@@ -423,6 +423,7 @@ class ExposureAnalysis(Analysis):
         -------
         ExposureConditionSummary
         """
+        from polyzymd.analyses._contacts_results import ContactResult
         from polyzymd.analyses._exposure_config import ExposureConfig
         from polyzymd.analyses._exposure_dynamics import (
             ExposureDynamicsResult,
@@ -433,7 +434,6 @@ class ExposureAnalysis(Analysis):
         from polyzymd.analyses._sasa_trajectory import compute_trajectory_sasa
         from polyzymd.analyses.shared.loader import TrajectoryLoader
         from polyzymd.analyses.shared.statistics import compute_sem
-        from polyzymd.analyses._contacts_results import ContactResult
         from polyzymd.compare.results.exposure import ExposureConditionSummary
 
         logger.info(f"  Processing condition: {cond.label}")
@@ -565,6 +565,7 @@ class ExposureAnalysis(Analysis):
         -------
         tuple[ExposureDynamicsResult, ChaperoneEnrichmentResult] or None
         """
+        from polyzymd.analyses._contacts_results import ContactResult
         from polyzymd.analyses._exposure_config import ExposureConfig
         from polyzymd.analyses._exposure_dynamics import (
             ExposureDynamicsResult,
@@ -574,7 +575,6 @@ class ExposureAnalysis(Analysis):
         from polyzymd.analyses._sasa_config import SASAConfig
         from polyzymd.analyses._sasa_trajectory import compute_trajectory_sasa
         from polyzymd.analyses.shared.loader import TrajectoryLoader
-        from polyzymd.analyses._contacts_results import ContactResult
 
         # Find cached ContactResult
         contact_result_path = self._find_contact_result(contacts_analysis_dir, replicate)

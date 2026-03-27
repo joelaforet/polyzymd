@@ -1448,7 +1448,7 @@ class ContactsAnalysis(Analysis):
             resolve_enzyme_pdb,
             try_load_cached_binding_preference,
         )
-        from polyzymd.analysis.contacts.binding_preference import (
+        from polyzymd.analyses._contacts_binding_preference import (
             AggregatedBindingPreferenceResult,
             BindingPreferenceResult,
         )
@@ -1538,7 +1538,7 @@ class ContactsAnalysis(Analysis):
         """
         import glob as glob_module
 
-        from polyzymd.analysis.contacts.binding_preference import (
+        from polyzymd.analyses._contacts_binding_preference import (
             AggregatedBindingPreferenceResult,
             BindingPreferenceResult,
             aggregate_binding_preference,
@@ -1598,7 +1598,7 @@ class ContactsAnalysis(Analysis):
         """
         import MDAnalysis as mda
 
-        from polyzymd.analysis.contacts.binding_preference import (
+        from polyzymd.analyses._contacts_binding_preference import (
             PolymerComposition,
             aggregate_binding_preference,
             compute_binding_preference,
@@ -1710,7 +1710,7 @@ class ContactsAnalysis(Analysis):
         -------
         BindingPreferenceComparisonSummary
         """
-        from polyzymd.analysis.contacts.binding_preference import (
+        from polyzymd.analyses._contacts_binding_preference import (
             AggregatedBindingPreferenceResult,
             AggregatedPartitionBindingResult,
             BindingPreferenceResult,

@@ -44,7 +44,7 @@ from polyzymd.analyses.base import (
 )
 
 if TYPE_CHECKING:
-    from polyzymd.analysis.contacts.binding_preference import (
+    from polyzymd.analyses._contacts_binding_preference import (
         AggregatedBindingPreferenceResult,
         AggregatedPartitionBindingEntry,
         BindingPreferenceResult,
@@ -560,7 +560,7 @@ class BindingFreeEnergyAnalysis(Analysis):
         -------
         list[FreeEnergyEntry]
         """
-        from polyzymd.analysis.contacts.binding_preference import (
+        from polyzymd.analyses._contacts_binding_preference import (
             AggregatedBindingPreferenceResult,
         )
         from polyzymd.compare.results.binding_free_energy import FreeEnergyEntry

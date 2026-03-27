@@ -35,8 +35,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 if TYPE_CHECKING:
-    from polyzymd.analyses._sasa_trajectory import SASATrajectoryResult
     from polyzymd.analyses._contacts_results import ContactResult
+    from polyzymd.analyses._sasa_trajectory import SASATrajectoryResult
 
 logger = logging.getLogger(__name__)
 
