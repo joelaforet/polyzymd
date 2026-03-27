@@ -8,7 +8,7 @@
 **Root cause:** The cache validation logic checks hashes per-frame or per-chunk
 rather than once at the start. Each check triggers the warning independently.
 
-**Location:** `src/polyzymd/analysis/cache.py` (cache validation logic)
+**Location:** `src/polyzymd/analyses/shared/config_hash.py` (cache validation logic)
 
 **Fix approach:** Add a "warned once" flag or move the hash check to a
 single-call validation step before the analysis loop begins.
@@ -27,7 +27,7 @@ loaded from cache.
 **Root cause:** The cache key does not include the cutoff value, so changing
 the cutoff doesn't invalidate the cache.
 
-**Location:** `src/polyzymd/analysis/contacts.py` and `cache.py`
+**Location:** `src/polyzymd/analyses/contacts.py` and `analyses/shared/config_hash.py`
 
 **Fix approach:** Include the cutoff value (and other analysis parameters)
 in the cache key hash computation.

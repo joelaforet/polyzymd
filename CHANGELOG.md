@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Analysis workflow and CLI.** Added the `polyzymd analyze` command family with
   YAML-driven setup and execution for RMSF, contacts, distances, catalytic triad,
   and secondary-structure analyses, plus shared loading, alignment, PBC handling,
-  result models, and aggregation helpers. (`src/polyzymd/analysis/`)
+  result models, and aggregation helpers. (`src/polyzymd/analyses/`)
 - **Comparison engine for multi-condition studies.** Added registry-based
   comparators, typed comparison result models, shared statistical utilities, and
   a generic `polyzymd compare run` workflow for RMSF, contacts, distances,
@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/polyzymd/compare/plotters/`)
 - **Secondary-structure comparison support.** Added DSSP-backed secondary
   structure analysis, comparison results, and plotting so secondary structure is
-  part of the stable release analysis stack. (`src/polyzymd/analysis/secondary_structure/`,
+  part of the stable release analysis stack. (`src/polyzymd/analyses/secondary_structure.py`,
   `src/polyzymd/compare/comparators/secondary_structure.py`,
   `src/polyzymd/compare/plotters/secondary_structure.py`)
 - **Comprehensive analysis documentation.** Added end-to-end tutorials,
@@ -69,8 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result discovery, condition-specific result paths, partition-aware BFE plots,
   shared-path bugs in the plot orchestrator, contacts/distances comparison edge
   cases, and corrupted-trajectory handling in contacts/exposure workflows.
-  (`src/polyzymd/compare/`, `src/polyzymd/analysis/contacts/`,
-   `src/polyzymd/analysis/distances/`)
+   (`src/polyzymd/compare/`, `src/polyzymd/analyses/contacts.py`,
+    `src/polyzymd/analyses/distances.py`)
 
 ### Known Limitations
 
