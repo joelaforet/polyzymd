@@ -5,9 +5,10 @@ neighbour searching, aggregates per-residue contact fractions across
 replicates, and performs cross-condition comparison with dual metrics
 (coverage and mean contact fraction).
 
-This plugin delegates heavy computation to
-:class:`polyzymd.analysis.contacts.calculator_parallel.ParallelContactAnalyzer`
-and wraps the existing plotter classes for figure generation.
+Contact computation uses :class:`ParallelContactAnalyzer` (inlined from the
+former ``analysis.contacts.calculator_parallel`` module) which delegates to
+MDAnalysis ``capped_distance`` for O(N) neighbour searching — typically
+10–100× faster than naïve pairwise distance calculations.
 
 Unlike single-scalar analyses (RMSF, catalytic_triad), contacts has **two**
 primary metrics — coverage (fraction of residues contacted) and mean
@@ -46,6 +47,10 @@ from polyzymd.analyses.base import (
 )
 
 if TYPE_CHECKING:
+    from MDAnalysis.core.groups import AtomGroup, Residue
+    from MDAnalysis.core.universe import Universe
+    from numpy.typing import NDArray
+
     from polyzymd.analysis.contacts.aggregator import (
         AggregatedContactResult,
     )
@@ -57,6 +62,333 @@ logger = logging.getLogger("polyzymd.analyses.contacts")
 
 # Default cutoff matching the existing settings module
 DEFAULT_CONTACT_CUTOFF = 4.5
+
+
+# ---------------------------------------------------------------------------
+# Inlined computation classes (formerly in analysis.contacts.calculator_parallel
+# and analysis.contacts._utils)
+# ---------------------------------------------------------------------------
+
+
+def identify_polymer_chains(
+    query_residues: "AtomGroup",
+) -> list[list[tuple[int, str, "Residue"]]]:
+    """Identify polymer chains and their segments from an atom group.
+
+    Groups residues by connected fragments (molecular graph components)
+    and returns structured chain information.
+
+    Parameters
+    ----------
+    query_residues : AtomGroup
+        MDAnalysis AtomGroup containing the polymer residues to classify.
+
+    Returns
+    -------
+    list[list[tuple[int, str, Residue]]]
+        List of chains, where each chain is a list of
+        (chain_idx, resname, residue) tuples.
+    """
+    all_atoms = query_residues.atoms
+    fragments = all_atoms.fragments if all_atoms.fragments else [all_atoms]
+
+    chains = []
+    for chain_idx, frag in enumerate(fragments):
+        chain_residues = []
+        for res in frag.residues:
+            chain_residues.append((chain_idx, res.resname, res))
+        if chain_residues:
+            chains.append(chain_residues)
+
+    return chains
+
+
+def _get_contact_analysis_base_cls() -> type:
+    """Return a ``_ContactAnalysisBase`` class that extends AnalysisBase.
+
+    MDAnalysis is a heavy dependency imported lazily.  Because
+    ``AnalysisBase`` is a C-extension-style class whose ``__bases__`` cannot
+    be reassigned post-hoc, we define the subclass *inside* this factory on
+    the first call and cache it for subsequent use.
+    """
+    cached = getattr(_get_contact_analysis_base_cls, "_cls", None)
+    if cached is not None:
+        return cached
+
+    from MDAnalysis.analysis.base import AnalysisBase
+
+    class _ContactAnalysisBase(AnalysisBase):  # type: ignore[misc]
+        """MDAnalysis AnalysisBase for residue-level contact detection.
+
+        Iterates trajectory frames using ``capped_distance`` for O(N)
+        neighbour searching (serial execution, ~26 s / 1 900 frames).
+        """
+
+        def __init__(
+            self,
+            target_atoms: "AtomGroup",
+            query_atoms: "AtomGroup",
+            target_residue_indices: "NDArray[np.int64]",
+            query_residue_indices: "NDArray[np.int64]",
+            cutoff: float,
+            n_target_residues: int,
+            n_query_residues: int,
+            **kwargs: Any,
+        ):
+            super().__init__(target_atoms.universe.trajectory, **kwargs)
+
+            self.target_atoms = target_atoms
+            self.query_atoms = query_atoms
+            self.target_residue_indices = target_residue_indices
+            self.query_residue_indices = query_residue_indices
+            self.cutoff = cutoff
+            self.n_target_residues = n_target_residues
+            self.n_query_residues = n_query_residues
+
+        def _prepare(self) -> None:
+            """Initialize results array."""
+            self._contact_matrix = np.zeros(
+                (self.n_frames, self.n_target_residues, self.n_query_residues),
+                dtype=np.uint8,
+            )
+
+        def _single_frame(self) -> None:
+            """Compute contacts for a single frame using capped_distance."""
+            from MDAnalysis.lib.distances import capped_distance
+
+            target_pos = self.target_atoms.positions
+            query_pos = self.query_atoms.positions
+            box = self._ts.dimensions
+
+            pairs, distances = capped_distance(
+                query_pos,
+                target_pos,
+                max_cutoff=self.cutoff,
+                box=box,
+                return_distances=True,
+            )
+
+            if len(pairs) == 0:
+                return
+
+            query_atom_indices = pairs[:, 0]
+            target_atom_indices = pairs[:, 1]
+
+            query_res_indices = self.query_residue_indices[query_atom_indices]
+            target_res_indices = self.target_residue_indices[target_atom_indices]
+
+            self._contact_matrix[self._frame_index, target_res_indices, query_res_indices] = 1
+
+        def _conclude(self) -> None:
+            """Store results."""
+            self.results.contact_matrix = self._contact_matrix
+
+    _get_contact_analysis_base_cls._cls = _ContactAnalysisBase  # type: ignore[attr-defined]
+    return _ContactAnalysisBase
+
+
+class ParallelContactAnalyzer:
+    """Optimized contact analyzer using cell-list based neighbour searching.
+
+    Uses MDAnalysis ``capped_distance`` for O(N) neighbour searching,
+    providing ~10–100× speedup over naïve distance calculations.
+
+    Parameters
+    ----------
+    target_selector : MolecularSelector
+        Selector for target residues (typically protein).
+    query_selector : MolecularSelector
+        Selector for query residues (typically polymer).
+    cutoff : float
+        Contact distance cutoff in Ångströms.  Default 4.0.
+    grouping : ResidueGrouping | None
+        Classification scheme for target residues.
+        Default: ``ProteinAAClassification()``.
+    """
+
+    def __init__(
+        self,
+        target_selector: Any,
+        query_selector: Any,
+        cutoff: float = 4.0,
+        grouping: Any | None = None,
+    ) -> None:
+        from polyzymd.analyses.shared.groupings import ProteinAAClassification
+
+        self.target_selector = target_selector
+        self.query_selector = query_selector
+        self.cutoff = cutoff
+        self.grouping = grouping or ProteinAAClassification()
+
+    def run(
+        self,
+        universe: "Universe",
+        start: int = 0,
+        stop: int | None = None,
+        step: int = 1,
+        verbose: bool = False,
+    ) -> "ContactResult":
+        """Run contact analysis.
+
+        Parameters
+        ----------
+        universe : Universe
+            MDAnalysis Universe with loaded trajectory.
+        start : int
+            First frame to analyse (0-indexed).
+        stop : int | None
+            Last frame to analyse (exclusive).  ``None`` → all frames.
+        step : int
+            Frame stride.
+        verbose : bool
+            Print progress information.
+
+        Returns
+        -------
+        ContactResult
+            Complete contact analysis results.
+        """
+        from polyzymd.analysis.contacts.results import (
+            ContactResult,
+            PolymerSegmentContacts,
+            ResidueContactData,
+            compress_contact_array,
+        )
+
+        target_result = self.target_selector.select(universe)
+        query_result = self.query_selector.select(universe)
+
+        target_atoms = target_result.atoms
+        query_atoms = query_result.atoms
+        target_residues = target_result.residues
+        query_residues = query_result.residues
+
+        if verbose:
+            logger.info(
+                f"Analyzing contacts: {len(query_residues)} query residues "
+                f"({len(query_atoms)} atoms) -> {len(target_residues)} target residues "
+                f"({len(target_atoms)} atoms)"
+            )
+            logger.info(f"Cutoff: {self.cutoff} A")
+
+        target_atom_to_res = self._build_atom_to_residue_map(target_atoms, target_residues)
+        query_atom_to_res = self._build_atom_to_residue_map(query_atoms, query_residues)
+
+        try:
+            timestep_ps = universe.trajectory.dt
+        except (AttributeError, ValueError):
+            timestep_ps = 1.0
+
+        analysis = _get_contact_analysis_base_cls()(
+            target_atoms=target_atoms,
+            query_atoms=query_atoms,
+            target_residue_indices=target_atom_to_res,
+            query_residue_indices=query_atom_to_res,
+            cutoff=self.cutoff,
+            n_target_residues=len(target_residues),
+            n_query_residues=len(query_residues),
+        )
+        analysis.run(start=start, stop=stop, step=step, verbose=verbose)
+
+        contact_matrix = analysis.results.contact_matrix
+        n_frames = contact_matrix.shape[0]
+
+        if verbose:
+            logger.info(f"Processing {n_frames} frames of contact data...")
+
+        polymer_chains = identify_polymer_chains(query_residues)
+
+        # Build residue index → chain/segment mapping
+        res_to_chain_seg: dict[int, tuple[int, int, str, int]] = {}
+        for chain_idx, chain in enumerate(polymer_chains):
+            for seg_idx, (_, _, res) in enumerate(chain):
+                for i, qr in enumerate(query_residues):
+                    if qr.resid == res.resid and qr.resname == res.resname:
+                        res_to_chain_seg[i] = (chain_idx, seg_idx, res.resname, res.resid)
+                        break
+
+        # Convert contact matrix → ContactResult
+        residue_contacts: list[ResidueContactData] = []
+        for target_idx, target_res in enumerate(target_residues):
+            group = self.grouping.classify(target_res.resname)
+
+            segment_contacts: list[PolymerSegmentContacts] = []
+            target_contacts = contact_matrix[:, target_idx, :]
+
+            for query_idx in range(target_contacts.shape[1]):
+                contact_array = target_contacts[:, query_idx].astype(bool)
+                if not np.any(contact_array):
+                    continue
+
+                if query_idx in res_to_chain_seg:
+                    chain_idx, seg_idx, resname, resid = res_to_chain_seg[query_idx]
+                else:
+                    qres = query_residues[query_idx]
+                    chain_idx, seg_idx = 0, query_idx
+                    resname, resid = qres.resname, qres.resid
+
+                events = compress_contact_array(contact_array)
+                if events:
+                    segment_contacts.append(
+                        PolymerSegmentContacts(
+                            polymer_resname=resname,
+                            polymer_resid=resid,
+                            polymer_chain_idx=chain_idx,
+                            events=events,
+                        )
+                    )
+
+            residue_contacts.append(
+                ResidueContactData(
+                    protein_resid=target_res.resid,
+                    protein_resname=target_res.resname,
+                    protein_group=group,
+                    segment_contacts=segment_contacts,
+                )
+            )
+
+        result = ContactResult(
+            residue_contacts=residue_contacts,
+            n_frames=n_frames,
+            timestep_ps=timestep_ps * step,
+            criteria_label=f"any_atom_{self.cutoff:.1f}A",
+            criteria_cutoff=self.cutoff,
+            start_frame=start,
+            metadata={
+                "target_selector": self.target_selector.label,
+                "query_selector": self.query_selector.label,
+                "n_polymer_chains": len(polymer_chains),
+                "n_polymer_segments": sum(len(c) for c in polymer_chains),
+                "optimized": True,
+                "algorithm": "capped_distance",
+            },
+        )
+        result.compute_per_residue_statistics()
+
+        if verbose:
+            logger.info(
+                f"Analysis complete: {result.n_contacted_residues}/{result.n_protein_residues} "
+                f"residues contacted ({result.coverage_fraction():.1%})"
+            )
+
+        return result
+
+    # -- helpers ----------------------------------------------------------
+
+    @staticmethod
+    def _build_atom_to_residue_map(
+        atoms: "AtomGroup",
+        residues: "AtomGroup",
+    ) -> "NDArray[np.int64]":
+        """Build mapping from atom index to residue index.
+
+        Returns an array where ``arr[atom_local_idx] = residue_idx``.
+        """
+        resid_to_idx = {res.resid: i for i, res in enumerate(residues)}
+        atom_to_res = np.zeros(len(atoms), dtype=np.int64)
+        for i, atom in enumerate(atoms):
+            atom_to_res[i] = resid_to_idx.get(atom.residue.resid, 0)
+        return atom_to_res
 
 
 # ---------------------------------------------------------------------------
@@ -236,10 +568,9 @@ class ContactsSettings(BaseModel):
 class ContactsAnalysis(Analysis):
     """Contacts analysis: polymer-protein contacts from MD trajectories.
 
-    This plugin wraps
-    :class:`~polyzymd.analysis.contacts.calculator_parallel.ParallelContactAnalyzer`
-    for per-replicate computation, aggregates across replicates, and
-    performs cross-condition comparison with dual metrics (coverage and
+    This plugin uses :class:`ParallelContactAnalyzer` (defined in this
+    module) for per-replicate computation, aggregates across replicates,
+    and performs cross-condition comparison with dual metrics (coverage and
     mean contact fraction).
 
     The ``compare()`` method is **fully overridden** because:
@@ -274,8 +605,8 @@ class ContactsAnalysis(Analysis):
     ) -> Any:
         """Compute contacts for a single replicate.
 
-        Delegates to
-        :class:`~polyzymd.analysis.contacts.calculator_parallel.ParallelContactAnalyzer`.
+        Uses :class:`ParallelContactAnalyzer` for optimised neighbour-search
+        based contact detection.
 
         Parameters
         ----------
@@ -291,9 +622,12 @@ class ContactsAnalysis(Analysis):
         """
         import MDAnalysis as mda
 
+        from polyzymd.analyses.shared.loader import (
+            TrajectoryLoader,
+            convert_time,
+            parse_time_string,
+        )
         from polyzymd.analyses.shared.selectors import MDAnalysisSelector
-        from polyzymd.analysis.contacts.calculator_parallel import ParallelContactAnalyzer
-        from polyzymd.analysis.core.loader import TrajectoryLoader, convert_time, parse_time_string
 
         settings = ctx.settings
 
@@ -354,8 +688,8 @@ class ContactsAnalysis(Analysis):
     ) -> Any:
         """Aggregate contact results across replicates for one condition.
 
-        Delegates to
-        :func:`~polyzymd.analysis.contacts.aggregator.aggregate_contact_results`.
+        Uses :func:`~polyzymd.analysis.contacts.aggregator.aggregate_contact_results`
+        (to be migrated in Tier 2).
 
         Parameters
         ----------

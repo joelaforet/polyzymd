@@ -228,10 +228,8 @@ class TestComputeReplicate:
         mock_result = _make_mock_contact_result(replicate=1)
 
         with (
-            patch(
-                "polyzymd.analysis.contacts.calculator_parallel.ParallelContactAnalyzer"
-            ) as MockAnalyzer,
-            patch("polyzymd.analysis.core.loader.TrajectoryLoader") as MockLoader,
+            patch("polyzymd.analyses.contacts.ParallelContactAnalyzer") as MockAnalyzer,
+            patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as MockLoader,
             patch("MDAnalysis.Universe") as MockUniverse,
         ):
             # Set up loader
@@ -279,7 +277,7 @@ class TestComputeReplicate:
             settings=settings,
         )
 
-        with patch("polyzymd.analysis.core.loader.TrajectoryLoader") as MockLoader:
+        with patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as MockLoader:
             MockLoader.return_value.get_trajectory_info.side_effect = FileNotFoundError(
                 "No trajectory"
             )
