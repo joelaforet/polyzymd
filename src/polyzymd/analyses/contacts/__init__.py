@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from polyzymd.analyses._contacts_aggregator import AggregatedContactResult
+from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
     from numpy.typing import NDArray
 
-    from polyzymd.analyses._contacts_results import ContactResult
+    from polyzymd.analyses.contacts._results import ContactResult
     from polyzymd.compare.results.contacts import ContactsComparisonResult
 
 logger = logging.getLogger("polyzymd.analyses.contacts")
@@ -258,7 +258,7 @@ class ParallelContactAnalyzer:
         ContactResult
             Complete contact analysis results.
         """
-        from polyzymd.analyses._contacts_results import (
+        from polyzymd.analyses.contacts._results import (
             ContactResult,
             PolymerSegmentContacts,
             ResidueContactData,
@@ -713,7 +713,7 @@ class ContactsAnalysis(Analysis):
         AggregatedContactResult
             Aggregated result with per-residue statistics.
         """
-        from polyzymd.analyses._contacts_aggregator import aggregate_contact_results
+        from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
 
         logger.info(f"  Aggregating {len(results)} replicates...")
         agg_result = aggregate_contact_results(list(results))
@@ -1415,12 +1415,12 @@ class ContactsAnalysis(Analysis):
         BindingPreferenceComparisonSummary or None
             Cross-condition comparison summary, or None if unavailable.
         """
-        from polyzymd.analyses._binding_preference_helpers import (
+        from polyzymd.analyses.contacts._helpers import (
             compute_condition_binding_preference,
             resolve_enzyme_pdb,
             try_load_cached_binding_preference,
         )
-        from polyzymd.analyses._contacts_binding_preference import (
+        from polyzymd.analyses.contacts._binding_preference import (
             AggregatedBindingPreferenceResult,
             BindingPreferenceResult,
         )
@@ -1510,7 +1510,7 @@ class ContactsAnalysis(Analysis):
         """
         import glob as glob_module
 
-        from polyzymd.analyses._contacts_binding_preference import (
+        from polyzymd.analyses.contacts._binding_preference import (
             AggregatedBindingPreferenceResult,
             BindingPreferenceResult,
             aggregate_binding_preference,
@@ -1570,15 +1570,15 @@ class ContactsAnalysis(Analysis):
         """
         import MDAnalysis as mda
 
-        from polyzymd.analyses._contacts_binding_preference import (
+        from polyzymd.analyses.contacts._binding_preference import (
             PolymerComposition,
             aggregate_binding_preference,
             compute_binding_preference,
             extract_polymer_composition,
             resolve_protein_groups_from_surface_exposure,
         )
-        from polyzymd.analyses._contacts_results import ContactResult
-        from polyzymd.analyses._contacts_surface_exposure import SurfaceExposureFilter
+        from polyzymd.analyses.contacts._results import ContactResult
+        from polyzymd.analyses.contacts._surface_exposure import SurfaceExposureFilter
 
         threshold = getattr(settings, "surface_exposure_threshold", 0.2)
         include_defaults = getattr(settings, "include_default_aa_groups", True)
@@ -1682,7 +1682,7 @@ class ContactsAnalysis(Analysis):
         -------
         BindingPreferenceComparisonSummary
         """
-        from polyzymd.analyses._contacts_binding_preference import (
+        from polyzymd.analyses.contacts._binding_preference import (
             AggregatedBindingPreferenceResult,
             AggregatedPartitionBindingResult,
             BindingPreferenceResult,
@@ -1987,7 +1987,7 @@ def _load_binding_preference_results(
     dict
         Mapping of label -> AggregatedBindingPreferenceResult
     """
-    from polyzymd.analyses._contacts_binding_preference import AggregatedBindingPreferenceResult
+    from polyzymd.analyses.contacts._binding_preference import AggregatedBindingPreferenceResult
 
     results: dict[str, AggregatedBindingPreferenceResult] = {}
 
@@ -2041,7 +2041,7 @@ def _load_system_coverage_results(
     dict
         Mapping of label -> AggregatedSystemCoverageResult
     """
-    from polyzymd.analyses._contacts_binding_preference import (
+    from polyzymd.analyses.contacts._binding_preference import (
         AggregatedBindingPreferenceResult,
         AggregatedSystemCoverageResult,
     )
@@ -2100,7 +2100,7 @@ def _load_aggregated_contact_results(
     dict
         Mapping of label -> AggregatedContactResult
     """
-    from polyzymd.analyses._contacts_aggregator import AggregatedContactResult
+    from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
 
     results: dict[str, AggregatedContactResult] = {}
 

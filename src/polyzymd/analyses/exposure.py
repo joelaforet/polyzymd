@@ -48,7 +48,7 @@ from polyzymd.analyses.shared.plotting import (
 )
 
 if TYPE_CHECKING:
-    from polyzymd.analyses._contacts_results import ContactResult
+    from polyzymd.analyses.contacts._results import ContactResult
     from polyzymd.analyses._exposure_dynamics import ExposureDynamicsResult
     from polyzymd.analyses._exposure_enrichment import ChaperoneEnrichmentResult
     from polyzymd.analyses._sasa_trajectory import SASATrajectoryResult
@@ -405,7 +405,7 @@ class ExposureAnalysis(Analysis):
         -------
         ExposureConditionSummary
         """
-        from polyzymd.analyses._contacts_results import ContactResult
+        from polyzymd.analyses.contacts._results import ContactResult
         from polyzymd.analyses._exposure_config import ExposureConfig
         from polyzymd.analyses._exposure_dynamics import (
             ExposureDynamicsResult,
@@ -547,7 +547,7 @@ class ExposureAnalysis(Analysis):
         -------
         tuple[ExposureDynamicsResult, ChaperoneEnrichmentResult] or None
         """
-        from polyzymd.analyses._contacts_results import ContactResult
+        from polyzymd.analyses.contacts._results import ContactResult
         from polyzymd.analyses._exposure_config import ExposureConfig
         from polyzymd.analyses._exposure_dynamics import (
             ExposureDynamicsResult,

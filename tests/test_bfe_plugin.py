@@ -918,7 +918,7 @@ class TestLifecycle:
 
 class TestCondProxy:
     def test_cond_proxy_attributes(self):
-        from polyzymd.analyses._binding_preference_helpers import CondProxy
+        from polyzymd.analyses.contacts._helpers import CondProxy
 
         proxy = CondProxy(label="A", config="/tmp/a.yaml")
         assert proxy.label == "A"

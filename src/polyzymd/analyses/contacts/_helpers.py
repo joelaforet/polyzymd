@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 from polyzymd.analyses.shared.constants import DEFAULT_SURFACE_EXPOSURE_THRESHOLD
 
 if TYPE_CHECKING:
-    from polyzymd.analyses._contacts_binding_preference import (
+    from polyzymd.analyses.contacts._binding_preference import (
         AggregatedBindingPreferenceResult,
         BindingPreferenceResult,
     )
@@ -191,15 +191,15 @@ def compute_condition_binding_preference(
     """
     import MDAnalysis as mda
 
-    from polyzymd.analyses._contacts_binding_preference import (
+    from polyzymd.analyses.contacts._binding_preference import (
         PolymerComposition,
         aggregate_binding_preference,
         compute_binding_preference,
         extract_polymer_composition,
         resolve_protein_groups_from_surface_exposure,
     )
-    from polyzymd.analyses._contacts_results import ContactResult
-    from polyzymd.analyses._contacts_surface_exposure import SurfaceExposureFilter
+    from polyzymd.analyses.contacts._results import ContactResult
+    from polyzymd.analyses.contacts._surface_exposure import SurfaceExposureFilter
 
     # --- Step 1: Compute surface exposure ---
     try:
@@ -324,7 +324,7 @@ def try_load_cached_binding_preference(
     """
     import glob as glob_module
 
-    from polyzymd.analyses._contacts_binding_preference import (
+    from polyzymd.analyses.contacts._binding_preference import (
         AggregatedBindingPreferenceResult,
         BindingPreferenceResult,
         aggregate_binding_preference,

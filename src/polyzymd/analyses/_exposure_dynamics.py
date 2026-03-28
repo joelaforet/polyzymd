@@ -36,7 +36,7 @@ from polyzymd.analyses._exposure_classification import (
 from polyzymd.analyses._results_base import BaseAnalysisResult
 
 if TYPE_CHECKING:
-    from polyzymd.analyses._contacts_results import ContactResult
+    from polyzymd.analyses.contacts._results import ContactResult
     from polyzymd.analyses._exposure_config import ExposureConfig
     from polyzymd.analyses._sasa_trajectory import SASATrajectoryResult
 

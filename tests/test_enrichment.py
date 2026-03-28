@@ -869,7 +869,7 @@ class TestRealDataSanity:
     @pytest.fixture
     def real_contacts(self):
         import pathlib
-        from polyzymd.analyses._contacts_results import ContactResult
+        from polyzymd.analyses.contacts._results import ContactResult
 
         contact_path = (
             pathlib.Path(self.TEST_DATA_BASE)

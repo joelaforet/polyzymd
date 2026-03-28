@@ -29,7 +29,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field
 
-from polyzymd.analyses._contacts_results import ContactResult
+from polyzymd.analyses.contacts._results import ContactResult
 from polyzymd.analyses._results_base import BaseAnalysisResult
 from polyzymd.analyses.shared.statistics import compute_sem as _compute_sem_stat
 

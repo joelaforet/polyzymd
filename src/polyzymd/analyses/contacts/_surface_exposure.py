@@ -14,7 +14,7 @@ maximum surface area exposed are considered surface-accessible.
 
 Examples
 --------
->>> from polyzymd.analyses._contacts_surface_exposure import SurfaceExposureFilter
+>>> from polyzymd.analyses.contacts._surface_exposure import SurfaceExposureFilter
 >>> filter = SurfaceExposureFilter(threshold=0.2)
 >>> result = filter.calculate("enzyme.pdb")
 >>> print(f"Found {result.exposed_count} surface-exposed residues")
