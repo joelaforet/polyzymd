@@ -36,7 +36,6 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from polyzymd.analyses.distances._results import DistanceAggregatedResult
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
@@ -44,6 +43,7 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.distances._results import DistanceAggregatedResult
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
@@ -57,12 +57,12 @@ from polyzymd.analyses.shared.plotting import (
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
+    from polyzymd.analyses.distances._comparison_results import (
+        DistanceComparisonResult,
+    )
     from polyzymd.analyses.distances._results import (
         DistancePairResult,
         DistanceResult,
-    )
-    from polyzymd.compare.results.distances import (
-        DistanceComparisonResult,
     )
     from polyzymd.config.schema import SimulationConfig
 
@@ -1011,7 +1011,7 @@ class DistancesAnalysis(Analysis):
             Comparison result, or ``None`` if fewer than 2 conditions.
         """
         from polyzymd import __version__
-        from polyzymd.compare.results.distances import (
+        from polyzymd.analyses.distances._comparison_results import (
             DistanceComparisonResult,
             DistanceConditionSummary,
             DistancePairANOVA,
@@ -1274,7 +1274,7 @@ class DistancesAnalysis(Analysis):
 
     def format(self, result: Any, output_format: str = "text") -> str:
         """Format distance comparison results without legacy dispatch."""
-        from polyzymd.compare.distances_formatters import format_distances_result
+        from polyzymd.analyses.distances._formatters import format_distances_result
 
         return format_distances_result(result, format=self._normalize_output_format(output_format))
 
@@ -1312,7 +1312,7 @@ class DistancesAnalysis(Analysis):
         DistancePairwiseComparison
             Statistical comparison result.
         """
-        from polyzymd.compare.results.distances import DistancePairwiseComparison
+        from polyzymd.analyses.distances._comparison_results import DistancePairwiseComparison
         from polyzymd.compare.statistics import (
             cohens_d,
             independent_ttest,
