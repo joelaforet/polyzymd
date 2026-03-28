@@ -653,7 +653,7 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
 
                     # Compute binding preference if enabled
                     if config.contacts.compute_binding_preference:
-                        from polyzymd.analyses.contacts._binding_preference import (
+                        from polyzymd.analyses.shared.binding_preference import (
                             compute_binding_preference_from_config,
                         )
 
@@ -706,7 +706,7 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
 
                     # Aggregate binding preference
                     if binding_pref_results:
-                        from polyzymd.analyses.contacts._binding_preference import (
+                        from polyzymd.analyses.shared.binding_preference import (
                             aggregate_binding_preference,
                         )
 
@@ -1442,13 +1442,13 @@ def contacts(
             click.echo()
             click.echo("Computing binding preference...")
 
-            from polyzymd.analyses.contacts._binding_preference import (
+            from polyzymd.analyses.shared.binding_preference import (
                 aggregate_binding_preference,
                 compute_binding_preference,
                 extract_polymer_composition,
                 resolve_protein_group_selections,
             )
-            from polyzymd.analyses.contacts._surface_exposure import SurfaceExposureFilter
+            from polyzymd.analyses.shared.surface_exposure import SurfaceExposureFilter
 
             # Determine enzyme PDB path
             if enzyme_pdb:
@@ -1563,7 +1563,7 @@ def contacts(
 
             # Aggregate and save binding preference if computed
             if binding_pref_results:
-                from polyzymd.analyses.contacts._binding_preference import (
+                from polyzymd.analyses.shared.binding_preference import (
                     aggregate_binding_preference,
                 )
 

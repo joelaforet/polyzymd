@@ -187,8 +187,8 @@ polyzymd compare run contacts -f comparison.yaml --format markdown
 ```python
 from pathlib import Path
 from polyzymd.analyses.contacts._results import ContactResult
-from polyzymd.analyses.contacts._binding_preference import compute_binding_preference
-from polyzymd.analyses.contacts._surface_exposure import SurfaceExposureFilter
+from polyzymd.analyses.shared.binding_preference import compute_binding_preference
+from polyzymd.analyses.shared.surface_exposure import SurfaceExposureFilter
 
 # Load contact results
 contacts = ContactResult.load("analysis/contacts/contacts_rep1.json")
@@ -210,7 +210,7 @@ protein_groups = {
 }
 
 # Extract polymer composition from trajectory (stored as metadata)
-from polyzymd.analyses.contacts._binding_preference import extract_polymer_composition
+from polyzymd.analyses.shared.binding_preference import extract_polymer_composition
 polymer_composition = extract_polymer_composition(universe)  # universe from trajectory
 
 # Compute binding preference
@@ -579,7 +579,7 @@ polyzymd compare run contacts -f comparison.yaml
 ### compute_binding_preference
 
 ```python
-from polyzymd.analyses.contacts._binding_preference import (
+from polyzymd.analyses.shared.binding_preference import (
     compute_binding_preference,
     extract_polymer_composition,
 )
@@ -635,7 +635,7 @@ result = compute_binding_preference(
 ### PolymerComposition
 
 ```python
-from polyzymd.analyses.contacts._binding_preference import (
+from polyzymd.analyses.shared.binding_preference import (
     PolymerComposition,
     extract_polymer_composition,
 )
@@ -812,7 +812,7 @@ Partitions must contain mutually exclusive groups.
 `````{tab-set}
 ````{tab-item} Python
 ```python
-from polyzymd.analyses.contacts._binding_preference import BindingPreferenceResult
+from polyzymd.analyses.shared.binding_preference import BindingPreferenceResult
 
 # Load binding preference result (includes system coverage)
 result = BindingPreferenceResult.load("binding_preference_rep1.json")
@@ -958,7 +958,7 @@ This helps understand:
 System coverage is automatically aggregated when you aggregate binding preference:
 
 ```python
-from polyzymd.analyses.contacts._binding_preference import (
+from polyzymd.analyses.shared.binding_preference import (
     aggregate_binding_preference,
     AggregatedBindingPreferenceResult,
 )

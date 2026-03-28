@@ -1,9 +1,10 @@
 """Surface exposure filtering using SASA calculations.
 
-This module provides tools for determining which protein residues are
-surface-exposed based on solvent-accessible surface area (SASA) calculations.
-Surface exposure filtering is critical for binding preference analysis because
-buried residues cannot participate in polymer-protein contacts.
+Shared utility for determining which protein residues are surface-exposed
+based on solvent-accessible surface area (SASA) calculations.  Surface
+exposure data is consumed by multiple analysis plugins (contacts,
+binding_free_energy, polymer_affinity) for binding preference analysis,
+since buried residues cannot participate in polymer-protein contacts.
 
 Uses `rust_sasa_python` for fast SASA computation on initial PDB structures.
 
@@ -14,7 +15,7 @@ maximum surface area exposed are considered surface-accessible.
 
 Examples
 --------
->>> from polyzymd.analyses.contacts._surface_exposure import SurfaceExposureFilter
+>>> from polyzymd.analyses.shared.surface_exposure import SurfaceExposureFilter
 >>> filter = SurfaceExposureFilter(threshold=0.2)
 >>> result = filter.calculate("enzyme.pdb")
 >>> print(f"Found {result.exposed_count} surface-exposed residues")

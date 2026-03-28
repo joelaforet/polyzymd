@@ -60,7 +60,7 @@ if TYPE_CHECKING:
         FreeEnergyEntry,
         FreeEnergyPairwiseEntry,
     )
-    from polyzymd.analyses.contacts._binding_preference import (
+    from polyzymd.analyses.shared.binding_preference import (
         AggregatedBindingPreferenceResult,
         AggregatedPartitionBindingEntry,
         BindingPreferenceResult,
@@ -463,7 +463,7 @@ class BindingFreeEnergyAnalysis(Analysis):
         -------
         AggregatedBindingPreferenceResult | BindingPreferenceResult | None
         """
-        from polyzymd.analyses.contacts._helpers import (
+        from polyzymd.analyses.shared.binding_preference_helpers import (
             CondProxy,
             compute_condition_binding_preference,
             resolve_enzyme_pdb,
@@ -565,7 +565,7 @@ class BindingFreeEnergyAnalysis(Analysis):
         list[FreeEnergyEntry]
         """
         from polyzymd.analyses.binding_free_energy._comparison_results import FreeEnergyEntry
-        from polyzymd.analyses.contacts._binding_preference import (
+        from polyzymd.analyses.shared.binding_preference import (
             AggregatedBindingPreferenceResult,
         )
 

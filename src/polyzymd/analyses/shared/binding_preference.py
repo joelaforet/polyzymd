@@ -1,7 +1,9 @@
 """Binding preference metrics for polymer-protein contacts.
 
-This module computes enrichment ratios that answer the scientific question:
-"Does polymer type X preferentially bind amino acid class Y?"
+Shared compute layer consumed by contacts, binding_free_energy, and
+polymer_affinity plugins.  This module computes enrichment ratios that
+answer the scientific question: "Does polymer type X preferentially bind
+amino acid class Y?"
 
 Enrichment Calculation (Zero-Centered, Surface-Normalized)
 -----------------------------------------------------------
@@ -39,11 +41,11 @@ calculation. The enrichment formula is purely based on protein surface availabil
 
 Examples
 --------
->>> from polyzymd.analyses.contacts._binding_preference import (
+>>> from polyzymd.analyses.shared.binding_preference import (
 ...     compute_binding_preference,
 ...     extract_polymer_composition,
 ... )
->>> from polyzymd.analyses.contacts._surface_exposure import SurfaceExposureFilter
+>>> from polyzymd.analyses.shared.surface_exposure import SurfaceExposureFilter
 >>>
 >>> # Load contact results and compute surface exposure
 >>> contact_result = ContactResult.load("contacts.json")
@@ -92,7 +94,7 @@ if TYPE_CHECKING:
 
     from polyzymd.analyses._analysis_config import ContactsConfig
     from polyzymd.analyses.contacts._results import ContactResult
-    from polyzymd.analyses.contacts._surface_exposure import SurfaceExposureResult
+    from polyzymd.analyses.shared.surface_exposure import SurfaceExposureResult
 
 logger = logging.getLogger(__name__)
 
@@ -3586,7 +3588,7 @@ def resolve_protein_groups_from_surface_exposure(
 
     Examples
     --------
-    >>> from polyzymd.analyses.contacts._surface_exposure import SurfaceExposureFilter
+    >>> from polyzymd.analyses.shared.surface_exposure import SurfaceExposureFilter
     >>> filter = SurfaceExposureFilter(threshold=0.2)
     >>> surface_result = filter.calculate("enzyme.pdb")
     >>> # Get default AA groups + custom active_site group
@@ -3897,7 +3899,7 @@ def compute_binding_preference_from_config(
     >>> print(result.enrichment_matrix())
     {'SBM': {'aromatic': 1.45, 'polar': 0.82, ...}, ...}
     """
-    from polyzymd.analyses.contacts._surface_exposure import SurfaceExposureFilter
+    from polyzymd.analyses.shared.surface_exposure import SurfaceExposureFilter
 
     logger.info("Computing binding preference from config...")
 

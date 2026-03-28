@@ -820,8 +820,8 @@ polymer type prefers (+) or avoids (-).
 ````{tab-item} Python
 ```python
 from polyzymd.analyses.contacts._results import ContactResult
-from polyzymd.analyses.contacts._binding_preference import compute_binding_preference
-from polyzymd.analyses.contacts._surface_exposure import SurfaceExposureFilter
+from polyzymd.analyses.shared.binding_preference import compute_binding_preference
+from polyzymd.analyses.shared.surface_exposure import SurfaceExposureFilter
 
 # Load contacts and compute surface exposure
 contacts = ContactResult.load("analysis/contacts/contacts_rep1.json")
