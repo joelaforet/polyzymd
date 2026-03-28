@@ -40,7 +40,7 @@ Plugin contract
 - ``min_replicates = 1``
 - ``compare()`` is fully overridden (temperature-aware, pairwise on total scores)
 - ``filter_conditions()`` excludes no-polymer conditions
-- ``plot()`` delegates to ``AffinityStackedBarPlotter`` and ``AffinityGroupBarPlotter``
+- ``plot()`` calls ``_plot_affinity_stacked_bars()`` and ``_plot_affinity_group_bars()``
 """
 
 from __future__ import annotations
@@ -62,6 +62,14 @@ from polyzymd.analyses.base import (
     MetricValue,
     PlotContext,
     ReplicateContext,
+)
+from polyzymd.analyses.shared.plotting import (
+    apply_axis_style,
+    apply_legend,
+    get_colors,
+    get_output_path,
+    grouped_bars,
+    save_figure,
 )
 
 if TYPE_CHECKING:
@@ -277,9 +285,9 @@ class PolymerAffinityAnalysis(Analysis):
     def plot(self, ctx: PlotContext) -> list[Path]:
         """Generate polymer affinity score plots.
 
-        Delegates to:
-        - :class:`~polyzymd.compare.plotters.polymer_affinity.AffinityStackedBarPlotter`
-        - :class:`~polyzymd.compare.plotters.polymer_affinity.AffinityGroupBarPlotter`
+        Calls module-level private functions:
+        - :func:`_plot_affinity_stacked_bars`
+        - :func:`_plot_affinity_group_bars`
         """
         plots: list[Path] = []
 
@@ -308,23 +316,17 @@ class PolymerAffinityAnalysis(Analysis):
 
             plot_settings = PlotSettings()
 
-        plotter_specs: list[tuple[str, str]] = [
-            ("polyzymd.compare.plotters.polymer_affinity", "AffinityStackedBarPlotter"),
-            ("polyzymd.compare.plotters.polymer_affinity", "AffinityGroupBarPlotter"),
-        ]
+        try:
+            result = _plot_affinity_stacked_bars(data, labels, ctx.output_dir, plot_settings)
+            plots.extend(result)
+        except Exception as exc:
+            logger.warning(f"Affinity stacked bars plot failed: {exc}")
 
-        for module_path, class_name in plotter_specs:
-            try:
-                import importlib
-
-                mod = importlib.import_module(module_path)
-                plotter_cls = getattr(mod, class_name)
-                plotter = plotter_cls(settings=plot_settings)
-                result = plotter.plot(data, labels, ctx.output_dir)
-                if result:
-                    plots.extend(result)
-            except Exception as exc:
-                logger.warning(f"{class_name} plot failed: {exc}")
+        try:
+            result = _plot_affinity_group_bars(data, labels, ctx.output_dir, plot_settings)
+            plots.extend(result)
+        except Exception as exc:
+            logger.warning(f"Affinity group bars plot failed: {exc}")
 
         return plots
 
@@ -1189,3 +1191,383 @@ def _condition_has_polymer(cond: Condition) -> bool:
         pass
 
     return False
+
+
+# ===========================================================================
+# Inlined plotting functions (from compare/plotters/polymer_affinity.py)
+# ===========================================================================
+
+
+def _find_affinity_result(data: dict[str, Any], labels: Sequence[str]) -> Any | None:
+    """Find and load PolymerAffinityScoreResult from the comparison cache.
+
+    Parameters
+    ----------
+    data : dict
+        Condition data dict with optional ``"__meta__"`` key.
+    labels : sequence of str
+        Condition labels in display order.
+
+    Returns
+    -------
+    PolymerAffinityScoreResult or None
+    """
+    from polyzymd.compare.io.results import find_comparison_result
+    from polyzymd.compare.results.polymer_affinity import PolymerAffinityScoreResult
+
+    return find_comparison_result(
+        data,
+        labels,
+        glob_patterns=[
+            "polymer_affinity_comparison_*.json",
+            "affinity_comparison_*.json",
+        ],
+        loader=PolymerAffinityScoreResult.load,
+        analysis_type="polymer_affinity",
+        log=logger,
+    )
+
+
+def _plot_affinity_stacked_bars(
+    data: dict[str, Any],
+    labels: Sequence[str],
+    output_dir: Path,
+    plot_settings: Any,
+) -> list[Path]:
+    """Stacked bar chart of total affinity score per condition.
+
+    Each bar represents one condition's total affinity score, with segments
+    colored by polymer type contribution.
+
+    Parameters
+    ----------
+    data : dict
+        Condition data dict from orchestrator.
+    labels : sequence of str
+        Condition labels in display order.
+    output_dir : Path
+        Directory to save plot files.
+    plot_settings : PlotSettings
+        Plot configuration.
+
+    Returns
+    -------
+    list[Path]
+        Paths to generated plot files.
+    """
+    import matplotlib.pyplot as plt
+
+    t = plot_settings.theme
+
+    result = _find_affinity_result(data, labels)
+    if result is None:
+        return []
+
+    affinity_settings = plot_settings.polymer_affinity
+
+    # Order conditions by labels
+    cond_labels = [c.label for c in result.conditions]
+    display_labels = [lbl for lbl in labels if lbl in cond_labels]
+    if not display_labels:
+        display_labels = cond_labels
+
+    # Collect polymer types across all conditions
+    all_polymer_types = result.polymer_types
+    if not all_polymer_types:
+        logger.info("No polymer types in affinity result — skipping stacked bars")
+        return []
+
+    n_conds = len(display_labels)
+    n_poly = len(all_polymer_types)
+    colors = get_colors(n_poly, plot_settings)
+
+    fig, ax = plt.subplots(figsize=affinity_settings.figsize_stacked, dpi=plot_settings.dpi)
+
+    x = np.arange(n_conds)
+    bottoms_neg = np.zeros(n_conds)
+    bottoms_pos = np.zeros(n_conds)
+
+    for poly_idx, poly_type in enumerate(all_polymer_types):
+        values = []
+        for cond_label in display_labels:
+            cond = result.get_condition(cond_label)
+            if cond is None:
+                values.append(0.0)
+                continue
+            # Find this polymer type's score
+            pts = [s for s in cond.polymer_type_scores if s.polymer_type == poly_type]
+            if pts:
+                values.append(pts[0].total_score)
+            else:
+                values.append(0.0)
+
+        vals = np.array(values)
+
+        # Stack negative bars downward, positive upward
+        neg_vals = np.where(vals < 0, vals, 0)
+        pos_vals = np.where(vals >= 0, vals, 0)
+
+        if np.any(neg_vals != 0):
+            ax.bar(
+                x,
+                neg_vals,
+                bottom=bottoms_neg,
+                color=colors[poly_idx],
+                label=poly_type,
+                alpha=t.bar_alpha,
+                edgecolor="white",
+                linewidth=t.bar_linewidth,
+            )
+            bottoms_neg += neg_vals
+
+        if np.any(pos_vals != 0):
+            ax.bar(
+                x,
+                pos_vals,
+                bottom=bottoms_pos,
+                color=colors[poly_idx],
+                label=poly_type if np.all(neg_vals == 0) else None,
+                alpha=t.bar_alpha,
+                edgecolor="white",
+                linewidth=t.bar_linewidth,
+            )
+            bottoms_pos += pos_vals
+
+    # Add total score markers with uncertainty
+    if affinity_settings.show_error_bars:
+        totals = []
+        errors = []
+        for cond_label in display_labels:
+            cond = result.get_condition(cond_label)
+            if cond is not None:
+                totals.append(cond.total_score)
+                errors.append(cond.total_score_uncertainty if cond.total_score_uncertainty else 0.0)
+            else:
+                totals.append(0.0)
+                errors.append(0.0)
+        ax.errorbar(
+            x,
+            totals,
+            yerr=errors,
+            fmt="k_",
+            capsize=t.bar_capsize,
+            capthick=1.5,
+            linewidth=0,
+            elinewidth=1.5,
+            label="Total ± SEM",
+            zorder=10,
+        )
+
+    ax.axhline(y=0, color="black", linewidth=1.0, linestyle="-")
+    ax.set_xticks(x)
+    ax.set_xticklabels(display_labels, rotation=35, ha="right", fontsize=t.tick_fontsize)
+    # Temperature string
+    temp_str = ""
+    if result.conditions:
+        temps = {c.temperature_K for c in result.conditions}
+        if len(temps) == 1:
+            temp_str = f" ({next(iter(temps)):.0f} K)"
+
+    apply_axis_style(
+        ax,
+        plot_settings,
+        title=f"Polymer Affinity Score by Condition{temp_str}",
+        ylabel=r"Affinity Score ($k_\mathrm{b}T$)",
+    )
+
+    # De-duplicate legend entries
+    handles, legend_labels = ax.get_legend_handles_labels()
+    seen: dict[str, Any] = {}
+    unique_handles = []
+    unique_labels = []
+    for handle, lbl in zip(handles, legend_labels):
+        if lbl not in seen:
+            seen[lbl] = True
+            unique_handles.append(handle)
+            unique_labels.append(lbl)
+    apply_legend(
+        ax,
+        plot_settings,
+        fontsize=t.small_fontsize,
+        handles=unique_handles,
+        labels=unique_labels,
+        framealpha=0.7,
+    )
+
+    plt.tight_layout()
+
+    output_path = get_output_path(output_dir, "affinity_stacked_bars", plot_settings)
+    return [
+        save_figure(
+            fig,
+            output_path,
+            plot_settings,
+            experimental_features=("polymer_affinity",),
+        )
+    ]
+
+
+def _plot_affinity_group_bars(
+    data: dict[str, Any],
+    labels: Sequence[str],
+    output_dir: Path,
+    plot_settings: Any,
+) -> list[Path]:
+    """Grouped bar chart of per-group affinity score contributions.
+
+    Creates one figure per polymer type with groups on x-axis (AA classes),
+    bars per condition, error bars, and reference line at score = 0.
+
+    Parameters
+    ----------
+    data : dict
+        Condition data dict from orchestrator.
+    labels : sequence of str
+        Condition labels in display order.
+    output_dir : Path
+        Directory to save plot files.
+    plot_settings : PlotSettings
+        Plot configuration.
+
+    Returns
+    -------
+    list[Path]
+        Paths to generated plot files.
+    """
+    import matplotlib.pyplot as plt
+
+    from polyzymd.analyses.shared.aa_classification import CANONICAL_AA_CLASS_ORDER
+
+    t = plot_settings.theme
+
+    result = _find_affinity_result(data, labels)
+    if result is None:
+        return []
+
+    affinity_settings = plot_settings.polymer_affinity
+
+    cond_labels = [c.label for c in result.conditions]
+    display_labels = [lbl for lbl in labels if lbl in cond_labels]
+    if not display_labels:
+        display_labels = cond_labels
+
+    # Filter to conditions with data
+    valid_labels = [
+        lbl
+        for lbl in display_labels
+        if lbl in cond_labels
+        and any(e.affinity_score is not None for e in result.get_condition(lbl).entries)
+    ]
+    if not valid_labels:
+        logger.info("No conditions with affinity score data — skipping group bars")
+        return []
+
+    polymer_types = result.polymer_types
+    protein_groups = result.protein_groups
+
+    if not polymer_types or not protein_groups:
+        return []
+
+    # Sort protein groups canonically
+    ordered_groups = [g for g in CANONICAL_AA_CLASS_ORDER if g in protein_groups]
+    for g in sorted(protein_groups):
+        if g not in ordered_groups:
+            ordered_groups.append(g)
+
+    n_conds = len(valid_labels)
+    n_groups = len(ordered_groups)
+    colors = get_colors(n_conds, plot_settings)
+    n_poly = len(polymer_types)
+
+    # Temperature string
+    temp_str = ""
+    if result.conditions:
+        temps = {c.temperature_K for c in result.conditions}
+        if len(temps) == 1:
+            temp_str = f" ({next(iter(temps)):.0f} K)"
+
+    output_paths: list[Path] = []
+
+    for poly_type in polymer_types:
+        fig, ax = plt.subplots(figsize=affinity_settings.figsize_group_bars, dpi=plot_settings.dpi)
+
+        x = np.arange(n_groups)
+
+        series: list[tuple[str, list[float], list[float]]] = []
+        for cond_label in valid_labels:
+            cond = result.get_condition(cond_label)
+            means: list[float] = []
+            sems: list[float] = []
+
+            for group in ordered_groups:
+                # Find matching entry
+                entry = None
+                if cond is not None:
+                    for e in cond.entries:
+                        if e.polymer_type == poly_type and e.protein_group == group:
+                            entry = e
+                            break
+
+                if entry is not None and entry.affinity_score is not None:
+                    means.append(entry.affinity_score)
+                    # Prefer replicate-based SEM
+                    per_rep = entry.affinity_score_per_replicate
+                    if len(per_rep) >= 2:
+                        sem = float(np.std(per_rep, ddof=1) / np.sqrt(len(per_rep)))
+                    elif entry.affinity_score_uncertainty is not None:
+                        sem = entry.affinity_score_uncertainty
+                    else:
+                        sem = 0.0
+                    sems.append(sem)
+                else:
+                    means.append(0.0)
+                    sems.append(0.0)
+
+            series.append((cond_label, means, sems))
+
+        grouped_bars(
+            ax,
+            x,
+            series,
+            colors,
+            plot_settings,
+            show_error=affinity_settings.show_error_bars,
+            reference_label="Score = 0 (neutral)",
+            bar_edgecolor="none",
+        )
+
+        poly_label = f": {poly_type}" if n_poly > 1 else ""
+        apply_axis_style(
+            ax,
+            plot_settings,
+            title=f"Per-Group Affinity Score{poly_label}{temp_str}",
+            xlabel="Amino Acid Group",
+            ylabel=r"Affinity Score ($k_\mathrm{b}T$)",
+        )
+        ax.set_xticks(x)
+        ax.set_xticklabels(ordered_groups, rotation=35, ha="right", fontsize=t.tick_fontsize)
+        apply_legend(
+            ax,
+            plot_settings,
+            fontsize=t.small_fontsize,
+            framealpha=0.7,
+        )
+
+        # Guide lines at ±1 kT
+        ax.axhline(y=1.0, color="gray", linestyle=":", linewidth=1.0, alpha=0.6)
+        ax.axhline(y=-1.0, color="gray", linestyle=":", linewidth=1.0, alpha=0.6)
+
+        plt.tight_layout()
+
+        stem = f"affinity_group_bars_{poly_type.lower()}" if n_poly > 1 else "affinity_group_bars"
+        output_path = get_output_path(output_dir, stem, plot_settings)
+        output_paths.append(
+            save_figure(
+                fig,
+                output_path,
+                plot_settings,
+                experimental_features=("polymer_affinity",),
+            )
+        )
+
+    return output_paths

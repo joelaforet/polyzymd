@@ -1110,15 +1110,16 @@ class TestPlot:
             plot_settings=None,
         )
 
-        with patch("importlib.import_module") as mock_import:
-            mock_plotter_cls = MagicMock()
-            mock_plotter_cls.return_value.plot.return_value = []
-
-            class FakeModule:
-                def __getattr__(self, name):
-                    return mock_plotter_cls
-
-            mock_import.return_value = FakeModule()
+        with (
+            patch(
+                "polyzymd.analyses.polymer_affinity._plot_affinity_stacked_bars",
+                return_value=[],
+            ),
+            patch(
+                "polyzymd.analyses.polymer_affinity._plot_affinity_group_bars",
+                return_value=[],
+            ),
+        ):
             analysis.plot(ctx)
 
         assert output_dir.exists()
@@ -1151,7 +1152,16 @@ class TestPlot:
             plot_settings=None,
         )
 
-        with patch("importlib.import_module", side_effect=ImportError("no module")):
+        with (
+            patch(
+                "polyzymd.analyses.polymer_affinity._plot_affinity_stacked_bars",
+                side_effect=RuntimeError("boom"),
+            ),
+            patch(
+                "polyzymd.analyses.polymer_affinity._plot_affinity_group_bars",
+                side_effect=RuntimeError("boom"),
+            ),
+        ):
             result = analysis.plot(ctx)
 
         assert result == []
@@ -1176,6 +1186,98 @@ class TestPlot:
 
         result = analysis.plot(ctx)
         assert result == []
+
+    def test_plot_collects_paths(self, tmp_path):
+        from polyzymd.analyses.base import Condition, PlotContext
+        from polyzymd.analyses.polymer_affinity import (
+            PolymerAffinityAnalysis,
+            PolymerAffinitySettings,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        mock_sim = MagicMock()
+        mock_sim.polymer = MagicMock()
+        conditions = [
+            Condition(
+                label="A",
+                config_path=Path("/tmp/a/config.yaml"),
+                replicates=(1, 2),
+                sim_config=mock_sim,
+            )
+        ]
+
+        ctx = PlotContext(
+            conditions=conditions,
+            analysis_dirs={"A": tmp_path / "A" / "polymer_affinity"},
+            results_dir=tmp_path / "results",
+            output_dir=tmp_path / "plots",
+            settings=PolymerAffinitySettings(),
+            plot_settings=None,
+        )
+
+        stacked_path = tmp_path / "stacked.png"
+        group_path = tmp_path / "group.png"
+
+        with (
+            patch(
+                "polyzymd.analyses.polymer_affinity._plot_affinity_stacked_bars",
+                return_value=[stacked_path],
+            ),
+            patch(
+                "polyzymd.analyses.polymer_affinity._plot_affinity_group_bars",
+                return_value=[group_path],
+            ),
+        ):
+            result = analysis.plot(ctx)
+
+        assert stacked_path in result
+        assert group_path in result
+
+    def test_plot_passes_plot_settings(self, tmp_path):
+        from polyzymd.analyses.base import Condition, PlotContext
+        from polyzymd.analyses.polymer_affinity import (
+            PolymerAffinityAnalysis,
+            PolymerAffinitySettings,
+        )
+        from polyzymd.compare.config import PlotSettings
+
+        analysis = PolymerAffinityAnalysis()
+        mock_sim = MagicMock()
+        mock_sim.polymer = MagicMock()
+        ps = PlotSettings()
+        conditions = [
+            Condition(
+                label="A",
+                config_path=Path("/tmp/a/config.yaml"),
+                replicates=(1, 2),
+                sim_config=mock_sim,
+            )
+        ]
+
+        ctx = PlotContext(
+            conditions=conditions,
+            analysis_dirs={"A": tmp_path / "A" / "polymer_affinity"},
+            results_dir=tmp_path / "results",
+            output_dir=tmp_path / "plots",
+            settings=PolymerAffinitySettings(),
+            plot_settings=ps,
+        )
+
+        with (
+            patch(
+                "polyzymd.analyses.polymer_affinity._plot_affinity_stacked_bars",
+                return_value=[],
+            ) as mock_stacked,
+            patch(
+                "polyzymd.analyses.polymer_affinity._plot_affinity_group_bars",
+                return_value=[],
+            ) as mock_group,
+        ):
+            analysis.plot(ctx)
+
+        # 4th positional arg (index 3) is plot_settings
+        assert mock_stacked.call_args[0][3] is ps
+        assert mock_group.call_args[0][3] is ps
 
 
 # ===========================================================================

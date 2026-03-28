@@ -655,16 +655,6 @@ class TestRegistration:
 
         assert ComparisonSettingsRegistry.is_registered("polymer_affinity")
 
-    def test_plotter_stacked_bars_registered(self):
-        from polyzymd.compare.plotter import PlotterRegistry
-
-        assert PlotterRegistry.is_registered("affinity_stacked_bars")
-
-    def test_plotter_group_bars_registered(self):
-        from polyzymd.compare.plotter import PlotterRegistry
-
-        assert PlotterRegistry.is_registered("affinity_group_bars")
-
     def test_results_module_importable(self):
         from polyzymd.compare.results.polymer_affinity import (
             AffinityScoreConditionSummary,
