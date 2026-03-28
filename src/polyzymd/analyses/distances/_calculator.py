@@ -54,7 +54,7 @@ from polyzymd.analyses.shared.selections import (
     get_position,
     parse_selection_string,
 )
-from polyzymd.compare.registries import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
+from polyzymd.compare.registries import BaseAnalysisSettings, BaseAnalyzer
 
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
@@ -131,7 +131,6 @@ def _make_pair_label(sel1: str, sel2: str) -> str:
     return f"{l1}-{l2}"
 
 
-@AnalyzerRegistry.register("distances")
 class DistanceCalculator(BaseAnalyzer):
     """Calculator for distance analysis with proper statistics.
 

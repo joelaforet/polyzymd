@@ -53,14 +53,6 @@ from polyzymd.analyses.rmsf._comparison_results import (
     RMSFConditionSummary,
 )
 
-# Legacy RMSF result classes (for backward compatibility with old comparator)
-from polyzymd.analyses.rmsf._comparison_results_legacy import (
-    ANOVASummary,
-    ComparisonResult,
-    ConditionSummary,
-    PairwiseComparison,
-)
-
 # Secondary structure result classes
 from polyzymd.analyses.secondary_structure._comparison_results import (
     SSComparisonResult,
@@ -77,14 +69,9 @@ from polyzymd.analyses.catalytic_triad._comparison_results import (
 )
 
 __all__ = [
-    # New OOP RMSF
+    # RMSF
     "RMSFComparisonResult",
     "RMSFConditionSummary",
-    # Legacy RMSF
-    "ANOVASummary",
-    "ComparisonResult",
-    "ConditionSummary",
-    "PairwiseComparison",
     # Triad
     "TriadANOVASummary",
     "TriadComparisonResult",

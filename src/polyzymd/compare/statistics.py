@@ -55,7 +55,8 @@ class EffectSize:
     interpretation : str
         Categorical interpretation: "negligible", "small", "medium", "large"
     direction : str
-        For RMSF: "stabilizing" (d > 0, lower RMSF) or "destabilizing" (d < 0)
+        Default: "higher" (d > 0) or "lower" (d < 0).
+        With ``rmsf_mode=True``: "stabilizing" (d > 0) or "destabilizing" (d < 0).
     """
 
     cohens_d: float
@@ -144,16 +145,16 @@ def independent_ttest(
 def cohens_d(
     group1: ArrayLike,
     group2: ArrayLike,
-    rmsf_mode: bool = True,
+    rmsf_mode: bool = False,
 ) -> EffectSize:
     """Compute Cohen's d effect size.
 
     Cohen's d is the difference between means divided by the pooled
     standard deviation. A positive d means group1 has higher values.
 
-    For RMSF comparisons (rmsf_mode=True), direction is interpreted as:
-    - d > 0 (control > treatment) = "stabilizing" (treatment reduces RMSF)
-    - d < 0 (control < treatment) = "destabilizing" (treatment increases RMSF)
+    By default, direction is labeled as "higher" / "lower".  When
+    ``rmsf_mode=True``, direction is labeled "stabilizing" (treatment
+    reduces the metric) or "destabilizing" (treatment increases it).
 
     Parameters
     ----------
@@ -163,7 +164,7 @@ def cohens_d(
         Second group (typically treatment)
     rmsf_mode : bool, optional
         If True, interpret direction for RMSF (lower = better).
-        Default is True.
+        Default is False.
 
     Returns
     -------
@@ -209,7 +210,7 @@ def cohens_d(
     else:
         interpretation = "large"
 
-    # Interpret direction for RMSF
+    # Interpret direction
     if rmsf_mode:
         # For RMSF: positive d means control > treatment, so treatment stabilizes
         direction = "stabilizing" if d > 0 else "destabilizing"

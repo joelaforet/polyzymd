@@ -12,21 +12,11 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from polyzymd.analyses.shared.defaults import AnalysisDefaults
 from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
 
-# Import settings to trigger registration
+# Import settings classes used as backward-compatible aliases below.
+# Other settings classes are no longer imported for registration side-effects
+# (the AnalysisSettingsRegistry and ComparisonSettingsRegistry were removed).
 from polyzymd.compare.settings import (  # noqa: F401
-    BindingFreeEnergyAnalysisSettings,
-    BindingFreeEnergyComparisonSettings,
     CatalyticTriadAnalysisSettings,
-    CatalyticTriadComparisonSettings,
-    ContactsAnalysisSettings,
-    ContactsComparisonSettings,
-    DistancePairSettings,
-    DistancesAnalysisSettings,
-    DistancesComparisonSettings,
-    RMSFAnalysisSettings,
-    RMSFComparisonSettings,
-    SecondaryStructureAnalysisSettings,
-    SecondaryStructureComparisonSettings,
     TriadPairSettings,
 )
 from polyzymd.core.branding import prepend_file_header

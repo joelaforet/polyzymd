@@ -113,7 +113,13 @@ def _run_replicates(
 
         try:
             result = analysis.compute_replicate(ctx, rep)
-            if result is not None and not result_path.exists():
+            if result is None:
+                logger.warning(
+                    f"  Skipping {condition.label} rep {rep}: compute_replicate returned None"
+                )
+                failed.append(rep)
+                continue
+            if not result_path.exists():
                 analysis.save_result(result, result_path)
             results.append(result)
             successful.append(rep)
@@ -345,6 +351,7 @@ def run_comparison(
     # 3. Compute + aggregate per condition
     analysis_dirs: dict[str, Path] = {}
     aggregated_results: dict[str, Any] = {}
+    failed_conditions: list[Condition] = []
 
     for cond in valid_conditions:
         cond_dir = analysis_root / sanitize_label(cond.label) / analysis.name
@@ -362,8 +369,10 @@ def run_comparison(
             aggregated_results[cond.label] = agg
         except ValueError as e:
             logger.error(f"  {cond.label}: {e}")
-            # Remove from valid conditions
-            valid_conditions = [c for c in valid_conditions if c is not cond]
+            failed_conditions.append(cond)
+
+    # Remove failed conditions from the valid set
+    valid_conditions = [c for c in valid_conditions if c not in failed_conditions]
 
     if len(valid_conditions) < 2:
         raise ValueError(f"{analysis.name}: fewer than 2 conditions succeeded analysis.")
@@ -392,6 +401,8 @@ def run_comparison(
         settings=settings,
         recompute=recompute,
         result_path=comparison_result_path,
+        failed_conditions=failed_conditions,
+        aggregated_results=aggregated_results,
     )
 
     comparison_result = analysis.compare(comp_ctx)
@@ -469,6 +480,9 @@ def run_all_comparisons(
         except KeyError:
             logger.warning(f"Unknown analysis type {name!r} — skipping.")
 
+    # Validate declared dependencies are discoverable
+    _warn_missing_dependencies(analyses)
+
     sorted_analyses = _topological_sort(analyses)
 
     results: dict[str, dict[str, Any]] = {}
@@ -490,6 +504,33 @@ def run_all_comparisons(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _warn_missing_dependencies(analyses: list[Analysis]) -> None:
+    """Warn if any analysis declares dependencies that aren't discoverable.
+
+    This catches configuration errors early — e.g. a plugin declares
+    ``dependencies = ("contacts",)`` but ``contacts`` isn't in the run list
+    or doesn't exist.
+    """
+    from polyzymd.analyses.discovery import list_all_names
+
+    known = list_all_names()
+    scheduled = {a.name for a in analyses}
+    for a_aliases in (a.aliases for a in analyses):
+        scheduled.update(a_aliases)
+
+    for a in analyses:
+        for dep in a.dependencies:
+            if dep not in known:
+                logger.warning(
+                    f"{a.name}: declared dependency {dep!r} is not a discoverable analysis plugin"
+                )
+            elif dep not in scheduled:
+                logger.warning(
+                    f"{a.name}: declared dependency {dep!r} is not in "
+                    f"the current run list — results may be stale"
+                )
 
 
 def _resolve_settings(analysis: Analysis, config: "ComparisonConfig") -> Any:

@@ -73,7 +73,7 @@ from polyzymd.analyses.shared.statistics import (
     aggregate_region_stats,
     compute_sem,
 )
-from polyzymd.compare.registries import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
+from polyzymd.compare.registries import BaseAnalysisSettings, BaseAnalyzer
 
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
@@ -89,7 +89,6 @@ except ImportError:
 LOGGER = logging.getLogger(__name__)
 
 
-@AnalyzerRegistry.register("rmsf")
 class RMSFCalculator(BaseAnalyzer):
     """Calculator for RMSF analysis with trajectory alignment.
 

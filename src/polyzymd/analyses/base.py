@@ -182,6 +182,9 @@ class ComparisonContext:
         Conditions that passed ``filter_conditions()``.
     excluded_conditions : list[Condition]
         Conditions removed by ``filter_conditions()``.
+    failed_conditions : list[Condition]
+        Conditions that were valid but failed during compute/aggregate
+        (e.g., insufficient replicates).  Empty by default.
     control_label : str | None
         Label of the control condition (``None`` if not specified or
         if the control was excluded).
@@ -198,6 +201,10 @@ class ComparisonContext:
         Whether to force recomputation.
     result_path : Path
         Canonical cache path for the comparison result.
+    aggregated_results : dict[str, Any]
+        Mapping ``condition_label -> aggregated result`` for conditions
+        that succeeded.  Plugins can use this instead of re-loading
+        from disk.
     """
 
     name: str
@@ -210,6 +217,8 @@ class ComparisonContext:
     settings: Any
     recompute: bool
     result_path: Path | None = None
+    failed_conditions: list[Condition] = field(default_factory=list)
+    aggregated_results: dict[str, Any] = field(default_factory=dict)
 
     @property
     def effective_control(self) -> str | None:

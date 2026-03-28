@@ -105,7 +105,7 @@ class BaseAnalysisResult(BaseModel, ABC):
 
     See Also
     --------
-    BaseAnalyzer : Base class for analyzer implementations.
+    Analysis : Base class for analysis plugins (``analyses/base.py``).
     AggregatedResultMixin : Mixin for multi-replicate aggregated results.
     """
 

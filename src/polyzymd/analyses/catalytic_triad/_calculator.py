@@ -50,7 +50,7 @@ from polyzymd.analyses.shared.loader import (
 )
 from polyzymd.analyses.shared.statistics import compute_sem
 from polyzymd.compare.config import CatalyticTriadConfig
-from polyzymd.compare.registries import AnalyzerRegistry, BaseAnalysisSettings, BaseAnalyzer
+from polyzymd.compare.registries import BaseAnalysisSettings, BaseAnalyzer
 
 if TYPE_CHECKING:
     from polyzymd.config.schema import SimulationConfig
@@ -58,7 +58,6 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-@AnalyzerRegistry.register("catalytic_triad")
 class CatalyticTriadAnalyzer(BaseAnalyzer):
     """Analyzer for catalytic triad/active site geometry.
 

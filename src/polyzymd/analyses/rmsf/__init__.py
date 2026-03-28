@@ -623,16 +623,12 @@ def _find_rmsf_comparison_result(
     """Try to find a pre-computed RMSF comparison result."""
     from polyzymd.compare.io.results import find_comparison_result
     from polyzymd.analyses.rmsf._comparison_results import RMSFComparisonResult
-    from polyzymd.analyses.rmsf._comparison_results_legacy import ComparisonResult
 
     def _try_load(path: Path) -> Any | None:
         try:
             return RMSFComparisonResult.load(path)
-        except Exception:
-            try:
-                return ComparisonResult.load(path)
-            except Exception as e:
-                logger.debug(f"Could not load {path}: {e}")
+        except Exception as e:
+            logger.debug(f"Could not load {path}: {e}")
         return None
 
     return find_comparison_result(

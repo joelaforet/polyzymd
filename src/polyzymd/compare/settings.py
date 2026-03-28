@@ -1,7 +1,14 @@
 """Analysis and comparison settings for the comparison workflow.
 
-This module defines the concrete settings classes for each analysis type,
-registered via the AnalysisSettingsRegistry and ComparisonSettingsRegistry.
+This module defines the concrete settings classes for each analysis type.
+These classes provide the YAML-to-model bridge for the ``compare/config.py``
+``ComparisonConfig`` layer and the old ``_calculator.py`` modules.
+
+.. note::
+    New analysis types should define a ``Settings`` inner class on their
+    ``Analysis`` subclass instead of adding classes here.  These legacy
+    settings classes are retained for backward compatibility with the
+    calculator layer and existing comparison YAML files.
 
 Analysis Settings (WHAT to analyze):
 - RMSFAnalysisSettings: RMSF calculation parameters
@@ -14,8 +21,6 @@ Comparison Settings (HOW to compare):
 - DistancesComparisonSettings: (no comparison-specific params)
 - CatalyticTriadComparisonSettings: (no comparison-specific params)
 - ContactsComparisonSettings: FDR, effect size, top residues
-
-All settings classes are auto-registered on module import.
 """
 
 from __future__ import annotations
@@ -30,10 +35,8 @@ from polyzymd.analyses.shared.constants import (
     DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
 )
 from polyzymd.compare.registries import (
-    AnalysisSettingsRegistry,
     BaseAnalysisSettings,
     BaseComparisonSettings,
-    ComparisonSettingsRegistry,
 )
 
 if TYPE_CHECKING:
@@ -44,7 +47,6 @@ if TYPE_CHECKING:
 # ============================================================================
 
 
-@AnalysisSettingsRegistry.register("rmsf")
 class RMSFAnalysisSettings(BaseAnalysisSettings):
     """RMSF analysis settings.
 
@@ -120,7 +122,6 @@ class RMSFAnalysisSettings(BaseAnalysisSettings):
         return result
 
 
-@ComparisonSettingsRegistry.register("rmsf")
 class RMSFComparisonSettings(BaseComparisonSettings):
     """Comparison settings for RMSF analysis.
 
@@ -207,7 +208,6 @@ class DistancePairSettings(BaseAnalysisSettings):
         return result
 
 
-@AnalysisSettingsRegistry.register("distances")
 class DistancesAnalysisSettings(BaseAnalysisSettings):
     """Distance analysis settings.
 
@@ -353,7 +353,6 @@ class DistancesAnalysisSettings(BaseAnalysisSettings):
         )
 
 
-@ComparisonSettingsRegistry.register("distances")
 class DistancesComparisonSettings(BaseComparisonSettings):
     """Comparison settings for distance analysis.
 
@@ -406,7 +405,6 @@ class TriadPairSettings(BaseAnalysisSettings):
         }
 
 
-@AnalysisSettingsRegistry.register("catalytic_triad")
 class CatalyticTriadAnalysisSettings(BaseAnalysisSettings):
     """Catalytic triad/active site analysis settings.
 
@@ -469,7 +467,6 @@ class CatalyticTriadAnalysisSettings(BaseAnalysisSettings):
         return result
 
 
-@ComparisonSettingsRegistry.register("catalytic_triad")
 class CatalyticTriadComparisonSettings(BaseComparisonSettings):
     """Comparison settings for catalytic triad analysis.
 
@@ -553,7 +550,6 @@ class BindingPreferenceFieldsMixin(BaseAnalysisSettings):
         raise NotImplementedError
 
 
-@AnalysisSettingsRegistry.register("contacts")
 class ContactsAnalysisSettings(BindingPreferenceFieldsMixin):
     """Polymer-protein contact analysis settings.
 
@@ -718,7 +714,6 @@ class ContactsAnalysisSettings(BindingPreferenceFieldsMixin):
         return result
 
 
-@ComparisonSettingsRegistry.register("contacts")
 class ContactsComparisonSettings(BaseComparisonSettings):
     """Comparison settings for polymer-protein contacts analysis.
 
@@ -767,7 +762,6 @@ class ContactsComparisonSettings(BaseComparisonSettings):
 # ============================================================================
 
 
-@AnalysisSettingsRegistry.register("exposure")
 class ExposureAnalysisSettings(BaseAnalysisSettings):
     """Experimental exposure dynamics settings (dynamic SASA-based chaperone analysis).
 
@@ -854,7 +848,6 @@ class ExposureAnalysisSettings(BaseAnalysisSettings):
         return result
 
 
-@ComparisonSettingsRegistry.register("exposure")
 class ExposureComparisonSettings(BaseComparisonSettings):
     """Comparison settings for exposure dynamics analysis.
 
@@ -876,7 +869,6 @@ class ExposureComparisonSettings(BaseComparisonSettings):
 # ============================================================================
 
 
-@AnalysisSettingsRegistry.register("binding_free_energy")
 class BindingFreeEnergyAnalysisSettings(BindingPreferenceFieldsMixin):
     """Experimental settings for binding free energy analysis via Boltzmann inversion.
 
@@ -977,7 +969,6 @@ class BindingFreeEnergyAnalysisSettings(BindingPreferenceFieldsMixin):
         return result
 
 
-@ComparisonSettingsRegistry.register("binding_free_energy")
 class BindingFreeEnergyComparisonSettings(BaseComparisonSettings):
     """Comparison settings for binding free energy analysis.
 
@@ -1004,7 +995,6 @@ class BindingFreeEnergyComparisonSettings(BaseComparisonSettings):
 # ============================================================================
 
 
-@AnalysisSettingsRegistry.register("polymer_affinity")
 class PolymerAffinityScoreSettings(BindingPreferenceFieldsMixin):
     """Experimental settings for polymer affinity score analysis.
 
@@ -1079,7 +1069,6 @@ class PolymerAffinityScoreSettings(BindingPreferenceFieldsMixin):
         return result
 
 
-@ComparisonSettingsRegistry.register("polymer_affinity")
 class PolymerAffinityScoreComparisonSettings(BaseComparisonSettings):
     """Comparison settings for polymer affinity score analysis.
 
@@ -1106,7 +1095,6 @@ class PolymerAffinityScoreComparisonSettings(BaseComparisonSettings):
 # ============================================================================
 
 
-@AnalysisSettingsRegistry.register("secondary_structure")
 class SecondaryStructureAnalysisSettings(BaseAnalysisSettings):
     """Secondary structure (DSSP) analysis settings.
 
@@ -1134,7 +1122,6 @@ class SecondaryStructureAnalysisSettings(BaseAnalysisSettings):
         }
 
 
-@ComparisonSettingsRegistry.register("secondary_structure")
 class SecondaryStructureComparisonSettings(BaseComparisonSettings):
     """Comparison settings for secondary structure analysis.
 
@@ -1148,30 +1135,3 @@ class SecondaryStructureComparisonSettings(BaseComparisonSettings):
     def analysis_type(cls) -> str:
         """Return the analysis type identifier."""
         return "secondary_structure"
-
-
-# ============================================================================
-# Utility Functions
-# ============================================================================
-
-
-def get_all_analysis_types() -> list[str]:
-    """Get all registered analysis types.
-
-    Returns
-    -------
-    list[str]
-        Sorted list of registered analysis type names.
-    """
-    return AnalysisSettingsRegistry.list_available()
-
-
-def get_all_comparison_types() -> list[str]:
-    """Get all registered comparison settings types.
-
-    Returns
-    -------
-    list[str]
-        Sorted list of registered comparison type names.
-    """
-    return ComparisonSettingsRegistry.list_available()
