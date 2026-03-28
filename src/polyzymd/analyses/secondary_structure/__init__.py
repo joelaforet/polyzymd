@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 import numpy as np
 from pydantic import BaseModel, Field
 
-from polyzymd.analyses._results_secondary_structure import (
+from polyzymd.analyses.secondary_structure._results import (
     SecondaryStructureAggregatedResult,
 )
 from polyzymd.analyses.base import (
@@ -42,7 +42,7 @@ from polyzymd.analyses.shared.plotting import (
 )
 
 if TYPE_CHECKING:
-    from polyzymd.analyses._results_secondary_structure import (
+    from polyzymd.analyses.secondary_structure._results import (
         SecondaryStructureResult,
     )
 
@@ -137,7 +137,7 @@ class SecondaryStructureAnalysis(Analysis):
             Per-replicate secondary structure result.
         """
         from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses._results_secondary_structure import SecondaryStructureResult
+        from polyzymd.analyses.secondary_structure._results import SecondaryStructureResult
 
         settings = ctx.settings
         sim_config = ctx.sim_config
@@ -311,7 +311,7 @@ class SecondaryStructureAnalysis(Analysis):
             Aggregated result with mean/SEM across replicates.
         """
         from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses._results_secondary_structure import (
+        from polyzymd.analyses.secondary_structure._results import (
             SecondaryStructureAggregatedResult,
         )
 

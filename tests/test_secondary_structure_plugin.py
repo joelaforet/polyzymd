@@ -526,7 +526,7 @@ class TestDeserializeResult:
 
     def test_aggregated_result_class_set(self, ss_analysis):
         """AggregatedResultClass should be SecondaryStructureAggregatedResult."""
-        from polyzymd.analyses._results_secondary_structure import (
+        from polyzymd.analyses.secondary_structure._results import (
             SecondaryStructureAggregatedResult,
         )
 
