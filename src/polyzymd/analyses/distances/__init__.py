@@ -36,7 +36,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from polyzymd.analyses._results_distances import DistanceAggregatedResult
+from polyzymd.analyses.distances._results import DistanceAggregatedResult
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
@@ -57,7 +57,7 @@ from polyzymd.analyses.shared.plotting import (
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
-    from polyzymd.analyses._results_distances import (
+    from polyzymd.analyses.distances._results import (
         DistancePairResult,
         DistanceResult,
     )
@@ -393,7 +393,7 @@ class DistanceCalculator:
             Distance analysis results.
         """
         from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses._results_distances import DistanceResult
+        from polyzymd.analyses.distances._results import DistanceResult
         from polyzymd.analyses.shared.config_hash import validate_config_hash
         from polyzymd.analyses.shared.diagnostics import validate_equilibration_time
         from polyzymd.analyses.shared.loader import convert_time, time_to_frame
@@ -598,7 +598,7 @@ class DistanceCalculator:
             Distance analysis results with KDE and autocorrelation statistics.
         """
         from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses._results_distances import DistancePairResult
+        from polyzymd.analyses.distances._results import DistancePairResult
         from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
         from polyzymd.analyses.shared.diagnostics import (
             get_selection_diagnostics,
@@ -909,7 +909,7 @@ class DistancesAnalysis(Analysis):
             Aggregated result with per-pair statistics and SEM.
         """
         from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses._results_distances import (
+        from polyzymd.analyses.distances._results import (
             DistanceAggregatedResult,
             DistancePairAggregatedResult,
         )

@@ -262,7 +262,7 @@ def _make_mock_distance_result(n_pairs: int = 2, n_frames: int = 1000):
     """
     import numpy as np
 
-    from polyzymd.analyses._results_distances import DistancePairResult
+    from polyzymd.analyses.distances._results import DistancePairResult
 
     mock_result = MagicMock()
     mock_result.n_frames_total = n_frames + 200

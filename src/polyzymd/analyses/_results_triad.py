@@ -19,7 +19,7 @@ from polyzymd.analyses._results_base import (
     AggregatedResultMixin,
     BaseAnalysisResult,
 )
-from polyzymd.analyses._results_distances import (
+from polyzymd.analyses.distances._results import (
     DistancePairAggregatedResult,
     DistancePairResult,
 )

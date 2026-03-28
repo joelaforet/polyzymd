@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
-    from polyzymd.analyses._results_distances import (
+    from polyzymd.analyses.distances._results import (
         DistanceAggregatedResult,
         DistancePairAggregatedResult,
         DistancePairResult,

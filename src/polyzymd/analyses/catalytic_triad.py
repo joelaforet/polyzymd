@@ -376,7 +376,7 @@ class CatalyticTriadAnalysis(Analysis):
             Aggregated result.
         """
         from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses._results_distances import DistancePairAggregatedResult
+        from polyzymd.analyses.distances._results import DistancePairAggregatedResult
         from polyzymd.analyses._results_triad import TriadAggregatedResult
         from polyzymd.analyses.shared.aggregation import aggregate_distance_pair_stats
         from polyzymd.analyses.shared.statistics import compute_sem

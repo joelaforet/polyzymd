@@ -407,7 +407,7 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
     require_analysis_deps()
 
     from polyzymd.analyses._analysis_config import AnalysisConfig
-    from polyzymd.analyses._calculator_distances import DistanceCalculator
+    from polyzymd.analyses.distances._calculator import DistanceCalculator
     from polyzymd.analyses.rmsf._calculator import RMSFCalculator
     from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer
     from polyzymd.analyses.shared.logging_utils import setup_logging
@@ -1070,7 +1070,7 @@ def distances(
     """
     require_analysis_deps()
 
-    from polyzymd.analyses._calculator_distances import DistanceCalculator
+    from polyzymd.analyses.distances._calculator import DistanceCalculator
     from polyzymd.config.schema import SimulationConfig
 
     # Parse inputs
@@ -1140,7 +1140,7 @@ def distances(
             # Generate plot if requested
             if plot:
                 require_matplotlib()
-                from polyzymd.analyses._distances_plotting import plot_distance_histogram
+                from polyzymd.analyses.distances._plotting import plot_distance_histogram
 
                 plot_dir = sim_config.output.projects_directory / "plots" / "distances"
                 plot_dir.mkdir(parents=True, exist_ok=True)
@@ -1172,7 +1172,7 @@ def distances(
             # Generate plot if requested
             if plot:
                 require_matplotlib()
-                from polyzymd.analyses._distances_plotting import plot_contact_fraction_bar
+                from polyzymd.analyses.distances._plotting import plot_contact_fraction_bar
 
                 plot_dir = sim_config.output.projects_directory / "plots" / "distances"
                 plot_dir.mkdir(parents=True, exist_ok=True)
@@ -2110,7 +2110,7 @@ def plot_distances_cmd(
     """
     require_matplotlib()
 
-    from polyzymd.analyses._results_distances import DistanceAggregatedResult, DistanceResult
+    from polyzymd.analyses.distances._results import DistanceAggregatedResult, DistanceResult
 
     # Load results
     results = []
@@ -2144,7 +2144,7 @@ def plot_distances_cmd(
 
     if len(results) == 1:
         # Single result - plot histogram for each pair
-        from polyzymd.analyses._distances_plotting import plot_distance_histogram
+        from polyzymd.analyses.distances._plotting import plot_distance_histogram
 
         result = results[0]
         if hasattr(result, "pair_results"):
@@ -2169,7 +2169,7 @@ def plot_distances_cmd(
 
     else:
         # Multiple results - comparison plot
-        from polyzymd.analyses._distances_plotting import plot_distance_comparison
+        from polyzymd.analyses.distances._plotting import plot_distance_comparison
 
         fig, ax = plot_distance_comparison(results, labels=label_list, threshold=threshold)
         if title:
