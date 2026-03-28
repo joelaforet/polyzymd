@@ -7,8 +7,8 @@ figures, and display results on the CLI.
 
 ```{note}
 This guide covers the **plugin system** in ``analyses/``.
-The underlying per-condition calculators (private ``_calculator_*.py`` modules
-inside ``analyses/``) are implementation details — you do not need to touch them.
+The underlying per-condition calculators (private ``_calculator.py`` modules
+inside each analysis sub-package in ``analyses/``) are implementation details — you do not need to touch them.
 ```
 
 ## Prerequisites
@@ -354,7 +354,7 @@ def compare(self, ctx: ComparisonContext) -> MyComparisonResult:
     ...
 ```
 
-See `src/polyzymd/analyses/contacts.py` or `src/polyzymd/analyses/distances.py`
+See `src/polyzymd/analyses/contacts/` or `src/polyzymd/analyses/distances/`
 for full examples.
 
 ## Loading Results in `plot()`
@@ -437,20 +437,20 @@ automatically via `json.dumps()`.
 
 ### Graduating to Pydantic Models
 
-Existing plugins like `rmsf.py` and `secondary_structure.py` use typed Pydantic
-result models defined in private `_results_*.py` files. These inherit from
+Existing plugins like `rmsf` and `secondary_structure` use typed Pydantic
+result models defined in private `_results.py` files inside each analysis sub-package. These inherit from
 `BaseAnalysisResult` in `analyses/_results_base.py`, which provides
 `save()`/`load()` methods and optional NPZ sidecar support for large arrays.
 
 If you follow this pattern:
 
-1. Define your result models in `analyses/_results_<name>.py`
+1. Define your result models in `analyses/<name>/_results.py`
 2. Inherit from `BaseAnalysisResult`
 3. Return model instances from `compute_replicate()` and `aggregate()`
 4. Set `AggregatedResultClass` on your plugin class:
 
 ```python
-from polyzymd.analyses._results_rg import RgAggregatedResult
+from polyzymd.analyses.rg._results import RgAggregatedResult
 
 class RgAnalysis(Analysis):
     name: ClassVar[str] = "rg"
@@ -606,11 +606,11 @@ should implement `plot()` and `format()` inline.
 
 | Plugin | Complexity | Comparison | Good Example Of |
 |--------|-----------|------------|-----------------|
-| `secondary_structure.py` | Simple | Default (extract_metrics) | Wraps existing calculator, uses AggregatedResultClass |
-| `rmsf.py` | Simple | Default (extract_metrics) | Default compare with formatting |
-| `catalytic_triad.py` | Medium | Default (extract_metrics) | Custom compute with triad geometry |
-| `contacts.py` | Complex | Custom (override compare) | Multi-metric comparison, condition filtering |
-| `distances.py` | Complex | Custom (override compare) | Entry-table comparison results |
+| `secondary_structure/` | Simple | Default (extract_metrics) | Wraps existing calculator, uses AggregatedResultClass |
+| `rmsf/` | Simple | Default (extract_metrics) | Default compare with formatting |
+| `catalytic_triad/` | Medium | Default (extract_metrics) | Custom compute with triad geometry |
+| `contacts/` | Complex | Custom (override compare) | Multi-metric comparison, condition filtering |
+| `distances/` | Complex | Custom (override compare) | Entry-table comparison results |
 
 ## Testing Your Plugin
 

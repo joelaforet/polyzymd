@@ -25,13 +25,13 @@ src/polyzymd/
 
 | Layer | Files | Role |
 |-------|-------|------|
-| **Plugins** (public) | `rmsf.py`, `contacts.py`, `rg.py`, etc. | One class per analysis type — the extension point |
-| **Compute** (private) | `_calculator_*.py`, `_results_*.py` | Per-condition calculators and result models |
+| **Plugins** (public) | `rmsf/`, `contacts/`, `rg.py`, etc. (sub-packages or single files) | One class per analysis type — the extension point |
+| **Compute** (private) | `<name>/_calculator.py`, `<name>/_results.py` | Per-condition calculators and result models |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Plugin ABC, auto-discovery, lifecycle runner |
 
 New analysis types are added as plugins in `analyses/`. The private
-`_calculator_*.py` modules provide underlying computation that some plugins
+`_calculator.py` modules (inside each analysis sub-package) provide underlying computation that some plugins
 delegate to; new plugins can compute directly in `compute_replicate()`.
 
 ## Chain Convention (Critical)

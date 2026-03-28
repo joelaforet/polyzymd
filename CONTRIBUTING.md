@@ -79,11 +79,13 @@ core code**.
 1. **Read the tutorial**: `docs/source/tutorials/extending_analyses.md` — it
    walks through every component of a plugin and has a complete working example.
 
-2. **Study an existing plugin**: Start with `src/polyzymd/analyses/secondary_structure.py`
-   (simplest real plugin) or `src/polyzymd/analyses/rmsf.py` (simple with default
+2. **Study an existing plugin**: Start with `src/polyzymd/analyses/secondary_structure/`
+   (simplest real plugin) or `src/polyzymd/analyses/rmsf/` (simple with default
    comparison path).
 
-3. **Create your plugin file**: `src/polyzymd/analyses/<name>.py`
+3. **Create your plugin sub-package**: `src/polyzymd/analyses/<name>/` with
+   `__init__.py` for multi-file plugins, or `src/polyzymd/analyses/<name>.py`
+   for simple single-file plugins
 
 4. **Subclass `Analysis`** and implement the required pieces:
    - `name` — unique lowercase string identifier

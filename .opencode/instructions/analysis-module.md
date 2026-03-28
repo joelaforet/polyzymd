@@ -11,26 +11,29 @@ src/polyzymd/analyses/
 ├── orchestrator.py         # Framework engine: compute → aggregate → compare → plot
 ├── stats.py                # default_scalar_comparison(), format_scalar_comparison()
 ├── shared/                 # Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
-├── _calculator_*.py        # Private per-condition calculators (compute layer)
-├── _results_*.py           # Private result models (Pydantic BaseModel subclasses)
-├── rg.py                   # Rg plugin (simplest complete example)
-├── rmsf.py                 # RMSF plugin (default compare with formatting)
-├── catalytic_triad.py      # Catalytic triad plugin (default compare)
-├── secondary_structure.py  # Secondary structure plugin (default compare)
-├── distances.py            # Distances plugin (custom compare)
-├── contacts.py             # Contacts plugin (custom compare)
-├── exposure.py             # Exposure dynamics plugin (custom compare)
+├── _results_base.py        # Base result model (shared, stays at top level)
+├── rmsf/                   # RMSF plugin sub-package
+│   ├── __init__.py         #   RMSFAnalysis plugin class
+│   ├── _calculator.py      #   RMSFCalculator
+│   ├── _results.py         #   Result models
+│   └── _plotting.py        #   Legacy plot helpers
+├── distances/              # Distances plugin sub-package
+├── catalytic_triad/        # Catalytic triad plugin sub-package
+├── secondary_structure/    # Secondary structure plugin sub-package
+├── contacts/               # Contacts plugin sub-package
+├── exposure/               # Exposure dynamics plugin sub-package
+├── rg.py                   # Rg plugin (simplest complete example, single file)
 ├── binding_free_energy.py  # Binding free energy plugin (custom compare)
 └── polymer_affinity.py     # Polymer affinity plugin (custom compare)
 ```
 
-The private `_calculator_*.py` modules provide underlying computation that
+The private `_calculator.py` modules (inside each sub-package) provide underlying computation that
 some plugins delegate to. New plugins can compute directly in
 `compute_replicate()` — there is no separate `analysis/` package.
 
 ### How to Add a New Analysis
 
-1. Create `src/polyzymd/analyses/<name>.py`
+1. Create `src/polyzymd/analyses/<name>/` sub-package (or `<name>.py` for simple single-file plugins)
 2. Define a `Settings` inner class (Pydantic v2 `BaseModel`)
 3. Subclass `Analysis` and implement `compute_replicate()` and `aggregate()`
 4. Done — framework discovers it via `pkgutil` (no registries, no imports)
@@ -91,7 +94,7 @@ for aggregated results. The orchestrator has a **fallback** auto-save that
 writes to `ctx.result_path` only if the file doesn't already exist.
 
 Simple plugins can skip manual saves and rely on the fallback. Plugins that
-want equilibration-aware caching should save explicitly (see `rmsf.py`,
+want equilibration-aware caching should save explicitly (see `rmsf/`,
 `rg.py` for the pattern).
 
 ### Return Types: Dicts vs Pydantic Models
@@ -121,10 +124,10 @@ by how they should handle autocorrelated MD data:
 | **VARIANCE_BASED** | Subsample by 2τ | Standard formula on independent samples | RMSF, fluctuation metrics |
 
 This classification lives in `analyses/shared/metric_type.py` and is used by
-the underlying calculators (`_calculator_*.py`), not directly by the plugin
+the underlying calculators (`_calculator.py` inside each sub-package), not directly by the plugin
 system.
 
-## Compute Layer (Private `_calculator_*.py` Modules)
+## Compute Layer (Private `_calculator.py` Modules)
 
 The private modules inside `analyses/` provide calculators that some plugins
 delegate to:

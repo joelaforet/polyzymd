@@ -60,13 +60,13 @@ src/polyzymd/
 
 | Layer | Files | Role |
 |-------|-------|------|
-| **Plugins** (public) | `rmsf.py`, `contacts.py`, `rg.py`, etc. | One class per analysis type — the **extension point** for contributors |
-| **Compute** (private) | `_calculator_*.py`, `_results_*.py` | Per-condition calculators and result models used internally by plugins |
+| **Plugins** (public) | `rmsf/`, `contacts/`, `rg.py`, etc. | One class per analysis type — the **extension point** for contributors |
+| **Compute** (private) | `<name>/_calculator.py`, `<name>/_results.py` | Per-condition calculators and result models used internally by plugins |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics, autocorrelation — reusable across plugins |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Plugin ABC, auto-discovery, lifecycle runner, default comparison utilities |
 
 New analysis types are added as **plugins in `analyses/`**. The private
-`_calculator_*.py` modules provide underlying computation that some plugins
+`_calculator.py` modules (inside each analysis sub-package) provide underlying computation that some plugins
 delegate to; new plugins can compute directly in `compute_replicate()`.
 
 ## Key Patterns
@@ -182,7 +182,7 @@ system achieves this:
 When writing a new analysis plugin, **study existing implementations first**:
 
 1. **Read `analyses/base.py`** — it defines the full contract
-2. **Study `analyses/secondary_structure.py`** or `analyses/rmsf.py` — simplest plugins
+2. **Study `analyses/secondary_structure/`** or `analyses/rmsf/` — simplest plugins
 3. **Match the context pattern** — use `ctx.settings`, `ctx.sim_config`, etc.
 
 **Anti-pattern to avoid:**
@@ -216,7 +216,7 @@ def compute_replicate(self, ctx, replicate):
 1. **Read the tutorial**: `docs/source/tutorials/extending_analyses.md`
 2. **Read `analyses/base.py`** — the class docstring defines the full contract
 3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
-4. **Study a matching example**: `rg.py` for simplest, `rmsf.py` for simple, `contacts.py` for custom
+4. **Study a matching example**: `rg.py` for simplest, `rmsf/` for simple, `contacts/` for custom
 5. **Write your plugin** in `analyses/<name>.py` — keep all logic in one file
 6. **Test**: `pixi run -e build pytest tests/test_<name>_plugin.py -v`
 

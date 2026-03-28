@@ -182,7 +182,7 @@ Then compare the JSON outputs manually or load both in Python for analysis.
 Use `interaction_matrix()` to get a complete polymer×AA-class breakdown:
 
 ```python
-from polyzymd.analyses._contacts_results import ContactResult
+from polyzymd.analyses.contacts._results import ContactResult
 from polyzymd.analyses.shared.groupings import CustomGrouping
 
 # Load a contacts result (analyzed with all polymer types)
@@ -301,7 +301,7 @@ JSON result in Python.
 Use `coverage_by_group()` for a complete breakdown:
 
 ```python
-from polyzymd.analyses._contacts_results import ContactResult
+from polyzymd.analyses.contacts._results import ContactResult
 
 result = ContactResult.load("analysis/contacts/contacts_rep1.json")
 
@@ -425,7 +425,7 @@ Contact Analysis Complete
 Use `residence_time_summary()` for detailed statistics:
 
 ```python
-from polyzymd.analyses._contacts_results import ContactResult
+from polyzymd.analyses.contacts._results import ContactResult
 
 result = ContactResult.load("analysis/contacts/contacts_rep1.json")
 
@@ -595,7 +595,7 @@ analyzer = ParallelContactAnalyzer(
 After running both analyses, compare the results:
 
 ```python
-from polyzymd.analyses._contacts_results import ContactResult
+from polyzymd.analyses.contacts._results import ContactResult
 
 active_site = ContactResult.load("analysis/contacts_active_site/contacts_rep1.json")
 surface = ContactResult.load("analysis/contacts_surface/contacts_rep1.json")
@@ -819,9 +819,9 @@ polymer type prefers (+) or avoids (-).
 
 ````{tab-item} Python
 ```python
-from polyzymd.analyses._contacts_results import ContactResult
-from polyzymd.analyses._contacts_binding_preference import compute_binding_preference
-from polyzymd.analyses._contacts_surface_exposure import SurfaceExposureFilter
+from polyzymd.analyses.contacts._results import ContactResult
+from polyzymd.analyses.contacts._binding_preference import compute_binding_preference
+from polyzymd.analyses.contacts._surface_exposure import SurfaceExposureFilter
 
 # Load contacts and compute surface exposure
 contacts = ContactResult.load("analysis/contacts/contacts_rep1.json")
@@ -919,7 +919,7 @@ SBM (SBMA):
 
 ```python
 # Results
-from polyzymd.analyses._contacts_results import ContactResult
+from polyzymd.analyses.contacts._results import ContactResult
 
 # Selectors
 from polyzymd.analyses.shared.selectors import (

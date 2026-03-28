@@ -411,7 +411,7 @@ Plots are saved to `<projects_directory>/plots/distances/`.
 Use the plotting functions for custom figures:
 
 ```python
-from polyzymd.analyses._distances_plotting import (
+from polyzymd.analyses.distances._plotting import (
     plot_distance_histogram,
     plot_distance_timeseries,
     plot_distance_comparison,

@@ -604,7 +604,7 @@ If one replicate differs substantially, investigate **why**:
 ### Accessing Autocorrelation Results
 
 ```python
-from polyzymd.analyses._calculator_rmsf import RMSFCalculator
+from polyzymd.analyses.rmsf._calculator import RMSFCalculator
 import json
 
 # Run analysis

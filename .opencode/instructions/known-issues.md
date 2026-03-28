@@ -27,7 +27,7 @@ loaded from cache.
 **Root cause:** The cache key does not include the cutoff value, so changing
 the cutoff doesn't invalidate the cache.
 
-**Location:** `src/polyzymd/analyses/contacts.py` and `analyses/shared/config_hash.py`
+**Location:** `src/polyzymd/analyses/contacts/` and `analyses/shared/config_hash.py`
 
 **Fix approach:** Include the cutoff value (and other analysis parameters)
 in the cache key hash computation.

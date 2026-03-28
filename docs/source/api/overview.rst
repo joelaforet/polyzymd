@@ -93,9 +93,9 @@ Restraints
 Analysis
 ~~~~~~~~
 
-- :py:class:`~polyzymd.analyses._calculator_rmsf.RMSFCalculator` - Per-residue RMSF
+- :py:class:`~polyzymd.analyses.rmsf._calculator.RMSFCalculator` - Per-residue RMSF
 - :py:class:`~polyzymd.analyses.distances.DistanceCalculator` - Inter-group distances
-- :py:class:`~polyzymd.analyses._calculator_triad.CatalyticTriadAnalyzer` - Catalytic triad integrity
+- :py:class:`~polyzymd.analyses.catalytic_triad._calculator.CatalyticTriadAnalyzer` - Catalytic triad integrity
 - :py:class:`~polyzymd.analyses.contacts.ParallelContactAnalyzer` - Polymer-protein contacts
 - :py:class:`~polyzymd.analyses._results_base.BaseAnalysisResult` - Serializable result base class
 

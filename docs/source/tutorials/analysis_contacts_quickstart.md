@@ -197,7 +197,7 @@ polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
 from pathlib import Path
 from polyzymd.config import SimulationConfig
 from polyzymd.analyses.contacts import ParallelContactAnalyzer
-from polyzymd.analyses._contacts_aggregator import aggregate_contact_results
+from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
 
 config = SimulationConfig.from_yaml("config.yaml")
 
@@ -342,7 +342,7 @@ polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns --residence-times
 ```python
 from polyzymd.config import SimulationConfig
 from polyzymd.analyses.contacts import ParallelContactAnalyzer
-from polyzymd.analyses._contacts_aggregator import aggregate_contact_results
+from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
 
 config = SimulationConfig.from_yaml("config.yaml")
 
@@ -593,7 +593,7 @@ The `interaction_matrix()` method computes contact metrics for each combination
 of polymer type and protein amino acid class:
 
 ```python
-from polyzymd.analyses._contacts_results import ContactResult
+from polyzymd.analyses.contacts._results import ContactResult
 
 result = ContactResult.load("analysis/contacts/contacts_rep1.json")
 
