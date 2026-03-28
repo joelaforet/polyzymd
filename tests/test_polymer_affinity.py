@@ -40,7 +40,7 @@ def _make_entry(
     affinity_score_per_replicate: list[float] | None = None,
 ):
     """Construct an AffinityScoreEntry with sensible defaults."""
-    from polyzymd.compare.results.polymer_affinity import AffinityScoreEntry
+    from polyzymd.analyses.polymer_affinity._comparison_results import AffinityScoreEntry
 
     # ΔG_sel per contact = -ln(contact_share / expected_share) [kT]
     delta_g: float | None = None
@@ -81,7 +81,7 @@ def _make_polymer_type_score(
     entries: list | None = None,
 ):
     """Construct a PolymerTypeScore."""
-    from polyzymd.compare.results.polymer_affinity import PolymerTypeScore
+    from polyzymd.analyses.polymer_affinity._comparison_results import PolymerTypeScore
 
     if entries is None:
         entries = [_make_entry(polymer_type=polymer_type)]
@@ -105,7 +105,7 @@ def _make_condition_summary(
     entries: list | None = None,
 ):
     """Construct an AffinityScoreConditionSummary."""
-    from polyzymd.compare.results.polymer_affinity import AffinityScoreConditionSummary
+    from polyzymd.analyses.polymer_affinity._comparison_results import AffinityScoreConditionSummary
 
     if entries is None:
         entries = [_make_entry()]
@@ -345,7 +345,9 @@ class TestPolymerAffinityScoreResult:
     """Test PolymerAffinityScoreResult serialization."""
 
     def _build_result(self, n_conditions: int = 2):
-        from polyzymd.compare.results.polymer_affinity import PolymerAffinityScoreResult
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
+            PolymerAffinityScoreResult,
+        )
 
         conditions = []
         for i in range(n_conditions):
@@ -369,7 +371,9 @@ class TestPolymerAffinityScoreResult:
 
         pairwise = []
         if n_conditions >= 2:
-            from polyzymd.compare.results.polymer_affinity import AffinityScorePairwiseEntry
+            from polyzymd.analyses.polymer_affinity._comparison_results import (
+                AffinityScorePairwiseEntry,
+            )
 
             pairwise.append(
                 AffinityScorePairwiseEntry(
@@ -449,7 +453,9 @@ class TestAffinityScorePairwiseEntry:
 
     def test_delta_score_sign(self):
         """Positive delta_score means B has weaker affinity than A."""
-        from polyzymd.compare.results.polymer_affinity import AffinityScorePairwiseEntry
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
+            AffinityScorePairwiseEntry,
+        )
 
         entry = AffinityScorePairwiseEntry(
             condition_a="Control",
@@ -464,7 +470,9 @@ class TestAffinityScorePairwiseEntry:
         assert entry.delta_score > 0
 
     def test_cross_temperature_flag(self):
-        from polyzymd.compare.results.polymer_affinity import AffinityScorePairwiseEntry
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
+            AffinityScorePairwiseEntry,
+        )
 
         entry = AffinityScorePairwiseEntry(
             condition_a="363K",
@@ -478,7 +486,9 @@ class TestAffinityScorePairwiseEntry:
         assert entry.p_value is None
 
     def test_same_temperature_has_stats(self):
-        from polyzymd.compare.results.polymer_affinity import AffinityScorePairwiseEntry
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
+            AffinityScorePairwiseEntry,
+        )
 
         entry = AffinityScorePairwiseEntry(
             condition_a="A",
@@ -506,7 +516,7 @@ class TestPolymerAffinityFormatters:
     """Test output formatters."""
 
     def _build_result(self, n_conditions: int = 2):
-        from polyzymd.compare.results.polymer_affinity import (
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
             AffinityScorePairwiseEntry,
             PolymerAffinityScoreResult,
         )
@@ -562,7 +572,7 @@ class TestPolymerAffinityFormatters:
         )
 
     def test_json_format_valid(self):
-        from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
+        from polyzymd.analyses.polymer_affinity._formatters import format_affinity_result
 
         result = self._build_result()
         output = format_affinity_result(result, format="json")
@@ -571,7 +581,7 @@ class TestPolymerAffinityFormatters:
         assert "methodology" in data
 
     def test_table_format_contains_condition_labels(self):
-        from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
+        from polyzymd.analyses.polymer_affinity._formatters import format_affinity_result
 
         result = self._build_result()
         output = format_affinity_result(result, format="table")
@@ -579,42 +589,42 @@ class TestPolymerAffinityFormatters:
         assert "Cond 1" in output
 
     def test_table_format_contains_polymer_type(self):
-        from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
+        from polyzymd.analyses.polymer_affinity._formatters import format_affinity_result
 
         result = self._build_result()
         output = format_affinity_result(result, format="table")
         assert "SBM" in output
 
     def test_table_format_contains_score_keyword(self):
-        from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
+        from polyzymd.analyses.polymer_affinity._formatters import format_affinity_result
 
         result = self._build_result()
         output = format_affinity_result(result, format="table")
         assert any(kw in output for kw in ["Score", "score", "kT"])
 
     def test_table_format_contains_disclaimer(self):
-        from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
+        from polyzymd.analyses.polymer_affinity._formatters import format_affinity_result
 
         result = self._build_result()
         output = format_affinity_result(result, format="table")
         assert "DISCLAIMER" in output or "independence" in output.lower()
 
     def test_markdown_format_has_headers(self):
-        from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
+        from polyzymd.analyses.polymer_affinity._formatters import format_affinity_result
 
         result = self._build_result()
         output = format_affinity_result(result, format="markdown")
         assert "#" in output
 
     def test_markdown_format_has_table_pipes(self):
-        from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
+        from polyzymd.analyses.polymer_affinity._formatters import format_affinity_result
 
         result = self._build_result()
         output = format_affinity_result(result, format="markdown")
         assert "|" in output
 
     def test_markdown_format_has_disclaimer(self):
-        from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
+        from polyzymd.analyses.polymer_affinity._formatters import format_affinity_result
 
         result = self._build_result()
         output = format_affinity_result(result, format="markdown")
@@ -622,7 +632,7 @@ class TestPolymerAffinityFormatters:
 
     def test_format_single_condition(self):
         """Single condition should not raise and should produce output."""
-        from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
+        from polyzymd.analyses.polymer_affinity._formatters import format_affinity_result
 
         result = self._build_result(n_conditions=1)
         for fmt in ("table", "markdown", "json"):
@@ -630,7 +640,7 @@ class TestPolymerAffinityFormatters:
             assert len(output) > 0
 
     def test_invalid_format_raises(self):
-        from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
+        from polyzymd.analyses.polymer_affinity._formatters import format_affinity_result
 
         result = self._build_result()
         with pytest.raises(ValueError, match="Unknown format"):
@@ -656,7 +666,7 @@ class TestRegistration:
         assert ComparisonSettingsRegistry.is_registered("polymer_affinity")
 
     def test_results_module_importable(self):
-        from polyzymd.compare.results.polymer_affinity import (
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
             AffinityScoreConditionSummary,
             AffinityScoreEntry,
             AffinityScorePairwiseEntry,
@@ -686,7 +696,7 @@ class TestRegistration:
         assert PolymerAffinityScoreResult is not None
 
     def test_formatters_importable(self):
-        from polyzymd.compare.polymer_affinity_formatters import (
+        from polyzymd.analyses.polymer_affinity._formatters import (
             format_affinity_result,
         )
 

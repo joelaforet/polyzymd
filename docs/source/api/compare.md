@@ -30,24 +30,24 @@ plotting.
 
 ### Result Models
 
-- `polyzymd.compare.results.rmsf`
-- `polyzymd.compare.results.triad`
-- `polyzymd.compare.results.contacts`
-- `polyzymd.compare.results.distances`
-- `polyzymd.compare.results.secondary_structure`
-- `polyzymd.compare.results.binding_free_energy`
-- `polyzymd.compare.results.exposure`
-- `polyzymd.compare.results.polymer_affinity`
+- `polyzymd.analyses.rmsf._comparison_results`
+- `polyzymd.analyses.catalytic_triad._comparison_results`
+- `polyzymd.analyses.contacts._comparison_results`
+- `polyzymd.analyses.distances._comparison_results`
+- `polyzymd.analyses.secondary_structure._comparison_results`
+- `polyzymd.analyses.binding_free_energy._comparison_results`
+- `polyzymd.analyses.exposure._comparison_results`
+- `polyzymd.analyses.polymer_affinity._comparison_results`
 
 ### Formatting Helpers
 
 - `polyzymd.compare.formatters`
-- `polyzymd.compare.contacts_formatters`
-- `polyzymd.compare.distances_formatters`
-- `polyzymd.compare.exposure_formatters`
-- `polyzymd.compare.triad_formatters`
-- `polyzymd.compare.binding_free_energy_formatters`
-- `polyzymd.compare.polymer_affinity_formatters`
+- `polyzymd.analyses.contacts._formatters`
+- `polyzymd.analyses.distances._formatters`
+- `polyzymd.analyses.exposure._formatters`
+- `polyzymd.analyses.catalytic_triad._formatters`
+- `polyzymd.analyses.binding_free_energy._formatters`
+- `polyzymd.analyses.polymer_affinity._formatters`
 
 ### Plotting Helpers
 

@@ -40,7 +40,7 @@ def _make_entry(
     delta_G_uncertainty: float | None = None,
 ):
     """Construct a FreeEnergyEntry with sensible defaults."""
-    from polyzymd.compare.results.binding_free_energy import FreeEnergyEntry
+    from polyzymd.analyses.binding_free_energy._comparison_results import FreeEnergyEntry
 
     enrichment_ratio = contact_share / expected_share
     if units == "kT":
@@ -77,7 +77,7 @@ def _make_condition_summary(
     units: str = "kT",
 ):
     """Construct a FreeEnergyConditionSummary."""
-    from polyzymd.compare.results.binding_free_energy import FreeEnergyConditionSummary
+    from polyzymd.analyses.binding_free_energy._comparison_results import FreeEnergyConditionSummary
 
     if entries is None:
         entries = [_make_entry()]
@@ -323,7 +323,9 @@ class TestBindingFreeEnergyResult:
     """Test BindingFreeEnergyResult serialization."""
 
     def _build_result(self, units: str = "kT"):
-        from polyzymd.compare.results.binding_free_energy import BindingFreeEnergyResult
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
+            BindingFreeEnergyResult,
+        )
 
         cond = _make_condition_summary(label="Cond A")
         return BindingFreeEnergyResult(
@@ -390,7 +392,9 @@ class TestFreeEnergyPairwiseEntry:
 
     def test_delta_delta_g_sign(self):
         """ΔΔG = ΔG_sel,B - ΔG_sel,A: positive means B less favorable than A."""
-        from polyzymd.compare.results.binding_free_energy import FreeEnergyPairwiseEntry
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
+            FreeEnergyPairwiseEntry,
+        )
 
         entry = FreeEnergyPairwiseEntry(
             polymer_type="SBM",
@@ -407,7 +411,9 @@ class TestFreeEnergyPairwiseEntry:
         assert entry.delta_delta_G > 0
 
     def test_cross_temperature_flag(self):
-        from polyzymd.compare.results.binding_free_energy import FreeEnergyPairwiseEntry
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
+            FreeEnergyPairwiseEntry,
+        )
 
         entry = FreeEnergyPairwiseEntry(
             polymer_type="SBM",
@@ -432,7 +438,9 @@ class TestBindingFreeEnergyFormatters:
     """Test output formatters."""
 
     def _build_result(self, n_conditions: int = 2):
-        from polyzymd.compare.results.binding_free_energy import BindingFreeEnergyResult
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
+            BindingFreeEnergyResult,
+        )
 
         conditions = []
         for i in range(n_conditions):
@@ -456,7 +464,9 @@ class TestBindingFreeEnergyFormatters:
             ]
             conditions.append(_make_condition_summary(label=f"Cond {i}", entries=entries))
 
-        from polyzymd.compare.results.binding_free_energy import FreeEnergyPairwiseEntry
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
+            FreeEnergyPairwiseEntry,
+        )
 
         pairwise = []
         if n_conditions >= 2:
@@ -488,7 +498,7 @@ class TestBindingFreeEnergyFormatters:
         )
 
     def test_json_format_valid(self):
-        from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
+        from polyzymd.analyses.binding_free_energy._formatters import format_bfe_result
 
         result = self._build_result()
         output = format_bfe_result(result, format="json")
@@ -497,7 +507,7 @@ class TestBindingFreeEnergyFormatters:
         assert data["units"] == "kT"
 
     def test_table_format_contains_condition_labels(self):
-        from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
+        from polyzymd.analyses.binding_free_energy._formatters import format_bfe_result
 
         result = self._build_result()
         output = format_bfe_result(result, format="table")
@@ -505,14 +515,14 @@ class TestBindingFreeEnergyFormatters:
         assert "Cond 1" in output
 
     def test_table_format_contains_polymer_type(self):
-        from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
+        from polyzymd.analyses.binding_free_energy._formatters import format_bfe_result
 
         result = self._build_result()
         output = format_bfe_result(result, format="table")
         assert "SBM" in output
 
     def test_table_format_contains_dg_symbol(self):
-        from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
+        from polyzymd.analyses.binding_free_energy._formatters import format_bfe_result
 
         result = self._build_result()
         output = format_bfe_result(result, format="table")
@@ -520,14 +530,14 @@ class TestBindingFreeEnergyFormatters:
         assert any(sym in output for sym in ["ΔG_sel", "ΔG", "dG", "delta_G"])
 
     def test_markdown_format_has_headers(self):
-        from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
+        from polyzymd.analyses.binding_free_energy._formatters import format_bfe_result
 
         result = self._build_result()
         output = format_bfe_result(result, format="markdown")
         assert "#" in output  # Markdown headers
 
     def test_markdown_format_has_table_pipes(self):
-        from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
+        from polyzymd.analyses.binding_free_energy._formatters import format_bfe_result
 
         result = self._build_result()
         output = format_bfe_result(result, format="markdown")
@@ -535,7 +545,7 @@ class TestBindingFreeEnergyFormatters:
 
     def test_format_single_condition(self):
         """Single condition should not raise and should produce output."""
-        from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
+        from polyzymd.analyses.binding_free_energy._formatters import format_bfe_result
 
         result = self._build_result(n_conditions=1)
         for fmt in ("table", "markdown", "json"):
@@ -562,7 +572,7 @@ class TestRegistration:
         assert ComparisonSettingsRegistry.is_registered("binding_free_energy")
 
     def test_results_module_importable(self):
-        from polyzymd.compare.results.binding_free_energy import (
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
             BindingFreeEnergyResult,
             FreeEnergyConditionSummary,
             FreeEnergyEntry,
@@ -575,6 +585,6 @@ class TestRegistration:
         assert FreeEnergyPairwiseEntry is not None
 
     def test_formatters_importable(self):
-        from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
+        from polyzymd.analyses.binding_free_energy._formatters import format_bfe_result
 
         assert callable(format_bfe_result)

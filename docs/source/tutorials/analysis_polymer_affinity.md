@@ -405,7 +405,7 @@ comparison_output/
 Reload for downstream processing:
 
 ```python
-from polyzymd.compare.results.polymer_affinity import PolymerAffinityScoreResult
+from polyzymd.analyses.polymer_affinity._comparison_results import PolymerAffinityScoreResult
 
 result = PolymerAffinityScoreResult.load("comparison/polymer_affinity/result.json")
 

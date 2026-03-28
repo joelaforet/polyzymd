@@ -345,7 +345,7 @@ def _make_context(n_conditions=2, n_reps=3, control="A", temperature=300.0):
 class TestCompare:
     def test_compare_returns_result(self):
         from polyzymd.analyses.binding_free_energy import BindingFreeEnergyAnalysis
-        from polyzymd.compare.results.binding_free_energy import FreeEnergyEntry
+        from polyzymd.analyses.binding_free_energy._comparison_results import FreeEnergyEntry
 
         analysis = BindingFreeEnergyAnalysis()
         ctx = _make_context(n_conditions=2)
@@ -545,7 +545,7 @@ class TestDGComputation:
 class TestPairwise:
     def _make_summaries(self, labels, temperature=300.0, dg_values=None):
         """Build mock FreeEnergyConditionSummary objects."""
-        from polyzymd.compare.results.binding_free_energy import (
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
             FreeEnergyConditionSummary,
             FreeEnergyEntry,
         )
@@ -611,7 +611,7 @@ class TestPairwise:
 
     def test_pairwise_control_no_data_falls_back(self):
         from polyzymd.analyses.binding_free_energy import BindingFreeEnergyAnalysis
-        from polyzymd.compare.results.binding_free_energy import (
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
             FreeEnergyConditionSummary,
         )
 

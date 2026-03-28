@@ -1,21 +1,9 @@
 """Result models for comparison analysis.
 
 .. versionchanged:: 1.3.0
-    All plugin-specific result models have been moved to their respective
+    All plugin-specific result models now live in their respective
     analysis plugin packages under ``polyzymd.analyses.<plugin>._comparison_results``.
-    This module re-exports them for backward compatibility.
-
-Submodules (now backward-compat shims)
---------------------------------------
-rmsf : RMSF comparison results
-rmsf_legacy : Legacy RMSF results (for backward compatibility)
-triad : Catalytic triad comparison results
-contacts : Polymer-protein contacts comparison results
-binding_free_energy : Binding free energy (ΔG_sel) comparison results
-polymer_affinity : Polymer affinity score comparison results
-distances : Distance comparison results
-exposure : Exposure comparison results
-secondary_structure : Secondary structure comparison results
+    This module re-exports them for convenience.
 """
 
 # Binding free energy result classes

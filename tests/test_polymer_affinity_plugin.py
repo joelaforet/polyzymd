@@ -383,7 +383,7 @@ def _make_pa_context(n_conditions=2, n_reps=3, control="A", temperature=300.0):
 
 def _make_condition_summary(label, temperature=300.0, entries=None):
     """Build a real AffinityScoreConditionSummary for compare-level tests."""
-    from polyzymd.compare.results.polymer_affinity import (
+    from polyzymd.analyses.polymer_affinity._comparison_results import (
         AffinityScoreConditionSummary,
         AffinityScoreEntry,
     )
@@ -509,7 +509,7 @@ class TestCompare:
 
     def test_compare_collects_metadata(self):
         from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
-        from polyzymd.compare.results.polymer_affinity import AffinityScoreEntry
+        from polyzymd.analyses.polymer_affinity._comparison_results import AffinityScoreEntry
 
         analysis = PolymerAffinityAnalysis()
         ctx = _make_pa_context(n_conditions=2)
@@ -836,7 +836,7 @@ class TestPerRepFromFiles:
 class TestAggregation:
     def test_aggregate_polymer_type_scores(self):
         from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
-        from polyzymd.compare.results.polymer_affinity import AffinityScoreEntry
+        from polyzymd.analyses.polymer_affinity._comparison_results import AffinityScoreEntry
 
         analysis = PolymerAffinityAnalysis()
 
@@ -884,7 +884,7 @@ class TestAggregation:
 
     def test_aggregate_multiple_polymer_types_sorted(self):
         from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
-        from polyzymd.compare.results.polymer_affinity import AffinityScoreEntry
+        from polyzymd.analyses.polymer_affinity._comparison_results import AffinityScoreEntry
 
         analysis = PolymerAffinityAnalysis()
 
@@ -945,7 +945,7 @@ class TestAggregation:
 class TestPairwise:
     def _make_summaries(self, labels, temperature=300.0, total_scores=None):
         """Build AffinityScoreConditionSummary objects."""
-        from polyzymd.compare.results.polymer_affinity import (
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
             AffinityScoreConditionSummary,
             AffinityScoreEntry,
         )
@@ -1010,7 +1010,7 @@ class TestPairwise:
 
     def test_pairwise_control_no_data_falls_back(self):
         from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
-        from polyzymd.compare.results.polymer_affinity import (
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
             AffinityScoreConditionSummary,
         )
 
@@ -1448,7 +1448,9 @@ class TestDeserialization:
     def test_deserialize_result_fallback_to_json(self, tmp_path):
         """Without AggregatedResultClass, _deserialize_result returns a dict via json.loads."""
         from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
-        from polyzymd.compare.results.polymer_affinity import PolymerAffinityScoreResult
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
+            PolymerAffinityScoreResult,
+        )
 
         analysis = PolymerAffinityAnalysis()
 

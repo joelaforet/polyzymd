@@ -347,7 +347,7 @@ project/
 The JSON file can be reloaded for downstream processing:
 
 ```python
-from polyzymd.compare.results.binding_free_energy import BindingFreeEnergyResult
+from polyzymd.analyses.binding_free_energy._comparison_results import BindingFreeEnergyResult
 
 result = BindingFreeEnergyResult.load(
     "comparison/binding_free_energy/result.json"

@@ -31,20 +31,20 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         "format_result",
         "to_json",
     ],
-    "polyzymd.compare.triad_formatters": [
+    "polyzymd.analyses.catalytic_triad._formatters": [
         "format_triad_console_table",
         "format_triad_markdown",
         "format_triad_result",
         "triad_to_json",
     ],
-    "polyzymd.compare.contacts_formatters": [
+    "polyzymd.analyses.contacts._formatters": [
         "contacts_to_json",
         "format_contacts_console_table",
         "format_contacts_markdown",
         "format_contacts_result",
     ],
-    "polyzymd.compare.binding_free_energy_formatters": ["format_bfe_result"],
-    "polyzymd.compare.polymer_affinity_formatters": ["format_affinity_result"],
+    "polyzymd.analyses.binding_free_energy._formatters": ["format_bfe_result"],
+    "polyzymd.analyses.polymer_affinity._formatters": ["format_affinity_result"],
     "polyzymd.compare.results": [
         "AffinityScoreConditionSummary",
         "AffinityScorePairwiseEntry",
