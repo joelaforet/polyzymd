@@ -1,128 +1,27 @@
-"""PolyzyMD comparison module with lazy public exports."""
+"""PolyzyMD comparison module.
 
-from __future__ import annotations
+Shared infrastructure for cross-condition statistical comparisons.
 
-from importlib import import_module
-from typing import Any
+Submodules
+----------
+core.base
+    Base result models (``BaseComparisonResult``, ``PairwiseComparison``, etc.)
+config
+    ``ComparisonConfig``, ``ConditionConfig`` — YAML-driven comparison setup.
+settings
+    Per-analysis settings classes consumed by ``config.py``.
+statistics
+    ``cohens_d``, ``mann_whitney_test``, ``kruskal_wallis_test``, etc.
+io
+    Path resolution and result loading utilities.
+results
+    Re-exports of plugin-specific comparison result models (historical).
+registries
+    ``PlotSettingsRegistry`` and deprecated base classes.
 
-_MODULE_EXPORTS: dict[str, list[str]] = {
-    "polyzymd.compare.core.base": [
-        "ANOVASummary",
-        "BaseComparisonResult",
-        "BaseConditionSummary",
-        "PairwiseComparison",
-    ],
-    "polyzymd.compare.config": ["ComparisonConfig", "ConditionConfig"],
-    "polyzymd.compare.settings": [
-        "RMSFAnalysisSettings",
-        "RMSFComparisonSettings",
-        "CatalyticTriadAnalysisSettings",
-        "CatalyticTriadComparisonSettings",
-        "ContactsAnalysisSettings",
-        "ContactsComparisonSettings",
-        "BindingFreeEnergyAnalysisSettings",
-        "BindingFreeEnergyComparisonSettings",
-        "PolymerAffinityScoreSettings",
-        "PolymerAffinityScoreComparisonSettings",
-    ],
-    "polyzymd.analyses.catalytic_triad._formatters": [
-        "format_triad_console_table",
-        "format_triad_markdown",
-        "format_triad_result",
-        "triad_to_json",
-    ],
-    "polyzymd.analyses.contacts._formatters": [
-        "contacts_to_json",
-        "format_contacts_console_table",
-        "format_contacts_markdown",
-        "format_contacts_result",
-    ],
-    "polyzymd.analyses.binding_free_energy._formatters": ["format_bfe_result"],
-    "polyzymd.analyses.polymer_affinity._formatters": ["format_affinity_result"],
-    "polyzymd.compare.results": [
-        "AffinityScoreConditionSummary",
-        "AffinityScorePairwiseEntry",
-        "AggregateComparisonResult",
-        "BindingFreeEnergyResult",
-        "ContactsComparisonResult",
-        "ContactsConditionSummary",
-        "ContactsPairwiseComparison",
-        "FreeEnergyConditionSummary",
-        "FreeEnergyEntry",
-        "FreeEnergyPairwiseEntry",
-        "PolymerAffinityScoreResult",
-        "RMSFComparisonResult",
-        "RMSFConditionSummary",
-        "TriadComparisonResult",
-        "TriadConditionSummary",
-    ],
-}
+All symbols are imported from their canonical submodule, e.g.::
 
-_EXPORTS = {
-    name: (module_name, name) for module_name, names in _MODULE_EXPORTS.items() for name in names
-}
-
-__all__ = [
-    # core result models
-    "ANOVASummary",
-    "BaseComparisonResult",
-    "BaseConditionSummary",
-    "PairwiseComparison",
-    # config
-    "ComparisonConfig",
-    "ConditionConfig",
-    # settings
-    "RMSFAnalysisSettings",
-    "RMSFComparisonSettings",
-    "CatalyticTriadAnalysisSettings",
-    "CatalyticTriadComparisonSettings",
-    "ContactsAnalysisSettings",
-    "ContactsComparisonSettings",
-    "BindingFreeEnergyAnalysisSettings",
-    "BindingFreeEnergyComparisonSettings",
-    "PolymerAffinityScoreSettings",
-    "PolymerAffinityScoreComparisonSettings",
-    # formatters
-    "format_triad_console_table",
-    "format_triad_markdown",
-    "format_triad_result",
-    "triad_to_json",
-    "format_contacts_console_table",
-    "format_contacts_markdown",
-    "format_contacts_result",
-    "contacts_to_json",
-    "format_bfe_result",
-    "format_affinity_result",
-    # result models
-    "RMSFComparisonResult",
-    "RMSFConditionSummary",
-    "TriadComparisonResult",
-    "TriadConditionSummary",
-    "ContactsComparisonResult",
-    "ContactsConditionSummary",
-    "ContactsPairwiseComparison",
-    "AggregateComparisonResult",
-    "BindingFreeEnergyResult",
-    "FreeEnergyConditionSummary",
-    "FreeEnergyEntry",
-    "FreeEnergyPairwiseEntry",
-    "PolymerAffinityScoreResult",
-    "AffinityScoreConditionSummary",
-    "AffinityScorePairwiseEntry",
-]
-
-
-def __getattr__(name: str) -> Any:
-    """Lazily import compare exports to avoid importing optional deps at install time."""
-    try:
-        module_name, attr_name = _EXPORTS[name]
-    except KeyError as exc:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
-
-    module = import_module(module_name)
-    return getattr(module, attr_name)
-
-
-def __dir__() -> list[str]:
-    """Return module attributes for tab completion and introspection."""
-    return sorted(set(globals()) | set(__all__))
+    from polyzymd.compare.config import ComparisonConfig
+    from polyzymd.compare.core.base import BaseComparisonResult
+    from polyzymd.compare.statistics import cohens_d
+"""

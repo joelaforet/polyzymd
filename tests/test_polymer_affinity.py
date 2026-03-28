@@ -680,39 +680,11 @@ class TestRegistration:
         assert AffinityScorePairwiseEntry is not None
         assert PolymerAffinityScoreResult is not None
 
-    def test_results_init_exports(self):
-        from polyzymd.compare.results import (
-            AffinityScoreConditionSummary,
-            AffinityScoreEntry,
-            AffinityScorePairwiseEntry,
-            PolymerAffinityScoreResult,
-            PolymerTypeScore,
-        )
-
-        assert AffinityScoreEntry is not None
-        assert PolymerTypeScore is not None
-        assert AffinityScoreConditionSummary is not None
-        assert AffinityScorePairwiseEntry is not None
-        assert PolymerAffinityScoreResult is not None
-
     def test_formatters_importable(self):
         from polyzymd.analyses.polymer_affinity._formatters import (
             format_affinity_result,
         )
 
-        assert format_affinity_result is not None
-
-    def test_compare_init_exports(self):
-        from polyzymd.compare import (
-            PolymerAffinityScoreComparisonSettings,
-            PolymerAffinityScoreResult,
-            PolymerAffinityScoreSettings,
-            format_affinity_result,
-        )
-
-        assert PolymerAffinityScoreResult is not None
-        assert PolymerAffinityScoreSettings is not None
-        assert PolymerAffinityScoreComparisonSettings is not None
         assert format_affinity_result is not None
 
     def test_plugin_has_plot_functions(self):

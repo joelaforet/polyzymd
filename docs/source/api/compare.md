@@ -41,13 +41,14 @@ plotting.
 
 ### Formatting Helpers
 
-- `polyzymd.compare.formatters`
 - `polyzymd.analyses.contacts._formatters`
 - `polyzymd.analyses.distances._formatters`
 - `polyzymd.analyses.exposure._formatters`
-- `polyzymd.analyses.catalytic_triad._formatters`
 - `polyzymd.analyses.binding_free_energy._formatters`
 - `polyzymd.analyses.polymer_affinity._formatters`
+
+Catalytic triad and RMSF formatting is inline in the plugin's `format()` method;
+secondary structure formatting is likewise inline.
 
 ### Plotting Helpers
 
