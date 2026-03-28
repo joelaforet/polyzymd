@@ -51,19 +51,11 @@ plotting.
 
 ### Plotting Helpers
 
-- `polyzymd.compare.plotter` - shared plotter base classes and registry
-- `polyzymd.compare.plotters.rmsf`
-- `polyzymd.compare.plotters.triad`
-- `polyzymd.compare.plotters.contacts`
-- `polyzymd.compare.plotters.contacts_binding_preference`
-- `polyzymd.compare.plotters.contacts_coverage`
-- `polyzymd.compare.plotters.contacts_grouped_bars`
-- `polyzymd.compare.plotters.contacts_profiles`
-- `polyzymd.compare.plotters.distances`
-- `polyzymd.compare.plotters.secondary_structure`
-- `polyzymd.compare.plotters.exposure`
-- `polyzymd.compare.plotters.binding_free_energy`
-- `polyzymd.compare.plotters.polymer_affinity`
+- `polyzymd.analyses.shared.plotting` - shared figure utilities used by analysis plugins
+
+Plotting logic lives inside each analysis plugin's `plot()` method. Shared
+helpers for axis styling, legends, color palettes, and figure saving are in
+`polyzymd.analyses.shared.plotting`.
 
 ## How This Fits Together
 
@@ -72,6 +64,7 @@ plotting.
 - Shared compare-layer models and utilities live in `polyzymd.compare`.
 - Canonical comparison caches are written under `comparison/<analysis>/result.json`.
 - Plotting helpers rediscover cached comparison data from disk.
+- Each plugin's `plot()` method produces publication-quality figures.
 
 ## Related Pages
 

@@ -705,10 +705,11 @@ class TestRegistration:
         assert PolymerAffinityScoreComparisonSettings is not None
         assert format_affinity_result is not None
 
-    def test_plotters_init_imports_module(self):
-        from polyzymd.compare.plotters import polymer_affinity
+    def test_plugin_has_plot_functions(self):
+        from polyzymd.analyses import polymer_affinity
 
-        assert polymer_affinity is not None
+        assert callable(getattr(polymer_affinity, "_plot_affinity_stacked_bars", None))
+        assert callable(getattr(polymer_affinity, "_plot_affinity_group_bars", None))
 
     def test_plot_settings_registered(self):
         from polyzymd.compare.registries import PlotSettingsRegistry

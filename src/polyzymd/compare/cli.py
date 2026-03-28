@@ -28,7 +28,6 @@ from polyzymd.core.branding import prepend_file_header
 from polyzymd.core.experimental import (
     echo_experimental_warning,
     experimental_features_for_comparison_type,
-    experimental_features_for_plot_type,
     format_experimental_suffix,
     normalize_experimental_features,
 )
@@ -446,6 +445,99 @@ def run_comparison(
         click.echo(f"Saved output: {output_path}")
 
 
+def _generate_analysis_plots(
+    config: ComparisonConfig,
+    analysis_names: list[str] | None = None,
+) -> list[Path]:
+    """Generate plots for analysis plugins using the plugin system.
+
+    Builds :class:`~polyzymd.analyses.base.PlotContext` objects for each
+    enabled analysis and calls the plugin's ``plot()`` method.
+
+    Parameters
+    ----------
+    config : ComparisonConfig
+        Comparison configuration loaded from comparison.yaml.
+    analysis_names : list[str] | None
+        Analyses to plot.  ``None`` means all enabled analyses.
+
+    Returns
+    -------
+    list[Path]
+        Paths to all generated figure files.
+    """
+    from polyzymd.analyses.base import Condition, PlotContext
+    from polyzymd.analyses.discovery import get_analysis
+    from polyzymd.analyses.orchestrator import _resolve_settings
+    from polyzymd.compare.io.paths import sanitize_label
+
+    if analysis_names is None:
+        analysis_names = config.plugins.get_enabled_plugins()
+
+    # Build Condition objects
+    conditions = [Condition.from_condition_config(c) for c in config.conditions]
+
+    # Resolve paths relative to comparison.yaml
+    source_path = config.source_path
+    analysis_root = source_path.parent / "analysis" if source_path else Path("analysis")
+
+    # Resolve output directory for figures
+    plot_settings = config.plot_settings
+    figures_base = plot_settings.output_dir
+    if not figures_base.is_absolute():
+        if source_path is not None:
+            figures_base = source_path.parent / figures_base
+        else:
+            figures_base = Path.cwd() / figures_base
+    figures_base = figures_base.resolve()
+
+    generated: list[Path] = []
+
+    for name in analysis_names:
+        try:
+            analysis_cls = get_analysis(name)
+        except KeyError:
+            LOGGER.warning(f"Unknown analysis type {name!r} — skipping plots.")
+            continue
+
+        analysis = analysis_cls()
+        settings = _resolve_settings(analysis, config)
+
+        # Filter conditions
+        valid_conditions = analysis.filter_conditions(conditions)
+
+        # Build analysis_dirs mapping (mirrors orchestrator.run_comparison)
+        analysis_dirs: dict[str, Path] = {}
+        for cond in valid_conditions:
+            analysis_dirs[cond.label] = analysis_root / sanitize_label(cond.label) / analysis.name
+
+        # Comparison results dir
+        results_dir = analysis_root.parent / "comparison" / analysis.name
+        comparison_result_path = analysis.comparison_result_path(results_dir)
+
+        # Figures dir for this analysis
+        figures_dir = analysis.figures_output_dir(figures_base)
+        figures_dir.mkdir(parents=True, exist_ok=True)
+
+        plot_ctx = PlotContext(
+            conditions=valid_conditions,
+            analysis_dirs=analysis_dirs,
+            results_dir=results_dir,
+            output_dir=figures_dir,
+            settings=settings,
+            plot_settings=plot_settings,
+            comparison_path=comparison_result_path,
+        )
+
+        try:
+            paths = analysis.plot(plot_ctx)
+            generated.extend(paths)
+        except Exception as e:
+            LOGGER.error(f"Failed to generate plots for {name}: {e}")
+
+    return generated
+
+
 @compare.command("plot-all")
 @click.option(
     "-f",
@@ -471,16 +563,9 @@ def run_comparison(
     help="Generate plots for specific analysis type only (e.g., 'rmsf', 'catalytic_triad').",
 )
 @click.option(
-    "-p",
-    "--plot-type",
-    type=str,
-    default=None,
-    help="Generate specific plot type only (e.g., 'triad_kde_panel').",
-)
-@click.option(
     "--list-available",
     is_flag=True,
-    help="List available plot types for enabled analyses.",
+    help="List enabled analysis types that can produce plots.",
 )
 @click.option(
     "-q",
@@ -497,7 +582,6 @@ def plot_all(
     config_file: Path,
     output_dir: Optional[Path],
     analysis_type: Optional[str],
-    plot_type: Optional[str],
     list_available: bool,
     quiet: bool,
     debug: bool,
@@ -506,27 +590,15 @@ def plot_all(
 
     This is the config-driven plotting command that reads plot_settings
     from comparison.yaml and generates all configured plots automatically.
-
-    \b
-    Available plot types (registered via PlotterRegistry):
-      - triad_kde_panel: Multi-row KDE panel for catalytic triad distances
-      - triad_threshold_bars: Grouped bar chart of triad contact fractions
-      - rmsf_comparison: Bar chart comparing whole-protein RMSF
-      - rmsf_profile: Per-residue RMSF line plot
-      - distance_kde: KDE distribution plots for distance pairs
-      - distance_threshold_bars: Contact fraction bar chart
-      - bfe_heatmap: ΔG_sel heatmap (AA groups × conditions, per polymer type)
-      - bfe_bars: ΔG_sel grouped bar chart with ±k_BT reference lines
+    Each enabled analysis plugin's ``plot()`` method is called to produce
+    its figures.
 
     \b
     Examples:
         polyzymd compare plot-all -f comparison.yaml
         polyzymd compare plot-all -f comparison.yaml -a catalytic_triad
-        polyzymd compare plot-all -f comparison.yaml -p triad_kde_panel
         polyzymd compare plot-all --list-available
     """
-    from polyzymd.compare.plotter import ComparisonPlotter, PlotterRegistry
-
     _echo_branding()
 
     # Configure logging
@@ -547,29 +619,29 @@ def plot_all(
     if output_dir:
         config.plot_settings.output_dir = output_dir
 
-    # Create plotter
-    plotter = ComparisonPlotter(config)
+    enabled = config.plugins.get_enabled_plugins()
 
-    # List available plots
+    # List available analyses
     if list_available:
-        click.echo("Registered plot types:")
-        for ptype in PlotterRegistry.list_available():
-            suffix = format_experimental_suffix(experimental_features_for_plot_type(ptype))
-            click.echo(f"  - {ptype}{suffix}")
-        click.echo()
-        click.echo("Available plots for enabled analyses:")
-        available = plotter.list_available_plots()
-        for atype, ptypes in available.items():
-            click.echo(f"  {atype}:")
-            for pt in ptypes:
-                suffix = format_experimental_suffix(experimental_features_for_plot_type(pt))
-                click.echo(f"    - {pt}{suffix}")
+        click.echo("Enabled analysis types:")
+        for atype in enabled:
+            comparison_type = atype
+            analysis_settings = config.plugins.get(atype)
+            suffix = format_experimental_suffix(
+                experimental_features_for_comparison_type(comparison_type, analysis_settings)
+            )
+            click.echo(f"  - {atype}{suffix}")
         return
 
+    # Determine which analyses to plot
+    if analysis_type:
+        target_analyses = [analysis_type]
+    else:
+        target_analyses = list(enabled)
+
+    # Experimental warnings
     experimental_features: tuple[str, ...]
-    if plot_type:
-        experimental_features = experimental_features_for_plot_type(plot_type)
-    elif analysis_type:
+    if analysis_type:
         comparison_type = analysis_type
         analysis_settings = config.plugins.get(analysis_type)
         experimental_features = experimental_features_for_comparison_type(
@@ -577,7 +649,7 @@ def plot_all(
         )
     else:
         feature_list: list[str] = []
-        for settings_key in config.plugins.get_enabled_plugins():
+        for settings_key in enabled:
             comparison_type = settings_key
             analysis_settings = config.plugins.get(settings_key)
             feature_list.extend(
@@ -587,25 +659,21 @@ def plot_all(
 
     echo_experimental_warning(experimental_features)
 
+    # Resolve output dir for display
+    plot_settings = config.plot_settings
+    display_dir = plot_settings.output_dir
+    if not display_dir.is_absolute() and config.source_path is not None:
+        display_dir = (config.source_path.parent / display_dir).resolve()
+
     click.echo(f"Comparison: {config.name}")
     click.echo(f"Conditions: {len(config.conditions)}")
-    click.echo(f"Output directory: {plotter.output_dir}")
+    click.echo(f"Output directory: {display_dir}")
     click.echo()
 
     # Generate plots
     try:
-        if plot_type and analysis_type:
-            # Specific plot type for specific analysis
-            click.echo(f"Generating {plot_type} for {analysis_type}...")
-            generated = plotter.plot_single(plot_type, analysis_type)
-        elif analysis_type:
-            # All plots for specific analysis
-            click.echo(f"Generating plots for {analysis_type}...")
-            generated = plotter.plot_analysis(analysis_type)
-        else:
-            # All plots for all analyses
-            click.echo("Generating all plots...")
-            generated = plotter.plot_all()
+        click.echo(f"Generating plots for: {', '.join(target_analyses)}...")
+        generated = _generate_analysis_plots(config, target_analyses)
     except Exception as e:
         click.echo(f"Error generating plots: {e}", err=True)
         if debug:
@@ -775,11 +843,9 @@ def run_all(
     if run_plots and succeeded:
         click.echo()
         click.echo("Generating plots ...")
-        from polyzymd.compare.plotter import ComparisonPlotter
 
         try:
-            plotter = ComparisonPlotter(config)
-            generated = plotter.plot_all()
+            generated = _generate_analysis_plots(config, succeeded)
             click.echo(f"Generated {len(generated)} plots.")
         except Exception as e:
             click.echo(f"Error generating plots: {e}", err=True)

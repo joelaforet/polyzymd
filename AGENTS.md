@@ -49,7 +49,7 @@ src/polyzymd/
 │   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
 │   ├── _*.py     #   Private compute layer (calculators, result models)
 │   └── *.py      #   Public plugin files (one per analysis type)
-├── compare/      # Cross-condition statistics, legacy formatters/plotters, config, IO
+├── compare/      # Cross-condition statistics, formatters, config, IO
 ├── exporters/    # GROMACS/other format exporters
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
@@ -102,7 +102,7 @@ Key rules:
 - **Custom compare path**: Override `compare()` entirely for multi-metric or entry-table analyses
 - **Auto-discovery**: Drop a `.py` file in `analyses/` — no imports, no registries, no bootstrap
 - **Result saving**: Existing plugins save results explicitly; the orchestrator has a fallback auto-save if the plugin doesn't
-- **No `compare/` files needed**: New plugins keep all logic inline; `compare/plotters/` and `compare/results/` are used by existing plugins for historical reasons
+- **No `compare/` files needed**: New plugins keep all logic inline; `compare/results/` are used by existing plugins for historical result models
 
 ### Quick Example — Minimal Plugin
 

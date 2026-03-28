@@ -44,10 +44,9 @@ Package Structure
     │   ├── orchestrator.py  # Framework engine
     │   ├── stats.py      # Shared statistical utilities
     │   └── *.py          # One file per analysis plugin
-    ├── compare/          # Statistics, formatters, plotters, config, IO
+    ├── compare/          # Statistics, formatters, config, IO
     │   ├── statistics.py # t-tests, ANOVA, Cohen's d
     │   ├── formatters.py # CLI output formatters
-    │   ├── plotters/     # Publication-quality figures
     │   └── config.py     # ComparisonConfig, plot settings
     └── cli/              # Command-line interface
         └── main.py       # Click CLI

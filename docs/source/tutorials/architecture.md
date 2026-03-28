@@ -25,7 +25,7 @@ src/polyzymd/
 |- workflow/
 |- analysis/     # per-condition calculators (compute layer)
 |- analyses/     # ★ plugin system — unified analysis lifecycle
-|- compare/      # statistics, formatters, plotters, config, IO
+|- compare/      # statistics, formatters, config, IO
 |- exporters/
 |- core/
 `- utils/
@@ -76,8 +76,8 @@ To add a new analysis, create ONE file in `analyses/` that subclasses
 ### `compare/`
 
 Provides shared comparison infrastructure: statistics (t-tests, ANOVA,
-Cohen's d), formatters, plotters, and configuration. The `analyses/` plugins
-delegate cross-condition comparison to this package.
+Cohen's d), formatters, and configuration. Each analysis plugin keeps its own
+plotting logic in its `plot()` method.
 
 ### `core/` and `utils/`
 

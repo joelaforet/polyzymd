@@ -47,7 +47,7 @@ docs/source/
 │   ├── contributing.md
 │   ├── extending_analyses.md    # ★ Primary guide for new contributors
 │   ├── extending_comparators.md # Legacy (deprecated — see extending_analyses)
-│   ├── extending_plotters.md    # Legacy (deprecated — see extending_analyses)
+│   ├── extending_plotters.md    # Redirect — see extending_analyses
 │   └── ...
 ├── contributor_guide/   # Contributor landing page
 │   ├── index.md

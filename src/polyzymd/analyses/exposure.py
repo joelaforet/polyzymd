@@ -17,7 +17,7 @@ Plugin contract
 - ``min_replicates = 2``
 - ``compare()`` is fully overridden (custom multi-metric flow)
 - ``filter_conditions()`` excludes no-polymer conditions
-- ``plot()`` delegates to 2 existing plotters
+- ``plot()`` generates 2 figure types via private module-level functions
 """
 
 from __future__ import annotations

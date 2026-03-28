@@ -592,7 +592,7 @@ class ContactsAnalysis(Analysis):
 
     Plots
     -----
-    Delegates to 11 existing plotter classes across 5 modules:
+    Generates 11 plot types via private module-level functions:
 
     - Contact fraction / residence time profiles
     - Grouped bar charts (by AA class, by partition)

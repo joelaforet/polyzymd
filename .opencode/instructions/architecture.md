@@ -14,7 +14,7 @@ src/polyzymd/
 │   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
 │   ├── _*.py     #   Private compute layer (calculators, result models)
 │   └── *.py      #   Public plugin files (one per analysis type)
-├── compare/      # Cross-condition statistics, legacy formatters/plotters, config, IO
+├── compare/      # Cross-condition statistics, formatters, config, IO
 ├── exporters/    # Format converters (GROMACS, etc.)
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
@@ -116,7 +116,7 @@ class AnalysisConfig(BaseModel):
 
 1. Create `src/polyzymd/analyses/<name>.py`
 2. Subclass `Analysis` with `name`, `Settings`, `compute_replicate()`, `aggregate()`
-3. For default comparison: implement `extract_metrics()` **and** `_deserialize_result()`
+3. For default comparison: implement `extract_metrics()` and set `AggregatedResultClass`
 4. Optionally implement `plot()`, `format()`
 5. Test with `pixi run -e build pytest tests/test_<name>_plugin.py -v`
 6. The CLI automatically discovers it via `polyzymd compare run <name>`
@@ -136,6 +136,5 @@ contributor tutorial.
 
 The `compare/` package provides shared statistical infrastructure. New plugins
 should NOT create files in `compare/` — keep plotting and formatting inline
-in the plugin's `plot()` and `format()` methods. The `compare/plotters/` and
-`compare/results/` directories are used by existing plugins for historical
-reasons only.
+in the plugin's `plot()` and `format()` methods. The `compare/results/`
+directory is used by existing plugins for historical result models only.

@@ -465,9 +465,9 @@ the framework falls back to `json.loads()`.
 
 ## A Note on the `compare/` Package
 
-You may notice a `compare/` package with `compare/plotters/`,
-`compare/results/`, and `compare/formatters.py`. Existing plugins reference
-these because they were written during an earlier version of the architecture.
+You may notice a `compare/` package with `compare/results/` and
+`compare/formatters.py`. Existing plugins reference these because they were
+written during an earlier version of the architecture.
 
 **You do NOT need to create files in `compare/` for a new plugin.** Keep your
 plotting logic in your plugin's `plot()` method and your formatting in
@@ -598,9 +598,9 @@ they are always available and must be patchable in tests. Only heavy
 
 ### Don't create files in `compare/`
 
-New plugins should keep all logic in a single file. The `compare/plotters/`
-and `compare/results/` directories are used by existing plugins for historical
-reasons. New plugins should implement `plot()` and `format()` inline.
+New plugins should keep all logic in a single file. The `compare/results/`
+directory is used by existing plugins for historical result models. New plugins
+should implement `plot()` and `format()` inline.
 
 ## Existing Plugins to Study
 

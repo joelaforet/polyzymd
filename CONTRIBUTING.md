@@ -194,7 +194,7 @@ src/polyzymd/
 │   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics)
 │   ├── _*.py     #   Private compute layer (calculators, result models)
 │   └── *.py      #   Public plugin files (one per analysis type)
-├── compare/      # Cross-condition statistics, formatters, plotters
+├── compare/      # Cross-condition statistics, formatters, config, IO
 ├── exporters/    # GROMACS/other format exporters
 ├── data/         # Bundled data files (force fields, templates)
 └── utils/        # Shared utilities
