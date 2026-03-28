@@ -22,7 +22,6 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-
 # ===========================================================================
 # Discovery
 # ===========================================================================
@@ -522,11 +521,15 @@ class TestCompare:
 
 
 class TestPlot:
-    def test_plot_creates_output_dir(self, tmp_path):
+    @patch("polyzymd.analyses.exposure._plot_enrichment_heatmap")
+    @patch("polyzymd.analyses.exposure._plot_chaperone_fraction")
+    def test_plot_creates_output_dir(self, mock_chaperone_fn, mock_heatmap_fn, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.exposure import ExposureAnalysis, ExposureSettings
 
         analysis = ExposureAnalysis()
+        mock_chaperone_fn.return_value = []
+        mock_heatmap_fn.return_value = []
 
         mock_sim = MagicMock()
         conditions = [
@@ -548,20 +551,19 @@ class TestPlot:
             plot_settings=None,
         )
 
-        with patch("importlib.import_module") as mock_import:
-            mock_plotter_cls = MagicMock()
-            mock_plotter_cls.return_value.plot.return_value = []
-
-            class FakeModule:
-                def __getattr__(self, name):
-                    return mock_plotter_cls
-
-            mock_import.return_value = FakeModule()
-            analysis.plot(ctx)
+        analysis.plot(ctx)
 
         assert output_dir.exists()
 
-    def test_plot_catches_exceptions(self, tmp_path):
+    @patch(
+        "polyzymd.analyses.exposure._plot_enrichment_heatmap",
+        side_effect=Exception("plot error"),
+    )
+    @patch(
+        "polyzymd.analyses.exposure._plot_chaperone_fraction",
+        side_effect=Exception("plot error"),
+    )
+    def test_plot_catches_exceptions(self, mock_chaperone_fn, mock_heatmap_fn, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.exposure import ExposureAnalysis, ExposureSettings
 
@@ -586,8 +588,7 @@ class TestPlot:
             plot_settings=None,
         )
 
-        with patch("importlib.import_module", side_effect=ImportError("no module")):
-            result = analysis.plot(ctx)
+        result = analysis.plot(ctx)
 
         assert result == []
 

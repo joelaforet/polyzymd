@@ -39,6 +39,13 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.shared.plotting import (
+    annotate_cells,
+    apply_axis_style,
+    get_colors,
+    get_output_path,
+    save_figure,
+)
 
 if TYPE_CHECKING:
     from polyzymd.analyses._contacts_results import ContactResult
@@ -309,25 +316,9 @@ class ExposureAnalysis(Analysis):
     # === Plot ===
 
     def plot(self, ctx: PlotContext) -> list[Path]:
-        """Generate exposure comparison plots.
-
-        Delegates to:
-        - :class:`~polyzymd.compare.plotters.exposure.ExposureChaperoneFractionPlotter`
-        - :class:`~polyzymd.compare.plotters.exposure.ExposureEnrichmentHeatmapPlotter`
-
-        Parameters
-        ----------
-        ctx : PlotContext
-            Framework-provided context.
-
-        Returns
-        -------
-        list[Path]
-            Paths to generated figure files.
-        """
+        """Generate exposure comparison plots."""
         plots: list[Path] = []
 
-        # Build data dict expected by the old plotter API
         data: dict[str, Any] = {}
         labels: list[str] = []
         for cond in ctx.conditions:
@@ -344,35 +335,26 @@ class ExposureAnalysis(Analysis):
         if not labels:
             return plots
 
-        # Add __meta__ for results_dir
         data["__meta__"] = {"results_dir": ctx.results_dir}
-
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Resolve plot settings
         plot_settings = ctx.plot_settings
         if plot_settings is None:
             from polyzymd.compare.config import PlotSettings
 
             plot_settings = PlotSettings()
 
-        plotter_specs: list[tuple[str, str]] = [
-            ("polyzymd.compare.plotters.exposure", "ExposureChaperoneFractionPlotter"),
-            ("polyzymd.compare.plotters.exposure", "ExposureEnrichmentHeatmapPlotter"),
-        ]
+        try:
+            result = _plot_chaperone_fraction(data, labels, ctx.output_dir, plot_settings)
+            plots.extend(result)
+        except Exception as exc:
+            logger.warning(f"Chaperone fraction plot failed: {exc}")
 
-        for module_path, class_name in plotter_specs:
-            try:
-                import importlib
-
-                mod = importlib.import_module(module_path)
-                plotter_cls = getattr(mod, class_name)
-                plotter = plotter_cls(settings=plot_settings)
-                result = plotter.plot(data, labels, ctx.output_dir)
-                if result:
-                    plots.extend(result)
-            except Exception as exc:
-                logger.warning(f"{class_name} plot failed: {exc}")
+        try:
+            result = _plot_enrichment_heatmap(data, labels, ctx.output_dir, plot_settings)
+            plots.extend(result)
+        except Exception as exc:
+            logger.warning(f"Enrichment heatmap plot failed: {exc}")
 
         return plots
 
@@ -785,3 +767,247 @@ class ExposureAnalysis(Analysis):
             significant=ttest.significant,
             percent_change=pct,
         )
+
+
+def _find_exposure_comparison_result(
+    data: dict[str, Any],
+    labels: Sequence[str],
+) -> Any | None:
+    """Locate a saved ExposureComparisonResult JSON.
+
+    Parameters
+    ----------
+    data : dict[str, Any]
+        Mapping of condition labels to plot input data
+    labels : Sequence[str]
+        Condition labels to search for
+
+    Returns
+    -------
+    Any | None
+        Loaded comparison result if found
+    """
+    from polyzymd.compare.io.results import find_comparison_result
+    from polyzymd.compare.results.exposure import ExposureComparisonResult
+
+    return find_comparison_result(
+        data,
+        labels,
+        glob_patterns=["exposure_comparison*.json"],
+        loader=ExposureComparisonResult.load,
+        analysis_type="exposure",
+        fallback_filenames=["exposure_comparison.json", "comparison_result.json"],
+        log=logger,
+    )
+
+
+def _plot_chaperone_fraction(
+    data: dict[str, Any],
+    labels: Sequence[str],
+    output_dir: Path,
+    plot_settings: Any,
+) -> list[Path]:
+    """Generate chaperone fraction bar chart.
+
+    Parameters
+    ----------
+    data : dict[str, Any]
+        Plot input data keyed by condition label
+    labels : Sequence[str]
+        Ordered condition labels
+    output_dir : Path
+        Directory to save figure into
+    plot_settings : Any
+        Plot settings model with theme and output fields
+
+    Returns
+    -------
+    list[Path]
+        Saved plot paths
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    result = _find_exposure_comparison_result(data, labels)
+    if result is None:
+        logger.warning(
+            "No ExposureComparisonResult found; skipping chaperone fraction plot. "
+            "Run exposure comparison first"
+        )
+        return []
+
+    t = plot_settings.theme
+    conditions = result.conditions
+    n = len(conditions)
+
+    cond_labels = [c.label for c in conditions]
+    means = [c.mean_chaperone_fraction for c in conditions]
+    sems = [c.sem_chaperone_fraction for c in conditions]
+    colors = get_colors(n, plot_settings)
+
+    fig, ax = plt.subplots(figsize=(max(6, n * 1.4), 5))
+    x = np.arange(n)
+    ax.bar(
+        x,
+        means,
+        yerr=sems,
+        capsize=t.bar_capsize,
+        color=colors,
+        alpha=t.bar_alpha,
+        edgecolor=t.bar_edgecolor,
+        linewidth=t.bar_linewidth,
+    )
+
+    rng = np.random.default_rng(seed=42)
+    bar_width = 0.8
+    for i, cond in enumerate(conditions):
+        rep_vals = getattr(cond, "replicate_values", None)
+        if rep_vals:
+            rep_arr = np.asarray(rep_vals, dtype=float)
+            jitter = rng.uniform(-bar_width * 0.25, bar_width * 0.25, size=len(rep_arr))
+            ax.scatter(
+                np.full_like(rep_arr, float(x[i])) + jitter,
+                rep_arr,
+                color=t.dot_color,
+                s=t.dot_size,
+                zorder=5,
+                alpha=t.dot_alpha,
+                edgecolors="none",
+            )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=t.tick_fontsize)
+    apply_axis_style(
+        ax,
+        plot_settings,
+        title="Chaperone fraction across conditions\n(transient residues only)",
+        ylabel="Mean chaperone fraction",
+    )
+    ax.set_ylim(bottom=0)
+    fig.tight_layout()
+
+    output_path = get_output_path(output_dir, "exposure_chaperone_fraction", plot_settings)
+    return [
+        save_figure(
+            fig,
+            output_path,
+            plot_settings,
+            experimental_features=("exposure",),
+        )
+    ]
+
+
+def _plot_enrichment_heatmap(
+    data: dict[str, Any],
+    labels: Sequence[str],
+    output_dir: Path,
+    plot_settings: Any,
+) -> list[Path]:
+    """Generate enrichment heatmap.
+
+    Parameters
+    ----------
+    data : dict[str, Any]
+        Plot input data keyed by condition label
+    labels : Sequence[str]
+        Ordered condition labels
+    output_dir : Path
+        Directory to save figure into
+    plot_settings : Any
+        Plot settings model with theme and output fields
+
+    Returns
+    -------
+    list[Path]
+        Saved plot paths
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    result = _find_exposure_comparison_result(data, labels)
+    if result is None:
+        logger.warning(
+            "No ExposureComparisonResult found; skipping enrichment heatmap. "
+            "Run exposure comparison first"
+        )
+        return []
+
+    t = plot_settings.theme
+    conditions = result.conditions
+
+    all_ptypes: list[str] = sorted({pt for c in conditions for pt in c.polymer_types})
+    all_groups: list[str] = sorted({ag for c in conditions for ag in c.aa_groups})
+
+    if not all_ptypes or not all_groups:
+        logger.warning("No enrichment data to plot")
+        return []
+
+    n_conds = len(conditions)
+    n_ptypes = len(all_ptypes)
+    n_groups = len(all_groups)
+
+    matrices = np.full((n_conds, n_ptypes, n_groups), np.nan)
+    for ci, cond in enumerate(conditions):
+        for pi, pt in enumerate(all_ptypes):
+            for gi, ag in enumerate(all_groups):
+                val = cond.enrichment_by_polymer_type.get(pt, {}).get(ag, float("nan"))
+                matrices[ci, pi, gi] = val
+
+    finite_vals = matrices[np.isfinite(matrices)]
+    if len(finite_vals) == 0:
+        logger.warning("All enrichment values are NaN; skipping heatmap")
+        return []
+
+    floor = 0.1
+    vmax_raw = max(abs(finite_vals.min()), abs(finite_vals.max()), floor)
+    vmin, vmax = -vmax_raw, vmax_raw
+
+    fig_width = max(8, n_groups * 1.2 + 2)
+    fig_height = max(4, n_ptypes * 0.8 * n_conds + 1)
+    fig, axes = plt.subplots(
+        1, n_conds, figsize=(fig_width, fig_height), sharey=True, squeeze=False
+    )
+
+    im = None
+    for ci, (cond, ax) in enumerate(zip(conditions, axes[0])):
+        mat = matrices[ci]
+        im = ax.imshow(mat, vmin=vmin, vmax=vmax, cmap="RdBu_r", aspect="auto")
+        ax.set_xticks(range(n_groups))
+        ax.set_xticklabels(all_groups, rotation=45, ha="right", fontsize=t.tick_fontsize)
+        ax.set_title(cond.label, fontsize=t.title_fontsize, fontweight=t.title_fontweight)
+        if ci == 0:
+            ax.set_yticks(range(n_ptypes))
+            ax.set_yticklabels(all_ptypes, fontsize=t.tick_fontsize)
+        else:
+            ax.set_yticks([])
+
+        annotate_cells(
+            ax,
+            mat,
+            plot_settings,
+            fmt="+.2f",
+            fontsize=t.small_fontsize,
+            threshold=vmax * 0.6,
+            show_sign=False,
+        )
+
+    if im is not None:
+        cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.04, pad=0.04)
+        cbar.set_label("Chaperone enrichment (residue-based)", fontsize=t.legend_fontsize)
+
+    fig.suptitle(
+        "Dynamic chaperone enrichment by AA group",
+        fontsize=t.suptitle_fontsize,
+        y=1.01,
+    )
+    fig.tight_layout()
+
+    output_path = get_output_path(output_dir, "exposure_enrichment_heatmap", plot_settings)
+    return [
+        save_figure(
+            fig,
+            output_path,
+            plot_settings,
+            experimental_features=("exposure",),
+        )
+    ]
