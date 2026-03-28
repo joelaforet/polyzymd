@@ -64,8 +64,8 @@ if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
     from numpy.typing import NDArray
 
+    from polyzymd.analyses.contacts._comparison_results import ContactsComparisonResult
     from polyzymd.analyses.contacts._results import ContactResult
-    from polyzymd.compare.results.contacts import ContactsComparisonResult
 
 logger = logging.getLogger("polyzymd.analyses.contacts")
 
@@ -798,7 +798,7 @@ class ContactsAnalysis(Analysis):
             Comparison result, or ``None`` if fewer than 2 conditions.
         """
         from polyzymd import __version__
-        from polyzymd.compare.results.contacts import (
+        from polyzymd.analyses.contacts._comparison_results import (
             AggregateComparisonResult,
             BindingPreferenceComparisonEntry,
             BindingPreferenceComparisonSummary,
@@ -994,7 +994,7 @@ class ContactsAnalysis(Analysis):
 
     def format(self, result: Any, output_format: str = "text") -> str:
         """Format contacts comparison results without legacy dispatch."""
-        from polyzymd.compare.contacts_formatters import format_contacts_result
+        from polyzymd.analyses.contacts._formatters import format_contacts_result
 
         return format_contacts_result(result, format=self._normalize_output_format(output_format))
 
@@ -1255,7 +1255,7 @@ class ContactsAnalysis(Analysis):
         ContactsPairwiseComparison
             Comparison with both metrics.
         """
-        from polyzymd.compare.results.contacts import (
+        from polyzymd.analyses.contacts._comparison_results import (
             AggregateComparisonResult,
             ContactsPairwiseComparison,
         )
@@ -1363,7 +1363,7 @@ class ContactsAnalysis(Analysis):
         list[ContactsANOVASummary]
             ANOVA results for coverage and mean_contact_fraction.
         """
-        from polyzymd.compare.results.contacts import ContactsANOVASummary
+        from polyzymd.analyses.contacts._comparison_results import ContactsANOVASummary
         from polyzymd.compare.statistics import one_way_anova
 
         results = []
@@ -1688,7 +1688,7 @@ class ContactsAnalysis(Analysis):
             BindingPreferenceResult,
             PartitionBindingResult,
         )
-        from polyzymd.compare.results.contacts import (
+        from polyzymd.analyses.contacts._comparison_results import (
             BindingPreferenceComparisonEntry,
             BindingPreferenceComparisonSummary,
         )

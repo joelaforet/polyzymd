@@ -77,6 +77,19 @@ from polyzymd.analyses.shared.pbc import (
     minimum_image_distance,
     pairwise_distances_pbc,
 )
+from polyzymd.analyses.shared.config_hash import (
+    compute_config_hash,
+    validate_config_hash,
+)
+from polyzymd.analyses.shared.plotting import (
+    apply_axis_style,
+    apply_legend,
+    get_colors,
+    get_output_path,
+    get_theme,
+    grouped_bars,
+    save_figure,
+)
 from polyzymd.analyses.shared.statistics import (
     PerResidueStats,
     StatResult,
@@ -125,4 +138,15 @@ __all__ = [
     "DEFAULT_SURFACE_EXPOSURE_THRESHOLD",
     # Defaults
     "AnalysisDefaults",
+    # Config hash
+    "compute_config_hash",
+    "validate_config_hash",
+    # Plotting
+    "get_theme",
+    "apply_axis_style",
+    "apply_legend",
+    "get_colors",
+    "get_output_path",
+    "save_figure",
+    "grouped_bars",
 ]

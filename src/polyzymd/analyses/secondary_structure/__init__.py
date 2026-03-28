@@ -588,7 +588,7 @@ def _find_ss_comparison_result(
 ) -> Any | None:
     """Try to locate a saved SSComparisonResult JSON."""
     from polyzymd.compare.io.results import find_comparison_result
-    from polyzymd.compare.results.secondary_structure import SSComparisonResult
+    from polyzymd.analyses.secondary_structure._comparison_results import SSComparisonResult
 
     return find_comparison_result(
         data,
