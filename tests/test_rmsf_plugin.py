@@ -1,8 +1,8 @@
-"""Tests for the RMSF analysis plugin (Phase B).
+"""Tests for the RMSF analysis plugin.
 
 Tests the RMSFAnalysis class: discovery, settings, compute_replicate,
-aggregate, extract_metrics, AggregatedResultClass, and the full lifecycle
-via the orchestrator.
+aggregate, extract_metrics, AggregatedResultClass, inlined plotting,
+and the full lifecycle via the orchestrator.
 
 Heavy dependencies (MDAnalysis, trajectories) are mocked.
 """
@@ -591,7 +591,7 @@ class TestMakeAggregatedFilename:
 
 
 class TestPlot:
-    """Test RMSFAnalysis.plot delegates to existing plotters."""
+    """Test RMSFAnalysis.plot calls inlined private plotting functions."""
 
     def test_plot_returns_empty_on_no_conditions(self, rmsf_analysis, tmp_path):
         ctx = PlotContext(
@@ -606,24 +606,19 @@ class TestPlot:
         plots = rmsf_analysis.plot(ctx)
         assert plots == []
 
-    @patch("polyzymd.compare.plotters.rmsf.RMSFProfilePlotter")
-    @patch("polyzymd.compare.plotters.rmsf.RMSFComparisonPlotter")
-    def test_plot_delegates_to_plotters(
+    @patch("polyzymd.analyses.rmsf._plot_rmsf_profile")
+    @patch("polyzymd.analyses.rmsf._plot_rmsf_comparison")
+    def test_plot_delegates_to_private_functions(
         self,
-        MockCompPlotter,
-        MockProfPlotter,
+        mock_comp_plot,
+        mock_prof_plot,
         rmsf_analysis,
         condition,
         tmp_path,
     ):
-        # Setup mock plotters
-        mock_comp = MagicMock()
-        mock_comp.plot.return_value = [tmp_path / "figures" / "rmsf_comparison.png"]
-        MockCompPlotter.return_value = mock_comp
-
-        mock_prof = MagicMock()
-        mock_prof.plot.return_value = [tmp_path / "figures" / "rmsf_profile.png"]
-        MockProfPlotter.return_value = mock_prof
+        # Setup mock returns
+        mock_comp_plot.return_value = [tmp_path / "figures" / "rmsf_comparison.png"]
+        mock_prof_plot.return_value = [tmp_path / "figures" / "rmsf_profile.png"]
 
         analysis_dir = tmp_path / "analysis" / "no_polymer" / "rmsf"
         analysis_dir.mkdir(parents=True)
@@ -642,22 +637,20 @@ class TestPlot:
             plots = rmsf_analysis.plot(ctx)
 
         assert len(plots) == 2
-        mock_comp.plot.assert_called_once()
-        mock_prof.plot.assert_called_once()
+        mock_comp_plot.assert_called_once()
+        mock_prof_plot.assert_called_once()
 
-    @patch("polyzymd.compare.plotters.rmsf.RMSFProfilePlotter", side_effect=Exception("plot error"))
-    @patch(
-        "polyzymd.compare.plotters.rmsf.RMSFComparisonPlotter", side_effect=Exception("plot error")
-    )
+    @patch("polyzymd.analyses.rmsf._plot_rmsf_profile", side_effect=Exception("plot error"))
+    @patch("polyzymd.analyses.rmsf._plot_rmsf_comparison", side_effect=Exception("plot error"))
     def test_plot_catches_exceptions(
         self,
-        MockCompPlotter,
-        MockProfPlotter,
+        mock_comp_plot,
+        mock_prof_plot,
         rmsf_analysis,
         condition,
         tmp_path,
     ):
-        """Plotter failures should be caught, not crash the pipeline."""
+        """Plotting failures should be caught, not crash the pipeline."""
         analysis_dir = tmp_path / "analysis" / "no_polymer" / "rmsf"
         analysis_dir.mkdir(parents=True)
 
