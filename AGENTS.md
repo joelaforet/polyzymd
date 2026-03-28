@@ -39,7 +39,7 @@ outside the managed pixi environment.
 
 ```
 src/polyzymd/
-├── cli/          # Click CLI (main.py = entry point)
+├── cli/          # Click CLI (main.py = entry point, scaffold.py = new-analysis generator)
 ├── config/       # Pydantic v2 models (schema.py), YAML loading
 ├── builders/     # System construction (PDB → parameterized topology)
 ├── simulation/   # OpenMM simulation runners
@@ -47,9 +47,8 @@ src/polyzymd/
 ├── core/         # Base classes, shared types
 ├── analyses/     # ★ Plugin system — unified analysis lifecycle (primary extension point)
 │   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
-│   ├── _*.py     #   Private compute layer (calculators, result models)
-│   └── *.py      #   Public plugin files (one per analysis type)
-├── compare/      # Cross-condition statistics, formatters, config, IO
+│   └── <name>/   #   One package per analysis type (all plugins are packages)
+├── compare/      # Shared comparison infrastructure (statistics, config, IO, CLI)
 ├── exporters/    # GROMACS/other format exporters
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
@@ -60,12 +59,14 @@ src/polyzymd/
 
 | Layer | Files | Role |
 |-------|-------|------|
-| **Plugins** (public) | `rmsf/`, `contacts/`, `rg.py`, etc. | One class per analysis type — the **extension point** for contributors |
+| **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the **extension point** for contributors |
 | **Compute** (private) | `<name>/_calculator.py`, `<name>/_results.py` | Per-condition calculators and result models used internally by plugins |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics, autocorrelation — reusable across plugins |
+| **Shared compute** | `shared/binding_preference.py`, `shared/surface_exposure.py` | Cross-plugin compute (used by contacts, BFE, polymer_affinity) |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Plugin ABC, auto-discovery, lifecycle runner, default comparison utilities |
 
-New analysis types are added as **plugins in `analyses/`**. The private
+New analysis types are added as **packages in `analyses/<name>/`**. All 8
+existing plugins are packages (no single-file plugins exist). The private
 `_calculator.py` modules (inside each analysis sub-package) provide underlying computation that some plugins
 delegate to; new plugins can compute directly in `compute_replicate()`.
 
@@ -80,16 +81,17 @@ delegate to; new plugins can compute directly in `compute_replicate()`.
 
 ### Contributor Entry Points for Analysis
 
-To add a new analysis type, create ONE file in `src/polyzymd/analyses/` and
-subclass `Analysis`:
+To add a new analysis type, use the scaffold command or create a package
+in `src/polyzymd/analyses/<name>/` and subclass `Analysis`:
 
 | Resource | Location | What It Documents |
 |----------|----------|-------------------|
+| **Scaffold CLI** | `polyzymd new-analysis <name>` | Generates plugin package + tests automatically |
 | `Analysis` base class | `analyses/base.py` | Full contract: required methods, optional overrides, context objects |
 | Plugin discovery | `analyses/discovery.py` | How auto-discovery works, naming rules |
 | Orchestrator | `analyses/orchestrator.py` | How the framework runs your plugin |
 | Shared utilities | `analyses/shared/` | `TrajectoryLoader`, alignment, statistics, autocorrelation |
-| Simplest example | `analyses/rg.py` | Complete minimal plugin with default compare + plots |
+| Simplest example | `analyses/secondary_structure/` | Complete minimal plugin with default compare + plots |
 | Stats utilities | `analyses/stats.py` | `default_scalar_comparison()`, `format_scalar_comparison()` |
 | Contributor tutorial | `docs/source/tutorials/extending_analyses.md` | Step-by-step guide with test examples |
 
@@ -103,66 +105,6 @@ Key rules:
 - **Auto-discovery**: Drop a `.py` file in `analyses/` — no imports, no registries, no bootstrap
 - **Result saving**: Existing plugins save results explicitly; the orchestrator has a fallback auto-save if the plugin doesn't
 - **No `compare/` files needed**: New plugins keep all logic inline; `compare/results/` are used by existing plugins for historical result models
-
-### Quick Example — Minimal Plugin
-
-```python
-"""Radius of gyration analysis plugin."""
-from __future__ import annotations
-
-import json
-from pathlib import Path
-from typing import Any, ClassVar, Sequence
-
-from pydantic import BaseModel
-
-from polyzymd.analyses.base import (
-    AggregateContext, Analysis, MetricValue, ReplicateContext,
-)
-
-
-class RgAnalysis(Analysis):
-    name: ClassVar[str] = "rg"
-
-    class Settings(BaseModel):
-        selection: str = "protein and name CA"
-
-    def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        import MDAnalysis as mda
-        import numpy as np
-
-        sim_config = ctx.sim_config
-        run_dir = sim_config.get_working_directory(replicate)
-        topology = run_dir / "solvated_system.pdb"
-        trajs = sorted(run_dir.glob("production_*/*_trajectory.dcd"))
-
-        u = mda.Universe(str(topology), [str(t) for t in trajs])
-        atoms = u.select_atoms(ctx.settings.selection)
-
-        rg_values = [atoms.radius_of_gyration() for _ in u.trajectory]
-        return {"mean_rg": float(np.mean(rg_values)), "replicate": replicate}
-
-    def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
-        import numpy as np
-
-        values = [r["mean_rg"] for r in results]
-        return {"mean_rg": float(np.mean(values)), "sem_rg": float(np.std(values, ddof=1) / np.sqrt(len(values))), "replicate_values": values}
-
-    def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
-        return {
-            "mean_rg": MetricValue(
-                name="mean_rg",
-                mean=summary["mean_rg"],
-                sem=summary["sem_rg"],
-                replicate_values=summary["replicate_values"],
-                higher_is_better=False,  # lower Rg = more compact
-                direction_labels=("compacting", "unchanged", "expanding"),
-            )
-        }
-
-    def _deserialize_result(self, path: Path) -> dict[str, Any]:
-        return json.loads(path.read_text())
-```
 
 ## Design Principles (Critical for Contributors)
 
@@ -182,7 +124,7 @@ system achieves this:
 When writing a new analysis plugin, **study existing implementations first**:
 
 1. **Read `analyses/base.py`** — it defines the full contract
-2. **Study `analyses/secondary_structure/`** or `analyses/rmsf/` — simplest plugins
+2. **Study `analyses/secondary_structure/`** or **`analyses/rmsf/`** — simplest plugins
 3. **Match the context pattern** — use `ctx.settings`, `ctx.sim_config`, etc.
 
 **Anti-pattern to avoid:**
@@ -216,8 +158,8 @@ def compute_replicate(self, ctx, replicate):
 1. **Read the tutorial**: `docs/source/tutorials/extending_analyses.md`
 2. **Read `analyses/base.py`** — the class docstring defines the full contract
 3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
-4. **Study a matching example**: `rg.py` for simplest, `rmsf/` for simple, `contacts/` for custom
-5. **Write your plugin** in `analyses/<name>.py` — keep all logic in one file
+4. **Study a matching example**: `secondary_structure/` for simplest, `rmsf/` for simple, `contacts/` for custom
+5. **Write your plugin** in `analyses/<name>/` — keep all logic in one file
 6. **Test**: `pixi run -e build pytest tests/test_<name>_plugin.py -v`
 
 ## Code Style

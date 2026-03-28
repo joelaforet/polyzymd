@@ -11,6 +11,9 @@ src/polyzymd/analyses/
 ├── orchestrator.py         # Framework engine: compute → aggregate → compare → plot
 ├── stats.py                # default_scalar_comparison(), format_scalar_comparison()
 ├── shared/                 # Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
+│   ├── binding_preference.py   # Cross-plugin compute (contacts, BFE, polymer_affinity)
+│   ├── binding_preference_helpers.py  # Orchestration helpers for binding preference
+│   └── surface_exposure.py     # SASA-based surface exposure utility
 ├── _results_base.py        # Base result model (shared, stays at top level)
 ├── rmsf/                   # RMSF plugin sub-package
 │   ├── __init__.py         #   RMSFAnalysis plugin class
@@ -22,9 +25,8 @@ src/polyzymd/analyses/
 ├── secondary_structure/    # Secondary structure plugin sub-package
 ├── contacts/               # Contacts plugin sub-package
 ├── exposure/               # Exposure dynamics plugin sub-package
-├── rg.py                   # Rg plugin (simplest complete example, single file)
-├── binding_free_energy.py  # Binding free energy plugin (custom compare)
-└── polymer_affinity.py     # Polymer affinity plugin (custom compare)
+├── binding_free_energy/    # Binding free energy plugin (custom compare)
+└── polymer_affinity/       # Polymer affinity plugin (custom compare)
 ```
 
 The private `_calculator.py` modules (inside each sub-package) provide underlying computation that
@@ -33,8 +35,9 @@ some plugins delegate to. New plugins can compute directly in
 
 ### How to Add a New Analysis
 
-1. Create `src/polyzymd/analyses/<name>/` sub-package (or `<name>.py` for simple single-file plugins)
-2. Define a `Settings` inner class (Pydantic v2 `BaseModel`)
+1. Run `polyzymd new-analysis <name>` to scaffold the plugin package and tests, OR
+   create `src/polyzymd/analyses/<name>/` sub-package manually
+2. Define a `Settings` class (Pydantic v2 `BaseModel`)
 3. Subclass `Analysis` and implement `compute_replicate()` and `aggregate()`
 4. Done — framework discovers it via `pkgutil` (no registries, no imports)
 
@@ -94,8 +97,8 @@ for aggregated results. The orchestrator has a **fallback** auto-save that
 writes to `ctx.result_path` only if the file doesn't already exist.
 
 Simple plugins can skip manual saves and rely on the fallback. Plugins that
-want equilibration-aware caching should save explicitly (see `rmsf/`,
-`rg.py` for the pattern).
+want equilibration-aware caching should save explicitly (see `rmsf/` for the
+pattern).
 
 ### Return Types: Dicts vs Pydantic Models
 
@@ -153,7 +156,6 @@ to detect changes. **Known issue:** the hash mismatch warning currently prints
 
 | Plugin | Default compare? | Primary metric |
 |--------|-----------------|----------------|
-| `rg` | Yes | `mean_rg` (lower = more compact) |
 | `rmsf` | Yes | `mean_rmsf` (lower = more stable) |
 | `catalytic_triad` | Yes | `mean_triad_proximity` (lower = closer) |
 | `secondary_structure` | Yes | `helix_fraction` (higher = more structured) |

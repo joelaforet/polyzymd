@@ -4,7 +4,7 @@
 
 ```
 src/polyzymd/
-├── cli/          # Click CLI entry point and command groups
+├── cli/          # Click CLI entry point, command groups, scaffold generator
 ├── config/       # Pydantic v2 configuration models
 ├── builders/     # System construction pipeline
 ├── simulation/   # OpenMM simulation execution
@@ -12,9 +12,8 @@ src/polyzymd/
 ├── core/         # Shared base classes and types
 ├── analyses/     # ★ Plugin system — unified analysis lifecycle
 │   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
-│   ├── _*.py     #   Private compute layer (calculators, result models)
-│   └── *.py      #   Public plugin files (one per analysis type)
-├── compare/      # Cross-condition statistics, formatters, config, IO
+│   └── <name>/   #   One package per analysis type (all plugins are packages)
+├── compare/      # Shared comparison infrastructure (statistics, config, IO, CLI)
 ├── exporters/    # Format converters (GROMACS, etc.)
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
@@ -25,14 +24,16 @@ src/polyzymd/
 
 | Layer | Files | Role |
 |-------|-------|------|
-| **Plugins** (public) | `rmsf/`, `contacts/`, `rg.py`, etc. (sub-packages or single files) | One class per analysis type — the extension point |
+| **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the extension point |
 | **Compute** (private) | `<name>/_calculator.py`, `<name>/_results.py` | Per-condition calculators and result models |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics |
+| **Shared compute** | `shared/binding_preference.py`, `shared/surface_exposure.py` | Cross-plugin compute (used by contacts, BFE, polymer_affinity) |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Plugin ABC, auto-discovery, lifecycle runner |
 
-New analysis types are added as plugins in `analyses/`. The private
-`_calculator.py` modules (inside each analysis sub-package) provide underlying computation that some plugins
-delegate to; new plugins can compute directly in `compute_replicate()`.
+New analysis types are added as **packages in `analyses/<name>/`**. All existing
+plugins are packages (no single-file plugins exist). The private `_calculator.py`
+modules provide underlying computation that some plugins delegate to; new plugins
+can compute directly in `compute_replicate()`.
 
 ## Chain Convention (Critical)
 
@@ -93,8 +94,8 @@ for name, cls in list_analyses().items():
 RMSFAnalysis = get_analysis("rmsf")
 ```
 
-No registries, no decorators, no explicit imports needed — just drop a `.py`
-file in `analyses/` that subclasses `Analysis`.
+No registries, no decorators, no explicit imports needed — just create a
+package in `analyses/<name>/` that subclasses `Analysis`.
 
 ### Config Pattern
 Pydantic v2 `BaseModel` subclasses with validators:
@@ -114,9 +115,9 @@ class AnalysisConfig(BaseModel):
 
 ### Adding a new analysis type (primary path)
 
-1. Create `src/polyzymd/analyses/<name>.py`
+1. Run `polyzymd new-analysis <name>` to scaffold the plugin, OR create `src/polyzymd/analyses/<name>/` manually
 2. Subclass `Analysis` with `name`, `Settings`, `compute_replicate()`, `aggregate()`
-3. For default comparison: implement `extract_metrics()` and set `AggregatedResultClass`
+3. For default comparison: implement `extract_metrics()` and `_deserialize_result()`
 4. Optionally implement `plot()`, `format()`
 5. Test with `pixi run -e build pytest tests/test_<name>_plugin.py -v`
 6. The CLI automatically discovers it via `polyzymd compare run <name>`
@@ -127,10 +128,10 @@ contributor tutorial.
 
 ### Adding a new per-condition calculator
 
-1. Create a private `_calculator_<name>.py` module in `analyses/`
-2. Define result models inheriting from `BaseAnalysisResult` (in `_results_<name>.py`)
+1. Create a private `_calculator.py` module inside `analyses/<name>/`
+2. Define result models inheriting from `BaseAnalysisResult` (in `_results.py`)
 3. Implement the calculator with `from_config()` factory method
-4. Create an `analyses/<name>.py` plugin to expose it through the CLI
+4. The plugin `__init__.py` delegates to it from `compute_replicate()`
 
 ### Adding comparison statistics or formatters
 
