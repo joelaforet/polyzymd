@@ -714,18 +714,21 @@ class TestPlot:
             plot_settings=None,
         )
 
-        with patch("importlib.import_module") as mock_import:
-            mock_plotter_cls = MagicMock()
-            mock_plotter_cls.return_value.plot.return_value = []
-
-            class FakeModule:
-                def __getattr__(self, name):
-                    return mock_plotter_cls
-
-            mock_import.return_value = FakeModule()
+        with (
+            patch(
+                "polyzymd.analyses.binding_free_energy._plot_bfe_heatmap",
+                return_value=[],
+            ) as mock_heatmap,
+            patch(
+                "polyzymd.analyses.binding_free_energy._plot_bfe_bars",
+                return_value=[],
+            ) as mock_bars,
+        ):
             analysis.plot(ctx)
 
         assert output_dir.exists()
+        assert mock_heatmap.called
+        assert mock_bars.called
 
     def test_plot_catches_exceptions(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
@@ -754,10 +757,109 @@ class TestPlot:
             plot_settings=None,
         )
 
-        with patch("importlib.import_module", side_effect=ImportError("no module")):
+        with (
+            patch(
+                "polyzymd.analyses.binding_free_energy._plot_bfe_heatmap",
+                side_effect=RuntimeError("boom"),
+            ),
+            patch(
+                "polyzymd.analyses.binding_free_energy._plot_bfe_bars",
+                side_effect=RuntimeError("boom"),
+            ),
+        ):
             result = analysis.plot(ctx)
 
         assert result == []
+
+    def test_plot_collects_paths(self, tmp_path):
+        from polyzymd.analyses.base import Condition, PlotContext
+        from polyzymd.analyses.binding_free_energy import (
+            BFESettings,
+            BindingFreeEnergyAnalysis,
+        )
+
+        analysis = BindingFreeEnergyAnalysis()
+        mock_sim = MagicMock()
+        conditions = [
+            Condition(
+                label="A",
+                config_path=Path("/tmp/a/config.yaml"),
+                replicates=(1, 2),
+                sim_config=mock_sim,
+            )
+        ]
+
+        ctx = PlotContext(
+            conditions=conditions,
+            analysis_dirs={"A": tmp_path / "A" / "bfe"},
+            results_dir=tmp_path / "results",
+            output_dir=tmp_path / "plots",
+            settings=BFESettings(),
+            plot_settings=None,
+        )
+
+        heatmap_path = tmp_path / "plots" / "bfe_heatmap.png"
+        bars_path = tmp_path / "plots" / "bfe_bars.png"
+
+        with (
+            patch(
+                "polyzymd.analyses.binding_free_energy._plot_bfe_heatmap",
+                return_value=[heatmap_path],
+            ),
+            patch(
+                "polyzymd.analyses.binding_free_energy._plot_bfe_bars",
+                return_value=[bars_path],
+            ),
+        ):
+            result = analysis.plot(ctx)
+
+        assert heatmap_path in result
+        assert bars_path in result
+
+    def test_plot_passes_plot_settings(self, tmp_path):
+        from polyzymd.analyses.base import Condition, PlotContext
+        from polyzymd.analyses.binding_free_energy import (
+            BFESettings,
+            BindingFreeEnergyAnalysis,
+        )
+        from polyzymd.compare.config import PlotSettings
+
+        analysis = BindingFreeEnergyAnalysis()
+        mock_sim = MagicMock()
+        ps = PlotSettings()
+        conditions = [
+            Condition(
+                label="A",
+                config_path=Path("/tmp/a/config.yaml"),
+                replicates=(1, 2),
+                sim_config=mock_sim,
+            )
+        ]
+
+        ctx = PlotContext(
+            conditions=conditions,
+            analysis_dirs={"A": tmp_path / "A" / "bfe"},
+            results_dir=tmp_path / "results",
+            output_dir=tmp_path / "plots",
+            settings=BFESettings(),
+            plot_settings=ps,
+        )
+
+        with (
+            patch(
+                "polyzymd.analyses.binding_free_energy._plot_bfe_heatmap",
+                return_value=[],
+            ) as mock_heatmap,
+            patch(
+                "polyzymd.analyses.binding_free_energy._plot_bfe_bars",
+                return_value=[],
+            ) as mock_bars,
+        ):
+            analysis.plot(ctx)
+
+        # 4th positional arg is plot_settings
+        assert mock_heatmap.call_args[0][3] is ps
+        assert mock_bars.call_args[0][3] is ps
 
 
 # ===========================================================================

@@ -20,7 +20,7 @@ Plugin contract
 - ``compare()`` is fully overridden (temperature-aware, multi-partition)
 - ``filter_conditions()`` keeps all conditions (no-polymer conditions get
   empty entries but are still valid for comparison)
-- ``plot()`` delegates to ``BFEHeatmapPlotter`` and ``BFEBarPlotter``
+- ``plot()`` calls ``_plot_bfe_heatmap()`` and ``_plot_bfe_bars()``
 """
 
 from __future__ import annotations
@@ -41,6 +41,16 @@ from polyzymd.analyses.base import (
     MetricValue,
     PlotContext,
     ReplicateContext,
+)
+from polyzymd.analyses.shared.plotting import (
+    annotate_cells,
+    apply_axis_style,
+    apply_legend,
+    get_colors,
+    get_output_path,
+    grouped_bars,
+    save_figure,
+    symmetric_clim,
 )
 
 if TYPE_CHECKING:
@@ -279,9 +289,9 @@ class BindingFreeEnergyAnalysis(Analysis):
     def plot(self, ctx: PlotContext) -> list[Path]:
         """Generate BFE comparison plots.
 
-        Delegates to:
-        - :class:`~polyzymd.compare.plotters.binding_free_energy.BFEHeatmapPlotter`
-        - :class:`~polyzymd.compare.plotters.binding_free_energy.BFEBarPlotter`
+        Calls module-level private functions:
+        - :func:`_plot_bfe_heatmap`
+        - :func:`_plot_bfe_bars`
         """
         plots: list[Path] = []
 
@@ -310,23 +320,17 @@ class BindingFreeEnergyAnalysis(Analysis):
 
             plot_settings = PlotSettings()
 
-        plotter_specs: list[tuple[str, str]] = [
-            ("polyzymd.compare.plotters.binding_free_energy", "BFEHeatmapPlotter"),
-            ("polyzymd.compare.plotters.binding_free_energy", "BFEBarPlotter"),
-        ]
+        try:
+            result = _plot_bfe_heatmap(data, labels, ctx.output_dir, plot_settings)
+            plots.extend(result)
+        except Exception as exc:
+            logger.warning(f"BFE heatmap plot failed: {exc}")
 
-        for module_path, class_name in plotter_specs:
-            try:
-                import importlib
-
-                mod = importlib.import_module(module_path)
-                plotter_cls = getattr(mod, class_name)
-                plotter = plotter_cls(settings=plot_settings)
-                result = plotter.plot(data, labels, ctx.output_dir)
-                if result:
-                    plots.extend(result)
-            except Exception as exc:
-                logger.warning(f"{class_name} plot failed: {exc}")
+        try:
+            result = _plot_bfe_bars(data, labels, ctx.output_dir, plot_settings)
+            plots.extend(result)
+        except Exception as exc:
+            logger.warning(f"BFE bar chart plot failed: {exc}")
 
         return plots
 
@@ -873,6 +877,454 @@ class BindingFreeEnergyAnalysis(Analysis):
 
 
 # ---------------------------------------------------------------------------
+# Plotting helpers (inlined from compare/plotters/binding_free_energy.py)
 # ---------------------------------------------------------------------------
-# Module-level polymer detection
-# ---------------------------------------------------------------------------
+
+
+def _unit_label_mpl(units: str) -> str:
+    """Return matplotlib-compatible unit label with subscript for kT."""
+    if units == "kT":
+        return r"$k_\mathrm{b}T$"
+    return units
+
+
+def _find_bfe_result(data: dict[str, Any], labels: Sequence[str]) -> Any | None:
+    """Find and load BindingFreeEnergyResult from the comparison cache."""
+    from polyzymd.compare.io.results import find_comparison_result
+    from polyzymd.compare.results.binding_free_energy import BindingFreeEnergyResult
+
+    return find_comparison_result(
+        data,
+        labels,
+        glob_patterns=[
+            "binding_free_energy_comparison_*.json",
+            "bfe_comparison_*.json",
+        ],
+        loader=BindingFreeEnergyResult.load,
+        analysis_type="binding_free_energy",
+        log=logger,
+    )
+
+
+def _sorted_groups(groups: list[str]) -> list[str]:
+    """Sort AA groups in canonical order, with non-canonical groups appended."""
+    from polyzymd.analyses.shared.aa_classification import CANONICAL_AA_CLASS_ORDER
+
+    ordered = [g for g in CANONICAL_AA_CLASS_ORDER if g in groups]
+    for g in sorted(groups):
+        if g not in ordered:
+            ordered.append(g)
+    return ordered
+
+
+def _get_partitions(result: Any) -> dict[str, list[str]]:
+    """Build a mapping of partition_name -> sorted list of protein groups."""
+    partition_groups: dict[str, set[str]] = {}
+    for cond in result.conditions:
+        for entry in cond.entries:
+            partition_groups.setdefault(entry.partition_name, set()).add(entry.protein_group)
+    ordered_partitions: dict[str, list[str]] = {}
+    partition_names = sorted(partition_groups.keys())
+    if "aa_class" in partition_names:
+        partition_names.remove("aa_class")
+        partition_names.insert(0, "aa_class")
+    for pname in partition_names:
+        ordered_partitions[pname] = _sorted_groups(list(partition_groups[pname]))
+    return ordered_partitions
+
+
+def _partition_display_name(partition_name: str) -> str:
+    """Convert a partition name to a human-readable display string."""
+    return partition_name.replace("_", " ").title()
+
+
+def _build_stem(
+    prefix: str,
+    partition_name: str,
+    poly_type: str,
+    multi_partition: bool,
+    multi_poly: bool,
+) -> str:
+    """Build output filename stem from partition and polymer type."""
+    parts = [prefix]
+    if multi_partition:
+        parts.append(partition_name.lower())
+    if multi_poly:
+        parts.append(poly_type.lower())
+    return "_".join(parts)
+
+
+def _plot_bfe_heatmap(
+    data: dict[str, Any],
+    labels: Sequence[str],
+    output_dir: Path,
+    plot_settings: Any,
+) -> list[Path]:
+    """Generate ΔG_sel heatmap comparing binding free energy across conditions.
+
+    Creates one figure per (partition, polymer_type) combination.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    result = _find_bfe_result(data, labels)
+    if result is None:
+        return []
+
+    bfe_settings = plot_settings.binding_free_energy
+    if not bfe_settings.generate_heatmap:
+        return []
+
+    t = plot_settings.theme
+    units = result.units
+
+    cond_labels = [c.label for c in result.conditions]
+    display_labels = [lbl for lbl in labels if lbl in cond_labels]
+    if not display_labels:
+        display_labels = cond_labels
+
+    polymer_types = result.polymer_types
+    partitions = _get_partitions(result)
+
+    if not polymer_types or not partitions:
+        logger.warning("BFE result has no polymer types or protein groups - skipping heatmap")
+        return []
+
+    n_conds = len(display_labels)
+    n_poly = len(polymer_types)
+    n_partitions = len(partitions)
+    multi_partition = n_partitions > 1
+
+    temp_str = ""
+    if result.conditions:
+        temps = {c.temperature_K for c in result.conditions}
+        if len(temps) == 1:
+            temp_str = f" at {next(iter(temps)):.0f} K"
+
+    output_paths: list[Path] = []
+
+    for partition_name, protein_groups in partitions.items():
+        n_groups = len(protein_groups)
+
+        partition_vals: list[float] = []
+        for cond_summary in result.conditions:
+            for entry in cond_summary.entries:
+                if entry.partition_name == partition_name and entry.delta_G is not None:
+                    partition_vals.append(entry.delta_G)
+
+        if not partition_vals:
+            logger.debug(f"No ΔG_sel values for partition '{partition_name}' - skipping")
+            continue
+
+        vmin, vmax = symmetric_clim(partition_vals, pad=0.05)
+        max_abs = vmax - 0.05
+
+        for poly_type in polymer_types:
+            if bfe_settings.figsize_heatmap is not None:
+                figsize = bfe_settings.figsize_heatmap
+            else:
+                figsize = (
+                    max(6, 1.5 * n_conds + 1.5),
+                    max(4, 0.9 * n_groups + 1.5),
+                )
+
+            fig, ax = plt.subplots(figsize=figsize, dpi=plot_settings.dpi)
+
+            matrix = np.full((n_groups, n_conds), np.nan)
+            sem_matrix = np.full((n_groups, n_conds), np.nan)
+
+            for col_idx, cond_label in enumerate(display_labels):
+                try:
+                    cond_summary = result.get_condition(cond_label)
+                except KeyError:
+                    continue
+                for row_idx, group in enumerate(protein_groups):
+                    entry = cond_summary.get_entry(poly_type, group, partition_name=partition_name)
+                    if entry is not None and entry.delta_G is not None:
+                        matrix[row_idx, col_idx] = entry.delta_G
+                        if entry.delta_G_uncertainty is not None:
+                            sem_matrix[row_idx, col_idx] = entry.delta_G_uncertainty
+
+            valid = matrix[~np.isnan(matrix)]
+            if len(valid) == 0:
+                logger.debug(
+                    f"No ΔG_sel data for partition '{partition_name}', "
+                    f"polymer '{poly_type}' - skipping"
+                )
+                plt.close(fig)
+                continue
+
+            im = ax.imshow(
+                matrix,
+                cmap=bfe_settings.colormap,
+                vmin=vmin,
+                vmax=vmax,
+                aspect="auto",
+            )
+
+            if bfe_settings.annotate_heatmap:
+                annotate_cells(
+                    ax,
+                    matrix,
+                    plot_settings,
+                    fontsize=t.small_fontsize,
+                    threshold=0.35 * max_abs,
+                    sem_matrix=sem_matrix,
+                    linespacing=1.2,
+                )
+
+            ax.set_xticks(range(n_conds))
+            ax.set_xticklabels(display_labels, rotation=35, ha="right")
+            ax.set_yticks(range(n_groups))
+            ax.set_yticklabels(protein_groups)
+
+            if multi_partition:
+                ylabel = f"Protein Group ({_partition_display_name(partition_name)})"
+            else:
+                ylabel = "Amino Acid Group"
+
+            poly_label = poly_type if n_poly > 1 else ""
+            if multi_partition:
+                part_label = _partition_display_name(partition_name)
+                title_parts = [r"$\Delta G_{\mathrm{sel}}$", part_label]
+                if poly_label:
+                    title_parts.append(poly_label)
+                if temp_str:
+                    title_parts.append(temp_str.strip())
+                title = " — ".join(title_parts[:2])
+                if poly_label:
+                    title += f" ({poly_label})"
+                if temp_str:
+                    title += temp_str
+            else:
+                parts = [r"$\Delta G_{\mathrm{sel}}$"]
+                if poly_label:
+                    parts.append(poly_label)
+                if temp_str:
+                    parts.append(temp_str.strip())
+                title = (
+                    " ".join(parts)
+                    if len(parts) > 1
+                    else r"$\Delta G_{\mathrm{sel}}$ Binding Selectivity"
+                )
+            apply_axis_style(ax, plot_settings, title=title, xlabel="Condition", ylabel=ylabel)
+
+            cbar = fig.colorbar(im, ax=ax, shrink=0.85)
+            unit_lbl = _unit_label_mpl(units)
+            cbar.set_label(
+                r"$\Delta G_{\mathrm{sel}}$" + f" ({unit_lbl})",
+                rotation=270,
+                labelpad=14,
+                fontsize=t.legend_fontsize,
+            )
+            cbar.ax.axhline(
+                y=0.0,
+                color=t.reference_line_color,
+                linewidth=t.reference_line_width,
+                linestyle=t.reference_line_style,
+            )
+
+            plt.tight_layout()
+
+            stem = _build_stem(
+                "bfe_heatmap",
+                partition_name,
+                poly_type,
+                multi_partition,
+                n_poly > 1,
+            )
+            output_path = get_output_path(output_dir, stem, plot_settings)
+            output_paths.append(
+                save_figure(
+                    fig,
+                    output_path,
+                    plot_settings,
+                    experimental_features=("binding_free_energy",),
+                )
+            )
+
+    return output_paths
+
+
+def _plot_bfe_bars(
+    data: dict[str, Any],
+    labels: Sequence[str],
+    output_dir: Path,
+    plot_settings: Any,
+) -> list[Path]:
+    """Generate ΔG_sel grouped bar charts comparing binding free energy across conditions.
+
+    Creates one figure per (partition, polymer_type) combination.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    result = _find_bfe_result(data, labels)
+    if result is None:
+        return []
+
+    bfe_settings = plot_settings.binding_free_energy
+    if not bfe_settings.generate_bars:
+        return []
+
+    t = plot_settings.theme
+    units = result.units
+
+    cond_labels = [c.label for c in result.conditions]
+    display_labels = [lbl for lbl in labels if lbl in cond_labels]
+    if not display_labels:
+        display_labels = cond_labels
+
+    valid_labels = [
+        lbl
+        for lbl in display_labels
+        if any(e.delta_G is not None for e in result.get_condition(lbl).entries)
+        if lbl in cond_labels
+    ]
+    if not valid_labels:
+        logger.info("No conditions with ΔG_sel values - skipping bar charts")
+        return []
+
+    polymer_types = result.polymer_types
+    partitions = _get_partitions(result)
+
+    if not polymer_types or not partitions:
+        return []
+
+    n_conds = len(valid_labels)
+    colors = get_colors(n_conds, plot_settings)
+    n_poly = len(polymer_types)
+    n_partitions = len(partitions)
+    multi_partition = n_partitions > 1
+
+    temp_str = ""
+    if result.conditions:
+        temps = {c.temperature_K for c in result.conditions}
+        if len(temps) == 1:
+            temp_str = f" ({next(iter(temps)):.0f} K)"
+
+    if units == "kT":
+        kt: float | None = 1.0
+    else:
+        temps_list = [c.temperature_K for c in result.conditions]
+        kt = None
+        if temps_list:
+            t_med = float(np.median(temps_list))
+            from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
+
+            tmp_settings = BindingFreeEnergyAnalysisSettings(units=units)
+            kt = tmp_settings.k_b() * t_med
+
+    output_paths: list[Path] = []
+
+    for partition_name, protein_groups in partitions.items():
+        n_groups = len(protein_groups)
+
+        for poly_type in polymer_types:
+            figsize = bfe_settings.figsize_bars
+            fig, ax = plt.subplots(figsize=figsize, dpi=plot_settings.dpi)
+
+            x = np.arange(n_groups)
+
+            series: list[tuple[str, list[float], list[float]]] = []
+            for cond_label in valid_labels:
+                cond_summary = result.get_condition(cond_label)
+                means: list[float] = []
+                sems: list[float] = []
+
+                for group in protein_groups:
+                    entry = cond_summary.get_entry(poly_type, group, partition_name=partition_name)
+                    if entry is not None and entry.delta_G is not None:
+                        means.append(entry.delta_G)
+                        per_rep = entry.delta_G_per_replicate
+                        if len(per_rep) >= 2:
+                            sem = float(np.std(per_rep, ddof=1) / np.sqrt(len(per_rep)))
+                        elif entry.delta_G_uncertainty is not None:
+                            sem = entry.delta_G_uncertainty
+                        else:
+                            sem = 0.0
+                        sems.append(sem)
+                    else:
+                        means.append(0.0)
+                        sems.append(0.0)
+
+                series.append((cond_label, means, sems))
+
+            grouped_bars(
+                ax,
+                x,
+                series,
+                colors,
+                plot_settings,
+                show_error=bfe_settings.show_error_bars,
+                reference_label=r"$\Delta G_{\mathrm{sel}}$ = 0 (neutral)",
+                bar_edgecolor="none",
+            )
+
+            poly_label = f": {poly_type}" if n_poly > 1 else ""
+            if multi_partition:
+                part_label = _partition_display_name(partition_name)
+                title = r"$\Delta G_{\mathrm{sel}}$" + f" — {part_label}{poly_label}{temp_str}"
+            else:
+                title = r"$\Delta G_{\mathrm{sel}}$" + f"{poly_label}{temp_str}"
+
+            if multi_partition:
+                xlabel = f"Protein Group ({_partition_display_name(partition_name)})"
+            else:
+                xlabel = "Amino Acid Group"
+            unit_lbl = _unit_label_mpl(units)
+            ylabel = r"$\Delta G_{\mathrm{sel}}$" + f" ({unit_lbl})"
+
+            apply_axis_style(ax, plot_settings, title=title, xlabel=xlabel, ylabel=ylabel)
+            ax.set_xticks(x)
+            ax.set_xticklabels(protein_groups, rotation=35, ha="right")
+            apply_legend(
+                ax,
+                plot_settings,
+                fontsize=t.small_fontsize,
+                framealpha=0.7,
+            )
+
+            if kt is not None:
+                ax.axhline(y=kt, color="gray", linestyle=":", linewidth=1.0, alpha=0.6)
+                ax.axhline(y=-kt, color="gray", linestyle=":", linewidth=1.0, alpha=0.6)
+                kt_label = r"$k_\mathrm{b}T$"
+                ax.text(
+                    n_groups - 0.5,
+                    kt,
+                    f"+{kt_label}",
+                    color="gray",
+                    fontsize=t.tiny_fontsize,
+                    va="bottom",
+                    ha="right",
+                )
+                ax.text(
+                    n_groups - 0.5,
+                    -kt,
+                    f"\u2212{kt_label}",
+                    color="gray",
+                    fontsize=t.tiny_fontsize,
+                    va="top",
+                    ha="right",
+                )
+
+            plt.tight_layout()
+
+            stem = _build_stem(
+                "bfe_bars",
+                partition_name,
+                poly_type,
+                multi_partition,
+                n_poly > 1,
+            )
+            output_path = get_output_path(output_dir, stem, plot_settings)
+            output_paths.append(
+                save_figure(
+                    fig,
+                    output_path,
+                    plot_settings,
+                    experimental_features=("binding_free_energy",),
+                )
+            )
+
+    return output_paths
