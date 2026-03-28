@@ -112,7 +112,14 @@ Treat it as a reference template for your own plugin file. It is not presented
 here as a required built-in deployed analysis.
 ```
 
-Create `src/polyzymd/analyses/rg.py` in your own branch or downstream project:
+Create `src/polyzymd/analyses/rg.py` in your own branch or downstream project,
+or use the scaffold command to generate the boilerplate automatically:
+
+```bash
+polyzymd new-analysis rg
+```
+
+If creating manually:
 
 ```python
 """Radius of gyration analysis plugin."""
@@ -627,7 +634,7 @@ deserialization fails.
 ## A Note on the `compare/` Package
 
 You may notice a `compare/` package with `compare/results/` and
-`compare/formatters.py`. Existing plugins reference these because they were
+`compare/settings.py`. Existing plugins reference these because they were
 designed in an earlier architecture stage.
 
 **You do NOT need to create files in `compare/` for a new plugin.** Keep your
@@ -707,9 +714,9 @@ stable even if internal module locations change.
 
 When creating a new analysis plugin:
 
-- [ ] File: `src/polyzymd/analyses/<name>.py`
+- [ ] File: `src/polyzymd/analyses/<name>/` (use `polyzymd new-analysis <name>` to scaffold)
 - [ ] `name: ClassVar[str]` — unique, lowercase, used in CLI
-- [ ] `Settings` inner class — Pydantic v2 BaseModel with defaults
+- [ ] `Settings` class — Pydantic v2 BaseModel with defaults
 - [ ] `compute_replicate()` — uses `TrajectoryLoader`, returns dict or Pydantic model
 - [ ] `aggregate()` — returns dict or Pydantic model; framework auto-saves to `ctx.result_path`
 - [ ] Choose comparison path:
@@ -725,7 +732,7 @@ When creating a new analysis plugin:
 
 A strong contribution usually includes:
 
-- one new plugin file in `src/polyzymd/analyses/`
+- one new plugin package in `src/polyzymd/analyses/<name>/`
 - one focused test file
 - one short docs update showing the `plugins:` config block
 - figures only if they add scientific value
