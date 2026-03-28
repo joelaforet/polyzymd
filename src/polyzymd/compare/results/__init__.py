@@ -1,29 +1,33 @@
 """Result models for comparison analysis.
 
-This module provides structured result models for each comparison type.
-All new result classes inherit from BaseComparisonResult.
+.. versionchanged:: 1.3.0
+    All plugin-specific result models have been moved to their respective
+    analysis plugin packages under ``polyzymd.analyses.<plugin>._comparison_results``.
+    This module re-exports them for backward compatibility.
 
-Submodules
-----------
-rmsf : RMSF comparison results (new OOP-compliant)
+Submodules (now backward-compat shims)
+--------------------------------------
+rmsf : RMSF comparison results
 rmsf_legacy : Legacy RMSF results (for backward compatibility)
 triad : Catalytic triad comparison results
 contacts : Polymer-protein contacts comparison results
 binding_free_energy : Binding free energy (ΔG_sel) comparison results
 polymer_affinity : Polymer affinity score comparison results
+distances : Distance comparison results
+exposure : Exposure comparison results
+secondary_structure : Secondary structure comparison results
 """
 
 # Binding free energy result classes
-from polyzymd.compare.results.binding_free_energy import (
+from polyzymd.analyses.binding_free_energy._comparison_results import (
     BindingFreeEnergyResult,
     FreeEnergyConditionSummary,
     FreeEnergyEntry,
     FreeEnergyPairwiseEntry,
 )
 
-# New OOP-compliant result classes
 # Contacts result classes
-from polyzymd.compare.results.contacts import (
+from polyzymd.analyses.contacts._comparison_results import (
     AggregateComparisonResult,
     ContactsANOVASummary,
     ContactsComparisonResult,
@@ -32,7 +36,7 @@ from polyzymd.compare.results.contacts import (
 )
 
 # Distance result classes
-from polyzymd.compare.results.distances import (
+from polyzymd.analyses.distances._comparison_results import (
     DistanceComparisonResult,
     DistanceConditionSummary,
     DistancePairANOVA,
@@ -40,18 +44,29 @@ from polyzymd.compare.results.distances import (
     DistancePairwiseComparison,
 )
 
+# Exposure result classes
+from polyzymd.analyses.exposure._comparison_results import (
+    ExposureComparisonResult,
+    ExposureConditionSummary,
+)
+
 # Polymer affinity score result classes
-from polyzymd.compare.results.polymer_affinity import (
+from polyzymd.analyses.polymer_affinity._comparison_results import (
     AffinityScoreConditionSummary,
     AffinityScoreEntry,
     AffinityScorePairwiseEntry,
     PolymerAffinityScoreResult,
     PolymerTypeScore,
 )
-from polyzymd.compare.results.rmsf import RMSFComparisonResult, RMSFConditionSummary
+
+# RMSF result classes (new OOP-compliant)
+from polyzymd.analyses.rmsf._comparison_results import (
+    RMSFComparisonResult,
+    RMSFConditionSummary,
+)
 
 # Legacy RMSF result classes (for backward compatibility with old comparator)
-from polyzymd.compare.results.rmsf_legacy import (
+from polyzymd.analyses.rmsf._comparison_results_legacy import (
     ANOVASummary,
     ComparisonResult,
     ConditionSummary,
@@ -59,13 +74,13 @@ from polyzymd.compare.results.rmsf_legacy import (
 )
 
 # Secondary structure result classes
-from polyzymd.compare.results.secondary_structure import (
+from polyzymd.analyses.secondary_structure._comparison_results import (
     SSComparisonResult,
     SSConditionSummary,
 )
 
 # Triad result classes
-from polyzymd.compare.results.triad import (
+from polyzymd.analyses.catalytic_triad._comparison_results import (
     TriadANOVASummary,
     TriadComparisonResult,
     TriadConditionSummary,
@@ -100,6 +115,9 @@ __all__ = [
     "DistancePairANOVA",
     "DistancePairSummary",
     "DistancePairwiseComparison",
+    # Exposure
+    "ExposureComparisonResult",
+    "ExposureConditionSummary",
     # Binding free energy
     "BindingFreeEnergyResult",
     "FreeEnergyConditionSummary",

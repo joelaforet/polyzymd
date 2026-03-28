@@ -54,16 +54,16 @@ from polyzymd.analyses.shared.plotting import (
 )
 
 if TYPE_CHECKING:
-    from polyzymd.analyses.contacts._binding_preference import (
-        AggregatedBindingPreferenceResult,
-        AggregatedPartitionBindingEntry,
-        BindingPreferenceResult,
-    )
-    from polyzymd.compare.results.binding_free_energy import (
+    from polyzymd.analyses.binding_free_energy._comparison_results import (
         BindingFreeEnergyResult,
         FreeEnergyConditionSummary,
         FreeEnergyEntry,
         FreeEnergyPairwiseEntry,
+    )
+    from polyzymd.analyses.contacts._binding_preference import (
+        AggregatedBindingPreferenceResult,
+        AggregatedPartitionBindingEntry,
+        BindingPreferenceResult,
     )
 
 logger = logging.getLogger("polyzymd.analyses.binding_free_energy")
@@ -210,7 +210,7 @@ class BindingFreeEnergyAnalysis(Analysis):
             Comparison result, or ``None`` if no conditions have data.
         """
         from polyzymd import __version__
-        from polyzymd.compare.results.binding_free_energy import (
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
             BindingFreeEnergyResult,
             FreeEnergyConditionSummary,
             FreeEnergyPairwiseEntry,
@@ -336,7 +336,7 @@ class BindingFreeEnergyAnalysis(Analysis):
 
     def format(self, result: Any, output_format: str = "text") -> str:
         """Format binding free energy results without legacy dispatch."""
-        from polyzymd.compare.binding_free_energy_formatters import format_bfe_result
+        from polyzymd.analyses.binding_free_energy._formatters import format_bfe_result
 
         return format_bfe_result(result, format=self._normalize_output_format(output_format))
 
@@ -376,7 +376,7 @@ class BindingFreeEnergyAnalysis(Analysis):
         -------
         FreeEnergyConditionSummary
         """
-        from polyzymd.compare.results.binding_free_energy import (
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
             FreeEnergyConditionSummary,
         )
         from polyzymd.config.schema import SimulationConfig
@@ -564,10 +564,10 @@ class BindingFreeEnergyAnalysis(Analysis):
         -------
         list[FreeEnergyEntry]
         """
+        from polyzymd.analyses.binding_free_energy._comparison_results import FreeEnergyEntry
         from polyzymd.analyses.contacts._binding_preference import (
             AggregatedBindingPreferenceResult,
         )
-        from polyzymd.compare.results.binding_free_energy import FreeEnergyEntry
 
         entries: list[FreeEnergyEntry] = []
 
@@ -586,7 +586,7 @@ class BindingFreeEnergyAnalysis(Analysis):
         temperature_K: float,
     ) -> list[Any]:
         """Extract ΔG_sel entries from an AggregatedBindingPreferenceResult."""
-        from polyzymd.compare.results.binding_free_energy import FreeEnergyEntry
+        from polyzymd.analyses.binding_free_energy._comparison_results import FreeEnergyEntry
 
         entries: list[FreeEnergyEntry] = []
         bp = result.binding_preference
@@ -625,7 +625,7 @@ class BindingFreeEnergyAnalysis(Analysis):
 
         Returns None if data is insufficient (zero shares).
         """
-        from polyzymd.compare.results.binding_free_energy import FreeEnergyEntry
+        from polyzymd.analyses.binding_free_energy._comparison_results import FreeEnergyEntry
 
         cs = entry.mean_contact_share
         es = entry.expected_share
@@ -676,7 +676,7 @@ class BindingFreeEnergyAnalysis(Analysis):
         temperature_K: float,
     ) -> list[Any]:
         """Extract ΔG_sel entries from a single-replicate BindingPreferenceResult."""
-        from polyzymd.compare.results.binding_free_energy import FreeEnergyEntry
+        from polyzymd.analyses.binding_free_energy._comparison_results import FreeEnergyEntry
 
         entries: list[FreeEnergyEntry] = []
         bp = result.binding_preference
@@ -818,7 +818,9 @@ class BindingFreeEnergyAnalysis(Analysis):
         -------
         list[FreeEnergyPairwiseEntry]
         """
-        from polyzymd.compare.results.binding_free_energy import FreeEnergyPairwiseEntry
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
+            FreeEnergyPairwiseEntry,
+        )
         from polyzymd.compare.statistics import independent_ttest
 
         cross_temperature = not math.isclose(
@@ -890,8 +892,8 @@ def _unit_label_mpl(units: str) -> str:
 
 def _find_bfe_result(data: dict[str, Any], labels: Sequence[str]) -> Any | None:
     """Find and load BindingFreeEnergyResult from the comparison cache."""
+    from polyzymd.analyses.binding_free_energy._comparison_results import BindingFreeEnergyResult
     from polyzymd.compare.io.results import find_comparison_result
-    from polyzymd.compare.results.binding_free_energy import BindingFreeEnergyResult
 
     return find_comparison_result(
         data,

@@ -78,7 +78,7 @@ if TYPE_CHECKING:
         AggregatedBindingPreferenceResult,
         BindingPreferenceResult,
     )
-    from polyzymd.compare.results.polymer_affinity import (
+    from polyzymd.analyses.polymer_affinity._comparison_results import (
         AffinityScoreConditionSummary,
         AffinityScoreEntry,
         AffinityScorePairwiseEntry,
@@ -207,7 +207,7 @@ class PolymerAffinityAnalysis(Analysis):
             Comparison result, or ``None`` if no conditions have data.
         """
         from polyzymd import __version__
-        from polyzymd.compare.results.polymer_affinity import (
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
             AffinityScoreConditionSummary,
             PolymerAffinityScoreResult,
         )
@@ -332,7 +332,7 @@ class PolymerAffinityAnalysis(Analysis):
 
     def format(self, result: Any, output_format: str = "text") -> str:
         """Format polymer affinity results without legacy dispatch."""
-        from polyzymd.compare.polymer_affinity_formatters import format_affinity_result
+        from polyzymd.analyses.polymer_affinity._formatters import format_affinity_result
 
         return format_affinity_result(result, format=self._normalize_output_format(output_format))
 
@@ -376,7 +376,7 @@ class PolymerAffinityAnalysis(Analysis):
         -------
         AffinityScoreConditionSummary
         """
-        from polyzymd.compare.results.polymer_affinity import (
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
             AffinityScoreConditionSummary,
         )
 
@@ -691,7 +691,7 @@ class PolymerAffinityAnalysis(Analysis):
         AffinityScoreEntry or None
             Affinity score entry, or None if data is insufficient.
         """
-        from polyzymd.compare.results.polymer_affinity import AffinityScoreEntry
+        from polyzymd.analyses.polymer_affinity._comparison_results import AffinityScoreEntry
 
         mcf = agg_entry.mean_contact_fraction
         n_exposed = agg_entry.n_exposed_in_group
@@ -781,7 +781,7 @@ class PolymerAffinityAnalysis(Analysis):
         -------
         list[AffinityScoreEntry]
         """
-        from polyzymd.compare.results.polymer_affinity import AffinityScoreEntry
+        from polyzymd.analyses.polymer_affinity._comparison_results import AffinityScoreEntry
 
         entries: list[Any] = []
 
@@ -894,7 +894,7 @@ class PolymerAffinityAnalysis(Analysis):
         list[PolymerTypeScore]
             One score per polymer type, sorted by total score ascending.
         """
-        from polyzymd.compare.results.polymer_affinity import PolymerTypeScore
+        from polyzymd.analyses.polymer_affinity._comparison_results import PolymerTypeScore
 
         # Group entries by polymer type
         by_polymer: dict[str, list[Any]] = {}
@@ -1082,7 +1082,9 @@ class PolymerAffinityAnalysis(Analysis):
         -------
         AffinityScorePairwiseEntry
         """
-        from polyzymd.compare.results.polymer_affinity import AffinityScorePairwiseEntry
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
+            AffinityScorePairwiseEntry,
+        )
         from polyzymd.compare.statistics import independent_ttest
 
         cross_temperature = not math.isclose(
@@ -1212,8 +1214,8 @@ def _find_affinity_result(data: dict[str, Any], labels: Sequence[str]) -> Any | 
     -------
     PolymerAffinityScoreResult or None
     """
+    from polyzymd.analyses.polymer_affinity._comparison_results import PolymerAffinityScoreResult
     from polyzymd.compare.io.results import find_comparison_result
-    from polyzymd.compare.results.polymer_affinity import PolymerAffinityScoreResult
 
     return find_comparison_result(
         data,
