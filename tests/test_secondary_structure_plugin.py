@@ -588,7 +588,7 @@ class TestMakeAggregatedFilename:
 
 
 class TestPlot:
-    """Test plot delegation to existing plotter classes."""
+    """Test plot delegation to inline plotting helpers."""
 
     def _make_plot_ctx(self, tmp_path, conditions=None):
         """Helper to build a PlotContext."""
@@ -629,30 +629,27 @@ class TestPlot:
 
         with (
             patch(
-                "polyzymd.compare.plotters.secondary_structure.SSTimelineHeatmapPlotter"
+                "polyzymd.analyses.secondary_structure._plot_ss_timeline_heatmap"
             ) as MockTimeline,
+            patch("polyzymd.analyses.secondary_structure._plot_ss_content_bars") as MockContent,
             patch(
-                "polyzymd.compare.plotters.secondary_structure.SSContentBarsPlotter"
-            ) as MockContent,
-            patch(
-                "polyzymd.compare.plotters.secondary_structure.SSIndividualBarsPlotter"
+                "polyzymd.analyses.secondary_structure._plot_ss_individual_bars"
             ) as MockIndividual,
             patch(
-                "polyzymd.compare.plotters.secondary_structure.SSPersistenceDiffHeatmapPlotter"
+                "polyzymd.analyses.secondary_structure._plot_ss_persistence_diff_heatmap"
             ) as MockPersistence,
         ):
             # All plotters return a single path
-            for mock_cls in [MockTimeline, MockContent, MockIndividual, MockPersistence]:
-                instance = mock_cls.return_value
-                instance.plot.return_value = [tmp_path / "plots" / "fake.png"]
+            for mock_fn in [MockTimeline, MockContent, MockIndividual, MockPersistence]:
+                mock_fn.return_value = [tmp_path / "plots" / "fake.png"]
 
             plots = ss_analysis.plot(ctx)
 
             # All 4 plotters should have been called
-            assert MockTimeline.return_value.plot.called
-            assert MockContent.return_value.plot.called
-            assert MockIndividual.return_value.plot.called
-            assert MockPersistence.return_value.plot.called
+            assert MockTimeline.called
+            assert MockContent.called
+            assert MockIndividual.called
+            assert MockPersistence.called
 
             # Total paths: 4 (one from each plotter)
             assert len(plots) == 4
@@ -663,23 +660,21 @@ class TestPlot:
 
         with (
             patch(
-                "polyzymd.compare.plotters.secondary_structure.SSTimelineHeatmapPlotter"
+                "polyzymd.analyses.secondary_structure._plot_ss_timeline_heatmap"
             ) as MockTimeline,
+            patch("polyzymd.analyses.secondary_structure._plot_ss_content_bars") as MockContent,
             patch(
-                "polyzymd.compare.plotters.secondary_structure.SSContentBarsPlotter"
-            ) as MockContent,
-            patch(
-                "polyzymd.compare.plotters.secondary_structure.SSIndividualBarsPlotter"
+                "polyzymd.analyses.secondary_structure._plot_ss_individual_bars"
             ) as MockIndividual,
             patch(
-                "polyzymd.compare.plotters.secondary_structure.SSPersistenceDiffHeatmapPlotter"
+                "polyzymd.analyses.secondary_structure._plot_ss_persistence_diff_heatmap"
             ) as MockPersistence,
         ):
             # Timeline raises, others succeed
-            MockTimeline.return_value.plot.side_effect = RuntimeError("boom")
-            MockContent.return_value.plot.return_value = [tmp_path / "plots" / "bars.png"]
-            MockIndividual.return_value.plot.return_value = [tmp_path / "plots" / "ind.png"]
-            MockPersistence.return_value.plot.return_value = [tmp_path / "plots" / "diff.png"]
+            MockTimeline.side_effect = RuntimeError("boom")
+            MockContent.return_value = [tmp_path / "plots" / "bars.png"]
+            MockIndividual.return_value = [tmp_path / "plots" / "ind.png"]
+            MockPersistence.return_value = [tmp_path / "plots" / "diff.png"]
 
             plots = ss_analysis.plot(ctx)
 
@@ -698,30 +693,29 @@ class TestPlot:
 
         with (
             patch(
-                "polyzymd.compare.plotters.secondary_structure.SSTimelineHeatmapPlotter"
+                "polyzymd.analyses.secondary_structure._plot_ss_timeline_heatmap"
             ) as MockTimeline,
+            patch("polyzymd.analyses.secondary_structure._plot_ss_content_bars") as MockContent,
             patch(
-                "polyzymd.compare.plotters.secondary_structure.SSContentBarsPlotter"
-            ) as MockContent,
-            patch(
-                "polyzymd.compare.plotters.secondary_structure.SSIndividualBarsPlotter"
+                "polyzymd.analyses.secondary_structure._plot_ss_individual_bars"
             ) as MockIndividual,
             patch(
-                "polyzymd.compare.plotters.secondary_structure.SSPersistenceDiffHeatmapPlotter"
+                "polyzymd.analyses.secondary_structure._plot_ss_persistence_diff_heatmap"
             ) as MockPersistence,
         ):
-            for mock_cls in [MockTimeline, MockContent, MockIndividual, MockPersistence]:
-                mock_cls.return_value.plot.return_value = []
+            for mock_fn in [MockTimeline, MockContent, MockIndividual, MockPersistence]:
+                mock_fn.return_value = []
 
             ss_analysis.plot(ctx)
 
-            # Check that PlotSettings was created and passed
+            # Check that PlotSettings was created and passed as 4th arg
             from polyzymd.compare.config import PlotSettings
 
-            for mock_cls in [MockTimeline, MockContent, MockIndividual, MockPersistence]:
-                call_args = mock_cls.call_args
+            for mock_fn in [MockTimeline, MockContent, MockIndividual, MockPersistence]:
+                assert mock_fn.called
+                call_args = mock_fn.call_args
                 assert call_args is not None
-                assert isinstance(call_args.kwargs.get("settings"), PlotSettings)
+                assert isinstance(call_args[0][3], PlotSettings)
 
     def test_plot_builds_data_dict_correctly(self, ss_analysis, tmp_path):
         """plot() should build the data dict with analysis_dir and replicates."""
@@ -739,18 +733,18 @@ class TestPlot:
 
         with (
             patch(
-                "polyzymd.compare.plotters.secondary_structure.SSTimelineHeatmapPlotter"
+                "polyzymd.analyses.secondary_structure._plot_ss_timeline_heatmap"
             ) as MockTimeline,
-            patch("polyzymd.compare.plotters.secondary_structure.SSContentBarsPlotter"),
-            patch("polyzymd.compare.plotters.secondary_structure.SSIndividualBarsPlotter"),
-            patch("polyzymd.compare.plotters.secondary_structure.SSPersistenceDiffHeatmapPlotter"),
+            patch("polyzymd.analyses.secondary_structure._plot_ss_content_bars"),
+            patch("polyzymd.analyses.secondary_structure._plot_ss_individual_bars"),
+            patch("polyzymd.analyses.secondary_structure._plot_ss_persistence_diff_heatmap"),
         ):
 
-            def capture_plot(data, labels, output_dir, **kwargs):
+            def capture_plot(data, labels, output_dir, plot_settings):
                 captured_data.update(data)
                 return []
 
-            MockTimeline.return_value.plot.side_effect = capture_plot
+            MockTimeline.side_effect = capture_plot
 
             ss_analysis.plot(ctx)
 
