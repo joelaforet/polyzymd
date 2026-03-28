@@ -25,11 +25,11 @@ from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import BaseModel, Field
 
-from polyzymd.analyses._exposure_chaperone import (
+from polyzymd.analyses.exposure._chaperone import (
     ChaperoneDetectionResult,
     detect_events,
 )
-from polyzymd.analyses._exposure_classification import (
+from polyzymd.analyses.exposure._classification import (
     ResidueStability,
     classify_residue_stability,
 )
@@ -37,8 +37,8 @@ from polyzymd.analyses._results_base import BaseAnalysisResult
 
 if TYPE_CHECKING:
     from polyzymd.analyses.contacts._results import ContactResult
-    from polyzymd.analyses._exposure_config import ExposureConfig
-    from polyzymd.analyses._sasa_trajectory import SASATrajectoryResult
+    from polyzymd.analyses.exposure._config import ExposureConfig
+    from polyzymd.analyses.exposure._sasa_trajectory import SASATrajectoryResult
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +269,7 @@ def analyze_exposure_dynamics(
     Parameters
     ----------
     sasa_result : SASATrajectoryResult
-        Output of :func:`~polyzymd.analyses._sasa_trajectory.compute_trajectory_sasa`.
+        Output of :func:`~polyzymd.analyses.exposure._sasa_trajectory.compute_trajectory_sasa`.
     contact_result : ContactResult
         Output of contact analysis for the same trajectory.
     config : ExposureConfig, optional
@@ -284,7 +284,7 @@ def analyze_exposure_dynamics(
     -------
     ExposureDynamicsResult
     """
-    from polyzymd.analyses._exposure_config import ExposureConfig as _ExposureConfig
+    from polyzymd.analyses.exposure._config import ExposureConfig as _ExposureConfig
 
     if config is None:
         config = _ExposureConfig()

@@ -31,7 +31,7 @@ from numpy.typing import NDArray
 from polyzymd.analyses.shared.aa_classification import MAX_ASA_TABLE, get_aa_class
 
 if TYPE_CHECKING:
-    from polyzymd.analyses._sasa_config import SASAConfig
+    from polyzymd.analyses.exposure._sasa_config import SASAConfig
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +269,7 @@ def compute_trajectory_sasa(
     # Lazy imports (heavy deps)
     import mdtraj as md
 
-    from polyzymd.analyses._sasa_config import SASAConfig as _SASAConfig
+    from polyzymd.analyses.exposure._sasa_config import SASAConfig as _SASAConfig
 
     if config is None:
         config = _SASAConfig()

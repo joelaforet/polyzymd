@@ -49,9 +49,9 @@ from polyzymd.analyses.shared.plotting import (
 
 if TYPE_CHECKING:
     from polyzymd.analyses.contacts._results import ContactResult
-    from polyzymd.analyses._exposure_dynamics import ExposureDynamicsResult
-    from polyzymd.analyses._exposure_enrichment import ChaperoneEnrichmentResult
-    from polyzymd.analyses._sasa_trajectory import SASATrajectoryResult
+    from polyzymd.analyses.exposure._dynamics import ExposureDynamicsResult
+    from polyzymd.analyses.exposure._enrichment import ChaperoneEnrichmentResult
+    from polyzymd.analyses.exposure._sasa_trajectory import SASATrajectoryResult
 
 logger = logging.getLogger("polyzymd.analyses.exposure")
 
@@ -406,14 +406,14 @@ class ExposureAnalysis(Analysis):
         ExposureConditionSummary
         """
         from polyzymd.analyses.contacts._results import ContactResult
-        from polyzymd.analyses._exposure_config import ExposureConfig
-        from polyzymd.analyses._exposure_dynamics import (
+        from polyzymd.analyses.exposure._config import ExposureConfig
+        from polyzymd.analyses.exposure._dynamics import (
             ExposureDynamicsResult,
             analyze_exposure_dynamics,
         )
-        from polyzymd.analyses._exposure_enrichment import compute_chaperone_enrichment
-        from polyzymd.analyses._sasa_config import SASAConfig
-        from polyzymd.analyses._sasa_trajectory import compute_trajectory_sasa
+        from polyzymd.analyses.exposure._enrichment import compute_chaperone_enrichment
+        from polyzymd.analyses.exposure._sasa_config import SASAConfig
+        from polyzymd.analyses.exposure._sasa_trajectory import compute_trajectory_sasa
         from polyzymd.analyses.shared.loader import TrajectoryLoader
         from polyzymd.analyses.shared.statistics import compute_sem
         from polyzymd.compare.results.exposure import ExposureConditionSummary
@@ -548,14 +548,14 @@ class ExposureAnalysis(Analysis):
         tuple[ExposureDynamicsResult, ChaperoneEnrichmentResult] or None
         """
         from polyzymd.analyses.contacts._results import ContactResult
-        from polyzymd.analyses._exposure_config import ExposureConfig
-        from polyzymd.analyses._exposure_dynamics import (
+        from polyzymd.analyses.exposure._config import ExposureConfig
+        from polyzymd.analyses.exposure._dynamics import (
             ExposureDynamicsResult,
             analyze_exposure_dynamics,
         )
-        from polyzymd.analyses._exposure_enrichment import compute_chaperone_enrichment
-        from polyzymd.analyses._sasa_config import SASAConfig
-        from polyzymd.analyses._sasa_trajectory import compute_trajectory_sasa
+        from polyzymd.analyses.exposure._enrichment import compute_chaperone_enrichment
+        from polyzymd.analyses.exposure._sasa_config import SASAConfig
+        from polyzymd.analyses.exposure._sasa_trajectory import compute_trajectory_sasa
         from polyzymd.analyses.shared.loader import TrajectoryLoader
 
         # Find cached ContactResult
