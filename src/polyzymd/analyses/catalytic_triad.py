@@ -6,11 +6,12 @@ in the same frame).  Aggregates across replicates with SEM and uses the
 default scalar comparison pipeline.
 
 All heavy computation is now inlined:
-- Per-pair distance computation delegates to ``DistanceCalculator`` (will be
-  inlined when the distances plugin is migrated in Phase 4d).
+- Per-pair distance computation delegates to ``DistanceCalculator``.
 - Simultaneous contact fraction and autocorrelation analysis are computed
   directly in this plugin.
 - Aggregation uses utilities from ``analyses.shared``.
+- Plotting delegates to ``_triad_plotting`` standalone functions with data
+  loading/pooling handled by private helpers in this module.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.shared.plotting import get_output_path, save_figure
 
 from polyzymd.analyses._results_triad import TriadAggregatedResult
 
@@ -523,9 +525,8 @@ class CatalyticTriadAnalysis(Analysis):
     def plot(self, ctx: PlotContext) -> list[Path]:
         """Generate triad comparison plots.
 
-        Delegates to the existing :class:`TriadKDEPanelPlotter` and
-        :class:`TriadThresholdBarsPlotter` from the plotter registry,
-        adapting the plugin context to the plotter API.
+        Delegates to private module-level helpers that call the standalone
+        plotting functions in ``_triad_plotting``.
 
         Parameters
         ----------
@@ -539,8 +540,7 @@ class CatalyticTriadAnalysis(Analysis):
         """
         plots: list[Path] = []
 
-        # Build the data dict expected by the old plotter API:
-        # { label: {"analysis_dir": Path, "aggregated_dir": Path, "replicates": [...]}, ... }
+        # Build the data dict for plotting helpers
         data: dict[str, Any] = {}
         labels: list[str] = []
 
@@ -567,22 +567,16 @@ class CatalyticTriadAnalysis(Analysis):
 
             plot_settings = PlotSettings()
 
-        # KDE panel plotter
+        # KDE panel plot
         try:
-            from polyzymd.compare.plotters.triad import TriadKDEPanelPlotter
-
-            plotter = TriadKDEPanelPlotter(settings=plot_settings)
-            result = plotter.plot(data, labels, ctx.output_dir)
+            result = _plot_triad_kde_panel(data, labels, ctx.output_dir, plot_settings)
             plots.extend(result)
         except Exception as exc:
             logger.warning(f"Triad KDE panel plot failed: {exc}")
 
-        # Threshold bars plotter
+        # Threshold bars plot
         try:
-            from polyzymd.compare.plotters.triad import TriadThresholdBarsPlotter
-
-            plotter = TriadThresholdBarsPlotter(settings=plot_settings)
-            result = plotter.plot(data, labels, ctx.output_dir)
+            result = _plot_triad_threshold_bars(data, labels, ctx.output_dir, plot_settings)
             plots.extend(result)
         except Exception as exc:
             logger.warning(f"Triad threshold bars plot failed: {exc}")
@@ -617,3 +611,302 @@ def _make_result_filename(settings: CatalyticTriadSettings, eq_value: float, eq_
     eq_str = f"eq{eq_value:.0f}{eq_unit}"
     name_safe = settings.name.replace(" ", "_").replace("/", "-")
     return f"triad_{name_safe}_{eq_str}.json"
+
+
+# ---------------------------------------------------------------------------
+# Private plotting helpers (inlined from compare/plotters/triad.py)
+# ---------------------------------------------------------------------------
+
+
+def _plot_triad_kde_panel(
+    data: dict[str, Any],
+    labels: Sequence[str],
+    output_dir: Path,
+    plot_settings: Any,
+) -> list[Path]:
+    """Generate multi-row KDE panel for triad distance distributions.
+
+    Pools per-replicate distances for each condition, then delegates to
+    :func:`polyzymd.analyses._triad_plotting.plot_triad_kde_panel_pooled`.
+
+    Parameters
+    ----------
+    data : dict
+        Mapping of condition_label -> condition data dict containing:
+        - analysis_dir: Path to analysis/catalytic_triad
+        - replicates: list of replicate numbers
+    labels : sequence of str
+        Condition labels (order for plotting).
+    output_dir : Path
+        Directory to save plots.
+    plot_settings : PlotSettings
+        Global plot settings.
+
+    Returns
+    -------
+    list[Path]
+        Paths to generated plot files.
+    """
+    from polyzymd.analyses._triad_plotting import plot_triad_kde_panel_pooled
+
+    if not plot_settings.triad.generate_kde_panel:
+        return []
+
+    # Pool distances across replicates for each condition
+    condition_distances, pair_labels, threshold = _pool_distances(data, labels)
+
+    if not condition_distances:
+        logger.warning("No distance data found for KDE panel plot")
+        return []
+
+    # Generate the plot
+    output_path = get_output_path(output_dir, "triad_kde_panel", plot_settings)
+
+    fig = plot_triad_kde_panel_pooled(
+        condition_distances=condition_distances,
+        pair_labels=pair_labels,
+        threshold=threshold,
+        color_palette=plot_settings.color_palette,
+        kde_fill_alpha=plot_settings.triad.kde_fill_alpha,
+        threshold_line_color=plot_settings.triad.threshold_line_color,
+        xlim=plot_settings.triad.kde_xlim,
+        figsize=plot_settings.triad.figsize_kde_panel,
+        dpi=plot_settings.dpi,
+    )
+
+    return [save_figure(fig, output_path, plot_settings)]
+
+
+def _plot_triad_threshold_bars(
+    data: dict[str, Any],
+    labels: Sequence[str],
+    output_dir: Path,
+    plot_settings: Any,
+) -> list[Path]:
+    """Generate grouped bar chart of triad contact fractions.
+
+    Loads aggregated results for each condition and delegates to
+    :func:`polyzymd.analyses._triad_plotting.plot_triad_threshold_bars`.
+
+    Parameters
+    ----------
+    data : dict
+        Mapping of condition_label -> condition data dict.
+    labels : sequence of str
+        Condition labels.
+    output_dir : Path
+        Directory to save plots.
+    plot_settings : PlotSettings
+        Global plot settings.
+
+    Returns
+    -------
+    list[Path]
+        Paths to generated plot files.
+    """
+    from polyzymd.analyses._triad_plotting import plot_triad_threshold_bars
+
+    if not plot_settings.triad.generate_bars:
+        return []
+
+    # Load aggregated results for each condition
+    aggregated_results = _load_aggregated_results(data, labels)
+
+    if not aggregated_results:
+        logger.warning("No aggregated triad results found for bar chart")
+        return []
+
+    # Filter to conditions that have data
+    valid_results = []
+    valid_labels = []
+    for label in labels:
+        if label in aggregated_results:
+            valid_results.append(aggregated_results[label])
+            valid_labels.append(label)
+
+    if not valid_results:
+        return []
+
+    # Generate the plot
+    output_path = get_output_path(output_dir, "triad_threshold_bars", plot_settings)
+
+    fig = plot_triad_threshold_bars(
+        results=valid_results,
+        labels=valid_labels,
+        color_palette=plot_settings.color_palette,
+        figsize=plot_settings.triad.figsize_bars,
+        show_simultaneous=True,
+        dpi=plot_settings.dpi,
+    )
+
+    return [save_figure(fig, output_path, plot_settings)]
+
+
+# ---------------------------------------------------------------------------
+# Data loading helpers for plotting
+# ---------------------------------------------------------------------------
+
+
+def _pool_distances(
+    data: dict[str, Any],
+    labels: Sequence[str],
+) -> tuple[dict[str, dict[str, np.ndarray]], list[str], float]:
+    """Pool distances across replicates for each condition.
+
+    Returns
+    -------
+    tuple
+        (condition_distances, pair_labels, threshold)
+        - condition_distances: {label: {pair_label: distances_array}}
+        - pair_labels: list of pair labels from first condition
+        - threshold: contact threshold from first condition
+    """
+    import json
+
+    condition_distances: dict[str, dict[str, np.ndarray]] = {}
+    pair_labels: list[str] = []
+    threshold: float = 3.5
+
+    for label in labels:
+        cond_data = data.get(label)
+        if cond_data is None:
+            logger.warning(f"No data for condition '{label}'")
+            continue
+
+        analysis_dir = cond_data.get("analysis_dir")
+        replicates = cond_data.get("replicates", [])
+
+        if not analysis_dir or not replicates:
+            logger.warning(f"Missing analysis_dir or replicates for '{label}'")
+            continue
+
+        # Load per-replicate results and pool distances
+        pooled = _load_and_pool_replicate_distances(Path(analysis_dir), replicates)
+
+        if pooled:
+            condition_distances[label] = pooled["distances"]
+            if not pair_labels:
+                pair_labels = pooled["pair_labels"]
+                threshold = pooled["threshold"]
+
+    return condition_distances, pair_labels, threshold
+
+
+def _load_and_pool_replicate_distances(
+    analysis_dir: Path,
+    replicates: list[int],
+) -> dict[str, Any] | None:
+    """Load triad results from replicates and pool distances.
+
+    Parameters
+    ----------
+    analysis_dir : Path
+        Path to analysis/catalytic_triad directory.
+    replicates : list[int]
+        Replicate numbers to load.
+
+    Returns
+    -------
+    dict or None
+        {"distances": {pair_label: pooled_array}, "pair_labels": [...], "threshold": float}
+    """
+    import json
+
+    pooled_by_pair: dict[str, list[np.ndarray]] = {}
+    pair_labels: list[str] = []
+    threshold: float = 3.5
+
+    for rep in replicates:
+        # Look for replicate result file
+        rep_dir = analysis_dir / f"run_{rep}"
+        result_file = rep_dir / "triad_result.json"
+
+        if not result_file.exists():
+            # Try alternative naming
+            result_files = list(rep_dir.glob("*.json"))
+            if result_files:
+                result_file = result_files[0]
+            else:
+                logger.debug(f"No triad result found in {rep_dir}")
+                continue
+
+        try:
+            with open(result_file) as f:
+                result_data = json.load(f)
+
+            # Get threshold from first replicate
+            if "threshold" in result_data and not pair_labels:
+                threshold = result_data["threshold"]
+
+            # Extract pair results
+            pair_results = result_data.get("pair_results", [])
+            for pr in pair_results:
+                pair_label = pr.get("pair_label", "")
+                distances = pr.get("distances")
+
+                if pair_label and distances is not None:
+                    if pair_label not in pooled_by_pair:
+                        pooled_by_pair[pair_label] = []
+                        if pair_label not in pair_labels:
+                            pair_labels.append(pair_label)
+                    pooled_by_pair[pair_label].append(np.array(distances))
+
+        except Exception as e:
+            logger.warning(f"Failed to load {result_file}: {e}")
+            continue
+
+    if not pooled_by_pair:
+        return None
+
+    # Concatenate pooled distances
+    pooled_distances = {pl: np.concatenate(arrays) for pl, arrays in pooled_by_pair.items()}
+
+    return {
+        "distances": pooled_distances,
+        "pair_labels": pair_labels,
+        "threshold": threshold,
+    }
+
+
+def _load_aggregated_results(
+    data: dict[str, Any],
+    labels: Sequence[str],
+) -> dict[str, Any]:
+    """Load aggregated triad results for each condition.
+
+    Returns
+    -------
+    dict
+        Mapping of label -> TriadAggregatedResult.
+    """
+    results: dict[str, Any] = {}
+
+    for label in labels:
+        cond_data = data.get(label)
+        if cond_data is None:
+            continue
+
+        aggregated_dir = cond_data.get("aggregated_dir")
+        if not aggregated_dir:
+            continue
+
+        aggregated_dir = Path(aggregated_dir)
+
+        # Find aggregated result file
+        result_file = aggregated_dir / "triad_aggregated.json"
+        if not result_file.exists():
+            # Try to find any JSON in aggregated dir
+            json_files = list(aggregated_dir.glob("*.json"))
+            if json_files:
+                result_file = json_files[0]
+            else:
+                logger.debug(f"No aggregated triad result in {aggregated_dir}")
+                continue
+
+        try:
+            result = TriadAggregatedResult.load(result_file)
+            results[label] = result
+        except Exception as e:
+            logger.warning(f"Failed to load aggregated result {result_file}: {e}")
+
+    return results

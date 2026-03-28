@@ -684,7 +684,7 @@ class TestMakeAggregatedFilename:
 
 
 class TestPlot:
-    """Test CatalyticTriadAnalysis.plot delegates to existing plotters."""
+    """Test CatalyticTriadAnalysis.plot delegates to inlined plotting helpers."""
 
     def test_plot_returns_empty_on_no_conditions(self, triad_analysis, tmp_path, default_settings):
         ctx = PlotContext(
@@ -699,25 +699,20 @@ class TestPlot:
         plots = triad_analysis.plot(ctx)
         assert plots == []
 
-    @patch("polyzymd.compare.plotters.triad.TriadThresholdBarsPlotter")
-    @patch("polyzymd.compare.plotters.triad.TriadKDEPanelPlotter")
-    def test_plot_delegates_to_plotters(
+    @patch("polyzymd.analyses.catalytic_triad._plot_triad_threshold_bars")
+    @patch("polyzymd.analyses.catalytic_triad._plot_triad_kde_panel")
+    def test_plot_delegates_to_helpers(
         self,
-        MockKDEPlotter,
-        MockBarsPlotter,
+        mock_kde_fn,
+        mock_bars_fn,
         triad_analysis,
         condition,
         tmp_path,
         default_settings,
     ):
-        # Setup mock plotters
-        mock_kde = MagicMock()
-        mock_kde.plot.return_value = [tmp_path / "figures" / "triad_kde_panel.png"]
-        MockKDEPlotter.return_value = mock_kde
-
-        mock_bars = MagicMock()
-        mock_bars.plot.return_value = [tmp_path / "figures" / "triad_threshold_bars.png"]
-        MockBarsPlotter.return_value = mock_bars
+        # Setup mock return values
+        mock_kde_fn.return_value = [tmp_path / "figures" / "triad_kde_panel.png"]
+        mock_bars_fn.return_value = [tmp_path / "figures" / "triad_threshold_bars.png"]
 
         analysis_dir = tmp_path / "analysis" / "no_polymer" / "catalytic_triad"
         analysis_dir.mkdir(parents=True)
@@ -736,20 +731,27 @@ class TestPlot:
             plots = triad_analysis.plot(ctx)
 
         assert len(plots) == 2
-        mock_kde.plot.assert_called_once()
-        mock_bars.plot.assert_called_once()
+        mock_kde_fn.assert_called_once()
+        mock_bars_fn.assert_called_once()
+
+        # Verify PlotSettings is passed to both functions
+        kde_args = mock_kde_fn.call_args[0]
+        bars_args = mock_bars_fn.call_args[0]
+        assert len(kde_args) == 4  # data, labels, output_dir, plot_settings
+        assert len(bars_args) == 4
 
     @patch(
-        "polyzymd.compare.plotters.triad.TriadThresholdBarsPlotter",
+        "polyzymd.analyses.catalytic_triad._plot_triad_threshold_bars",
         side_effect=Exception("plot error"),
     )
     @patch(
-        "polyzymd.compare.plotters.triad.TriadKDEPanelPlotter", side_effect=Exception("plot error")
+        "polyzymd.analyses.catalytic_triad._plot_triad_kde_panel",
+        side_effect=Exception("plot error"),
     )
     def test_plot_catches_exceptions(
         self,
-        MockKDEPlotter,
-        MockBarsPlotter,
+        mock_kde_fn,
+        mock_bars_fn,
         triad_analysis,
         condition,
         tmp_path,
@@ -775,7 +777,7 @@ class TestPlot:
         assert plots == []
 
     def test_plot_passes_data_and_labels(self, triad_analysis, tmp_path, default_settings):
-        """Verify the data dict passed to plotters has the expected shape."""
+        """Verify the data dict passed to helpers has the expected shape."""
         cond1 = Condition(
             label="No Polymer",
             config_path=Path("/fake/config1.yaml"),
@@ -795,21 +797,19 @@ class TestPlot:
         captured_data = {}
         captured_labels = []
 
-        with patch("polyzymd.compare.plotters.triad.TriadKDEPanelPlotter") as MockKDE:
-            mock_kde_inst = MagicMock()
-            mock_kde_inst.plot.return_value = []
-            MockKDE.return_value = mock_kde_inst
+        def capture_kde(data, labels, output_dir, plot_settings):
+            captured_data.update(data)
+            captured_labels.extend(labels)
+            return []
 
-            # Capture what's passed
-            def capture_plot(data, labels, output_dir, **kwargs):
-                captured_data.update(data)
-                captured_labels.extend(labels)
-                return []
-
-            mock_kde_inst.plot.side_effect = capture_plot
-
-            with patch("polyzymd.compare.plotters.triad.TriadThresholdBarsPlotter") as MockBars:
-                MockBars.return_value.plot.return_value = []
+        with patch(
+            "polyzymd.analyses.catalytic_triad._plot_triad_kde_panel",
+            side_effect=capture_kde,
+        ) as mock_kde_fn:
+            with patch(
+                "polyzymd.analyses.catalytic_triad._plot_triad_threshold_bars"
+            ) as mock_bars_fn:
+                mock_bars_fn.return_value = []
 
                 ctx = PlotContext(
                     conditions=[cond1, cond2],
