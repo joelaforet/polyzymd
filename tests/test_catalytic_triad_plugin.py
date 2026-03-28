@@ -595,7 +595,7 @@ class TestDeserializeResult:
 
     def test_aggregated_result_class_set(self, triad_analysis):
         """AggregatedResultClass should be TriadAggregatedResult."""
-        from polyzymd.analyses._results_triad import TriadAggregatedResult
+        from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
 
         assert triad_analysis.AggregatedResultClass is TriadAggregatedResult
 

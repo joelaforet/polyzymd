@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 from polyzymd.analyses.distances._calculator import DistanceCalculator
 from polyzymd.analyses.rmsf._calculator import RMSFCalculator
-from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer
+from polyzymd.analyses.catalytic_triad._calculator import CatalyticTriadAnalyzer
 from polyzymd.compare.registries import AnalyzerRegistry, BaseAnalyzer
 
 
@@ -27,7 +27,7 @@ class TestAnalyzerRegistry:
         # Import triggers @register decorators on calculator classes
         from polyzymd.analyses.distances._calculator import DistanceCalculator  # noqa: F811
         from polyzymd.analyses.rmsf._calculator import RMSFCalculator  # noqa: F811
-        from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer  # noqa: F811
+        from polyzymd.analyses.catalytic_triad._calculator import CatalyticTriadAnalyzer  # noqa: F811
 
         expected = {
             "rmsf",

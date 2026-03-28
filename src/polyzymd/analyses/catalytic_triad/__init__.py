@@ -32,10 +32,10 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.shared.plotting import get_output_path, save_figure
 
-from polyzymd.analyses._results_triad import TriadAggregatedResult
+from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
 
 if TYPE_CHECKING:
-    from polyzymd.analyses._results_triad import TriadResult
+    from polyzymd.analyses.catalytic_triad._results import TriadResult
 
 logger = logging.getLogger("polyzymd.analyses.catalytic_triad")
 
@@ -170,7 +170,7 @@ class CatalyticTriadAnalysis(Analysis):
             Per-replicate triad result.
         """
         from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses._results_triad import TriadResult
+        from polyzymd.analyses.catalytic_triad._results import TriadResult
         from polyzymd.analyses.distances import DistanceCalculator
         from polyzymd.analyses.shared import (
             TrajectoryLoader,
@@ -377,7 +377,7 @@ class CatalyticTriadAnalysis(Analysis):
         """
         from polyzymd.analyses._results_base import get_polyzymd_version
         from polyzymd.analyses.distances._results import DistancePairAggregatedResult
-        from polyzymd.analyses._results_triad import TriadAggregatedResult
+        from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
         from polyzymd.analyses.shared.aggregation import aggregate_distance_pair_stats
         from polyzymd.analyses.shared.statistics import compute_sem
 
@@ -627,7 +627,7 @@ def _plot_triad_kde_panel(
     """Generate multi-row KDE panel for triad distance distributions.
 
     Pools per-replicate distances for each condition, then delegates to
-    :func:`polyzymd.analyses._triad_plotting.plot_triad_kde_panel_pooled`.
+    :func:`polyzymd.analyses.catalytic_triad._plotting.plot_triad_kde_panel_pooled`.
 
     Parameters
     ----------
@@ -647,7 +647,7 @@ def _plot_triad_kde_panel(
     list[Path]
         Paths to generated plot files.
     """
-    from polyzymd.analyses._triad_plotting import plot_triad_kde_panel_pooled
+    from polyzymd.analyses.catalytic_triad._plotting import plot_triad_kde_panel_pooled
 
     if not plot_settings.triad.generate_kde_panel:
         return []
@@ -686,7 +686,7 @@ def _plot_triad_threshold_bars(
     """Generate grouped bar chart of triad contact fractions.
 
     Loads aggregated results for each condition and delegates to
-    :func:`polyzymd.analyses._triad_plotting.plot_triad_threshold_bars`.
+    :func:`polyzymd.analyses.catalytic_triad._plotting.plot_triad_threshold_bars`.
 
     Parameters
     ----------
@@ -704,7 +704,7 @@ def _plot_triad_threshold_bars(
     list[Path]
         Paths to generated plot files.
     """
-    from polyzymd.analyses._triad_plotting import plot_triad_threshold_bars
+    from polyzymd.analyses.catalytic_triad._plotting import plot_triad_threshold_bars
 
     if not plot_settings.triad.generate_bars:
         return []

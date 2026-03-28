@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
-    from polyzymd.analyses._results_triad import TriadAggregatedResult, TriadResult
+    from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult, TriadResult
 
 # Matplotlib/seaborn are optional
 try:
@@ -115,7 +115,7 @@ def plot_triad_kde_panel(
 
     Examples
     --------
-    >>> from polyzymd.analyses._results_triad import TriadResult
+    >>> from polyzymd.analyses.catalytic_triad._results import TriadResult
     >>> results = [TriadResult.load("cond1/triad.json"), TriadResult.load("cond2/triad.json")]
     >>> fig = plot_triad_kde_panel(results, labels=["Control", "Treatment"])
     >>> fig.savefig("triad_kde.png")

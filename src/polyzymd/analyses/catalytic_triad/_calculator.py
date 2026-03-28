@@ -31,7 +31,7 @@ from polyzymd.analyses.distances._results import (
     DistancePairAggregatedResult,
     DistancePairResult,
 )
-from polyzymd.analyses._results_triad import TriadAggregatedResult, TriadResult
+from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult, TriadResult
 from polyzymd.analyses.shared.aggregation import (
     aggregate_distance_pair_stats,
     collect_replicate_results,

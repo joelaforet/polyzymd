@@ -409,7 +409,7 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
     from polyzymd.analyses._analysis_config import AnalysisConfig
     from polyzymd.analyses.distances._calculator import DistanceCalculator
     from polyzymd.analyses.rmsf._calculator import RMSFCalculator
-    from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer
+    from polyzymd.analyses.catalytic_triad._calculator import CatalyticTriadAnalyzer
     from polyzymd.analyses.shared.logging_utils import setup_logging
     from polyzymd.compare.config import CatalyticTriadConfig as CompareTriadConfig
     from polyzymd.compare.config import TriadPairConfig as CompareTriadPairConfig
@@ -1753,7 +1753,7 @@ def triad(
     """
     require_analysis_deps()
 
-    from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer
+    from polyzymd.analyses.catalytic_triad._calculator import CatalyticTriadAnalyzer
     from polyzymd.compare.config import ComparisonConfig
     from polyzymd.config.loader import load_config
 
