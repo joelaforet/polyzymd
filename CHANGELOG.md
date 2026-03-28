@@ -5,6 +5,97 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Analysis Plugin System & OCP Compliance
+
+Large-scale refactoring of the analysis and comparison subsystems to achieve
+Open-Closed Principle compliance.  New analysis types can now be added by
+dropping a package in `analyses/<name>/` with no modifications to core code.
+
+### Breaking Changes
+
+- **`compare/` public API removed.**  The lazy-export facade in
+  `compare/__init__.py` (44 symbols) and the re-export layer in
+  `compare/results/__init__.py` (8 classes) have been deleted.  All consumers
+  must import from concrete submodules (`compare.statistics`, `compare.config`,
+  `compare.io`, `compare.core.base`).  No external downstream consumers exist.
+- **Three dead registries removed.**  `AnalyzerRegistry`,
+  `AnalysisSettingsRegistry`, and `ComparisonSettingsRegistry` (plus all 16
+  `@register` decorators) have been deleted from `compare/registries.py`.
+  `PlotSettingsRegistry` is retained (4 active production consumers).
+- **`compare/plotters/` directory removed.**  All per-analysis plotting code has
+  been inlined into each plugin's package.  `compare/plotter.py` (plot-all
+  orchestrator) has been rewritten to delegate to plugins.
+- **`compare/formatters.py` removed.**  RMSF-specific formatters moved to
+  `analyses/rmsf/`.
+- **`compare/comparators/` directory removed.**  All 11 old comparator files
+  deleted; comparison logic lives in each plugin's `compare()` method.
+- **Contacts plugin slimmed.**  `_binding_preference.py` (3,938 lines),
+  `_surface_exposure.py` (369 lines), and `_helpers.py` (369 lines) extracted
+  to `analyses/shared/` as reusable cross-plugin compute utilities.
+
+### Added
+
+- **`polyzymd new-analysis <name>` scaffold CLI command.**  Generates a complete
+  plugin package (`__init__.py`, `_comparison_results.py`) and test file
+  (`test_<name>_plugin.py`) with working discovery, compute, aggregate, and
+  extract_metrics implementations.  Supports `--class-name`, `--force`,
+  `--dry-run`, and `--project-root` options.  Validates plugin names
+  (snake_case, no collisions) and class names (PascalCase, valid identifiers).
+  (`cli/scaffold.py`, `cli/main.py`)
+- **Analysis plugin framework.**  `Analysis` ABC (`analyses/base.py`),
+  `pkgutil`-based auto-discovery (`analyses/discovery.py`), lifecycle
+  orchestrator (`analyses/orchestrator.py`), and default scalar comparison
+  pipeline (`analyses/stats.py`).  Eight analysis types migrated as plugins:
+  RMSF, contacts, distances, catalytic triad, secondary structure, exposure,
+  binding free energy, polymer affinity.
+- **Shared analysis utilities.**  `analyses/shared/` package with reusable
+  `TrajectoryLoader`, alignment helpers, autocorrelation, plot utilities,
+  `surface_exposure.py`, `binding_preference.py`, and
+  `binding_preference_helpers.py`.
+- **Framework hardening.**  `compute_replicate()` return values are validated
+  (None rejected).  `ComparisonContext` gains `failed_conditions` and
+  `aggregated_results` fields.  Orchestrator warns on undeclared plugin
+  dependencies.
+- **`cohens_d()` default corrected.**  `rmsf_mode` default changed from `True`
+  to `False` in `compare/statistics.py` so the general-purpose function is not
+  biased toward one analysis type.
+
+### Changed
+
+- **All analysis plugins are now packages.**  Each plugin lives in
+  `analyses/<name>/` with `__init__.py` (plugin class), `_comparison_results.py`
+  (result models), and optional `_plotting.py`, `_formatters.py` modules.
+  Single-file plugins no longer exist.
+- **Plugin-specific code co-located.**  Result models, formatters, plotters, and
+  settings that were previously scattered across `compare/results/`,
+  `compare/formatters.py`, `compare/plotters/`, and `compare/comparators/` now
+  live inside each plugin's package.
+- **`compare/` is now shared infrastructure only.**  Contains statistics,
+  ComparisonConfig/PlotSettings/PlotTheme, IO helpers, CLI commands, and
+  base result classes — no analysis-specific code.
+
+### Fixed
+
+- **Dead code removed.**  `catalytic_triad/_formatters.py` (427 lines, zero
+  imports), `rmsf/_comparison_results_legacy.py`, ghost `compare/plotters/`
+  directory, stale `__pycache__/` files.
+- **`validate_name()` exception handling narrowed.**  `except Exception:` changed
+  to `except ImportError:` in the scaffold's collision-check path.
+
+### Documentation
+
+- Updated `docs/source/tutorials/extending_analyses.md` with scaffold command
+  as the primary entry point for contributors.
+- Updated `AGENTS.md` and `.opencode/instructions/` for refactored layout.
+- Updated `docs/source/api/compare.md` to remove stale module references.
+
+### Tests
+
+- 940 tests passing (6 skipped), up from 908 at branch start.
+- Added 44 scaffold tests (name validation, class-name validation, file
+  generation, code quality, CliRunner integration).
+- Removed 12 obsolete registry and smoke tests.
+
 ## [1.2.1] - 2026-04-01
 
 ### Fixed
