@@ -408,7 +408,7 @@ def run_analyses(analysis_config: Path, recompute: bool, quiet: bool, debug: boo
 
     from polyzymd.analyses._analysis_config import AnalysisConfig
     from polyzymd.analyses._calculator_distances import DistanceCalculator
-    from polyzymd.analyses._calculator_rmsf import RMSFCalculator
+    from polyzymd.analyses.rmsf._calculator import RMSFCalculator
     from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer
     from polyzymd.analyses.shared.logging_utils import setup_logging
     from polyzymd.compare.config import CatalyticTriadConfig as CompareTriadConfig
@@ -861,7 +861,7 @@ def rmsf(
     """
     require_analysis_deps()
 
-    from polyzymd.analyses._calculator_rmsf import RMSFCalculator
+    from polyzymd.analyses.rmsf._calculator import RMSFCalculator
     from polyzymd.config.schema import SimulationConfig
 
     # Validate reference-mode and reference-frame combination
@@ -940,7 +940,7 @@ def rmsf(
             # Generate plot if requested
             if plot:
                 require_matplotlib()
-                from polyzymd.analyses._rmsf_plotting import plot_rmsf
+                from polyzymd.analyses.rmsf._plotting import plot_rmsf
 
                 fig, ax = plot_rmsf(result)
                 plot_dir = sim_config.output.projects_directory / "plots" / "rmsf"
@@ -969,7 +969,7 @@ def rmsf(
             # Generate plot if requested
             if plot:
                 require_matplotlib()
-                from polyzymd.analyses._rmsf_plotting import plot_rmsf
+                from polyzymd.analyses.rmsf._plotting import plot_rmsf
 
                 fig, ax = plot_rmsf(result, show_error=True)
                 plot_dir = sim_config.output.projects_directory / "plots" / "rmsf"
@@ -1986,7 +1986,7 @@ def plot_rmsf_cmd(
     """
     require_matplotlib()
 
-    from polyzymd.analyses._results_rmsf import RMSFAggregatedResult, RMSFResult
+    from polyzymd.analyses.rmsf._results import RMSFAggregatedResult, RMSFResult
 
     # Load results
     results = []
@@ -2019,11 +2019,11 @@ def plot_rmsf_cmd(
 
     # Create plot
     if len(results) == 1:
-        from polyzymd.analyses._rmsf_plotting import plot_rmsf
+        from polyzymd.analyses.rmsf._plotting import plot_rmsf
 
         fig, ax = plot_rmsf(results[0], show_error=show_error, label=label_list[0])
     else:
-        from polyzymd.analyses._rmsf_plotting import plot_rmsf_comparison
+        from polyzymd.analyses.rmsf._plotting import plot_rmsf_comparison
 
         fig, ax = plot_rmsf_comparison(results, labels=label_list, show_error=show_error)
 

@@ -513,7 +513,7 @@ class TestDeserializeResult:
 
     def test_aggregated_result_class_set(self, rmsf_analysis):
         """AggregatedResultClass should be RMSFAggregatedResult."""
-        from polyzymd.analyses._results_rmsf import RMSFAggregatedResult
+        from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
 
         assert rmsf_analysis.AggregatedResultClass is RMSFAggregatedResult
 

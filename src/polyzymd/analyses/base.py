@@ -510,7 +510,7 @@ class Analysis(ABC):
 
         Example::
 
-            from polyzymd.analyses._results_rmsf import RMSFAggregatedResult
+            from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
 
             class RMSFAnalysis(Analysis):
                 name = "rmsf"

@@ -47,7 +47,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from polyzymd.analyses._results_base import get_polyzymd_version
-from polyzymd.analyses._results_rmsf import RMSFAggregatedResult, RMSFResult
+from polyzymd.analyses.rmsf._results import RMSFAggregatedResult, RMSFResult
 from polyzymd.analyses.shared.aggregation import collect_replicate_results
 from polyzymd.analyses.shared.alignment import (
     AlignmentConfig,

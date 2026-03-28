@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
-    from polyzymd.analyses._results_rmsf import RMSFAggregatedResult, RMSFResult
+    from polyzymd.analyses.rmsf._results import RMSFAggregatedResult, RMSFResult
 
 # Matplotlib is optional
 try:
@@ -65,7 +65,7 @@ def plot_rmsf(
     """
     _require_matplotlib()
 
-    from polyzymd.analyses._results_rmsf import RMSFAggregatedResult, RMSFResult
+    from polyzymd.analyses.rmsf._results import RMSFAggregatedResult, RMSFResult
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(12, 4))

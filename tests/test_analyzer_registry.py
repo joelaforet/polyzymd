@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from polyzymd.analyses._calculator_distances import DistanceCalculator
-from polyzymd.analyses._calculator_rmsf import RMSFCalculator
+from polyzymd.analyses.rmsf._calculator import RMSFCalculator
 from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer
 from polyzymd.compare.registries import AnalyzerRegistry, BaseAnalyzer
 
@@ -26,7 +26,7 @@ class TestAnalyzerRegistry:
         """Bootstrap should register all expected analyzer keys."""
         # Import triggers @register decorators on calculator classes
         from polyzymd.analyses._calculator_distances import DistanceCalculator  # noqa: F811
-        from polyzymd.analyses._calculator_rmsf import RMSFCalculator  # noqa: F811
+        from polyzymd.analyses.rmsf._calculator import RMSFCalculator  # noqa: F811
         from polyzymd.analyses._calculator_triad import CatalyticTriadAnalyzer  # noqa: F811
 
         expected = {
