@@ -106,7 +106,7 @@ class TestSettings:
     def test_empty_pairs_rejected(self):
         from polyzymd.analyses.distances import DistancesSettings
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             DistancesSettings(pairs=[])
 
     def test_get_pair_selections(self):
@@ -149,7 +149,7 @@ class TestSettings:
     def test_alignment_mode_validation(self):
         from polyzymd.analyses.distances import DistancePairSettings, DistancesSettings
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             DistancesSettings(
                 pairs=[DistancePairSettings(label="A", selection_a="a", selection_b="b")],
                 alignment_mode="invalid",
@@ -158,7 +158,7 @@ class TestSettings:
     def test_alignment_frame_required(self):
         from polyzymd.analyses.distances import DistancePairSettings, DistancesSettings
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             DistancesSettings(
                 pairs=[DistancePairSettings(label="A", selection_a="a", selection_b="b")],
                 alignment_mode="frame",
@@ -241,12 +241,12 @@ class TestComputeReplicate:
     """compute_replicate delegates to DistanceCalculator."""
 
     def test_delegates_to_calculator(self):
+        from polyzymd.analyses.base import Condition, ReplicateContext
         from polyzymd.analyses.distances import (
             DistancePairSettings,
             DistancesAnalysis,
             DistancesSettings,
         )
-        from polyzymd.analyses.base import Condition, ReplicateContext
 
         analysis = DistancesAnalysis()
 
@@ -287,12 +287,12 @@ class TestComputeReplicate:
         )
 
     def test_passes_settings_to_calculator(self):
+        from polyzymd.analyses.base import Condition, ReplicateContext
         from polyzymd.analyses.distances import (
             DistancePairSettings,
             DistancesAnalysis,
             DistancesSettings,
         )
-        from polyzymd.analyses.base import Condition, ReplicateContext
 
         analysis = DistancesAnalysis()
 
@@ -376,12 +376,12 @@ class TestAggregate:
         return results
 
     def test_aggregate_produces_result(self, tmp_path):
+        from polyzymd.analyses.base import AggregateContext, Condition
         from polyzymd.analyses.distances import (
             DistancePairSettings,
             DistancesAnalysis,
             DistancesSettings,
         )
-        from polyzymd.analyses.base import AggregateContext, Condition
 
         analysis = DistancesAnalysis()
         settings = DistancesSettings(
@@ -441,12 +441,12 @@ class TestAggregate:
         assert len(result.pair_results) == 2
 
     def test_aggregate_saves_file(self, tmp_path):
+        from polyzymd.analyses.base import AggregateContext, Condition
         from polyzymd.analyses.distances import (
             DistancePairSettings,
             DistancesAnalysis,
             DistancesSettings,
         )
-        from polyzymd.analyses.base import AggregateContext, Condition
 
         analysis = DistancesAnalysis()
         settings = DistancesSettings(
@@ -535,12 +535,12 @@ class TestCompare:
     """compare() produces a DistanceComparisonResult with per-pair stats."""
 
     def _make_analysis_and_ctx(self, tmp_path, n_conditions: int = 3, control: str = "Control"):
+        from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.distances import (
             DistancePairSettings,
             DistancesAnalysis,
             DistancesSettings,
         )
-        from polyzymd.analyses.base import ComparisonContext, Condition
 
         analysis = DistancesAnalysis()
 
@@ -889,11 +889,11 @@ class TestMakeAggregatedFilename:
 
 
 class TestPlot:
-    """plot() delegates to all three distance plotters."""
+    """plot() delegates to all three inlined plotting functions."""
 
     def test_delegates_to_three_plotters(self, tmp_path):
-        from polyzymd.analyses.distances import DistancesAnalysis
         from polyzymd.analyses.base import Condition, PlotContext
+        from polyzymd.analyses.distances import DistancesAnalysis
 
         analysis = DistancesAnalysis()
 
@@ -914,26 +914,24 @@ class TestPlot:
         )
 
         with (
-            patch("polyzymd.compare.plotters.distances.DistanceKDEPlotter") as MockKDE,
-            patch(
-                "polyzymd.compare.plotters.distances.DistanceThresholdBarsPlotter"
-            ) as MockThreshold,
-            patch("polyzymd.compare.plotters.distances.DistanceStateBarsPlotter") as MockState,
+            patch("polyzymd.analyses.distances._plot_distance_kde") as MockKDE,
+            patch("polyzymd.analyses.distances._plot_distance_threshold_bars") as MockThreshold,
+            patch("polyzymd.analyses.distances._plot_distance_state_bars") as MockState,
         ):
-            MockKDE.return_value.plot.return_value = [Path("kde.png")]
-            MockThreshold.return_value.plot.return_value = [Path("bars.png")]
-            MockState.return_value.plot.return_value = [Path("state.png")]
+            MockKDE.return_value = [Path("kde.png")]
+            MockThreshold.return_value = [Path("bars.png")]
+            MockState.return_value = [Path("state.png")]
 
             plots = analysis.plot(ctx)
 
         assert len(plots) == 3
-        MockKDE.return_value.plot.assert_called_once()
-        MockThreshold.return_value.plot.assert_called_once()
-        MockState.return_value.plot.assert_called_once()
+        MockKDE.assert_called_once()
+        MockThreshold.assert_called_once()
+        MockState.assert_called_once()
 
     def test_plot_handles_failure(self, tmp_path):
-        from polyzymd.analyses.distances import DistancesAnalysis
         from polyzymd.analyses.base import Condition, PlotContext
+        from polyzymd.analyses.distances import DistancesAnalysis
 
         analysis = DistancesAnalysis()
 
@@ -955,16 +953,14 @@ class TestPlot:
 
         with (
             patch(
-                "polyzymd.compare.plotters.distances.DistanceKDEPlotter",
-                side_effect=Exception("KDE failed"),
-            ),
-            patch(
-                "polyzymd.compare.plotters.distances.DistanceThresholdBarsPlotter"
-            ) as MockThreshold,
-            patch("polyzymd.compare.plotters.distances.DistanceStateBarsPlotter") as MockState,
+                "polyzymd.analyses.distances._plot_distance_kde",
+            ) as MockKDE,
+            patch("polyzymd.analyses.distances._plot_distance_threshold_bars") as MockThreshold,
+            patch("polyzymd.analyses.distances._plot_distance_state_bars") as MockState,
         ):
-            MockThreshold.return_value.plot.return_value = [Path("bars.png")]
-            MockState.return_value.plot.return_value = [Path("state.png")]
+            MockKDE.side_effect = Exception("KDE failed")
+            MockThreshold.return_value = [Path("bars.png")]
+            MockState.return_value = [Path("state.png")]
 
             plots = analysis.plot(ctx)
 
@@ -972,8 +968,8 @@ class TestPlot:
         assert len(plots) == 2
 
     def test_plot_empty_conditions(self, tmp_path):
-        from polyzymd.analyses.distances import DistancesAnalysis
         from polyzymd.analyses.base import PlotContext
+        from polyzymd.analyses.distances import DistancesAnalysis
 
         analysis = DistancesAnalysis()
 
@@ -990,8 +986,8 @@ class TestPlot:
         assert plots == []
 
     def test_plot_creates_default_plot_settings(self, tmp_path):
-        from polyzymd.analyses.distances import DistancesAnalysis
         from polyzymd.analyses.base import Condition, PlotContext
+        from polyzymd.analyses.distances import DistancesAnalysis
 
         analysis = DistancesAnalysis()
 
@@ -1012,15 +1008,13 @@ class TestPlot:
         )
 
         with (
-            patch("polyzymd.compare.plotters.distances.DistanceKDEPlotter") as MockKDE,
-            patch(
-                "polyzymd.compare.plotters.distances.DistanceThresholdBarsPlotter"
-            ) as MockThreshold,
-            patch("polyzymd.compare.plotters.distances.DistanceStateBarsPlotter") as MockState,
+            patch("polyzymd.analyses.distances._plot_distance_kde") as MockKDE,
+            patch("polyzymd.analyses.distances._plot_distance_threshold_bars") as MockThreshold,
+            patch("polyzymd.analyses.distances._plot_distance_state_bars") as MockState,
         ):
-            MockKDE.return_value.plot.return_value = []
-            MockThreshold.return_value.plot.return_value = []
-            MockState.return_value.plot.return_value = []
+            MockKDE.return_value = []
+            MockThreshold.return_value = []
+            MockState.return_value = []
 
             analysis.plot(ctx)
 
@@ -1028,8 +1022,8 @@ class TestPlot:
         from polyzymd.compare.config import PlotSettings
 
         MockKDE.assert_called_once()
-        call_kwargs = MockKDE.call_args
-        assert isinstance(call_kwargs[1]["settings"], PlotSettings)
+        call_args = MockKDE.call_args
+        assert isinstance(call_args[0][3], PlotSettings)
 
 
 # ---------------------------------------------------------------------------
@@ -1041,8 +1035,8 @@ class TestFilterConditions:
     """Default filter_conditions keeps all conditions."""
 
     def test_keeps_all_conditions(self):
-        from polyzymd.analyses.distances import DistancesAnalysis
         from polyzymd.analyses.base import Condition
+        from polyzymd.analyses.distances import DistancesAnalysis
 
         analysis = DistancesAnalysis()
 
@@ -1075,16 +1069,16 @@ class TestLifecycle:
 
     def test_settings_to_compute_to_aggregate_to_compare(self, tmp_path):
         """Verify the full lifecycle flow works end-to-end with mocks."""
-        from polyzymd.analyses.distances import (
-            DistancePairSettings,
-            DistancesAnalysis,
-            DistancesSettings,
-        )
         from polyzymd.analyses.base import (
             AggregateContext,
             ComparisonContext,
             Condition,
             ReplicateContext,
+        )
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesAnalysis,
+            DistancesSettings,
         )
 
         analysis = DistancesAnalysis()
