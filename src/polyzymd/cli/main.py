@@ -2162,6 +2162,108 @@ def info() -> None:
 
 
 # =============================================================================
+# Scaffold Command
+# =============================================================================
+
+
+@cli.command("new-analysis")
+@click.argument("name")
+@click.option(
+    "--class-name",
+    default=None,
+    help="PascalCase class prefix (default: auto-derived from NAME).",
+)
+@click.option(
+    "--project-root",
+    type=click.Path(exists=True, file_okay=False, resolve_path=True),
+    default=None,
+    help="Repository root. Default: auto-detected from this file's location.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Overwrite existing files.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Print what would be created without writing files.",
+)
+def new_analysis(
+    name: str,
+    class_name: str | None,
+    project_root: str | None,
+    force: bool,
+    dry_run: bool,
+) -> None:
+    """Scaffold a new analysis plugin.
+
+    NAME is the snake_case plugin name (e.g. 'solvent_shell').
+
+    Creates:
+
+    \b
+      src/polyzymd/analyses/<NAME>/__init__.py    — plugin class
+      src/polyzymd/analyses/<NAME>/_comparison_results.py — result model
+      tests/test_<NAME>_plugin.py                 — smoke tests
+
+    Run the generated tests with:
+
+    \b
+      pixi run -e build pytest tests/test_<NAME>_plugin.py -v
+    """
+    from polyzymd.cli.scaffold import generate_scaffold, validate_name
+
+    # Validate name
+    error = validate_name(name)
+    if error:
+        raise click.BadParameter(error, param_hint="'NAME'")
+
+    # Resolve project root
+    if project_root is None:
+        # Walk up from this file to find pyproject.toml
+        root = Path(__file__).resolve().parent
+        for _ in range(10):
+            if (root / "pyproject.toml").exists():
+                break
+            root = root.parent
+        else:
+            raise click.UsageError(
+                "Could not auto-detect project root. Pass --project-root explicitly."
+            )
+    else:
+        root = Path(project_root)
+
+    try:
+        created = generate_scaffold(
+            name,
+            root,
+            class_name=class_name,
+            force=force,
+            dry_run=dry_run,
+        )
+    except FileExistsError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    verb = "Would create" if dry_run else "Created"
+    for p in created:
+        try:
+            display = p.relative_to(root)
+        except ValueError:
+            display = p
+        colored_echo(f"  {verb}: {display}", phase="cli")
+
+    if not dry_run:
+        colored_echo(f"\nPlugin '{name}' scaffolded successfully!", phase="cli")
+        colored_echo(
+            f"Run tests: pixi run -e build pytest tests/test_{name}_plugin.py -v",
+            phase="cli",
+        )
+
+
+# =============================================================================
 # Analysis Commands (from analysis module)
 # =============================================================================
 
