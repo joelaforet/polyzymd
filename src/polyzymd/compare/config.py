@@ -447,8 +447,8 @@ class PlotTheme(BaseModel):
     """Centralized visual defaults for all comparison plots.
 
     Replaces ~219 hardcoded style values (font sizes, alphas, line widths,
-    marker sizes, spine visibility, etc.) across all plotter files with a
-    single configurable Pydantic model.
+    marker sizes, spine visibility, etc.) across all plugin ``plot()`` methods
+    with a single configurable Pydantic model.
 
     Three presets are available via class methods:
 

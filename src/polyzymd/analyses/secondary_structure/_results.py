@@ -199,7 +199,7 @@ class SecondaryStructureAggregatedResult(AggregatedResultMixin, BaseAnalysisResu
     sem_overall_coil : float
         SEM of global coil fraction.
     per_replicate_helix : list[float]
-        Per-replicate overall helix fraction (for comparator).
+        Per-replicate overall helix fraction (for cross-condition comparison).
     per_replicate_strand : list[float]
         Per-replicate overall strand fraction.
     per_replicate_coil : list[float]

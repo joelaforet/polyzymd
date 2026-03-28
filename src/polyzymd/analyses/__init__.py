@@ -27,9 +27,10 @@ Quick Start
 
 Adding a New Analysis
 ---------------------
-Create a file in ``src/polyzymd/analyses/`` and subclass
+Create a package in ``src/polyzymd/analyses/<name>/`` and subclass
 :class:`~polyzymd.analyses.base.Analysis`.  The framework discovers
 it automatically — no imports, no registries, no bootstrap files.
+Use ``polyzymd new-analysis <name>`` to generate the boilerplate.
 
 See :mod:`polyzymd.analyses.base` for the full contract.
 """

@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from polyzymd import __version__
 
 # ============================================================================
-# Shared Result Models (DRY - used by all comparators)
+# Shared Result Models (DRY - used by all analysis plugins)
 # ============================================================================
 
 
@@ -35,7 +35,7 @@ class PairwiseComparison(BaseModel):
     """Statistical comparison between two conditions.
 
     This is the standard pairwise comparison result used across all
-    comparator types. For comparators that need additional fields
+    analysis plugins. For plugins that need additional fields
     (e.g., multiple metrics), subclass this model.
 
     Attributes

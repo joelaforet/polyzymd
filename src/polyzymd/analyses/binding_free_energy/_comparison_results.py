@@ -316,7 +316,7 @@ class FreeEnergyPairwiseEntry(BaseModel):
 class BindingFreeEnergyResult(BaseModel):
     """Complete binding free energy comparison result.
 
-    This is the main output from BindingFreeEnergyComparator.compare().
+    This is the main output from ``BindingFreeEnergyAnalysis.compare()``.
 
     Physics summary
     ---------------

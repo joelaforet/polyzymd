@@ -71,8 +71,8 @@ Never force-push to `main` or `dev`.
 ## How to Contribute a New Analysis Plugin
 
 This is the most common type of contribution. PolyzyMD's plugin system is
-designed so that adding a new analysis requires **one file** and **no changes to
-core code**.
+designed so that adding a new analysis requires **one package** and **no changes
+to core code**.
 
 ### Step-by-Step
 
@@ -83,9 +83,9 @@ core code**.
    (simplest real plugin) or `src/polyzymd/analyses/rmsf/` (simple with default
    comparison path).
 
-3. **Create your plugin sub-package**: `src/polyzymd/analyses/<name>/` with
-   `__init__.py` for multi-file plugins, or `src/polyzymd/analyses/<name>.py`
-   for simple single-file plugins
+3. **Create your plugin package**: Use `polyzymd new-analysis <name>` to
+   scaffold automatically, or create `src/polyzymd/analyses/<name>/` with an
+   `__init__.py` manually
 
 4. **Subclass `Analysis`** and implement the required pieces:
    - `name` — unique lowercase string identifier
@@ -136,7 +136,7 @@ core code**.
 
 ### Checklist Before Opening a PR
 
-- [ ] Plugin file in `src/polyzymd/analyses/<name>.py`
+- [ ] Plugin package in `src/polyzymd/analyses/<name>/`
 - [ ] `name` class variable set (lowercase, unique)
 - [ ] `Settings` inner class with default values for all fields
 - [ ] `compute_replicate` and `aggregate` implemented
@@ -194,17 +194,16 @@ src/polyzymd/
 ├── core/         # Base classes, shared types
 ├── analyses/     # Plugin system — primary extension point
 │   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics)
-│   ├── _*.py     #   Private compute layer (calculators, result models)
-│   └── *.py      #   Public plugin files (one per analysis type)
+│   └── <name>/   #   One sub-package per analysis type (all plugins are packages)
 ├── compare/      # Cross-condition statistics, formatters, config, IO
 ├── exporters/    # GROMACS/other format exporters
 ├── data/         # Bundled data files (force fields, templates)
 └── utils/        # Shared utilities
 ```
 
-The `analyses/` directory is the primary extension point. Each public `.py` file
-is one analysis plugin. Private `_*.py` files are internal implementation
-details.
+The `analyses/` directory is the primary extension point. Each sub-package
+(`<name>/`) is one analysis plugin. Private `_*.py` modules inside each package
+are internal implementation details (calculators, result models, formatters).
 
 ## Getting Help
 

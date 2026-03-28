@@ -131,7 +131,7 @@ class TriadANOVASummary(BaseModel):
 class TriadComparisonResult(BaseModel):
     """Complete triad comparison analysis result.
 
-    This is the main output from TriadComparator.compare().
+    This is the main output from ``CatalyticTriadAnalysis.compare()``.
     Contains all condition summaries, statistical comparisons,
     and rankings.
 

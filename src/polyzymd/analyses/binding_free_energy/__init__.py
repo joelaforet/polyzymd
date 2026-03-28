@@ -5,11 +5,10 @@ energies via:
 
     ΔG_sel = -k_B·T · ln(contact_share / expected_share)
 
-This is a **comparator-only** analysis: ``compute_replicate()`` and
+This is a **compare-only** analysis: ``compute_replicate()`` and
 ``aggregate()`` return ``None``.  All computation is orchestrated within
-``compare()`` which delegates to the existing
-:class:`~polyzymd.compare.comparators.binding_free_energy.BindingFreeEnergyComparator`
-via its private helpers.
+``compare()`` which delegates to private helpers for enrichment → ΔG
+conversion, pairwise comparison, and result assembly.
 
 Plugin contract
 ---------------
@@ -1212,9 +1211,7 @@ def _plot_bfe_bars(
         kt = None
         if temps_list:
             t_med = float(np.median(temps_list))
-            from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
-
-            tmp_settings = BindingFreeEnergyAnalysisSettings(units=units)
+            tmp_settings = BFESettings(units=units)
             kt = tmp_settings.k_b() * t_med
 
     output_paths: list[Path] = []

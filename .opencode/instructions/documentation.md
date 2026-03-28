@@ -4,7 +4,7 @@
 
 - **Engine:** Sphinx 8.x
 - **Parser:** MyST-Parser (Markdown support)
-- **Theme:** Furo
+- **Theme:** sphinx_rtd_theme
 - **Extensions:** autodoc, napoleon, intersphinx, myst-parser, copybutton
 - **Source:** `docs/source/`
 - **Build output:** `docs/build/html/`

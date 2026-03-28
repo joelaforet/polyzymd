@@ -29,25 +29,23 @@ Package Structure
     ├── core/             # Core utilities
     │   ├── parameters.py # Simulation parameters
     │   └── restraints.py # Restraint definitions
-    ├── analysis/         # Per-condition trajectory calculators
-    │   ├── rmsf/         # Root Mean Square Fluctuation
-    │   ├── distances/    # Inter-atomic distance analysis
-    │   ├── triad/        # Catalytic triad integrity
-    │   ├── contacts/     # Polymer-protein contacts, binding preference
-    │   ├── sasa/         # Solvent Accessible Surface Area
-    │   ├── exposure/     # Chaperone-like exposure dynamics
-    │   ├── core/         # Statistics, autocorrelation, MetricType
-    │   └── results/      # Serializable result model classes
     ├── analyses/         # ★ Plugin system — unified analysis lifecycle
     │   ├── base.py       # Analysis ABC, context objects, result models
     │   ├── discovery.py  # pkgutil-based auto-discovery
     │   ├── orchestrator.py  # Framework engine
     │   ├── stats.py      # Shared statistical utilities
-    │   └── *.py          # One file per analysis plugin
-    ├── compare/          # Statistics, formatters, config, IO
+    │   ├── shared/       # Reusable utilities (TrajectoryLoader, alignment, etc.)
+    │   ├── rmsf/         # RMSF plugin package
+    │   ├── contacts/     # Contacts plugin package
+    │   ├── distances/    # Distance analysis plugin package
+    │   ├── secondary_structure/  # Secondary structure plugin package
+    │   └── ...           # One sub-package per analysis type
+    ├── compare/          # Shared comparison infrastructure
     │   ├── statistics.py # t-tests, ANOVA, Cohen's d
-    │   ├── formatters.py # CLI output formatters
-    │   └── config.py     # ComparisonConfig, plot settings
+    │   ├── config.py     # ComparisonConfig, plot settings
+    │   ├── settings.py   # Legacy analysis settings (being migrated)
+    │   ├── core/         # Base comparison classes
+    │   └── io/           # Result I/O utilities
     └── cli/              # Command-line interface
         └── main.py       # Click CLI
 

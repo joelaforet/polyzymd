@@ -409,9 +409,7 @@ class ParallelContactAnalyzer:
 class ContactsSettings(BaseModel):
     """Settings for contacts analysis.
 
-    Mirrors :class:`~polyzymd.compare.settings.ContactsAnalysisSettings`
-    and :class:`~polyzymd.compare.settings.ContactsComparisonSettings`
-    in a single flat model.
+    Unified settings model for the contacts analysis plugin.
 
     Attributes
     ----------

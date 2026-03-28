@@ -19,7 +19,7 @@ Use {doc}`extending_analyses` as the main contributor guide.
 
 For a new community contribution, the preferred shape is:
 
-1. create one file in `src/polyzymd/analyses/`
+1. create one package in `src/polyzymd/analyses/<name>/`
 2. keep settings in the plugin's inner `Settings` model
 3. use `plugins:` in `comparison.yaml`
 4. let the orchestrator manage cache files under `comparison/<analysis>/result.json`

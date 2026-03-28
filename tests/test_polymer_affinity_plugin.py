@@ -1454,7 +1454,7 @@ class TestDeserialization:
 
         analysis = PolymerAffinityAnalysis()
 
-        # AggregatedResultClass should not be set for comparator-only plugins
+        # AggregatedResultClass should not be set for compare-only plugins
         assert analysis.AggregatedResultClass is None
 
         result = PolymerAffinityScoreResult(

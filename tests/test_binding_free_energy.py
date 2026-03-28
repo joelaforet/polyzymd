@@ -4,7 +4,7 @@ Tests cover:
 - Physics / math correctness (ΔG_sel formula, delta-method uncertainty)
 - FreeEnergyEntry, FreeEnergyConditionSummary, BindingFreeEnergyResult models
 - BindingFreeEnergyAnalysisSettings and BindingFreeEnergyComparisonSettings
-- BindingFreeEnergyComparator helpers (no I/O, uses synthetic data)
+- BindingFreeEnergyAnalysis compare helpers (no I/O, uses synthetic data)
 - Formatters (console table, markdown, JSON)
 """
 

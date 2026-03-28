@@ -321,7 +321,7 @@ class AffinityScorePairwiseEntry(BaseModel):
 class PolymerAffinityScoreResult(BaseModel):
     """Complete polymer affinity score comparison result.
 
-    This is the main output from PolymerAffinityScoreComparator.compare().
+    This is the main output from ``PolymerAffinityAnalysis.compare()``.
 
     The polymer affinity score quantifies total polymer-protein interaction
     strength as a comparative metric. It is computed by summing per-contact

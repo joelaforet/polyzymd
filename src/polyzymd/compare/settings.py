@@ -939,7 +939,7 @@ class BindingFreeEnergyAnalysisSettings(BindingPreferenceFieldsMixin):
             instead of k_b() * T.
         """
         if self.units == "kT":
-            return 0.0  # Not used; comparator sets kT=1.0 directly
+            return 0.0  # Not used; plugin sets kT=1.0 directly
         if self.units == "kJ/mol":
             return 0.0083144626  # kJ/(mol·K)
         return 0.0019872041  # kcal/(mol·K)  [default]

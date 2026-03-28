@@ -107,7 +107,7 @@ class ExposureConditionSummary(BaseConditionSummary):
 class ExposureComparisonResult(BaseComparisonResult[ExposureConditionSummary, PairwiseComparison]):
     """Complete exposure dynamics comparison result.
 
-    This is the main output from ExposureDynamicsComparator.compare().
+    This is the main output from ``ExposureAnalysis.compare()``.
     Contains per-condition summaries of transient exposure and chaperone
     event statistics, plus pairwise statistical comparisons.
 

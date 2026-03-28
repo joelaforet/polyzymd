@@ -5,7 +5,7 @@ Tests cover:
 - AffinityScoreEntry, PolymerTypeScore, AffinityScoreConditionSummary models
 - PolymerAffinityScoreResult save/load roundtrip
 - AffinityScorePairwiseEntry model
-- PolymerAffinityScoreComparator helpers (no I/O, synthetic data)
+- PolymerAffinityAnalysis compare helpers (no I/O, synthetic data)
 - Formatters (console table, markdown, JSON)
 - Registry and import checks
 """

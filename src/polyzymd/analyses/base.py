@@ -586,8 +586,8 @@ class Analysis(ABC):
             ...
 
     **Custom compare plugin** — override ``compare()`` entirely for
-    multi-metric or entry-table analyses.  See ``analyses/contacts.py``
-    or ``analyses/distances.py`` for full examples.
+    multi-metric or entry-table analyses.  See ``analyses/contacts/``
+    or ``analyses/distances/`` for full examples.
 
     See Also
     --------

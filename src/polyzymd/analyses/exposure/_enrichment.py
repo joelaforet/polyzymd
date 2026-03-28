@@ -32,7 +32,7 @@ atom count differences vs. chemical preference.
 Scope
 -----
 This module operates on a **single trajectory** (one replicate).  Aggregation
-across replicates is done upstream by the comparator.
+across replicates is done upstream by the analysis plugin.
 """
 
 from __future__ import annotations

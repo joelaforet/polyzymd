@@ -172,5 +172,5 @@ GitHub Issue #20 tracks the analysis module roadmap. The plugin system
 
 1. Fix cache hash mismatch warning (prints 66x)
 2. Resolve contact criteria cutoff disagreement (4.0A vs 4.5A)
-3. Migrate legacy formatters into plugin `format()` methods
+3. ~~Migrate legacy formatters into plugin `format()` methods~~ (DONE — Phase 7)
 4. Add test templates for new contributor plugins

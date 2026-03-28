@@ -22,7 +22,7 @@ def find_comparison_result(
 ) -> T | None:
     """Locate and load a saved comparison result JSON.
 
-    Implements the standard two-phase discovery strategy used by all plotters:
+    Implements the standard two-phase discovery strategy used by all plugin ``plot()`` methods:
 
     1. Primary search in ``data["__meta__"]`` using canonical comparison metadata
        (exact ``comparison_result_path`` first, then ``comparison_dir``)

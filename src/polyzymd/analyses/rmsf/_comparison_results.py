@@ -61,7 +61,7 @@ class RMSFConditionSummary(BaseConditionSummary):
 class RMSFComparisonResult(BaseComparisonResult[RMSFConditionSummary, PairwiseComparison]):
     """Complete RMSF comparison analysis result.
 
-    This is the main output from RMSFComparator.compare().
+    This is the main output from ``RMSFAnalysis.compare()``.
     Contains all condition summaries, statistical comparisons,
     and rankings.
 

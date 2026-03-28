@@ -364,7 +364,7 @@ S_{\text{rep}} = N_{\text{rep}} \times \Delta G_{\mathrm{sel,rep}}
 Mean and SEM are computed across replicates. Pairwise t-tests use these
 per-replicate score distributions.
 
-When per-replicate files are unavailable, the comparator falls back to
+When per-replicate files are unavailable, the plugin falls back to
 analytical error propagation:
 
 ```{math}

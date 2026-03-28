@@ -112,8 +112,8 @@ Treat it as a reference template for your own plugin file. It is not presented
 here as a required built-in deployed analysis.
 ```
 
-Create `src/polyzymd/analyses/rg.py` in your own branch or downstream project,
-or use the scaffold command to generate the boilerplate automatically:
+Create `src/polyzymd/analyses/rg/` as a package in your own branch or downstream
+project, or use the scaffold command to generate the boilerplate automatically:
 
 ```bash
 polyzymd new-analysis rg
@@ -639,7 +639,7 @@ designed in an earlier architecture stage.
 
 **You do NOT need to create files in `compare/` for a new plugin.** Keep your
 plotting logic in your plugin's `plot()` method and your formatting in
-`format()`. Everything can live in a single file.
+`format()`. Everything can live in a single `__init__.py` within the plugin package.
 
 (shared-utilities)=
 ## Shared Utilities (`analyses/shared/`)
@@ -796,7 +796,7 @@ methods.
 
 ### Do not create files in `compare/`
 
-New plugins should keep all logic in a single file. The `compare/results/`
+New plugins should keep all logic in the plugin package. The `compare/results/`
 directory is primarily used by existing plugins designed under older
 architecture constraints.
 

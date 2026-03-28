@@ -1011,8 +1011,8 @@ class PolymerAffinityAnalysis(Analysis):
     ) -> list[Any]:
         """Compute pairwise total score comparisons with temperature grouping.
 
-        Unlike the BFE comparator which compares per-(polymer, group) pairs,
-        this comparator compares total scores between conditions.  This is
+        Unlike the BFE plugin which compares per-(polymer, group) pairs,
+        this plugin compares total scores between conditions.  This is
         the natural unit for the polymer affinity score since it sums across
         all interactions.
 

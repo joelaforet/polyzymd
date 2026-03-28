@@ -88,7 +88,7 @@ class SSConditionSummary(BaseConditionSummary):
 class SSComparisonResult(BaseComparisonResult[SSConditionSummary, PairwiseComparison]):
     """Complete secondary structure comparison analysis result.
 
-    This is the main output from ``SecondaryStructureComparator.compare()``.
+    This is the main output from ``SecondaryStructureAnalysis.compare()``.
     Contains condition summaries with helix/strand/coil fractions,
     pairwise statistical comparisons (on helix fraction), and rankings.
 

@@ -102,7 +102,7 @@ Key rules:
 - **Optional overrides**: `compare()`, `plot()`, `format()`, `extract_metrics()`, `filter_conditions()`
 - **Default compare path**: Implement `extract_metrics()` **and** `_deserialize_result()` — the framework does t-tests, ANOVA, ranking automatically
 - **Custom compare path**: Override `compare()` entirely for multi-metric or entry-table analyses
-- **Auto-discovery**: Drop a `.py` file in `analyses/` — no imports, no registries, no bootstrap
+- **Auto-discovery**: Drop a package in `analyses/<name>/` — no imports, no registries, no bootstrap
 - **Result saving**: Existing plugins save results explicitly; the orchestrator has a fallback auto-save if the plugin doesn't
 - **No `compare/` files needed**: New plugins keep all logic inline; `compare/results/` are used by existing plugins for historical result models
 
@@ -115,7 +115,7 @@ without modifying core code. Follow these principles:
 
 Classes should be **open for extension, closed for modification**. The plugin
 system achieves this:
-- Subclass `Analysis` and drop a file in `analyses/` — no core changes needed
+- Subclass `Analysis` and drop a package in `analyses/<name>/` — no core changes needed
 - Framework discovers plugins automatically via `pkgutil`
 - Default implementations (compare, format, plot) are overridable
 

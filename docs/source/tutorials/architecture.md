@@ -70,8 +70,9 @@ The **plugin system** — the primary extension point for contributors. Each
 analysis plugin wraps an `analysis/` calculator into a unified lifecycle:
 compute → aggregate → compare → plot → format.
 
-To add a new analysis, create ONE file in `analyses/` that subclasses
-`Analysis`. See {doc}`extending_analyses` for the full guide.
+To add a new analysis, create a package in `analyses/<name>/` that subclasses
+`Analysis`, or use `polyzymd new-analysis <name>` to scaffold one automatically.
+See {doc}`extending_analyses` for the full guide.
 
 ### `compare/`
 
@@ -118,9 +119,10 @@ CLI operations usable even when optional heavy dependencies are absent.
 ### Plugin-based extension points
 
 Analysis is the primary extensibility axis. New analysis types are added by
-creating a single file in `analyses/` that subclasses `Analysis`. The
+creating a package in `analyses/<name>/` that subclasses `Analysis`. The
 framework discovers plugins automatically via `pkgutil` — no registries,
-no decorators, no imports needed.
+no decorators, no imports needed. Use `polyzymd new-analysis <name>` to
+scaffold the package structure automatically.
 
 ### Separation between per-condition and cross-condition work
 
