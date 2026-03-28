@@ -1003,8 +1003,23 @@ class TestDeserializeResult:
 # ---------------------------------------------------------------------------
 
 
+_PLOT_FUNCTIONS = [
+    "_plot_contact_fraction_profile",
+    "_plot_residence_time_profile",
+    "_plot_cf_by_aa_class_bars",
+    "_plot_cf_by_partition_bars",
+    "_plot_rt_by_aa_class_bars",
+    "_plot_rt_by_partition_bars",
+    "_plot_user_partition_bars",
+    "_plot_system_coverage_bars",
+    "_plot_system_coverage_heatmap",
+    "_plot_binding_preference_bars",
+    "_plot_binding_preference_heatmap",
+]
+
+
 class TestPlot:
-    """Test plot() delegates to existing plotter classes."""
+    """Test plot() delegates to private module-level plotting functions."""
 
     def test_plot_creates_output_dir(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
@@ -1032,35 +1047,75 @@ class TestPlot:
             plot_settings=None,
         )
 
-        # Mock importlib to avoid actual plotter import failures
-        with patch("importlib.import_module") as mock_import:
-            # MagicMock already returns a new MagicMock for any getattr.
-            # We need: getattr(mod, class_name)(settings=...).plot(...) -> []
-            mock_plotter_instance = MagicMock()
-            mock_plotter_instance.plot.return_value = []
-            # Any attribute of the module returns a callable that gives plotter_instance
-            mock_mod = MagicMock()
-            mock_mod._plotter = mock_plotter_instance
-            # Override getattr via side_effect on __getattr__ won't work on MagicMock.
-            # Instead: the plugin does getattr(mod, class_name) which on a MagicMock
-            # returns a child MagicMock. That child is then called with settings=...
-            # which returns another MagicMock whose .plot() returns a MagicMock.
-            # We need .plot() to return a list (not a MagicMock) to avoid extend() issues.
-            # Simplest: patch at the plotter_cls level — make all child attrs return
-            # a class whose instances have plot() -> [].
-            mock_plotter_cls = MagicMock()
-            mock_plotter_cls.return_value.plot.return_value = []
-
-            # Use a custom module class instead of MagicMock
-            class FakeModule:
-                def __getattr__(self, name):
-                    return mock_plotter_cls
-
-            mock_import.return_value = FakeModule()
-
+        # Mock all 11 private plot functions to return empty lists
+        patches = {
+            fn: patch(f"polyzymd.analyses.contacts.{fn}", return_value=[]) for fn in _PLOT_FUNCTIONS
+        }
+        mocks = {name: p.start() for name, p in patches.items()}
+        try:
             analysis.plot(ctx)
+        finally:
+            for p in patches.values():
+                p.stop()
 
         assert output_dir.exists()
+        # Verify all 11 functions were called
+        for name, mock_fn in mocks.items():
+            assert mock_fn.called, f"{name} was not called"
+
+    def test_plot_returns_combined_paths(self, tmp_path):
+        from polyzymd.analyses.base import Condition, PlotContext
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+
+        analysis = ContactsAnalysis()
+
+        mock_sim = MagicMock()
+        conditions = [
+            Condition(
+                label="A",
+                config_path=Path("/tmp/a/config.yaml"),
+                replicates=(1, 2),
+                sim_config=mock_sim,
+            )
+        ]
+
+        ctx = PlotContext(
+            conditions=conditions,
+            analysis_dirs={"A": tmp_path / "A" / "contacts"},
+            results_dir=tmp_path / "results",
+            output_dir=tmp_path / "plots",
+            settings=ContactsSettings(),
+            plot_settings=None,
+        )
+
+        # Make first two functions return paths, rest return empty
+        path_a = tmp_path / "plot_a.png"
+        path_b = tmp_path / "plot_b.png"
+
+        patches = {}
+        for fn in _PLOT_FUNCTIONS:
+            patches[fn] = patch(f"polyzymd.analyses.contacts.{fn}", return_value=[])
+
+        patches[_PLOT_FUNCTIONS[0]] = patch(
+            f"polyzymd.analyses.contacts.{_PLOT_FUNCTIONS[0]}",
+            return_value=[path_a],
+        )
+        patches[_PLOT_FUNCTIONS[1]] = patch(
+            f"polyzymd.analyses.contacts.{_PLOT_FUNCTIONS[1]}",
+            return_value=[path_b],
+        )
+
+        for p in patches.values():
+            p.start()
+        try:
+            result = analysis.plot(ctx)
+        finally:
+            for p in patches.values():
+                p.stop()
+
+        assert path_a in result
+        assert path_b in result
+        assert len(result) == 2
 
     def test_plot_catches_plotter_exceptions(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
@@ -1087,12 +1142,65 @@ class TestPlot:
             plot_settings=None,
         )
 
-        # Make importlib raise for all plotters
-        with patch("importlib.import_module", side_effect=ImportError("no module")):
+        # Make all plot functions raise
+        patches = {
+            fn: patch(
+                f"polyzymd.analyses.contacts.{fn}",
+                side_effect=RuntimeError("plot failed"),
+            )
+            for fn in _PLOT_FUNCTIONS
+        }
+        for p in patches.values():
+            p.start()
+        try:
             result = analysis.plot(ctx)
+        finally:
+            for p in patches.values():
+                p.stop()
 
         # Should return empty list, not raise
         assert result == []
+
+    def test_plot_passes_plot_settings(self, tmp_path):
+        from polyzymd.analyses.base import Condition, PlotContext
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.compare.config import PlotSettings
+
+        analysis = ContactsAnalysis()
+        ps = PlotSettings()
+
+        mock_sim = MagicMock()
+        conditions = [
+            Condition(
+                label="A",
+                config_path=Path("/tmp/a/config.yaml"),
+                replicates=(1, 2),
+                sim_config=mock_sim,
+            )
+        ]
+
+        ctx = PlotContext(
+            conditions=conditions,
+            analysis_dirs={"A": tmp_path / "A" / "contacts"},
+            results_dir=tmp_path / "results",
+            output_dir=tmp_path / "plots",
+            settings=ContactsSettings(),
+            plot_settings=ps,
+        )
+
+        patches = {
+            fn: patch(f"polyzymd.analyses.contacts.{fn}", return_value=[]) for fn in _PLOT_FUNCTIONS
+        }
+        mocks = {name: p.start() for name, p in patches.items()}
+        try:
+            analysis.plot(ctx)
+        finally:
+            for p in patches.values():
+                p.stop()
+
+        # Verify PlotSettings was passed as 4th positional arg to each function
+        for name, mock_fn in mocks.items():
+            assert mock_fn.call_args[0][3] is ps, f"{name} did not receive PlotSettings as 4th arg"
 
 
 # ---------------------------------------------------------------------------
