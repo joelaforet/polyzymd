@@ -190,7 +190,7 @@ class ExposureAnalysis(Analysis):
         from polyzymd import __version__
         from polyzymd.analyses.shared.statistics import compute_sem
         from polyzymd.compare.core.base import ANOVASummary, PairwiseComparison
-        from polyzymd.compare.results.exposure import (
+        from polyzymd.analyses.exposure._comparison_results import (
             ExposureComparisonResult,
             ExposureConditionSummary,
         )
@@ -360,7 +360,7 @@ class ExposureAnalysis(Analysis):
 
     def format(self, result: Any, output_format: str = "text") -> str:
         """Format exposure comparison results without legacy dispatch."""
-        from polyzymd.compare.exposure_formatters import format_exposure_result
+        from polyzymd.analyses.exposure._formatters import format_exposure_result
 
         return format_exposure_result(result, format=self._normalize_output_format(output_format))
 
@@ -416,7 +416,7 @@ class ExposureAnalysis(Analysis):
         from polyzymd.analyses.exposure._sasa_trajectory import compute_trajectory_sasa
         from polyzymd.analyses.shared.loader import TrajectoryLoader
         from polyzymd.analyses.shared.statistics import compute_sem
-        from polyzymd.compare.results.exposure import ExposureConditionSummary
+        from polyzymd.analyses.exposure._comparison_results import ExposureConditionSummary
 
         logger.info(f"  Processing condition: {cond.label}")
 
@@ -788,7 +788,7 @@ def _find_exposure_comparison_result(
         Loaded comparison result if found
     """
     from polyzymd.compare.io.results import find_comparison_result
-    from polyzymd.compare.results.exposure import ExposureComparisonResult
+    from polyzymd.analyses.exposure._comparison_results import ExposureComparisonResult
 
     return find_comparison_result(
         data,
