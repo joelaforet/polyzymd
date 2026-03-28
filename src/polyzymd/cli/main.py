@@ -2214,12 +2214,18 @@ def new_analysis(
     \b
       pixi run -e build pytest tests/test_<NAME>_plugin.py -v
     """
-    from polyzymd.cli.scaffold import generate_scaffold, validate_name
+    from polyzymd.cli.scaffold import generate_scaffold, validate_class_name, validate_name
 
     # Validate name
     error = validate_name(name)
     if error:
         raise click.BadParameter(error, param_hint="'NAME'")
+
+    # Validate class name if provided
+    if class_name is not None:
+        cls_error = validate_class_name(class_name)
+        if cls_error:
+            raise click.BadParameter(cls_error, param_hint="'--class-name'")
 
     # Resolve project root
     if project_root is None:

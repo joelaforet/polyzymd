@@ -7,8 +7,14 @@ import sys
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
-from polyzymd.cli.scaffold import generate_scaffold, to_pascal_case, validate_name
+from polyzymd.cli.scaffold import (
+    generate_scaffold,
+    to_pascal_case,
+    validate_class_name,
+    validate_name,
+)
 
 # ---------------------------------------------------------------------------
 # Unit tests — validate_name
@@ -218,3 +224,180 @@ class TestGeneratedCodeQuality:
         tf = tmp_path / "tests" / "test_solvent_shell_plugin.py"
         source = tf.read_text()
         compile(source, str(tf), "exec")
+
+
+# ---------------------------------------------------------------------------
+# Unit tests — validate_class_name
+# ---------------------------------------------------------------------------
+
+
+class TestValidateClassName:
+    """Validation of custom class name prefixes."""
+
+    def test_valid_pascal_case(self):
+        assert validate_class_name("SolventShell") is None
+
+    def test_valid_single_word(self):
+        assert validate_class_name("Density") is None
+
+    def test_valid_with_digits(self):
+        assert validate_class_name("Rdf2D") is None
+
+    def test_reject_leading_digit(self):
+        err = validate_class_name("2DRdf")
+        assert err is not None
+        assert "identifier" in err
+
+    def test_reject_python_keyword(self):
+        err = validate_class_name("class")
+        assert err is not None
+        assert "keyword" in err
+
+    def test_reject_lowercase_start(self):
+        err = validate_class_name("solventShell")
+        assert err is not None
+        assert "uppercase" in err
+
+    def test_reject_hyphenated(self):
+        err = validate_class_name("Solvent-Shell")
+        assert err is not None
+        assert "identifier" in err
+
+    def test_reject_spaces(self):
+        err = validate_class_name("Solvent Shell")
+        assert err is not None
+        assert "identifier" in err
+
+    def test_reject_empty_string(self):
+        # empty string is not a valid identifier
+        err = validate_class_name("")
+        assert err is not None
+
+
+class TestGenerateScaffoldClassNameValidation:
+    """Ensure generate_scaffold rejects invalid class names."""
+
+    def test_invalid_class_name_raises(self, tmp_path: Path):
+        (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
+        (tmp_path / "tests").mkdir()
+
+        with pytest.raises(ValueError, match="identifier"):
+            generate_scaffold("density", tmp_path, class_name="2Bad")
+
+    def test_lowercase_class_name_raises(self, tmp_path: Path):
+        (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
+        (tmp_path / "tests").mkdir()
+
+        with pytest.raises(ValueError, match="uppercase"):
+            generate_scaffold("density", tmp_path, class_name="massDensity")
+
+
+# ---------------------------------------------------------------------------
+# CLI integration tests — CliRunner
+# ---------------------------------------------------------------------------
+
+
+class TestNewAnalysisCLI:
+    """Test the ``new-analysis`` Click command via CliRunner."""
+
+    @pytest.fixture(autouse=True)
+    def _setup_project_dir(self, tmp_path: Path):
+        """Create a minimal project structure and store the root."""
+        (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
+        (tmp_path / "tests").mkdir()
+        self.root = tmp_path
+
+    @pytest.fixture
+    def runner(self):
+        return CliRunner()
+
+    @pytest.fixture
+    def cli(self):
+        from polyzymd.cli.main import new_analysis
+
+        return new_analysis
+
+    def test_success(self, runner: CliRunner, cli):
+        result = runner.invoke(
+            cli,
+            ["solvent_shell", "--project-root", str(self.root)],
+        )
+        assert result.exit_code == 0, result.output
+        assert "scaffolded successfully" in result.output
+        init = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell" / "__init__.py"
+        assert init.exists()
+
+    def test_dry_run(self, runner: CliRunner, cli):
+        result = runner.invoke(
+            cli,
+            ["solvent_shell", "--project-root", str(self.root), "--dry-run"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Would create" in result.output
+        init = self.root / "src" / "polyzymd" / "analyses" / "solvent_shell" / "__init__.py"
+        assert not init.exists()
+
+    def test_invalid_name(self, runner: CliRunner, cli):
+        result = runner.invoke(
+            cli,
+            ["BadName", "--project-root", str(self.root)],
+        )
+        assert result.exit_code != 0
+        assert "snake_case" in result.output
+
+    def test_existing_plugin_rejected(self, runner: CliRunner, cli):
+        result = runner.invoke(
+            cli,
+            ["rmsf", "--project-root", str(self.root)],
+        )
+        assert result.exit_code != 0
+        assert "already exists" in result.output
+
+    def test_invalid_class_name(self, runner: CliRunner, cli):
+        result = runner.invoke(
+            cli,
+            ["density", "--class-name", "2Bad", "--project-root", str(self.root)],
+        )
+        assert result.exit_code != 0
+        assert "identifier" in result.output
+
+    def test_lowercase_class_name_rejected(self, runner: CliRunner, cli):
+        result = runner.invoke(
+            cli,
+            ["density", "--class-name", "massDensity", "--project-root", str(self.root)],
+        )
+        assert result.exit_code != 0
+        assert "uppercase" in result.output
+
+    def test_custom_class_name_success(self, runner: CliRunner, cli):
+        result = runner.invoke(
+            cli,
+            ["density", "--class-name", "MassDensity", "--project-root", str(self.root)],
+        )
+        assert result.exit_code == 0, result.output
+        init = self.root / "src" / "polyzymd" / "analyses" / "density" / "__init__.py"
+        assert init.exists()
+        assert "class MassDensityAnalysis(Analysis):" in init.read_text()
+
+    def test_force_overwrites(self, runner: CliRunner, cli):
+        # First run
+        result = runner.invoke(
+            cli,
+            ["solvent_shell", "--project-root", str(self.root)],
+        )
+        assert result.exit_code == 0
+
+        # Second run without force — should fail
+        result = runner.invoke(
+            cli,
+            ["solvent_shell", "--project-root", str(self.root)],
+        )
+        assert result.exit_code != 0
+        assert "already exists" in result.output
+
+        # Third run with force — should succeed
+        result = runner.invoke(
+            cli,
+            ["solvent_shell", "--project-root", str(self.root), "--force"],
+        )
+        assert result.exit_code == 0, result.output

@@ -63,8 +63,29 @@ def validate_name(name: str, *, check_existing: bool = True) -> str | None:
 
             if name in list_all_names():
                 return f"'{name}' already exists as a registered analysis plugin."
-        except Exception:
-            pass  # Discovery unavailable — skip collision check
+        except ImportError:
+            pass  # Discovery module not available (e.g. minimal install)
+    return None
+
+
+def validate_class_name(class_name: str) -> str | None:
+    """Return an error message if *class_name* is not a valid class prefix, else None.
+
+    Parameters
+    ----------
+    class_name : str
+        Proposed PascalCase class prefix (e.g. ``SolventShell``).
+        Will be used as ``<class_name>Analysis``, ``<class_name>Settings``, etc.
+    """
+    if not class_name.isidentifier():
+        return (
+            f"'{class_name}' is not a valid Python identifier. "
+            "Use PascalCase (e.g. 'SolventShell')."
+        )
+    if keyword.iskeyword(class_name):
+        return f"'{class_name}' is a Python keyword and cannot be used as a class name."
+    if not class_name[0].isupper():
+        return f"'{class_name}' should start with an uppercase letter (PascalCase convention)."
     return None
 
 
@@ -354,6 +375,11 @@ def generate_scaffold(
     Returns the list of created (or would-be-created) file paths.
     """
     cls = class_name or to_pascal_case(name)
+
+    # Validate the class name (whether user-supplied or auto-derived)
+    cls_error = validate_class_name(cls)
+    if cls_error:
+        raise ValueError(cls_error)
 
     analyses_dir = project_root / "src" / "polyzymd" / "analyses" / name
     tests_dir = project_root / "tests"
