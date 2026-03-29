@@ -282,10 +282,10 @@ Note: Contiguous ranges use a hyphen (`1-3`), non-contiguous use underscores (`1
    statistics. The JSON output includes a `replicates` field for this purpose.
 
 3. **Re-run with complete data**: Once all simulations finish, re-run
-   analysis with `--recompute` to include all replicates:
-   ```bash
-   polyzymd analyze rmsf -c config.yaml -r 1-5 --recompute
-   ```
+    analysis with `--recompute` to include all replicates:
+    ```bash
+    polyzymd compare run rmsf -f comparison.yaml --recompute
+    ```
 
 4. **Consider statistical implications**: Results from 2 replicates have
    larger uncertainty than 3+. Be appropriately cautious when interpreting
@@ -296,8 +296,8 @@ Note: Contiguous ranges use a hyphen (`1-3`), non-contiguous use underscores (`1
 A common workflow when simulations are still running:
 
 ```bash
-# Request all 5 planned replicates, but only 3 have completed
-polyzymd analyze rmsf -c config.yaml -r 1-5 --eq-time 100ns
+# Request all 5 planned replicates in comparison.yaml, but only 3 have completed
+polyzymd compare run rmsf -f comparison.yaml --eq-time 100ns
 
 # Output shows:
 # Skipping replicate 4: trajectory data not found...
@@ -311,7 +311,7 @@ Later, when all simulations complete:
 
 ```bash
 # Re-run to include all replicates
-polyzymd analyze rmsf -c config.yaml -r 1-5 --eq-time 100ns --recompute
+polyzymd compare run rmsf -f comparison.yaml --eq-time 100ns --recompute
 
 # Now all 5 are included:
 # Results saved to: rmsf_reps1-5_eq100ns.json
@@ -548,7 +548,7 @@ give different results
 
 ```bash
 # Skip first 10% of a 200 ns simulation
-polyzymd analyze rmsf -c config.yaml -r 1 --eq-time 20ns
+polyzymd compare run rmsf -f comparison.yaml --eq-time 20ns
 ```
 
 Monitor RMSD vs time — equilibration is complete when RMSD plateaus.
@@ -604,23 +604,34 @@ If one replicate differs substantially, investigate **why**:
 ### Accessing Autocorrelation Results
 
 ```python
-from polyzymd.analyses.rmsf._calculator import RMSFCalculator
+from pathlib import Path
 import json
 
-# Run analysis
-calc = RMSFCalculator(config_path="config.yaml", equilibration="100ns")
-result = calc.compute(replicate=1)
+from polyzymd.analyses.discovery import get_analysis
+from polyzymd.analyses.orchestrator import run_comparison
+from polyzymd.compare.config import ComparisonConfig
 
-# Access autocorrelation data
-print(f"Correlation time: {result.correlation_time:.1f} ps")
-print(f"N independent: {result.n_independent_frames}")
+# Programmatic access goes through the RMSFAnalysis plugin
+config = ComparisonConfig.from_yaml("comparison.yaml")
+analysis = get_analysis("rmsf")()
+pipeline_result = run_comparison(analysis, config, equilibration="100ns")
 
-# Load full result for detailed inspection
-with open(result.source_file) as f:
-    data = json.load(f)
+# Load the saved comparison result for detailed inspection
+comparison_path = Path(pipeline_result["comparison_path"])
+with comparison_path.open() as f:
+    comparison_data = json.load(f)
 
-# Per-residue data
-for resid, rmsf in zip(data['residue_ids'], data['rmsf_per_residue']):
+# Access condition-level summary
+for condition in comparison_data["conditions"]:
+    print(
+        f"{condition['label']}: "
+        f"mean RMSF={condition['mean_rmsf']:.3f} Å, "
+        f"SEM={condition['sem_rmsf']:.3f} Å"
+    )
+
+# Access per-residue data for the first condition
+first_condition = comparison_data["conditions"][0]
+for resid, rmsf in zip(first_condition["residue_ids"], first_condition["mean_rmsf_per_residue"]):
     print(f"Residue {resid}: {rmsf:.3f} Å")
 ```
 

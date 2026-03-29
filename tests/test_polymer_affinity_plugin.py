@@ -1087,6 +1087,7 @@ class TestPlot:
             PolymerAffinityAnalysis,
             PolymerAffinitySettings,
         )
+        from polyzymd.compare.config import PlotSettings
 
         analysis = PolymerAffinityAnalysis()
         mock_sim = MagicMock()
@@ -1107,7 +1108,7 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=output_dir,
             settings=PolymerAffinitySettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         with (
@@ -1130,6 +1131,7 @@ class TestPlot:
             PolymerAffinityAnalysis,
             PolymerAffinitySettings,
         )
+        from polyzymd.compare.config import PlotSettings
 
         analysis = PolymerAffinityAnalysis()
         mock_sim = MagicMock()
@@ -1149,7 +1151,7 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=tmp_path / "plots",
             settings=PolymerAffinitySettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         with (
@@ -1172,6 +1174,7 @@ class TestPlot:
             PolymerAffinityAnalysis,
             PolymerAffinitySettings,
         )
+        from polyzymd.compare.config import PlotSettings
 
         analysis = PolymerAffinityAnalysis()
 
@@ -1181,7 +1184,7 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=tmp_path / "plots",
             settings=PolymerAffinitySettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         result = analysis.plot(ctx)
@@ -1193,6 +1196,7 @@ class TestPlot:
             PolymerAffinityAnalysis,
             PolymerAffinitySettings,
         )
+        from polyzymd.compare.config import PlotSettings
 
         analysis = PolymerAffinityAnalysis()
         mock_sim = MagicMock()
@@ -1212,7 +1216,7 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=tmp_path / "plots",
             settings=PolymerAffinitySettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         stacked_path = tmp_path / "stacked.png"

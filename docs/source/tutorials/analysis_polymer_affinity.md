@@ -407,6 +407,10 @@ Reload for downstream processing:
 ```python
 from polyzymd.analyses.polymer_affinity._comparison_results import PolymerAffinityScoreResult
 
+# Legacy pattern: this plugin still exposes result models from
+# _comparison_results.py. New plugins should define result models inline
+# in the plugin package/module unless a separate file is clearly needed.
+
 result = PolymerAffinityScoreResult.load("comparison/polymer_affinity/result.json")
 
 # Access per-condition scores

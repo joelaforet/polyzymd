@@ -119,10 +119,11 @@ don't provide as much *independent* information.
 
 $$\text{SEM} = \frac{\sigma}{\sqrt{N_{\text{eff}}}} = \frac{\sigma}{\sqrt{N/g}}$$
 
-This is exactly what PolyzyMD's distance analysis does:
+This is exactly what PolyzyMD's distances plugin does internally in
+`compute_replicate()`:
 
 ```python
-# From distances/calculator.py (lines 638-641)
+# From analyses/distances/__init__.py (DistanceCalculator internals)
 # SEM = std / sqrt(n_independent)
 if n_independent_frames > 0:
     sem_distance = float(std_dist / np.sqrt(n_independent_frames))
@@ -156,7 +157,7 @@ oversamples the slow transitions and underestimates fluctuations.
 **Correct approach**: Use only independent frames (spaced by ≥2τ):
 
 ```python
-# From rmsf/calculator.py (lines 322-327)
+# From analyses/rmsf plugin internals
 frame_indices = get_independent_indices(
     n_frames=n_frames_total,
     correlation_time=correlation_time,
@@ -169,10 +170,10 @@ frame_indices = get_independent_indices(
 
 ## How PolyzyMD Implements This
 
-### Distance Analysis
+### Distance analysis
 
-The `DistanceCalculator` computes distances for **all frames** and uses
-autocorrelation to correct the uncertainty:
+The distances plugin computes distances for **all frames** in
+`compute_replicate()` and uses autocorrelation to correct the uncertainty:
 
 ```python
 # Compute distances for every frame
@@ -191,10 +192,10 @@ sem_distance = std_dist / np.sqrt(n_independent_frames)
 More frames = more precise mean estimate. The corrected SEM properly reflects
 our actual uncertainty.
 
-### RMSF Analysis
+### RMSF analysis
 
-The `RMSFCalculator` **subsamples** to independent frames before computing
-fluctuations:
+The RMSF plugin **subsamples** to independent frames in `compute_replicate()`
+before computing fluctuations:
 
 ```python
 # Compute RMSD timeseries for ACF
@@ -266,11 +267,11 @@ Independent replicates provide truly uncorrelated samples. PolyzyMD's
 aggregation functions properly combine replicates:
 
 ```bash
-# Aggregate across 5 independent replicates
-polyzymd analyze distances config.yaml \
-    --replicates 1-5 \
-    --equilibration 100ns
+# Aggregate across configured independent replicates
+polyzymd compare run distances -f comparison.yaml --eq-time 100ns
 ```
+
+Replicates are configured per condition in `comparison.yaml`.
 
 The aggregated SEM is computed from the **variance across replicate means**,
 which is statistically robust regardless of within-trajectory correlation.

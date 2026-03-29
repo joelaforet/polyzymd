@@ -11,17 +11,17 @@ For proper uncertainty quantification and statistical best practices, see the
 ## TL;DR
 
 ```bash
-# Single replicate (basic)
-polyzymd analyze rmsf -c config.yaml -r 1 --eq-time 10ns
+# Single analysis (replicates defined in comparison.yaml)
+polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns
 
-# Multiple replicates (recommended)
-polyzymd analyze rmsf -c config.yaml -r 1-3 --eq-time 10ns
+# All enabled analyses (including RMSF)
+polyzymd compare run-all -f comparison.yaml --eq-time 10ns
 
-# With plot
-polyzymd analyze rmsf -c config.yaml -r 1-3 --eq-time 10ns --plot
+# Save formatted output
+polyzymd compare run rmsf -f comparison.yaml --format table -o rmsf_summary.txt
 
 # Force recompute (ignore cache)
-polyzymd analyze rmsf -c config.yaml -r 1-3 --eq-time 10ns --recompute
+polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns --recompute
 ```
 
 ## Prerequisites
@@ -44,7 +44,7 @@ ls $(polyzymd info -c config.yaml --scratch-dir)/production_*/
 ### Single Replicate
 
 ```bash
-polyzymd analyze rmsf -c config.yaml -r 1 --eq-time 10ns
+polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns
 ```
 
 **Expected output:**
@@ -77,7 +77,7 @@ RMSF Analysis Complete
 Running multiple replicates provides more reliable statistics:
 
 ```bash
-polyzymd analyze rmsf -c config.yaml -r 1-3 --eq-time 10ns
+polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns
 ```
 
 **Replicate specification formats:**
@@ -101,55 +101,66 @@ RMSF Analysis Complete (Aggregated)
 The aggregated result combines per-residue RMSF values across replicates,
 reporting the mean and standard error.
 
-## Using analysis.yaml
+## Using comparison.yaml
 
-For reproducible, version-controlled analysis configuration, use `analysis.yaml` 
-instead of CLI flags. Place this file alongside your `config.yaml`.
+For reproducible, version-controlled analysis configuration, use
+`comparison.yaml` and put RMSF settings under `plugins.rmsf`.
 
-### Create analysis.yaml
+### Create comparison.yaml
 
 ```yaml
-# analysis.yaml
-replicates: [1, 2, 3]
+# comparison.yaml
+name: "rmsf_quickstart"
+description: "Single-condition RMSF quick start"
+control: "MySimulation"
+
+conditions:
+  - label: "MySimulation"
+    config: "config.yaml"
+    replicates: [1, 2, 3]
 
 defaults:
   equilibration_time: "10ns"
 
-rmsf:
-  enabled: true
-  selection: "protein and name CA"    # MDAnalysis selection
-  reference_mode: "centroid"          # centroid | average | frame | external
-  reference_frame: null               # Required if reference_mode: frame
-  # reference_file: "/path/to/crystal.pdb"  # Required if reference_mode: external
+plugins:
+  rmsf:
+    enabled: true
+    selection: "protein and name CA"    # MDAnalysis selection
+    reference_mode: "centroid"          # centroid | average | frame | external
+    reference_frame: 0                   # Used if reference_mode: frame
+    # reference_file: "/path/to/crystal.pdb"  # Used if reference_mode: external
 ```
 
-### Run All Enabled Analyses
+### Run RMSF
 
 ```bash
-# Initialize a template (if starting fresh)
-polyzymd analyze init
+# Run RMSF analysis
+polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns
 
-# Run all analyses defined in analysis.yaml
-polyzymd analyze run
+# Run all enabled analyses in one command
+polyzymd compare run-all -f comparison.yaml --eq-time 10ns
+
+# Run all enabled analyses and generate plots
+polyzymd compare run-all -f comparison.yaml --eq-time 10ns --plot
 
 # Force recompute
-polyzymd analyze run --recompute
+polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns --recompute
 ```
 
 ### Configuration Options
 
-| Field | Type | Default | Description |
+| Field (`plugins.rmsf`) | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `true` | Whether to run RMSF analysis |
 | `selection` | str | `"protein and name CA"` | MDAnalysis selection for RMSF calculation |
 | `reference_mode` | str | `"centroid"` | Alignment reference: `centroid`, `average`, `frame`, or `external` |
-| `reference_frame` | int | `null` | Frame number when `reference_mode: frame` (1-indexed) |
+| `reference_frame` | int | `0` | Frame number when `reference_mode: frame` |
 | `reference_file` | str | `null` | Path to external PDB when `reference_mode: external` |
 
 ```{tip}
-**When to use analysis.yaml vs CLI:** Use `analysis.yaml` for standard, 
-reproducible workflows. Use CLI flags (`polyzymd analyze rmsf ...`) for 
-one-off analyses or when exploring different parameters.
+**When to use YAML vs CLI:** Use `comparison.yaml` for standard,
+reproducible workflows. Use `polyzymd compare run rmsf` for quick reruns,
+format changes, or `--recompute`.
 ```
 
 ## Comparing Two Conditions
@@ -195,7 +206,7 @@ plugins:
 polyzymd compare run rmsf -f comparison.yaml
 
 # Output formats
-polyzymd compare run rmsf -f comparison.yaml --format markdown  # For docs
+polyzymd compare run rmsf -f comparison.yaml --format table     # Human-readable
 polyzymd compare run rmsf -f comparison.yaml --format json      # Machine-readable
 ```
 
@@ -210,20 +221,16 @@ See [Comparing Conditions](analysis_compare_conditions.md) for the full guide.
 ````
 
 ````{tab-item} CLI
-Run analysis on each condition separately, then use the comparison pipeline:
+Run the RMSF comparison pipeline directly:
 
 ```bash
-# Step 1: Analyze each condition
-polyzymd analyze rmsf -c no_polymer/config.yaml -r 1-3 --eq-time 10ns
-polyzymd analyze rmsf -c with_polymer/config.yaml -r 1-3 --eq-time 10ns
-
-# Step 2: Create comparison.yaml (or use polyzymd compare init)
+# Step 1: Create comparison.yaml (or use polyzymd compare init)
 polyzymd compare init my_comparison
 # Edit my_comparison/comparison.yaml to point to your configs
 
-# Step 3: Run comparison (uses cached RMSF results when available)
+# Step 2: Run comparison (uses cached RMSF results when available)
 cd my_comparison
-polyzymd compare run rmsf
+polyzymd compare run rmsf --eq-time 10ns
 ```
 
 The comparison command automatically loads cached results if available, 
@@ -321,15 +328,16 @@ Results are saved in your project's analysis directory:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-c, --config` | (required) | Path to config.yaml |
-| `-r, --replicates` | (required) | Which replicates to analyze |
-| `--eq-time` | `0ns` | Equilibration time to skip |
-| `--selection` | `protein and name CA` | Atoms for RMSF calculation |
-| `--reference-mode` | `centroid` | Reference structure type (`centroid`, `average`, `frame`, `external`) |
-| `--reference-file` | (none) | Path to external PDB (required when `--reference-mode external`) |
-| `--plot` | off | Generate matplotlib figure |
+| `-f, --file` | `comparison.yaml` | Comparison config file |
+| `--eq-time` | from YAML (or `0ns`) | Equilibration time to skip |
 | `--recompute` | off | Ignore cached results |
-| `-o, --output-dir` | (auto) | Custom output location |
+| `--format` | `table` | Output format (`table` or `json`) |
+| `-o, --output` | (none) | Save formatted output to file |
+| `-q, --quiet` | off | Suppress INFO messages |
+| `--debug` | off | Enable DEBUG logging |
+
+RMSF-specific controls (`selection`, `reference_mode`, `reference_frame`,
+`reference_file`) are configured in `comparison.yaml` under `plugins.rmsf`.
 
 ### Equilibration Time
 
@@ -337,10 +345,10 @@ Always skip the equilibration period:
 
 ```bash
 # Skip first 10 ns
-polyzymd analyze rmsf -c config.yaml -r 1 --eq-time 10ns
+polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns
 
 # Skip first 100 ns (longer equilibration)
-polyzymd analyze rmsf -c config.yaml -r 1 --eq-time 100ns
+polyzymd compare run rmsf -f comparison.yaml --eq-time 100ns
 ```
 
 ```{tip}
@@ -350,24 +358,32 @@ or until RMSD has plateaued.
 
 ### Selection String
 
-Change which atoms are analyzed:
+Change which atoms are analyzed by editing `plugins.rmsf.selection` in
+`comparison.yaml`:
 
-```bash
-# All backbone atoms (not just CA)
-polyzymd analyze rmsf -c config.yaml -r 1 --selection "protein and backbone"
+```yaml
+plugins:
+  rmsf:
+    selection: "protein and backbone"
+```
 
-# Specific residue range
-polyzymd analyze rmsf -c config.yaml -r 1 --selection "protein and name CA and resid 50-100"
+```yaml
+plugins:
+  rmsf:
+    selection: "protein and name CA and resid 50-100"
+```
 
-# Include ligand
-polyzymd analyze rmsf -c config.yaml -r 1 --selection "(protein and name CA) or resname LIG"
+```yaml
+plugins:
+  rmsf:
+    selection: "(protein and name CA) or resname LIG"
 ```
 
 ```{tip}
 **Trimming flexible termini:** N- and C-terminal loops often have very high
 RMSF that dominates summary statistics and obscures active-site signals. Use a
 residue range selection to exclude them:
-`--selection "protein and name CA and resid 5:175"`
+`selection: "protein and name CA and resid 5:175"`
 This is especially useful with `external` reference mode for catalytic
 competence analysis.
 ```
@@ -376,19 +392,34 @@ competence analysis.
 
 Choose how the trajectory is aligned before RMSF calculation:
 
-```bash
+```yaml
 # Default: align to most populated conformation
-polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode centroid
+plugins:
+  rmsf:
+    reference_mode: "centroid"
+```
 
+```yaml
 # Align to average structure
-polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode average
+plugins:
+  rmsf:
+    reference_mode: "average"
+```
 
+```yaml
 # Align to specific frame (e.g., catalytically competent)
-polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode frame --reference-frame 500
+plugins:
+  rmsf:
+    reference_mode: "frame"
+    reference_frame: 500
+```
 
+```yaml
 # Align to external crystal structure (condition-independent reference)
-polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode external \
-    --reference-file /path/to/crystal_structure.pdb
+plugins:
+  rmsf:
+    reference_mode: "external"
+    reference_file: "/path/to/crystal_structure.pdb"
 ```
 
 See [Reference Structure Selection](analysis_reference_selection.md) for details
@@ -409,7 +440,7 @@ your trajectories are stored.
 
 **Fix**: 
 - Check that your selection string matches atoms in your system
-- Try `--reference-mode average` to compare
+- Try `reference_mode: "average"` to compare
 - Verify trajectory files are complete
 
 ### "Low statistical reliability" warning
@@ -428,7 +459,7 @@ uncertainties may be underestimated. See [Best Practices Guide](analysis_rmsf_be
 **Fix**: Add debug flag to see detailed logging:
 
 ```bash
-polyzymd --debug analyze rmsf -c config.yaml -r 1 --eq-time 10ns
+polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns --debug
 ```
 
 ### Missing Replicate Warning
@@ -446,4 +477,4 @@ for details.
 
 - **Understand the statistics**: [Best Practices Guide](analysis_rmsf_best_practices.md)
 - **Choose reference structures**: [Reference Selection Guide](analysis_reference_selection.md)
-- **Analyze distances**: `polyzymd analyze distance --help`
+- **Analyze distances**: `polyzymd compare run distances --help`

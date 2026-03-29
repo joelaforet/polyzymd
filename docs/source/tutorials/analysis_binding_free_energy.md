@@ -349,6 +349,10 @@ The JSON file can be reloaded for downstream processing:
 ```python
 from polyzymd.analyses.binding_free_energy._comparison_results import BindingFreeEnergyResult
 
+# Legacy pattern: this plugin still exposes result models from
+# _comparison_results.py. New plugins should define result models inline
+# in the plugin package/module unless a separate file is clearly needed.
+
 result = BindingFreeEnergyResult.load(
     "comparison/binding_free_energy/result.json"
 )

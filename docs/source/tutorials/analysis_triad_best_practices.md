@@ -472,7 +472,7 @@ Note: Contiguous ranges use a hyphen (`1-3`), non-contiguous use underscores (`1
 3. **Re-run with complete data**: Once all simulations finish, re-run
    analysis with `--recompute` to include all replicates:
    ```bash
-   polyzymd analyze triad -c comparison.yaml --recompute
+   polyzymd compare run triad -f comparison.yaml --recompute
    ```
 
 4. **Consider statistical implications**: Results from 2 replicates have
@@ -484,8 +484,8 @@ Note: Contiguous ranges use a hyphen (`1-3`), non-contiguous use underscores (`1
 A common workflow when simulations are still running:
 
 ```bash
-# Request all 5 planned replicates, but only 3 have completed
-polyzymd analyze triad -c comparison.yaml -r 1-5 --eq-time 100ns
+# Request all planned replicates as defined per condition in comparison.yaml
+polyzymd compare run triad -f comparison.yaml --eq-time 100ns
 
 # Output shows:
 # Skipping replicate 4: trajectory data not found...
@@ -499,7 +499,7 @@ Later, when all simulations complete:
 
 ```bash
 # Re-run to include all replicates
-polyzymd analyze triad -c comparison.yaml -r 1-5 --eq-time 100ns --recompute
+polyzymd compare run triad -f comparison.yaml --eq-time 100ns --recompute
 
 # Now all 5 are included:
 # Results saved to: triad_LipA_reps1-5_eq100ns.json
@@ -603,29 +603,31 @@ system should be equilibrated before triad analysis.
 ### Programmatic Analysis
 
 ```python
-from polyzymd.config.loader import load_config
+from polyzymd.analyses.discovery import get_analysis
+from polyzymd.analyses.orchestrator import run_comparison
 from polyzymd.compare.config import ComparisonConfig
-from polyzymd.analyses.catalytic_triad._calculator import CatalyticTriadAnalyzer
 
-# Load configs
+# Load comparison config
 comp_config = ComparisonConfig.from_yaml("comparison.yaml")
-sim_config = load_config(comp_config.conditions[0].config)
 
-# Create analyzer
-analyzer = CatalyticTriadAnalyzer(
-    config=sim_config,
-    triad_config=comp_config.catalytic_triad,
+# Create analysis plugin
+analysis = get_analysis("triad")()
+
+# Run full comparison workflow
+pipeline_result = run_comparison(
+    analysis,
+    comp_config,
+    recompute=False,
     equilibration="100ns",
 )
 
-# Single replicate
-result = analyzer.compute(replicate=1)
-print(f"Simultaneous contact: {result.simultaneous_contact_fraction * 100:.1f}%")
+# Access condition-level aggregated result
+result = pipeline_result["aggregated"]["No Polymer"]
+print(f"Mean contact: {result.overall_simultaneous_contact * 100:.1f}%")
 
-# Aggregated
-agg_result = analyzer.compute_aggregated(replicates=[1, 2, 3])
-print(f"Mean contact: {agg_result.overall_simultaneous_contact * 100:.1f} "
-      f"+/- {agg_result.sem_simultaneous_contact * 100:.1f}%")
+# Comparison-level statistics
+comparison = pipeline_result["comparison"]
+print(f"Ranking: {comparison.ranking}")
 ```
 
 ### Accessing Detailed Results

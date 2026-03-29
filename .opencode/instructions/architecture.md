@@ -25,15 +25,14 @@ src/polyzymd/
 | Layer | Files | Role |
 |-------|-------|------|
 | **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the extension point |
-| **Compute** (private) | `<name>/_calculator.py`, `<name>/_results.py` | Per-condition calculators and result models |
+| **Private modules** | `<name>/_plotters.py`, `<name>/_results.py`, etc. | Plotting functions, result models, formatters used internally by plugins |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics |
 | **Shared compute** | `shared/binding_preference.py`, `shared/surface_exposure.py` | Cross-plugin compute (used by contacts, BFE, polymer_affinity) |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Plugin ABC, auto-discovery, lifecycle runner |
 
 New analysis types are added as **packages in `analyses/<name>/`**. All existing
-plugins are packages (no single-file plugins exist). The private `_calculator.py`
-modules provide underlying computation that some plugins delegate to; new plugins
-can compute directly in `compute_replicate()`.
+plugins are packages (no single-file plugins exist). New plugins can compute
+directly in `compute_replicate()` — no private calculator modules needed.
 
 ## Chain Convention (Critical)
 
@@ -117,25 +116,21 @@ class AnalysisConfig(BaseModel):
 
 1. Run `polyzymd new-analysis <name>` to scaffold the plugin, OR create `src/polyzymd/analyses/<name>/` manually
 2. Subclass `Analysis` with `name`, `Settings`, `compute_replicate()`, `aggregate()`
-3. For default comparison: implement `extract_metrics()` and `_deserialize_result()`
-4. Optionally implement `plot()`, `format()`
-5. Test with `pixi run -e build pytest tests/test_<name>_plugin.py -v`
-6. The CLI automatically discovers it via `polyzymd compare run <name>`
+3. For default comparison: implement `extract_metrics()`
+4. Implement `plot()` using `_build_plot_data()` and shared plotting helpers
+5. Optionally implement `format()`
+6. Test with `pixi run -e build pytest tests/test_<name>_plugin.py -v`
+7. The CLI automatically discovers it via `polyzymd compare run <name>`
 
 See `analyses/base.py` for the full contract, `analysis-module.md` for
 detailed patterns, and `docs/source/tutorials/extending_analyses.md` for the
 contributor tutorial.
 
-### Adding a new per-condition calculator
-
-1. Create a private `_calculator.py` module inside `analyses/<name>/`
-2. Define result models inheriting from `BaseAnalysisResult` (in `_results.py`)
-3. Implement the calculator with `from_config()` factory method
-4. The plugin `__init__.py` delegates to it from `compute_replicate()`
-
 ### Adding comparison statistics or formatters
 
 The `compare/` package provides shared statistical infrastructure. New plugins
-should NOT create files in `compare/` — keep plotting and formatting inline
-in the plugin's `plot()` and `format()` methods. The `compare/results/`
+should NOT create files in `compare/` — keep formatting inline in the plugin's
+`format()` method. Established plugins extract plotting into `_plotters.py`
+modules within their package; new plugins can start with plotting inline in
+`plot()` and extract later as complexity grows. The `compare/results/`
 directory is used by existing plugins for historical result models only.

@@ -894,6 +894,7 @@ class TestPlot:
     def test_delegates_to_three_plotters(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.distances import DistancesAnalysis
+        from polyzymd.compare.config import PlotSettings
 
         analysis = DistancesAnalysis()
 
@@ -910,7 +911,7 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=tmp_path / "plots",
             settings=MagicMock(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         with (
@@ -932,6 +933,7 @@ class TestPlot:
     def test_plot_handles_failure(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.distances import DistancesAnalysis
+        from polyzymd.compare.config import PlotSettings
 
         analysis = DistancesAnalysis()
 
@@ -948,7 +950,7 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=tmp_path / "plots",
             settings=MagicMock(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         with (
@@ -970,6 +972,7 @@ class TestPlot:
     def test_plot_empty_conditions(self, tmp_path):
         from polyzymd.analyses.base import PlotContext
         from polyzymd.analyses.distances import DistancesAnalysis
+        from polyzymd.compare.config import PlotSettings
 
         analysis = DistancesAnalysis()
 
@@ -979,15 +982,17 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=tmp_path / "plots",
             settings=MagicMock(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         plots = analysis.plot(ctx)
         assert plots == []
 
     def test_plot_creates_default_plot_settings(self, tmp_path):
+        """Orchestrator guarantees non-None plot_settings; plugin passes it through."""
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.distances import DistancesAnalysis
+        from polyzymd.compare.config import PlotSettings
 
         analysis = DistancesAnalysis()
 
@@ -998,13 +1003,14 @@ class TestPlot:
             sim_config=MagicMock(),
         )
 
+        plot_settings = PlotSettings()
         ctx = PlotContext(
             conditions=[cond],
             analysis_dirs={"Cond1": tmp_path / "analysis"},
             results_dir=tmp_path / "results",
             output_dir=tmp_path / "plots",
             settings=MagicMock(),
-            plot_settings=None,  # None triggers default creation
+            plot_settings=plot_settings,
         )
 
         with (
@@ -1018,9 +1024,7 @@ class TestPlot:
 
             analysis.plot(ctx)
 
-        # Verify PlotSettings was created and passed
-        from polyzymd.compare.config import PlotSettings
-
+        # Verify PlotSettings was passed through
         MockKDE.assert_called_once()
         call_args = MockKDE.call_args
         assert isinstance(call_args[0][3], PlotSettings)

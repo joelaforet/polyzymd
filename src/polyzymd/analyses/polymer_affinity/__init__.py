@@ -311,10 +311,6 @@ class PolymerAffinityAnalysis(Analysis):
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
         plot_settings = ctx.plot_settings
-        if plot_settings is None:
-            from polyzymd.compare.config import PlotSettings
-
-            plot_settings = PlotSettings()
 
         try:
             result = _plot_affinity_stacked_bars(data, labels, ctx.output_dir, plot_settings)

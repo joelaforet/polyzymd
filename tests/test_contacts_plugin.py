@@ -1024,6 +1024,7 @@ class TestPlot:
     def test_plot_creates_output_dir(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.compare.config import PlotSettings
 
         analysis = ContactsAnalysis()
 
@@ -1044,7 +1045,7 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=output_dir,
             settings=ContactsSettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         # Mock all 11 private plot functions to return empty lists
@@ -1066,6 +1067,7 @@ class TestPlot:
     def test_plot_returns_combined_paths(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.compare.config import PlotSettings
 
         analysis = ContactsAnalysis()
 
@@ -1085,7 +1087,7 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=tmp_path / "plots",
             settings=ContactsSettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         # Make first two functions return paths, rest return empty
@@ -1120,6 +1122,7 @@ class TestPlot:
     def test_plot_catches_plotter_exceptions(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.compare.config import PlotSettings
 
         analysis = ContactsAnalysis()
 
@@ -1139,7 +1142,7 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=tmp_path / "plots",
             settings=ContactsSettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         # Make all plot functions raise

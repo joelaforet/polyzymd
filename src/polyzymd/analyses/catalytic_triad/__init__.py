@@ -10,7 +10,7 @@ All heavy computation is now inlined:
 - Simultaneous contact fraction and autocorrelation analysis are computed
   directly in this plugin.
 - Aggregation uses utilities from ``analyses.shared``.
-- Plotting delegates to ``_triad_plotting`` standalone functions with data
+- Plotting delegates to ``_plotters`` standalone functions with data
   loading/pooling handled by private helpers in this module.
 """
 
@@ -30,9 +30,8 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
-from polyzymd.analyses.shared.plotting import get_output_path, save_figure
-
 from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
+from polyzymd.analyses.shared.plotting import get_output_path, save_figure
 
 if TYPE_CHECKING:
     from polyzymd.analyses.catalytic_triad._results import TriadResult
@@ -179,7 +178,6 @@ class CatalyticTriadAnalysis(Analysis):
         )
         from polyzymd.analyses.shared.config_hash import (
             compute_config_hash,
-            validate_config_hash,
         )
         from polyzymd.analyses.shared.diagnostics import (
             get_selection_diagnostics,
@@ -200,11 +198,14 @@ class CatalyticTriadAnalysis(Analysis):
 
         # Check cache
         result_file = output_dir / _make_result_filename(settings, eq_value, eq_unit)
-        if not ctx.recompute and result_file.exists():
-            logger.info(f"Loading cached triad result from {result_file}")
-            result = TriadResult.load(result_file)
-            validate_config_hash(result.config_hash, sim_config)
-            return result
+        cached = self._check_cache(
+            TriadResult,
+            result_file,
+            recompute=ctx.recompute,
+            sim_config=sim_config,
+        )
+        if cached is not None:
+            return cached
 
         logger.info(f"Computing triad analysis '{settings.name}' for replicate {replicate}")
 
@@ -376,8 +377,8 @@ class CatalyticTriadAnalysis(Analysis):
             Aggregated result.
         """
         from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.distances._results import DistancePairAggregatedResult
         from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
+        from polyzymd.analyses.distances._results import DistancePairAggregatedResult
         from polyzymd.analyses.shared.aggregation import aggregate_distance_pair_stats
         from polyzymd.analyses.shared.statistics import compute_sem
 
@@ -526,7 +527,7 @@ class CatalyticTriadAnalysis(Analysis):
         """Generate triad comparison plots.
 
         Delegates to private module-level helpers that call the standalone
-        plotting functions in ``_triad_plotting``.
+        plotting functions in ``_plotters``.
 
         Parameters
         ----------
@@ -540,32 +541,14 @@ class CatalyticTriadAnalysis(Analysis):
         """
         plots: list[Path] = []
 
-        # Build the data dict for plotting helpers
-        data: dict[str, Any] = {}
-        labels: list[str] = []
-
-        for cond in ctx.conditions:
-            label = cond.label
-            labels.append(label)
-            analysis_dir = ctx.analysis_dirs.get(label)
-            if analysis_dir is not None:
-                data[label] = {
-                    "analysis_dir": analysis_dir,
-                    "aggregated_dir": analysis_dir / "aggregated",
-                    "replicates": list(cond.replicates),
-                }
-
+        data, labels = self._build_plot_data(ctx, include_replicates=True)
         if not labels:
             return plots
 
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Resolve plot settings (create default if not provided)
+        # Resolve plot settings (guaranteed non-None by orchestrator)
         plot_settings = ctx.plot_settings
-        if plot_settings is None:
-            from polyzymd.compare.config import PlotSettings
-
-            plot_settings = PlotSettings()
 
         # KDE panel plot
         try:
@@ -592,11 +575,7 @@ class CatalyticTriadAnalysis(Analysis):
     ) -> str:
         """Backward-compatible filename helper retained for tests."""
         eq_str = f"eq{first_result.equilibration_time:.0f}{first_result.equilibration_unit}"
-        reps = sorted(replicates)
-        if reps == list(range(reps[0], reps[-1] + 1)):
-            rep_str = f"reps{reps[0]}-{reps[-1]}"
-        else:
-            rep_str = "reps" + "_".join(map(str, reps))
+        rep_str = Analysis._format_replicate_range(replicates)
         name_safe = first_result.triad_name.replace(" ", "_").replace("/", "-")
         return f"triad_{name_safe}_{rep_str}_{eq_str}.json"
 
@@ -627,7 +606,7 @@ def _plot_triad_kde_panel(
     """Generate multi-row KDE panel for triad distance distributions.
 
     Pools per-replicate distances for each condition, then delegates to
-    :func:`polyzymd.analyses.catalytic_triad._plotting.plot_triad_kde_panel_pooled`.
+    :func:`polyzymd.analyses.catalytic_triad._plotters.plot_triad_kde_panel_pooled`.
 
     Parameters
     ----------
@@ -647,7 +626,7 @@ def _plot_triad_kde_panel(
     list[Path]
         Paths to generated plot files.
     """
-    from polyzymd.analyses.catalytic_triad._plotting import plot_triad_kde_panel_pooled
+    from polyzymd.analyses.catalytic_triad._plotters import plot_triad_kde_panel_pooled
 
     if not plot_settings.triad.generate_kde_panel:
         return []
@@ -686,7 +665,7 @@ def _plot_triad_threshold_bars(
     """Generate grouped bar chart of triad contact fractions.
 
     Loads aggregated results for each condition and delegates to
-    :func:`polyzymd.analyses.catalytic_triad._plotting.plot_triad_threshold_bars`.
+    :func:`polyzymd.analyses.catalytic_triad._plotters.plot_triad_threshold_bars`.
 
     Parameters
     ----------
@@ -704,7 +683,7 @@ def _plot_triad_threshold_bars(
     list[Path]
         Paths to generated plot files.
     """
-    from polyzymd.analyses.catalytic_triad._plotting import plot_triad_threshold_bars
+    from polyzymd.analyses.catalytic_triad._plotters import plot_triad_threshold_bars
 
     if not plot_settings.triad.generate_bars:
         return []

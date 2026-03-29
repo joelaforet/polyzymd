@@ -60,15 +60,15 @@ src/polyzymd/
 | Layer | Files | Role |
 |-------|-------|------|
 | **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the **extension point** for contributors |
-| **Compute** (private) | `<name>/_calculator.py`, `<name>/_results.py` | Per-condition calculators and result models used internally by plugins |
+| **Private modules** | `<name>/_plotters.py`, `<name>/_results.py`, etc. | Plotting functions, result models, formatters, aggregators used internally by plugins |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics, autocorrelation — reusable across plugins |
 | **Shared compute** | `shared/binding_preference.py`, `shared/surface_exposure.py` | Cross-plugin compute (used by contacts, BFE, polymer_affinity) |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Plugin ABC, auto-discovery, lifecycle runner, default comparison utilities |
 
 New analysis types are added as **packages in `analyses/<name>/`**. All 8
-existing plugins are packages (no single-file plugins exist). The private
-`_calculator.py` modules (inside each analysis sub-package) provide underlying computation that some plugins
-delegate to; new plugins can compute directly in `compute_replicate()`.
+existing plugins are packages (no single-file plugins exist). Established
+plugins extract plotting into `_plotters.py` modules; new plugins can keep
+plotting inline in `plot()` or extract it as complexity grows.
 
 ## Key Patterns
 
@@ -91,7 +91,7 @@ in `src/polyzymd/analyses/<name>/` and subclass `Analysis`:
 | Plugin discovery | `analyses/discovery.py` | How auto-discovery works, naming rules |
 | Orchestrator | `analyses/orchestrator.py` | How the framework runs your plugin |
 | Shared utilities | `analyses/shared/` | `TrajectoryLoader`, alignment, statistics, autocorrelation |
-| Simplest example | `analyses/secondary_structure/` | Complete minimal plugin with default compare + plots |
+| Simplest example | `analyses/catalytic_triad/` | Simplest default-compare lifecycle (but has substantial plotting code) |
 | Stats utilities | `analyses/stats.py` | `default_scalar_comparison()`, `format_scalar_comparison()` |
 | Contributor tutorial | `docs/source/tutorials/extending_analyses.md` | Step-by-step guide with test examples |
 
@@ -100,7 +100,7 @@ Key rules:
 - **Required class variables**: `name` (str) and `Settings` (Pydantic BaseModel)
 - **Required methods**: `compute_replicate(ctx, replicate)` and `aggregate(ctx, results)`
 - **Optional overrides**: `compare()`, `plot()`, `format()`, `extract_metrics()`, `filter_conditions()`
-- **Default compare path**: Implement `extract_metrics()` **and** `_deserialize_result()` — the framework does t-tests, ANOVA, ranking automatically
+- **Default compare path**: Implement `extract_metrics()` — the framework loads results automatically (via `AggregatedResultClass` or `json.loads()`) and does t-tests, ANOVA, ranking
 - **Custom compare path**: Override `compare()` entirely for multi-metric or entry-table analyses
 - **Auto-discovery**: Drop a package in `analyses/<name>/` — no imports, no registries, no bootstrap
 - **Result saving**: Existing plugins save results explicitly; the orchestrator has a fallback auto-save if the plugin doesn't
@@ -124,8 +124,8 @@ system achieves this:
 When writing a new analysis plugin, **study existing implementations first**:
 
 1. **Read `analyses/base.py`** — it defines the full contract
-2. **Study `analyses/secondary_structure/`** or **`analyses/rmsf/`** — simplest plugins
-3. **Match the context pattern** — use `ctx.settings`, `ctx.sim_config`, etc.
+2. **Start with the scaffold output** — `polyzymd new-analysis <name>` generates a complete working plugin with compute, aggregate, comparison, plotting, and tests
+3. **Study `analyses/rmsf/`** for default compare with plots, or **`analyses/catalytic_triad/`** for default-compare lifecycle
 
 **Anti-pattern to avoid:**
 ```python
@@ -158,8 +158,8 @@ def compute_replicate(self, ctx, replicate):
 1. **Read the tutorial**: `docs/source/tutorials/extending_analyses.md`
 2. **Read `analyses/base.py`** — the class docstring defines the full contract
 3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
-4. **Study a matching example**: `secondary_structure/` for simplest, `rmsf/` for simple, `contacts/` for custom
-5. **Write your plugin** in `analyses/<name>/` — keep all logic in one file
+4. **Study a matching example**: scaffold output for the simplest lifecycle, `rmsf/` for default compare with plots, `contacts/` for custom compare
+5. **Write your plugin** in `analyses/<name>/` — start with all logic in `__init__.py`; extract plotting to `_plotters.py` as complexity grows
 6. **Test**: `pixi run -e build pytest tests/test_<name>_plugin.py -v`
 
 ## Code Style

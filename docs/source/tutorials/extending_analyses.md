@@ -1,14 +1,15 @@
 # Extending the Analysis Framework
 
-This guide shows you how to add a new analysis type to PolyzyMD in one file.
+This guide shows you how to add a new analysis type to PolyzyMD.
 By the end, you will have a working analysis plugin that can compute metrics
 per replicate, aggregate across replicates, compare conditions, generate
 figures, and display results on the CLI.
 
 ```{note}
 This guide covers the **plugin system** in ``analyses/``.
-The underlying per-condition calculators (private ``_calculator.py`` modules
-inside each analysis sub-package in ``analyses/``) are implementation details — you do not need to touch them.
+Each plugin is a self-contained package — you implement the science
+(compute, aggregate) and the framework handles discovery, iteration,
+result saving, comparison statistics, and CLI wiring.
 ```
 
 ## Prerequisites
@@ -21,9 +22,9 @@ inside each analysis sub-package in ``analyses/``) are implementation details �
 ## How the Plugin System Works
 
 Every analysis in PolyzyMD is a single class that subclasses `Analysis` and
-lives in `src/polyzymd/analyses/`. The framework discovers plugins
-automatically — no registry edits, no imports, no boilerplate. You drop a file,
-and the CLI can run it.
+lives in a package under `src/polyzymd/analyses/<name>/`. The framework discovers
+plugins automatically — no registry edits, no imports, no boilerplate. You drop
+a package, and the CLI can run it.
 
 The lifecycle for each analysis is:
 
@@ -93,8 +94,11 @@ implement `extract_metrics()`, you typically do **not** need to override
 
 ### `plot(ctx)` (optional)
 
-Generate matplotlib figures. Use `self._load_aggregated_result(agg_dir)` to
-load each condition's data. Return a list of figure paths.
+Generate matplotlib figures. Use `self._build_plot_data(ctx)` to collect
+per-condition paths, then `self._load_aggregated_result(agg_dir)` to load each
+condition's data. Use shared plotting helpers (`get_theme`, `apply_axis_style`,
+`save_figure`, `get_colors`) for consistent theming. Return a list of figure
+paths. The scaffold generates a working `plot()` method automatically.
 
 ### `format(result, output_format)` (optional)
 
@@ -113,7 +117,8 @@ here as a required built-in deployed analysis.
 ```
 
 Create `src/polyzymd/analyses/rg/` as a package in your own branch or downstream
-project, or use the scaffold command to generate the boilerplate automatically:
+project, or use the scaffold command to generate the boilerplate automatically
+(the scaffold includes compute, aggregate, comparison, plotting, and tests):
 
 ```bash
 polyzymd new-analysis rg
@@ -220,29 +225,43 @@ class RgAnalysis(Analysis):
         """Generate an Rg bar chart comparing conditions."""
         import matplotlib.pyplot as plt
 
-        labels = []
-        means = []
-        sems = []
-        for cond in ctx.conditions:
-            agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
-            summary = self._load_aggregated_result(agg_dir)
-            if summary is None:
-                continue
-            labels.append(cond.label)
-            means.append(summary["mean_rg"])
-            sems.append(summary["sem_rg"])
+        from polyzymd.analyses.shared import apply_axis_style, get_colors, get_theme, save_figure
 
+        # Use the base class helper to gather per-condition paths
+        data, labels = self._build_plot_data(ctx)
         if not labels:
             return []
 
+        # Load aggregated results for each condition
+        plot_labels = []
+        means = []
+        sems = []
+        for label in labels:
+            if label not in data or label == "__meta__":
+                continue
+            agg_dir = data[label]["aggregated_dir"]
+            summary = self._load_aggregated_result(agg_dir)
+            if summary is None:
+                continue
+            plot_labels.append(label)
+            means.append(summary["mean_rg"])
+            sems.append(summary["sem_rg"])
+
+        if not plot_labels:
+            return []
+
+        # Use shared plotting utilities for consistent theming
+        plot_settings = ctx.plot_settings
+        theme = get_theme(plot_settings)
+        colors = get_colors(len(plot_labels), plot_settings)
+
         fig, ax = plt.subplots(figsize=(8, 5))
-        ax.bar(labels, means, yerr=sems, capsize=5, color="steelblue")
-        ax.set_ylabel("Radius of Gyration (Å)")
-        ax.set_title("Rg Comparison Across Conditions")
+        ax.bar(plot_labels, means, yerr=sems, capsize=5, color=colors[: len(plot_labels)])
+        apply_axis_style(ax, plot_settings, title="Rg Comparison Across Conditions", ylabel="Radius of Gyration (Å)")
 
         output_path = ctx.output_dir / "rg_comparison.png"
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        save_figure(fig, output_path, plot_settings)
         plt.close(fig)
         return [output_path]
 
@@ -265,6 +284,104 @@ class RgAnalysis(Analysis):
 
 That file is now discoverable, runnable through compare workflows, and
 compatible with default framework formatting/statistics.
+
+## Base Class Helpers
+
+The `Analysis` base class provides three utility methods that reduce
+boilerplate across the lifecycle. The `RgAnalysis` example above uses
+`_build_plot_data()` in its `plot()` method, but all three are available
+to every plugin.
+
+### `_build_plot_data(ctx, *, include_replicates=False)`
+
+Collects per-condition paths from a `PlotContext` into a dict ready for
+plotter functions. Returns `(data, labels)` where `data[label]` contains
+`"analysis_dir"` and `"aggregated_dir"` keys:
+
+```python
+def plot(self, ctx: PlotContext) -> list[Path]:
+    # One line replaces the 8-12 line loop through ctx.conditions
+    data, labels = self._build_plot_data(ctx, include_replicates=True)
+    if not labels:
+        return []
+
+    for label in labels:
+        agg_dir = data[label]["aggregated_dir"]
+        summary = self._load_aggregated_result(agg_dir)
+        # ... plot summary data ...
+```
+
+```{admonition} Manual alternative
+:class: dropdown
+
+Without `_build_plot_data()`, you write the loop yourself — which is
+fine for understanding the data flow:
+
+~~~python
+def plot(self, ctx: PlotContext) -> list[Path]:
+    for cond in ctx.conditions:
+        agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
+        summary = self._load_aggregated_result(agg_dir)
+        if summary is None:
+            continue
+        # ... plot summary data ...
+~~~
+```
+
+### `_check_cache(result_cls, cache_path, *, recompute, sim_config=None)`
+
+Consolidates the cache-checking pattern used in `compute_replicate()`.
+Loads a Pydantic result from disk if the cache file exists and
+`recompute` is False, optionally validating the config hash:
+
+```python
+def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> dict:
+    result_file = ctx.output_dir / "rg_result.json"
+
+    # One line replaces the 5-line cache check pattern
+    cached = self._check_cache(
+        RgReplicateResult, result_file,
+        recompute=ctx.recompute, sim_config=ctx.sim_config,
+    )
+    if cached is not None:
+        return cached
+
+    # ... expensive computation ...
+```
+
+```{note}
+`_check_cache()` requires a Pydantic model class with a `.load(path)`
+method (i.e., a `BaseAnalysisResult` subclass). Dict-based plugins that
+want caching should use explicit `json.loads()` / `Path.exists()` checks
+instead.
+```
+
+### `_format_replicate_range(replicates)`
+
+Formats replicate tuples into compact strings for log messages and
+filenames. Contiguous ranges are collapsed:
+
+```python
+cls._format_replicate_range((1, 2, 3))    # → "reps1-3"
+cls._format_replicate_range((1, 3, 5))    # → "reps1_3_5"
+```
+
+Useful in `aggregate()` for logging or naming output files:
+
+```python
+def aggregate(self, ctx: AggregateContext, results):
+    rep_str = self._format_replicate_range(ctx.replicates)
+    logger.info("Aggregating %s across %s", self.name, rep_str)
+    # ...
+```
+
+### Summary of helpers
+
+| Helper | Used in | Purpose |
+|--------|---------|---------|
+| `_build_plot_data()` | `plot()` | Collect per-condition paths from `PlotContext` |
+| `_check_cache()` | `compute_replicate()` | Load cached Pydantic result if valid |
+| `_format_replicate_range()` | `aggregate()`, logging | Compact replicate string for messages/filenames |
 
 ## Import Rules
 
@@ -328,10 +445,8 @@ figure style, DPI, or output behavior.
 
 ### Type and global fields
 
-`ctx.plot_settings` is either:
-
-- an instance of `PlotSettings`, or
-- `None` (for backward compatibility)
+`ctx.plot_settings` is always an instance of `PlotSettings` (the orchestrator
+guarantees this — it is never `None`).
 
 Global fields available on `PlotSettings` include:
 
@@ -365,14 +480,11 @@ when a specific analysis block is not configured; defaults are returned.
 
 ### Standard plugin pattern
 
-All plugins should follow this guard pattern:
+The orchestrator guarantees that `ctx.plot_settings` is always a valid
+`PlotSettings` instance — never `None`. Use it directly:
 
 ```python
 plot_settings = ctx.plot_settings
-if plot_settings is None:
-    from polyzymd.compare.config import PlotSettings
-
-    plot_settings = PlotSettings()
 ```
 
 ### Example using shared plotting helpers
@@ -393,11 +505,6 @@ def plot(self, ctx: PlotContext) -> list[Path]:
     import matplotlib.pyplot as plt
 
     plot_settings = ctx.plot_settings
-    if plot_settings is None:
-        from polyzymd.compare.config import PlotSettings
-
-        plot_settings = PlotSettings()
-
     theme = get_theme(plot_settings)
     colors = get_colors(len(ctx.conditions), plot_settings)
 
@@ -453,8 +560,9 @@ for full examples.
 ## Loading Results in `plot()`
 
 `PlotContext` provides paths and conditions but does **not** carry pre-loaded
-aggregated results. Use `self._load_aggregated_result(agg_dir)` — inherited
-from `Analysis` — to load each condition's data:
+aggregated results. The recommended approach is to use `_build_plot_data()` to
+collect per-condition paths, then `_load_aggregated_result()` to load each
+condition's data:
 
 ```python
 from pathlib import Path
@@ -465,11 +573,30 @@ from polyzymd.analyses.base import PlotContext
 def plot(self, ctx: PlotContext) -> list[Path]:
     import matplotlib.pyplot as plt
 
+    data, labels = self._build_plot_data(ctx)
+    for label in labels:
+        if label not in data or label == "__meta__":
+            continue
+        agg_dir = data[label]["aggregated_dir"]
+        summary = self._load_aggregated_result(agg_dir)
+        if summary is not None:
+            # summary is a dict or AggregatedResultClass instance
+            # ... plot data from summary ...
+            pass
+
+    return []
+```
+
+You can also loop through `ctx.conditions` directly for fine-grained control:
+
+```python
+def plot(self, ctx: PlotContext) -> list[Path]:
+    import matplotlib.pyplot as plt
+
     for cond in ctx.conditions:
         agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
         summary = self._load_aggregated_result(agg_dir)
         if summary is not None:
-            # summary is a dict or AggregatedResultClass instance
             # ... plot data from summary ...
             pass
 
@@ -639,7 +766,9 @@ designed in an earlier architecture stage.
 
 **You do NOT need to create files in `compare/` for a new plugin.** Keep your
 plotting logic in your plugin's `plot()` method and your formatting in
-`format()`. Everything can live in a single `__init__.py` within the plugin package.
+`format()`. Start with all logic in `__init__.py`; as your plugin grows, extract
+plotting functions into a `_plotters.py` module within the package (see
+{ref}`plotters-extraction` below).
 
 (shared-utilities)=
 ## Shared Utilities (`analyses/shared/`)
@@ -722,10 +851,12 @@ When creating a new analysis plugin:
 - [ ] Choose comparison path:
   - [ ] Default: implement `extract_metrics()`
   - [ ] Custom: override `compare()` returning a model with `.save()`
-- [ ] (Optional) `plot()` — matplotlib figures, load data via `self._load_aggregated_result()`
+- [ ] `plot()` — use `_build_plot_data()` + shared plotting helpers (`get_theme`, `apply_axis_style`, `save_figure`, `get_colors`)
 - [ ] (Optional) `format()` — CLI display via `format_scalar_comparison()`
+- [ ] (Optional) Use `_check_cache()` in `compute_replicate()` for result caching
+- [ ] (Optional) Use `_format_replicate_range()` for compact log messages
 - [ ] If using `AggregatedResultClass`, return matching result model instances
-- [ ] Tests: `tests/test_<name>_plugin.py`
+- [ ] Tests: `tests/test_<name>_plugin.py` (scaffold generates plot tests too)
 - [ ] Verify: `pixi run -e build pytest tests/test_<name>_plugin.py -v`
 
 ## What a Good Community PR Looks Like
@@ -738,6 +869,41 @@ A strong contribution usually includes:
 - figures only if they add scientific value
 
 Aim for a plugin that another MDAnalysis user can understand in one read.
+
+(plotters-extraction)=
+## Extracting Plotting to `_plotters.py`
+
+As a plugin grows, its `plot()` method may accumulate many helper functions.
+Established plugins extract these into a `_plotters.py` module within the
+plugin package:
+
+```text
+analyses/rmsf/
+├── __init__.py      # Analysis lifecycle (compute, aggregate, compare, plot)
+├── _plotters.py     # Plotting functions called by plot()
+├── _results.py      # Result models
+└── ...
+```
+
+The `plot()` method in `__init__.py` delegates to functions in `_plotters.py`:
+
+```python
+from ._plotters import plot_comparison_bars, plot_per_residue
+
+def plot(self, ctx: PlotContext) -> list[Path]:
+    data, labels = self._build_plot_data(ctx)
+    paths = []
+    paths.append(plot_comparison_bars(data, labels, ctx.output_dir, ctx.plot_settings))
+    paths.append(plot_per_residue(data, labels, ctx.output_dir, ctx.plot_settings))
+    return [p for p in paths if p is not None]
+```
+
+**When to extract:** Consider extracting when your plugin has 3+ plot
+functions or `__init__.py` exceeds ~500 lines. For simple plugins (like
+`catalytic_triad/`), keeping plotting inline is fine.
+
+**All 5 established plugins have `_plotters.py`:** rmsf, secondary_structure,
+distances, contacts, catalytic_triad.
 
 ## Anti-Patterns to Avoid
 
@@ -804,11 +970,11 @@ architecture constraints.
 
 | Plugin | Comparison path | Good example of |
 |--------|------------------|-----------------|
-| `secondary_structure/` | Default (`extract_metrics`) | Wrapping existing calculators and using typed result classes |
-| `rmsf/` | Default (`extract_metrics`) | Default scalar comparison plus plotting/formatting workflow |
-| `catalytic_triad/` | Default (`extract_metrics`) | Custom geometric computation inside plugin lifecycle |
-| `contacts/` | Custom (`compare` override) | Multi-metric comparison and condition filtering |
-| `distances/` | Custom (`compare` override) | Entry-table style comparison output |
+| `catalytic_triad/` | Default (`extract_metrics`) | Simplest lifecycle — minimal compute logic with `_plotters.py` for KDE/bar plots |
+| `rmsf/` | Default (`extract_metrics`) | Default scalar comparison with `_plotters.py` extraction |
+| `secondary_structure/` | Default (`extract_metrics`) | Wrapping existing calculators with `_plotters.py` and typed result classes |
+| `contacts/` | Custom (`compare` override) | Multi-metric comparison, condition filtering, large `_plotters.py` |
+| `distances/` | Custom (`compare` override) | Entry-table style comparison with `_plotters.py` extraction |
 
 ```{important}
 Do not interpret plugin differences as "simple" versus "complex" quality.
@@ -941,7 +1107,7 @@ class TestRgCompute:
 
 Note the patch target:
 `@patch("polyzymd.analyses.rg.TrajectoryLoader")`. This works because
-`TrajectoryLoader` is imported at module level in `rg.py`.
+`TrajectoryLoader` is imported at module level in `rg/__init__.py`.
 
 ### Testing `aggregate()`
 

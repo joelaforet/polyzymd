@@ -24,12 +24,10 @@ The choice of reference structure determines *what* you're measuring:
 
 ### Centroid (Default)
 
-```python
-calc = RMSFCalculator(
-    config,
-    reference_mode="centroid",  # Default
-    equilibration="100ns",
-)
+```yaml
+plugins:
+  rmsf:
+    reference_mode: "centroid"  # Default
 ```
 
 The **centroid mode** finds the most populated conformational state using
@@ -48,12 +46,10 @@ the trajectory that best represents where the protein spends most of its time.
 
 ### Average Structure
 
-```python
-calc = RMSFCalculator(
-    config,
-    reference_mode="average",
-    equilibration="100ns",
-)
+```yaml
+plugins:
+  rmsf:
+    reference_mode: "average"
 ```
 
 The **average mode** computes the mathematical mean of all atomic positions
@@ -72,13 +68,11 @@ and aligns the trajectory to this synthetic structure.
 
 ### Specific Frame
 
-```python
-calc = RMSFCalculator(
-    config,
-    reference_mode="frame",
-    reference_frame=500,  # 1-indexed frame number
-    equilibration="100ns",
-)
+```yaml
+plugins:
+  rmsf:
+    reference_mode: "frame"
+    reference_frame: 500
 ```
 
 The **frame mode** aligns to a user-specified frame. This is powerful for
@@ -98,19 +92,16 @@ For enzyme studies, you might want to find a frame where:
 - The substrate is positioned correctly
 - The active site is in the "reactive" configuration
 
-```python
+```yaml
 # First, identify the catalytically competent frame
 # (e.g., by analyzing hydrogen bond distances, active site geometry)
-catalytic_frame = 1523  # Frame where catalytic triad is aligned
+plugins:
+  rmsf:
+    reference_mode: "frame"
+    reference_frame: 1523
 
-# Then compute RMSF relative to that state
-calc = RMSFCalculator(
-    config,
-    reference_mode="frame",
-    reference_frame=catalytic_frame,
-    equilibration="100ns",
-)
-result = calc.compute(replicate=1)
+# Then run RMSF with the configured frame reference
+# polyzymd compare run rmsf -f comparison.yaml --eq-time 100ns
 
 # High RMSF values now indicate residues that frequently deviate
 # from the catalytically competent geometry
@@ -122,32 +113,30 @@ result = calc.compute(replicate=1)
 
 ````{tab-item} Python
 ```python
-calc = RMSFCalculator(
-    config,
-    reference_mode="external",
-    reference_file="/path/to/crystal_structure.pdb",
-    equilibration="100ns",
-)
-result = calc.compute(replicate=1)
+from polyzymd.analyses.discovery import get_analysis
+from polyzymd.analyses.orchestrator import run_comparison
+from polyzymd.compare.config import ComparisonConfig
+
+config = ComparisonConfig.from_yaml("comparison.yaml")
+analysis = get_analysis("rmsf")()
+run_comparison(analysis, config, equilibration="100ns")
 ```
 ````
 
-````{tab-item} YAML (analysis.yaml)
+````{tab-item} YAML (comparison.yaml)
 ```yaml
-rmsf:
-  enabled: true
-  selection: "protein and name CA"
-  reference_mode: "external"
-  reference_file: "/path/to/crystal_structure.pdb"
+plugins:
+  rmsf:
+    enabled: true
+    selection: "protein and name CA"
+    reference_mode: "external"
+    reference_file: "/path/to/crystal_structure.pdb"
 ```
 ````
 
 ````{tab-item} CLI
 ```bash
-polyzymd analyze rmsf -c config.yaml -r 1 \
-    --reference-mode external \
-    --reference-file /path/to/crystal_structure.pdb \
-    --eq-time 100ns
+polyzymd compare run rmsf -f comparison.yaml --eq-time 100ns
 ```
 ````
 
@@ -196,22 +185,19 @@ For enzyme-polymer studies, a crystal structure provides a physically
 grounded reference for measuring how well each condition maintains the
 catalytically competent geometry:
 
-```python
-# Use the crystal structure as the "gold standard" reference
-calc = RMSFCalculator(
-    config,
-    reference_mode="external",
-    reference_file="/path/to/enzyme_crystal.pdb",
-    selection="protein and name CA and resid 5:175",  # Trim flexible termini
-    equilibration="100ns",
-)
-result = calc.compute(replicate=1)
+```yaml
+# comparison.yaml
+plugins:
+  rmsf:
+    reference_mode: "external"
+    reference_file: "/path/to/enzyme_crystal.pdb"
+    selection: "protein and name CA and resid 5:175"
+
+# Then run:
+# polyzymd compare run rmsf -f comparison.yaml --eq-time 100ns
 
 # Lower RMSF = closer to crystal structure = more catalytically competent
-# Compare active site residues across conditions
-for resid, rmsf in zip(result.residue_ids, result.rmsf_per_residue):
-    if resid in [77, 133, 156]:  # Catalytic triad (e.g., LipA)
-        print(f"Residue {resid}: {rmsf:.2f} Å from crystal")
+# Compare active site residues across conditions from the saved output JSON
 ```
 
 ```{tip}
@@ -227,13 +213,11 @@ selection natively.
 Independently of the reference mode, you can control which atoms are used
 for the alignment superposition:
 
-```python
-calc = RMSFCalculator(
-    config,
-    reference_mode="centroid",
-    alignment_selection="protein and name CA",  # Default: backbone alignment
-    centroid_selection="protein",  # Default: all protein atoms for clustering
-)
+```yaml
+plugins:
+  rmsf:
+    reference_mode: "centroid"
+    selection: "protein and name CA"
 ```
 
 **Alignment selection** (`alignment_selection`):
@@ -253,7 +237,7 @@ calc = RMSFCalculator(
 Use the default centroid mode:
 
 ```bash
-polyzymd analyze rmsf -c config.yaml -r 1 --eq-time 100ns
+polyzymd compare run rmsf -f comparison.yaml --eq-time 100ns
 ```
 
 This gives you flexibility relative to the equilibrium state, which is
@@ -264,27 +248,23 @@ usually what you want for comparing flexibility across conditions or mutants.
 Consider using **external mode** with a crystal structure, or **frame mode**
 with a catalytically relevant frame from the trajectory:
 
-```python
+```yaml
 # Option 1 (Recommended): External crystal structure as reference
 # Best when you have a high-resolution crystal structure and want
 # condition-independent comparison
-calc = RMSFCalculator(
-    config,
-    reference_mode="external",
-    reference_file="/path/to/crystal_structure.pdb",
-    selection="protein and name CA and resid 5:175",
-    equilibration="100ns",
-)
+plugins:
+  rmsf:
+    reference_mode: "external"
+    reference_file: "/path/to/crystal_structure.pdb"
+    selection: "protein and name CA and resid 5:175"
 
 # Option 2: Specific trajectory frame as reference
 # Useful when the relevant conformation differs from the crystal structure
 # (e.g., ligand-induced conformational change during simulation)
-calc = RMSFCalculator(
-    config,
-    reference_mode="frame",
-    reference_frame=catalytic_frame_id,
-    equilibration="100ns",
-)
+# plugins:
+#   rmsf:
+#     reference_mode: "frame"
+#     reference_frame: <catalytic_frame_id>
 ```
 
 RMSF values will then tell you which residues deviate from the active

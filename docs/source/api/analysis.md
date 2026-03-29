@@ -8,8 +8,7 @@ All analysis code lives in `polyzymd.analyses`:
 |---------|------|
 | `polyzymd.analyses` | **Plugin system** — unified analysis lifecycle (compute → aggregate → compare → plot → format) |
 | `polyzymd.analyses.shared` | Reusable utilities (trajectory loading, alignment, autocorrelation, statistics) |
-| `polyzymd.analyses.<name>._calculator` | Per-condition calculators (RMSF, distances, catalytic triad) |
-| `polyzymd.analyses.<name>._results` | Pydantic result models for serialization |
+| `polyzymd.analyses.<name>._results` | Pydantic result models for serialization (existing plugins) |
 
 ## Plugin System
 

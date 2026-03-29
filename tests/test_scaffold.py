@@ -98,7 +98,7 @@ class TestGenerateScaffold:
 
         created = generate_scaffold("solvent_shell", tmp_path)
 
-        assert len(created) == 3
+        assert len(created) == 2
         for p in created:
             assert p.exists(), f"{p} was not created"
 
@@ -110,7 +110,6 @@ class TestGenerateScaffold:
         names = {p.name for p in created}
 
         assert "__init__.py" in names
-        assert "_comparison_results.py" in names
         assert "test_solvent_shell_plugin.py" in names
 
     def test_plugin_init_content(self, tmp_path: Path):
@@ -127,17 +126,20 @@ class TestGenerateScaffold:
         assert "def compute_replicate(" in text
         assert "def aggregate(" in text
         assert "def extract_metrics(" in text
+        assert "def plot(self, ctx: PlotContext)" in text
+        assert "_build_plot_data" in text
 
-    def test_comparison_results_content(self, tmp_path: Path):
+    def test_init_contains_result_models(self, tmp_path: Path):
+        """Result models (ReplicateResult, AggregatedResult) are inline in __init__.py."""
         (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
         (tmp_path / "tests").mkdir()
 
         generate_scaffold("solvent_shell", tmp_path)
-        cr = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell" / "_comparison_results.py"
-        text = cr.read_text()
+        init = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell" / "__init__.py"
+        text = init.read_text()
 
-        assert "class SolventShellComparisonResult(ComparisonResult):" in text
-        assert 'analysis_type: str = "solvent_shell"' in text
+        assert "class SolventShellReplicateResult(BaseModel):" in text
+        assert "class SolventShellAggregatedResult(BaseModel):" in text
 
     def test_test_file_content(self, tmp_path: Path):
         (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
@@ -151,6 +153,7 @@ class TestGenerateScaffold:
         assert "class TestComputeReplicate:" in text
         assert "class TestAggregate:" in text
         assert "class TestExtractMetrics:" in text
+        assert "class TestPlot:" in text
 
     def test_custom_class_name(self, tmp_path: Path):
         (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
@@ -178,14 +181,14 @@ class TestGenerateScaffold:
         generate_scaffold("solvent_shell", tmp_path)
         # Should not raise
         created = generate_scaffold("solvent_shell", tmp_path, force=True)
-        assert len(created) == 3
+        assert len(created) == 2
 
     def test_dry_run_creates_no_files(self, tmp_path: Path):
         (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
         (tmp_path / "tests").mkdir()
 
         created = generate_scaffold("solvent_shell", tmp_path, dry_run=True)
-        assert len(created) == 3
+        assert len(created) == 2
         for p in created:
             assert not p.exists(), f"{p} should not exist in dry-run mode"
 
@@ -207,14 +210,18 @@ class TestGeneratedCodeQuality:
         source = init.read_text()
         compile(source, str(init), "exec")  # raises SyntaxError if invalid
 
-    def test_generated_results_compiles(self, tmp_path: Path):
+    def test_generated_init_with_results_compiles(self, tmp_path: Path):
+        """Result models are inline in __init__.py; verify it still compiles."""
         (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
         (tmp_path / "tests").mkdir()
 
         generate_scaffold("solvent_shell", tmp_path)
-        cr = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell" / "_comparison_results.py"
-        source = cr.read_text()
-        compile(source, str(cr), "exec")
+        init = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell" / "__init__.py"
+        source = init.read_text()
+        # Must contain result models
+        assert "ReplicateResult" in source
+        assert "AggregatedResult" in source
+        compile(source, str(init), "exec")
 
     def test_generated_test_compiles(self, tmp_path: Path):
         (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)

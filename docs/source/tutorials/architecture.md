@@ -61,13 +61,14 @@ generation, resubmission, and recovery flows.
 ### `analysis/`
 
 Computes post-simulation metrics for individual conditions or trajectories.
-This is the **compute layer** with calculators like `RMSFCalculator`,
-`DistanceCalculator`, `ParallelContactAnalyzer`, etc.
+This is the **compute layer** with per-condition calculators like
+`ParallelContactAnalyzer` and `DistanceCalculator`.
 
 ### `analyses/`
 
 The **plugin system** — the primary extension point for contributors. Each
-analysis plugin wraps an `analysis/` calculator into a unified lifecycle:
+analysis plugin contains its own compute logic, aggregation, comparison,
+plotting, and formatting in a unified lifecycle:
 compute → aggregate → compare → plot → format.
 
 To add a new analysis, create a package in `analyses/<name>/` that subclasses
@@ -77,8 +78,9 @@ See {doc}`extending_analyses` for the full guide.
 ### `compare/`
 
 Provides shared comparison infrastructure: statistics (t-tests, ANOVA,
-Cohen's d), formatters, and configuration. Each analysis plugin keeps its own
-plotting logic in its `plot()` method.
+Cohen's d), formatters, and configuration. Established analysis plugins
+delegate plotting to `_plotters.py` modules within their package; the
+`plot()` method in `__init__.py` orchestrates what to plot.
 
 ### `core/` and `utils/`
 
@@ -137,7 +139,7 @@ roles separate helps maintain both code clarity and scientific interpretation.
 | add or validate config fields | `src/polyzymd/config/` |
 | change build behavior | `src/polyzymd/builders/` |
 | change run or restart behavior | `src/polyzymd/simulation/` and `src/polyzymd/workflow/` |
-| add an analysis type | `src/polyzymd/analyses/` (plugin, with private `_calculator.py` modules for computation) |
+| add an analysis type | `src/polyzymd/analyses/` (plugin package — subclass `Analysis` and implement `compute_replicate()` / `aggregate()`) |
 | add comparison statistics | `src/polyzymd/compare/` |
 | add or change CLI commands | `src/polyzymd/cli/` |
 

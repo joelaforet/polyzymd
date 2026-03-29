@@ -17,21 +17,35 @@ src/polyzymd/analyses/
 ├── _results_base.py        # Base result model (shared, stays at top level)
 ├── rmsf/                   # RMSF plugin sub-package
 │   ├── __init__.py         #   RMSFAnalysis plugin class
-│   ├── _calculator.py      #   RMSFCalculator
+│   ├── _plotters.py        #   Plotting functions (extracted from __init__.py)
 │   ├── _results.py         #   Result models
-│   └── _plotting.py        #   Legacy plot helpers
+│   └── _comparison_results.py  # Comparison result model
 ├── distances/              # Distances plugin sub-package
-├── catalytic_triad/        # Catalytic triad plugin sub-package
+│   ├── __init__.py         #   DistancesAnalysis + DistanceCalculator
+│   └── _plotters.py        #   Plotting functions
+├── catalytic_triad/        # Catalytic triad plugin sub-package (default-compare lifecycle)
+│   ├── __init__.py         #   CatalyticTriadAnalysis plugin class
+│   ├── _plotters.py        #   Plotting functions (KDE panels, threshold bars)
+│   └── _results.py         #   Result models
 ├── secondary_structure/    # Secondary structure plugin sub-package
+│   ├── __init__.py         #   SecondaryStructureAnalysis plugin class
+│   └── _plotters.py        #   Plotting functions
 ├── contacts/               # Contacts plugin sub-package
+│   ├── __init__.py         #   ContactsAnalysis plugin class
+│   ├── _plotters.py        #   Plotting functions (19 functions)
+│   ├── _results.py         #   Result models (widely imported — do not modify)
+│   ├── _comparison_results.py  # Comparison result model
+│   ├── _aggregator.py      #   Aggregation logic
+│   └── _formatters.py      #   CLI formatting
 ├── exposure/               # Exposure dynamics plugin sub-package
 ├── binding_free_energy/    # Binding free energy plugin (custom compare)
 └── polymer_affinity/       # Polymer affinity plugin (custom compare)
 ```
 
-The private `_calculator.py` modules (inside each sub-package) provide underlying computation that
-some plugins delegate to. New plugins can compute directly in
-`compute_replicate()` — there is no separate `analysis/` package.
+Each plugin is a self-contained package. All established plugins extract
+plotting functions into a `_plotters.py` module to keep `__init__.py` focused
+on the Analysis lifecycle. New plugins can start with all logic in
+`__init__.py` and extract plotting later as complexity grows.
 
 ### How to Add a New Analysis
 
@@ -66,13 +80,44 @@ class MyAnalysis(Analysis):
 | `plot()` | Returns `[]` (no plots) | Custom matplotlib visualizations |
 | `format()` | JSON dump or legacy formatter | Custom CLI output formatting |
 
+### Extracting Plotting to `_plotters.py`
+
+Established plugins separate plotting functions into a `_plotters.py` module
+within the plugin package. This keeps `__init__.py` focused on the lifecycle
+methods (`compute_replicate`, `aggregate`, `compare`) while plotting functions
+live in a dedicated file.
+
+**Current state** (all 5 established plugins have `_plotters.py`):
+- `rmsf/_plotters.py` — 8 plotting functions
+- `secondary_structure/_plotters.py` — 7 plotting functions + 3 constants
+- `distances/_plotters.py` — 10 plotting functions
+- `contacts/_plotters.py` — 18 functions (8 data loaders + 10 plotters)
+- `catalytic_triad/_plotters.py` — 7 functions (KDE panels, threshold bars, 2D KDE)
+
+**Pattern:** The plugin's `plot()` method calls functions from `_plotters.py`:
+
+```python
+# In __init__.py
+from ._plotters import plot_comparison_bars, plot_per_residue
+
+def plot(self, ctx: PlotContext) -> list[Path]:
+    data, labels = self._build_plot_data(ctx)
+    paths = []
+    paths.append(plot_comparison_bars(data, labels, ctx.output_dir, ctx.plot_settings))
+    paths.append(plot_per_residue(data, labels, ctx.output_dir, ctx.plot_settings))
+    return [p for p in paths if p is not None]
+```
+
+**New plugins** should start with plotting inline in `plot()` and extract to
+`_plotters.py` when the module exceeds ~500 lines or has 3+ plot functions.
+
 ### Two Comparison Paths
 
-**Simple path** (rg, RMSF, catalytic_triad, secondary_structure):
+**Simple path** (rmsf, catalytic_triad, secondary_structure):
 - Implement `extract_metrics()` to return `dict[str, MetricValue]`
-- Implement `_deserialize_result()` so the default `compare()` can load
-  aggregated JSON results
-- Framework handles t-tests, ANOVA, ranking, and formatting automatically
+- Set `AggregatedResultClass` if using Pydantic models (dict plugins work
+  automatically via `json.loads()`)
+- Framework handles loading, t-tests, ANOVA, ranking, and formatting automatically
 
 **Custom path** (contacts, distances, exposure, BFE, polymer_affinity):
 - Override `compare()` entirely — return your own Pydantic model with `.save()`
@@ -100,21 +145,57 @@ Simple plugins can skip manual saves and rely on the fallback. Plugins that
 want equilibration-aware caching should save explicitly (see `rmsf/` for the
 pattern).
 
-### Return Types: Dicts vs Pydantic Models
+### Return Types: Pydantic Models vs Dicts
 
-Both plain dicts and Pydantic `BaseModel` instances are supported as return
-types from `compute_replicate()` and `aggregate()`. Dicts are recommended
-for new plugins; Pydantic models are useful for complex results that need
-validation or NPZ sidecar storage.
+**Recommended:** Return typed Pydantic `BaseModel` instances from
+`compute_replicate()` and `aggregate()`. This gives you validation, type
+safety, and IDE autocomplete. Plain dicts are also supported for rapid
+prototyping.
 
-### Important: `_deserialize_result()` Footgun
+The orchestrator issues a warning if return types are not `BaseModel` or `dict`.
 
-If you use the **default `compare()` path**, the framework calls
-`_load_aggregated_result()` → `_deserialize_result()` to load your aggregated
-JSON. The base implementation raises `NotImplementedError`. You MUST either:
+### Result Deserialization
 
-1. Implement `_deserialize_result(path)` to load your aggregated result model, OR
-2. Override `compare()` entirely (then `_deserialize_result()` is never called)
+The default `compare()` path calls `_load_aggregated_result()` →
+`_deserialize_result()` to load aggregated results from disk. The base
+implementation handles both paths automatically:
+
+- If `AggregatedResultClass` is set: uses `.load(path)` or `.model_validate_json()`
+- Otherwise: uses `json.loads()` for plain-dict results
+
+You only need to override `_deserialize_result()` for non-standard
+deserialization (e.g. NPZ sidecars, custom migrations).
+
+### PlotContext.plot_settings Guarantee
+
+The orchestrator guarantees that `PlotContext.plot_settings` is always a valid
+`PlotSettings` instance — never `None`. Plugins should NOT guard against `None`:
+
+```python
+# CORRECT — trust the guarantee
+def plot(self, ctx: PlotContext) -> list[Path]:
+    theme = get_theme(ctx.plot_settings)
+
+# WRONG — unnecessary guard (removed from all plugins)
+def plot(self, ctx: PlotContext) -> list[Path]:
+    if ctx.plot_settings is None:
+        ...
+```
+
+### Loading Results in `plot()`
+
+Use the convenience method `self.load_condition_result(ctx, label)` to load
+aggregated results for a specific condition:
+
+```python
+for cond in ctx.conditions:
+    summary = self.load_condition_result(ctx, cond.label)
+    if summary is not None:
+        # ... plot data ...
+```
+
+This wraps the verbose `agg_dir / "aggregated"` + `_load_aggregated_result()`
+pattern.
 
 ## MetricType System (Autocorrelation Handling)
 
@@ -126,22 +207,14 @@ by how they should handle autocorrelated MD data:
 | **MEAN_BASED** | Use ALL frames | Correct SEM with N_eff = N/g | Contact fraction, triad proximity |
 | **VARIANCE_BASED** | Subsample by 2τ | Standard formula on independent samples | RMSF, fluctuation metrics |
 
-This classification lives in `analyses/shared/metric_type.py` and is used by
-the underlying calculators (`_calculator.py` inside each sub-package), not directly by the plugin
-system.
+This classification lives in `analyses/shared/metric_type.py` and is used
+internally by the compute logic within each plugin.
 
-## Compute Layer (Private `_calculator.py` Modules)
+## Key Classes
 
-The private modules inside `analyses/` provide calculators that some plugins
-delegate to:
-
-### Key Classes
-
-- **`RMSFCalculator`** — Per-residue RMSF calculation
-- **`DistanceCalculator`** — Inter-group distance tracking
-- **`CatalyticTriadAnalyzer`** — Catalytic triad integrity
-- **`ParallelContactAnalyzer`** — Polymer-protein contacts
-- **`SecondaryStructureCalculator`** — DSSP secondary structure
+- **`Analysis`** — Plugin ABC (in `analyses/base.py`)
+- **`ParallelContactAnalyzer`** — Polymer-protein contacts (in `contacts/`)
+- **`DistanceCalculator`** — Inter-group distance tracking (in `distances/__init__.py`)
 - **`MolecularSelector`** — Strategy for atom group selection
 - **`ContactCriteria`** — Strategy for contact definitions
 - **`MetricType`** — Autocorrelation handling strategy

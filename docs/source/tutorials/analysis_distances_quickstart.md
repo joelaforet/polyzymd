@@ -11,19 +11,14 @@ see the [Statistical Best Practices Guide](analysis_statistics_best_practices.md
 ## TL;DR
 
 ```bash
-# Single distance pair, single replicate
-polyzymd analyze distances -c config.yaml -r 1 --eq-time 10ns \
-    --pair "resid 77 and name OG : resid 133 and name NE2"
+# Configure distance pairs in comparison.yaml, then run:
+polyzymd compare run distances -f comparison.yaml --eq-time 10ns
 
-# Multiple pairs with contact threshold
-polyzymd analyze distances -c config.yaml -r 1-3 --eq-time 10ns \
-    --pair "resid 77 and name OG : resid 133 and name NE2" \
-    --pair "resid 133 and name NE2 : resid 156 and name OD1" \
-    --threshold 3.5
+# Run all enabled analyses in the same workflow
+polyzymd compare run-all -f comparison.yaml --eq-time 10ns
 
-# With plots
-polyzymd analyze distances -c config.yaml -r 1 --eq-time 10ns \
-    --pair "resid 77 and name OG : resid 133 and name NE2" --plot
+# Force recompute and machine-readable output
+polyzymd compare run distances -f comparison.yaml --eq-time 10ns --recompute --format json
 ```
 
 ## Prerequisites
@@ -31,7 +26,7 @@ polyzymd analyze distances -c config.yaml -r 1 --eq-time 10ns \
 Before running distance analysis, you need:
 
 1. **Completed production simulation(s)** - at least one replicate
-2. **Config file** - the same `config.yaml` used for the simulation
+2. **Comparison config** - `comparison.yaml` with conditions and plugin settings
 3. **Trajectory files** - in the scratch directory specified in config
 
 Verify your setup:
@@ -65,37 +60,44 @@ The distance analysis module computes:
 `````{tab-set}
 
 ````{tab-item} YAML (Recommended)
-For reproducible analysis, define distance pairs in `analysis.yaml`:
+For reproducible analysis, define distance pairs in `comparison.yaml`:
 
 ```yaml
-# analysis.yaml (alongside config.yaml)
-replicates: [1, 2, 3]
+# comparison.yaml
+name: "distance_quickstart"
+control: "no_polymer"
 
-defaults:
-  equilibration_time: "10ns"
+conditions:
+  - label: "no_polymer"
+    config: "configs/no_polymer.yaml"
+    replicates: [1, 2, 3]
+  - label: "with_polymer"
+    config: "configs/with_polymer.yaml"
+    replicates: [1, 2, 3]
 
-distances:
-  enabled: true
-  pairs:
-    - label: "Ser77-His156"
-      selection_a: "resid 77 and name OG"
-      selection_b: "resid 156 and name NE2"
-    - label: "His156-Asp133"
-      selection_a: "resid 156 and name ND1"
-      selection_b: "midpoint(resid 133 and name OD1 OD2)"
+plugins:
+  distances:
+    enabled: true
+    pairs:
+      - label: "Ser77-His156"
+        selection_a: "protein and resid 77 and name OG"
+        selection_b: "protein and resid 156 and name NE2"
+      - label: "His156-Asp133"
+        selection_a: "protein and resid 156 and name ND1"
+        selection_b: "midpoint(protein and resid 133 and name OD1 OD2)"
 ```
 
 Then run:
 
 ```bash
-# Initialize template (if starting fresh)
-polyzymd analyze init
+# Run distance analysis only
+polyzymd compare run distances -f comparison.yaml --eq-time 10ns
 
-# Run all enabled analyses (uses analysis.yaml)
-polyzymd analyze run
+# Run all enabled plugins in comparison.yaml
+polyzymd compare run-all -f comparison.yaml --eq-time 10ns
 
 # Force recompute
-polyzymd analyze run --recompute
+polyzymd compare run distances -f comparison.yaml --eq-time 10ns --recompute
 ```
 
 **Benefits:**
@@ -105,130 +107,99 @@ polyzymd analyze run --recompute
 ````
 
 ````{tab-item} CLI
-### Single Distance Pair
+### Single analysis run
 
 ```bash
-polyzymd analyze distances -c config.yaml -r 1 --eq-time 10ns \
-    --pair "resid 77 and name OG : resid 133 and name NE2"
+polyzymd compare run distances -f comparison.yaml --eq-time 10ns
 ```
 
-**Expected output:**
+**Expected behavior:**
 
 ```
-Loading configuration from: config.yaml
-Distance Analysis: MySimulation
-  Replicates: 1
+Loading comparison config from: comparison.yaml
+Running plugin: distances
   Equilibration: 10ns
-  Distance pairs: 1
-    1. resid 77 and name OG <-> resid 133 and name NE2
-
-Distance Analysis Complete
-  resid77_OG-resid133_NE2:
-    Mean: 3.42 ± 0.15 Å
-    Min:  2.61 Å
-    Max:  5.87 Å
+  Conditions: no_polymer, with_polymer
+Distance comparison complete
 ```
 
-### Multiple Pairs
+### Multiple pairs
 
-Specify `--pair` multiple times:
+Define multiple pairs in `comparison.yaml`, then run the same command:
 
 ```bash
-polyzymd analyze distances -c config.yaml -r 1 --eq-time 10ns \
-    --pair "resid 77 and name OG : resid 133 and name NE2" \
-    --pair "resid 133 and name NE2 : resid 156 and name OD1"
+polyzymd compare run distances -f comparison.yaml --eq-time 10ns
 ```
 
-### Multiple Replicates
+### All enabled analyses
 
-Aggregates results with SEM across replicates:
+Run distances plus any other enabled plugins:
 
 ```bash
-polyzymd analyze distances -c config.yaml -r 1-3 --eq-time 10ns \
-    --pair "resid 77 and name OG : resid 133 and name NE2"
-```
-
-**Output:**
-
-```
-Distance Analysis Complete (Aggregated)
-  Replicates: 1-3
-  resid77_OG-resid133_NE2:
-    Mean: 3.38 ± 0.08 Å (SEM across 3 replicates)
+polyzymd compare run-all -f comparison.yaml --eq-time 10ns
 ```
 ````
 
 ````{tab-item} Python
-Use `DistanceCalculator` for programmatic analysis:
+Use the analysis plugin workflow for reproducible results.
 
 ```python
-from polyzymd.config.schema import SimulationConfig
-from polyzymd.analyses.distances import DistanceCalculator
+from pathlib import Path
+import subprocess
 
-# Load configuration
-config = SimulationConfig.from_yaml("config.yaml")
-
-# Define distance pairs
-pairs = [
-    ("resid 77 and name OG", "resid 156 and name NE2"),
-    ("resid 156 and name ND1", "midpoint(resid 133 and name OD1 OD2)"),
-]
-
-# Create calculator
-calc = DistanceCalculator(
-    config=config,
-    pairs=pairs,
-    equilibration="10ns",
-    threshold=3.5,  # Optional: contact analysis
+# Distance analysis is configured in comparison.yaml and executed
+# through the compare workflow
+comparison_file = Path("comparison.yaml")
+subprocess.run(
+    [
+        "polyzymd",
+        "compare",
+        "run",
+        "distances",
+        "-f",
+        str(comparison_file),
+        "--eq-time",
+        "10ns",
+    ],
+    check=True,
 )
-
-# Single replicate
-result = calc.compute(replicate=1)
-
-for pr in result.pair_results:
-    print(f"{pr.pair_label}: {pr.mean_distance:.2f} ± {pr.sem_distance:.2f} Å")
-    if pr.fraction_below_threshold is not None:
-        print(f"  Contact fraction: {pr.fraction_below_threshold:.1%}")
-
-# Multiple replicates (aggregated with SEM)
-agg_result = calc.compute_aggregated(replicates=[1, 2, 3])
-
-for pr in agg_result.pair_results:
-    print(f"{pr.pair_label}: {pr.overall_mean:.2f} ± {pr.overall_sem:.2f} Å")
 ```
+
+`DistanceCalculator` is still part of `polyzymd.analyses.distances`, but it is an
+internal implementation detail used by the distances and catalytic triad plugins.
+For user workflows, prefer `comparison.yaml` + `polyzymd compare run`.
 ````
 
 `````
 
 ## Contact Threshold Analysis
 
-Add `--threshold` to compute the fraction of frames where the distance is below
-a cutoff (useful for hydrogen bond analysis, active site proximity, etc.):
+Set `threshold` in `comparison.yaml` to compute the fraction of frames where the
+distance is below a cutoff (useful for hydrogen bond analysis, active site proximity, etc.):
 
 `````{tab-set}
 
 ````{tab-item} YAML (Recommended)
 ```yaml
-# analysis.yaml
-distances:
-  enabled: true
-  threshold: 3.5  # Angstroms (H-bond cutoff)
-  pairs:
-    - label: "Ser77-His156"
-      selection_a: "resid 77 and name OG"
-      selection_b: "resid 156 and name NE2"
+# comparison.yaml
+plugins:
+  distances:
+    enabled: true
+    threshold: 3.5  # Angstroms (H-bond cutoff)
+    pairs:
+      - label: "Ser77-His156"
+        selection_a: "protein and resid 77 and name OG"
+        selection_b: "protein and resid 156 and name NE2"
 ```
 
 ```bash
-polyzymd analyze run
+polyzymd compare run distances -f comparison.yaml --eq-time 10ns
 ```
 ````
 
 ````{tab-item} CLI
 ```bash
-polyzymd analyze distances -c config.yaml -r 1-3 --eq-time 10ns \
-    --pair "resid 77 and name OG : resid 133 and name NE2" \
-    --threshold 3.5
+polyzymd compare run distances -f comparison.yaml --eq-time 10ns
 ```
 
 **Output:**
@@ -245,17 +216,24 @@ Distance Analysis Complete
 
 ````{tab-item} Python
 ```python
-calc = DistanceCalculator(
-    config=config,
-    pairs=pairs,
-    equilibration="10ns",
-    threshold=3.5,  # Contact cutoff in Angstroms
-)
+import subprocess
 
-result = calc.compute(replicate=1)
-for pr in result.pair_results:
-    if pr.fraction_below_threshold is not None:
-        print(f"{pr.pair_label}: {pr.fraction_below_threshold:.1%} below {pr.threshold} Å")
+# Threshold is read from plugins.distances.threshold in comparison.yaml
+subprocess.run(
+    [
+        "polyzymd",
+        "compare",
+        "run",
+        "distances",
+        "-f",
+        "comparison.yaml",
+        "--eq-time",
+        "10ns",
+        "--format",
+        "table",
+    ],
+    check=True,
+)
 ```
 ````
 
@@ -330,13 +308,22 @@ accept a hydrogen bond. This gives a single representative point instead of
 choosing arbitrarily between OD1/OD2 or OE1/OE2.
 ```
 
-### CLI Syntax
+### CLI execution
 
-On the command line, use quotes to protect the special syntax:
+Configure quoted selection strings in YAML, then run the plugin:
+
+```yaml
+plugins:
+  distances:
+    enabled: true
+    pairs:
+      - label: "His156-Asp133"
+        selection_a: "protein and resid 156 and name ND1"
+        selection_b: "midpoint(protein and resid 133 and name OD1 OD2)"
+```
 
 ```bash
-polyzymd analyze distances -c config.yaml -r 1 --eq-time 10ns \
-    --pair "protein and resid 156 and name ND1 : midpoint(protein and resid 133 and name OD1 OD2)"
+polyzymd compare run distances -f comparison.yaml --eq-time 10ns
 ```
 
 ## Output Files
@@ -396,91 +383,61 @@ Results are saved in your project's analysis directory:
 `````{tab-set}
 
 ````{tab-item} CLI
-Generate plots automatically with `--plot`:
+Generate plugin plots after running comparisons:
 
 ```bash
-polyzymd analyze distances -c config.yaml -r 1 --eq-time 10ns \
-    --pair "resid 77 and name OG : resid 133 and name NE2" \
-    --plot
+polyzymd compare run distances -f comparison.yaml --eq-time 10ns
+polyzymd compare plot-all -f comparison.yaml
 ```
 
 Plots are saved to `<projects_directory>/plots/distances/`.
 ````
 
 ````{tab-item} Python
-Use the plotting functions for custom figures:
+Plotting is handled by the distances plugin `plot()` method, which is invoked
+through the compare plotting workflow:
 
 ```python
-from polyzymd.analyses.distances._plotting import (
-    plot_distance_histogram,
-    plot_distance_timeseries,
-    plot_distance_comparison,
-    plot_contact_fraction_bar,
+import subprocess
+
+subprocess.run(
+    ["polyzymd", "compare", "plot-all", "-f", "comparison.yaml"],
+    check=True,
 )
-
-# Single distribution
-result = calc.compute(replicate=1)
-fig, ax = plot_distance_histogram(result.pair_results[0])
-fig.savefig("distance_histogram.png")
-
-# Time series (requires store_distributions=True)
-fig, ax = plot_distance_timeseries(result.pair_results[0])
-fig.savefig("distance_timeseries.png")
-
-# Compare multiple conditions
-results_no_poly = calc_no_poly.compute(replicate=1)
-results_with_poly = calc_with_poly.compute(replicate=1)
-
-fig, ax = plot_distance_comparison(
-    [results_no_poly.pair_results[0], results_with_poly.pair_results[0]],
-    labels=["No Polymer", "With Polymer"],
-)
-fig.savefig("distance_comparison.png")
 ```
 ````
 
 `````
 
-### Available Plot Types
+### Available plot types
 
-The CLI `--plot` flag generates histograms automatically. For other plot types,
-use the Python API:
+The distances plugin generates figures through `polyzymd compare plot-all`:
 
-| Function | Description | CLI | Python |
-|----------|-------------|:---:|:------:|
-| `plot_distance_histogram` | Distribution with optional threshold line | ✓ | ✓ |
-| `plot_distance_timeseries` | Distance over frame number | | ✓ |
-| `plot_distance_comparison` | Overlay multiple conditions | | ✓ |
-| `plot_contact_fraction_bar` | Bar chart of contact fractions | ✓* | ✓ |
-
-*\*Only generated when `--threshold` is specified with multiple replicates.*
-
-```{note}
-**Want more CLI plot options?** See [Issue #27](https://github.com/joelaforet/polyzymd/issues/27) 
-and [Issue #28](https://github.com/joelaforet/polyzymd/issues/28) for planned enhancements
-to automatic plot generation.
-```
+| Plot output | Description |
+|-------------|-------------|
+| `distance_kde_*.png` | KDE distribution overlay per configured distance pair |
+| `distance_threshold_bars.png` | Grouped bars for fraction below threshold across conditions |
+| `distance_state_*.png` | Per-pair above/below-threshold state summaries |
 
 ## Common Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-c, --config` | (required) | Path to config.yaml |
-| `-r, --replicates` | `1` | Which replicates to analyze |
+| `-f, --file` | `comparison.yaml` | Path to comparison configuration |
 | `--eq-time` | `0ns` | Equilibration time to skip |
-| `--pair` | (required) | Distance pair as `selection1 : selection2` |
-| `--threshold` | (none) | Contact cutoff in Angstroms |
-| `--plot` | off | Generate matplotlib figures |
-| `--recompute` | off | Ignore cached results |
-| `-o, --output-dir` | (auto) | Custom output location |
+| `--recompute` | off | Ignore cached results and recompute |
+| `--format` | `table` | Output format (`table` or `json`) |
 
 ### Replicate Specification
 
-| Format | Meaning |
-|--------|---------|
-| `-r 1` | Single replicate |
-| `-r 1-5` | Replicates 1 through 5 |
-| `-r 1,3,5` | Specific replicates |
+Replicates are configured per condition in `comparison.yaml`:
+
+```yaml
+conditions:
+  - label: "no_polymer"
+    config: "configs/no_polymer.yaml"
+    replicates: [1, 3, 5]
+```
 
 ## PBC-Aware Distances and Trajectory Alignment
 
@@ -514,35 +471,14 @@ it's always safer to keep it enabled (the default).
 
 ````{tab-item} YAML
 ```yaml
-# analysis.yaml
-distances:
-  use_pbc: true  # Default, can be omitted
-  pairs:
-    - label: "Ser77-His156"
-      selection_a: "resid 77 and name OG"
-      selection_b: "resid 156 and name NE2"
-```
-````
-
-````{tab-item} Python
-```python
-from polyzymd.analyses.distances import DistanceCalculator
-
-# PBC enabled by default
-calc = DistanceCalculator(
-    config=config,
-    pairs=pairs,
-    equilibration="10ns",
-    use_pbc=True,  # Default, can be omitted
-)
-
-# Disable PBC (not recommended)
-calc = DistanceCalculator(
-    config=config,
-    pairs=pairs,
-    equilibration="10ns",
-    use_pbc=False,
-)
+# comparison.yaml
+plugins:
+  distances:
+    use_pbc: true  # Default, can be omitted
+    pairs:
+      - label: "Ser77-His156"
+        selection_a: "protein and resid 77 and name OG"
+        selection_b: "protein and resid 156 and name NE2"
 ```
 ````
 
@@ -575,49 +511,16 @@ ensures you're aware that trajectory coordinates have been modified in-memory.
 
 ````{tab-item} YAML
 ```yaml
-# analysis.yaml
-distances:
-  align_trajectory: true  # Default
-  alignment_mode: centroid  # Default
-  alignment_selection: "protein and name CA"  # Default
-  pairs:
-    - label: "Ser77-His156"
-      selection_a: "resid 77 and name OG"
-      selection_b: "resid 156 and name NE2"
-```
-````
-
-````{tab-item} Python
-```python
-from polyzymd.analyses.distances import DistanceCalculator
-from polyzymd.analyses.shared.alignment import AlignmentConfig
-
-# Default: align to centroid using CA atoms
-calc = DistanceCalculator(
-    config=config,
-    pairs=pairs,
-    equilibration="10ns",
-)
-
-# Custom alignment: align to frame 500
-calc = DistanceCalculator(
-    config=config,
-    pairs=pairs,
-    equilibration="10ns",
-    alignment=AlignmentConfig(
-        reference_mode="frame",
-        reference_frame=500,
-        selection="protein and backbone",
-    ),
-)
-
-# Disable alignment (not recommended for most analyses)
-calc = DistanceCalculator(
-    config=config,
-    pairs=pairs,
-    equilibration="10ns",
-    alignment=AlignmentConfig(enabled=False),
-)
+# comparison.yaml
+plugins:
+  distances:
+    align_trajectory: true  # Default
+    alignment_mode: centroid  # Default
+    alignment_selection: "protein and name CA"  # Default
+    pairs:
+      - label: "Ser77-His156"
+        selection_a: "protein and resid 77 and name OG"
+        selection_b: "protein and resid 156 and name NE2"
 ```
 ````
 
@@ -645,7 +548,7 @@ clearing cached results.
 **Fix:**
 - Check residue numbering in your PDB vs. MDAnalysis (0-indexed vs 1-indexed)
 - Verify atom names match your topology: `protein and resid 77` to see available atoms
-- Use `polyzymd --debug analyze distances ...` for detailed selection diagnostics
+- Use `polyzymd --debug compare run distances -f comparison.yaml ...` for detailed diagnostics
 
 ### Very wide distance distribution
 
@@ -685,7 +588,7 @@ both measure atom-pair distances, but serve different purposes:
 | Feature | Distances | Catalytic Triad |
 |---------|-----------|-----------------|
 | **Focus** | Any atom pairs | Pre-defined catalytic geometry |
-| **Configuration** | `analysis.yaml` or CLI | `comparison.yaml` with conditions |
+| **Configuration** | `comparison.yaml` (`plugins.distances`) | `comparison.yaml` with conditions |
 | **Multi-condition** | Via `compare run distances` | Built-in condition comparison |
 | **Simultaneous contacts** | Not computed | Key metric (all pairs < threshold) |
 | **Use case** | Ad-hoc distance measurements | Structured enzyme comparisons |

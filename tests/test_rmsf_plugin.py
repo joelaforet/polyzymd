@@ -205,7 +205,7 @@ class TestComputeReplicate:
 
     @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
     @patch("polyzymd.analyses.rmsf.validate_equilibration_time", return_value=(True, ""))
-    @patch("polyzymd.analyses.rmsf.validate_config_hash")
+    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
     @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
     def test_computes_rmsf_inline(
@@ -268,7 +268,7 @@ class TestComputeReplicate:
 
     @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
     @patch("polyzymd.analyses.rmsf.validate_equilibration_time", return_value=(True, ""))
-    @patch("polyzymd.analyses.rmsf.validate_config_hash")
+    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
     @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
     def test_passes_custom_settings(
@@ -331,7 +331,7 @@ class TestComputeReplicate:
 
     @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
     @patch("polyzymd.analyses.rmsf.validate_equilibration_time", return_value=(True, ""))
-    @patch("polyzymd.analyses.rmsf.validate_config_hash")
+    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
     @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
     def test_handles_legacy_settings(
@@ -594,13 +594,15 @@ class TestPlot:
     """Test RMSFAnalysis.plot calls inlined private plotting functions."""
 
     def test_plot_returns_empty_on_no_conditions(self, rmsf_analysis, tmp_path):
+        from polyzymd.compare.config import PlotSettings
+
         ctx = PlotContext(
             conditions=[],
             analysis_dirs={},
             results_dir=tmp_path / "comparison",
             output_dir=tmp_path / "figures",
             settings=RMSFSettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         plots = rmsf_analysis.plot(ctx)
@@ -616,6 +618,8 @@ class TestPlot:
         condition,
         tmp_path,
     ):
+        from polyzymd.compare.config import PlotSettings
+
         # Setup mock returns
         mock_comp_plot.return_value = [tmp_path / "figures" / "rmsf_comparison.png"]
         mock_prof_plot.return_value = [tmp_path / "figures" / "rmsf_profile.png"]
@@ -629,7 +633,7 @@ class TestPlot:
             results_dir=tmp_path / "comparison",
             output_dir=tmp_path / "figures",
             settings=RMSFSettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         with patch("polyzymd.compare.config.PlotSettings") as MockPlotSettings:
@@ -651,6 +655,8 @@ class TestPlot:
         tmp_path,
     ):
         """Plotting failures should be caught, not crash the pipeline."""
+        from polyzymd.compare.config import PlotSettings
+
         analysis_dir = tmp_path / "analysis" / "no_polymer" / "rmsf"
         analysis_dir.mkdir(parents=True)
 
@@ -660,7 +666,7 @@ class TestPlot:
             results_dir=tmp_path / "comparison",
             output_dir=tmp_path / "figures",
             settings=RMSFSettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         with patch("polyzymd.compare.config.PlotSettings") as MockPlotSettings:
@@ -685,7 +691,7 @@ class TestRMSFLifecycle:
 
     @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
     @patch("polyzymd.analyses.rmsf.validate_equilibration_time", return_value=(True, ""))
-    @patch("polyzymd.analyses.rmsf.validate_config_hash")
+    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
     @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
     def test_run_analysis_lifecycle(

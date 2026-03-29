@@ -225,7 +225,7 @@ class TestComputeReplicate:
 
         return mock_traj, sliced
 
-    @patch("polyzymd.analyses.secondary_structure.validate_config_hash")
+    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.secondary_structure.compute_config_hash", return_value="abc123")
     @patch("polyzymd.analyses.secondary_structure.TrajectoryLoader")
     def test_computes_ss_inline(
@@ -296,7 +296,7 @@ class TestComputeReplicate:
         # Verify TrajectoryLoader was used
         MockLoader.assert_called_once_with(condition.sim_config)
 
-    @patch("polyzymd.analyses.secondary_structure.validate_config_hash")
+    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.secondary_structure.compute_config_hash", return_value="abc123")
     @patch("polyzymd.analyses.secondary_structure.TrajectoryLoader")
     def test_custom_chain_id(
@@ -592,6 +592,8 @@ class TestPlot:
 
     def _make_plot_ctx(self, tmp_path, conditions=None):
         """Helper to build a PlotContext."""
+        from polyzymd.compare.config import PlotSettings
+
         if conditions is None:
             conditions = [
                 Condition(
@@ -620,7 +622,7 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=tmp_path / "plots",
             settings=SecondaryStructureSettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
     def test_delegates_to_all_four_plotters(self, ss_analysis, tmp_path):
@@ -688,7 +690,7 @@ class TestPlot:
         assert plots == []
 
     def test_plot_creates_default_plot_settings(self, ss_analysis, tmp_path):
-        """When plot_settings is None, plot() should create a default PlotSettings."""
+        """Orchestrator guarantees non-None plot_settings; plugin passes it through."""
         ctx = self._make_plot_ctx(tmp_path)
 
         with (

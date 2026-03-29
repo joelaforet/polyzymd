@@ -687,13 +687,15 @@ class TestPlot:
     """Test CatalyticTriadAnalysis.plot delegates to inlined plotting helpers."""
 
     def test_plot_returns_empty_on_no_conditions(self, triad_analysis, tmp_path, default_settings):
+        from polyzymd.compare.config import PlotSettings
+
         ctx = PlotContext(
             conditions=[],
             analysis_dirs={},
             results_dir=tmp_path / "comparison",
             output_dir=tmp_path / "figures",
             settings=default_settings,
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         plots = triad_analysis.plot(ctx)
@@ -710,6 +712,8 @@ class TestPlot:
         tmp_path,
         default_settings,
     ):
+        from polyzymd.compare.config import PlotSettings
+
         # Setup mock return values
         mock_kde_fn.return_value = [tmp_path / "figures" / "triad_kde_panel.png"]
         mock_bars_fn.return_value = [tmp_path / "figures" / "triad_threshold_bars.png"]
@@ -723,7 +727,7 @@ class TestPlot:
             results_dir=tmp_path / "comparison",
             output_dir=tmp_path / "figures",
             settings=default_settings,
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         with patch("polyzymd.compare.config.PlotSettings") as MockPlotSettings:
@@ -758,6 +762,8 @@ class TestPlot:
         default_settings,
     ):
         """Plotter failures should be caught, not crash the pipeline."""
+        from polyzymd.compare.config import PlotSettings
+
         analysis_dir = tmp_path / "analysis" / "no_polymer" / "catalytic_triad"
         analysis_dir.mkdir(parents=True)
 
@@ -767,7 +773,7 @@ class TestPlot:
             results_dir=tmp_path / "comparison",
             output_dir=tmp_path / "figures",
             settings=default_settings,
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         with patch("polyzymd.compare.config.PlotSettings") as MockPlotSettings:

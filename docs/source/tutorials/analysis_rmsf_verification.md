@@ -31,18 +31,14 @@ $$
 
 ## Source Code
 
-The RMSF and RMSD calculations live in a single file:
+The RMSF and RMSD calculations now live in the RMSF plugin class:
 
-- **RMSF:** [`_compute_rmsf()`](https://github.com/joelaforet/polyzymd/blob/feature/analysis-module/src/polyzymd/analyses/rmsf/_calculator.py#L633-L683)
-  in `src/polyzymd/analyses/rmsf/_calculator.py` (lines 633--683).
-  Two-pass algorithm: (1) compute average positions from selected frames
-  (or use external reference), (2) accumulate squared deviations.
+- **RMSF + RMSD workflow:** `RMSFAnalysis.compute_replicate()` in
+  `src/polyzymd/analyses/rmsf/__init__.py`.
+  The method performs the same two-pass RMSF logic and internal RMSD
+  timeseries calculation for autocorrelation analysis.
 
-- **RMSD:** [`_compute_rmsd_timeseries()`](https://github.com/joelaforet/polyzymd/blob/feature/analysis-module/src/polyzymd/analyses/rmsf/_calculator.py#L613-L631)
-  in the same file (lines 613--631). Used internally for autocorrelation
-  analysis, not exposed to users.
-
-Both methods are plain NumPy with no MDAnalysis analysis class
+The implementation is plain NumPy with no MDAnalysis analysis class
 dependencies. The `MDAnalysis.analysis.rms.RMSF` and
 `MDAnalysis.analysis.rms.RMSD` imports that existed previously were
 confirmed dead code and removed in commit `19a247e`.

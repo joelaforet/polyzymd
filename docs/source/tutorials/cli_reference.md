@@ -718,73 +718,19 @@ Validating: /path/to/analysis.yaml
 }
 ```
 
-### polyzymd analyze rmsf
+### polyzymd analyze rmsf (removed)
 
-Compute per-residue flexibility from MD trajectories.
-
-```bash
-polyzymd analyze rmsf --config <path> --replicates <range> [OPTIONS]
-polyzymd analyze rmsf -c <path> -r 1-5 --eq-time 100ns
-```
-
-#### Options
-
-| Option | Short | Required | Default | Description |
-|--------|-------|----------|---------|-------------|
-| `--config` | `-c` | Yes | - | Path to YAML configuration file |
-| `--replicates` | `-r` | No | "1" | Replicate specification: "1-5", "1,3,5", or "1" |
-| `--eq-time` | - | No | "0ns" | Equilibration time to skip: "100ns", "5000ps" |
-| `--selection` | - | No | "protein and name CA" | MDAnalysis selection for RMSF atoms |
-| `--reference-mode` | - | No | "centroid" | Reference structure: "centroid", "average", "frame", or "external" |
-| `--reference-frame` | - | No | - | Frame index when --reference-mode=frame (1-indexed) |
-| `--reference-file` | - | No | - | Path to external PDB when --reference-mode=external |
-| `--alignment-selection` | - | No | "protein and name CA" | Selection for trajectory alignment |
-| `--centroid-selection` | - | No | "protein" | Selection for centroid finding |
-| `--plot` | - | No | false | Generate plot after analysis |
-| `--recompute` | - | No | false | Force recompute even if cached |
-| `--output-dir` | `-o` | No | auto | Custom output directory |
-
-#### Reference Modes
-
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| `centroid` | Most populated conformational state (K-Means) | Equilibrium flexibility analysis |
-| `average` | Mathematical mean structure | Pure thermal fluctuations |
-| `frame` | User-specified frame number | Functional state analysis |
-| `external` | External PDB file (e.g., crystal structure) | Catalytic competence, condition-independent comparison |
-
-#### Example
+`polyzymd analyze rmsf` was removed.
+Use `polyzymd compare run rmsf` instead:
 
 ```bash
-# Basic RMSF analysis
-polyzymd analyze rmsf -c config.yaml -r 1 --eq-time 10ns
-
-# Multiple replicates with plot
-polyzymd analyze rmsf -c config.yaml -r 1-3 --eq-time 10ns --plot
-
-# Custom reference structure
-polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode average
-
-# Specific frame as reference (e.g., catalytically competent)
-polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode frame --reference-frame 500
-
-# External crystal structure as reference (condition-independent)
-polyzymd analyze rmsf -c config.yaml -r 1 --reference-mode external \
-    --reference-file /path/to/crystal_structure.pdb
+polyzymd compare run rmsf [OPTIONS]
 ```
 
-#### Output
+This command runs RMSF comparison across conditions and requires a
+`plugins.rmsf` section in `comparison.yaml`.
 
-Results are saved in JSON format:
-
-```
-<projects_directory>/
-└── analysis/
-    └── rmsf/
-        ├── run_1/rmsf_eq10ns.json
-        ├── run_2/rmsf_eq10ns.json
-        └── aggregated/rmsf_reps1-3_eq10ns.json
-```
+For full options and examples, see [polyzymd compare run rmsf](#polyzymd-compare-run-rmsf).
 
 ---
 
@@ -974,44 +920,35 @@ polyzymd compare plot-all -a rmsf
 
 ---
 
-## polyzymd plot
+## Plotting comparisons (`polyzymd compare plot-all`)
 
-Standalone plotting for analysis results (separate from `compare plot`).
-
-```bash
-polyzymd plot COMMAND [OPTIONS]
-
-Commands:
-  rmsf       Plot and compare RMSF results
-  distances  Plot and compare distance analysis results
-```
-
-### polyzymd plot rmsf
-
-Plot RMSF analysis results, optionally comparing multiple conditions.
+The standalone `polyzymd plot` command group was removed.
+Use `polyzymd compare plot-all` for all comparison plotting workflows.
 
 ```bash
-polyzymd plot rmsf --inputs <files> [OPTIONS]
+polyzymd compare plot-all [OPTIONS]
 
 Options:
-  --inputs PATH...    One or more RMSF result JSON files [required]
-  --labels TEXT...    Labels for each input (same order as inputs)
-  -o, --output PATH   Output file path
-  --format TEXT       Output format: png, pdf, svg [default: png]
+  -f, --file PATH                 Path to comparison.yaml [default: comparison.yaml]
+  -o, --output-dir PATH           Override plot output directory
+  -a, --analysis TEXT             Plot one analysis type only
+  -p, --plot-type TEXT            Plot one registered plot type only
+  --list-available                List registered/available plots and exit
+  -q, --quiet                     Suppress INFO messages
+  --debug                         Enable DEBUG logging
 ```
 
 #### Example
 
 ```bash
-# Single condition
-polyzymd plot rmsf --inputs analysis/rmsf/run_1/rmsf_eq10ns.json
+# Generate all configured plots
+polyzymd compare plot-all
 
-# Compare two conditions
-polyzymd plot rmsf \
-    --inputs no_polymer/analysis/rmsf/aggregated/rmsf_reps1-3_eq10ns.json \
-             with_polymer/analysis/rmsf/aggregated/rmsf_reps1-3_eq10ns.json \
-    --labels "No Polymer" "With Polymer" \
-    -o comparison.png
+# Show available plots
+polyzymd compare plot-all --list-available
+
+# Plot only RMSF
+polyzymd compare plot-all -a rmsf
 ```
 
 ---

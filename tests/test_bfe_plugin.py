@@ -692,6 +692,7 @@ class TestPlot:
             BFESettings,
             BindingFreeEnergyAnalysis,
         )
+        from polyzymd.compare.config import PlotSettings
 
         analysis = BindingFreeEnergyAnalysis()
         mock_sim = MagicMock()
@@ -711,7 +712,7 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=output_dir,
             settings=BFESettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         with (
@@ -736,6 +737,7 @@ class TestPlot:
             BFESettings,
             BindingFreeEnergyAnalysis,
         )
+        from polyzymd.compare.config import PlotSettings
 
         analysis = BindingFreeEnergyAnalysis()
         mock_sim = MagicMock()
@@ -754,7 +756,7 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=tmp_path / "plots",
             settings=BFESettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         with (
@@ -777,6 +779,7 @@ class TestPlot:
             BFESettings,
             BindingFreeEnergyAnalysis,
         )
+        from polyzymd.compare.config import PlotSettings
 
         analysis = BindingFreeEnergyAnalysis()
         mock_sim = MagicMock()
@@ -795,7 +798,7 @@ class TestPlot:
             results_dir=tmp_path / "results",
             output_dir=tmp_path / "plots",
             settings=BFESettings(),
-            plot_settings=None,
+            plot_settings=PlotSettings(),
         )
 
         heatmap_path = tmp_path / "plots" / "bfe_heatmap.png"

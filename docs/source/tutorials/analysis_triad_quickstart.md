@@ -11,17 +11,17 @@ For proper interpretation and statistical best practices, see the
 ## TL;DR
 
 ```bash
-# Single replicate
-polyzymd analyze triad -c comparison.yaml --condition "No Polymer" -r 1 --eq-time 100ns
+# Run catalytic triad comparison (all conditions in comparison.yaml)
+polyzymd compare run triad -f comparison.yaml --eq-time 100ns
 
-# Multiple replicates (recommended)
-polyzymd analyze triad -c comparison.yaml --condition "No Polymer" --eq-time 100ns
+# Equivalent full plugin name
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 
-# All conditions in comparison.yaml
-polyzymd analyze triad -c comparison.yaml --eq-time 100ns
+# Run all enabled analyses
+polyzymd compare run-all -f comparison.yaml --eq-time 100ns
 
 # Force recompute (ignore cache)
-polyzymd analyze triad -c comparison.yaml --condition "No Polymer" --recompute
+polyzymd compare run triad -f comparison.yaml --recompute
 ```
 
 ## Prerequisites
@@ -159,13 +159,10 @@ Then run with minimal CLI arguments:
 
 ```bash
 # Analyze all conditions using settings from comparison.yaml
-polyzymd analyze triad -c comparison.yaml
-
-# Analyze specific condition
-polyzymd analyze triad -c comparison.yaml --condition "No Polymer"
+polyzymd compare run triad -f comparison.yaml
 
 # Force recompute (ignore cache)
-polyzymd analyze triad -c comparison.yaml --recompute
+polyzymd compare run triad -f comparison.yaml --recompute
 ```
 
 **Benefits of YAML configuration:**
@@ -175,52 +172,49 @@ polyzymd analyze triad -c comparison.yaml --recompute
 ````
 
 ````{tab-item} CLI
-### Single Replicate
+### Run configured comparison
 
 ```bash
-polyzymd analyze triad -c comparison.yaml --condition "No Polymer" -r 1 --eq-time 100ns
+polyzymd compare run triad -f comparison.yaml --eq-time 100ns
 ```
 
 **Expected output:**
 
 ```
-Loading comparison config from: comparison.yaml
-Triad: LipA_catalytic_triad
-  Description: Ser-His-Asp catalytic triad of Lipase A (Bacillus subtilis)
-  Pairs: 2
-    - Asp133-His156
-    - His156-Ser77
-  Threshold: 3.5 A
-  Equilibration: 100ns
+Comparison: polymer_triad_study
+Type: catalytic_triad
+Conditions: 2
+Equilibration: 100ns
 
-=== No Polymer ===
-  Replicates: [1]
+Saved result: analysis/comparison/catalytic_triad/comparison.json
 
-Triad Analysis Complete
-  Asp133-His156: 2.91 A (93.2% below threshold)
-  His156-Ser77: 3.12 A (78.4% below threshold)
-
-  Simultaneous contact: 74.1%
-    (SEM: +/-8.2%)
+Condition         Mean Contact     SEM
+------------------------------------------
+No Polymer        49.9%            27.3%
+With Polymer      87.3%             2.2%
 ```
 
-### Multiple Replicates (Recommended)
+### Replicates and conditions come from comparison.yaml
 
-Omit the `-r` flag to analyze all replicates defined for that condition:
+`polyzymd compare run triad` does not take `--condition` or `-r/--replicates`.
+Instead, set conditions and replicates directly in `comparison.yaml`:
+
+```yaml
+conditions:
+  - label: "No Polymer"
+    config: "../projects/noPoly/config.yaml"
+    replicates: [1, 2, 3]
+
+  - label: "With Polymer"
+    config: "../projects/withPoly/config.yaml"
+    replicates: [1, 2, 3]
+```
+
+Then run:
 
 ```bash
-polyzymd analyze triad -c comparison.yaml --condition "No Polymer" --eq-time 100ns
+polyzymd compare run triad -f comparison.yaml --eq-time 100ns
 ```
-
-### Analyzing All Conditions
-
-To analyze every condition in your comparison.yaml:
-
-```bash
-polyzymd analyze triad -c comparison.yaml --eq-time 100ns
-```
-
-This loops through all conditions and reports results for each.
 ````
 
 ````{tab-item} Python
@@ -228,41 +222,35 @@ Use the Python API for programmatic analysis and integration with custom
 workflows:
 
 ```python
+from polyzymd.analyses.discovery import get_analysis
+from polyzymd.analyses.orchestrator import run_comparison
 from polyzymd.compare.config import ComparisonConfig
-from polyzymd.analyses.catalytic_triad._calculator import CatalyticTriadAnalyzer
-from polyzymd.config.loader import load_config
 
 # Load comparison configuration
 comp_config = ComparisonConfig.from_yaml("comparison.yaml")
 
-# Get the first condition's simulation config
-condition = comp_config.conditions[0]  # "No Polymer"
-sim_config = load_config(condition.config)
+# Get the catalytic triad plugin by alias or canonical name
+analysis = get_analysis("triad")()
 
-# Create analyzer
-analyzer = CatalyticTriadAnalyzer(
-    config=sim_config,
-    triad_config=comp_config.catalytic_triad,
+# Run full triad workflow (compute -> aggregate -> compare -> plot)
+pipeline_result = run_comparison(
+    analysis,
+    comp_config,
+    recompute=False,
     equilibration="100ns",
 )
 
-# Single replicate analysis
-result = analyzer.compute(replicate=1)
-print(f"Simultaneous contact: {result.simultaneous_contact_fraction * 100:.1f}%")
+# Comparison output
+comparison = pipeline_result["comparison"]
+print(f"Ranking (best triad first): {comparison.ranking}")
 
-# Per-pair results
-for pair in result.pair_results:
-    print(f"  {pair.pair_label}: {pair.mean_distance:.2f} A "
-          f"({pair.fraction_below_threshold * 100:.1f}% below threshold)")
+# Aggregated per-condition outputs
+for condition_label, agg in pipeline_result["aggregated"].items():
+    contact_pct = agg.overall_simultaneous_contact * 100
+    sem_pct = agg.sem_simultaneous_contact * 100
+    print(f"{condition_label}: {contact_pct:.1f} ± {sem_pct:.1f}%")
 
-# Multi-replicate aggregation
-agg_result = analyzer.compute_aggregated(replicates=[1, 2, 3])
-print(f"\nAggregated: {agg_result.overall_simultaneous_contact * 100:.1f} "
-      f"+/- {agg_result.sem_simultaneous_contact * 100:.1f}%")
-
-# Save results
-result.save("triad_rep1.json")
-agg_result.save("triad_aggregated.json")
+print(f"Comparison JSON: {pipeline_result['comparison_path']}")
 ```
 
 **When to use Python:**
@@ -355,7 +343,7 @@ plugins:
 polyzymd compare run triad -f comparison.yaml
 
 # Output formats
-polyzymd compare run triad -f comparison.yaml --format markdown  # For docs
+polyzymd compare run triad -f comparison.yaml --format table     # Human-readable
 polyzymd compare run triad -f comparison.yaml --format json      # Machine-readable
 ```
 
@@ -370,19 +358,18 @@ See [Comparing Conditions](analysis_compare_conditions.md) for the full guide.
 ````
 
 ````{tab-item} CLI
-Run analysis on each condition separately, then run the comparison pipeline:
+Run the triad comparison directly (all conditions come from `comparison.yaml`):
 
 ```bash
-# Step 1: Analyze each condition
-polyzymd analyze triad -c comparison.yaml --condition "No Polymer"
-polyzymd analyze triad -c comparison.yaml --condition "With Polymer"
-
-# Step 2: Run comparison (uses cached triad results when available)
+# Run catalytic triad comparison
 polyzymd compare run triad -f comparison.yaml
+
+# Or run all enabled analyses in one pass
+polyzymd compare run-all -f comparison.yaml
 ```
 
-The comparison command automatically loads cached results if available,
-so you don't recompute triad analysis.
+The framework automatically handles all configured conditions and replicates,
+and reuses cached per-condition results unless `--recompute` is set.
 ````
 
 ````{tab-item} Python
@@ -512,20 +499,11 @@ Results are saved in your project's analysis directory:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-c, --comparison` | (required) | Path to comparison.yaml |
-| `--condition` | (all) | Specific condition label to analyze |
-| `-r, --replicates` | (from yaml) | Override replicate specification |
+| `-f, --file` | `comparison.yaml` | Path to comparison.yaml |
 | `--eq-time` | (from yaml) | Equilibration time to skip |
 | `--recompute` | off | Ignore cached results |
-| `-o, --output-dir` | (auto) | Custom output location |
-
-### Replicate Specification Formats
-
-| Format | Meaning |
-|--------|---------|
-| `-r 1` | Single replicate |
-| `-r 1-5` | Replicates 1 through 5 |
-| `-r 1,3,5` | Specific replicates |
+| `--format` | `table` | Output format: `table` or `json` |
+| `--list` | off | List available comparison types |
 
 ### Equilibration Time
 
@@ -534,10 +512,10 @@ conformations:
 
 ```bash
 # Skip first 100 ns
-polyzymd analyze triad -c comparison.yaml --eq-time 100ns
+polyzymd compare run triad -f comparison.yaml --eq-time 100ns
 
 # Skip first 10 ns (shorter simulations)
-polyzymd analyze triad -c comparison.yaml --eq-time 10ns
+polyzymd compare run triad -f comparison.yaml --eq-time 10ns
 ```
 
 ## Troubleshooting
@@ -603,4 +581,4 @@ for details.
 
 - **Understand the statistics**: [Best Practices Guide](analysis_triad_best_practices.md)
 - **Compare conditions**: [Comparing Conditions Guide](analysis_compare_conditions.md)
-- **Analyze flexibility**: `polyzymd analyze rmsf --help`
+- **Analyze flexibility**: `polyzymd compare run rmsf --help`

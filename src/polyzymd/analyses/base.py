@@ -7,7 +7,7 @@ caching, dependency ordering, and CLI wiring.
 
 How to Add a New Analysis
 -------------------------
-1. Create ``src/polyzymd/analyses/<name>.py`` (or a sub-package).
+1. Create ``src/polyzymd/analyses/<name>/`` as a sub-package.
 2. Define a ``Settings`` model (Pydantic v2 ``BaseModel``) as an inner class.
 3. Subclass :class:`Analysis` and implement the required methods.
 4. Done — the framework discovers it via ``pkgutil``.
@@ -28,8 +28,9 @@ Optional overrides (sensible defaults provided)::
 Notes
 -----
 The orchestrator auto-saves results returned by ``compute_replicate()``
-and ``aggregate()`` to disk.  Plugins should **not** save results
-manually — just return the data.
+and ``aggregate()`` to disk.  Simple plugins can rely on this fallback.
+Plugins that need equilibration-aware caching or custom filenames should
+save explicitly (see ``rmsf/`` for the pattern).
 
 See Also
 --------
@@ -245,25 +246,34 @@ class PlotContext:
         Where to write figures.
     settings : BaseModel
         Analysis-specific settings.
-    plot_settings : BaseModel | None
-        Global plot settings (theme, DPI, format, etc.).
+    plot_settings : PlotSettings
+        Global plot settings (theme, DPI, format, etc.).  The orchestrator
+        guarantees this is never ``None`` — a default ``PlotSettings()``
+        is provided when the comparison config has no ``plot_settings:``
+        section.
     comparison_path : Path | None
         Canonical comparison result path for this analysis.
 
     Notes
     -----
     ``PlotContext`` does **not** carry pre-loaded aggregated results.
-    Use ``self._load_aggregated_result(agg_dir)`` (inherited from
-    :class:`Analysis`) inside your ``plot()`` method to load each
-    condition's data from the ``aggregated/`` directory.  This keeps
-    memory usage low for analyses with large result objects.
+    Use :meth:`Analysis.load_condition_result` to load each condition's
+    data::
+
+        def plot(self, ctx: PlotContext) -> list[Path]:
+            for cond in ctx.conditions:
+                summary = self.load_condition_result(ctx, cond.label)
+                # ... plot data from summary ...
+
+    The lower-level :meth:`Analysis._load_aggregated_result` is also
+    available if you need to load from a custom directory.
 
     Example::
 
         def plot(self, ctx: PlotContext) -> list[Path]:
             for cond in ctx.conditions:
-                agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
-                summary = self._load_aggregated_result(agg_dir)
+                summary = self.load_condition_result(ctx, cond.label)
+                # ... plot data from summary ...
                 # ... plot data from summary ...
     """
 
@@ -272,7 +282,9 @@ class PlotContext:
     results_dir: Path
     output_dir: Path
     settings: Any
-    plot_settings: Any = None
+    plot_settings: Any = (
+        None  # Guaranteed non-None by orchestrator; default kept for dataclass ordering
+    )
     comparison_path: Path | None = None
 
 
@@ -890,7 +902,94 @@ class Analysis(ABC):
                 return cls.model_validate_json(path.read_text())
         return json.loads(path.read_text())
 
+    def load_condition_result(
+        self,
+        ctx: ComparisonContext | PlotContext,
+        label: str,
+    ) -> Any:
+        """Load the aggregated result for a condition from disk.
+
+        Convenience wrapper around :meth:`_load_aggregated_result` that
+        resolves the ``aggregated/`` directory from a context object.
+        Use this in :meth:`plot` or :meth:`compare` instead of manually
+        building the path::
+
+            def plot(self, ctx: PlotContext) -> list[Path]:
+                for cond in ctx.conditions:
+                    summary = self.load_condition_result(ctx, cond.label)
+                    # ... plot summary ...
+
+        Parameters
+        ----------
+        ctx : ComparisonContext or PlotContext
+            Context with ``analysis_dirs`` mapping.
+        label : str
+            Condition label (must exist in ``ctx.analysis_dirs``).
+
+        Returns
+        -------
+        dict or BaseModel or None
+            Loaded aggregated result, or ``None`` if not found.
+
+        Raises
+        ------
+        KeyError
+            If *label* is not in ``ctx.analysis_dirs``.
+        """
+        agg_dir = ctx.analysis_dirs[label] / "aggregated"
+        return self._load_aggregated_result(agg_dir)
+
     # === Utility methods (available to all subclasses) ===
+
+    def _check_cache(
+        self,
+        result_cls: type,
+        cache_path: Path,
+        *,
+        recompute: bool,
+        sim_config: Any = None,
+    ) -> Any | None:
+        """Load a cached result from disk if valid, otherwise return ``None``.
+
+        This consolidates the cache-checking pattern shared by plugins
+        that save per-replicate results to a custom filename::
+
+            result = self._check_cache(
+                RMSFResult, result_file,
+                recompute=ctx.recompute, sim_config=sim_config,
+            )
+            if result is not None:
+                return result
+
+        Parameters
+        ----------
+        result_cls : type
+            Pydantic model class with a ``.load(path)`` class method.
+        cache_path : Path
+            Path to the cached JSON result file.
+        recompute : bool
+            If ``True``, skip the cache unconditionally.
+        sim_config : SimulationConfig, optional
+            If provided, :func:`validate_config_hash` is called on
+            the loaded result's ``config_hash`` attribute.
+
+        Returns
+        -------
+        BaseModel | None
+            The loaded result on cache hit, or ``None`` on miss.
+        """
+        if recompute or not cache_path.exists():
+            return None
+
+        logger.info("Loading cached %s result from %s", self.name, cache_path)
+        result = result_cls.load(cache_path)
+
+        if sim_config is not None and hasattr(result, "config_hash"):
+            from polyzymd.analyses.shared.config_hash import validate_config_hash
+
+            validate_config_hash(result.config_hash, sim_config)
+
+        return result
 
     @staticmethod
     def replicate_result_path(output_dir: Path) -> Path:
@@ -901,6 +1000,77 @@ class Analysis(ABC):
     def aggregate_result_path(output_dir: Path) -> Path:
         """Return the canonical aggregated cache path."""
         return output_dir / "result.json"
+
+    @staticmethod
+    def _format_replicate_range(replicates: Sequence[int]) -> str:
+        """Format a replicate tuple as a compact string.
+
+        Contiguous ranges are collapsed: ``(1,2,3)`` → ``"reps1-3"``.
+        Non-contiguous: ``(1,3,5)`` → ``"reps1_3_5"``.
+
+        Parameters
+        ----------
+        replicates : Sequence[int]
+            Replicate numbers (need not be sorted).
+
+        Returns
+        -------
+        str
+            Compact replicate string, e.g. ``"reps1-5"`` or ``"reps1_3_5"``.
+        """
+        reps = sorted(replicates)
+        if reps == list(range(reps[0], reps[-1] + 1)):
+            return f"reps{reps[0]}-{reps[-1]}"
+        return "reps" + "_".join(map(str, reps))
+
+    @staticmethod
+    def _build_plot_data(
+        ctx: PlotContext,
+        *,
+        include_replicates: bool = False,
+    ) -> tuple[dict[str, Any], list[str]]:
+        """Build the ``data`` / ``labels`` dicts consumed by ``_plotters.py`` functions.
+
+        Consolidates the 8-12 line boilerplate repeated in every ``plot()``
+        method into a single call::
+
+            data, labels = self._build_plot_data(ctx, include_replicates=True)
+            if not labels:
+                return []
+
+        Parameters
+        ----------
+        ctx : PlotContext
+            Framework-provided plot context.
+        include_replicates : bool
+            If ``True``, each condition entry gets a ``"replicates"`` key
+            with the list of replicate numbers (needed by some plotters).
+
+        Returns
+        -------
+        tuple[dict[str, Any], list[str]]
+            ``(data, labels)`` ready to pass to plotter functions.
+            ``data`` always includes a ``"__meta__"`` key with
+            ``{"results_dir": ctx.results_dir}``.
+        """
+        data: dict[str, Any] = {}
+        labels: list[str] = []
+
+        for cond in ctx.conditions:
+            label = cond.label
+            labels.append(label)
+            analysis_dir = ctx.analysis_dirs.get(label)
+            if analysis_dir is not None:
+                entry: dict[str, Any] = {
+                    "analysis_dir": analysis_dir,
+                    "aggregated_dir": analysis_dir / "aggregated",
+                }
+                if include_replicates:
+                    entry["replicates"] = list(cond.replicates)
+                data[label] = entry
+
+        data["__meta__"] = {"results_dir": ctx.results_dir}
+        return data, labels
 
     def comparison_result_path(self, results_dir: Path) -> Path:
         """Return the canonical comparison cache path."""

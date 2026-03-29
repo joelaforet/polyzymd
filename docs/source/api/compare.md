@@ -30,14 +30,21 @@ plotting.
 
 ### Result Models
 
+Per-plugin comparison result models are defined as private modules within each
+analysis package. These are used by existing plugins and are part of the
+internal API:
+
 - `polyzymd.analyses.rmsf._comparison_results`
-- `polyzymd.analyses.catalytic_triad._comparison_results`
 - `polyzymd.analyses.contacts._comparison_results`
 - `polyzymd.analyses.distances._comparison_results`
 - `polyzymd.analyses.secondary_structure._comparison_results`
 - `polyzymd.analyses.binding_free_energy._comparison_results`
 - `polyzymd.analyses.exposure._comparison_results`
 - `polyzymd.analyses.polymer_affinity._comparison_results`
+
+New plugins should define result models inline in the plugin's `__init__.py`
+as Pydantic `BaseModel` subclasses. There is no need to create a separate
+`_comparison_results.py` module.
 
 ### Formatting Helpers
 

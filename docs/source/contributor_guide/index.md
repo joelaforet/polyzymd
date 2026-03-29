@@ -13,8 +13,8 @@ PolyzyMD, understand the codebase, or add new capabilities.
 ## Extension Workflows
 
 - **[Extend the Analysis Framework](../tutorials/extending_analyses.md)** —
-  how to add a new analysis type in one file, including compute, comparison,
-  formatting, and plotting
+  how to add a new analysis type as a plugin package, including compute,
+  comparison, formatting, and plotting
 
 ## Contributor Mindset
 

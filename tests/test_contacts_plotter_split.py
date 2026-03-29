@@ -1,15 +1,17 @@
-"""Tests for inlined contacts plotting functions.
+"""Tests for contacts plotting functions after extraction to _plotters.py.
 
-Verifies that all 11 private plotting functions and 7 shared helpers
-exist as module-level callables in the contacts plugin module.
+Verifies that all 11 private plotting functions are re-exported from
+the contacts plugin module (used by plot()), and that 7 shared helpers
+exist in the contacts._plotters module (private implementation details).
 """
 
 from __future__ import annotations
 
 import polyzymd.analyses.contacts as contacts_mod
+import polyzymd.analyses.contacts._plotters as plotters_mod
 
-# All 11 inlined plot functions
-INLINED_PLOT_FUNCTIONS = [
+# All 11 plot functions — re-exported from __init__.py (used in plot())
+PLOT_FUNCTIONS = [
     "_plot_contact_fraction_profile",
     "_plot_residence_time_profile",
     "_plot_cf_by_aa_class_bars",
@@ -23,8 +25,8 @@ INLINED_PLOT_FUNCTIONS = [
     "_plot_binding_preference_heatmap",
 ]
 
-# All 7 inlined shared helpers
-INLINED_SHARED_HELPERS = [
+# All 7 shared helpers — private to _plotters.py (data loaders + utilities)
+SHARED_HELPERS = [
     "_get_polymer_types_and_aa_classes",
     "_get_enrichment_value",
     "_get_enrichment_with_sem",
@@ -35,27 +37,35 @@ INLINED_SHARED_HELPERS = [
 ]
 
 
-def test_all_plot_functions_exist() -> None:
-    """All 11 inlined plot functions should be callable attributes of the module."""
-    for fn_name in INLINED_PLOT_FUNCTIONS:
+def test_all_plot_functions_exist_on_module() -> None:
+    """All 11 plot functions should be re-exported from contacts __init__.py."""
+    for fn_name in PLOT_FUNCTIONS:
         fn = getattr(contacts_mod, fn_name, None)
-        assert fn is not None, f"Missing plot function: {fn_name}"
+        assert fn is not None, f"Missing plot function on contacts module: {fn_name}"
+        assert callable(fn), f"{fn_name} is not callable"
+
+
+def test_all_plot_functions_exist_on_plotters() -> None:
+    """All 11 plot functions should be defined in contacts._plotters."""
+    for fn_name in PLOT_FUNCTIONS:
+        fn = getattr(plotters_mod, fn_name, None)
+        assert fn is not None, f"Missing plot function on _plotters: {fn_name}"
         assert callable(fn), f"{fn_name} is not callable"
 
 
 def test_all_shared_helpers_exist() -> None:
-    """All 7 inlined shared helpers should be callable attributes of the module."""
-    for fn_name in INLINED_SHARED_HELPERS:
-        fn = getattr(contacts_mod, fn_name, None)
-        assert fn is not None, f"Missing shared helper: {fn_name}"
+    """All 7 shared helpers should be callable in contacts._plotters."""
+    for fn_name in SHARED_HELPERS:
+        fn = getattr(plotters_mod, fn_name, None)
+        assert fn is not None, f"Missing shared helper on _plotters: {fn_name}"
         assert callable(fn), f"{fn_name} is not callable"
 
 
 def test_plot_function_count() -> None:
-    """There should be exactly 11 inlined plot functions."""
-    assert len(INLINED_PLOT_FUNCTIONS) == 11
+    """There should be exactly 11 plot functions."""
+    assert len(PLOT_FUNCTIONS) == 11
 
 
 def test_shared_helper_count() -> None:
-    """There should be exactly 7 inlined shared helpers."""
-    assert len(INLINED_SHARED_HELPERS) == 7
+    """There should be exactly 7 shared helpers."""
+    assert len(SHARED_HELPERS) == 7

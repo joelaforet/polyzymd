@@ -1,9 +1,10 @@
 """Scaffold generator for new analysis plugins.
 
 Creates the minimal file set needed for a new analysis plugin:
-- ``src/polyzymd/analyses/<name>/__init__.py``  — plugin class
-- ``src/polyzymd/analyses/<name>/_comparison_results.py``  — result model
-- ``tests/test_<name>_plugin.py``  — smoke tests
+- ``src/polyzymd/analyses/<name>/__init__.py``  — plugin class with compute,
+  aggregate, comparison, and plotting methods
+- ``tests/test_<name>_plugin.py``  — smoke tests covering discovery, compute,
+  aggregate, metrics, and plotting
 
 Usage::
 
@@ -104,6 +105,7 @@ def _plugin_init(name: str, cls: str) -> str:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, ClassVar, Sequence
 
@@ -112,11 +114,40 @@ from pydantic import BaseModel, Field
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
-    ComparisonContext,
     ComparisonResult,
     MetricValue,
+    PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.stats import format_scalar_comparison
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Result models
+# ---------------------------------------------------------------------------
+
+
+class {cls}ReplicateResult(BaseModel):
+    """Result from a single replicate of {name} analysis."""
+
+    replicate: int
+    value: float
+    example_parameter: str = ""
+
+
+class {cls}AggregatedResult(BaseModel):
+    """Aggregated {name} result across replicates."""
+
+    mean_value: float
+    sem_value: float
+    replicate_values: list[float]
+
+
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
 
 
 class {cls}Settings(BaseModel):
@@ -130,6 +161,11 @@ class {cls}Settings(BaseModel):
         default="dummy",
         description="Replace with real settings for your analysis.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Plugin
+# ---------------------------------------------------------------------------
 
 
 class {cls}Analysis(Analysis):
@@ -151,60 +187,136 @@ class {cls}Analysis(Analysis):
         self,
         ctx: ReplicateContext,
         replicate: int,
-    ) -> Any:
+    ) -> {cls}ReplicateResult:
         """Compute results for a single replicate.
 
         Replace with real per-replicate computation.
         """
-        return {{
-            "replicate": replicate,
-            "dummy_value": 1.0,
-            "example_parameter": ctx.settings.example_parameter,
-        }}
+        return {cls}ReplicateResult(
+            replicate=replicate,
+            value=1.0,
+            example_parameter=ctx.settings.example_parameter,
+        )
 
     def aggregate(
         self,
         ctx: AggregateContext,
         results: Sequence[Any],
-    ) -> Any:
+    ) -> {cls}AggregatedResult:
         """Aggregate replicate results for one condition.
 
         Replace with real aggregation logic.
         """
-        values = [float(r["dummy_value"]) for r in results]
+        values = [float(r.value if hasattr(r, "value") else r["value"]) for r in results]
         n = len(values)
         mean = sum(values) / n if n else 0.0
         sem = 0.0
         if n > 1:
             variance = sum((v - mean) ** 2 for v in values) / (n - 1)
             sem = (variance ** 0.5) / (n ** 0.5)
-        return {{
-            "mean_dummy_value": mean,
-            "sem_dummy_value": sem,
-            "replicate_values": values,
-        }}
+        return {cls}AggregatedResult(
+            mean_value=mean,
+            sem_value=sem,
+            replicate_values=values,
+        )
 
     # -- comparison ----------------------------------------------------------
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
         """Expose scalar metrics for the default comparison pipeline."""
-        data = summary if isinstance(summary, dict) else summary.model_dump()
+        if isinstance(summary, {cls}AggregatedResult):
+            data = summary.model_dump()
+        elif isinstance(summary, dict):
+            data = summary
+        else:
+            data = summary.model_dump()
         return {{
-            "dummy_value": MetricValue(
-                name="dummy_value",
-                mean=float(data["mean_dummy_value"]),
-                sem=float(data["sem_dummy_value"]),
+            "value": MetricValue(
+                name="value",
+                mean=float(data["mean_value"]),
+                sem=float(data["sem_value"]),
                 replicate_values=[float(v) for v in data["replicate_values"]],
                 higher_is_better=True,
                 direction_labels=("decreased", "unchanged", "increased"),
             )
         }}
 
-    def _deserialize_result(self, path: Path) -> dict[str, Any]:
-        """Load a cached result from disk."""
-        import json
+    # -- formatting ----------------------------------------------------------
 
-        return json.loads(path.read_text())
+    def format(self, result: Any, output_format: str = "text") -> str:
+        """Format comparison result for CLI display."""
+        if isinstance(result, ComparisonResult):
+            return format_scalar_comparison(
+                result,
+                title="{name.replace("_", " ").title()} Comparison",
+                metric_label="Mean Value",
+                metric_unit="",
+                metric_key="value",
+                output_format=output_format,
+                higher_is_better=True,
+            )
+        return super().format(result, output_format)
+
+    # -- plotting ------------------------------------------------------------
+
+    def plot(self, ctx: PlotContext) -> list[Path]:
+        """Generate comparison figures.
+
+        Uses ``_build_plot_data()`` from the ``Analysis`` base class to
+        load aggregated results for each condition, then creates a bar
+        chart.  Replace this with your own plotting logic.
+
+        As your plugin grows, extract plotting functions into a
+        ``_plotters.py`` module within the package.
+        """
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        from polyzymd.analyses.shared import get_theme, apply_axis_style, save_figure, get_colors, get_output_path
+
+        # _build_plot_data() collects analysis_dir / aggregated_dir per condition
+        data, labels = self._build_plot_data(ctx)
+        if not labels:
+            return []
+
+        # Collect per-condition aggregated values
+        means: list[float] = []
+        sems: list[float] = []
+        valid_labels: list[str] = []
+        for label in labels:
+            if label not in data or label == "__meta__":
+                continue
+            agg_dir = data[label]["aggregated_dir"]
+            summary = self._load_aggregated_result(agg_dir)
+            if summary is None:
+                continue
+            # Handle both dict and Pydantic model results
+            if isinstance(summary, dict):
+                means.append(float(summary.get("mean_value", 0.0)))
+                sems.append(float(summary.get("sem_value", 0.0)))
+            else:
+                means.append(float(summary.mean_value))
+                sems.append(float(summary.sem_value))
+            valid_labels.append(label)
+
+        if not valid_labels:
+            return []
+
+        plot_settings = ctx.plot_settings
+        theme = get_theme(plot_settings)
+        colors = get_colors(len(valid_labels), plot_settings)
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.bar(valid_labels, means, yerr=sems, capsize=5, color=colors[: len(valid_labels)])
+        apply_axis_style(ax, plot_settings, title="{name.replace("_", " ").title()} Comparison", ylabel="Value")
+
+        output_path = get_output_path(ctx.output_dir, "{name}_comparison", plot_settings)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        save_figure(fig, output_path, plot_settings)
+        plt.close(fig)
+        return [output_path]
 '''
 
 
@@ -240,10 +352,18 @@ import pytest
 from polyzymd.analyses.base import (
     AggregateContext,
     Condition,
+    MetricValue,
+    PlotContext,
     ReplicateContext,
 )
 from polyzymd.analyses.discovery import clear_cache, get_analysis
-from polyzymd.analyses.{name} import {cls}Analysis, {cls}Settings
+from polyzymd.analyses.{name} import (
+    {cls}AggregatedResult,
+    {cls}Analysis,
+    {cls}ReplicateResult,
+    {cls}Settings,
+)
+from polyzymd.compare.config import PlotSettings
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +379,11 @@ def analysis() -> {cls}Analysis:
 @pytest.fixture
 def settings() -> {cls}Settings:
     return {cls}Settings()
+
+
+@pytest.fixture
+def plot_settings() -> PlotSettings:
+    return PlotSettings()
 
 
 @pytest.fixture
@@ -294,7 +419,7 @@ class TestDiscovery:
 
 
 class TestComputeReplicate:
-    def test_returns_result(self, analysis, settings, condition, tmp_path):
+    def test_returns_typed_result(self, analysis, settings, condition, tmp_path):
         ctx = ReplicateContext(
             condition=condition,
             replicate=1,
@@ -306,9 +431,10 @@ class TestComputeReplicate:
         )
         result = analysis.compute_replicate(ctx, 1)
 
-        assert result["replicate"] == 1
-        assert result["dummy_value"] == pytest.approx(1.0)
-        assert result["example_parameter"] == "dummy"
+        assert isinstance(result, {cls}ReplicateResult)
+        assert result.replicate == 1
+        assert result.value == pytest.approx(1.0)
+        assert result.example_parameter == "dummy"
 
 
 # ---------------------------------------------------------------------------
@@ -325,16 +451,15 @@ class TestAggregate:
             equilibration="0ns",
             settings=settings,
         )
-        summary = analysis.aggregate(
-            ctx,
-            [
-                {{"replicate": 1, "dummy_value": 1.0}},
-                {{"replicate": 2, "dummy_value": 3.0}},
-            ],
-        )
+        results = [
+            {cls}ReplicateResult(replicate=1, value=1.0),
+            {cls}ReplicateResult(replicate=2, value=3.0),
+        ]
+        summary = analysis.aggregate(ctx, results)
 
-        assert summary["mean_dummy_value"] == pytest.approx(2.0)
-        assert summary["replicate_values"] == [1.0, 3.0]
+        assert isinstance(summary, {cls}AggregatedResult)
+        assert summary.mean_value == pytest.approx(2.0)
+        assert summary.replicate_values == [1.0, 3.0]
 
 
 # ---------------------------------------------------------------------------
@@ -343,17 +468,91 @@ class TestAggregate:
 
 
 class TestExtractMetrics:
-    def test_returns_dummy_metric(self, analysis):
-        summary = {{
-            "mean_dummy_value": 2.0,
-            "sem_dummy_value": 0.5,
-            "replicate_values": [1.0, 3.0],
-        }}
+    def test_returns_metric_value(self, analysis):
+        summary = {cls}AggregatedResult(
+            mean_value=2.0,
+            sem_value=0.5,
+            replicate_values=[1.0, 3.0],
+        )
         metrics = analysis.extract_metrics(summary)
 
-        assert "dummy_value" in metrics
-        assert metrics["dummy_value"].mean == pytest.approx(2.0)
-        assert metrics["dummy_value"].sem == pytest.approx(0.5)
+        assert "value" in metrics
+        assert isinstance(metrics["value"], MetricValue)
+        assert metrics["value"].mean == pytest.approx(2.0)
+        assert metrics["value"].sem == pytest.approx(0.5)
+
+
+# ---------------------------------------------------------------------------
+# Plot
+# ---------------------------------------------------------------------------
+
+
+class TestPlot:
+    def test_plot_produces_figure(self, analysis, settings, plot_settings, tmp_path):
+        """Plot with two conditions produces a comparison PNG."""
+        import json
+
+        conditions = []
+        analysis_dirs = {{}}
+
+        for label, mean, sem in [("Cond_A", 2.0, 0.3), ("Cond_B", 4.0, 0.5)]:
+            cond = Condition(
+                label=label,
+                config_path=tmp_path / "config.yaml",
+                replicates=(1, 2),
+                sim_config=MagicMock(),
+            )
+            conditions.append(cond)
+
+            agg_dir = tmp_path / label / "{name}" / "aggregated"
+            agg_dir.mkdir(parents=True)
+            (agg_dir / "result.json").write_text(
+                json.dumps({{
+                    "mean_value": mean,
+                    "sem_value": sem,
+                    "replicate_values": [mean - 0.1, mean + 0.1],
+                }}),
+                encoding="utf-8",
+            )
+            analysis_dirs[label] = tmp_path / label / "{name}"
+
+        ctx = PlotContext(
+            conditions=conditions,
+            analysis_dirs=analysis_dirs,
+            output_dir=tmp_path / "figures",
+            results_dir=tmp_path / "results",
+            settings=settings,
+            plot_settings=plot_settings,
+        )
+
+        paths = analysis.plot(ctx)
+
+        assert len(paths) == 1
+        assert paths[0].exists()
+        assert paths[0].suffix == ".png"
+
+    def test_plot_returns_empty_when_no_data(self, analysis, settings, plot_settings, tmp_path):
+        """Plot with no aggregated results returns empty list."""
+        cond = Condition(
+            label="Empty",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1,),
+            sim_config=MagicMock(),
+        )
+        analysis_dirs = {{"Empty": tmp_path / "Empty" / "{name}"}}
+        (tmp_path / "Empty" / "{name}" / "aggregated").mkdir(parents=True)
+
+        ctx = PlotContext(
+            conditions=[cond],
+            analysis_dirs=analysis_dirs,
+            output_dir=tmp_path / "figures",
+            results_dir=tmp_path / "results",
+            settings=settings,
+            plot_settings=plot_settings,
+        )
+
+        paths = analysis.plot(ctx)
+        assert paths == []
 '''
 
 
@@ -386,7 +585,6 @@ def generate_scaffold(
 
     files: dict[Path, str] = {
         analyses_dir / "__init__.py": _plugin_init(name, cls),
-        analyses_dir / "_comparison_results.py": _comparison_results(name, cls),
         tests_dir / f"test_{name}_plugin.py": _test_file(name, cls),
     }
 

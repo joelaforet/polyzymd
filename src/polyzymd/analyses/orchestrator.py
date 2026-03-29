@@ -49,6 +49,34 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("polyzymd.analyses")
 
+_ACCEPTABLE_RESULT_TYPES = (dict,)  # BaseModel checked separately (lazy import)
+
+
+def _check_result_type(result: Any, method: str, analysis_name: str) -> None:
+    """Warn if a plugin returns an unexpected type from a lifecycle method.
+
+    Accepted types: ``dict``, ``pydantic.BaseModel`` subclass.  Anything
+    else still works (the framework serialises via ``json.dumps``), but
+    gets a one-time warning so plugin authors catch it early.
+    """
+    if result is None:
+        return
+    if isinstance(result, _ACCEPTABLE_RESULT_TYPES):
+        return
+    # Lazy check for BaseModel to avoid import cost on every call
+    try:
+        from pydantic import BaseModel as _BM
+
+        if isinstance(result, _BM):
+            return
+    except ImportError:
+        pass
+    logger.warning(
+        f"{analysis_name}.{method}() returned {type(result).__name__} — "
+        f"expected dict or pydantic BaseModel.  The result will still be "
+        f"serialised, but typed results are strongly recommended."
+    )
+
 
 # ---------------------------------------------------------------------------
 # Replicate runner
@@ -119,6 +147,7 @@ def _run_replicates(
                 )
                 failed.append(rep)
                 continue
+            _check_result_type(result, "compute_replicate", analysis.name)
             if not result_path.exists():
                 analysis.save_result(result, result_path)
             results.append(result)
@@ -217,6 +246,7 @@ def run_analysis(
     )
 
     aggregated = analysis.aggregate(agg_ctx, results)
+    _check_result_type(aggregated, "aggregate", analysis.name)
     if aggregated is not None and not agg_result_path.exists():
         analysis.save_result(aggregated, agg_result_path)
     logger.info(f"  Aggregated {len(results)} replicates for '{condition.label}'")
@@ -413,13 +443,21 @@ def run_comparison(
     figures_dir = analysis.figures_output_dir(analysis_root.parent / "figures")
     figures_dir.mkdir(parents=True, exist_ok=True)
 
+    # Guarantee plot_settings is never None — plugins should not need
+    # to guard against it.
+    raw_plot_settings = getattr(config, "plot_settings", None)
+    if raw_plot_settings is None:
+        from polyzymd.compare.config import PlotSettings
+
+        raw_plot_settings = PlotSettings()
+
     plot_ctx = PlotContext(
         conditions=valid_conditions,
         analysis_dirs=analysis_dirs,
         results_dir=results_dir,
         output_dir=figures_dir,
         settings=settings,
-        plot_settings=getattr(config, "plot_settings", None),
+        plot_settings=raw_plot_settings,
         comparison_path=comparison_result_path,
     )
 

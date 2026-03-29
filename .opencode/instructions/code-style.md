@@ -23,7 +23,7 @@ import pandas as pd
 
 # local
 from polyzymd.config.schema import SimulationConfig
-from polyzymd.core.base import BaseAnalyzer
+from polyzymd.analyses.base import Analysis
 ```
 
 **Lazy imports** are mandatory for heavy dependencies. These packages must NOT
