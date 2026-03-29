@@ -121,8 +121,20 @@ project, or use the scaffold command to generate the boilerplate automatically
 (the scaffold includes compute, aggregate, comparison, plotting, and tests):
 
 ```bash
+# Default: dict-based results (simplest starting point)
 polyzymd new-analysis rg
+
+# Typed Pydantic result models (better for complex analyses)
+polyzymd new-analysis rg --style pydantic
 ```
+
+The `--style` flag controls how results are structured:
+
+- **`dict`** (default) — Uses plain dicts for replicate/aggregated results.
+  No result model classes needed. Best for getting started quickly.
+- **`pydantic`** — Generates typed `ReplicateResult` and `AggregatedResult`
+  Pydantic models with `AggregatedResultClass`. Better when you need
+  validation, IDE autocomplete, or NPZ sidecar storage.
 
 If creating manually:
 
@@ -893,7 +905,7 @@ stable even if internal module locations change.
 
 When creating a new analysis plugin:
 
-- [ ] File: `src/polyzymd/analyses/<name>/` (use `polyzymd new-analysis <name>` to scaffold)
+- [ ] File: `src/polyzymd/analyses/<name>/` (use `polyzymd new-analysis <name>` to scaffold; add `--style pydantic` for typed result models)
 - [ ] `name: ClassVar[str]` — unique, lowercase, used in CLI
 - [ ] `Settings` class — Pydantic v2 BaseModel with defaults
 - [ ] `compute_replicate()` — uses `TrajectoryLoader`, returns dict or Pydantic model
