@@ -98,7 +98,7 @@ class TestGenerateScaffold:
 
         created = generate_scaffold("solvent_shell", tmp_path)
 
-        assert len(created) == 2
+        assert len(created) == 3
         for p in created:
             assert p.exists(), f"{p} was not created"
 
@@ -110,6 +110,7 @@ class TestGenerateScaffold:
         names = {p.name for p in created}
 
         assert "__init__.py" in names
+        assert "_plot_settings.py" in names
         assert "test_solvent_shell_plugin.py" in names
 
     def test_plugin_init_content(self, tmp_path: Path):
@@ -129,6 +130,7 @@ class TestGenerateScaffold:
         assert "def extract_metrics(" in text
         assert "def plot(self, ctx: PlotContext)" in text
         assert "_build_plot_data" in text
+        assert "_plot_settings" in text  # imports plot settings registration
 
     def test_init_contains_result_models(self, tmp_path: Path):
         """Result models (ReplicateResult, AggregatedResult) are inline in __init__.py."""
@@ -167,6 +169,18 @@ class TestGenerateScaffold:
         assert "class MassDensityAnalysis(Analysis):" in text
         assert "class MassDensitySettings(BaseModel):" in text
 
+    def test_plot_settings_content(self, tmp_path: Path):
+        (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
+        (tmp_path / "tests").mkdir()
+
+        generate_scaffold("solvent_shell", tmp_path)
+        ps = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell" / "_plot_settings.py"
+        text = ps.read_text()
+
+        assert "@PlotSettingsRegistry.register" in text
+        assert "class SolventShellPlotSettings(BasePlotSettings):" in text
+        assert 'register("solvent_shell")' in text
+
     def test_refuses_overwrite_without_force(self, tmp_path: Path):
         (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
         (tmp_path / "tests").mkdir()
@@ -182,14 +196,14 @@ class TestGenerateScaffold:
         generate_scaffold("solvent_shell", tmp_path)
         # Should not raise
         created = generate_scaffold("solvent_shell", tmp_path, force=True)
-        assert len(created) == 2
+        assert len(created) == 3
 
     def test_dry_run_creates_no_files(self, tmp_path: Path):
         (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
         (tmp_path / "tests").mkdir()
 
         created = generate_scaffold("solvent_shell", tmp_path, dry_run=True)
-        assert len(created) == 2
+        assert len(created) == 3
         for p in created:
             assert not p.exists(), f"{p} should not exist in dry-run mode"
 

@@ -3,6 +3,8 @@
 Creates the minimal file set needed for a new analysis plugin:
 - ``src/polyzymd/analyses/<name>/__init__.py``  — plugin class with compute,
   aggregate, comparison, and plotting methods
+- ``src/polyzymd/analyses/<name>/_plot_settings.py``  — per-analysis plot
+  settings registered with ``PlotSettingsRegistry``
 - ``tests/test_<name>_plugin.py``  — smoke tests covering discovery, compute,
   aggregate, metrics, and plotting
 
@@ -119,6 +121,9 @@ from polyzymd.analyses.base import (
     ReplicateContext,
 )
 from polyzymd.analyses.stats import format_scalar_comparison
+
+# Trigger plot settings registration at import time.
+import polyzymd.analyses.{name}._plot_settings as _plot_settings  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +313,34 @@ class {cls}Analysis(Analysis):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         save_figure(fig, output_path, plot_settings)
         return [output_path]
+'''
+
+
+def _plot_settings_template(name: str, cls: str) -> str:
+    return f'''"""{name.replace("_", " ").title()} plot settings — registered with PlotSettingsRegistry at import time."""
+
+from __future__ import annotations
+
+from pydantic import Field
+
+from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
+
+
+@PlotSettingsRegistry.register("{name}")
+class {cls}PlotSettings(BasePlotSettings):
+    """{name.replace("_", " ").title()}-specific plot customization.
+
+    Add plot-related settings here. These are resolved from the
+    ``plot_settings:`` section in ``comparison.yaml`` under the
+    ``{name}:`` key.
+
+    Attributes
+    ----------
+    figsize : tuple[float, float]
+        Default figure size for comparison plots.
+    """
+
+    figsize: tuple[float, float] = (8, 6)
 '''
 
 
@@ -564,6 +597,7 @@ def generate_scaffold(
 
     files: dict[Path, str] = {
         analyses_dir / "__init__.py": _plugin_init(name, cls),
+        analyses_dir / "_plot_settings.py": _plot_settings_template(name, cls),
         tests_dir / f"test_{name}_plugin.py": _test_file(name, cls),
     }
 

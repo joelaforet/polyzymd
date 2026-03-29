@@ -122,7 +122,7 @@ def pairwise_comparisons(
         mv_b = metrics_by_condition[label_b]
 
         ttest = independent_ttest(mv_a.replicate_values, mv_b.replicate_values)
-        effect = cohens_d(mv_a.replicate_values, mv_b.replicate_values, rmsf_mode=False)
+        effect = cohens_d(mv_a.replicate_values, mv_b.replicate_values)
         pct = percent_change(mv_a.mean, mv_b.mean)
         direction = interpret_direction(pct, mv_a.direction_labels)
 

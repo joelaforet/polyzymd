@@ -1279,7 +1279,7 @@ class ContactsAnalysis(Analysis):
         coverage_b = data_b["coverage_per_replicate"]
 
         ttest = independent_ttest(coverage_a, coverage_b)
-        effect = cohens_d(coverage_a, coverage_b, rmsf_mode=False)
+        effect = cohens_d(coverage_a, coverage_b)
         pct = percent_change(summary_a.coverage_mean, summary_b.coverage_mean)
 
         # Direction: higher contact = increased
@@ -1314,7 +1314,7 @@ class ContactsAnalysis(Analysis):
         contact_b = data_b["contact_fraction_per_replicate"]
 
         ttest = independent_ttest(contact_a, contact_b)
-        effect = cohens_d(contact_a, contact_b, rmsf_mode=False)
+        effect = cohens_d(contact_a, contact_b)
         pct = percent_change(
             summary_a.mean_contact_fraction,
             summary_b.mean_contact_fraction,
