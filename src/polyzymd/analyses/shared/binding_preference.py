@@ -3929,11 +3929,22 @@ def compute_binding_preference_from_config(
         logger.debug(f"  {group_name}: {len(resids)} residues, {len(exposed_in_group)} exposed")
 
     # Step 3: Get polymer types
-    polymer_types = resolve_polymer_type_selections(universe, config.polymer_type_selections)
+    # Extract polymer chain ID from config.polymer_selection (e.g. "chainID C" → "C").
+    # Falls back to default "C" if the selection doesn't match the "chainID X" pattern.
+    _polymer_chain = "C"
+    _ps = getattr(config, "polymer_selection", "")
+    if _ps.startswith("chainID ") and len(_ps.split()) == 2:
+        _polymer_chain = _ps.split()[1]
+
+    polymer_types = resolve_polymer_type_selections(
+        universe, config.polymer_type_selections, polymer_chain=_polymer_chain
+    )
     logger.info(f"Polymer types for binding preference: {polymer_types}")
 
     # Step 4: Extract polymer composition for dual normalization
-    polymer_composition = extract_polymer_composition(universe, config.polymer_type_selections)
+    polymer_composition = extract_polymer_composition(
+        universe, config.polymer_type_selections, polymer_chain=_polymer_chain
+    )
 
     # Step 5: Compute binding preference
     result = compute_binding_preference(

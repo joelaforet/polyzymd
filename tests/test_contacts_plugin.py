@@ -1257,9 +1257,10 @@ class TestBindingPreference:
 
     def test_try_load_cached_bp_not_found(self, tmp_path):
         from polyzymd.analyses.base import Condition
-        from polyzymd.analyses.contacts import ContactsAnalysis
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            try_load_cached_binding_preference,
+        )
 
-        analysis = ContactsAnalysis()
         cond = Condition(
             label="test",
             config_path=Path("/tmp/config.yaml"),
@@ -1268,7 +1269,7 @@ class TestBindingPreference:
         )
 
         # Empty directory — no cached results
-        result = analysis._try_load_cached_bp(cond, tmp_path)
+        result = try_load_cached_binding_preference(cond, tmp_path)
         assert result is None
 
 

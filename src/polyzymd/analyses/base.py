@@ -8,7 +8,7 @@ caching, dependency ordering, and CLI wiring.
 How to Add a New Analysis
 -------------------------
 1. Create ``src/polyzymd/analyses/<name>/`` as a sub-package.
-2. Define a ``Settings`` model (Pydantic v2 ``BaseModel``) as an inner class.
+2. Define a ``Settings`` model (Pydantic v2 ``BaseModel``) as a class attribute.
 3. Subclass :class:`Analysis` and implement the required methods.
 4. Done — the framework discovers it via ``pkgutil``.
 
@@ -692,7 +692,11 @@ class Analysis(ABC):
 
     # === Optional methods (have sensible defaults) ===
 
-    def filter_conditions(self, conditions: list[Condition]) -> list[Condition]:
+    def filter_conditions(
+        self,
+        conditions: list[Condition],
+        settings: BaseModel | None = None,
+    ) -> list[Condition]:
         """Filter conditions before comparison.
 
         Override to exclude conditions where this analysis is not applicable
@@ -704,6 +708,11 @@ class Analysis(ABC):
         ----------
         conditions : list[Condition]
             All conditions from the comparison config.
+        settings : BaseModel or None
+            Resolved plugin settings from the comparison config.  The
+            orchestrator passes the fully-resolved ``Settings`` instance so
+            overrides can use user-customized values (e.g. polymer selection
+            strings) instead of class-level defaults.
 
         Returns
         -------
@@ -712,7 +721,7 @@ class Analysis(ABC):
         """
         return list(conditions)
 
-    def compare(self, ctx: ComparisonContext) -> ComparisonResult | None:
+    def compare(self, ctx: ComparisonContext) -> BaseModel | None:
         """Compare results across conditions.
 
         The default implementation uses :meth:`extract_metrics` to build
@@ -1036,7 +1045,7 @@ class Analysis(ABC):
         tuple[dict[str, Any], list[str]]
             ``(data, labels)`` ready to pass to plotter functions.
             ``data`` always includes a ``"__meta__"`` key with
-            ``{"results_dir": ctx.results_dir}``.
+            ``results_dir``, ``settings``, and ``control_label``.
         """
         data: dict[str, Any] = {}
         labels: list[str] = []

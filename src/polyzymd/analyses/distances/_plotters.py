@@ -181,15 +181,13 @@ def _plot_distance_threshold_bars(
     if not pair_labels:
         return []
 
-    n_conditions = len(aggregated)
     n_pairs = len(pair_labels)
-    colors = get_colors(n_conditions, plot_settings)
 
-    fractions = np.zeros((n_conditions, n_pairs))
-    errors = np.zeros((n_conditions, n_pairs))
+    fractions_list: list[list[float]] = []
+    errors_list: list[list[float]] = []
     valid_labels: list[str] = []
 
-    for cond_idx, label in enumerate(labels):
+    for label in labels:
         if label not in aggregated:
             continue
         valid_labels.append(label)
@@ -197,19 +195,30 @@ def _plot_distance_threshold_bars(
         agg_data = aggregated[label]
         pair_results = agg_data.get("pair_results", [])
 
-        for pair_idx, pair_result in enumerate(pair_results[:n_pairs]):
+        row_frac = []
+        row_err = []
+        for pair_result in pair_results[:n_pairs]:
             frac = pair_result.get("overall_fraction_below") or pair_result.get(
                 "fraction_below_threshold", 0
             )
             sem = pair_result.get("sem_fraction_below", 0)
-            fractions[cond_idx, pair_idx] = frac * 100
-            errors[cond_idx, pair_idx] = sem * 100
+            row_frac.append(frac * 100)
+            row_err.append(sem * 100)
+        # Pad if fewer pair results than expected
+        while len(row_frac) < n_pairs:
+            row_frac.append(0.0)
+            row_err.append(0.0)
+        fractions_list.append(row_frac)
+        errors_list.append(row_err)
+
+    n_conditions = len(valid_labels)
+    colors = get_colors(n_conditions, plot_settings)
 
     fig, ax = plt.subplots(figsize=plot_settings.distances.figsize)
 
     x = np.arange(n_pairs)
     series = [
-        (label, fractions[cond_idx].tolist(), errors[cond_idx].tolist())
+        (label, fractions_list[cond_idx], errors_list[cond_idx])
         for cond_idx, label in enumerate(valid_labels)
     ]
 

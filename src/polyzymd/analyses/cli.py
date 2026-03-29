@@ -1,11 +1,9 @@
 """Command-line interface for PolyzyMD analysis module.
 
 This module provides CLI commands for trajectory analysis:
-- `polyzymd analyze rmsf` - RMSF analysis
-- `polyzymd analyze distances` - Distance analysis
-- `polyzymd analyze triad` - Catalytic triad/active site analysis
-- `polyzymd plot rmsf` - Plot RMSF results
-- `polyzymd plot distances` - Plot distance results
+- ``polyzymd analyze init``      - Create analysis.yaml template
+- ``polyzymd analyze validate``  - Validate analysis.yaml
+- ``polyzymd analyze contacts``  - Polymer-protein contact analysis
 """
 
 from __future__ import annotations
@@ -105,15 +103,14 @@ def analyze() -> None:
 
     \b
     Workflow:
-    1. cd your_project/        # Directory with config.yaml
-    2. polyzymd analyze init   # Create analysis.yaml template
-    3. Edit analysis.yaml      # Configure analyses
-    4. polyzymd analyze run    # Run all enabled analyses
+    1. cd your_project/         # Directory with config.yaml
+    2. polyzymd analyze init    # Create analysis.yaml template
+    3. Edit analysis.yaml       # Configure analyses
+    4. polyzymd compare run     # Run cross-condition comparison
 
     \b
     Or run individual analyses:
-        polyzymd analyze rmsf -c config.yaml -r 1-5 --eq-time 100ns
-        polyzymd analyze distances -c config.yaml -r 1 --pair "sel1 : sel2"
+        polyzymd analyze contacts -c config.yaml -r 1-5 --eq-time 100ns
 
     \b
     Note: Analysis currently supports OpenMM-produced trajectories only
@@ -634,7 +631,15 @@ def contacts(
                 click.echo(f"  Protein groups: {', '.join(protein_groups.keys())}")
 
                 # Extract polymer composition (once - same for all replicates)
-                polymer_composition = extract_polymer_composition(universe, None)
+                # Derive polymer chain from --polymer-selection if it matches
+                # "chainID X" or "segid X" pattern; otherwise use default "C".
+                _cli_polymer_chain = "C"
+                _ps_parts = polymer_selection.strip().split()
+                if len(_ps_parts) == 2 and _ps_parts[0] in ("chainID", "segid"):
+                    _cli_polymer_chain = _ps_parts[1]
+                polymer_composition = extract_polymer_composition(
+                    universe, None, polymer_chain=_cli_polymer_chain
+                )
                 click.echo(
                     f"  Polymer composition: {polymer_composition.total_residues} residues, "
                     f"{polymer_composition.total_heavy_atoms} heavy atoms"

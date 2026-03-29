@@ -1031,8 +1031,11 @@ class DistancesAnalysis(Analysis):
         summaries: list[DistanceConditionSummary] = []
 
         for cond in ctx.conditions:
-            agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
-            agg_result = self._load_aggregated_result(agg_dir)
+            # Prefer in-memory results from orchestrator, fall back to disk
+            agg_result = ctx.aggregated_results.get(cond.label)
+            if agg_result is None:
+                agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
+                agg_result = self._load_aggregated_result(agg_dir)
 
             if agg_result is None:
                 logger.warning(f"No aggregated result found for '{cond.label}' — skipping.")

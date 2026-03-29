@@ -267,6 +267,8 @@ class DistanceComparisonResult(
         Version of polyzymd used (inherited from BaseComparisonResult).
     """
 
+    comparison_type: ClassVar[str] = "distances"
+
     metric: str = "mean_distance"
     name: str
     n_pairs: int
@@ -274,6 +276,8 @@ class DistanceComparisonResult(
     control_label: str | None = None
     conditions: list[DistanceConditionSummary]
     pairwise_comparisons: list[DistancePairwiseComparison]
+    # Override base anova field — distances uses per-pair ANOVA instead
+    anova: None = None  # type: ignore[assignment]
     anova_by_pair: list[DistancePairANOVA] | None = None
     ranking_by_pair: dict[str, list[str]]
     fraction_ranking_by_pair: dict[str, list[str]] | None = None
@@ -298,7 +302,7 @@ class DistanceComparisonResult(
         """
         return [c for c in self.pairwise_comparisons if c.pair_label == pair_label]
 
-    def get_comparison(
+    def get_pair_comparison(
         self, pair_label: str, condition_b: str
     ) -> DistancePairwiseComparison | None:
         """Get pairwise comparison for a specific pair and condition vs control.

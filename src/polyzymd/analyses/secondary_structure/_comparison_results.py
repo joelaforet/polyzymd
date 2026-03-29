@@ -15,7 +15,7 @@ Strand and coil fractions are included as additional fields.
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from pydantic import Field
 
@@ -120,6 +120,9 @@ class SSComparisonResult(BaseComparisonResult[SSConditionSummary, PairwiseCompar
     """
 
     comparison_type: ClassVar[str] = "secondary_structure"
+
+    # Fix metric to "helix_fraction" — enforce the documented invariant
+    metric: Literal["helix_fraction"] = "helix_fraction"
 
     # Override with specific types
     conditions: list[SSConditionSummary]

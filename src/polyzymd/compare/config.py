@@ -75,16 +75,26 @@ class PluginSettingsContainer(BaseModel):
             try:
                 analysis_cls = get_analysis(key_lower)
             except KeyError:
-                logger.warning(f"Unknown analysis type '{key}' - skipping")
-                continue
+                from polyzymd.analyses.discovery import discover_analyses
+
+                available = sorted(discover_analyses().keys())
+                raise ValueError(
+                    f"Unknown analysis plugin '{key}' in plugins section. "
+                    f"Available plugins: {available}"
+                ) from None
+
+            # Always store under the canonical name so that
+            # _resolve_settings() (which queries by analysis.name) finds it,
+            # even when the YAML key is an alias like "triad".
+            canonical_name = analysis_cls.name
 
             settings_class = analysis_cls.Settings
             if isinstance(value, settings_class):
-                parsed_settings[key_lower] = value
+                parsed_settings[canonical_name] = value
             elif isinstance(value, dict):
-                parsed_settings[key_lower] = settings_class.model_validate(value)
+                parsed_settings[canonical_name] = settings_class.model_validate(value)
             elif hasattr(value, "model_dump"):
-                parsed_settings[key_lower] = settings_class.model_validate(value.model_dump())
+                parsed_settings[canonical_name] = settings_class.model_validate(value.model_dump())
             else:
                 raise ValueError(
                     f"Invalid value for {key}: expected dict or {settings_class.__name__}"
@@ -697,7 +707,11 @@ class PlotSettings(BaseModel):
                         f"expected dict or {settings_class.__name__}"
                     )
             else:
-                logger.warning(f"Unknown plot settings key '{key}' — skipping")
+                raise ValueError(
+                    f"Unknown plot settings key '{key}'. "
+                    f"Expected a global field ({sorted(PlotSettings._GLOBAL_FIELDS)}) "
+                    f"or a registered analysis type."
+                )
 
         # ── Resolve theme from style preset + user overrides ──
         style = global_data.get("style", "publication")
@@ -903,8 +917,28 @@ class ComparisonConfig(BaseModel):
                 return cond
         raise KeyError(f"Condition '{label}' not found in: {[c.label for c in self.conditions]}")
 
+    @model_validator(mode="after")
+    def _validate_conditions(self) -> "ComparisonConfig":
+        """Validate conditions at construction time.
+
+        Checks:
+        - At least 2 conditions
+        - No duplicate labels
+        - Control label exists in conditions (if specified)
+        """
+        labels = [c.label for c in self.conditions]
+        if len(labels) != len(set(labels)):
+            dupes = [lbl for lbl in labels if labels.count(lbl) > 1]
+            raise ValueError(f"Duplicate condition labels: {set(dupes)}")
+        if self.control and self.control not in labels:
+            raise ValueError(f"Control '{self.control}' not in conditions: {labels}")
+        return self
+
     def validate_config(self) -> list[str]:
-        """Validate the comparison configuration.
+        """Validate the comparison configuration (runtime checks).
+
+        This method performs checks that cannot be done at construction time
+        (e.g. filesystem existence checks).
 
         Returns
         -------
@@ -916,15 +950,6 @@ class ComparisonConfig(BaseModel):
         # Check minimum conditions
         if len(self.conditions) < 2:
             errors.append("Need at least 2 conditions to compare")
-
-        # Check for duplicate labels
-        labels = [c.label for c in self.conditions]
-        if len(labels) != len(set(labels)):
-            errors.append("Duplicate condition labels found")
-
-        # Check control label exists
-        if self.control and self.control not in labels:
-            errors.append(f"Control '{self.control}' not in conditions: {labels}")
 
         # Check config files exist
         for cond in self.conditions:

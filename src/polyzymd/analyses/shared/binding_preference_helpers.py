@@ -4,11 +4,11 @@ Used by the contacts, binding_free_energy, and polymer_affinity analysis
 plugins to compute SASA-based binding preference enrichment.
 
 Workflow:
-1. Resolve enzyme PDB → compute SASA-based surface exposure
+1. Resolve enzyme PDB -> compute SASA-based surface exposure
 2. Resolve protein groups from surface exposure
 3. Extract polymer composition from topology
-4. For each replicate: load contacts_rep{N}.json → compute_binding_preference
-5. Aggregate across replicates → save aggregated result
+4. For each replicate: find contacts result (any naming convention) -> compute_binding_preference
+5. Aggregate across replicates -> save aggregated result
 
 Public functions
 ----------------
@@ -60,6 +60,63 @@ class CondProxy:
     def __init__(self, label: str, config: str) -> None:
         self.label = label
         self.config = config
+
+
+def _find_contact_result(analysis_dir: Path, rep: int) -> Path | None:
+    """Locate the per-replicate contacts JSON for binding preference.
+
+    ``compute_replicate`` saves contacts with a parameterised filename
+    (``contacts_eq<X>_cut<Y>_rep<N>.json``) and also mirrors the result
+    to the orchestrator's canonical path (``run_<N>/result.json``).  This
+    helper searches for all known naming conventions so that downstream
+    BP code works regardless of how the contacts were produced.
+
+    Search order (first hit wins):
+
+    1. ``run_{rep}/result.json`` — orchestrator canonical path
+    2. ``contacts_eq*_cut*_rep{rep}.json`` — parameterised filename
+    3. ``run_{rep}/contacts_eq*_cut*_rep{rep}.json`` — param inside run dir
+    4. ``contacts_rep{rep}.json`` — legacy / simplified filename
+    5. ``run_{rep}/contacts_rep{rep}.json`` — legacy inside run dir
+
+    Parameters
+    ----------
+    analysis_dir : Path
+        Analysis directory for this condition (contains ``run_N/``).
+    rep : int
+        Replicate number.
+
+    Returns
+    -------
+    Path or None
+        Path to the contacts result file, or ``None`` if not found.
+    """
+    # 1. Orchestrator canonical
+    canonical = analysis_dir / f"run_{rep}" / "result.json"
+    if canonical.exists():
+        return canonical
+
+    # 2. Parameterised name in analysis_dir
+    matches = sorted(analysis_dir.glob(f"contacts_eq*_cut*_rep{rep}.json"))
+    if matches:
+        return matches[-1]
+
+    # 3. Parameterised name inside run dir
+    matches = sorted((analysis_dir / f"run_{rep}").glob(f"contacts_eq*_cut*_rep{rep}.json"))
+    if matches:
+        return matches[-1]
+
+    # 4. Legacy name in analysis_dir
+    legacy = analysis_dir / f"contacts_rep{rep}.json"
+    if legacy.exists():
+        return legacy
+
+    # 5. Legacy name inside run dir
+    legacy_run = analysis_dir / f"run_{rep}" / f"contacts_rep{rep}.json"
+    if legacy_run.exists():
+        return legacy_run
+
+    return None
 
 
 def find_enzyme_pdb(sim_config: Any) -> Path | None:
@@ -151,6 +208,7 @@ def compute_condition_binding_preference(
     custom_protein_groups: dict[str, list[int]] | None = None,
     protein_partitions: dict[str, list[str]] | None = None,
     polymer_type_selections: dict[str, str] | None = None,
+    polymer_chain: str = "C",
 ) -> "AggregatedBindingPreferenceResult | None":
     """Compute binding preference for a condition from contacts data.
 
@@ -183,6 +241,9 @@ def compute_condition_binding_preference(
         Custom partitions as ``{partition_name: [group1, ...]}``.
     polymer_type_selections : dict or None, optional
         Custom polymer type selections as ``{name: "MDAnalysis selection"}``.
+    polymer_chain : str, optional
+        Chain ID for polymer auto-detection when *polymer_type_selections*
+        is None. Defaults to ``"C"`` (PolyzyMD chain convention).
 
     Returns
     -------
@@ -246,7 +307,9 @@ def compute_condition_binding_preference(
     if topology_path is not None:
         try:
             universe = mda.Universe(str(topology_path))
-            polymer_composition = extract_polymer_composition(universe, polymer_type_selections)
+            polymer_composition = extract_polymer_composition(
+                universe, polymer_type_selections, polymer_chain=polymer_chain
+            )
             logger.debug(
                 f"Extracted polymer composition for {cond.label}: "
                 f"{polymer_composition.total_residues} residues, "
@@ -264,9 +327,9 @@ def compute_condition_binding_preference(
     # --- Step 4: Compute binding preference per replicate ---
     rep_results = []
     for rep in cond.replicates:
-        contact_path = analysis_dir / f"contacts_rep{rep}.json"
-        if not contact_path.exists():
-            logger.warning(f"Contacts file not found: {contact_path}")
+        contact_path = _find_contact_result(analysis_dir, rep)
+        if contact_path is None:
+            logger.warning(f"Contacts file not found for {cond.label} rep{rep} in {analysis_dir}")
             continue
 
         try:

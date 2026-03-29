@@ -251,7 +251,7 @@ def format_distances_console_table(
                 lines.append(f"  -> {abs(pct_diff):.1f}% {direction} than control")
 
             # Check significance
-            comp = result.get_comparison(pair_label, best)
+            comp = result.get_pair_comparison(pair_label, best)
             if comp and comp.distance_significant:
                 lines.append(
                     f"  -> Significant (p={comp.distance_p_value:.4f}, "
@@ -474,7 +474,7 @@ def format_distances_markdown(
                 direction = "closer" if pct_diff < 0 else "farther"
                 lines.append(f"   - {abs(pct_diff):.1f}% {direction} than control")
 
-            comp = result.get_comparison(pair_label, best)
+            comp = result.get_pair_comparison(pair_label, best)
             if comp and comp.distance_significant:
                 lines.append(f"   - Statistically significant (p={comp.distance_p_value:.4f})")
 

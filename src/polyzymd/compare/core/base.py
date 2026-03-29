@@ -177,8 +177,11 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseC
     metric: str
     name: str
     control_label: str | None = None
-    conditions: list[Any]  # Will be overridden in subclasses with specific type
-    pairwise_comparisons: list[Any]  # Will be overridden in subclasses
+    # These fields are typed as list[Any] because Pydantic v2 does not
+    # resolve Generic type variables for field validation.  Subclasses
+    # override these with concrete types (e.g. list[RMSFConditionSummary]).
+    conditions: list[Any]
+    pairwise_comparisons: list[Any]
     anova: ANOVASummary | list[ANOVASummary] | None = None
     ranking: list[str]
     equilibration_time: str

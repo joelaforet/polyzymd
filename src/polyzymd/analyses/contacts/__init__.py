@@ -441,6 +441,9 @@ class ContactsSettings(BaseModel):
         Custom partitions as ``{partition_name: [group1, ...]}``.
     polymer_type_selections : dict[str, str] | None
         Custom polymer type selections as ``{name: "MDAnalysis selection"}``.
+    polymer_chain : str
+        Chain ID for polymer auto-detection when *polymer_type_selections*
+        is None. Defaults to ``"C"`` (PolyzyMD chain convention).
     fdr_alpha : float
         False discovery rate alpha for Benjamini-Hochberg correction.
     min_effect_size : float
@@ -501,6 +504,13 @@ class ContactsSettings(BaseModel):
     polymer_type_selections: dict[str, str] | None = Field(
         default=None,
         description="Custom polymer type selections as {name: 'MDAnalysis selection'}",
+    )
+    polymer_chain: str = Field(
+        default="C",
+        description=(
+            "Chain ID for polymer auto-detection when polymer_type_selections "
+            "is None. Defaults to 'C' (PolyzyMD chain convention)."
+        ),
     )
     enrichment_normalization: str = Field(
         default="residue",
@@ -737,7 +747,11 @@ class ContactsAnalysis(Analysis):
 
     # === filter_conditions() — exclude no-polymer conditions ===
 
-    def filter_conditions(self, conditions: list[Condition]) -> list[Condition]:
+    def filter_conditions(
+        self,
+        conditions: list[Condition],
+        settings: "BaseModel | None" = None,
+    ) -> list[Condition]:
         """Filter conditions to only those with polymer atoms.
 
         Conditions without polymer atoms (e.g. "No Polymer" controls) are
@@ -754,23 +768,26 @@ class ContactsAnalysis(Analysis):
         ----------
         conditions : list[Condition]
             All conditions from the comparison config.
+        settings : BaseModel or None
+            Resolved plugin settings from the orchestrator.
 
         Returns
         -------
         list[Condition]
             Conditions to include in analysis.
         """
+        resolved = settings if isinstance(settings, self.Settings) else self.Settings()
         valid: list[Condition] = []
 
         for cond in conditions:
             try:
-                if self._condition_has_polymer(cond):
+                if self._condition_has_polymer(cond, resolved):
                     valid.append(cond)
                 else:
                     logger.info(
                         f"  Excluding '{cond.label}': no polymer atoms found "
                         f"with selection "
-                        f"'{self._get_polymer_selection(cond)}'"
+                        f"'{resolved.polymer_selection}'"
                     )
             except Exception as e:
                 logger.warning(f"  Error checking condition '{cond.label}': {e} — including anyway")
@@ -989,18 +1006,9 @@ class ContactsAnalysis(Analysis):
 
     # === Private helpers: condition filtering ===
 
-    def _get_polymer_selection(self, cond: Condition) -> str:
-        """Get the polymer selection string from settings default.
-
-        During ``filter_conditions()`` the per-condition settings may not be
-        fully resolved yet (the framework only resolves settings immediately
-        before ``compute_replicate``).  We therefore use the class-level
-        ``Settings`` default, which already reflects the YAML-merged value
-        when the analysis was constructed via ``from_config()``.
-        """
-        return self.Settings().polymer_selection
-
-    def _condition_has_polymer(self, cond: Condition) -> bool:
+    def _condition_has_polymer(
+        self, cond: Condition, settings: "ContactsAnalysis.Settings"
+    ) -> bool:
         """Check whether a condition has polymer atoms.
 
         Checks:
@@ -1012,6 +1020,8 @@ class ContactsAnalysis(Analysis):
         ----------
         cond : Condition
             Condition to check.
+        settings : ContactsAnalysis.Settings
+            Resolved settings with ``polymer_selection``.
 
         Returns
         -------
@@ -1050,8 +1060,7 @@ class ContactsAnalysis(Analysis):
                 import MDAnalysis as mda
 
                 universe = mda.Universe(str(topo_path))
-                polymer_sel = self._get_polymer_selection(cond)
-                polymer_atoms = universe.select_atoms(polymer_sel)
+                polymer_atoms = universe.select_atoms(settings.polymer_selection)
                 if len(polymer_atoms) > 0:
                     logger.debug(f"  {cond.label} rep {rep}: {len(polymer_atoms)} polymer atoms")
                     return True
@@ -1412,10 +1421,6 @@ class ContactsAnalysis(Analysis):
         BindingPreferenceComparisonSummary or None
             Cross-condition comparison summary, or None if unavailable.
         """
-        from polyzymd.analyses.shared.binding_preference import (
-            AggregatedBindingPreferenceResult,
-            BindingPreferenceResult,
-        )
         from polyzymd.analyses.shared.binding_preference_helpers import (
             compute_condition_binding_preference,
             resolve_enzyme_pdb,
@@ -1437,8 +1442,7 @@ class ContactsAnalysis(Analysis):
 
                 # Try cached first
                 if not recompute:
-                    # Build a minimal ConditionConfig-like object for the helper
-                    cached = self._try_load_cached_bp(cond, analysis_dir)
+                    cached = try_load_cached_binding_preference(cond, analysis_dir)
                     if cached is not None:
                         condition_results[cond.label] = cached
                         if surface_threshold is None:
@@ -1451,7 +1455,7 @@ class ContactsAnalysis(Analysis):
                     logger.info(f"  Computing binding preference for {cond.label}...")
                     enzyme_pdb = resolve_enzyme_pdb(
                         enzyme_pdb_setting=getattr(settings, "enzyme_pdb_for_sasa", None),
-                        source_path=None,  # Plugin doesn't have source_path
+                        source_path=cond.config_path,
                         sim_config=cond.sim_config,
                     )
                     if enzyme_pdb is None or not enzyme_pdb.exists():
@@ -1461,9 +1465,19 @@ class ContactsAnalysis(Analysis):
                         )
                         continue
 
-                    # Build a minimal ConditionConfig-like object
-                    computed = self._compute_bp_for_condition(
-                        cond, analysis_dir, enzyme_pdb, settings
+                    computed = compute_condition_binding_preference(
+                        cond=cond,
+                        sim_config=cond.sim_config,
+                        analysis_dir=analysis_dir,
+                        enzyme_pdb=enzyme_pdb,
+                        threshold=getattr(settings, "surface_exposure_threshold", 0.2),
+                        include_default_aa_groups=getattr(
+                            settings, "include_default_aa_groups", True
+                        ),
+                        custom_protein_groups=getattr(settings, "protein_groups", None),
+                        protein_partitions=getattr(settings, "protein_partitions", None),
+                        polymer_type_selections=getattr(settings, "polymer_type_selections", None),
+                        polymer_chain=getattr(settings, "polymer_chain", "C"),
                     )
                     if computed is not None:
                         condition_results[cond.label] = computed
@@ -1486,189 +1500,6 @@ class ContactsAnalysis(Analysis):
 
         # Build comparison summary
         return self._build_binding_preference_summary(condition_results, surface_threshold)
-
-    def _try_load_cached_bp(
-        self,
-        cond: Condition,
-        analysis_dir: Path,
-    ) -> Any | None:
-        """Try to load cached binding preference results.
-
-        Parameters
-        ----------
-        cond : Condition
-            Condition to load.
-        analysis_dir : Path
-            Analysis directory for this condition.
-
-        Returns
-        -------
-        AggregatedBindingPreferenceResult | BindingPreferenceResult | None
-        """
-        import glob as glob_module
-
-        from polyzymd.analyses.shared.binding_preference import (
-            AggregatedBindingPreferenceResult,
-            BindingPreferenceResult,
-            aggregate_binding_preference,
-        )
-
-        # Try aggregated result first
-        agg_path = analysis_dir / "binding_preference_aggregated.json"
-        if agg_path.exists():
-            return AggregatedBindingPreferenceResult.load(agg_path)
-
-        # Try with rep range in name
-        agg_pattern = str(analysis_dir / "binding_preference_aggregated_reps*.json")
-        agg_matches = sorted(glob_module.glob(agg_pattern))
-        if agg_matches:
-            return AggregatedBindingPreferenceResult.load(agg_matches[-1])
-
-        # Try single replicate result
-        single_path = analysis_dir / "binding_preference.json"
-        if single_path.exists():
-            return BindingPreferenceResult.load(single_path)
-
-        # Try per-replicate results and aggregate them
-        rep_results = []
-        for rep in cond.replicates:
-            rep_path = analysis_dir / f"binding_preference_rep{rep}.json"
-            if rep_path.exists():
-                rep_results.append(BindingPreferenceResult.load(rep_path))
-
-        if rep_results:
-            return aggregate_binding_preference(rep_results)
-
-        return None
-
-    def _compute_bp_for_condition(
-        self,
-        cond: Condition,
-        analysis_dir: Path,
-        enzyme_pdb: Path,
-        settings: Any,
-    ) -> Any | None:
-        """Compute binding preference for a single condition.
-
-        Parameters
-        ----------
-        cond : Condition
-            Condition to compute.
-        analysis_dir : Path
-            Analysis directory containing contacts results.
-        enzyme_pdb : Path
-            Path to enzyme PDB for SASA calculation.
-        settings : ContactsSettings
-            Plugin settings.
-
-        Returns
-        -------
-        AggregatedBindingPreferenceResult or None
-        """
-        import MDAnalysis as mda
-
-        from polyzymd.analyses.contacts._results import ContactResult
-        from polyzymd.analyses.shared.binding_preference import (
-            PolymerComposition,
-            aggregate_binding_preference,
-            compute_binding_preference,
-            extract_polymer_composition,
-            resolve_protein_groups_from_surface_exposure,
-        )
-        from polyzymd.analyses.shared.surface_exposure import SurfaceExposureFilter
-
-        threshold = getattr(settings, "surface_exposure_threshold", 0.2)
-        include_defaults = getattr(settings, "include_default_aa_groups", True)
-        custom_groups = getattr(settings, "protein_groups", None)
-        protein_partitions = getattr(settings, "protein_partitions", None)
-        polymer_type_selections = getattr(settings, "polymer_type_selections", None)
-
-        # Compute surface exposure
-        try:
-            exposure_filter = SurfaceExposureFilter(threshold=threshold)
-            surface_exposure = exposure_filter.calculate(str(enzyme_pdb))
-        except Exception as e:
-            logger.warning(f"Failed to compute surface exposure for {cond.label}: {e}")
-            return None
-
-        # Resolve protein groups
-        protein_groups = resolve_protein_groups_from_surface_exposure(
-            surface_exposure,
-            include_default_aa_groups=include_defaults,
-            custom_protein_groups=custom_groups,
-        )
-        if not protein_groups:
-            logger.warning(f"No protein groups resolved for {cond.label}")
-            return None
-
-        # Extract polymer composition
-        polymer_composition = None
-        first_rep = cond.replicates[0] if cond.replicates else 1
-        run_dir = cond.sim_config.get_working_directory(first_rep)
-
-        # Use TrajectoryLoader's robust topology search rather than
-        # hardcoding "solvated_system.pdb".
-        try:
-            from polyzymd.analyses.shared.loader import TrajectoryLoader
-
-            loader = TrajectoryLoader(cond.sim_config)
-            topology_path = loader.find_topology(run_dir)
-        except (FileNotFoundError, ImportError):
-            topology_path = None
-
-        if topology_path is not None:
-            try:
-                universe = mda.Universe(str(topology_path))
-                polymer_composition = extract_polymer_composition(universe, polymer_type_selections)
-            except Exception as e:
-                logger.warning(f"Failed to extract polymer composition for {cond.label}: {e}")
-
-        if polymer_composition is None:
-            polymer_composition = PolymerComposition()
-
-        # Compute per-replicate
-        rep_results = []
-        for rep in cond.replicates:
-            contact_path = analysis_dir / f"contacts_rep{rep}.json"
-            if not contact_path.exists():
-                # Also check run_N subdirectory
-                contact_path = analysis_dir / f"run_{rep}" / f"contacts_rep{rep}.json"
-                if not contact_path.exists():
-                    logger.warning(f"Contacts file not found: {contact_path}")
-                    continue
-
-            try:
-                contact_result = ContactResult.load(contact_path)
-                bp_result = compute_binding_preference(
-                    contact_result=contact_result,
-                    surface_exposure=surface_exposure,
-                    protein_groups=protein_groups,
-                    polymer_composition=polymer_composition,
-                    protein_partitions=protein_partitions,
-                )
-                rep_results.append(bp_result)
-
-                rep_bp_path = analysis_dir / f"binding_preference_rep{rep}.json"
-                bp_result.save(rep_bp_path)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to compute binding preference for {cond.label} rep{rep}: {e}"
-                )
-                continue
-
-        if not rep_results:
-            return None
-
-        agg_result = aggregate_binding_preference(rep_results)
-        rep_range = f"{min(cond.replicates)}-{max(cond.replicates)}"
-        agg_path = analysis_dir / f"binding_preference_aggregated_reps{rep_range}.json"
-        agg_result.save(agg_path)
-        logger.info(
-            f"Computed binding preference for {cond.label}: "
-            f"{len(rep_results)} replicates, {len(protein_groups)} protein groups"
-        )
-
-        return agg_result
 
     def _build_binding_preference_summary(
         self,

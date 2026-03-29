@@ -280,7 +280,11 @@ class ExposureAnalysis(Analysis):
 
     # === Filter conditions (exclude no-polymer) ===
 
-    def filter_conditions(self, conditions: list[Condition]) -> list[Condition]:
+    def filter_conditions(
+        self,
+        conditions: list[Condition],
+        settings: "BaseModel | None" = None,
+    ) -> list[Condition]:
         """Exclude conditions without polymer (no chaperone events possible).
 
         A condition is excluded if:

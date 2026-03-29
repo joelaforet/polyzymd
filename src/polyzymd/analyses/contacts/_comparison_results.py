@@ -28,6 +28,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from polyzymd import __version__
+
 
 class BindingPreferenceComparisonEntry(BaseModel):
     """Cross-condition binding preference comparison for one (polymer_type, protein_group) pair.
@@ -260,6 +262,17 @@ class ContactsComparisonResult(BaseModel):
     Contains all condition summaries, aggregate statistical comparisons,
     and rankings.
 
+    .. note::
+
+        This class does **not** inherit from
+        :class:`~polyzymd.compare.core.base.BaseComparisonResult` because the
+        contacts plugin uses a dual-metric structure (coverage **and** mean
+        contact fraction) with separate rankings, ANOVA lists, and optional
+        binding-preference data.  That structure does not map to the
+        single-metric base class.  The ``save``/``load``/``get_condition``/
+        ``get_comparison`` helpers are identical to the base class and kept
+        inline for simplicity.
+
     Attributes
     ----------
     name : str
@@ -322,7 +335,7 @@ class ContactsComparisonResult(BaseModel):
     )
     equilibration_time: str
     created_at: datetime
-    polyzymd_version: str
+    polyzymd_version: str = __version__
 
     def save(self, path: Path | str) -> Path:
         """Save result to JSON file.

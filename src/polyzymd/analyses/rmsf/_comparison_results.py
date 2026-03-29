@@ -11,7 +11,7 @@ RMSF-specific fields.
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from pydantic import Field
 
@@ -90,6 +90,9 @@ class RMSFComparisonResult(BaseComparisonResult[RMSFConditionSummary, PairwiseCo
     """
 
     comparison_type: ClassVar[str] = "rmsf"
+
+    # Fix metric to "rmsf" — enforce the documented invariant
+    metric: Literal["rmsf"] = "rmsf"
 
     # Override with specific types
     conditions: list[RMSFConditionSummary]

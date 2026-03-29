@@ -115,6 +115,9 @@ class PolymerAffinitySettings(BaseModel):
         Custom partitions for mutually-exclusive group comparison.
     polymer_type_selections : dict | None
         Custom polymer type MDAnalysis selections.
+    polymer_chain : str
+        Chain ID for polymer auto-detection when *polymer_type_selections*
+        is None. Defaults to ``"C"`` (PolyzyMD chain convention).
     fdr_alpha : float
         FDR alpha for Benjamini-Hochberg correction.
     """
@@ -126,6 +129,7 @@ class PolymerAffinitySettings(BaseModel):
     protein_groups: dict[str, list[int]] | None = None
     protein_partitions: dict[str, list[str]] | None = None
     polymer_type_selections: dict[str, str] | None = None
+    polymer_chain: str = "C"
     fdr_alpha: float = 0.05
 
     @field_validator("surface_exposure_threshold")
@@ -263,7 +267,11 @@ class PolymerAffinityAnalysis(Analysis):
 
     # === Filter conditions ===
 
-    def filter_conditions(self, conditions: list[Condition]) -> list[Condition]:
+    def filter_conditions(
+        self,
+        conditions: list[Condition],
+        settings: "BaseModel | None" = None,
+    ) -> list[Condition]:
         """Exclude conditions without polymer (no affinity to score).
 
         No-polymer conditions (e.g. bare enzyme controls) have no polymer
@@ -536,6 +544,7 @@ class PolymerAffinityAnalysis(Analysis):
             custom_protein_groups=settings.protein_groups,
             protein_partitions=settings.protein_partitions,
             polymer_type_selections=settings.polymer_type_selections,
+            polymer_chain=settings.polymer_chain,
         )
 
         if bp is not None:

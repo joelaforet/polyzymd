@@ -1,10 +1,18 @@
-"""Configuration schema for analysis.yaml files.
+"""Configuration schema for analysis.yaml files (legacy CLI support).
 
-This module defines the YAML schema for analysis.yaml files that
-configure which analyses to run for a simulation.
+This module defines the YAML schema for analysis.yaml files used by the
+``polyzymd analyze init`` and ``polyzymd analyze validate`` CLI commands.
 
-The analysis.yaml must live alongside config.yaml (same directory)
-to maintain the config.yaml as the single source of truth.
+.. note::
+
+    This is a **legacy** configuration layer with a fixed schema of hardcoded
+    analysis names and ``enabled: bool`` flags.  The modern plugin system
+    (``analyses/discovery.py``, ``compare/config.py``) does NOT use this
+    module.  New analysis types added as plugins are discovered automatically
+    and do not need entries here.
+
+    The analysis.yaml format is still useful for single-simulation analysis
+    setup (as opposed to cross-condition comparison via ``comparison.yaml``).
 """
 
 from __future__ import annotations
@@ -19,6 +27,7 @@ from polyzymd.analyses.shared.constants import (
     DEFAULT_DISTANCE_THRESHOLD,
     DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
 )
+from polyzymd.analyses.shared.defaults import AnalysisDefaults
 from polyzymd.core.branding import prepend_file_header
 
 # =============================================================================
@@ -121,14 +130,6 @@ class CatalyticTriadConfig(BaseModel):
     threshold: float = DEFAULT_DISTANCE_THRESHOLD
     pairs: list[TriadPairConfig] = Field(default_factory=list)
 
-    @field_validator("pairs", mode="after")
-    @classmethod
-    def validate_pairs_if_enabled(cls, v: list[TriadPairConfig], info) -> list[TriadPairConfig]:
-        """Warn if enabled but no pairs defined."""
-        # Note: We can't access 'enabled' here easily, so validation
-        # happens at runtime in the CLI
-        return v
-
 
 class ContactsConfig(BaseModel):
     """Configuration for polymer-protein contact analysis.
@@ -211,27 +212,6 @@ class SecondaryStructureConfig(BaseModel):
 
     enabled: bool = False
     chain_id: str = "A"
-
-
-# =============================================================================
-# Main Analysis Configuration
-# =============================================================================
-
-
-class AnalysisDefaults(BaseModel):
-    """Default parameters applied to all analyses.
-
-    .. deprecated::
-        Relocated to ``polyzymd.analyses.shared.defaults.AnalysisDefaults``.
-        This class is kept as a re-export for backward compatibility.
-
-    Attributes
-    ----------
-    equilibration_time : str
-        Time to skip for equilibration (e.g., "10ns", "5000ps")
-    """
-
-    equilibration_time: str = "10ns"
 
 
 class AnalysisConfig(BaseModel):

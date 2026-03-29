@@ -359,19 +359,21 @@ def run_comparison(
     # Resolve settings from config
     settings = _resolve_settings(analysis, config)
 
-    # 1. Build conditions
+    # 1. Build conditions (loads SimulationConfig for each — required for
+    #    filter_conditions() which may inspect topologies)
     all_conditions = [Condition.from_condition_config(c) for c in config.conditions]
 
     # 2. Filter
-    valid_conditions = analysis.filter_conditions(all_conditions)
-    # Validate: filter_conditions must return a subset of the input, no duplicates
-    valid_set = {id(c) for c in valid_conditions}
-    input_set = {id(c) for c in all_conditions}
-    if not valid_set.issubset(input_set):
+    valid_conditions = analysis.filter_conditions(all_conditions, settings=settings)
+    # Validate: filter_conditions must return a subset of the input, no duplicates.
+    # Use identity (id) consistently — Condition objects may not define __eq__.
+    valid_ids = [id(c) for c in valid_conditions]
+    input_ids = {id(c) for c in all_conditions}
+    if not set(valid_ids).issubset(input_ids):
         logger.warning(
             f"{analysis.name}: filter_conditions() returned conditions not in the original list"
         )
-    if len(valid_set) != len(valid_conditions):
+    if len(set(valid_ids)) != len(valid_ids):
         logger.warning(
             f"{analysis.name}: filter_conditions() returned duplicate conditions — deduplicating"
         )
@@ -382,7 +384,8 @@ def run_comparison(
                 seen.add(id(c))
                 deduped.append(c)
         valid_conditions = deduped
-    excluded = [c for c in all_conditions if c not in valid_conditions]
+    valid_id_set = {id(c) for c in valid_conditions}
+    excluded = [c for c in all_conditions if id(c) not in valid_id_set]
 
     if excluded:
         logger.warning(
@@ -414,16 +417,19 @@ def run_comparison(
                 recompute=recompute,
             )
             # Only register successful conditions in analysis_dirs and results
-            analysis_dirs[cond.label] = cond_dir
             if agg is not None:
+                analysis_dirs[cond.label] = cond_dir
                 aggregated_results[cond.label] = agg
-            elif analysis.has_compute_stage:
-                # None from a compute-stage plugin means the condition failed
+            elif analysis.has_compute_stage and analysis.has_aggregate_stage:
+                # None from a plugin with both stages means the condition failed
                 logger.warning(
                     f"  {cond.label}: run_analysis returned None — "
                     "condition will be excluded from comparison."
                 )
                 failed_conditions.append(cond)
+            else:
+                # Compare-only or compute-only plugin — None is expected
+                analysis_dirs[cond.label] = cond_dir
             # else: compare-only plugin — None is expected, not a failure
         except Exception as e:
             logger.error(f"  {cond.label}: {type(e).__name__} — {e}")
