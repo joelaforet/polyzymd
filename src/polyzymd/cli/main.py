@@ -2174,6 +2174,12 @@ def info() -> None:
     help="PascalCase class prefix (default: auto-derived from NAME).",
 )
 @click.option(
+    "--style",
+    type=click.Choice(["dict", "pydantic"], case_sensitive=False),
+    default="dict",
+    help="Template style: 'dict' (default) for plain dicts, 'pydantic' for typed result models.",
+)
+@click.option(
     "--project-root",
     type=click.Path(exists=True, file_okay=False, resolve_path=True),
     default=None,
@@ -2194,6 +2200,7 @@ def info() -> None:
 def new_analysis(
     name: str,
     class_name: str | None,
+    style: str,
     project_root: str | None,
     force: bool,
     dry_run: bool,
@@ -2207,6 +2214,12 @@ def new_analysis(
     \b
       src/polyzymd/analyses/<NAME>/__init__.py    — plugin class
       tests/test_<NAME>_plugin.py                 — smoke tests
+
+    Styles:
+
+    \b
+      dict      Plain dicts for results (default, simplest)
+      pydantic  Typed Pydantic result models (better for complex analyses)
 
     Run the generated tests with:
 
@@ -2246,6 +2259,7 @@ def new_analysis(
             name,
             root,
             class_name=class_name,
+            style=style,
             force=force,
             dry_run=dry_run,
         )
