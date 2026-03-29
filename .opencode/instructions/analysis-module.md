@@ -198,8 +198,6 @@ for label in labels:
         # ... plot data ...
 ```
 
-> **Note:** `load_condition_result()` is deprecated — use the pattern above.
-
 ## MetricType System (Autocorrelation Handling)
 
 Based on LiveCoMS best practices (Grossfield et al., 2018), metrics are classified

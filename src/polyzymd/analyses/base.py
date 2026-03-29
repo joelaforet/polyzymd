@@ -902,50 +902,6 @@ class Analysis(ABC):
                 return cls.model_validate_json(path.read_text())
         return json.loads(path.read_text())
 
-    def load_condition_result(
-        self,
-        ctx: ComparisonContext | PlotContext,
-        label: str,
-    ) -> Any:
-        """Load the aggregated result for a condition from disk.
-
-        .. deprecated::
-            Prefer ``_build_plot_data()`` + ``_load_aggregated_result()``
-            instead.  All existing plugins use that pattern.  This method
-            remains for backward compatibility but is no longer recommended
-            for new plugins.
-
-        Convenience wrapper around :meth:`_load_aggregated_result` that
-        resolves the ``aggregated/`` directory from a context object.
-
-        Parameters
-        ----------
-        ctx : ComparisonContext or PlotContext
-            Context with ``analysis_dirs`` mapping.
-        label : str
-            Condition label (must exist in ``ctx.analysis_dirs``).
-
-        Returns
-        -------
-        dict or BaseModel or None
-            Loaded aggregated result, or ``None`` if not found.
-
-        Raises
-        ------
-        KeyError
-            If *label* is not in ``ctx.analysis_dirs``.
-        """
-        import warnings
-
-        warnings.warn(
-            "load_condition_result() is deprecated. Use _build_plot_data() + "
-            "_load_aggregated_result() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        agg_dir = ctx.analysis_dirs[label] / "aggregated"
-        return self._load_aggregated_result(agg_dir)
-
     # === Utility methods (available to all subclasses) ===
 
     def _check_cache(
