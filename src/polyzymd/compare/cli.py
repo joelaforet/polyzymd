@@ -167,7 +167,7 @@ prepared simulation input), NOT a trajectory frame.
         click.echo("     polyzymd compare run rmsf      # Compare flexibility")
         click.echo("     polyzymd compare run triad     # Compare triad geometry")
         click.echo("     polyzymd compare run contacts  # Compare polymer-protein contacts")
-        click.echo("     polyzymd compare exposure      # Compare chaperone-like activity")
+        click.echo("     polyzymd compare run exposure  # Compare chaperone-like activity")
         click.echo()
 
     except Exception as e:
@@ -213,8 +213,6 @@ def validate(config_file: Path, output_format: str):
         polyzymd compare validate -f my_comparison.yaml
         polyzymd compare validate --format json
     """
-    import json as json_module
-
     config_file = Path(config_file).resolve()
 
     # Prepare result structure

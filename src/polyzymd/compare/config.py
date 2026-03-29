@@ -132,312 +132,11 @@ class PluginSettingsContainer(BaseModel):
 # Plot Settings Configuration
 # ============================================================================
 
-
-@PlotSettingsRegistry.register("rmsf")
-class RMSFPlotSettings(BasePlotSettings):
-    """RMSF-specific plot customization.
-
-    Attributes
-    ----------
-    show_error : bool
-        Show error bands/bars on plots (default True)
-    highlight_residues : list[int]
-        Residue numbers to highlight with vertical lines (e.g., active site)
-    figsize_profile : tuple[float, float]
-        Figure size for per-residue profile plots
-    figsize_comparison : tuple[float, float]
-        Figure size for bar comparison plots
-    """
-
-    show_error: bool = True
-    highlight_residues: list[int] = Field(default_factory=list)
-    figsize_profile: tuple[float, float] = (14, 4)
-    figsize_comparison: tuple[float, float] = (8, 6)
-
-
-@PlotSettingsRegistry.register("triad")
-class TriadPlotSettings(BasePlotSettings):
-    """Triad-specific plot customization.
-
-    Attributes
-    ----------
-    generate_kde_panel : bool
-        Generate multi-row KDE panel plot (default True)
-    generate_bars : bool
-        Generate grouped threshold bar chart (default True)
-    generate_2d_kde : bool
-        Generate 2D joint KDE plot (default False, more specialized)
-    threshold_line_color : str
-        Color for threshold vertical line
-    kde_fill_alpha : float
-        Transparency for KDE fill (0-1)
-    kde_xlim : tuple[float, float]
-        X-axis limits for KDE panel in Angstroms (default ``(0, 7)``).
-    figsize_kde_panel : tuple[float, float] | None
-        Figure size for KDE panel (auto-calculated if None)
-    figsize_bars : tuple[float, float]
-        Figure size for bar chart
-    """
-
-    generate_kde_panel: bool = True
-    generate_bars: bool = True
-    generate_2d_kde: bool = False
-    threshold_line_color: str = "red"
-    kde_fill_alpha: float = 0.7
-    kde_xlim: tuple[float, float] = (0.0, 7.0)
-    figsize_kde_panel: tuple[float, float] | None = None
-    figsize_bars: tuple[float, float] = (10, 6)
-
-
-@PlotSettingsRegistry.register("distances")
-class DistancesPlotSettings(BasePlotSettings):
-    """Distance analysis plot customization.
-
-    Attributes
-    ----------
-    show_threshold : bool
-        Show threshold line on distribution plots
-    use_kde : bool
-        Use KDE instead of histogram for distributions
-    generate_state_bars : bool
-        Generate per-pair state bar charts (above/below threshold).
-        Each pair gets its own figure showing the fraction of frames
-        in each state per condition. Default True.
-    figsize : tuple[float, float]
-        Default figure size for distance plots
-    """
-
-    show_threshold: bool = True
-    use_kde: bool = True
-    generate_state_bars: bool = True
-    figsize: tuple[float, float] = (10, 6)
-
-
-@PlotSettingsRegistry.register("contacts")
-class ContactsPlotSettings(BasePlotSettings):
-    """Contacts analysis plot customization.
-
-    Attributes
-    ----------
-    figsize : tuple[float, float]
-        Default figure size for contact plots
-    generate_enrichment_heatmap : bool
-        Generate binding preference enrichment heatmap (default True)
-    generate_enrichment_bars : bool
-        Generate binding preference bar charts (default True)
-    figsize_enrichment_heatmap : tuple[float, float] | None
-        Figure size for enrichment heatmap (auto-calculated if None)
-    figsize_enrichment_bars : tuple[float, float]
-        Figure size for enrichment bar charts
-    enrichment_colormap : str
-        Colormap for enrichment heatmap (diverging recommended)
-    show_enrichment_error : bool
-        Show error bars on enrichment bar charts (default True)
-    generate_system_coverage_heatmap : bool
-        Generate system coverage enrichment heatmap (default True)
-    generate_system_coverage_bars : bool
-        Generate system coverage bar charts (default True)
-    figsize_system_coverage_heatmap : tuple[float, float] | None
-        Figure size for system coverage heatmap (auto-calculated if None)
-    figsize_system_coverage_bars : tuple[float, float]
-        Figure size for system coverage bar charts
-    show_system_coverage_error : bool
-        Show error bars on system coverage bar charts (default True)
-    generate_user_partition_bars : bool
-        Generate user-defined partition bar charts (default True)
-    figsize_user_partition_bars : tuple[float, float]
-        Figure size for user-defined partition bar charts
-    show_user_partition_error : bool
-        Show error bars on user-defined partition bar charts (default True)
-    generate_contact_fraction_profile : bool
-        Generate per-residue contact fraction line plot (default True)
-    figsize_contact_fraction_profile : tuple[float, float]
-        Figure size for contact fraction profile plot
-    show_contact_fraction_profile_error : bool
-        Show SEM fill_between bands on contact fraction profile (default True)
-    contact_fraction_profile_threshold : float or None
-        If set, draw a horizontal threshold line on the contact fraction
-        profile. Residues above this value are considered "high contact".
-    generate_residence_time_profile : bool
-        Generate per-residue mean residence time line plot (default True)
-    figsize_residence_time_profile : tuple[float, float]
-        Figure size for residence time profile plot
-    show_residence_time_profile_error : bool
-        Show SEM fill_between bands on residence time profile (default True)
-    generate_cf_by_aa_class_bars : bool
-        Generate contact fraction by AA class grouped bar chart (default True)
-    figsize_cf_by_aa_class_bars : tuple[float, float]
-        Figure size for contact fraction by AA class bar chart
-    show_cf_by_aa_class_error : bool
-        Show error bars on contact fraction by AA class bar chart (default True)
-    generate_cf_by_partition_bars : bool
-        Generate contact fraction by user-defined partition bar charts (default True)
-    figsize_cf_by_partition_bars : tuple[float, float]
-        Figure size for contact fraction by partition bar charts
-    show_cf_by_partition_error : bool
-        Show error bars on contact fraction by partition bar charts (default True)
-    generate_rt_by_aa_class_bars : bool
-        Generate residence time by AA class grouped bar chart (default True)
-    figsize_rt_by_aa_class_bars : tuple[float, float]
-        Figure size for residence time by AA class bar chart
-    show_rt_by_aa_class_error : bool
-        Show error bars on residence time by AA class bar chart (default True)
-    generate_rt_by_partition_bars : bool
-        Generate residence time by user-defined partition bar charts (default True)
-    figsize_rt_by_partition_bars : tuple[float, float]
-        Figure size for residence time by partition bar charts
-    show_rt_by_partition_error : bool
-        Show error bars on residence time by partition bar charts (default True)
-    highlight_residues : list[int]
-        Residue IDs to mark with vertical dashed lines on profile plots.
-        Useful for highlighting active-site residues or known anchor points.
-    """
-
-    figsize: tuple[float, float] = (10, 8)
-    generate_enrichment_heatmap: bool = True
-    generate_enrichment_bars: bool = True
-    figsize_enrichment_heatmap: tuple[float, float] | None = None
-    figsize_enrichment_bars: tuple[float, float] = (10, 6)
-    enrichment_colormap: str = "RdBu_r"  # Diverging: red=high, blue=low
-    show_enrichment_error: bool = True
-
-    # System coverage plot settings
-    generate_system_coverage_heatmap: bool = True
-    generate_system_coverage_bars: bool = True
-    figsize_system_coverage_heatmap: tuple[float, float] | None = None
-    figsize_system_coverage_bars: tuple[float, float] = (10, 6)
-    show_system_coverage_error: bool = True
-
-    # User-defined partition plot settings
-    generate_user_partition_bars: bool = True
-    figsize_user_partition_bars: tuple[float, float] = (10, 6)
-    show_user_partition_error: bool = True
-
-    # Contact fraction profile plot settings
-    generate_contact_fraction_profile: bool = True
-    figsize_contact_fraction_profile: tuple[float, float] = (14, 5)
-    show_contact_fraction_profile_error: bool = True
-    contact_fraction_profile_threshold: float | None = None
-
-    # Residence time profile plot settings
-    generate_residence_time_profile: bool = True
-    figsize_residence_time_profile: tuple[float, float] = (14, 5)
-    show_residence_time_profile_error: bool = True
-
-    # Contact fraction by AA class bar chart settings
-    generate_cf_by_aa_class_bars: bool = True
-    figsize_cf_by_aa_class_bars: tuple[float, float] = (10, 6)
-    show_cf_by_aa_class_error: bool = True
-
-    # Contact fraction by user partition bar chart settings
-    generate_cf_by_partition_bars: bool = True
-    figsize_cf_by_partition_bars: tuple[float, float] = (10, 6)
-    show_cf_by_partition_error: bool = True
-
-    # Residence time by AA class bar chart settings
-    generate_rt_by_aa_class_bars: bool = True
-    figsize_rt_by_aa_class_bars: tuple[float, float] = (10, 6)
-    show_rt_by_aa_class_error: bool = True
-
-    # Residence time by user partition bar chart settings
-    generate_rt_by_partition_bars: bool = True
-    figsize_rt_by_partition_bars: tuple[float, float] = (10, 6)
-    show_rt_by_partition_error: bool = True
-
-    # Shared profile plot settings
-    highlight_residues: list[int] = Field(default_factory=list)
-
-
-@PlotSettingsRegistry.register("binding_free_energy")
-class BFEPlotSettings(BasePlotSettings):
-    """Binding free energy plot customization.
-
-    Attributes
-    ----------
-    generate_heatmap : bool
-        Generate ΔG_sel heatmap (rows = AA groups, columns = conditions). Default True.
-    generate_bars : bool
-        Generate ΔG_sel grouped bar chart (one bar per condition per AA group). Default True.
-    figsize_heatmap : tuple[float, float] | None
-        Figure size for ΔG_sel heatmap (auto-calculated if None).
-    figsize_bars : tuple[float, float]
-        Figure size for ΔG_sel bar charts.
-    colormap : str
-        Diverging colormap for heatmap (default "RdBu_r": red = avoidance, blue = preference).
-    show_error_bars : bool
-        Show SEM error bars on bar charts. Default True.
-    annotate_heatmap : bool
-        Annotate each heatmap cell with its ΔG_sel value. Default True.
-    """
-
-    generate_heatmap: bool = True
-    generate_bars: bool = True
-    figsize_heatmap: tuple[float, float] | None = None
-    figsize_bars: tuple[float, float] = (10, 6)
-    colormap: str = "RdBu_r"
-    show_error_bars: bool = True
-    annotate_heatmap: bool = True
-
-
-@PlotSettingsRegistry.register("polymer_affinity")
-class AffinityPlotSettings(BasePlotSettings):
-    """Polymer affinity score plot customization.
-
-    Attributes
-    ----------
-    generate_stacked_bars : bool
-        Generate stacked bar chart of total score by condition, broken
-        down by polymer type. Default True.
-    generate_group_bars : bool
-        Generate grouped bar chart showing per-group contributions
-        across conditions. Default True.
-    figsize_stacked : tuple[float, float]
-        Figure size for stacked bar chart.
-    figsize_group_bars : tuple[float, float]
-        Figure size for grouped bar charts.
-    show_error_bars : bool
-        Show SEM error bars on plots. Default True.
-    """
-
-    generate_stacked_bars: bool = True
-    generate_group_bars: bool = True
-    figsize_stacked: tuple[float, float] = (10, 6)
-    figsize_group_bars: tuple[float, float] = (10, 6)
-    show_error_bars: bool = True
-
-
-@PlotSettingsRegistry.register("secondary_structure")
-class SSPlotSettings(BasePlotSettings):
-    """Secondary structure plot customization.
-
-    Attributes
-    ----------
-    generate_timeline : bool
-        Generate per-condition residue x time SS heatmap. Default True.
-    generate_content_bars : bool
-        Generate grouped bar chart of helix/strand/coil fractions. Default True.
-    generate_individual_bars : bool
-        Generate one bar chart per SS type (helix, beta-sheet, no-SS). Default True.
-    generate_diff_heatmap : bool
-        Generate condition x residue persistence difference heatmap. Default True.
-    figsize_timeline : tuple[float, float]
-        Figure size for timeline heatmap.
-    figsize_content_bars : tuple[float, float]
-        Figure size for content bar chart.
-    figsize_diff_heatmap : tuple[float, float] | None
-        Figure size for difference heatmap (auto-calculated if None).
-    diff_colormap : str
-        Diverging colormap for difference heatmap.
-    """
-
-    generate_timeline: bool = True
-    generate_content_bars: bool = True
-    generate_individual_bars: bool = True
-    generate_diff_heatmap: bool = True
-    figsize_timeline: tuple[float, float] = (14, 6)
-    figsize_content_bars: tuple[float, float] = (10, 6)
-    figsize_diff_heatmap: tuple[float, float] | None = None
-    diff_colormap: str = "RdBu_r"
+# Per-analysis plot settings classes (RMSFPlotSettings, TriadPlotSettings, etc.)
+# live in their respective plugin packages at analyses/<name>/_plot_settings.py.
+# They register with PlotSettingsRegistry via decorator at import time.
+# PlotSettings.__init__ calls PlotSettingsRegistry.ensure_discovered() to
+# guarantee registrations are active before parsing YAML keys.
 
 
 class PlotTheme(BaseModel):
@@ -689,6 +388,10 @@ class PlotSettings(BaseModel):
             types are parsed into their settings classes; global keys are
             handled by Pydantic; unknown keys are logged and skipped.
         """
+        # Ensure all plugin packages have been imported so that their
+        # @PlotSettingsRegistry.register decorators have fired.
+        PlotSettingsRegistry.ensure_discovered()
+
         global_data: dict[str, Any] = {}
         per_analysis: dict[str, BasePlotSettings] = {}
 
@@ -759,6 +462,9 @@ class PlotSettings(BaseModel):
         AttributeError
             If *name* is not a registered plot settings type.
         """
+        # Ensure plugin packages are imported so their registrations are active.
+        PlotSettingsRegistry.ensure_discovered()
+
         if PlotSettingsRegistry.is_registered(name):
             settings_class = PlotSettingsRegistry.get(name)
             return settings_class()
@@ -925,9 +631,12 @@ class ComparisonConfig(BaseModel):
         """Validate conditions at construction time.
 
         Checks:
-        - At least 2 conditions
         - No duplicate labels
         - Control label exists in conditions (if specified)
+
+        Note: The minimum-2-conditions check is deferred to
+        :meth:`validate_config` because a partially-built config
+        (e.g. during template generation) may have fewer.
         """
         labels = [c.label for c in self.conditions]
         if len(labels) != len(set(labels)):

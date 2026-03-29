@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 import numpy as np
 from pydantic import BaseModel, Field
 
+import polyzymd.analyses.secondary_structure._plot_settings as _plot_settings  # register plot settings  # noqa: F401
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,

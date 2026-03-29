@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from pydantic import BaseModel, Field, field_validator
 
+import polyzymd.analyses.binding_free_energy._plot_settings as _plot_settings  # register plot settings  # noqa: F401
 from polyzymd.analyses.base import (
     Analysis,
     ComparisonContext,

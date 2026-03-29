@@ -154,3 +154,18 @@ class PlotSettingsRegistry:
     def clear(cls) -> None:
         """Clear the registry (for testing purposes)."""
         cls._registry.clear()
+
+    @classmethod
+    def ensure_discovered(cls) -> None:
+        """Ensure analysis plugins have been imported so their plot settings are registered.
+
+        Triggers the analysis plugin discovery machinery, which imports all
+        plugin packages.  Each package's ``_plot_settings`` module is loaded
+        as part of this import, firing the ``@PlotSettingsRegistry.register``
+        decorators.
+
+        This method is idempotent — the underlying discovery is cached.
+        """
+        from polyzymd.analyses.discovery import _cached_registry  # noqa: F811
+
+        _cached_registry()  # triggers import of all plugin packages

@@ -54,6 +54,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
 
+import polyzymd.analyses.polymer_affinity._plot_settings as _plot_settings  # register plot settings  # noqa: F401
 from polyzymd.analyses.base import (
     Analysis,
     ComparisonContext,

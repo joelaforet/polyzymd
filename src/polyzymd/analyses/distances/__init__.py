@@ -36,6 +36,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+import polyzymd.analyses.distances._plot_settings as _plot_settings  # register plot settings  # noqa: F401
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
