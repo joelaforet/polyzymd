@@ -91,6 +91,11 @@ from polyzymd.analyses.shared.plotting import (
     save_figure,
     symmetric_clim,
 )
+
+# Re-export PlotSettings so plugin authors and test code can import
+# from analyses.shared instead of reaching into compare.config.
+from polyzymd.compare.config import PlotSettings
+
 from polyzymd.analyses.shared.statistics import (
     PerResidueStats,
     StatResult,
@@ -153,4 +158,6 @@ __all__ = [
     "find_json",
     "annotate_cells",
     "symmetric_clim",
+    # Plot settings (re-exported from compare.config)
+    "PlotSettings",
 ]

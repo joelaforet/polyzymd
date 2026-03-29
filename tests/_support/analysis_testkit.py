@@ -363,7 +363,7 @@ def make_plot_context(
     if analysis_dirs is None:
         analysis_dirs = {c.label: Path(f"/tmp/analysis/{c.label}") for c in conditions}
     if plot_settings is None:
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.analyses.shared import PlotSettings
 
         plot_settings = PlotSettings()
     return PlotContext(
