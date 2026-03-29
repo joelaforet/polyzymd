@@ -657,23 +657,28 @@ def format(self, result: Any, output_format: str = "text") -> str:
 ## Return Types: Dicts vs Pydantic Models
 
 Plugins can return either plain dicts or typed Pydantic models from
-`compute_replicate()` and `aggregate()`. Both are supported, but they follow
-different deserialization paths.
+`compute_replicate()` and `aggregate()`. Both paths are fully supported.
 
-### Dict path
+**For new plugins, start with dicts.** They require no extra imports, no extra
+classes, and they work with the default comparison pipeline out of the box.
+You can always migrate to Pydantic models later if your plugin grows in
+complexity.
 
-Dict plugins are straightforward:
+### Dict path (recommended starting point)
+
+Dict plugins are the simplest way to get a working analysis:
 
 - `compute_replicate()` returns `dict`
 - `aggregate()` returns `dict`
-- no `AggregatedResultClass` class variable is required
-- framework saves/loads JSON using standard `json.dumps()` / `json.loads()`
-
-This path is often best for scalar analyses and quick plugin development.
+- No `AggregatedResultClass` class variable needed
+- Framework saves/loads JSON using standard `json.dumps()` / `json.loads()`
 
 ```python
 class MyAnalysis(Analysis):
     name = "my_analysis"
+
+    class Settings(BaseModel):
+        selection: str = "protein and name CA"
 
     def compute_replicate(self, ctx, replicate):
         return {"value": 1.23, "replicate": replicate}
@@ -681,11 +686,45 @@ class MyAnalysis(Analysis):
     def aggregate(self, ctx, results):
         vals = [r["value"] for r in results]
         return {"mean_value": sum(vals) / len(vals), "replicate_values": vals}
+
+    def extract_metrics(self, summary):
+        return {
+            "value": MetricValue(
+                name="value",
+                mean=summary["mean_value"],
+                sem=0.1,
+                replicate_values=summary["replicate_values"],
+            )
+        }
 ```
+
+This is the path used in the complete `RgAnalysis` example earlier in this
+tutorial. The framework handles serialization, deserialization, and the full
+comparison lifecycle without any Pydantic result models.
+
+### What is Pydantic, and when would you use it?
+
+[Pydantic](https://docs.pydantic.dev/) is a Python data validation library.
+A Pydantic `BaseModel` subclass is like a dataclass with automatic type
+checking: if you declare a field as `float`, Pydantic raises a validation
+error if someone passes a string. PolyzyMD already uses Pydantic for its
+config system (`Settings` classes), so it is always available in the
+environment.
+
+For **result models**, Pydantic adds:
+
+- **Validation on construction** — catches type errors early (e.g., passing a
+  string where a float is expected)
+- **Typed attribute access** — `result.mean_rg` instead of
+  `result["mean_rg"]`, with IDE autocomplete
+- **NPZ sidecar storage** — `BaseAnalysisResult` (which inherits from
+  Pydantic's `BaseModel`) can offload large NumPy arrays to `.npz` files
+  alongside the JSON
+- **Nested structure** — complex result hierarchies with validated sub-models
 
 ### Pydantic model path
 
-Use models when you want validation, nested structure, strict typing, and
+Use models when you need validation, nested structure, strict typing, or
 sidecar storage for large arrays.
 
 Key pieces:
@@ -752,11 +791,22 @@ not match the model contract expected by `AggregatedResultClass.load(path)`,
 deserialization fails.
 ```
 
-### Quick decision guide
+### Comparison: dicts vs Pydantic models
 
-- Choose **dicts** when your output is small, flat, and naturally JSON
-- Choose **Pydantic models** when you need validation, richer structure,
-  predictable typing, or NPZ sidecar support
+| Aspect | Dicts | Pydantic models |
+|--------|-------|-----------------|
+| **Setup effort** | None — just return `{}` | Define result classes inheriting `BaseAnalysisResult` |
+| **Validation** | None — typos in keys are silent | Automatic type checking on construction |
+| **Attribute access** | `result["mean_rg"]` | `result.mean_rg` with IDE autocomplete |
+| **Large array support** | Manual — save NumPy arrays yourself | NPZ sidecar via `BaseAnalysisResult.save()` |
+| **Nested structure** | Manual — dicts of dicts | Validated sub-models with typed fields |
+| **Serialization** | `json.dumps()` / `json.loads()` | `model.save(path)` / `Model.load(path)` |
+| **Framework wiring** | No `AggregatedResultClass` needed | Set `AggregatedResultClass` on plugin class |
+| **Best for** | Scalar analyses, quick prototypes, new contributors | Complex results, per-residue arrays, production plugins |
+
+**Rule of thumb:** Start with dicts. If you find yourself writing defensive
+`result.get("key", default)` checks, duplicating key strings, or needing to
+store large NumPy arrays alongside JSON, migrate to Pydantic models.
 
 ## A Note on the `compare/` Package
 
@@ -1257,3 +1307,115 @@ pixi run -e build pytest tests/test_rg_plugin.py -v
 - {doc}`analysis_statistics_best_practices` — Autocorrelation and uncertainty
 - {doc}`analysis_compare_conditions` — User guide for running comparisons
 - API reference: `polyzymd.analyses.base.Analysis`
+
+(comparison-yaml)=
+## Appendix: The `comparison.yaml` File
+
+The `comparison.yaml` file is the single configuration file that drives the
+entire comparison workflow. It defines which simulation conditions to compare,
+which analyses to run, and how to generate plots. Understanding this file is
+important for plugin authors because your `Settings` class maps directly to
+the `plugins:` section.
+
+### Generating a template
+
+The fastest way to create a `comparison.yaml` is with the scaffold command:
+
+```bash
+polyzymd compare init -n my_study
+```
+
+This creates a project directory with a fully commented template. You can
+also specify a custom equilibration time:
+
+```bash
+polyzymd compare init -n my_study --eq-time 20ns
+```
+
+### File structure
+
+A `comparison.yaml` has four main sections:
+
+```yaml
+# Project metadata
+name: "my_study"
+description: "Comparison of polymer conditions"
+control: "Condition A"  # or null if no control
+
+# Conditions — each points to a simulation's config.yaml
+conditions:
+  - label: "Condition A"
+    config: "../path/to/condition_a/config.yaml"
+    replicates: [1, 2, 3]
+
+  - label: "Condition B"
+    config: "../path/to/condition_b/config.yaml"
+    replicates: [1, 2, 3]
+
+# Defaults
+defaults:
+  equilibration_time: "10ns"
+
+# Plugins — which analyses to run and their settings
+plugins:
+  rmsf:
+    selection: "protein and name CA"
+    reference_mode: "centroid"
+
+  # Your plugin's Settings fields go here:
+  my_analysis:
+    example_parameter: "value"
+
+# Plot settings — visual customization
+plot_settings:
+  output_dir: "figures/"
+  format: "png"
+  dpi: 300
+  style: "publication"
+```
+
+### How `plugins:` connects to your `Settings` class
+
+When the framework runs your plugin, it reads the `plugins:` section of
+`comparison.yaml` and deserializes the matching key into your `Settings`
+model. For example, if your plugin has:
+
+```python
+class MySettings(BaseModel):
+    cutoff: float = 4.5
+    selection: str = "protein and name CA"
+```
+
+Then users configure it in `comparison.yaml` as:
+
+```yaml
+plugins:
+  my_analysis:
+    cutoff: 5.0
+    selection: "chainID A"
+```
+
+Any fields not specified in the YAML use the defaults from your `Settings`
+class. This is why providing sensible defaults for every field is important —
+it means the analysis works without any explicit configuration.
+
+### Running comparisons
+
+After editing `comparison.yaml`:
+
+```bash
+# Validate the configuration
+polyzymd compare validate
+
+# Run a specific analysis
+polyzymd compare run rmsf
+
+# Run all enabled analyses
+polyzymd compare run-all
+
+# Generate plots
+polyzymd compare plot-all
+```
+
+See {doc}`analysis_compare_conditions` for a complete user guide on running
+comparisons.
