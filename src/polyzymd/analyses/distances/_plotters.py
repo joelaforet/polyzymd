@@ -646,18 +646,10 @@ def _get_distance_pair_settings(data: dict[str, Any]) -> list[Any] | None:
         Pair settings list or ``None`` if unavailable.
     """
     meta = data.get("__meta__", {})
-    source_path = meta.get("comparison_source_path")
-    if source_path is None:
-        return None
 
-    try:
-        from polyzymd.compare.config import ComparisonConfig
-
-        comp_config = ComparisonConfig.from_yaml(source_path)
-        dist_settings = comp_config.plugins.get("distances")
-        if dist_settings is not None:
-            return getattr(dist_settings, "pairs", None)
-    except Exception as exc:
-        logger.debug(f"Could not reload comparison config for pair labels: {exc}")
+    # Use settings injected by _build_plot_data (avoids YAML reload).
+    dist_settings = meta.get("settings")
+    if dist_settings is not None:
+        return getattr(dist_settings, "pairs", None)
 
     return None

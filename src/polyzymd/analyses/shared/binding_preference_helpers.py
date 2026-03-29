@@ -228,9 +228,22 @@ def compute_condition_binding_preference(
     polymer_composition = None
     first_rep = cond.replicates[0] if cond.replicates else 1
     run_dir = sim_config.get_working_directory(first_rep)
-    topology_path = run_dir / "solvated_system.pdb"
 
-    if topology_path.exists():
+    # Use TrajectoryLoader's robust topology search rather than
+    # hardcoding "solvated_system.pdb".
+    topology_path = None
+    try:
+        from polyzymd.analyses.shared.loader import TrajectoryLoader
+
+        loader = TrajectoryLoader(sim_config)
+        topology_path = loader.find_topology(run_dir)
+    except (FileNotFoundError, ImportError):
+        logger.warning(
+            f"Cannot extract polymer composition for {cond.label}: "
+            f"no topology file found in {run_dir}"
+        )
+
+    if topology_path is not None:
         try:
             universe = mda.Universe(str(topology_path))
             polymer_composition = extract_polymer_composition(universe, polymer_type_selections)
@@ -241,11 +254,6 @@ def compute_condition_binding_preference(
             )
         except Exception as e:
             logger.warning(f"Failed to extract polymer composition for {cond.label}: {e}")
-    else:
-        logger.warning(
-            f"Cannot extract polymer composition for {cond.label}: "
-            f"topology not found at {topology_path}"
-        )
 
     if polymer_composition is None:
         polymer_composition = PolymerComposition()

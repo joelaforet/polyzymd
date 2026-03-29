@@ -418,16 +418,7 @@ def _plot_ss_persistence_diff_heatmap(
         return []
 
     meta = data.get("__meta__", {})
-    source_path = meta.get("comparison_source_path")
-    control_label: str | None = None
-    if source_path is not None:
-        try:
-            from polyzymd.compare.config import ComparisonConfig
-
-            comp_config = ComparisonConfig.from_yaml(source_path)
-            control_label = comp_config.control_label
-        except Exception:
-            pass
+    control_label: str | None = meta.get("control_label")
 
     available_labels = [lbl for lbl in labels if lbl in persistence_data]
     if not available_labels:

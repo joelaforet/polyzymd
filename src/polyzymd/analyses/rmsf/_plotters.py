@@ -349,31 +349,25 @@ def _load_reference_ss(data: dict[str, Any]) -> dict | None:
         are integers (0=coil, 1=helix, 2=strand), or None on failure.
     """
     meta = data.get("__meta__", {})
-    source_path = meta.get("comparison_source_path")
-    if source_path is None:
-        return None
 
-    try:
-        from polyzymd.compare.config import ComparisonConfig
-
-        comp_config = ComparisonConfig.from_yaml(source_path)
-        rmsf_settings = comp_config.plugins.get("rmsf")
-        if rmsf_settings is None:
-            return None
+    # Prefer settings injected by _build_plot_data (avoids YAML reload).
+    settings = meta.get("settings")
+    reference_file: str | None = None
+    if settings is not None:
         reference_file = (
-            rmsf_settings.get("reference_file")
-            if isinstance(rmsf_settings, dict)
-            else getattr(rmsf_settings, "reference_file", None)
+            settings.get("reference_file")
+            if isinstance(settings, dict)
+            else getattr(settings, "reference_file", None)
         )
-        if reference_file is None:
-            return None
-    except Exception as exc:
-        logger.debug(f"Could not load comparison config for SS bar: {exc}")
+    if reference_file is None:
         return None
 
     ref_path = Path(reference_file)
     if not ref_path.is_absolute():
-        ref_path = Path(source_path).parent / ref_path
+        # Resolve relative to results_dir parent (comparison root)
+        results_dir = meta.get("results_dir")
+        if results_dir is not None:
+            ref_path = Path(results_dir).parent.parent / ref_path
     if not ref_path.exists():
         logger.debug(f"Reference PDB not found: {ref_path}")
         return None

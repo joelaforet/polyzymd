@@ -371,27 +371,15 @@ def _load_partition_definitions(
         Mapping of partition_name -> list of group names.
         Empty dict if not defined. May include ``remaining_residues``.
     """
-    from polyzymd.compare.config import ComparisonConfig
-
     meta = data.get("__meta__")
     if meta is None:
         logger.debug("No __meta__ in data dict — cannot load partition definitions")
         return {}, {}
 
-    source_path = meta.get("comparison_source_path")
-    if source_path is None:
-        logger.debug("No comparison_source_path in __meta__")
-        return {}, {}
-
-    try:
-        config = ComparisonConfig.from_yaml(source_path)
-    except Exception as e:
-        logger.warning(f"Failed to load comparison config from {source_path}: {e}")
-        return {}, {}
-
-    contacts_settings = config.plugins.get("contacts")
+    # Use settings injected by _build_plot_data (avoids YAML reload).
+    contacts_settings = meta.get("settings")
     if contacts_settings is None:
-        logger.debug("No contacts analysis settings in comparison config")
+        logger.debug("No settings in __meta__")
         return {}, {}
 
     # Access via getattr to avoid LSP errors (the comparison config settings

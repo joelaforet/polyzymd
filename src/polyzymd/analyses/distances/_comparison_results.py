@@ -19,12 +19,8 @@ For each pair:
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
-from polyzymd import __version__
 from polyzymd.compare.core.base import BaseComparisonResult, BaseConditionSummary
 
 
@@ -58,13 +54,13 @@ class DistancePairSummary(BaseModel):
     label: str
     selection_a: str
     selection_b: str
-    threshold: Optional[float] = None
+    threshold: float | None = None
     mean_distance: float
     sem_distance: float
-    fraction_below_threshold: Optional[float] = None
-    sem_fraction_below: Optional[float] = None
+    fraction_below_threshold: float | None = None
+    sem_fraction_below: float | None = None
     per_replicate_means: list[float] = Field(default_factory=list)
-    per_replicate_fractions: Optional[list[float]] = None
+    per_replicate_fractions: list[float] | None = None
 
 
 class DistanceConditionSummary(BaseConditionSummary):
@@ -188,13 +184,13 @@ class DistancePairwiseComparison(BaseModel):
     distance_percent_change: float
 
     # Fraction metric (optional)
-    fraction_t_statistic: Optional[float] = None
-    fraction_p_value: Optional[float] = None
-    fraction_cohens_d: Optional[float] = None
-    fraction_effect_interpretation: Optional[str] = None
-    fraction_direction: Optional[str] = None
-    fraction_significant: Optional[bool] = None
-    fraction_percent_change: Optional[float] = None
+    fraction_t_statistic: float | None = None
+    fraction_p_value: float | None = None
+    fraction_cohens_d: float | None = None
+    fraction_effect_interpretation: str | None = None
+    fraction_direction: str | None = None
+    fraction_significant: bool | None = None
+    fraction_percent_change: float | None = None
 
 
 class DistancePairANOVA(BaseModel):
@@ -222,9 +218,9 @@ class DistancePairANOVA(BaseModel):
     distance_f_statistic: float
     distance_p_value: float
     distance_significant: bool
-    fraction_f_statistic: Optional[float] = None
-    fraction_p_value: Optional[float] = None
-    fraction_significant: Optional[bool] = None
+    fraction_f_statistic: float | None = None
+    fraction_p_value: float | None = None
+    fraction_significant: bool | None = None
 
 
 class DistanceComparisonResult(
@@ -266,27 +262,26 @@ class DistanceComparisonResult(
     equilibration_time : str
         Equilibration time used.
     created_at : datetime
-        When the analysis was run.
+        When the analysis was run (inherited from BaseComparisonResult).
     polyzymd_version : str
-        Version of polyzymd used.
+        Version of polyzymd used (inherited from BaseComparisonResult).
     """
 
     metric: str = "mean_distance"
     name: str
     n_pairs: int
     pair_labels: list[str]
-    control_label: Optional[str] = None
+    control_label: str | None = None
     conditions: list[DistanceConditionSummary]
     pairwise_comparisons: list[DistancePairwiseComparison]
-    anova_by_pair: Optional[list[DistancePairANOVA]] = None
+    anova_by_pair: list[DistancePairANOVA] | None = None
     ranking_by_pair: dict[str, list[str]]
-    fraction_ranking_by_pair: Optional[dict[str, list[str]]] = None
+    fraction_ranking_by_pair: dict[str, list[str]] | None = None
     ranking: list[str] = Field(default_factory=list)
     equilibration_time: str
-    created_at: datetime
-    polyzymd_version: str = __version__
 
     # save(), load(), and get_condition() are inherited from BaseComparisonResult.
+    # created_at and polyzymd_version are also inherited from BaseComparisonResult.
 
     def get_comparisons_for_pair(self, pair_label: str) -> list[DistancePairwiseComparison]:
         """Get all pairwise comparisons for a specific pair.
@@ -305,7 +300,7 @@ class DistanceComparisonResult(
 
     def get_comparison(
         self, pair_label: str, condition_b: str
-    ) -> Optional[DistancePairwiseComparison]:
+    ) -> DistancePairwiseComparison | None:
         """Get pairwise comparison for a specific pair and condition vs control.
 
         Parameters

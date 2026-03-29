@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Optional
 
 from polyzymd.analyses.binding_free_energy._comparison_results import (
     BindingFreeEnergyResult,

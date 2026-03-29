@@ -256,6 +256,9 @@ class PlotContext:
         section.
     comparison_path : Path | None
         Canonical comparison result path for this analysis.
+    control_label : str | None
+        Label of the control condition, or ``None`` if not specified /
+        excluded.  Mirrors ``ComparisonContext.control_label``.
 
     Notes
     -----
@@ -278,6 +281,7 @@ class PlotContext:
     settings: BaseModel
     plot_settings: PlotSettings = None  # type: ignore[assignment]  # Guaranteed non-None by orchestrator; default kept for dataclass ordering
     comparison_path: Path | None = None
+    control_label: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1053,7 +1057,11 @@ class Analysis(ABC):
                 data[label] = entry
                 labels.append(label)
 
-        data["__meta__"] = {"results_dir": ctx.results_dir}
+        data["__meta__"] = {
+            "results_dir": ctx.results_dir,
+            "settings": ctx.settings,
+            "control_label": ctx.control_label,
+        }
         return data, labels
 
     def comparison_result_path(self, results_dir: Path) -> Path:

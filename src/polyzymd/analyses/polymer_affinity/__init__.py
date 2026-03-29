@@ -1123,20 +1123,23 @@ class PolymerAffinityAnalysis(Analysis):
 # ---------------------------------------------------------------------------
 
 
-def _condition_has_polymer(cond: Condition) -> bool:
+def _condition_has_polymer(cond: Condition, polymer_selection: str = "chainID C") -> bool:
     """Check whether a condition's simulation includes polymer chains.
 
     Uses three detection strategies in order:
 
     1. ``sim_config.polymers`` — fast check for polymer builder section.
     2. ``sim_config.topology.chains`` — check for chain C in topology model.
-    3. MDAnalysis topology inspection — load ``solvated_system.pdb`` and
-       check for atoms matching ``chainID C``.
+    3. MDAnalysis topology inspection — uses ``TrajectoryLoader`` to find
+       the topology file and checks for atoms matching *polymer_selection*.
 
     Parameters
     ----------
     cond : Condition
         Condition to check.
+    polymer_selection : str
+        MDAnalysis selection string for polymer atoms.  Defaults to
+        ``"chainID C"`` (PolyzyMD chain convention).
 
     Returns
     -------
@@ -1164,16 +1167,22 @@ def _condition_has_polymer(cond: Condition) -> bool:
     try:
         for rep in cond.replicates:
             run_dir = sim_config.get_working_directory(rep)
-            topology_path = run_dir / "solvated_system.pdb"
 
-            if not topology_path.exists():
+            # Use TrajectoryLoader's robust topology search rather than
+            # hardcoding "solvated_system.pdb".
+            try:
+                from polyzymd.analyses.shared.loader import TrajectoryLoader
+
+                loader = TrajectoryLoader(sim_config)
+                topology_path = loader.find_topology(run_dir)
+            except (FileNotFoundError, ImportError):
                 continue
 
             try:
                 import MDAnalysis as mda
 
                 universe = mda.Universe(str(topology_path))
-                polymer_atoms = universe.select_atoms("chainID C")
+                polymer_atoms = universe.select_atoms(polymer_selection)
                 if len(polymer_atoms) > 0:
                     logger.debug(f"  {cond.label} rep {rep}: {len(polymer_atoms)} polymer atoms")
                     return True

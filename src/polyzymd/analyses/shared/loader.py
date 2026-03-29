@@ -173,7 +173,7 @@ class TrajectoryLoader:
 
         # Find topology and trajectories
         # Methods handle both new (production_N/) and legacy (production/) structures
-        topology_file = self._find_topology(working_dir)
+        topology_file = self.find_topology(working_dir)
         trajectory_files = self._find_trajectories(working_dir)
 
         return TrajectoryInfo(
@@ -353,7 +353,7 @@ class TrajectoryLoader:
                     continue
         return sorted(replicates)
 
-    def _find_topology(self, working_dir: Path) -> Path:
+    def find_topology(self, working_dir: Path) -> Path:
         """Find topology file in working directory.
 
         Search order:

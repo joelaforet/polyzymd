@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from MDAnalysis import Universe
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-def get_protein_residue_range(universe: "Universe") -> Optional[tuple[int, int]]:
+def get_protein_residue_range(universe: "Universe") -> tuple[int, int] | None:
     """Get the min and max residue IDs for protein atoms.
 
     Parameters
@@ -54,7 +54,7 @@ def get_protein_residue_range(universe: "Universe") -> Optional[tuple[int, int]]
 def get_residue_info(
     universe: "Universe",
     resid: int,
-) -> Optional[dict]:
+) -> dict | None:
     """Get information about a specific residue.
 
     Parameters
@@ -104,7 +104,7 @@ def format_diagnostic_message(lines: list[str], header: str = "Diagnostic info:"
 def get_selection_diagnostics(
     universe: "Universe",
     selection: str,
-    context: Optional[str] = None,
+    context: str | None = None,
 ) -> str:
     """Generate diagnostic info for a failed atom selection.
 
@@ -230,7 +230,7 @@ def validate_equilibration_time(
     equilibration_ns: float,
     trajectory_ns: float,
     warn_threshold: float = 0.5,
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     """Validate equilibration time against trajectory length.
 
     Parameters

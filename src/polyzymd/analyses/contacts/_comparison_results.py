@@ -25,11 +25,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel, Field
-
-from polyzymd import __version__
 
 
 class BindingPreferenceComparisonEntry(BaseModel):
@@ -61,8 +58,8 @@ class BindingPreferenceComparisonEntry(BaseModel):
     pairwise_p_values: dict[str, float] = Field(
         default_factory=dict, description="Pairwise comparison p-values"
     )
-    highest_enrichment_condition: Optional[str] = None
-    lowest_enrichment_condition: Optional[str] = None
+    highest_enrichment_condition: str | None = None
+    lowest_enrichment_condition: str | None = None
 
 
 class BindingPreferenceComparisonSummary(BaseModel):
@@ -91,11 +88,11 @@ class BindingPreferenceComparisonSummary(BaseModel):
     protein_groups: list[str] = Field(default_factory=list)
     n_conditions: int = 0
     condition_labels: list[str] = Field(default_factory=list)
-    surface_exposure_threshold: Optional[float] = None
+    surface_exposure_threshold: float | None = None
 
     def get_entry(
         self, polymer_type: str, protein_group: str
-    ) -> Optional[BindingPreferenceComparisonEntry]:
+    ) -> BindingPreferenceComparisonEntry | None:
         """Get entry for a (polymer_type, protein_group) pair."""
         for entry in self.entries:
             if entry.polymer_type == polymer_type and entry.protein_group == protein_group:
@@ -303,13 +300,13 @@ class ContactsComparisonResult(BaseModel):
 
     name: str
     contacts_name: str
-    contacts_description: Optional[str] = None
+    contacts_description: str | None = None
     polymer_selection: str
     protein_selection: str
     cutoff: float
     contact_criteria: str
     fdr_alpha: float
-    control_label: Optional[str] = None
+    control_label: str | None = None
     conditions: list[ContactsConditionSummary]
     pairwise_comparisons: list[ContactsPairwiseComparison]
     anova: list[ContactsANOVASummary] = Field(default_factory=list)
@@ -319,7 +316,7 @@ class ContactsComparisonResult(BaseModel):
         default_factory=list,
         description="Conditions excluded from analysis (no polymer atoms found)",
     )
-    binding_preference: Optional[BindingPreferenceComparisonSummary] = Field(
+    binding_preference: BindingPreferenceComparisonSummary | None = Field(
         default=None,
         description="Binding preference comparison across conditions (if computed)",
     )
@@ -385,7 +382,7 @@ class ContactsComparisonResult(BaseModel):
                 return cond
         raise KeyError(f"Condition '{label}' not found")
 
-    def get_comparison(self, label: str) -> Optional[ContactsPairwiseComparison]:
+    def get_comparison(self, label: str) -> ContactsPairwiseComparison | None:
         """Get pairwise comparison for a condition vs control.
 
         Parameters

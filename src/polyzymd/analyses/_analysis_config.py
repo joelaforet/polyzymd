@@ -10,7 +10,6 @@ to maintain the config.yaml as the single source of truth.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -47,8 +46,8 @@ class RMSFConfig(BaseModel):
     enabled: bool = False
     selection: str = "protein and name CA"
     reference_mode: str = "centroid"
-    reference_frame: Optional[int] = None
-    reference_file: Optional[str] = None
+    reference_frame: int | None = None
+    reference_file: str | None = None
 
 
 class DistancePairConfig(BaseModel):
@@ -187,16 +186,16 @@ class ContactsConfig(BaseModel):
     polymer_selection: str = "chainID C"
     protein_selection: str = "protein"
     cutoff: float = DEFAULT_CONTACT_CUTOFF
-    polymer_types: Optional[list[str]] = None
+    polymer_types: list[str] | None = None
     grouping: str = "aa_class"
     compute_residence_times: bool = True
 
     # Binding preference analysis
     compute_binding_preference: bool = False
-    polymer_type_selections: Optional[dict[str, str]] = None
-    protein_group_selections: Optional[dict[str, str]] = None
+    polymer_type_selections: dict[str, str] | None = None
+    protein_group_selections: dict[str, str] | None = None
     surface_exposure_threshold: float = DEFAULT_SURFACE_EXPOSURE_THRESHOLD
-    enzyme_pdb_for_sasa: Optional[str] = None
+    enzyme_pdb_for_sasa: str | None = None
 
 
 class SecondaryStructureConfig(BaseModel):

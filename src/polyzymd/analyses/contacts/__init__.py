@@ -1042,7 +1042,7 @@ class ContactsAnalysis(Analysis):
                 from polyzymd.analyses.shared.loader import TrajectoryLoader
 
                 loader = TrajectoryLoader(cond.sim_config)
-                topo_path = loader._find_topology(run_dir)
+                topo_path = loader.find_topology(run_dir)
             except (FileNotFoundError, ImportError):
                 continue
 
@@ -1605,9 +1605,18 @@ class ContactsAnalysis(Analysis):
         polymer_composition = None
         first_rep = cond.replicates[0] if cond.replicates else 1
         run_dir = cond.sim_config.get_working_directory(first_rep)
-        topology_path = run_dir / "solvated_system.pdb"
 
-        if topology_path.exists():
+        # Use TrajectoryLoader's robust topology search rather than
+        # hardcoding "solvated_system.pdb".
+        try:
+            from polyzymd.analyses.shared.loader import TrajectoryLoader
+
+            loader = TrajectoryLoader(cond.sim_config)
+            topology_path = loader.find_topology(run_dir)
+        except (FileNotFoundError, ImportError):
+            topology_path = None
+
+        if topology_path is not None:
             try:
                 universe = mda.Universe(str(topology_path))
                 polymer_composition = extract_polymer_composition(universe, polymer_type_selections)

@@ -3648,11 +3648,12 @@ def resolve_protein_groups_from_surface_exposure(
 def resolve_polymer_type_selections(
     universe: "Universe",
     polymer_type_selections: dict[str, str] | None = None,
+    polymer_chain: str = "C",
 ) -> list[str]:
     """Resolve polymer type selections and return list of polymer types.
 
     If explicit selections are provided, validates them and returns the keys.
-    If None, auto-detects polymer types from the standard polymer chain (C).
+    If None, auto-detects polymer types from the standard polymer chain.
 
     Parameters
     ----------
@@ -3660,7 +3661,10 @@ def resolve_polymer_type_selections(
         MDAnalysis Universe with loaded topology
     polymer_type_selections : dict[str, str], optional
         Mapping of type name to MDAnalysis selection string.
-        If None, auto-detects from "chainID C".
+        If None, auto-detects from ``chainID <polymer_chain>``.
+    polymer_chain : str
+        Chain ID for auto-detection when *polymer_type_selections* is None.
+        Defaults to ``"C"`` (PolyzyMD chain convention).
 
     Returns
     -------
@@ -3697,16 +3701,16 @@ def resolve_polymer_type_selections(
                 logger.warning(f"Invalid selection for polymer type '{type_name}': {e}")
         return valid_types
 
-    # Auto-detect from chain C
+    # Auto-detect from polymer chain
     try:
-        polymer_atoms = universe.select_atoms("chainID C")
+        polymer_atoms = universe.select_atoms(f"chainID {polymer_chain}")
         if len(polymer_atoms) == 0:
-            logger.warning("No atoms found in chainID C for polymer auto-detection")
+            logger.warning(f"No atoms found in chainID {polymer_chain} for polymer auto-detection")
             return []
 
         # Get unique resnames
         resnames = set(polymer_atoms.residues.resnames)
-        logger.debug(f"Auto-detected polymer types from chain C: {resnames}")
+        logger.debug(f"Auto-detected polymer types from chain {polymer_chain}: {resnames}")
         return sorted(resnames)
 
     except Exception as e:
@@ -3717,6 +3721,7 @@ def resolve_polymer_type_selections(
 def extract_polymer_composition(
     universe: "Universe",
     polymer_type_selections: dict[str, str] | None = None,
+    polymer_chain: str = "C",
 ) -> PolymerComposition:
     """Extract polymer composition (residue and heavy atom counts) from trajectory.
 
@@ -3730,7 +3735,11 @@ def extract_polymer_composition(
         MDAnalysis Universe with loaded topology
     polymer_type_selections : dict[str, str], optional
         Mapping of type name to MDAnalysis selection string.
-        If None, auto-detects from "chainID C" using unique resnames.
+        If None, auto-detects from ``chainID <polymer_chain>`` using unique
+        resnames.
+    polymer_chain : str
+        Chain ID for auto-detection when *polymer_type_selections* is None.
+        Defaults to ``"C"`` (PolyzyMD chain convention).
 
     Returns
     -------
@@ -3741,7 +3750,7 @@ def extract_polymer_composition(
     Notes
     -----
     For auto-detection (polymer_type_selections=None), the function:
-    1. Selects all atoms in chainID C
+    1. Selects all atoms in the specified polymer chain
     2. Groups residues by resname
     3. Counts residues and heavy atoms per resname
 
@@ -3799,19 +3808,19 @@ def extract_polymer_composition(
                 logger.warning(f"Failed to extract composition for '{type_name}': {e}")
 
     else:
-        # Auto-detect from chain C
+        # Auto-detect from polymer chain
         try:
-            polymer_atoms = universe.select_atoms("chainID C")
+            polymer_atoms = universe.select_atoms(f"chainID {polymer_chain}")
             if len(polymer_atoms) == 0:
-                logger.warning("No atoms found in chainID C for polymer composition")
+                logger.warning(f"No atoms found in chainID {polymer_chain} for polymer composition")
                 return PolymerComposition()
 
             # Group by resname
             resnames = set(polymer_atoms.residues.resnames)
 
             for resname in resnames:
-                # Select atoms of this resname within chain C
-                type_atoms = universe.select_atoms(f"chainID C and resname {resname}")
+                # Select atoms of this resname within polymer chain
+                type_atoms = universe.select_atoms(f"chainID {polymer_chain} and resname {resname}")
 
                 # Count residues
                 n_residues = len(type_atoms.residues)

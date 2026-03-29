@@ -11,12 +11,10 @@ RMSF-specific fields.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import ClassVar
 
 from pydantic import Field
 
-from polyzymd import __version__
 from polyzymd.compare.core.base import (
     ANOVASummary,
     BaseComparisonResult,

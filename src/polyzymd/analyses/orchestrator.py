@@ -487,6 +487,7 @@ def run_comparison(
         settings=settings,
         plot_settings=raw_plot_settings,
         comparison_path=comparison_result_path,
+        control_label=effective_control,
     )
 
     plots = analysis.plot(plot_ctx)

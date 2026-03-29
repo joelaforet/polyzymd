@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 
@@ -441,9 +440,9 @@ def contacts(
     residence_times: bool,
     plot: bool,
     recompute: bool,
-    output_dir: Optional[str],
+    output_dir: str | None,
     binding_preference: bool,
-    enzyme_pdb: Optional[str],
+    enzyme_pdb: str | None,
     surface_threshold: float,
 ) -> None:
     """Analyze polymer-protein contacts.
