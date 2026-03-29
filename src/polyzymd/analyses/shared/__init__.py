@@ -25,8 +25,6 @@ diagnostics
     Selection diagnostics, equilibration validation.
 config_hash
     Config hashing for cache validation.
-metric_type
-    Metric type classification for autocorrelation handling.
 constants
     Shared default values (cutoffs, thresholds).
 defaults
@@ -60,6 +58,10 @@ from polyzymd.analyses.shared.autocorrelation import (
     statistical_inefficiency,
     statistical_inefficiency_multiple,
 )
+from polyzymd.analyses.shared.config_hash import (
+    compute_config_hash,
+    validate_config_hash,
+)
 from polyzymd.analyses.shared.constants import (
     DEFAULT_CONTACT_CUTOFF,
     DEFAULT_DISTANCE_THRESHOLD,
@@ -76,10 +78,6 @@ from polyzymd.analyses.shared.loader import (
 from polyzymd.analyses.shared.pbc import (
     minimum_image_distance,
     pairwise_distances_pbc,
-)
-from polyzymd.analyses.shared.config_hash import (
-    compute_config_hash,
-    validate_config_hash,
 )
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,

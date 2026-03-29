@@ -2206,7 +2206,6 @@ def new_analysis(
 
     \b
       src/polyzymd/analyses/<NAME>/__init__.py    — plugin class
-      src/polyzymd/analyses/<NAME>/_comparison_results.py — result model
       tests/test_<NAME>_plugin.py                 — smoke tests
 
     Run the generated tests with:

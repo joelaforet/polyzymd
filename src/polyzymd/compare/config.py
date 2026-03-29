@@ -11,20 +11,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.analyses.shared.defaults import AnalysisDefaults
 from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
-
-# Import settings classes used as backward-compatible aliases below.
-# Other settings classes are no longer imported for registration side-effects
-# (the AnalysisSettingsRegistry and ComparisonSettingsRegistry were removed).
-from polyzymd.compare.settings import (  # noqa: F401
-    CatalyticTriadAnalysisSettings,
-    TriadPairSettings,
-)
 from polyzymd.core.branding import prepend_file_header
-
-# Backward-compatible aliases for analysis module
-# The analysis/triad module still imports these old names
-CatalyticTriadConfig = CatalyticTriadAnalysisSettings
-TriadPairConfig = TriadPairSettings
 
 logger = logging.getLogger(__name__)
 

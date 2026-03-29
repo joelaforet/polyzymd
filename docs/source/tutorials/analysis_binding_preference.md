@@ -763,9 +763,9 @@ plugins:
 
 ````{tab-item} Python
 ```python
-from polyzymd.compare.settings import ContactsAnalysisSettings
+from polyzymd.analyses.contacts import ContactsSettings
 
-settings = ContactsAnalysisSettings(
+settings = ContactsSettings(
     protein_groups={
         "lid_helix_5": "resid 141:155",
         "lid_helix_10": "resid 281:295",

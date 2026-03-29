@@ -10,14 +10,9 @@ Registries
 Base classes
 ------------
 - ``BasePlotSettings``  — Base class for per-analysis plot settings
-- ``BaseAnalysisSettings``  — ABC for analysis parameter configs (legacy, kept for calculator layer)
-- ``BaseComparisonSettings`` — ABC for comparison parameter configs (legacy, kept for settings layer)
-- ``BaseAnalyzer`` — ABC for analyzer implementations (legacy, kept for calculator layer)
 
 Note
 ----
-The ``AnalyzerRegistry``, ``AnalysisSettingsRegistry``, and
-``ComparisonSettingsRegistry`` were removed in the OCP-compliance refactor.
 Analysis plugins are discovered via ``analyses.discovery`` and their
 ``Settings`` inner classes provide the authoritative configuration.
 """
@@ -25,102 +20,11 @@ Analysis plugins are discovered via ``analyses.discovery`` and their
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Type
+from typing import Type
 
 from pydantic import BaseModel
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from polyzymd.config.schema import SimulationConfig
-
 logger = logging.getLogger(__name__)
-
-
-# ============================================================================
-# Legacy Base Classes (kept for calculator / settings layer compatibility)
-# ============================================================================
-
-
-class BaseAnalysisSettings(BaseModel, ABC):
-    """Abstract base class for analysis settings configurations.
-
-    .. deprecated::
-        This class is retained only for backward compatibility with the
-        ``compare/settings.py`` layer and the old ``_calculator.py`` modules.
-        New analysis types should define a ``Settings`` inner class on their
-        ``Analysis`` subclass instead.
-    """
-
-    @classmethod
-    @abstractmethod
-    def analysis_type(cls) -> str:
-        """Return the unique identifier for this analysis type."""
-        ...
-
-    @abstractmethod
-    def to_analysis_yaml_dict(self) -> dict[str, Any]:
-        """Convert to analysis.yaml-compatible dictionary."""
-        ...
-
-
-class BaseComparisonSettings(BaseModel, ABC):
-    """Abstract base class for comparison settings configurations.
-
-    .. deprecated::
-        This class is retained only for backward compatibility with the
-        ``compare/settings.py`` layer.  New analysis types should handle
-        comparison parameters within their plugin ``Settings`` class.
-    """
-
-    @classmethod
-    @abstractmethod
-    def analysis_type(cls) -> str:
-        """Return the unique identifier for this analysis type."""
-        ...
-
-
-class BaseAnalyzer(ABC):
-    """Abstract base class defining the expected interface for analyzers.
-
-    .. deprecated::
-        This class is retained only for backward compatibility with the
-        old ``_calculator.py`` modules.  New analysis types should use
-        the ``analyses/`` plugin system instead (subclass ``Analysis``).
-    """
-
-    @classmethod
-    @abstractmethod
-    def analysis_type(cls) -> str:
-        """Return the unique identifier for this analyzer."""
-        ...
-
-    @classmethod
-    @abstractmethod
-    def from_config(
-        cls,
-        analysis_settings: BaseAnalysisSettings,
-        sim_config: "SimulationConfig",
-        equilibration: str = "0ns",
-    ) -> "BaseAnalyzer":
-        """Factory method to create analyzer from config."""
-        ...
-
-    @abstractmethod
-    def compute(self, replicate: int, **kwargs) -> Any:
-        """Run analysis for a single replicate."""
-        ...
-
-    @abstractmethod
-    def compute_aggregated(self, replicates: "Sequence[int]", **kwargs) -> Any:
-        """Run aggregated analysis across multiple replicates."""
-        ...
-
-    @property
-    def label(self) -> str:
-        """Human-readable label for this analyzer."""
-        return self.analysis_type()
 
 
 # ============================================================================

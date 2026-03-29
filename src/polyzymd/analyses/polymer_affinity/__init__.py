@@ -73,17 +73,17 @@ from polyzymd.analyses.shared.plotting import (
 )
 
 if TYPE_CHECKING:
-    from polyzymd.analyses.shared.binding_preference import (
-        AggregatedBindingPreferenceEntry,
-        AggregatedBindingPreferenceResult,
-        BindingPreferenceResult,
-    )
     from polyzymd.analyses.polymer_affinity._comparison_results import (
         AffinityScoreConditionSummary,
         AffinityScoreEntry,
         AffinityScorePairwiseEntry,
         PolymerAffinityScoreResult,
         PolymerTypeScore,
+    )
+    from polyzymd.analyses.shared.binding_preference import (
+        AggregatedBindingPreferenceEntry,
+        AggregatedBindingPreferenceResult,
+        BindingPreferenceResult,
     )
 
 logger = logging.getLogger("polyzymd.analyses.polymer_affinity")

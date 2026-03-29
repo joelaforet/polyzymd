@@ -394,8 +394,9 @@ def _load_partition_definitions(
         logger.debug("No contacts analysis settings in comparison config")
         return {}, {}
 
-    # Access via getattr to avoid LSP errors (BaseAnalysisSettings doesn't
-    # declare protein_groups/protein_partitions; ContactsAnalysisSettings does)
+    # Access via getattr to avoid LSP errors (the comparison config settings
+    # object doesn't declare protein_groups/protein_partitions directly;
+    # ContactsSettings does)
     protein_groups: dict[str, list[int]] = getattr(contacts_settings, "protein_groups", None) or {}
     protein_partitions: dict[str, list[str]] = (
         getattr(contacts_settings, "protein_partitions", None) or {}

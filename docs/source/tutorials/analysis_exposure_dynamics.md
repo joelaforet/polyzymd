@@ -521,7 +521,7 @@ downstream functional assays.
 
 ## Configuration Reference
 
-### ExposureAnalysisSettings
+### ExposureSettings
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -536,7 +536,7 @@ downstream functional assays.
 | `probe_radius_nm` | float | `0.14` | Probe radius for MDTraj `shrake_rupley`, in nm (1.4 Å water probe). |
 | `n_sphere_points` | int | `960` | Number of sphere points for `shrake_rupley`. Higher = more accurate, slower. |
 
-### ExposureComparisonSettings
+### Comparison Settings
 
 No comparison-specific parameters beyond analysis settings defaults. Specify
 only `plugins.exposure` in `comparison.yaml`.

@@ -188,12 +188,12 @@ class ExposureAnalysis(Analysis):
             Comparison result, or ``None`` if fewer than 2 valid conditions.
         """
         from polyzymd import __version__
-        from polyzymd.analyses.shared.statistics import compute_sem
-        from polyzymd.compare.core.base import ANOVASummary, PairwiseComparison
         from polyzymd.analyses.exposure._comparison_results import (
             ExposureComparisonResult,
             ExposureConditionSummary,
         )
+        from polyzymd.analyses.shared.statistics import compute_sem
+        from polyzymd.compare.core.base import ANOVASummary, PairwiseComparison
         from polyzymd.compare.statistics import (
             cohens_d,
             independent_ttest,
@@ -402,6 +402,7 @@ class ExposureAnalysis(Analysis):
         ExposureConditionSummary
         """
         from polyzymd.analyses.contacts._results import ContactResult
+        from polyzymd.analyses.exposure._comparison_results import ExposureConditionSummary
         from polyzymd.analyses.exposure._config import ExposureConfig
         from polyzymd.analyses.exposure._dynamics import (
             ExposureDynamicsResult,
@@ -412,7 +413,6 @@ class ExposureAnalysis(Analysis):
         from polyzymd.analyses.exposure._sasa_trajectory import compute_trajectory_sasa
         from polyzymd.analyses.shared.loader import TrajectoryLoader
         from polyzymd.analyses.shared.statistics import compute_sem
-        from polyzymd.analyses.exposure._comparison_results import ExposureConditionSummary
 
         logger.info(f"  Processing condition: {cond.label}")
 
@@ -783,8 +783,8 @@ def _find_exposure_comparison_result(
     Any | None
         Loaded comparison result if found
     """
-    from polyzymd.compare.io.results import find_comparison_result
     from polyzymd.analyses.exposure._comparison_results import ExposureComparisonResult
+    from polyzymd.compare.io.results import find_comparison_result
 
     return find_comparison_result(
         data,

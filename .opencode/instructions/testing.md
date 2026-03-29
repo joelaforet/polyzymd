@@ -16,7 +16,7 @@ The test suite covers the full analysis plugin system and core infrastructure:
 pixi run -e build pytest tests/ -v
 
 # Specific test file
-pixi run -e build pytest tests/test_analyses_rmsf.py -v
+pixi run -e build pytest tests/test_rmsf_plugin.py -v
 
 # Run tests matching a pattern
 pixi run -e build pytest tests/ -v -k "rmsf"

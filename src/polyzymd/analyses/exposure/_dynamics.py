@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import BaseModel, Field
 
+from polyzymd.analyses._results_base import BaseAnalysisResult
 from polyzymd.analyses.exposure._chaperone import (
     ChaperoneDetectionResult,
     detect_events,
@@ -33,7 +34,6 @@ from polyzymd.analyses.exposure._classification import (
     ResidueStability,
     classify_residue_stability,
 )
-from polyzymd.analyses._results_base import BaseAnalysisResult
 
 if TYPE_CHECKING:
     from polyzymd.analyses.contacts._results import ContactResult

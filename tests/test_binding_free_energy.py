@@ -179,56 +179,6 @@ class TestBoltzmannInversion:
 # ---------------------------------------------------------------------------
 
 
-class TestBindingFreeEnergySettings:
-    """Test BindingFreeEnergyAnalysisSettings and ComparisonSettings."""
-
-    def test_default_units_kT(self):
-        from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
-
-        s = BindingFreeEnergyAnalysisSettings()
-        assert s.units == "kT"
-
-    def test_k_b_kT_returns_zero(self):
-        from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
-
-        s = BindingFreeEnergyAnalysisSettings(units="kT")
-        assert s.k_b() == 0.0
-
-    def test_k_b_kcal(self):
-        from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
-
-        s = BindingFreeEnergyAnalysisSettings(units="kcal/mol")
-        assert abs(s.k_b() - KB_KCAL) < 1e-12
-
-    def test_k_b_kj(self):
-        from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
-
-        s = BindingFreeEnergyAnalysisSettings(units="kJ/mol")
-        assert abs(s.k_b() - KB_KJ) < 1e-12
-
-    def test_invalid_units_raises(self):
-        from pydantic import ValidationError
-
-        from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
-
-        with pytest.raises(ValidationError):
-            BindingFreeEnergyAnalysisSettings(units="eV")
-
-    def test_comparison_settings_defaults(self):
-        from polyzymd.compare.settings import BindingFreeEnergyComparisonSettings
-
-        cs = BindingFreeEnergyComparisonSettings()
-        assert 0 < cs.fdr_alpha <= 1.0
-
-    def test_surface_exposure_threshold_positive(self):
-        from pydantic import ValidationError
-
-        from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
-
-        with pytest.raises(ValidationError):
-            BindingFreeEnergyAnalysisSettings(surface_exposure_threshold=-0.1)
-
-
 # ---------------------------------------------------------------------------
 # FreeEnergyEntry Tests
 # ---------------------------------------------------------------------------
@@ -560,16 +510,6 @@ class TestBindingFreeEnergyFormatters:
 
 class TestRegistration:
     """Test that BFE components are properly registered and importable."""
-
-    def test_analysis_settings_registered(self):
-        from polyzymd.compare.settings import BindingFreeEnergyAnalysisSettings
-
-        assert BindingFreeEnergyAnalysisSettings.analysis_type() == "binding_free_energy"
-
-    def test_comparison_settings_registered(self):
-        from polyzymd.compare.settings import BindingFreeEnergyComparisonSettings
-
-        assert BindingFreeEnergyComparisonSettings.analysis_type() == "binding_free_energy"
 
     def test_results_module_importable(self):
         from polyzymd.analyses.binding_free_energy._comparison_results import (

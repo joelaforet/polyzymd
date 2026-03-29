@@ -655,16 +655,6 @@ class TestPolymerAffinityFormatters:
 class TestRegistration:
     """Test that polymer affinity types are registered properly."""
 
-    def test_analysis_settings_registered(self):
-        from polyzymd.compare.settings import PolymerAffinityScoreSettings
-
-        assert PolymerAffinityScoreSettings.analysis_type() == "polymer_affinity"
-
-    def test_comparison_settings_registered(self):
-        from polyzymd.compare.settings import PolymerAffinityScoreComparisonSettings
-
-        assert PolymerAffinityScoreComparisonSettings.analysis_type() == "polymer_affinity"
-
     def test_results_module_importable(self):
         from polyzymd.analyses.polymer_affinity._comparison_results import (
             AffinityScoreConditionSummary,
@@ -697,34 +687,3 @@ class TestRegistration:
         from polyzymd.compare.registries import PlotSettingsRegistry
 
         assert PlotSettingsRegistry.is_registered("polymer_affinity")
-
-
-# ---------------------------------------------------------------------------
-# Settings Tests
-# ---------------------------------------------------------------------------
-
-
-class TestPolymerAffinitySettings:
-    """Test PolymerAffinityScoreSettings and ComparisonSettings."""
-
-    def test_default_settings_construction(self):
-        from polyzymd.compare.settings import PolymerAffinityScoreSettings
-
-        s = PolymerAffinityScoreSettings()
-        assert s.surface_exposure_threshold > 0
-
-    def test_comparison_settings_defaults(self):
-        from polyzymd.compare.settings import PolymerAffinityScoreComparisonSettings
-
-        cs = PolymerAffinityScoreComparisonSettings()
-        assert 0 < cs.fdr_alpha <= 1.0
-
-    def test_analysis_type_string(self):
-        from polyzymd.compare.settings import PolymerAffinityScoreSettings
-
-        assert PolymerAffinityScoreSettings.analysis_type() == "polymer_affinity"
-
-    def test_comparison_analysis_type_string(self):
-        from polyzymd.compare.settings import PolymerAffinityScoreComparisonSettings
-
-        assert PolymerAffinityScoreComparisonSettings.analysis_type() == "polymer_affinity"
