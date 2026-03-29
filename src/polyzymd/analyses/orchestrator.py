@@ -474,9 +474,6 @@ def run_comparison(
         analysis.save_result(comparison_result, comparison_result_path)
 
     # 5. Plot
-    figures_dir = analysis.figures_output_dir(analysis_root.parent / "figures")
-    figures_dir.mkdir(parents=True, exist_ok=True)
-
     # Guarantee plot_settings is never None — plugins should not need
     # to guard against it.
     raw_plot_settings = getattr(config, "plot_settings", None)
@@ -484,6 +481,18 @@ def run_comparison(
         from polyzymd.compare.config import PlotSettings
 
         raw_plot_settings = PlotSettings()
+
+    # Resolve figure output directory from plot_settings.output_dir,
+    # relative to comparison.yaml location (consistent with CLI plot-all).
+    figures_base = raw_plot_settings.output_dir
+    if not figures_base.is_absolute():
+        source_path = getattr(config, "source_path", None)
+        if source_path is not None:
+            figures_base = source_path.parent / figures_base
+        else:
+            figures_base = analysis_root.parent / figures_base
+    figures_dir = analysis.figures_output_dir(figures_base)
+    figures_dir.mkdir(parents=True, exist_ok=True)
 
     plot_ctx = PlotContext(
         conditions=valid_conditions,

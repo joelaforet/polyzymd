@@ -75,9 +75,9 @@ class PluginSettingsContainer(BaseModel):
             try:
                 analysis_cls = get_analysis(key_lower)
             except KeyError:
-                from polyzymd.analyses.discovery import discover_analyses
+                from polyzymd.analyses.discovery import list_analyses
 
-                available = sorted(discover_analyses().keys())
+                available = sorted(list_analyses().keys())
                 raise ValueError(
                     f"Unknown analysis plugin '{key}' in plugins section. "
                     f"Available plugins: {available}"
@@ -610,8 +610,8 @@ class PlotSettings(BaseModel):
     Controls plot generation for all analyses. Per-analysis plot settings
     are discovered via ``PlotSettingsRegistry`` — any key in the YAML that
     matches a registered analysis type is parsed into the corresponding
-    settings class.  Unrecognised keys that are not global fields are
-    logged and skipped.
+    settings class.  Unrecognised keys that are not global fields raise
+    ``ValueError``.
 
     Attributes
     ----------
@@ -862,6 +862,9 @@ class ComparisonConfig(BaseModel):
 
         with open(path) as f:
             data = yaml.safe_load(f)
+
+        if data is None:
+            data = {}
 
         # Resolve relative paths relative to the config file location
         config_dir = path.parent.resolve()

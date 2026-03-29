@@ -116,7 +116,11 @@ def find_comparison_result(
 
         condition = condition_data.get("condition")
         if condition is not None:
-            config_path = getattr(condition, "config", None)
+            # Support both Condition.config_path (plugin system) and
+            # ConditionConfig.config (comparison config) for backward compat.
+            config_path = getattr(condition, "config_path", None) or getattr(
+                condition, "config", None
+            )
             if config_path is not None:
                 config_path = Path(config_path)
                 for parent in [config_path.parent, config_path.parent.parent]:

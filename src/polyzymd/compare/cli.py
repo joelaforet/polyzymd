@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 import yaml
@@ -84,7 +83,7 @@ def compare():
     default=None,
     help="Parent directory for the comparison project. Defaults to current directory.",
 )
-def init(name: str, eq_time: str, output_dir: Optional[Path]):
+def init(name: str, eq_time: str, output_dir: Path | None):
     """Initialize a new comparison project.
 
     Creates a new directory NAME containing:
@@ -325,12 +324,12 @@ def _output_validation_result(result: dict, output_format: str) -> None:
     help="List available comparison types and exit.",
 )
 def run_comparison(
-    comparison_type: Optional[str],
+    comparison_type: str | None,
     config_file: Path,
-    eq_time: Optional[str],
+    eq_time: str | None,
     recompute: bool,
     output_format: str,
-    output_path: Optional[Path],
+    output_path: Path | None,
     quiet: bool,
     debug: bool,
     list_types: bool,
@@ -477,6 +476,14 @@ def _generate_analysis_plots(
     # Build Condition objects
     conditions = [Condition.from_condition_config(c) for c in config.conditions]
 
+    # Resolve effective control label
+    control_label = config.control
+    effective_control = (
+        control_label
+        if control_label and any(c.label == control_label for c in conditions)
+        else None
+    )
+
     # Resolve paths relative to comparison.yaml
     source_path = config.source_path
     analysis_root = source_path.parent / "analysis" if source_path else Path("analysis")
@@ -503,8 +510,8 @@ def _generate_analysis_plots(
         analysis = analysis_cls()
         settings = _resolve_settings(analysis, config)
 
-        # Filter conditions
-        valid_conditions = analysis.filter_conditions(conditions)
+        # Filter conditions (pass resolved settings for plugins that need them)
+        valid_conditions = analysis.filter_conditions(conditions, settings=settings)
 
         # Build analysis_dirs mapping (mirrors orchestrator.run_comparison)
         analysis_dirs: dict[str, Path] = {}
@@ -527,6 +534,7 @@ def _generate_analysis_plots(
             settings=settings,
             plot_settings=plot_settings,
             comparison_path=comparison_result_path,
+            control_label=effective_control,
         )
 
         try:
@@ -580,8 +588,8 @@ def _generate_analysis_plots(
 )
 def plot_all(
     config_file: Path,
-    output_dir: Optional[Path],
-    analysis_type: Optional[str],
+    output_dir: Path | None,
+    analysis_type: str | None,
     list_available: bool,
     quiet: bool,
     debug: bool,
@@ -758,8 +766,7 @@ def run_all(
         polyzymd compare run-all -f comparison.yaml --eq-time 10ns
         polyzymd compare run-all --recompute --plot
     """
-    from polyzymd.analyses.discovery import get_analysis
-    from polyzymd.analyses.orchestrator import run_comparison as _run_pipeline
+    from polyzymd.analyses.orchestrator import run_all_comparisons
     from polyzymd.analyses.shared.logging_utils import setup_logging
 
     _echo_branding()
@@ -783,46 +790,30 @@ def run_all(
     click.echo(f"Enabled analyses: {', '.join(enabled_analyses)}")
     click.echo()
 
-    # --- Run each analysis plugin -------------------------------------------
+    # --- Run all analyses in dependency order --------------------------------
+    all_results = run_all_comparisons(
+        config,
+        analysis_names=None,  # run all enabled
+        recompute=recompute,
+        equilibration=equilibration,
+    )
+
+    # Categorize results for summary
     succeeded: list[str] = []
     failed: list[tuple[str, str]] = []
     skipped: list[str] = []
 
-    for settings_key in enabled_analyses:
-        # Resolve plugin — try the settings_key directly as an analysis name
-        try:
-            analysis_cls = get_analysis(settings_key)
-        except KeyError:
-            click.echo(f"  [{settings_key}] skipped — no registered analysis plugin")
-            skipped.append(settings_key)
-            continue
-
-        click.echo(f"  [{settings_key}] running {analysis_cls.name} comparison ...")
-
-        try:
-            analysis = analysis_cls()
-            pipeline_result = _run_pipeline(
-                analysis, config, recompute=recompute, equilibration=equilibration
-            )
-            result = pipeline_result["comparison"]
-        except Exception as e:
-            msg = str(e)
-            click.echo(f"  [{settings_key}] FAILED: {msg}", err=True)
-            if debug:
-                import traceback
-
-                traceback.print_exc()
-            failed.append((settings_key, msg))
-            continue
-
-        if result is None:
-            click.echo(f"  [{settings_key}] skipped — no comparison result")
-            skipped.append(settings_key)
-            continue
-
-        json_path = pipeline_result.get("comparison_path")
-        click.echo(f"  [{settings_key}] saved -> {json_path}")
-        succeeded.append(settings_key)
+    for name, result in all_results.items():
+        if "error" in result:
+            click.echo(f"  [{name}] FAILED: {result['error']}", err=True)
+            failed.append((name, result["error"]))
+        elif result.get("comparison") is None:
+            click.echo(f"  [{name}] skipped — no comparison result")
+            skipped.append(name)
+        else:
+            json_path = result.get("comparison_path")
+            click.echo(f"  [{name}] saved -> {json_path}")
+            succeeded.append(name)
 
     # --- Summary ------------------------------------------------------------
     click.echo()
