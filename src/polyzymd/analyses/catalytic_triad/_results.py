@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 import numpy as np
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from polyzymd.analyses._results_base import (
     AggregatedResultMixin,
@@ -106,6 +106,17 @@ class TriadResult(BaseAnalysisResult):
     # Trajectory info
     n_frames_total: int = Field(..., description="Total frames in trajectory")
     n_frames_used: int = Field(..., description="Frames used after equilibration")
+
+    @model_validator(mode="after")
+    def _check_triad_consistency(self) -> "TriadResult":
+        if len(self.pair_results) == 0:
+            raise ValueError("pair_results must contain at least one pair")
+        if self.n_frames_simultaneous > self.n_frames_used:
+            raise ValueError(
+                f"n_frames_simultaneous ({self.n_frames_simultaneous}) > "
+                f"n_frames_used ({self.n_frames_used})"
+            )
+        return self
 
     def summary(self) -> str:
         """Return human-readable summary."""
@@ -238,6 +249,21 @@ class TriadAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     source_result_files: list[str] = Field(
         default_factory=list, description="Paths to individual replicate result files"
     )
+
+    @model_validator(mode="after")
+    def _check_aggregated_consistency(self) -> "TriadAggregatedResult":
+        if len(self.pair_results) == 0:
+            raise ValueError("pair_results must contain at least one pair")
+        if self.n_replicates != len(self.replicates):
+            raise ValueError(
+                f"n_replicates ({self.n_replicates}) != len(replicates) ({len(self.replicates)})"
+            )
+        if len(self.per_replicate_simultaneous) != self.n_replicates:
+            raise ValueError(
+                f"per_replicate_simultaneous length ({len(self.per_replicate_simultaneous)}) != "
+                f"n_replicates ({self.n_replicates})"
+            )
+        return self
 
     def summary(self) -> str:
         """Return human-readable summary."""

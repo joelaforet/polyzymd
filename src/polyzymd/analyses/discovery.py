@@ -59,18 +59,18 @@ def _is_concrete_analysis(obj: type) -> bool:
     )
 
 
-def _discover_plugins() -> dict[str, type["Analysis"]]:
+def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
     """Import all analysis modules and collect concrete Analysis subclasses.
 
     Returns
     -------
-    dict[str, type[Analysis]]
-        Mapping ``analysis_name -> Analysis subclass``.
+    tuple[dict[str, type[Analysis]], dict[str, str]]
+        ``(name_registry, alias_to_name)`` mappings.
 
     Raises
     ------
     RuntimeError
-        If two plugins register the same ``name``.
+        If two plugins register the same ``name`` or alias.
     """
     import polyzymd.analyses as analyses_pkg
 
@@ -95,11 +95,22 @@ def _discover_plugins() -> dict[str, type["Analysis"]]:
             continue
 
         for attr_name in dir(module):
-            obj = getattr(module, attr_name)
+            try:
+                obj = getattr(module, attr_name)
+            except Exception:
+                continue  # Module __getattr__ raised; skip this attribute
             if not _is_concrete_analysis(obj):
                 continue
 
             name = obj.name
+            if not name or not name.strip():
+                logger.warning(
+                    "Analysis class %s.%s has empty name — skipping.",
+                    obj.__module__,
+                    obj.__qualname__,
+                )
+                continue
+            name = name.strip()
             if name in registry:
                 existing = registry[name]
                 if existing is obj:
@@ -114,6 +125,13 @@ def _discover_plugins() -> dict[str, type["Analysis"]]:
 
             # Register aliases
             for alias in getattr(obj, "aliases", ()):
+                if not alias or not alias.strip():
+                    logger.warning(
+                        "Analysis %r has empty alias — skipping.",
+                        name,
+                    )
+                    continue
+                alias = alias.strip()
                 if alias in alias_registry:
                     raise RuntimeError(
                         f"Analysis alias collision: {alias!r} is claimed by both "
@@ -126,7 +144,7 @@ def _discover_plugins() -> dict[str, type["Analysis"]]:
                     )
                 alias_registry[alias] = name
 
-    return registry
+    return registry, alias_registry
 
 
 @lru_cache(maxsize=1)
@@ -135,15 +153,7 @@ def _cached_registry() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
 
     The cache is invalidated only by :func:`clear_cache`.
     """
-    registry = _discover_plugins()
-
-    # Build alias map
-    alias_to_name: dict[str, str] = {}
-    for name, cls in registry.items():
-        for alias in getattr(cls, "aliases", ()):
-            alias_to_name[alias] = name
-
-    return registry, alias_to_name
+    return _discover_plugins()
 
 
 def clear_cache() -> None:

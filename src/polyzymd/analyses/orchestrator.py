@@ -148,7 +148,7 @@ def _run_replicates(
                 failed.append(rep)
                 continue
             _check_result_type(result, "compute_replicate", analysis.name)
-            if not result_path.exists():
+            if recompute or not result_path.exists():
                 analysis.save_result(result, result_path)
             results.append(result)
             successful.append(rep)
@@ -247,7 +247,7 @@ def run_analysis(
 
     aggregated = analysis.aggregate(agg_ctx, results)
     _check_result_type(aggregated, "aggregate", analysis.name)
-    if aggregated is not None and not agg_result_path.exists():
+    if aggregated is not None and (recompute or not agg_result_path.exists()):
         analysis.save_result(aggregated, agg_result_path)
     logger.info(f"  Aggregated {len(results)} replicates for '{condition.label}'")
 
@@ -364,6 +364,24 @@ def run_comparison(
 
     # 2. Filter
     valid_conditions = analysis.filter_conditions(all_conditions)
+    # Validate: filter_conditions must return a subset of the input, no duplicates
+    valid_set = {id(c) for c in valid_conditions}
+    input_set = {id(c) for c in all_conditions}
+    if not valid_set.issubset(input_set):
+        logger.warning(
+            f"{analysis.name}: filter_conditions() returned conditions not in the original list"
+        )
+    if len(valid_set) != len(valid_conditions):
+        logger.warning(
+            f"{analysis.name}: filter_conditions() returned duplicate conditions — deduplicating"
+        )
+        seen: set[int] = set()
+        deduped: list[Condition] = []
+        for c in valid_conditions:
+            if id(c) not in seen:
+                seen.add(id(c))
+                deduped.append(c)
+        valid_conditions = deduped
     excluded = [c for c in all_conditions if c not in valid_conditions]
 
     if excluded:
@@ -385,7 +403,6 @@ def run_comparison(
 
     for cond in valid_conditions:
         cond_dir = analysis_root / sanitize_label(cond.label) / analysis.name
-        analysis_dirs[cond.label] = cond_dir
 
         try:
             agg = run_analysis(
@@ -396,9 +413,18 @@ def run_comparison(
                 output_dir=cond_dir,
                 recompute=recompute,
             )
-            aggregated_results[cond.label] = agg
-        except ValueError as e:
-            logger.error(f"  {cond.label}: {e}")
+            # Only register successful conditions in analysis_dirs and results
+            analysis_dirs[cond.label] = cond_dir
+            if agg is not None:
+                aggregated_results[cond.label] = agg
+            else:
+                logger.warning(
+                    f"  {cond.label}: run_analysis returned None — "
+                    "condition will be excluded from comparison."
+                )
+                failed_conditions.append(cond)
+        except Exception as e:
+            logger.error(f"  {cond.label}: {type(e).__name__} — {e}")
             failed_conditions.append(cond)
 
     # Remove failed conditions from the valid set

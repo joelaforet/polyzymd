@@ -80,13 +80,16 @@ from polyzymd.analyses.shared.pbc import (
     pairwise_distances_pbc,
 )
 from polyzymd.analyses.shared.plotting import (
+    annotate_cells,
     apply_axis_style,
     apply_legend,
+    find_json,
     get_colors,
     get_output_path,
     get_theme,
     grouped_bars,
     save_figure,
+    symmetric_clim,
 )
 from polyzymd.analyses.shared.statistics import (
     PerResidueStats,
@@ -147,4 +150,7 @@ __all__ = [
     "get_output_path",
     "save_figure",
     "grouped_bars",
+    "find_json",
+    "annotate_cells",
+    "symmetric_clim",
 ]

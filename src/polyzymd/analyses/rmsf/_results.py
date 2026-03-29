@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from polyzymd.analyses._results_base import (
     AggregatedResultMixin,
@@ -104,6 +104,19 @@ class RMSFResult(BaseAnalysisResult):
     trajectory_files: list[str] = Field(
         default_factory=list, description="Trajectory files analyzed"
     )
+
+    @model_validator(mode="after")
+    def _check_parallel_arrays(self) -> "RMSFResult":
+        n_ids = len(self.residue_ids)
+        if len(self.residue_names) != n_ids:
+            raise ValueError(
+                f"residue_names length ({len(self.residue_names)}) != residue_ids length ({n_ids})"
+            )
+        if len(self.rmsf_values) != n_ids:
+            raise ValueError(
+                f"rmsf_values length ({len(self.rmsf_values)}) != residue_ids length ({n_ids})"
+            )
+        return self
 
     def summary(self) -> str:
         """Return human-readable summary."""
@@ -198,6 +211,34 @@ class RMSFAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     source_result_files: list[str] = Field(
         default_factory=list, description="Paths to individual replicate result files"
     )
+
+    @model_validator(mode="after")
+    def _check_parallel_arrays(self) -> "RMSFAggregatedResult":
+        n_ids = len(self.residue_ids)
+        if len(self.residue_names) != n_ids:
+            raise ValueError(
+                f"residue_names length ({len(self.residue_names)}) != residue_ids length ({n_ids})"
+            )
+        if len(self.mean_rmsf_per_residue) != n_ids:
+            raise ValueError(
+                f"mean_rmsf_per_residue length ({len(self.mean_rmsf_per_residue)}) != "
+                f"residue_ids length ({n_ids})"
+            )
+        if len(self.sem_rmsf_per_residue) != n_ids:
+            raise ValueError(
+                f"sem_rmsf_per_residue length ({len(self.sem_rmsf_per_residue)}) != "
+                f"residue_ids length ({n_ids})"
+            )
+        if self.n_replicates != len(self.replicates):
+            raise ValueError(
+                f"n_replicates ({self.n_replicates}) != len(replicates) ({len(self.replicates)})"
+            )
+        if len(self.per_replicate_mean_rmsf) != self.n_replicates:
+            raise ValueError(
+                f"per_replicate_mean_rmsf length ({len(self.per_replicate_mean_rmsf)}) != "
+                f"n_replicates ({self.n_replicates})"
+            )
+        return self
 
     def summary(self) -> str:
         """Return human-readable summary."""

@@ -488,9 +488,9 @@ class CatalyticTriadAnalysis(Analysis):
         return {
             "simultaneous_contact_fraction": MetricValue(
                 name="simultaneous_contact_fraction",
-                mean=summary.overall_simultaneous_contact,
-                sem=summary.sem_simultaneous_contact,
-                replicate_values=summary.per_replicate_simultaneous,
+                mean=summary.overall_simultaneous_contact * 100,
+                sem=summary.sem_simultaneous_contact * 100,
+                replicate_values=[v * 100 for v in summary.per_replicate_simultaneous],
                 higher_is_better=True,
                 direction_labels=("worsening", "unchanged", "improving"),
             ),
@@ -579,7 +579,7 @@ class CatalyticTriadAnalysis(Analysis):
         first_result: Any,
     ) -> str:
         """Backward-compatible filename helper retained for tests."""
-        eq_str = f"eq{first_result.equilibration_time:.0f}{first_result.equilibration_unit}"
+        eq_str = f"eq{first_result.equilibration_time:.2f}{first_result.equilibration_unit}"
         rep_str = Analysis._format_replicate_range(replicates)
         name_safe = first_result.triad_name.replace(" ", "_").replace("/", "-")
         return f"triad_{name_safe}_{rep_str}_{eq_str}.json"
@@ -592,6 +592,6 @@ class CatalyticTriadAnalysis(Analysis):
 
 def _make_result_filename(settings: CatalyticTriadSettings, eq_value: float, eq_unit: str) -> str:
     """Generate filename for single-replicate result JSON."""
-    eq_str = f"eq{eq_value:.0f}{eq_unit}"
+    eq_str = f"eq{eq_value:.2f}{eq_unit}"
     name_safe = settings.name.replace(" ", "_").replace("/", "-")
     return f"triad_{name_safe}_{eq_str}.json"

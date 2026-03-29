@@ -255,9 +255,29 @@ def default_scalar_comparison(
     """
     from polyzymd import __version__
 
-    # Discover metric names from the first condition
-    first_cond = next(iter(metrics_by_condition.values()))
-    metric_names = list(first_cond.keys())
+    if not metrics_by_condition:
+        raise ValueError("metrics_by_condition is empty — need at least 2 conditions.")
+
+    # Discover metric names from ALL conditions (union), preserving first-seen order
+    seen: set[str] = set()
+    metric_names: list[str] = []
+    for cond_metrics in metrics_by_condition.values():
+        for mn in cond_metrics:
+            if mn not in seen:
+                seen.add(mn)
+                metric_names.append(mn)
+
+    if not metric_names:
+        raise ValueError("No metric names found in metrics_by_condition.")
+
+    # Warn if control label is specified but not present
+    if control_label and control_label not in metrics_by_condition:
+        logger.warning(
+            "Control label %r not found in metrics_by_condition — "
+            "falling back to all-pairs comparison.",
+            control_label,
+        )
+        control_label = None
 
     all_pairwise: list[PairwiseResult] = []
     all_anova: list[ANOVAResult] = []

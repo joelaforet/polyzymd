@@ -189,14 +189,14 @@ def get_colors(n: int, plot_settings: "PlotSettings") -> list:
 
     palette = plot_settings.color_palette
     try:
-        cmap = plt.cm.get_cmap(palette)
-    except ValueError:
+        cmap = plt.colormaps[palette]
+    except (KeyError, ValueError):
         logger.warning(
             "Color palette %r is not a valid matplotlib colormap "
             "(seaborn is not installed). Falling back to 'tab10'.",
             palette,
         )
-        cmap = plt.cm.get_cmap("tab10")
+        cmap = plt.colormaps["tab10"]
     return [cmap(i / max(1, n - 1)) for i in range(n)]
 
 
@@ -273,14 +273,16 @@ def save_figure(
             style="italic",
         )
 
-    fig.savefig(
-        output_path,
-        dpi=plot_settings.dpi,
-        bbox_inches="tight",
-        facecolor="white",
-        edgecolor="none",
-    )
-    plt.close(fig)
+    try:
+        fig.savefig(
+            output_path,
+            dpi=plot_settings.dpi,
+            bbox_inches="tight",
+            facecolor="white",
+            edgecolor="none",
+        )
+    finally:
+        plt.close(fig)
     logger.info(f"Saved plot: {output_path}")
     return output_path
 
@@ -419,7 +421,7 @@ def grouped_bars(
             rng = np.random.default_rng(seed=42 + i)
             cond_reps = replicate_values[i]
             for j in range(len(x)):
-                if j < len(cond_reps) and cond_reps[j]:
+                if j < len(cond_reps) and cond_reps[j] is not None and len(cond_reps[j]) > 0:
                     rep_vals = np.asarray(cond_reps[j], dtype=float)
                     jitter = rng.uniform(-w * 0.3, w * 0.3, size=len(rep_vals))
                     ax.scatter(

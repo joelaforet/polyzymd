@@ -211,7 +211,7 @@ class RMSFAnalysis(Analysis):
 
         # Determine output path and check cache
         output_dir = ctx.output_dir
-        eq_str = f"eq{eq_value:.0f}{eq_unit}"
+        eq_str = f"eq{eq_value:.2f}{eq_unit}"
         result_filename = f"rmsf_{eq_str}.json"
         result_file = output_dir / result_filename
 
@@ -559,7 +559,7 @@ class RMSFAnalysis(Analysis):
         first_result: Any,
     ) -> str:
         """Backward-compatible filename helper retained for tests."""
-        eq_str = f"eq{first_result.equilibration_time:.0f}{first_result.equilibration_unit}"
+        eq_str = f"eq{first_result.equilibration_time:.2f}{first_result.equilibration_unit}"
         rep_str = Analysis._format_replicate_range(replicates)
         return f"rmsf_{rep_str}_{eq_str}.json"
 

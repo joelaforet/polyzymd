@@ -23,16 +23,14 @@ if TYPE_CHECKING:
 
     from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult, TriadResult
 
-# Matplotlib/seaborn are optional
+# Matplotlib/seaborn are lazy-imported inside functions to avoid
+# import-time overhead. Sentinels defined here for availability checks.
+HAS_SEABORN: bool
 try:
-    import matplotlib.pyplot as plt
-except ImportError:
-    pass
-
-try:
-    import seaborn as sns
+    import seaborn as _sns_probe  # noqa: F401 — probe only
 
     HAS_SEABORN = True
+    del _sns_probe
 except ImportError:
     HAS_SEABORN = False
 
@@ -61,6 +59,8 @@ def _get_color_palette(n_colors: int, palette: str = "tab10") -> list:
         List of color values
     """
     _require_seaborn()
+    import seaborn as sns
+
     return sns.color_palette(palette, n_colors)
 
 
@@ -122,6 +122,8 @@ def plot_triad_kde_panel(
     """
     _require_matplotlib()
     _require_seaborn()
+    import matplotlib.pyplot as plt
+    import seaborn as sns
 
     if len(results) == 0:
         raise ValueError("At least one result is required")
@@ -270,6 +272,8 @@ def plot_triad_kde_panel_pooled(
     """
     _require_matplotlib()
     _require_seaborn()
+    import matplotlib.pyplot as plt
+    import seaborn as sns
 
     condition_labels = list(condition_distances.keys())
     n_conditions = len(condition_labels)
@@ -392,6 +396,7 @@ def plot_triad_threshold_bars(
         The generated figure
     """
     _require_matplotlib()
+    import matplotlib.pyplot as plt
 
     if len(results) == 0:
         raise ValueError("At least one result is required")
@@ -523,6 +528,7 @@ def plot_triad_2d_kde(
     """
     _require_matplotlib()
     _require_seaborn()
+    import seaborn as sns
 
     if pair_x_idx >= result.n_pairs or pair_y_idx >= result.n_pairs:
         raise ValueError(f"Pair indices must be < {result.n_pairs}")
@@ -621,6 +627,7 @@ def plot_triad_2d_kde_comparison(
     """
     _require_matplotlib()
     _require_seaborn()
+    import seaborn as sns
 
     if len(results) != len(labels):
         raise ValueError(f"Number of results ({len(results)}) must match labels ({len(labels)})")

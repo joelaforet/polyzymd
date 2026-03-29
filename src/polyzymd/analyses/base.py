@@ -45,7 +45,6 @@ import json
 import logging
 from abc import ABC
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Self, Sequence
 
@@ -125,8 +124,10 @@ class ReplicateContext:
         If ``True``, ignore cached results and recompute.
     settings : BaseModel
         Analysis-specific settings (the analysis's ``Settings`` class).
-    result_path : Path
-        Canonical cache path for the per-replicate result.
+    result_path : Path | None
+        Canonical cache path for the per-replicate result.  May be
+        ``None`` if the plugin is invoked outside the normal orchestrator
+        pipeline.
     """
 
     condition: Condition
@@ -156,8 +157,10 @@ class AggregateContext:
         Equilibration time string.
     settings : BaseModel
         Analysis-specific settings.
-    result_path : Path
-        Canonical cache path for the aggregated result.
+    result_path : Path | None
+        Canonical cache path for the aggregated result.  May be
+        ``None`` if the plugin is invoked outside the normal orchestrator
+        pipeline.
     """
 
     condition: Condition
@@ -200,7 +203,7 @@ class ComparisonContext:
         Analysis-specific settings.
     recompute : bool
         Whether to force recomputation.
-    result_path : Path
+    result_path : Path | None
         Canonical cache path for the comparison result.
     aggregated_results : dict[str, Any]
         Mapping ``condition_label -> aggregated result`` for conditions
@@ -273,7 +276,7 @@ class PlotContext:
     results_dir: Path
     output_dir: Path
     settings: BaseModel
-    plot_settings: PlotSettings = (
+    plot_settings: PlotSettings | None = (
         None  # Guaranteed non-None by orchestrator; default kept for dataclass ordering
     )
     comparison_path: Path | None = None
@@ -707,7 +710,7 @@ class Analysis(ABC):
         """
         return list(conditions)
 
-    def compare(self, ctx: ComparisonContext) -> ComparisonResult | Any | None:
+    def compare(self, ctx: ComparisonContext) -> ComparisonResult | None:
         """Compare results across conditions.
 
         The default implementation uses :meth:`extract_metrics` to build
@@ -737,7 +740,15 @@ class Analysis(ABC):
         for cond in ctx.conditions:
             summary = ctx.aggregated_results.get(cond.label)
             if summary is None:
-                agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
+                agg_dir_parent = ctx.analysis_dirs.get(cond.label)
+                if agg_dir_parent is None:
+                    logger.warning(
+                        "%s: no analysis directory for condition %r — skipping.",
+                        self.name,
+                        cond.label,
+                    )
+                    continue
+                agg_dir = agg_dir_parent / "aggregated"
                 summary = self._load_aggregated_result(agg_dir)
             if summary is not None:
                 extracted = self.extract_metrics(summary)
@@ -946,6 +957,11 @@ class Analysis(ABC):
         if recompute or not cache_path.exists():
             return None
 
+        if not hasattr(result_cls, "load"):
+            raise TypeError(
+                f"_check_cache requires result_cls to have a .load() method, got {result_cls!r}."
+            )
+
         logger.info("Loading cached %s result from %s", self.name, cache_path)
         result = result_cls.load(cache_path)
 
@@ -985,7 +1001,7 @@ class Analysis(ABC):
         """
         if not replicates:
             return "no_replicates"
-        reps = sorted(replicates)
+        reps = sorted(set(replicates))
         if reps == list(range(reps[0], reps[-1] + 1)):
             return f"reps{reps[0]}-{reps[-1]}"
         return "reps" + "_".join(map(str, reps))
@@ -1025,7 +1041,9 @@ class Analysis(ABC):
 
         for cond in ctx.conditions:
             label = cond.label
-            labels.append(label)
+            if label == "__meta__":
+                logger.warning("Condition label '__meta__' conflicts with reserved key — skipping.")
+                continue
             analysis_dir = ctx.analysis_dirs.get(label)
             if analysis_dir is not None:
                 entry: dict[str, Any] = {
@@ -1035,6 +1053,7 @@ class Analysis(ABC):
                 if include_replicates:
                     entry["replicates"] = list(cond.replicates)
                 data[label] = entry
+                labels.append(label)
 
         data["__meta__"] = {"results_dir": ctx.results_dir}
         return data, labels
@@ -1097,6 +1116,13 @@ class Analysis(ABC):
         if not hasattr(cls, "Settings"):
             raise TypeError(
                 f"Analysis subclass {cls.__name__} must define 'Settings' as a ClassVar[type]."
+            )
+        # #2: Validate Settings is a BaseModel subclass
+        settings_cls = cls.Settings
+        if not (isinstance(settings_cls, type) and issubclass(settings_cls, BaseModel)):
+            raise TypeError(
+                f"Analysis subclass {cls.__name__}.Settings must be a "
+                f"pydantic BaseModel subclass, got {settings_cls!r}."
             )
         if not cls.has_compute_stage and cls.has_aggregate_stage:
             raise TypeError(

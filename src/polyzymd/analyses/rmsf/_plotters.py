@@ -273,7 +273,7 @@ def _plot_rmsf_comparison_from_aggregated(
         # Look for aggregated RMSF result
         result_file = aggregated_dir / "rmsf_aggregated.json"
         if not result_file.exists():
-            json_files = list(aggregated_dir.glob("*.json"))
+            json_files = sorted(aggregated_dir.glob("*.json"))
             if json_files:
                 result_file = json_files[0]
             else:
@@ -360,7 +360,11 @@ def _load_reference_ss(data: dict[str, Any]) -> dict | None:
         rmsf_settings = comp_config.plugins.get("rmsf")
         if rmsf_settings is None:
             return None
-        reference_file = getattr(rmsf_settings, "reference_file", None)
+        reference_file = (
+            rmsf_settings.get("reference_file")
+            if isinstance(rmsf_settings, dict)
+            else getattr(rmsf_settings, "reference_file", None)
+        )
         if reference_file is None:
             return None
     except Exception as exc:
@@ -482,7 +486,7 @@ def _load_rmsf_profile(aggregated_dir: Path) -> dict | None:
 
     result_file = aggregated_dir / "rmsf_aggregated.json"
     if not result_file.exists():
-        json_files = list(aggregated_dir.glob("*.json"))
+        json_files = sorted(aggregated_dir.glob("*.json"))
         if json_files:
             result_file = json_files[0]
         else:

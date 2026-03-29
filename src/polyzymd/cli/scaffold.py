@@ -105,7 +105,6 @@ def _plugin_init(name: str, cls: str) -> str:
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any, ClassVar, Sequence
 
@@ -120,8 +119,6 @@ from polyzymd.analyses.base import (
     ReplicateContext,
 )
 from polyzymd.analyses.stats import format_scalar_comparison
-
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +207,9 @@ class {cls}Analysis(Analysis):
         """
         values = [float(r.value if hasattr(r, "value") else r["value"]) for r in results]
         n = len(values)
-        mean = sum(values) / n if n else 0.0
+        if n == 0:
+            raise ValueError("aggregate() received no results — cannot compute statistics.")
+        mean = sum(values) / n
         sem = 0.0
         if n > 1:
             variance = sum((v - mean) ** 2 for v in values) / (n - 1)
@@ -546,6 +545,11 @@ def generate_scaffold(
 
     Returns the list of created (or would-be-created) file paths.
     """
+    # Validate the plugin name
+    name_error = validate_name(name, check_existing=not force)
+    if name_error:
+        raise ValueError(name_error)
+
     cls = class_name or to_pascal_case(name)
 
     # Validate the class name (whether user-supplied or auto-derived)

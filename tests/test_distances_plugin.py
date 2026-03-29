@@ -860,7 +860,7 @@ class TestMakeAggregatedFilename:
         mock_result.equilibration_unit = "ns"
 
         filename = DistancesAnalysis._make_aggregated_filename((1, 2, 3), mock_result)
-        assert filename == "distances_reps1-3_eq100ns.json"
+        assert filename == "distances_reps1-3_eq100.00ns.json"
 
     def test_nonconsecutive_replicates(self):
         from polyzymd.analyses.distances import DistancesAnalysis
@@ -870,7 +870,7 @@ class TestMakeAggregatedFilename:
         mock_result.equilibration_unit = "ns"
 
         filename = DistancesAnalysis._make_aggregated_filename((1, 3, 5), mock_result)
-        assert filename == "distances_reps1_3_5_eq50ns.json"
+        assert filename == "distances_reps1_3_5_eq50.00ns.json"
 
     def test_ps_equilibration(self):
         from polyzymd.analyses.distances import DistancesAnalysis
@@ -880,7 +880,7 @@ class TestMakeAggregatedFilename:
         mock_result.equilibration_unit = "ps"
 
         filename = DistancesAnalysis._make_aggregated_filename((1, 2), mock_result)
-        assert filename == "distances_reps1-2_eq5000ps.json"
+        assert filename == "distances_reps1-2_eq5000.00ps.json"
 
 
 # ---------------------------------------------------------------------------
