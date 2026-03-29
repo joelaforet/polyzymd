@@ -105,10 +105,13 @@ def independent_ttest(
     group1: ArrayLike,
     group2: ArrayLike,
 ) -> TTestResult:
-    """Perform two-sample independent t-test.
+    """Perform Welch's two-sample independent t-test.
 
     Tests the null hypothesis that two independent samples have
-    identical expected values.
+    identical expected values.  Uses Welch's t-test (``equal_var=False``)
+    which does **not** assume equal population variances.  This is the
+    appropriate default for MD replicate data where the number of
+    replicates and variance may differ between conditions.
 
     Parameters
     ----------
@@ -134,7 +137,7 @@ def independent_ttest(
     g1 = np.asarray(group1, dtype=np.float64)
     g2 = np.asarray(group2, dtype=np.float64)
 
-    t, p = stats.ttest_ind(g1, g2)
+    t, p = stats.ttest_ind(g1, g2, equal_var=False)
 
     return TTestResult(
         t_statistic=float(t),

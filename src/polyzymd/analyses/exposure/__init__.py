@@ -31,13 +31,11 @@ import numpy as np
 from pydantic import BaseModel, Field, field_validator
 
 from polyzymd.analyses.base import (
-    AggregateContext,
     Analysis,
     ComparisonContext,
     Condition,
     MetricValue,
     PlotContext,
-    ReplicateContext,
 )
 from polyzymd.analyses.shared.plotting import (
     annotate_cells,

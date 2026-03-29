@@ -256,24 +256,24 @@ def save_figure(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if experimental_features:
-        annotate_experimental_figure(fig, experimental_features)
-
-    # Add watermark if enabled
-    if plot_settings.theme.show_watermark:
-        fig.text(
-            0.99,
-            0.01,
-            PLOT_WATERMARK,
-            fontsize=7,
-            color="dimgray",
-            ha="right",
-            va="bottom",
-            alpha=0.85,
-            style="italic",
-        )
-
     try:
+        if experimental_features:
+            annotate_experimental_figure(fig, experimental_features)
+
+        # Add watermark if enabled
+        if plot_settings.theme.show_watermark:
+            fig.text(
+                0.99,
+                0.01,
+                PLOT_WATERMARK,
+                fontsize=7,
+                color="dimgray",
+                ha="right",
+                va="bottom",
+                alpha=0.85,
+                style="italic",
+            )
+
         fig.savefig(
             output_path,
             dpi=plot_settings.dpi,

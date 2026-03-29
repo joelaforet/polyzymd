@@ -276,9 +276,7 @@ class PlotContext:
     results_dir: Path
     output_dir: Path
     settings: BaseModel
-    plot_settings: PlotSettings | None = (
-        None  # Guaranteed non-None by orchestrator; default kept for dataclass ordering
-    )
+    plot_settings: PlotSettings = None  # type: ignore[assignment]  # Guaranteed non-None by orchestrator; default kept for dataclass ordering
     comparison_path: Path | None = None
 
 

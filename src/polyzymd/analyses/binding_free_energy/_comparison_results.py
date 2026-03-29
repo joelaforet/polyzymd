@@ -108,7 +108,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -164,11 +163,11 @@ class FreeEnergyEntry(BaseModel):
     enrichment_ratio: float = Field(
         description="contact_share / expected_share; ΔG_sel = -kT·ln(this value)"
     )
-    delta_G: Optional[float] = Field(
+    delta_G: float | None = Field(
         default=None,
         description="ΔG_sel = -k_B·T·ln(contact_share / expected_share) in units",
     )
-    delta_G_uncertainty: Optional[float] = Field(
+    delta_G_uncertainty: float | None = Field(
         default=None,
         description="σ(ΔG_sel) from delta-method: k_B·T·√[(σ_cs/cs)²+(σ_es/es)²]",
     )
@@ -234,7 +233,7 @@ class FreeEnergyConditionSummary(BaseModel):
         polymer_type: str,
         protein_group: str,
         partition_name: str | None = None,
-    ) -> Optional[FreeEnergyEntry]:
+    ) -> FreeEnergyEntry | None:
         """Get the FreeEnergyEntry for a (polymer_type, protein_group) pair.
 
         Parameters
@@ -306,11 +305,11 @@ class FreeEnergyPairwiseEntry(BaseModel):
     temperature_a_K: float
     temperature_b_K: float
     cross_temperature: bool = False
-    delta_G_a: Optional[float] = None
-    delta_G_b: Optional[float] = None
-    delta_delta_G: Optional[float] = None
-    t_statistic: Optional[float] = None
-    p_value: Optional[float] = None
+    delta_G_a: float | None = None
+    delta_G_b: float | None = None
+    delta_delta_G: float | None = None
+    t_statistic: float | None = None
+    p_value: float | None = None
 
 
 class BindingFreeEnergyResult(BaseModel):
@@ -370,7 +369,7 @@ class BindingFreeEnergyResult(BaseModel):
     pairwise_comparisons: list[FreeEnergyPairwiseEntry] = Field(default_factory=list)
     polymer_types: list[str] = Field(default_factory=list)
     protein_groups: list[str] = Field(default_factory=list)
-    surface_exposure_threshold: Optional[float] = None
+    surface_exposure_threshold: float | None = None
     equilibration_time: str = ""
     created_at: datetime = Field(default_factory=datetime.now)
     polyzymd_version: str = Field(default_factory=lambda: __version__)

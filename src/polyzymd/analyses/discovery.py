@@ -111,6 +111,11 @@ def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
                 )
                 continue
             name = name.strip()
+            if name in alias_registry:
+                raise RuntimeError(
+                    f"Analysis name {name!r} (from {obj.__module__}.{obj.__qualname__}) "
+                    f"conflicts with existing alias for {alias_registry[name]!r}."
+                )
             if name in registry:
                 existing = registry[name]
                 if existing is obj:

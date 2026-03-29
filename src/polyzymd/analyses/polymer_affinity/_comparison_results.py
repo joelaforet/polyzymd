@@ -70,7 +70,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -123,15 +122,15 @@ class AffinityScoreEntry(BaseModel):
     protein_group: str
     partition_name: str = "aa_class"
     n_contacts: float = Field(description="Mean simultaneous contacts per frame = mcf * n_exposed")
-    delta_G_per_contact: Optional[float] = Field(
+    delta_G_per_contact: float | None = Field(
         default=None,
         description="Per-contact ΔG_sel = -ln(contact_share / expected_share) [kT]",
     )
-    affinity_score: Optional[float] = Field(
+    affinity_score: float | None = Field(
         default=None,
         description="N_contacts × ΔG_sel_per_contact [kT]; negative = favorable",
     )
-    affinity_score_uncertainty: Optional[float] = Field(
+    affinity_score_uncertainty: float | None = Field(
         default=None,
         description="σ(affinity_score) from replicate SEM or error propagation",
     )
@@ -185,7 +184,7 @@ class PolymerTypeScore(BaseModel):
     total_score: float = Field(
         description="Σ_g (N_g × ΔG_sel(g)) summed over protein groups [kT]",
     )
-    total_score_uncertainty: Optional[float] = Field(
+    total_score_uncertainty: float | None = Field(
         default=None,
         description="σ(total_score) from replicate SEM or quadrature sum",
     )
@@ -245,7 +244,7 @@ class AffinityScoreConditionSummary(BaseModel):
         default=0.0,
         description="Grand total affinity score [kT]",
     )
-    total_score_uncertainty: Optional[float] = Field(
+    total_score_uncertainty: float | None = Field(
         default=None,
         description="σ(total_score)",
     )
@@ -313,9 +312,9 @@ class AffinityScorePairwiseEntry(BaseModel):
     cross_temperature: bool = False
     score_a: float = 0.0
     score_b: float = 0.0
-    delta_score: Optional[float] = None
-    t_statistic: Optional[float] = None
-    p_value: Optional[float] = None
+    delta_score: float | None = None
+    t_statistic: float | None = None
+    p_value: float | None = None
 
 
 class PolymerAffinityScoreResult(BaseModel):
@@ -382,7 +381,7 @@ class PolymerAffinityScoreResult(BaseModel):
     pairwise_comparisons: list[AffinityScorePairwiseEntry] = Field(default_factory=list)
     polymer_types: list[str] = Field(default_factory=list)
     protein_groups: list[str] = Field(default_factory=list)
-    surface_exposure_threshold: Optional[float] = None
+    surface_exposure_threshold: float | None = None
     equilibration_time: str = ""
     created_at: datetime = Field(default_factory=datetime.now)
     polyzymd_version: str = Field(default_factory=lambda: __version__)

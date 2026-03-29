@@ -79,6 +79,14 @@ def pairwise_comparisons(
 ) -> list[PairwiseResult]:
     """Compute pairwise statistical comparisons for a single metric.
 
+    .. note::
+
+       When 3+ conditions are compared, the pairwise p-values are **not**
+       corrected for multiple comparisons (no Bonferroni or
+       Benjamini-Hochberg adjustment).  The accompanying ANOVA provides an
+       omnibus test, but individual pairwise p-values should be interpreted
+       cautiously.  Multiple-comparison correction is a planned enhancement.
+
     Parameters
     ----------
     metrics_by_condition : dict[str, MetricValue]
@@ -232,6 +240,15 @@ def default_scalar_comparison(
     1. Pairwise t-tests + Cohen's d + percent-change.
     2. ANOVA (if 3+ conditions).
     3. Ranking.
+
+    .. note::
+
+       Pairwise t-tests use Welch's test (unequal variance).  When 3+
+       conditions are compared, pairwise p-values are **not** corrected
+       for multiple comparisons.  ANOVA provides an omnibus test; interpret
+       individual pairwise p-values with caution.  Multiple-comparison
+       correction (Bonferroni / Benjamini-Hochberg) is a planned
+       enhancement.
 
     Parameters
     ----------

@@ -417,12 +417,14 @@ def run_comparison(
             analysis_dirs[cond.label] = cond_dir
             if agg is not None:
                 aggregated_results[cond.label] = agg
-            else:
+            elif analysis.has_compute_stage:
+                # None from a compute-stage plugin means the condition failed
                 logger.warning(
                     f"  {cond.label}: run_analysis returned None — "
                     "condition will be excluded from comparison."
                 )
                 failed_conditions.append(cond)
+            # else: compare-only plugin — None is expected, not a failure
         except Exception as e:
             logger.error(f"  {cond.label}: {type(e).__name__} — {e}")
             failed_conditions.append(cond)

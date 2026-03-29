@@ -680,7 +680,9 @@ class ContactsAnalysis(Analysis):
 
             # Save result
             ctx.output_dir.mkdir(parents=True, exist_ok=True)
-            output_file = ctx.output_dir / f"contacts_rep{replicate}.json"
+            eq_str = f"eq{eq_value:.2f}{eq_unit}"
+            cut_str = f"cut{settings.cutoff:.1f}"
+            output_file = ctx.output_dir / f"contacts_{eq_str}_{cut_str}_rep{replicate}.json"
             result.save(output_file)
             if ctx.result_path is not None:
                 self.save_result(result, ctx.result_path)
@@ -713,6 +715,7 @@ class ContactsAnalysis(Analysis):
             Aggregated result with per-residue statistics.
         """
         from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
+        from polyzymd.analyses.shared.loader import parse_time_string
 
         logger.info(f"  Aggregating {len(results)} replicates...")
         agg_result = aggregate_contact_results(list(results))
@@ -721,7 +724,10 @@ class ContactsAnalysis(Analysis):
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
         reps = sorted(ctx.replicates)
         rep_range = f"{reps[0]}-{reps[-1]}"
-        agg_file = ctx.output_dir / f"contacts_aggregated_reps{rep_range}.json"
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+        eq_str = f"eq{eq_value:.2f}{eq_unit}"
+        cut_str = f"cut{ctx.settings.cutoff:.1f}"
+        agg_file = ctx.output_dir / f"contacts_aggregated_{eq_str}_{cut_str}_reps{rep_range}.json"
         agg_result.save(agg_file)
         if ctx.result_path is not None:
             self.save_result(agg_result, ctx.result_path)
@@ -984,10 +990,15 @@ class ContactsAnalysis(Analysis):
     # === Private helpers: condition filtering ===
 
     def _get_polymer_selection(self, cond: Condition) -> str:
-        """Get the polymer selection string, trying settings then default."""
-        # Settings may not be resolved yet during filter_conditions;
-        # use a safe fallback.
-        return "chainID C"
+        """Get the polymer selection string from settings default.
+
+        During ``filter_conditions()`` the per-condition settings may not be
+        fully resolved yet (the framework only resolves settings immediately
+        before ``compute_replicate``).  We therefore use the class-level
+        ``Settings`` default, which already reflects the YAML-merged value
+        when the analysis was constructed via ``from_config()``.
+        """
+        return self.Settings().polymer_selection
 
     def _condition_has_polymer(self, cond: Condition) -> bool:
         """Check whether a condition has polymer atoms.
@@ -1013,27 +1024,34 @@ class ContactsAnalysis(Analysis):
             run_dir = cond.sim_config.get_working_directory(rep)
             projects_dir = cond.sim_config.output.projects_directory
 
-            result_paths = [
-                projects_dir / "analysis" / "contacts" / f"contacts_rep{rep}.json",
-            ]
-            for rp in result_paths:
-                if rp.exists():
+            contacts_dir = projects_dir / "analysis" / "contacts"
+            if contacts_dir.is_dir():
+                # Match both old (contacts_rep{N}.json) and new
+                # (contacts_eq*_cut*_rep{N}.json) filename schemes.
+                for rp in contacts_dir.glob(f"contacts*rep{rep}.json"):
                     logger.debug(f"  {cond.label} rep {rep}: found cached result at {rp}")
                     return True
 
         # Check 2: Topology inspection
         for rep in cond.replicates:
             run_dir = cond.sim_config.get_working_directory(rep)
-            topology_path = run_dir / "solvated_system.pdb"
 
-            if not topology_path.exists():
+            # Use TrajectoryLoader's robust topology search rather than
+            # hardcoding "solvated_system.pdb".
+            try:
+                from polyzymd.analyses.shared.loader import TrajectoryLoader
+
+                loader = TrajectoryLoader(cond.sim_config)
+                topo_path = loader._find_topology(run_dir)
+            except (FileNotFoundError, ImportError):
                 continue
 
             try:
                 import MDAnalysis as mda
 
-                universe = mda.Universe(str(topology_path))
-                polymer_atoms = universe.select_atoms("chainID C")
+                universe = mda.Universe(str(topo_path))
+                polymer_sel = self._get_polymer_selection(cond)
+                polymer_atoms = universe.select_atoms(polymer_sel)
                 if len(polymer_atoms) > 0:
                     logger.debug(f"  {cond.label} rep {rep}: {len(polymer_atoms)} polymer atoms")
                     return True

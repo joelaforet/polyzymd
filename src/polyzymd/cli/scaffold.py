@@ -545,8 +545,10 @@ def generate_scaffold(
 
     Returns the list of created (or would-be-created) file paths.
     """
-    # Validate the plugin name
-    name_error = validate_name(name, check_existing=not force)
+    # Validate the plugin name — always check for name collisions with
+    # existing plugins/aliases, even with --force.  The --force flag only
+    # allows overwriting *files*, not reusing a registered plugin name.
+    name_error = validate_name(name, check_existing=True)
     if name_error:
         raise ValueError(name_error)
 
