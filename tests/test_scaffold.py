@@ -122,6 +122,7 @@ class TestGenerateScaffold:
 
         assert "class SolventShellAnalysis(Analysis):" in text
         assert 'name: ClassVar[str] = "solvent_shell"' in text
+        assert "AggregatedResultClass: ClassVar[type] = SolventShellAggregatedResult" in text
         assert "class SolventShellSettings(BaseModel):" in text
         assert "def compute_replicate(" in text
         assert "def aggregate(" in text

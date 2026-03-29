@@ -177,6 +177,7 @@ class {cls}Analysis(Analysis):
 
     name: ClassVar[str] = "{name}"
     Settings: ClassVar[type] = {cls}Settings
+    AggregatedResultClass: ClassVar[type] = {cls}AggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
@@ -223,19 +224,17 @@ class {cls}Analysis(Analysis):
     # -- comparison ----------------------------------------------------------
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
-        """Expose scalar metrics for the default comparison pipeline."""
-        if isinstance(summary, {cls}AggregatedResult):
-            data = summary.model_dump()
-        elif isinstance(summary, dict):
-            data = summary
-        else:
-            data = summary.model_dump()
+        """Expose scalar metrics for the default comparison pipeline.
+
+        ``AggregatedResultClass`` is set, so the framework always
+        deserializes into ``{cls}AggregatedResult`` — no dict fallback needed.
+        """
         return {{
             "value": MetricValue(
                 name="value",
-                mean=float(data["mean_value"]),
-                sem=float(data["sem_value"]),
-                replicate_values=[float(v) for v in data["replicate_values"]],
+                mean=float(summary.mean_value),
+                sem=float(summary.sem_value),
+                replicate_values=[float(v) for v in summary.replicate_values],
                 higher_is_better=True,
                 direction_labels=("decreased", "unchanged", "increased"),
             )
@@ -292,13 +291,8 @@ class {cls}Analysis(Analysis):
             summary = self._load_aggregated_result(agg_dir)
             if summary is None:
                 continue
-            # Handle both dict and Pydantic model results
-            if isinstance(summary, dict):
-                means.append(float(summary.get("mean_value", 0.0)))
-                sems.append(float(summary.get("sem_value", 0.0)))
-            else:
-                means.append(float(summary.mean_value))
-                sems.append(float(summary.sem_value))
+            means.append(float(summary.mean_value))
+            sems.append(float(summary.sem_value))
             valid_labels.append(label)
 
         if not valid_labels:
@@ -317,25 +311,6 @@ class {cls}Analysis(Analysis):
         save_figure(fig, output_path, plot_settings)
         plt.close(fig)
         return [output_path]
-'''
-
-
-def _comparison_results(name: str, cls: str) -> str:
-    return f'''"""Comparison result models for the {name} analysis."""
-
-from __future__ import annotations
-
-from polyzymd.analyses.base import ComparisonResult
-
-
-class {cls}ComparisonResult(ComparisonResult):
-    """Typed comparison result for the {name} analysis.
-
-    Extend with analysis-specific fields if the default
-    ``ComparisonResult`` schema is insufficient.
-    """
-
-    analysis_type: str = "{name}"
 '''
 
 

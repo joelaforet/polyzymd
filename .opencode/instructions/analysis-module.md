@@ -184,18 +184,21 @@ def plot(self, ctx: PlotContext) -> list[Path]:
 
 ### Loading Results in `plot()`
 
-Use the convenience method `self.load_condition_result(ctx, label)` to load
-aggregated results for a specific condition:
+Use `_build_plot_data()` to collect per-condition paths, then
+`_load_aggregated_result()` to load each condition's result:
 
 ```python
-for cond in ctx.conditions:
-    summary = self.load_condition_result(ctx, cond.label)
+data, labels = self._build_plot_data(ctx)
+for label in labels:
+    if label not in data or label == "__meta__":
+        continue
+    agg_dir = data[label]["aggregated_dir"]
+    summary = self._load_aggregated_result(agg_dir)
     if summary is not None:
         # ... plot data ...
 ```
 
-This wraps the verbose `agg_dir / "aggregated"` + `_load_aggregated_result()`
-pattern.
+> **Note:** `load_condition_result()` is deprecated — use the pattern above.
 
 ## MetricType System (Autocorrelation Handling)
 

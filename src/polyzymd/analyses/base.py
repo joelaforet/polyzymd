@@ -257,23 +257,23 @@ class PlotContext:
     Notes
     -----
     ``PlotContext`` does **not** carry pre-loaded aggregated results.
-    Use :meth:`Analysis.load_condition_result` to load each condition's
-    data::
+    Use :meth:`Analysis._build_plot_data` to collect per-condition paths,
+    then :meth:`Analysis._load_aggregated_result` to load each result::
 
         def plot(self, ctx: PlotContext) -> list[Path]:
-            for cond in ctx.conditions:
-                summary = self.load_condition_result(ctx, cond.label)
+            data, labels = self._build_plot_data(ctx)
+            for label in labels:
+                agg_dir = data[label]["aggregated_dir"]
+                summary = self._load_aggregated_result(agg_dir)
                 # ... plot data from summary ...
-
-    The lower-level :meth:`Analysis._load_aggregated_result` is also
-    available if you need to load from a custom directory.
 
     Example::
 
         def plot(self, ctx: PlotContext) -> list[Path]:
-            for cond in ctx.conditions:
-                summary = self.load_condition_result(ctx, cond.label)
-                # ... plot data from summary ...
+            data, labels = self._build_plot_data(ctx)
+            for label in labels:
+                agg_dir = data[label]["aggregated_dir"]
+                summary = self._load_aggregated_result(agg_dir)
                 # ... plot data from summary ...
     """
 
@@ -909,15 +909,14 @@ class Analysis(ABC):
     ) -> Any:
         """Load the aggregated result for a condition from disk.
 
+        .. deprecated::
+            Prefer ``_build_plot_data()`` + ``_load_aggregated_result()``
+            instead.  All existing plugins use that pattern.  This method
+            remains for backward compatibility but is no longer recommended
+            for new plugins.
+
         Convenience wrapper around :meth:`_load_aggregated_result` that
         resolves the ``aggregated/`` directory from a context object.
-        Use this in :meth:`plot` or :meth:`compare` instead of manually
-        building the path::
-
-            def plot(self, ctx: PlotContext) -> list[Path]:
-                for cond in ctx.conditions:
-                    summary = self.load_condition_result(ctx, cond.label)
-                    # ... plot summary ...
 
         Parameters
         ----------
@@ -936,6 +935,14 @@ class Analysis(ABC):
         KeyError
             If *label* is not in ``ctx.analysis_dirs``.
         """
+        import warnings
+
+        warnings.warn(
+            "load_condition_result() is deprecated. Use _build_plot_data() + "
+            "_load_aggregated_result() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         agg_dir = ctx.analysis_dirs[label] / "aggregated"
         return self._load_aggregated_result(agg_dir)
 

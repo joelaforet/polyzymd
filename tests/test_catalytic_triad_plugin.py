@@ -701,8 +701,8 @@ class TestPlot:
         plots = triad_analysis.plot(ctx)
         assert plots == []
 
-    @patch("polyzymd.analyses.catalytic_triad._plot_triad_threshold_bars")
-    @patch("polyzymd.analyses.catalytic_triad._plot_triad_kde_panel")
+    @patch("polyzymd.analyses.catalytic_triad.plot_triad_threshold_bars_from_data")
+    @patch("polyzymd.analyses.catalytic_triad.plot_triad_kde_panel_from_data")
     def test_plot_delegates_to_helpers(
         self,
         mock_kde_fn,
@@ -745,11 +745,11 @@ class TestPlot:
         assert len(bars_args) == 4
 
     @patch(
-        "polyzymd.analyses.catalytic_triad._plot_triad_threshold_bars",
+        "polyzymd.analyses.catalytic_triad.plot_triad_threshold_bars_from_data",
         side_effect=Exception("plot error"),
     )
     @patch(
-        "polyzymd.analyses.catalytic_triad._plot_triad_kde_panel",
+        "polyzymd.analyses.catalytic_triad.plot_triad_kde_panel_from_data",
         side_effect=Exception("plot error"),
     )
     def test_plot_catches_exceptions(
@@ -809,11 +809,11 @@ class TestPlot:
             return []
 
         with patch(
-            "polyzymd.analyses.catalytic_triad._plot_triad_kde_panel",
+            "polyzymd.analyses.catalytic_triad.plot_triad_kde_panel_from_data",
             side_effect=capture_kde,
         ) as mock_kde_fn:
             with patch(
-                "polyzymd.analyses.catalytic_triad._plot_triad_threshold_bars"
+                "polyzymd.analyses.catalytic_triad.plot_triad_threshold_bars_from_data"
             ) as mock_bars_fn:
                 mock_bars_fn.return_value = []
 
