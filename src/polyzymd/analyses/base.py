@@ -49,10 +49,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Self, Sequence
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from polyzymd.compare.config import ComparisonConfig, ConditionConfig
+    from polyzymd.compare.config import ComparisonConfig, ConditionConfig, PlotSettings
     from polyzymd.config.schema import SimulationConfig
 
 logger = logging.getLogger("polyzymd.analyses")
@@ -85,7 +85,7 @@ class Condition:
     label: str
     config_path: Path
     replicates: tuple[int, ...]
-    sim_config: Any  # SimulationConfig — lazy-imported at runtime
+    sim_config: SimulationConfig
 
     @classmethod
     def from_condition_config(cls, cond: "ConditionConfig") -> Condition:
@@ -131,11 +131,11 @@ class ReplicateContext:
 
     condition: Condition
     replicate: int
-    sim_config: Any
+    sim_config: SimulationConfig
     output_dir: Path
     equilibration: str
     recompute: bool
-    settings: Any  # BaseModel — the analysis's Settings class
+    settings: BaseModel
     result_path: Path | None = None
 
 
@@ -164,7 +164,7 @@ class AggregateContext:
     replicates: tuple[int, ...]
     output_dir: Path
     equilibration: str
-    settings: Any
+    settings: BaseModel
     result_path: Path | None = None
 
 
@@ -215,7 +215,7 @@ class ComparisonContext:
     analysis_dirs: dict[str, Path]
     results_dir: Path
     equilibration: str
-    settings: Any
+    settings: BaseModel
     recompute: bool
     result_path: Path | None = None
     failed_conditions: list[Condition] = field(default_factory=list)
@@ -266,23 +266,14 @@ class PlotContext:
                 agg_dir = data[label]["aggregated_dir"]
                 summary = self._load_aggregated_result(agg_dir)
                 # ... plot data from summary ...
-
-    Example::
-
-        def plot(self, ctx: PlotContext) -> list[Path]:
-            data, labels = self._build_plot_data(ctx)
-            for label in labels:
-                agg_dir = data[label]["aggregated_dir"]
-                summary = self._load_aggregated_result(agg_dir)
-                # ... plot data from summary ...
     """
 
     conditions: list[Condition]
     analysis_dirs: dict[str, Path]
     results_dir: Path
     output_dir: Path
-    settings: Any
-    plot_settings: Any = (
+    settings: BaseModel
+    plot_settings: PlotSettings = (
         None  # Guaranteed non-None by orchestrator; default kept for dataclass ordering
     )
     comparison_path: Path | None = None
@@ -455,10 +446,10 @@ class ComparisonResult(BaseModel):
     analysis_type: str
     name: str
     control_label: str | None = None
-    conditions: list[ConditionSummary] = []
-    pairwise_comparisons: list[PairwiseResult] = []
+    conditions: list[ConditionSummary] = Field(default_factory=list)
+    pairwise_comparisons: list[PairwiseResult] = Field(default_factory=list)
     anova: list[ANOVAResult] | None = None
-    ranking: list[str] = []
+    ranking: list[str] = Field(default_factory=list)
     rankings_by_metric: dict[str, list[str]] | None = None
     equilibration_time: str = "0ns"
     created_at: str = ""
@@ -508,105 +499,105 @@ class ComparisonResult(BaseModel):
 class Analysis(ABC):
     """Base class for all PolyzyMD analyses.
 
-    Subclasses represent a complete analysis lifecycle: per-replicate
-    computation, aggregation across replicates, cross-condition comparison,
-    plotting, and CLI formatting.
+        Subclasses represent a complete analysis lifecycle: per-replicate
+        computation, aggregation across replicates, cross-condition comparison,
+        plotting, and CLI formatting.
 
-    Class Variables
-    ---------------
-    name : str
-        Unique identifier used in config files and CLI (e.g. ``"rmsf"``).
-    Settings : type[BaseModel]
-        Pydantic model for this analysis's settings.
-    AggregatedResultClass : type[BaseModel] | None
-        Optional Pydantic model class for aggregated results.  When set,
-        the default :meth:`_deserialize_result` uses this class's
-        ``.load(path)`` method (if available) or
-        ``.model_validate_json()`` to load aggregated results from disk.
-        When ``None`` (the default), aggregated results are loaded as
-        plain dicts via ``json.loads()``.
+        Class Variables
+        ---------------
+        name : str
+            Unique identifier used in config files and CLI (e.g. ``"rmsf"``).
+        Settings : type[BaseModel]
+            Pydantic model for this analysis's settings.
+        AggregatedResultClass : type[BaseModel] | None
+            Optional Pydantic model class for aggregated results.  When set,
+            the default :meth:`_deserialize_result` uses this class's
+            ``.load(path)`` method (if available) or
+            ``.model_validate_json()`` to load aggregated results from disk.
+            When ``None`` (the default), aggregated results are loaded as
+            plain dicts via ``json.loads()``.
 
-        Setting this class variable replaces the need to override
-        :meth:`_deserialize_result` in most cases.
+            Setting this class variable replaces the need to override
+            :meth:`_deserialize_result` in most cases.
 
-        Example::
+            Example::
 
-            from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
+                from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
 
-            class RMSFAnalysis(Analysis):
-                name = "rmsf"
-                AggregatedResultClass = RMSFAggregatedResult
+                class RMSFAnalysis(Analysis):
+                    name = "rmsf"
+                    AggregatedResultClass = RMSFAggregatedResult
+                    ...
+        aliases : tuple[str, ...]
+            Alternative CLI names (e.g. ``("triad",)`` for ``catalytic_triad``).
+        dependencies : tuple[str, ...]
+            Names of analyses that must run before this one (topological sort).
+        min_replicates : int
+            Minimum successful replicates required for aggregation.
+        has_compute_stage : bool
+            Whether the framework should run ``compute_replicate()``.
+        has_aggregate_stage : bool
+            Whether the framework should run ``aggregate()``.
+
+        Examples
+        --------
+        **Simple plugin** using the default comparison pipeline (t-tests,
+        ANOVA, ranking).  Implement ``extract_metrics()`` — the framework
+        deserializes aggregated results automatically via ``json.loads()``::
+
+            from polyzymd.analyses.base import (
+                AggregateContext, Analysis, MetricValue, ReplicateContext,
+            )
+    from pydantic import BaseModel
+
+            class RgAnalysis(Analysis):
+                name = "rg"
+
+                class Settings(BaseModel):
+                    selection: str = "protein and name CA"
+
+                def compute_replicate(self, ctx, replicate):
+                    import MDAnalysis as mda
+                    import numpy as np
+                    # Use ctx.sim_config, ctx.settings — never load configs yourself
+                    ...
+                    return {"mean_rg": float(np.mean(rg_values)), "replicate": replicate}
+
+                def aggregate(self, ctx, results):
+                    import numpy as np
+                    values = [r["mean_rg"] for r in results]
+                    return {"mean_rg": float(np.mean(values)),
+                            "sem_rg": float(np.std(values, ddof=1) / np.sqrt(len(values))),
+                            "replicate_values": values}
+
+                def extract_metrics(self, summary):
+                    return {"mean_rg": MetricValue(
+                        name="mean_rg", mean=summary["mean_rg"],
+                        sem=summary["sem_rg"],
+                        replicate_values=summary["replicate_values"],
+                        higher_is_better=False,
+                        direction_labels=("compacting", "unchanged", "expanding"),
+                    )}
+
+        If your aggregated results use a typed Pydantic model, set
+        ``AggregatedResultClass`` to have the framework deserialize into
+        that model automatically instead of returning a plain dict::
+
+            class RgAnalysis(Analysis):
+                name = "rg"
+                AggregatedResultClass = RgAggregatedResult  # has .load(path) or model_validate_json
                 ...
-    aliases : tuple[str, ...]
-        Alternative CLI names (e.g. ``("triad",)`` for ``catalytic_triad``).
-    dependencies : tuple[str, ...]
-        Names of analyses that must run before this one (topological sort).
-    min_replicates : int
-        Minimum successful replicates required for aggregation.
-    has_compute_stage : bool
-        Whether the framework should run ``compute_replicate()``.
-    has_aggregate_stage : bool
-        Whether the framework should run ``aggregate()``.
 
-    Examples
-    --------
-    **Simple plugin** using the default comparison pipeline (t-tests,
-    ANOVA, ranking).  Implement ``extract_metrics()`` — the framework
-    deserializes aggregated results automatically via ``json.loads()``::
+        **Custom compare plugin** — override ``compare()`` entirely for
+        multi-metric or entry-table analyses.  See ``analyses/contacts/``
+        or ``analyses/distances/`` for full examples.
 
-        from polyzymd.analyses.base import (
-            AggregateContext, Analysis, MetricValue, ReplicateContext,
-        )
-        from pydantic import BaseModel
-
-        class RgAnalysis(Analysis):
-            name = "rg"
-
-            class Settings(BaseModel):
-                selection: str = "protein and name CA"
-
-            def compute_replicate(self, ctx, replicate):
-                import MDAnalysis as mda
-                import numpy as np
-                # Use ctx.sim_config, ctx.settings — never load configs yourself
-                ...
-                return {"mean_rg": float(np.mean(rg_values)), "replicate": replicate}
-
-            def aggregate(self, ctx, results):
-                import numpy as np
-                values = [r["mean_rg"] for r in results]
-                return {"mean_rg": float(np.mean(values)),
-                        "sem_rg": float(np.std(values, ddof=1) / np.sqrt(len(values))),
-                        "replicate_values": values}
-
-            def extract_metrics(self, summary):
-                return {"mean_rg": MetricValue(
-                    name="mean_rg", mean=summary["mean_rg"],
-                    sem=summary["sem_rg"],
-                    replicate_values=summary["replicate_values"],
-                    higher_is_better=False,
-                    direction_labels=("compacting", "unchanged", "expanding"),
-                )}
-
-    If your aggregated results use a typed Pydantic model, set
-    ``AggregatedResultClass`` to have the framework deserialize into
-    that model automatically instead of returning a plain dict::
-
-        class RgAnalysis(Analysis):
-            name = "rg"
-            AggregatedResultClass = RgAggregatedResult  # has .load(path) or model_validate_json
-            ...
-
-    **Custom compare plugin** — override ``compare()`` entirely for
-    multi-metric or entry-table analyses.  See ``analyses/contacts/``
-    or ``analyses/distances/`` for full examples.
-
-    See Also
-    --------
-    analyses.stats : ``default_scalar_comparison()``, ``format_scalar_comparison()``
-    analyses.discovery : How the framework discovers plugins automatically.
-    analyses.orchestrator : How the framework runs the lifecycle.
-    tutorials/extending_analyses.md : Step-by-step contributor guide.
+        See Also
+        --------
+        analyses.stats : ``default_scalar_comparison()``, ``format_scalar_comparison()``
+        analyses.discovery : How the framework discovers plugins automatically.
+        analyses.orchestrator : How the framework runs the lifecycle.
+        tutorials/extending_analyses.md : Step-by-step contributor guide.
     """
 
     # --- Class variables (subclasses MUST set name and Settings) ---
@@ -740,11 +731,14 @@ class Analysis(ABC):
         """
         from polyzymd.analyses.stats import default_scalar_comparison
 
-        # Load aggregated results and build metric values
+        # Load aggregated results — prefer in-memory from orchestrator,
+        # fall back to disk if not available (e.g. standalone compare)
         metrics_by_condition: dict[str, dict[str, MetricValue]] = {}
         for cond in ctx.conditions:
-            agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
-            summary = self._load_aggregated_result(agg_dir)
+            summary = ctx.aggregated_results.get(cond.label)
+            if summary is None:
+                agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
+                summary = self._load_aggregated_result(agg_dir)
             if summary is not None:
                 extracted = self.extract_metrics(summary)
                 if extracted:
@@ -869,8 +863,16 @@ class Analysis(ABC):
         json_files = sorted(aggregated_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
         if not json_files:
             return None
-        # Use the most recent file
-        return self._deserialize_result(json_files[-1])
+        chosen = json_files[-1]
+        logger.warning(
+            "%s: canonical result.json not found in %s — falling back to %s "
+            "(%d JSON file(s) present)",
+            self.name,
+            aggregated_dir,
+            chosen.name,
+            len(json_files),
+        )
+        return self._deserialize_result(chosen)
 
     def _deserialize_result(self, path: Path) -> Any:
         """Load a result from a JSON file.
@@ -910,7 +912,7 @@ class Analysis(ABC):
         cache_path: Path,
         *,
         recompute: bool,
-        sim_config: Any = None,
+        sim_config: SimulationConfig | None = None,
     ) -> Any | None:
         """Load a cached result from disk if valid, otherwise return ``None``.
 
@@ -981,6 +983,8 @@ class Analysis(ABC):
         str
             Compact replicate string, e.g. ``"reps1-5"`` or ``"reps1_3_5"``.
         """
+        if not replicates:
+            return "no_replicates"
         reps = sorted(replicates)
         if reps == list(range(reps[0], reps[-1] + 1)):
             return f"reps{reps[0]}-{reps[-1]}"
@@ -1051,7 +1055,7 @@ class Analysis(ABC):
         if hasattr(result, "model_dump_json"):
             path.write_text(result.model_dump_json(indent=2))
             return path
-        path.write_text(json.dumps(result, indent=2, default=str))
+        path.write_text(json.dumps(result, indent=2))
         return path
 
     def resolve_output_dir(

@@ -416,7 +416,7 @@ class CatalyticTriadAnalysis(Analysis):
                 per_replicate_means=stats.per_rep_means,
                 per_replicate_stds=stats.per_rep_stds,
                 per_replicate_medians=stats.per_rep_medians,
-                threshold=getattr(settings, "threshold", 3.5),
+                threshold=settings.threshold,
                 overall_fraction_below=(
                     stats.fraction_stats.mean if stats.fraction_stats else None
                 ),
@@ -436,8 +436,8 @@ class CatalyticTriadAnalysis(Analysis):
         per_rep_simultaneous = [r.simultaneous_contact_fraction for r in results]
         sim_stats = compute_sem(per_rep_simultaneous)
 
-        triad_name = getattr(settings, "name", "catalytic_triad")
-        triad_description = getattr(settings, "description", None)
+        triad_name = settings.name
+        triad_description = settings.description
 
         agg_result = TriadAggregatedResult(
             config_hash=first.config_hash,
@@ -453,7 +453,7 @@ class CatalyticTriadAnalysis(Analysis):
             triad_name=triad_name,
             triad_description=triad_description,
             pair_results=aggregated_pairs,
-            threshold=getattr(settings, "threshold", 3.5),
+            threshold=settings.threshold,
             overall_simultaneous_contact=sim_stats.mean,
             sem_simultaneous_contact=sim_stats.sem,
             per_replicate_simultaneous=per_rep_simultaneous,

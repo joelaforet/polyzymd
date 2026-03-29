@@ -179,12 +179,12 @@ class RMSFAnalysis(Analysis):
         settings = ctx.settings
         sim_config = ctx.sim_config
 
-        selection = getattr(settings, "selection", "protein and name CA")
-        reference_mode: ReferenceMode = getattr(settings, "reference_mode", "centroid")
-        reference_frame = getattr(settings, "reference_frame", None)
-        reference_file = getattr(settings, "reference_file", None)
-        alignment_selection = getattr(settings, "alignment_selection", "protein and name CA")
-        centroid_selection = getattr(settings, "centroid_selection", "protein")
+        selection = settings.selection
+        reference_mode: ReferenceMode = settings.reference_mode
+        reference_frame = settings.reference_frame
+        reference_file = settings.reference_file
+        alignment_selection = settings.alignment_selection
+        centroid_selection = settings.centroid_selection
 
         # Validate reference_mode + reference_frame/file combinations
         if reference_mode == "frame" and reference_frame is None:
@@ -435,7 +435,7 @@ class RMSFAnalysis(Analysis):
             replicate=None,
             equilibration_time=results[0].equilibration_time,
             equilibration_unit=results[0].equilibration_unit,
-            selection_string=getattr(settings, "selection", results[0].selection_string),
+            selection_string=settings.selection,
             replicates=list(ctx.replicates),
             n_replicates=len(ctx.replicates),
             residue_ids=results[0].residue_ids,

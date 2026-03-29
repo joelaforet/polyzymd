@@ -178,15 +178,26 @@ def get_colors(n: int, plot_settings: "PlotSettings") -> list:
     list
         List of color values (RGB tuples or matplotlib color specs).
     """
-    import matplotlib.pyplot as plt
-
     try:
         import seaborn as sns
 
         return list(sns.color_palette(plot_settings.color_palette, n))
     except ImportError:
-        cmap = plt.cm.get_cmap(plot_settings.color_palette)
-        return [cmap(i / max(1, n - 1)) for i in range(n)]
+        pass
+
+    import matplotlib.pyplot as plt
+
+    palette = plot_settings.color_palette
+    try:
+        cmap = plt.cm.get_cmap(palette)
+    except ValueError:
+        logger.warning(
+            "Color palette %r is not a valid matplotlib colormap "
+            "(seaborn is not installed). Falling back to 'tab10'.",
+            palette,
+        )
+        cmap = plt.cm.get_cmap("tab10")
+    return [cmap(i / max(1, n - 1)) for i in range(n)]
 
 
 # ---------------------------------------------------------------------------

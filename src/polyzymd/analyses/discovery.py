@@ -34,9 +34,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("polyzymd.analyses")
 
-# The package to scan for analysis plugins
-_ANALYSES_PACKAGE = "polyzymd.analyses"
-
 # Modules that are infrastructure, not plugins
 _SKIP_MODULES = frozenset(
     {

@@ -138,7 +138,7 @@ class SecondaryStructureAnalysis(Analysis):
         settings = ctx.settings
         sim_config = ctx.sim_config
 
-        chain_id = getattr(settings, "chain_id", "A")
+        chain_id = settings.chain_id
 
         # Parse equilibration time
         eq_value, eq_unit = parse_time_string(ctx.equilibration)

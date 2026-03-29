@@ -273,7 +273,7 @@ class {cls}Analysis(Analysis):
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        from polyzymd.analyses.shared import get_theme, apply_axis_style, save_figure, get_colors, get_output_path
+        from polyzymd.analyses.shared import apply_axis_style, save_figure, get_colors, get_output_path
 
         # _build_plot_data() collects analysis_dir / aggregated_dir per condition
         data, labels = self._build_plot_data(ctx)
@@ -299,7 +299,6 @@ class {cls}Analysis(Analysis):
             return []
 
         plot_settings = ctx.plot_settings
-        theme = get_theme(plot_settings)
         colors = get_colors(len(valid_labels), plot_settings)
 
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -309,7 +308,6 @@ class {cls}Analysis(Analysis):
         output_path = get_output_path(ctx.output_dir, "{name}_comparison", plot_settings)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         save_figure(fig, output_path, plot_settings)
-        plt.close(fig)
         return [output_path]
 '''
 
