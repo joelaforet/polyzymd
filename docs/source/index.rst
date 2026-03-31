@@ -29,8 +29,8 @@ Use this site by *need*:
 
    Stable analysis workflows for the `v1.2.0` release are RMSF, contacts,
    distances, catalytic triad, and secondary structure. Binding preference,
-   exposure dynamics, binding free energy, and polymer affinity remain
-   available, but are documented as experimental.
+   exposure dynamics, binding free energy, polymer affinity, and polymer
+   bridging remain available, but are documented as experimental.
 
 Choose Your Path
 ----------------

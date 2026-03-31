@@ -51,6 +51,7 @@ Experimental but still available:
 - `exposure`
 - `binding_free_energy`
 - `polymer_affinity`
+- `polymer_bridging` (alias: `bridging`)
 
 ## Path Rules
 
@@ -87,6 +88,7 @@ polyzymd compare plot-all
 polyzymd compare run exposure
 polyzymd compare run binding_free_energy
 polyzymd compare run polymer_affinity
+polyzymd compare run polymer_bridging   # alias: polyzymd compare run bridging
 ```
 
 These remain callable, but PolyzyMD labels them as experimental in CLI output,

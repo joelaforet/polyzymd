@@ -4,15 +4,44 @@ Quantifies oligomer-level multisite attachment to the protein surface directly
 from trajectories. The core question is whether a single short oligomer
 typically makes one-site or multi-site protein attachments.
 
-Primary metrics:
+**Status:** Experimental. Contributed as a proof-of-concept extensibility
+exercise. Metric definitions, chemistry-aware profiling outputs, and
+interpretation are subject to change.
+
+Observation model
+-----------------
+One observation = one polymer fragment in one trajectory frame that contacts
+at least one protein residue within the distance cutoff. All statistics are
+computed over this observation population.
+
+Primary metrics
+---------------
 - mean contacts per contacting oligomer
 - fraction of contacting oligomer observations that are multisite
 - fraction of contacting oligomer observations with high valency (3+ residues)
 
-Bridging is defined operationally as a single oligomer chain contacting more
-than one distinct protein residue in the same frame. A stricter optional filter
-requires contacted residue pairs to exceed a minimum frame-wise C-alpha
-separation.
+Chemistry-aware outputs (experimental)
+--------------------------------------
+- anchor protein class probabilities
+- peripheral and all-multivalent protein class probabilities
+- polymer contact/anchor monomer probabilities
+- anchor-to-peripheral class matrices (row-normalized)
+- polymer-anchor to protein-anchor matrices (row-normalized)
+- ordered fragment signature probabilities (top 10)
+
+Key definitions
+---------------
+- *Multisite*: effective eligible valency > 1. With positive
+  ``min_ca_distance_angstrom``, eligibility is based on dynamic per-frame
+  CA distances among contacted protein residues.
+- *Anchor*: the polymer-protein residue pair with the minimum atom distance
+  within a multivalent observation.
+- *Peripheral*: all other eligible contacted residues in the observation.
+
+Notes
+-----
+Interpretation is descriptive and experimental — observed frequencies over the
+observation population, not normalized enrichment and not proof of mechanism.
 """
 
 from __future__ import annotations
@@ -61,7 +90,34 @@ EXPERIMENTAL_CHEMISTRY_FEATURES = ("polymer_bridging_chemistry",)
 
 @dataclass(frozen=True)
 class PolymerBridgingObservation:
-    """One fragment-frame observation with chemistry metadata."""
+    """One fragment-frame observation with chemistry metadata.
+
+    Represents a single polymer fragment in a single trajectory frame that
+    contacts at least one protein residue. This is the fundamental unit of
+    data from which all bridging statistics are computed.
+
+    Attributes
+    ----------
+    protein_residues : set[int]
+        Residue IDs of all protein residues contacted by this fragment.
+    protein_resnames : dict[int, str]
+        Mapping from protein residue ID to residue name (3-letter code).
+    protein_groups : dict[int, str]
+        Mapping from protein residue ID to amino acid class
+        (aromatic, charged_positive, etc.).
+    contacting_polymer_resids : set[int]
+        Residue IDs of polymer monomers that participate in contacts.
+    polymer_resnames : dict[int, str]
+        Mapping from polymer residue ID to monomer name.
+    fragment_signature : tuple[str, ...]
+        Ordered sequence of all monomer names in the fragment (full chain).
+    ca_distances : ResiduePairDistances
+        Frame-wise C-alpha distances for all pairs of contacted protein
+        residues. Keys are ``(min_resid, max_resid)`` tuples.
+    pair_min_distances : dict[tuple[int, int], float]
+        Minimum atom-level distance for each (polymer_resid, protein_resid)
+        pair. Used to determine the anchor.
+    """
 
     protein_residues: set[int]
     protein_resnames: dict[int, str]
@@ -77,7 +133,26 @@ FrameContactObservation = PolymerBridgingObservation | tuple[set[int], ResiduePa
 
 
 class PolymerBridgingSettings(BaseModel):
-    """Settings for oligomer bridging analysis."""
+    """Settings for oligomer bridging analysis.
+
+    Parameters
+    ----------
+    protein_selection : str
+        MDAnalysis atom selection string for the protein.
+        Default ``"protein"``.
+    polymer_selection : str
+        MDAnalysis atom selection string for the polymer chain(s).
+        Default ``"chainID C"`` (PolyzyMD chain convention).
+    cutoff : float
+        Contact distance cutoff in Angstroms. Atom pairs within this
+        distance are considered in contact. Default ``4.5``.
+    min_ca_distance_angstrom : float
+        Minimum frame-wise C-alpha distance (Angstroms) between contacted
+        protein residues for an observation to count as multisite. Set to
+        ``0.0`` (default) to disable geometric filtering, or to a positive
+        value (e.g., ``8.0``) to require spatially separated contacts.
+        Must be >= 0.
+    """
 
     protein_selection: str = Field(
         default="protein",
@@ -105,7 +180,53 @@ class PolymerBridgingSettings(BaseModel):
 
 
 class PolymerBridgingReplicateResult(BaseModel):
-    """Per-replicate oligomer bridging summary."""
+    """Per-replicate oligomer bridging summary.
+
+    Contains both the primary scalar metrics (multisite fraction, mean
+    contacts, high-valency fraction) and the chemistry-aware probability
+    distributions computed from one replicate trajectory.
+
+    Attributes
+    ----------
+    replicate : int
+        Replicate index.
+    n_frames : int
+        Number of trajectory frames analyzed (after equilibration).
+    timestep_ps : float
+        Trajectory timestep in picoseconds.
+    min_ca_distance_angstrom : float
+        The C-alpha distance threshold used for eligibility filtering.
+    contacting_observations : int
+        Total number of fragment-frame observations with at least one contact.
+    multisite_observations : int
+        Number of observations with eligible valency > 1.
+    high_valency_observations : int
+        Number of observations with eligible valency >= 3.
+    mean_contacts_per_contacting_oligomer : float
+        Average eligible valency across all contacting observations.
+    multisite_fraction : float
+        Fraction of contacting observations that are multisite.
+    high_valency_fraction : float
+        Fraction of contacting observations with valency >= 3.
+    valency_probabilities : dict[str, float]
+        Probability distribution over valency bins: ``"1"``, ``"2"``, ``"3+"``.
+    anchor_protein_group_probabilities : dict[str, float]
+        Amino acid class frequency of anchor residues in multivalent events.
+    peripheral_protein_group_probabilities : dict[str, float]
+        Amino acid class frequency of peripheral residues in multivalent events.
+    multivalent_protein_group_probabilities : dict[str, float]
+        Amino acid class frequency of all eligible residues in multivalent events.
+    polymer_contact_type_probabilities : dict[str, float]
+        Monomer-type frequency among all contacting polymer residues.
+    polymer_anchor_type_probabilities : dict[str, float]
+        Monomer-type frequency of the polymer anchor in multivalent events.
+    anchor_to_peripheral_group_matrix : dict[str, dict[str, float]]
+        Row-normalized matrix: anchor protein class -> peripheral protein class.
+    polymer_anchor_to_protein_anchor_matrix : dict[str, dict[str, float]]
+        Row-normalized matrix: polymer anchor monomer -> protein anchor class.
+    fragment_signature_probabilities : dict[str, float]
+        Top-10 ordered fragment signatures by frequency in multivalent events.
+    """
 
     replicate: int
     n_frames: int
@@ -141,7 +262,33 @@ class PolymerBridgingReplicateResult(BaseModel):
 
 
 class PolymerBridgingAggregatedResult(BaseModel):
-    """Aggregated oligomer bridging result for one condition."""
+    """Aggregated oligomer bridging result for one condition.
+
+    Contains cross-replicate mean +/- SEM for all metrics and
+    chemistry-aware probability distributions. Per-replicate values
+    are preserved for downstream statistical testing.
+
+    Attributes
+    ----------
+    n_replicates : int
+        Number of replicates aggregated.
+    replicates : list[int]
+        Replicate indices.
+    min_ca_distance_angstrom : float
+        C-alpha distance threshold used.
+    mean_contacts_per_contacting_oligomer : float
+        Cross-replicate mean of per-replicate mean valency.
+    mean_contacts_sem : float
+        Standard error of the mean for valency.
+    multisite_fraction : float
+        Cross-replicate mean of per-replicate multisite fraction.
+    multisite_fraction_sem : float
+        Standard error of the mean for multisite fraction.
+    high_valency_fraction : float
+        Cross-replicate mean of per-replicate high-valency fraction.
+    high_valency_fraction_sem : float
+        Standard error of the mean for high-valency fraction.
+    """
 
     n_replicates: int
     replicates: list[int]
@@ -211,7 +358,36 @@ class PolymerBridgingAggregatedResult(BaseModel):
 
 
 class PolymerBridgingAnalysis(Analysis):
-    """Oligomer-level multisite protein attachment analysis."""
+    """Oligomer-level multisite protein attachment analysis.
+
+    This plugin computes per-fragment, per-frame polymer bridging metrics
+    directly from MD trajectories. It implements the full Analysis lifecycle:
+    ``compute_replicate`` → ``aggregate`` → ``compare`` → ``plot`` → ``format``.
+
+    **Status:** Experimental. Chemistry-aware outputs are labeled
+    ``polymer_bridging_chemistry`` in the experimental feature system.
+
+    Class Variables
+    ---------------
+    name : str
+        Plugin name: ``"polymer_bridging"``.
+    Settings : type
+        ``PolymerBridgingSettings`` — Pydantic model for YAML configuration.
+    AggregatedResultClass : type
+        ``PolymerBridgingAggregatedResult`` — used by the default result loader.
+    aliases : tuple[str, ...]
+        ``("bridging",)`` — CLI shorthand.
+    dependencies : tuple[str, ...]
+        Empty — no prerequisite analyses.
+    min_replicates : int
+        ``2`` — minimum replicates for comparison statistics.
+
+    Notes
+    -----
+    Conditions without polymer atoms are automatically filtered via
+    ``filter_conditions()``. The comparison uses NaN-safe pairwise t-tests
+    and ANOVA across three primary metrics.
+    """
 
     name: ClassVar[str] = "polymer_bridging"
     Settings: ClassVar[type] = PolymerBridgingSettings
@@ -877,7 +1053,30 @@ def _compute_bridging_statistics_from_frames(
     min_ca_distance_angstrom: float,
     ca_distances: ResiduePairDistances | None = None,
 ) -> dict[str, Any]:
-    """Compute per-replicate oligomer bridging statistics from frame contacts."""
+    """Compute per-replicate oligomer bridging statistics from frame contacts.
+
+    Processes a list of observations and produces all primary metrics and
+    chemistry-aware probability distributions.
+
+    Parameters
+    ----------
+    frame_contacts : Sequence[set[int] | FrameContactObservation]
+        List of observations. Each is either a
+        ``PolymerBridgingObservation`` (with full chemistry metadata), a
+        ``(residues, ca_distances)`` tuple, or a bare ``set[int]`` of
+        contacted residue IDs.
+    min_ca_distance_angstrom : float
+        Minimum frame-wise C-alpha distance for eligibility.
+    ca_distances : ResiduePairDistances or None, optional
+        Fallback CA distances used when observations are bare sets.
+
+    Returns
+    -------
+    dict[str, Any]
+        Dictionary containing all computed metrics and probability
+        distributions, keyed to match ``PolymerBridgingReplicateResult``
+        field names.
+    """
     eligible_counts: list[int] = []
     default_ca_distances = ca_distances or {}
     anchor_group_counter: Counter[str] = Counter()
@@ -998,7 +1197,27 @@ def _count_eligible_residues(
     min_ca_distance_angstrom: float,
     ca_distances: ResiduePairDistances,
 ) -> int:
-    """Count residues that belong to at least one geometrically eligible pair."""
+    """Count residues that belong to at least one geometrically eligible pair.
+
+    When ``min_ca_distance_angstrom <= 0``, returns ``len(residues)``
+    (no filtering). Otherwise, returns the count of residues that
+    participate in at least one pair with frame-wise CA distance >=
+    the threshold.
+
+    Parameters
+    ----------
+    residues : set[int]
+        Contacted protein residue IDs.
+    min_ca_distance_angstrom : float
+        Minimum CA-CA distance for a pair to be eligible.
+    ca_distances : ResiduePairDistances
+        Frame-wise CA distances keyed by ``(min_resid, max_resid)``.
+
+    Returns
+    -------
+    int
+        Number of eligible residues (minimum 1 if any residues contacted).
+    """
     if len(residues) <= 1 or min_ca_distance_angstrom <= 0:
         return len(residues)
 
@@ -1037,7 +1256,24 @@ def _find_anchor_pair(
     observation: PolymerBridgingObservation,
     eligible_residues: set[int],
 ) -> tuple[int, int] | None:
-    """Choose the closest polymer-protein residue pair within the eligible set."""
+    """Choose the closest polymer-protein residue pair within the eligible set.
+
+    The anchor pair is the (polymer_resid, protein_resid) with the minimum
+    atom-level distance, restricted to protein residues in the eligible set.
+
+    Parameters
+    ----------
+    observation : PolymerBridgingObservation
+        The full observation with pair minimum distances.
+    eligible_residues : set[int]
+        Protein residue IDs that passed the CA distance filter.
+
+    Returns
+    -------
+    tuple[int, int] or None
+        ``(polymer_resid, protein_resid)`` of the anchor pair, or None if
+        no eligible pairs exist.
+    """
     best_pair: tuple[int, int] | None = None
     best_distance = float("inf")
     for pair, distance in observation.pair_min_distances.items():
@@ -1261,7 +1497,39 @@ def _compute_frame_contacts(
     cutoff: float,
     equilibration: str,
 ) -> tuple[list[FrameContactObservation], int, float]:
-    """Return one contacted-residue set plus frame-wise CA distances per observation."""
+    """Compute per-fragment, per-frame contact observations from a trajectory.
+
+    Iterates over all frames after equilibration. For each frame and each
+    polymer fragment, detects atom-level contacts with the protein using
+    ``capped_distance``, then assembles a ``PolymerBridgingObservation``
+    containing contacted residue identities, amino acid classes, polymer
+    monomer types, frame-wise CA distances, and ordered fragment signatures.
+
+    Parameters
+    ----------
+    condition : Condition
+        The simulation condition (provides sim_config for path resolution).
+    replicate : int
+        Replicate index.
+    protein_selection : str
+        MDAnalysis selection string for the protein.
+    polymer_selection : str
+        MDAnalysis selection string for the polymer.
+    cutoff : float
+        Contact distance cutoff in Angstroms.
+    equilibration : str
+        Equilibration time string (e.g., ``"10ns"``). Frames before this
+        time are skipped.
+
+    Returns
+    -------
+    observations : list[FrameContactObservation]
+        One observation per contacting fragment per frame.
+    n_frames : int
+        Number of frames analyzed (after equilibration).
+    timestep_ps : float
+        Trajectory timestep in picoseconds.
+    """
     from MDAnalysis.lib.distances import capped_distance
 
     from polyzymd.analyses.shared.loader import TrajectoryLoader, convert_time, parse_time_string

@@ -28,6 +28,7 @@ Experimental workflows:
 - [Experimental: Analyze Binding Preference](../tutorials/analysis_binding_preference.md)
 - [Experimental: Analyze Binding Free Energy](../tutorials/analysis_binding_free_energy.md)
 - [Experimental: Analyze Polymer Affinity](../tutorials/analysis_polymer_affinity.md)
+- [Experimental: Analyze Polymer Bridging](../tutorials/analysis_polymer_bridging.md)
 - [Experimental: Analyze Exposure Dynamics](../tutorials/analysis_exposure_dynamics.md)
 
 ## Recipe Collections
@@ -58,6 +59,7 @@ Run Catalytic Triad Analysis <../tutorials/analysis_triad_quickstart>
 Experimental: Analyze Binding Preference <../tutorials/analysis_binding_preference>
 Experimental: Analyze Binding Free Energy <../tutorials/analysis_binding_free_energy>
 Experimental: Analyze Polymer Affinity <../tutorials/analysis_polymer_affinity>
+Experimental: Analyze Polymer Bridging <../tutorials/analysis_polymer_bridging>
 Experimental: Analyze Exposure Dynamics <../tutorials/analysis_exposure_dynamics>
 Contacts Cookbook <../tutorials/analysis_contacts_cookbook>
 Broken Molecule Debugging <../tutorials/broken_molecules_debugging>

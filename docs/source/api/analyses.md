@@ -54,6 +54,7 @@ adding new analysis types to PolyzyMD.
 | `exposure` | `analyses.exposure` | Custom |
 | `binding_free_energy` | `analyses.binding_free_energy` | Custom |
 | `polymer_affinity` | `analyses.polymer_affinity` | Custom |
+| `polymer_bridging` | `analyses.polymer_bridging` | Custom (experimental) |
 
 ## Related Documentation
 

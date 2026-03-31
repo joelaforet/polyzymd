@@ -247,6 +247,7 @@ the presentation release:
 - [Experimental: Analyze Binding Preference](analysis_binding_preference.md)
 - [Experimental: Analyze Binding Free Energy](analysis_binding_free_energy.md)
 - [Experimental: Analyze Polymer Affinity](analysis_polymer_affinity.md)
+- [Experimental: Analyze Polymer Bridging](analysis_polymer_bridging.md)
 - [Experimental: Analyze Exposure Dynamics](analysis_exposure_dynamics.md)
 
 ## Troubleshooting

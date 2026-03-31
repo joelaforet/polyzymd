@@ -25,6 +25,7 @@ evolving and they should be treated as experimental:
 - [Binding Preference](../tutorials/analysis_binding_preference.md)
 - [Binding Free Energy](../tutorials/analysis_binding_free_energy.md)
 - [Polymer Affinity](../tutorials/analysis_polymer_affinity.md)
+- [Polymer Bridging Interpretation](polymer_bridging_interpretation.md)
 - [Exposure Dynamics](../tutorials/analysis_exposure_dynamics.md)
 
 <!-- IMAGE OPPORTUNITY: Add a chain-convention figure (A/B/C/D+), plus a simple
@@ -43,4 +44,5 @@ RMSF Best Practices <../tutorials/analysis_rmsf_best_practices>
 RMSF Reference Selection <../tutorials/analysis_reference_selection>
 RMSF Verification <../tutorials/analysis_rmsf_verification>
 Catalytic Triad Best Practices <../tutorials/analysis_triad_best_practices>
+Polymer Bridging Interpretation <polymer_bridging_interpretation>
 ```
