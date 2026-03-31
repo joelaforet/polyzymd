@@ -92,10 +92,6 @@ from polyzymd.analyses.shared.plotting import (
     symmetric_clim,
 )
 
-# Re-export PlotSettings so plugin authors and test code can import
-# from analyses.shared instead of reaching into compare.config.
-from polyzymd.compare.config import PlotSettings
-
 from polyzymd.analyses.shared.statistics import (
     PerResidueStats,
     StatResult,
@@ -158,6 +154,15 @@ __all__ = [
     "find_json",
     "annotate_cells",
     "symmetric_clim",
-    # Plot settings (re-exported from compare.config)
+    # Plot settings (lazily re-exported from compare.config)
     "PlotSettings",
 ]
+
+
+def __getattr__(name: str):
+    """Lazily expose ``PlotSettings`` without creating an import cycle."""
+    if name == "PlotSettings":
+        from polyzymd.compare.config import PlotSettings
+
+        return PlotSettings
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

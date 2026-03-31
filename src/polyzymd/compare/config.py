@@ -572,6 +572,16 @@ class ComparisonConfig(BaseModel):
         if data is None:
             data = {}
 
+        if "plugins" not in data and "analysis_settings" in data:
+            logger.warning(
+                "comparison.yaml uses legacy 'analysis_settings:'; treating it as 'plugins:' "
+                "for backward compatibility."
+            )
+            data["plugins"] = data.pop("analysis_settings")
+
+        if "plugins" not in data:
+            data["plugins"] = {}
+
         # Resolve relative paths relative to the config file location
         config_dir = path.parent.resolve()
         if "conditions" in data:
