@@ -1,0 +1,287 @@
+"""RMSD analysis result models.
+
+This module defines Pydantic models for storing RMSD analysis results:
+- RMSDRunResult: Single run (selection) within a single replicate
+- RMSDResult: All runs for one replicate
+- RMSDRunAggregatedResult: One run aggregated across replicates
+- RMSDAggregatedResult: All runs aggregated across replicates
+
+Supports multiple named RMSD selections (runs) per analysis, following
+the multi-entry pattern established by the distances plugin.
+"""
+
+from __future__ import annotations
+
+from typing import ClassVar
+
+from pydantic import Field
+
+from polyzymd.analyses._results_base import (
+    AggregatedResultMixin,
+    BaseAnalysisResult,
+)
+
+
+class RMSDRunResult(BaseAnalysisResult):
+    """RMSD result for a single named run in one replicate.
+
+    Stores per-frame RMSD timeseries (as NPZ sidecar path) and summary
+    statistics for one selection.
+
+    Attributes
+    ----------
+    run_label : str
+        Human-readable label for this run (e.g., "protein_backbone").
+    selection : str
+        MDAnalysis selection string used for RMSD calculation.
+    alignment_selection : str
+        MDAnalysis selection string used for trajectory alignment.
+    reference_mode : str
+        Reference structure mode: centroid, average, or frame.
+    reference_frame : int | None
+        1-indexed reference frame used (None for average mode).
+    mean_rmsd : float
+        Mean RMSD over analyzed frames (Angstroms).
+    std_rmsd : float
+        Standard deviation of per-frame RMSD.
+    median_rmsd : float
+        Median RMSD.
+    min_rmsd : float
+        Minimum RMSD observed.
+    max_rmsd : float
+        Maximum RMSD observed.
+    final_rmsd : float
+        RMSD of the last frame (useful for convergence assessment).
+    sem_rmsd : float | None
+        Autocorrelation-corrected standard error of the mean.
+    n_frames_total : int
+        Total frames in trajectory.
+    n_frames_used : int
+        Frames used after equilibration.
+    npz_path : str | None
+        Path to NPZ sidecar containing per-frame RMSD timeseries.
+    """
+
+    analysis_type: ClassVar[str] = "rmsd_run"
+
+    # Run identification
+    run_label: str = Field(..., description="Human-readable run label")
+    selection: str = Field(..., description="MDAnalysis selection for RMSD calculation")
+    alignment_selection: str = Field(
+        ..., description="MDAnalysis selection for trajectory alignment"
+    )
+    reference_mode: str = Field(
+        ..., description="Reference structure mode: centroid, average, or frame"
+    )
+    reference_frame: int | None = Field(
+        default=None, description="Reference frame (1-indexed), None for average mode"
+    )
+
+    # Summary statistics
+    mean_rmsd: float = Field(..., description="Mean RMSD (Angstroms)")
+    std_rmsd: float = Field(..., description="Standard deviation of per-frame RMSD")
+    median_rmsd: float = Field(..., description="Median RMSD")
+    min_rmsd: float = Field(..., description="Minimum RMSD observed")
+    max_rmsd: float = Field(..., description="Maximum RMSD observed")
+    final_rmsd: float = Field(..., description="RMSD of last frame")
+
+    # Autocorrelation-corrected uncertainty
+    sem_rmsd: float | None = Field(
+        default=None, description="Standard error of the mean (autocorrelation-corrected)"
+    )
+    correlation_time_unit: str | None = Field(default=None, description="Unit of correlation time")
+    statistical_inefficiency: float | None = Field(
+        default=None, description="Factor by which variance is inflated due to correlation"
+    )
+    autocorrelation_warning: str | None = Field(
+        default=None, description="Warning if statistics may be unreliable"
+    )
+
+    # Frame info
+    n_frames_total: int = Field(..., description="Total frames in trajectory")
+    n_frames_used: int = Field(..., description="Frames used after equilibration")
+
+    # Timeseries sidecar
+    npz_path: str | None = Field(
+        default=None, description="Path to NPZ sidecar with per-frame RMSD timeseries"
+    )
+
+    # Time array metadata (for plotting)
+    time_unit: str = Field(default="ns", description="Unit of time axis")
+    timestep_ps: float | None = Field(default=None, description="Timestep between frames in ps")
+
+    def summary(self) -> str:
+        """Return human-readable summary."""
+        lines = [
+            f"RMSD Run: {self.run_label}",
+            "=" * 50,
+            f"Replicate: {self.replicate}",
+            f"Selection: {self.selection}",
+            f"Alignment: {self.alignment_selection}",
+            f"Reference: {self.reference_mode}"
+            + (f" (frame {self.reference_frame})" if self.reference_frame else ""),
+            f"Equilibration: {self._format_equilibration()}",
+            f"Frames used: {self.n_frames_used}/{self.n_frames_total}",
+            "",
+        ]
+
+        if self.sem_rmsd is not None:
+            lines.append(f"Mean: {self.mean_rmsd:.3f} +/- {self.sem_rmsd:.3f} A (SEM)")
+            if self.n_independent_frames is not None:
+                lines.append(f"  (n_independent = {self.n_independent_frames})")
+        else:
+            lines.append(f"Mean: {self.mean_rmsd:.3f} +/- {self.std_rmsd:.3f} A (std)")
+
+        lines.append(f"Median: {self.median_rmsd:.3f} A")
+        lines.append(f"Range: {self.min_rmsd:.3f} - {self.max_rmsd:.3f} A")
+        lines.append(f"Final: {self.final_rmsd:.3f} A")
+
+        if self.autocorrelation_warning:
+            lines.append("")
+            lines.append(f"WARNING: {self.autocorrelation_warning}")
+
+        return "\n".join(lines)
+
+
+class RMSDResult(BaseAnalysisResult):
+    """RMSD results for all runs in one replicate.
+
+    Container for analyzing multiple RMSD selections simultaneously.
+    """
+
+    analysis_type: ClassVar[str] = "rmsd"
+
+    # Collection of run results
+    run_results: list[RMSDRunResult] = Field(..., description="Results for each RMSD run")
+
+    # Trajectory info (shared across runs)
+    n_frames_total: int = Field(..., description="Total frames in trajectory")
+    n_frames_used: int = Field(..., description="Frames used after equilibration")
+    trajectory_files: list[str] = Field(
+        default_factory=list, description="Trajectory files analyzed"
+    )
+
+    def summary(self) -> str:
+        """Return human-readable summary."""
+        lines = [
+            f"RMSD Analysis (replicate {self.replicate})",
+            "=" * 50,
+            f"Runs analyzed: {len(self.run_results)}",
+            f"Equilibration: {self._format_equilibration()}",
+            f"Frames used: {self.n_frames_used}/{self.n_frames_total}",
+            "",
+        ]
+
+        for rr in self.run_results:
+            lines.append(f"{rr.run_label}: {rr.mean_rmsd:.3f} +/- {rr.std_rmsd:.3f} A")
+
+        return "\n".join(lines)
+
+    @property
+    def n_runs(self) -> int:
+        """Number of RMSD runs analyzed."""
+        return len(self.run_results)
+
+
+class RMSDRunAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
+    """Aggregated RMSD results for one run across replicates.
+
+    Attributes
+    ----------
+    run_label : str
+        Human-readable label for this run.
+    selection : str
+        MDAnalysis selection used.
+    overall_mean : float
+        Mean of replicate means.
+    overall_sem : float
+        SEM across replicate means.
+    per_replicate_means : list[float]
+        Mean RMSD from each replicate.
+    per_replicate_stds : list[float]
+        Std dev from each replicate.
+    """
+
+    analysis_type: ClassVar[str] = "rmsd_run_aggregated"
+
+    # Replicate info
+    replicates: list[int] = Field(..., description="Replicate numbers included")
+    n_replicates: int = Field(..., description="Number of replicates")
+
+    # Run identification
+    run_label: str = Field(..., description="Human-readable run label")
+    selection: str = Field(..., description="MDAnalysis selection for RMSD")
+    alignment_selection: str = Field(..., description="MDAnalysis selection for alignment")
+
+    # Aggregated statistics
+    overall_mean: float = Field(..., description="Mean of replicate means")
+    overall_sem: float = Field(..., description="SEM across replicates")
+    overall_median: float = Field(..., description="Median of replicate medians")
+
+    # Per-replicate values
+    per_replicate_means: list[float] = Field(..., description="Mean RMSD from each replicate")
+    per_replicate_stds: list[float] = Field(..., description="Std dev from each replicate")
+    per_replicate_medians: list[float] = Field(..., description="Median from each replicate")
+
+    def summary(self) -> str:
+        """Return human-readable summary."""
+        rep_range = self.replicate_range
+        lines = [
+            f"RMSD Aggregated: {self.run_label}",
+            "=" * 50,
+            f"Replicates: {rep_range}",
+            f"Selection: {self.selection}",
+            f"Equilibration: {self._format_equilibration()}",
+            "",
+            f"Mean: {self.overall_mean:.3f} +/- {self.overall_sem:.3f} A",
+            f"Median: {self.overall_median:.3f} A",
+            "",
+            "Per-replicate means:",
+        ]
+
+        for rep, mean in zip(self.replicates, self.per_replicate_means):
+            lines.append(f"  Rep {rep}: {mean:.3f} A")
+
+        return "\n".join(lines)
+
+
+class RMSDAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
+    """Aggregated RMSD results for all runs across replicates."""
+
+    analysis_type: ClassVar[str] = "rmsd_aggregated"
+
+    # Replicate info
+    replicates: list[int] = Field(..., description="Replicate numbers included")
+    n_replicates: int = Field(..., description="Number of replicates")
+
+    # Collection of aggregated run results
+    run_results: list[RMSDRunAggregatedResult] = Field(
+        ..., description="Aggregated results for each run"
+    )
+
+    # Source files
+    source_result_files: list[str] = Field(
+        default_factory=list, description="Paths to individual replicate result files"
+    )
+
+    def summary(self) -> str:
+        """Return human-readable summary."""
+        rep_range = self.replicate_range
+        lines = [
+            "RMSD Aggregated Analysis",
+            "=" * 50,
+            f"Replicates: {rep_range}",
+            f"Runs analyzed: {len(self.run_results)}",
+            f"Equilibration: {self._format_equilibration()}",
+            "",
+        ]
+
+        for rr in self.run_results:
+            lines.append(f"{rr.run_label}: {rr.overall_mean:.3f} +/- {rr.overall_sem:.3f} A")
+
+        return "\n".join(lines)
+
+    @property
+    def n_runs(self) -> int:
+        """Number of RMSD runs analyzed."""
+        return len(self.run_results)
