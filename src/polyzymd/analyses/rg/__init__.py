@@ -551,9 +551,66 @@ class RgAnalysis(Analysis):
             raise ValueError(f"Run '{run.label}' selection matched no atoms: {run.selection!r}")
 
         rg_values = np.empty(n_frames_used, dtype=np.float64)
-        for idx, frame_idx in enumerate(range(start_frame, n_frames_total)):
-            u.trajectory[frame_idx]
-            rg_values[idx] = float(atom_group.radius_of_gyration())
+        all_fragment_rg: list[float] = []
+        fragment_counts: list[int] = []
+        frag_masses: np.ndarray | None = None
+        frag_metadata: dict[str, float | int] = {}
+
+        if run.calculation_mode == "fragments":
+            fragments = list(atom_group.fragments) if atom_group.fragments else [atom_group]
+            if len(fragments) == 1:
+                logger.warning(
+                    "Run '%s' selection produced only 1 fragment; fragment mode will behave "
+                    "identically to selection mode",
+                    run.label,
+                )
+
+            if run.fragment_weighting == "mass":
+                frag_masses = np.asarray(
+                    [frag.total_mass() for frag in fragments], dtype=np.float64
+                )
+                if np.any(frag_masses <= 0) or np.any(np.isnan(frag_masses)):
+                    raise ValueError(
+                        f"Run '{run.label}': fragment masses contain zero or NaN values. "
+                        "This suggests a problem with the MDAnalysis universe topology. "
+                        f"Fragment masses: {frag_masses.tolist()}"
+                    )
+
+            for idx, frame_idx in enumerate(range(start_frame, n_frames_total)):
+                u.trajectory[frame_idx]
+                frag_rg = np.asarray(
+                    [frag.radius_of_gyration() for frag in fragments], dtype=np.float64
+                )
+                fragment_counts.append(len(fragments))
+                if run.save_fragment_distribution:
+                    all_fragment_rg.extend(frag_rg.tolist())
+                if frag_masses is not None:
+                    rg_values[idx] = float(np.average(frag_rg, weights=frag_masses))
+                else:
+                    rg_values[idx] = float(np.mean(frag_rg))
+
+            if all_fragment_rg:
+                frag_arr = np.asarray(all_fragment_rg, dtype=np.float64)
+                frag_metadata = {
+                    "fragment_mean_rg": float(np.mean(frag_arr)),
+                    "fragment_std_rg": float(np.std(frag_arr, ddof=0)),
+                    "fragment_median_rg": float(np.median(frag_arr)),
+                    "fragment_min_rg": float(np.min(frag_arr)),
+                    "fragment_max_rg": float(np.max(frag_arr)),
+                    "fragment_rg_p10": float(np.percentile(frag_arr, 10)),
+                    "fragment_rg_p25": float(np.percentile(frag_arr, 25)),
+                    "fragment_rg_p50": float(np.percentile(frag_arr, 50)),
+                    "fragment_rg_p75": float(np.percentile(frag_arr, 75)),
+                    "fragment_rg_p90": float(np.percentile(frag_arr, 90)),
+                }
+
+            frag_metadata["mean_fragments_per_frame"] = float(np.mean(fragment_counts))
+            frag_metadata["min_fragments_per_frame"] = int(np.min(fragment_counts))
+            frag_metadata["max_fragments_per_frame"] = int(np.max(fragment_counts))
+        else:
+            for idx, frame_idx in enumerate(range(start_frame, n_frames_total)):
+                u.trajectory[frame_idx]
+                rg_values[idx] = float(atom_group.radius_of_gyration())
 
         frames = np.arange(start_frame, n_frames_total, dtype=np.int64)
         time_ns = (frames.astype(np.float64) * timestep_ps) / 1000.0
@@ -590,12 +647,18 @@ class RgAnalysis(Analysis):
 
         npz_filename = f"rg_{run.label}_timeseries.npz"
         npz_path = ctx.output_dir / npz_filename
-        np.savez_compressed(
-            npz_path,
-            rg_values=rg_values,
-            time_ns=time_ns,
-            frames=frames,
-        )
+        npz_data: dict[str, np.ndarray] = {
+            "rg_values": rg_values,
+            "time_ns": time_ns,
+            "frames": frames,
+        }
+        if run.calculation_mode == "fragments" and run.save_fragment_distribution:
+            npz_data["fragment_rg_values"] = np.asarray(all_fragment_rg, dtype=np.float64)
+            npz_data["fragment_counts_per_frame"] = np.asarray(fragment_counts, dtype=np.int64)
+            if frag_masses is not None:
+                npz_data["fragment_masses"] = frag_masses
+
+        np.savez_compressed(npz_path, **npz_data)
 
         return RgRunResult(
             config_hash=config_hash,
@@ -608,6 +671,10 @@ class RgAnalysis(Analysis):
             n_independent_frames=n_independent_frames,
             run_label=run.label,
             selection=run.selection,
+            calculation_mode=run.calculation_mode,
+            fragment_weighting=(
+                run.fragment_weighting if run.calculation_mode == "fragments" else None
+            ),
             mean_rg=mean_rg,
             std_rg=std_rg,
             median_rg=median_rg,
@@ -623,6 +690,7 @@ class RgAnalysis(Analysis):
             npz_path=str(npz_path),
             time_unit="ns",
             timestep_ps=timestep_ps,
+            **frag_metadata,
         )
 
     @staticmethod
