@@ -27,6 +27,11 @@ from polyzymd.analyses.rg._results import (
     RgRunResult,
 )
 from polyzymd.compare.registries import PlotSettingsRegistry
+from tests._support.analysis_testkit import (
+    FakeUniverse,
+    make_mock_trajectory_loader,
+    make_replicate_context,
+)
 
 
 def _make_run_settings() -> list[RgRunSettings]:
@@ -380,6 +385,130 @@ def test_rg_plot_settings_defaults() -> None:
     assert settings.timeseries_figsize == (12, 5)
 
 
+def test_compute_single_run_zero_atoms_returns_none(
+    condition: Condition,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """_compute_single_run should skip zero-atom selections with warning."""
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=[RgRunSettings(label="polymer_blob_rg", selection="resname SBM")])
+    ctx = make_replicate_context(
+        condition=condition,
+        replicate=1,
+        output_dir=tmp_path / "run_1",
+        settings=settings,
+        equilibration="10ns",
+    )
+
+    empty_group = MagicMock()
+    empty_group.__len__.return_value = 0
+    universe = MagicMock()
+    universe.select_atoms.return_value = empty_group
+    loader = MagicMock()
+    loader.load_universe.return_value = universe
+
+    run = settings.runs[0]
+    with caplog.at_level("WARNING"):
+        result = analysis._compute_single_run(
+            ctx=ctx,
+            replicate=1,
+            run=run,
+            loader=loader,
+            config_hash="hash123",
+            eq_value=10.0,
+            eq_unit="ns",
+            start_frame=0,
+            n_frames_total=10,
+            n_frames_used=10,
+            timestep_ps=10.0,
+        )
+
+    assert result is None
+    assert "selection matched no atoms" in caplog.text
+
+
+def test_compute_replicate_skips_none_runs(
+    condition: Condition, tmp_path: Path, monkeypatch
+) -> None:
+    """compute_replicate should omit runs that returned None."""
+    import polyzymd.analyses.rg as rg_module
+
+    analysis = RgAnalysis()
+    settings = RgSettings(
+        runs=[
+            RgRunSettings(label="protein_rg", selection="protein and name CA"),
+            RgRunSettings(label="polymer_blob_rg", selection="resname SBM"),
+        ]
+    )
+    output_dir = tmp_path / "run_1"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ctx = make_replicate_context(
+        condition=condition,
+        replicate=1,
+        output_dir=output_dir,
+        settings=settings,
+        equilibration="0ps",
+    )
+
+    fake_universe = FakeUniverse(n_atoms=50, n_frames=100, n_residues=10)
+    loader = make_mock_trajectory_loader(fake_universe)
+    monkeypatch.setattr(rg_module, "TrajectoryLoader", lambda _sim_config: loader)
+    monkeypatch.setattr(rg_module, "compute_config_hash", lambda _sim_config: "hash123")
+    monkeypatch.setattr(analysis, "_check_cache", lambda *args, **kwargs: None)
+
+    def _mock_compute_single_run(*, run: RgRunSettings, **kwargs):
+        if run.label == "polymer_blob_rg":
+            return None
+        return _make_run_result(1, "protein_rg", 15.0)
+
+    monkeypatch.setattr(analysis, "_compute_single_run", _mock_compute_single_run)
+
+    result = analysis.compute_replicate(ctx, 1)
+
+    assert len(result.run_results) == 1
+    assert result.run_results[0].run_label == "protein_rg"
+
+
+def test_aggregate_handles_missing_run(
+    condition: Condition,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """aggregate should skip runs with no replicate entries."""
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=_make_run_settings())
+    ctx = AggregateContext(
+        condition=condition,
+        replicates=(1, 2),
+        output_dir=tmp_path / "aggregated",
+        equilibration="10ns",
+        settings=settings,
+    )
+    results = [
+        RgResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=rep,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            run_results=[_make_run_result(rep, "protein_backbone", 14.0 + rep)],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=["/fake/traj.dcd"],
+        )
+        for rep in (1, 2)
+    ]
+
+    with caplog.at_level("WARNING"):
+        aggregated = analysis.aggregate(ctx, results)
+
+    assert len(aggregated.run_results) == 1
+    assert aggregated.run_results[0].run_label == "protein_backbone"
+    assert "selection may match no atoms in this condition" in caplog.text
+
+
 def test_aggregate_single_replicate(
     condition: Condition, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -589,6 +718,63 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
     assert comparison is not None
     assert comparison.anova_by_run is not None
     assert len(comparison.anova_by_run) == 2
+
+
+def test_compare_skips_run_missing_in_some_conditions(tmp_path: Path) -> None:
+    """compare should handle runs missing from a condition."""
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=_make_run_settings())
+    control = Condition("Control", Path("/fake/control.yaml"), (1, 2, 3), MagicMock())
+    treated = Condition("Treated", Path("/fake/treated.yaml"), (1, 2, 3), MagicMock())
+
+    control_agg = RgAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[
+            _make_aggregated_run("protein_backbone", "protein and name CA", [15.0, 15.1, 14.9]),
+        ],
+        source_result_files=[],
+    )
+    treated_agg = RgAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA; segid C and backbone",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[
+            _make_aggregated_run("protein_backbone", "protein and name CA", [14.0, 14.1, 13.9]),
+            _make_aggregated_run("polymer_core", "segid C and backbone", [20.0, 20.1, 19.9]),
+        ],
+        source_result_files=[],
+    )
+
+    ctx = ComparisonContext(
+        name="rg_compare",
+        conditions=[control, treated],
+        excluded_conditions=[],
+        control_label="Control",
+        analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
+        results_dir=tmp_path / "comparison",
+        equilibration="10ns",
+        settings=settings,
+        recompute=False,
+        aggregated_results={"Control": control_agg, "Treated": treated_agg},
+    )
+
+    comparison = analysis.compare(ctx)
+
+    assert comparison is not None
+    assert comparison.run_labels == ["protein_backbone"]
+    assert len(comparison.pairwise_comparisons) == 1
 
 
 def test_rg_run_settings_fragment_mode_defaults() -> None:
@@ -1113,6 +1299,84 @@ def test_format_markdown_fragment_mode() -> None:
     assert "fragments" in text
 
 
+def test_aggregate_selection_mode_builds_reduced_histograms(
+    condition: Condition, tmp_path: Path
+) -> None:
+    """aggregate should build reduced histogram for selection-mode runs with NPZ data."""
+    import numpy as np
+
+    rng = np.random.default_rng(99)
+    analysis = RgAnalysis()
+    run_label = "protein_rg"
+
+    run_results: list[RgRunResult] = []
+    for rep in (1, 2):
+        run_dir = tmp_path / f"run_{rep}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        npz_path = run_dir / f"rg_{run_label}_timeseries.npz"
+
+        rg_values = rng.normal(loc=15.5, scale=0.3, size=50)
+        time_ns = np.linspace(0.0, 50.0, 50)
+        frames = np.arange(50)
+
+        np.savez(
+            npz_path,
+            rg_values=rg_values,
+            time_ns=time_ns,
+            frames=frames,
+        )
+
+        run_results.append(
+            _make_run_result(rep, run_label, float(np.mean(rg_values))).model_copy(
+                update={
+                    "npz_path": str(npz_path),
+                    "calculation_mode": "selection",
+                }
+            )
+        )
+
+    results = [
+        RgResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=rep,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            run_results=[run_result],
+            n_frames_total=50,
+            n_frames_used=50,
+            trajectory_files=["/fake/traj.dcd"],
+        )
+        for rep, run_result in zip((1, 2), run_results)
+    ]
+
+    settings = RgSettings(runs=[RgRunSettings(label=run_label, selection="protein and name CA")])
+    ctx = AggregateContext(
+        condition=condition,
+        replicates=(1, 2),
+        output_dir=tmp_path / "aggregated",
+        equilibration="10ns",
+        settings=settings,
+    )
+
+    aggregated = analysis.aggregate(ctx, results)
+
+    run_agg = aggregated.run_results[0]
+    assert run_agg.calculation_mode == "selection"
+    # Selection mode should now build reduced histograms
+    assert run_agg.reduced_histogram_edges is not None
+    assert len(run_agg.reduced_histogram_edges) == 51  # 50 bins + 1 edges
+    assert run_agg.reduced_histogram_density_mean is not None
+    assert len(run_agg.reduced_histogram_density_mean) == 50
+    assert run_agg.reduced_histogram_density_sem is not None
+    assert len(run_agg.reduced_histogram_density_sem) == 50
+    # Fragment-specific fields should remain None
+    assert run_agg.fragment_histogram_edges is None
+    assert run_agg.fragment_histogram_density_mean is None
+    assert run_agg.overall_mean_fragments_per_frame is None
+
+
 def test_load_condition_aggregated_missing_dir(tmp_path: Path) -> None:
     """Condition aggregated loader should return None when directory is missing."""
     from polyzymd.analyses.rg._plotters import _load_condition_aggregated
@@ -1153,3 +1417,29 @@ def test_load_condition_aggregated_loads_json(tmp_path: Path) -> None:
     assert loaded is not None
     assert "run_results" in loaded
     assert loaded["run_results"][0]["run_label"] == "polymer_frags"
+
+
+def test_load_condition_aggregated_canonical_result_json(tmp_path: Path) -> None:
+    """Condition aggregated loader should find canonical result.json from framework."""
+    from polyzymd.analyses.rg._plotters import _load_condition_aggregated
+
+    payload = {
+        "run_results": [
+            {
+                "run_label": "protein_rg",
+                "calculation_mode": "selection",
+                "reduced_histogram_edges": [14.0, 14.5, 15.0, 15.5],
+                "reduced_histogram_density_mean": [0.1, 0.6, 0.3],
+                "reduced_histogram_density_sem": [0.01, 0.06, 0.03],
+            }
+        ]
+    }
+    json_path = tmp_path / "aggregated" / "result.json"
+    json_path.parent.mkdir(parents=True)
+    json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = _load_condition_aggregated(tmp_path)
+
+    assert loaded is not None
+    assert "run_results" in loaded
+    assert loaded["run_results"][0]["run_label"] == "protein_rg"
