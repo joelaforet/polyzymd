@@ -222,6 +222,82 @@ Protein" vs "Polymer"). A "replicate" is an independent simulation repeat
 (run_1, run_2, run_3). All configured runs are computed for every replicate.
 ```
 
+## Fragment Mode
+
+```{versionadded} 1.4.0
+Fragment-aware Rg calculation was added in PolyzyMD 1.4.0.
+```
+
+Standard (selection) mode computes a single Rg value per frame for the entire
+atom group matched by `selection`. **Fragment mode** instead identifies every
+topological fragment (disconnected molecular subgraph) within the selection,
+computes Rg for each fragment independently, and then reduces those values to
+a single per-frame number via a mean or mass-weighted mean.
+
+### When to Use Fragment Mode
+
+- **Polymer blob Rg** — your selection contains many independent polymer
+  chains in solution (e.g., 50 copies of a 20-mer). You want the *average
+  chain size*, not the size of the entire blob.
+- **Oligomer populations** — multiple small molecules that you want to
+  characterize individually and in aggregate.
+- Any selection that contains **multiple disconnected molecules** where a
+  whole-group Rg would be dominated by their spatial separation rather than
+  individual chain conformations.
+
+### Configuration
+
+Set `calculation_mode: "fragments"` on any run to enable fragment mode:
+
+```{code-block} yaml
+:caption: Mixed selection-mode and fragment-mode config
+
+plugins:
+  rg:
+    runs:
+      - label: protein_rg
+        selection: protein
+
+      - label: polymer_blob_rg
+        selection: "resname SBM or resname EGM or resname EGP"
+        calculation_mode: fragments
+        fragment_weighting: equal
+```
+
+| Setting | Meaning |
+|---------|---------|
+| `calculation_mode: "selection"` (default) | Whole-group Rg — standard behavior |
+| `calculation_mode: "fragments"` | Per-fragment Rg with reduction |
+| `fragment_weighting: "equal"` (default) | Arithmetic mean of fragment Rg values |
+| `fragment_weighting: "mass"` | Mass-weighted mean — heavier fragments contribute more |
+
+```{warning}
+Setting `fragment_weighting` to anything other than `"equal"` when
+`calculation_mode` is `"selection"` raises a validation error. Fragment
+weighting is only meaningful in fragment mode.
+```
+
+```{tip}
+If your selection resolves to a single fragment (e.g., one contiguous protein
+chain), fragment mode behaves identically to selection mode. A warning is
+logged so you know this happened.
+```
+
+### How Fragment Mode Works
+
+1. MDAnalysis identifies topological fragments (disconnected subgraphs)
+   within the atom group matched by `selection`.
+2. For each frame, Rg is computed independently for every fragment.
+3. Fragment Rg values are reduced to a single per-frame value:
+   - **Equal weighting**: arithmetic mean of fragment Rg values.
+   - **Mass weighting**: weighted average where each fragment's Rg is
+     weighted by the fragment's total mass.
+4. The reduced timeseries is used for all summary statistics (mean, SEM,
+   correlation time) — identical to what selection mode produces.
+5. Optionally (`save_fragment_distribution: true`, the default), all
+   individual fragment Rg values are saved in the NPZ sidecar for
+   distribution analysis.
+
 ## Why No Alignment or Reference?
 
 Unlike RMSD, Rg does not require trajectory alignment or a reference structure.
@@ -254,6 +330,10 @@ All fields for `RgRunSettings`:
 |-------|------|---------|-------------|
 | `label` | `str` | *required* | Human-readable run label (must be unique) |
 | `selection` | `str` | *required* | MDAnalysis selection for Rg calculation |
+| `calculation_mode` | `str` | `"selection"` | `"selection"` for whole-group Rg, `"fragments"` for per-fragment reduction |
+| `fragment_weighting` | `str` | `"equal"` | `"equal"` (arithmetic mean) or `"mass"` (mass-weighted mean). Only valid when `calculation_mode="fragments"` |
+| `save_fragment_distribution` | `bool` | `true` | Save per-fragment Rg values in NPZ sidecar for distribution analysis |
+| `histogram_bins` | `int` | `50` | Number of bins for fragment/reduced distribution histograms (minimum 2) |
 
 Top-level `RgSettings` contains a single field:
 
@@ -298,6 +378,19 @@ Each replicate directory contains:
 - **JSON result** — summary statistics for all configured runs
 - **NPZ sidecar(s)** — raw per-frame Rg timeseries (one per run)
 
+### NPZ Sidecar Contents
+
+Each NPZ sidecar (`rg_<label>_timeseries.npz`) contains the following arrays:
+
+| Array | Mode | Description |
+|-------|------|-------------|
+| `rg_values` | always | Per-frame reduced Rg timeseries (Å). In selection mode this is the whole-group Rg; in fragment mode it is the mean/weighted-mean across fragments. |
+| `time_ns` | always | Time axis in nanoseconds |
+| `frames` | always | Frame indices (0-indexed) |
+| `fragment_rg_values` | fragment only | All individual fragment Rg values pooled across frames |
+| `fragment_counts_per_frame` | fragment only | Number of fragments detected in each frame |
+| `fragment_masses` | fragment + mass weighting | Total mass of each fragment (used for weighted reduction) |
+
 ### JSON Result Structure
 
 Per-replicate result (`RgResult`):
@@ -308,14 +401,16 @@ Per-replicate result (`RgResult`):
     "replicate": 1,
     "equilibration_time": 10.0,
     "equilibration_unit": "ns",
-    "selection_string": "protein; protein and name CA",
+    "selection_string": "protein; resname SBM or resname EGM or resname EGP",
     "n_frames_total": 10000,
     "n_frames_used": 9000,
     "trajectory_files": ["..."],
     "run_results": [
         {
-            "run_label": "Whole Protein",
+            "run_label": "protein_rg",
             "selection": "protein",
+            "calculation_mode": "selection",
+            "fragment_weighting": null,
             "mean_rg": 18.234,
             "std_rg": 0.412,
             "median_rg": 18.191,
@@ -329,7 +424,36 @@ Per-replicate result (`RgResult`):
             "statistical_inefficiency": 473.7,
             "n_frames_total": 10000,
             "n_frames_used": 9000,
-            "npz_path": ".../rg_Whole Protein_timeseries.npz",
+            "npz_path": ".../rg_protein_rg_timeseries.npz",
+            "time_unit": "ns",
+            "timestep_ps": 10.0
+        },
+        {
+            "run_label": "polymer_blob_rg",
+            "selection": "resname SBM or resname EGM or resname EGP",
+            "calculation_mode": "fragments",
+            "fragment_weighting": "equal",
+            "mean_rg": 8.412,
+            "std_rg": 0.231,
+            "median_rg": 8.389,
+            "min_rg": 7.612,
+            "max_rg": 9.103,
+            "final_rg": 8.467,
+            "sem_rg": 0.054,
+            "mean_fragments_per_frame": 50.0,
+            "min_fragments_per_frame": 50,
+            "max_fragments_per_frame": 50,
+            "fragment_mean_rg": 8.445,
+            "fragment_std_rg": 1.203,
+            "fragment_median_rg": 8.391,
+            "fragment_min_rg": 5.102,
+            "fragment_max_rg": 12.881,
+            "fragment_rg_p10": 7.012,
+            "fragment_rg_p25": 7.621,
+            "fragment_rg_p50": 8.391,
+            "fragment_rg_p75": 9.198,
+            "fragment_rg_p90": 10.022,
+            "npz_path": ".../rg_polymer_blob_rg_timeseries.npz",
             "time_unit": "ns",
             "timestep_ps": 10.0
         }
@@ -345,14 +469,39 @@ Aggregated result (`RgAggregatedResult`):
     "n_replicates": 3,
     "run_results": [
         {
-            "run_label": "Whole Protein",
+            "run_label": "protein_rg",
             "selection": "protein",
+            "calculation_mode": "selection",
+            "fragment_weighting": null,
             "overall_mean": 18.256,
             "overall_sem": 0.044,
             "overall_median": 18.223,
             "per_replicate_means": [18.234, 18.291, 18.244],
             "per_replicate_stds": [0.412, 0.398, 0.424],
-            "per_replicate_medians": [18.191, 18.262, 18.216]
+            "per_replicate_medians": [18.191, 18.262, 18.216],
+            "reduced_histogram_edges": [17.0, 17.04, "..."],
+            "reduced_histogram_density_mean": [0.012, 0.034, "..."],
+            "reduced_histogram_density_sem": [0.001, 0.002, "..."]
+        },
+        {
+            "run_label": "polymer_blob_rg",
+            "selection": "resname SBM or resname EGM or resname EGP",
+            "calculation_mode": "fragments",
+            "fragment_weighting": "equal",
+            "overall_mean": 8.432,
+            "overall_sem": 0.021,
+            "overall_median": 8.401,
+            "per_replicate_means": [8.412, 8.445, 8.439],
+            "per_replicate_stds": [0.231, 0.218, 0.225],
+            "per_replicate_medians": [8.389, 8.421, 8.394],
+            "overall_mean_fragments_per_frame": 50.0,
+            "per_replicate_mean_fragments_per_frame": [50.0, 50.0, 50.0],
+            "fragment_histogram_edges": [5.0, 5.16, "..."],
+            "fragment_histogram_density_mean": [0.005, 0.012, "..."],
+            "fragment_histogram_density_sem": [0.001, 0.002, "..."],
+            "reduced_histogram_edges": [7.8, 7.83, "..."],
+            "reduced_histogram_density_mean": [0.021, 0.045, "..."],
+            "reduced_histogram_density_sem": [0.002, 0.003, "..."]
         }
     ]
 }
@@ -397,11 +546,35 @@ The Rg plugin generates figures through `polyzymd compare plot-all`:
 |-------------|-------------|
 | `rg_timeseries_<run>.png` | Mean Rg vs time with SEM shading, one per run |
 | `rg_comparison_<run>.png` | Grouped bar chart of mean Rg across conditions, one per run |
+| `rg_distribution_<run>.png` | Rg distribution plot. Selection mode: single panel (reduced series distribution). Fragment mode: two panels (reduced series + pooled fragment distribution). Shows density with SEM shading across replicates. |
 
 **Timeseries plot features:**
 - Mean Rg curve per condition with SEM shading
 - Legend placed outside the plot area (`bbox_to_anchor=(1.02, 0.5)`)
 - Optional per-replicate traces via `show_per_replicate: true`
+
+### Distribution Plots
+
+Distribution plots visualize the spread of Rg values and are generated for
+every run that has histogram data in the aggregated results.
+
+**Reduced Rg Distribution** *(both modes)*
+: Distribution of per-frame reduced (mean-averaged) Rg values across the
+  trajectory. Each data point corresponds to one frame's Rg. This reflects
+  **temporal variation** in the average conformational state. The distribution
+  is typically narrow due to the central limit theorem (each frame's value
+  is already an average over fragments in fragment mode).
+
+**Fragment Rg Distribution** *(fragment mode only)*
+: Distribution of **all individual fragment Rg values** pooled across every
+  frame and every replicate. This captures **inter-chain conformational
+  heterogeneity** — the full range of sizes that individual polymer chains
+  adopt. The distribution typically has broader tails than the reduced
+  distribution because it includes the full variability of individual chains.
+
+In **selection mode**, only the reduced distribution panel is shown.
+In **fragment mode**, a two-panel layout is generated: reduced distribution
+(left) and fragment distribution (right), with SEM shading across replicates.
 
 ### Plot Settings
 
@@ -495,9 +668,15 @@ multi-plugin comparison documentation.
 
 ### "Selection matched no atoms"
 
-**Cause:** MDAnalysis selection doesn't match any atoms in your topology.
+**Behavior:** When a run's selection matches 0 atoms in a given condition or
+replicate, that run is **skipped with a warning** — the analysis does not
+crash. This is by design for mixed-mode configurations where some runs may
+not apply to all conditions (e.g., a polymer selection on a no-polymer control).
 
-**Fix:**
+The skipped run will be absent from that condition's results. During comparison,
+the run is still compared across conditions that *do* have data.
+
+**If this is unexpected:**
 - Check residue numbering in your PDB vs. MDAnalysis (0-indexed vs 1-indexed)
 - Verify atom names match your topology
 - Use `polyzymd --debug compare run rg -f comparison.yaml ...` for detailed
@@ -575,6 +754,22 @@ uncertainties may be underestimated.
 
 **Fix:** This is informational — analysis continues with available replicates.
 Check simulation status if unexpected.
+
+### Control condition missing from fragment-mode comparison
+
+**Message:** `Control condition '<label>' has no data for run '<run>'; using
+all-vs-all pairwise comparisons for this run`
+
+**Cause:** The designated control condition does not have results for a
+particular run — typically because the selection matched no atoms in that
+condition (e.g., a polymer Rg run applied to a no-polymer control).
+
+**Behavior:** The comparison falls back to **all-vs-all pairwise** t-tests
+for that run instead of the default control-vs-treatment comparisons. All
+other runs that have control data continue to use the normal comparison mode.
+
+**This is expected** in mixed-mode configurations. No action needed unless the
+missing data is a surprise.
 
 ## Rg vs RMSD Comparison
 

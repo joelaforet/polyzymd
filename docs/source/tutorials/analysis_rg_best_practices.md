@@ -444,6 +444,130 @@ atoms in the selection.
 - Core stability → exclude flexible termini with specific residue ranges
 - Polymer behavior → `"chainID C"`
 
+## Fragment Mode Best Practices
+
+```{versionadded} 1.4.0
+```
+
+When your selection contains multiple disconnected molecules (e.g., many
+polymer chains in solution), use `calculation_mode: "fragments"` to compute
+per-fragment Rg and reduce to a meaningful per-frame average. Without
+fragment mode, the whole-group Rg is dominated by the spatial separation
+between molecules rather than individual chain conformations.
+
+### Selection Strategy
+
+Use `resname`-based selections for polymer fragment mode. These are more
+robust than `chainID` or `segid` because residue names are consistently
+assigned during system building, whereas chain and segment IDs can be
+reassigned during topology manipulations:
+
+```{code-block} yaml
+:caption: Recommended — resname-based selection
+
+- label: polymer_blob_rg
+  selection: "resname SBM or resname EGM or resname EGP"
+  calculation_mode: fragments
+```
+
+```{code-block} yaml
+:caption: Less robust — chainID may be reassigned
+
+- label: polymer_blob_rg
+  selection: "chainID C"
+  calculation_mode: fragments
+```
+
+### Verify Fragment Count
+
+Before running large production analyses, verify that MDAnalysis detects the
+expected number of fragments with a quick test:
+
+```python
+import MDAnalysis as mda
+
+u = mda.Universe("topology.pdb", "trajectory.dcd")
+ag = u.select_atoms("resname SBM or resname EGM or resname EGP")
+print(f"Atoms: {len(ag)}, Fragments: {len(ag.fragments)}")
+```
+
+If the fragment count does not match the expected number of independent
+polymer chains, check your topology for unexpected bonds bridging chains.
+
+### When to Use Each Mode
+
+| Scenario | Recommended mode |
+|----------|-----------------|
+| Single protein chain | `selection` (default) |
+| Single polymer chain | `selection` |
+| Many polymer chains in solution | `fragments` |
+| Oligomer populations | `fragments` |
+| Protein + single polymer combined | `selection` |
+
+### Fragment Weighting
+
+- **`equal`** (default): Arithmetic mean — all fragments contribute equally
+  regardless of size. Best when fragments are similar in length and you want
+  to treat each chain as an independent observation.
+- **`mass`**: Mass-weighted mean — heavier fragments contribute more. Best
+  when fragment sizes vary significantly and you want the average to reflect
+  the total material, not just the chain count.
+
+### Statistical Comparison with Fragment Mode
+
+The **reduced Rg timeseries** (per-frame mean across fragments) is the
+primary metric used for cross-condition statistical comparison (t-tests,
+ANOVA, ranking). This is stored in `rg_values` in the NPZ sidecar and
+drives the mean, SEM, and correlation time reported in JSON results.
+
+The **fragment Rg distribution** is supplementary — it provides
+conformational insight but is not used for hypothesis testing. Use it to
+understand *why* conditions differ, not *whether* they differ.
+
+## Interpreting Distribution Plots
+
+Distribution plots provide a deeper view of Rg behavior beyond mean and SEM.
+
+### Reduced Rg Distribution
+
+The reduced distribution shows the spread of per-frame Rg values (one value
+per frame). Because each frame's value is already an average over multiple
+fragments (in fragment mode), this distribution is relatively **narrow** —
+a consequence of the central limit theorem.
+
+Use reduced distributions to:
+- Compare overall conformational states across conditions
+- Identify bimodal behavior (two distinct conformational states)
+- Assess whether conditions produce overlapping or distinct Rg ranges
+
+### Fragment Rg Distribution
+
+The fragment distribution pools ALL individual fragment Rg values across
+all frames and all replicates. It captures the **full range of sizes**
+that individual chains adopt, including rare extended or collapsed
+conformations that average out in the reduced series.
+
+Use fragment distributions to:
+- Detect conformational heterogeneity within a population
+- Identify subpopulations of chains with distinct sizes
+- Understand the physical origin of differences seen in reduced distributions
+
+### Comparing Reduced and Fragment Distributions
+
+| Observation | Interpretation |
+|-------------|---------------|
+| Reduced distributions differ, fragment distributions also differ | All chains shift conformational state uniformly |
+| Reduced distributions differ, fragment distributions overlap | Differences arise from a few outlier chains |
+| Reduced distributions overlap, fragment distributions differ | Individual chains sample different states that average out |
+| Both distributions overlap | No meaningful conformational difference |
+
+```{tip}
+If reduced distributions overlap but fragment distributions differ, this
+suggests individual chains are sampling different conformational states that
+cancel out in the average. This is a sign of **conformational heterogeneity**
+that merits visual inspection of trajectories.
+```
+
 ## Rg as a Folding Diagnostic
 
 Rg is a classical measure of protein folding state. The relationship between
