@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 import polyzymd.analyses.rmsd._plot_settings as _plot_settings  # noqa: F401
 from polyzymd.analyses.base import (
@@ -54,9 +54,11 @@ class RMSDRunSettings(BaseModel):
     alignment_selection : str
         MDAnalysis selection used for trajectory alignment.
     reference_mode : str
-        Reference mode: ``"centroid"``, ``"average"``, or ``"frame"``.
+        Reference mode: ``"centroid"``, ``"average"``, ``"frame"``, or ``"external"``.
     reference_frame : int
         0-indexed frame index used when ``reference_mode="frame"``.
+    reference_file : str | None
+        Path to external PDB file when ``reference_mode="external"``.
     centroid_selection : str | None
         Selection used for centroid finding when ``reference_mode="centroid"``.
         If ``None``, ``alignment_selection`` is used.
@@ -73,11 +75,15 @@ class RMSDRunSettings(BaseModel):
     )
     reference_mode: str = Field(
         default="centroid",
-        description="Reference mode: centroid, average, or frame",
+        description="Reference mode: centroid, average, frame, or external",
     )
     reference_frame: int = Field(
         default=0,
         description="0-indexed reference frame for reference_mode='frame'",
+    )
+    reference_file: str | None = Field(
+        default=None,
+        description="Path to external PDB file for reference_mode='external'",
     )
     centroid_selection: str | None = Field(
         default=None,
@@ -88,10 +94,30 @@ class RMSDRunSettings(BaseModel):
     @classmethod
     def validate_reference_mode(cls, value: str) -> str:
         """Validate reference mode value."""
-        valid_modes = {"centroid", "average", "frame"}
+        valid_modes = {"centroid", "average", "frame", "external"}
         if value not in valid_modes:
             raise ValueError(f"reference_mode must be one of {valid_modes}, got {value!r}")
         return value
+
+    @model_validator(mode="after")
+    def validate_external_reference(self) -> "RMSDRunSettings":
+        """Validate external reference requirements."""
+        if self.reference_mode != "external":
+            return self
+
+        if self.reference_file is None:
+            raise ValueError(
+                "reference_file is required when reference_mode='external'. "
+                "Provide a path to the external PDB reference structure."
+            )
+
+        ref_path = Path(self.reference_file)
+        if not ref_path.exists():
+            raise ValueError(
+                f"reference_file does not exist: {ref_path}. "
+                "Provide a valid path to the external PDB reference structure."
+            )
+        return self
 
 
 class RMSDSettings(BaseModel):
@@ -544,6 +570,7 @@ class RMSDAnalysis(Analysis):
             reference_frame=reference_frame_1indexed,
             selection=run.alignment_selection,
             centroid_selection=centroid_selection or run.alignment_selection,
+            reference_file=(Path(run.reference_file) if run.reference_file is not None else None),
         )
         ref_frame_idx = align_trajectory(
             u,
@@ -630,6 +657,7 @@ class RMSDAnalysis(Analysis):
             alignment_selection=run.alignment_selection,
             reference_mode=run.reference_mode,
             reference_frame=(ref_frame_idx + 1 if ref_frame_idx is not None else None),
+            reference_file=run.reference_file,
             mean_rmsd=mean_rmsd,
             std_rmsd=std_rmsd,
             median_rmsd=median_rmsd,
@@ -675,6 +703,40 @@ class RMSDAnalysis(Analysis):
                 universe.trajectory[frame_idx]
                 positions.append(atom_group.positions.copy().astype(np.float64))
             ref_positions = np.mean(np.stack(positions, axis=0), axis=0)
+        elif run.reference_mode == "external":
+            if run.reference_file is None:
+                raise ValueError(
+                    f"Run '{run.label}' requires reference_file when reference_mode='external'"
+                )
+
+            ref_path = Path(run.reference_file)
+            logger.info("Using external reference from: %s", ref_path)
+
+            ref_universe = mda.Universe(str(ref_path))
+            ref_atoms = ref_universe.select_atoms(run.selection)
+
+            if len(ref_atoms) == 0:
+                raise ValueError(
+                    f"Run '{run.label}' external PDB '{ref_path.name}' has no atoms matching "
+                    f"selection {run.selection!r}."
+                )
+
+            if len(ref_atoms) != len(atom_group):
+                logger.warning(
+                    "Run '%s' external reference atom count mismatch for selection %r "
+                    "(trajectory=%d, external=%d)",
+                    run.label,
+                    run.selection,
+                    len(atom_group),
+                    len(ref_atoms),
+                )
+                raise ValueError(
+                    f"Run '{run.label}' atom count mismatch between trajectory "
+                    f"({len(atom_group)}) and external PDB ({len(ref_atoms)}) for "
+                    f"selection {run.selection!r}."
+                )
+
+            ref_positions = ref_atoms.positions.copy().astype(np.float64)
         else:
             raise ValueError(f"Unsupported RMSD reference_mode: {run.reference_mode!r}")
 

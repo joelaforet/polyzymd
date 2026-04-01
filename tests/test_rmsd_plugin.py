@@ -227,6 +227,12 @@ def test_rmsd_settings_single_run() -> None:
     assert settings.runs[0].label == "single"
 
 
+def test_rmsd_external_reference_requires_file() -> None:
+    """RMSDRunSettings should require reference_file for external mode."""
+    with pytest.raises(ValueError, match="reference_file is required"):
+        RMSDRunSettings(label="protein_backbone", reference_mode="external")
+
+
 def test_rmsd_run_result_creation() -> None:
     """RMSDRunResult should be constructible with all required fields."""
     result = _make_run_result(replicate=1, run_label="protein_backbone", mean_rmsd=1.2)

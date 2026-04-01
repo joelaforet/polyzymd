@@ -37,9 +37,11 @@ class RMSDRunResult(BaseAnalysisResult):
     alignment_selection : str
         MDAnalysis selection string used for trajectory alignment.
     reference_mode : str
-        Reference structure mode: centroid, average, or frame.
+        Reference structure mode: centroid, average, frame, or external.
     reference_frame : int | None
         1-indexed reference frame used (None for average mode).
+    reference_file : str | None
+        Path to external PDB used when ``reference_mode='external'``.
     mean_rmsd : float
         Mean RMSD over analyzed frames (Angstroms).
     std_rmsd : float
@@ -71,10 +73,14 @@ class RMSDRunResult(BaseAnalysisResult):
         ..., description="MDAnalysis selection for trajectory alignment"
     )
     reference_mode: str = Field(
-        ..., description="Reference structure mode: centroid, average, or frame"
+        ..., description="Reference structure mode: centroid, average, frame, or external"
     )
     reference_frame: int | None = Field(
         default=None, description="Reference frame (1-indexed), None for average mode"
+    )
+    reference_file: str | None = Field(
+        default=None,
+        description="Path to external PDB file used for external reference mode",
     )
 
     # Summary statistics
