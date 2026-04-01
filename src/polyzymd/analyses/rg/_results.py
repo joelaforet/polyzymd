@@ -54,6 +54,36 @@ class RgRunResult(BaseAnalysisResult):
         Frames used after equilibration.
     npz_path : str | None
         Path to NPZ sidecar containing per-frame Rg timeseries.
+    calculation_mode : str
+        Calculation mode used for this run ("selection" or "fragments").
+    fragment_weighting : str | None
+        Fragment weighting used in fragments mode, else None.
+    mean_fragments_per_frame : float | None
+        Mean number of fragments observed per frame.
+    min_fragments_per_frame : int | None
+        Minimum fragment count observed in any frame.
+    max_fragments_per_frame : int | None
+        Maximum fragment count observed in any frame.
+    fragment_mean_rg : float | None
+        Mean of all per-fragment Rg observations.
+    fragment_std_rg : float | None
+        Standard deviation of all per-fragment Rg observations.
+    fragment_median_rg : float | None
+        Median of all per-fragment Rg observations.
+    fragment_min_rg : float | None
+        Minimum per-fragment Rg observed.
+    fragment_max_rg : float | None
+        Maximum per-fragment Rg observed.
+    fragment_rg_p10 : float | None
+        10th percentile of per-fragment Rg values.
+    fragment_rg_p25 : float | None
+        25th percentile of per-fragment Rg values.
+    fragment_rg_p50 : float | None
+        50th percentile of per-fragment Rg values.
+    fragment_rg_p75 : float | None
+        75th percentile of per-fragment Rg values.
+    fragment_rg_p90 : float | None
+        90th percentile of per-fragment Rg values.
     """
 
     analysis_type: ClassVar[str] = "rg_run"
@@ -89,6 +119,54 @@ class RgRunResult(BaseAnalysisResult):
     # Timeseries sidecar
     npz_path: str | None = Field(
         default=None, description="Path to NPZ sidecar with per-frame Rg timeseries"
+    )
+
+    # Fragment-aware metadata (only populated in fragments mode)
+    calculation_mode: str = Field(
+        default="selection", description='Calculation mode: "selection" or "fragments"'
+    )
+    fragment_weighting: str | None = Field(
+        default=None,
+        description="Fragment weighting scheme used, or None for selection mode",
+    )
+    mean_fragments_per_frame: float | None = Field(
+        default=None, description="Mean number of fragments per frame"
+    )
+    min_fragments_per_frame: int | None = Field(
+        default=None, description="Minimum fragments in any frame"
+    )
+    max_fragments_per_frame: int | None = Field(
+        default=None, description="Maximum fragments in any frame"
+    )
+
+    # Fragment distribution summaries (only populated in fragments mode)
+    fragment_mean_rg: float | None = Field(
+        default=None, description="Mean of all per-fragment Rg observations"
+    )
+    fragment_std_rg: float | None = Field(
+        default=None, description="Std dev of all per-fragment Rg observations"
+    )
+    fragment_median_rg: float | None = Field(
+        default=None, description="Median of all per-fragment Rg observations"
+    )
+    fragment_min_rg: float | None = Field(default=None, description="Min per-fragment Rg observed")
+    fragment_max_rg: float | None = Field(default=None, description="Max per-fragment Rg observed")
+
+    # Quantiles of fragment Rg distribution
+    fragment_rg_p10: float | None = Field(
+        default=None, description="10th percentile of fragment Rg"
+    )
+    fragment_rg_p25: float | None = Field(
+        default=None, description="25th percentile of fragment Rg"
+    )
+    fragment_rg_p50: float | None = Field(
+        default=None, description="50th percentile (median) of fragment Rg"
+    )
+    fragment_rg_p75: float | None = Field(
+        default=None, description="75th percentile of fragment Rg"
+    )
+    fragment_rg_p90: float | None = Field(
+        default=None, description="90th percentile of fragment Rg"
     )
 
     # Time array metadata (for plotting)
@@ -182,6 +260,26 @@ class RgRunAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
         Mean Rg from each replicate.
     per_replicate_stds : list[float]
         Std dev from each replicate.
+    calculation_mode : str
+        Calculation mode used for this run.
+    fragment_weighting : str | None
+        Fragment weighting scheme used, if fragment mode was used.
+    overall_mean_fragments_per_frame : float | None
+        Mean fragment count per frame across replicates.
+    per_replicate_mean_fragments_per_frame : list[float] | None
+        Per-replicate mean fragment count per frame.
+    fragment_histogram_edges : list[float] | None
+        Shared histogram bin edges for fragment Rg distribution.
+    fragment_histogram_density_mean : list[float] | None
+        Mean normalized fragment histogram density across replicates.
+    fragment_histogram_density_sem : list[float] | None
+        SEM of normalized fragment histogram density across replicates.
+    reduced_histogram_edges : list[float] | None
+        Shared histogram bin edges for reduced frame-level Rg values.
+    reduced_histogram_density_mean : list[float] | None
+        Mean normalized reduced-series histogram density across replicates.
+    reduced_histogram_density_sem : list[float] | None
+        SEM of normalized reduced-series histogram density across replicates.
     """
 
     analysis_type: ClassVar[str] = "rg_run_aggregated"
@@ -203,6 +301,42 @@ class RgRunAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     per_replicate_means: list[float] = Field(..., description="Mean Rg from each replicate")
     per_replicate_stds: list[float] = Field(..., description="Std dev from each replicate")
     per_replicate_medians: list[float] = Field(..., description="Median from each replicate")
+
+    # Fragment-aware metadata
+    calculation_mode: str = Field(default="selection", description="Calculation mode used")
+    fragment_weighting: str | None = Field(
+        default=None, description="Fragment weighting scheme used"
+    )
+    overall_mean_fragments_per_frame: float | None = Field(
+        default=None, description="Mean fragments/frame across replicates"
+    )
+    per_replicate_mean_fragments_per_frame: list[float] | None = Field(
+        default=None, description="Mean fragments/frame for each replicate"
+    )
+
+    # Aggregated fragment distribution histograms
+    fragment_histogram_edges: list[float] | None = Field(
+        default=None, description="Common histogram bin edges for fragment Rg distribution"
+    )
+    fragment_histogram_density_mean: list[float] | None = Field(
+        default=None, description="Mean normalized density across replicates"
+    )
+    fragment_histogram_density_sem: list[float] | None = Field(
+        default=None, description="SEM of normalized density across replicates"
+    )
+
+    # Aggregated reduced-series histograms
+    reduced_histogram_edges: list[float] | None = Field(
+        default=None, description="Common histogram bin edges for reduced frame-level Rg"
+    )
+    reduced_histogram_density_mean: list[float] | None = Field(
+        default=None,
+        description="Mean normalized density of reduced series across replicates",
+    )
+    reduced_histogram_density_sem: list[float] | None = Field(
+        default=None,
+        description="SEM of normalized density of reduced series across replicates",
+    )
 
     def summary(self) -> str:
         """Return human-readable summary."""

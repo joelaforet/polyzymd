@@ -35,6 +35,12 @@ class RgRunSummary(BaseModel):
         SEM of Rg across replicates.
     per_replicate_means : list[float]
         Mean Rg from each replicate (for statistical tests).
+    calculation_mode : str
+        Calculation mode used.
+    fragment_weighting : str | None
+        Fragment weighting scheme used, if applicable.
+    mean_fragments_per_frame : float | None
+        Mean number of fragments per frame, if applicable.
     """
 
     label: str
@@ -42,6 +48,9 @@ class RgRunSummary(BaseModel):
     mean_rg: float
     sem_rg: float
     per_replicate_means: list[float] = Field(default_factory=list)
+    calculation_mode: str = Field(default="selection", description="Calculation mode used")
+    fragment_weighting: str | None = Field(default=None, description="Fragment weighting scheme")
+    mean_fragments_per_frame: float | None = Field(default=None, description="Mean fragments/frame")
 
 
 class RgConditionSummary(BaseConditionSummary):

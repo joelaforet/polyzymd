@@ -10,9 +10,9 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Sequence
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 import polyzymd.analyses.rg._plot_settings as _plot_settings  # noqa: F401
 from polyzymd.analyses.base import (
@@ -48,10 +48,51 @@ class RgRunSettings(BaseModel):
         Human-readable run label.
     selection : str
         MDAnalysis selection used for Rg calculation.
+    calculation_mode : Literal["selection", "fragments"]
+        Rg calculation mode for either whole-selection or per-fragment reduction.
+    fragment_weighting : Literal["equal", "mass"]
+        Fragment reduction weighting scheme when fragment mode is enabled.
+    save_fragment_distribution : bool
+        Whether to save per-fragment Rg distribution data in NPZ sidecar output.
+    histogram_bins : int
+        Number of histogram bins used for fragment distribution summaries.
     """
 
     label: str = Field(..., description="Human-readable run label")
     selection: str = Field(..., description="MDAnalysis selection for Rg calculation")
+    calculation_mode: Literal["selection", "fragments"] = Field(
+        default="selection",
+        description='Rg calculation mode: "selection" (whole group) or "fragments" (per-fragment with reduction)',
+    )
+    fragment_weighting: Literal["equal", "mass"] = Field(
+        default="equal",
+        description='Fragment reduction weighting: "equal" (arithmetic mean) or "mass" (mass-weighted mean). Only used when calculation_mode="fragments".',
+    )
+    save_fragment_distribution: bool = Field(
+        default=True,
+        description="Save per-fragment Rg distribution data in NPZ sidecar. Only used when calculation_mode='fragments'.",
+    )
+    histogram_bins: int = Field(
+        default=50,
+        description="Number of histogram bins for fragment Rg distribution summaries.",
+    )
+
+    @field_validator("histogram_bins")
+    @classmethod
+    def validate_histogram_bins(cls, value: int) -> int:
+        """Ensure histogram bin count is at least 2."""
+        if value < 2:
+            raise ValueError("histogram_bins must be >= 2")
+        return value
+
+    @model_validator(mode="after")
+    def validate_fragment_options(self) -> RgRunSettings:
+        """Validate fragment options against selected calculation mode."""
+        if self.calculation_mode == "selection" and self.fragment_weighting != "equal":
+            raise ValueError(
+                "fragment_weighting is only meaningful when calculation_mode='fragments'"
+            )
+        return self
 
 
 class RgSettings(BaseModel):
