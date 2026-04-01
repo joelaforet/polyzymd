@@ -17,8 +17,14 @@ class RgPlotSettings(BasePlotSettings):
         Default figure size for Rg plots.
     timeseries_figsize : tuple[float, float]
         Figure size for Rg vs time plots (often wider).
+    generate_distribution_plots : bool
+        Whether to generate histogram-based distribution plots.
+    distribution_figsize : tuple[float, float]
+        Figure size for Rg distribution plots.
     """
 
     show_per_replicate: bool = False
     figsize: tuple[float, float] = (10, 6)
     timeseries_figsize: tuple[float, float] = (12, 5)
+    generate_distribution_plots: bool = True
+    distribution_figsize: tuple[float, float] = (12, 5)

@@ -599,6 +599,7 @@ class RgAnalysis(Analysis):
         try:
             from polyzymd.analyses.rg._plotters import (
                 plot_rg_comparison_bars,
+                plot_rg_distributions,
                 plot_rg_timeseries,
             )
         except ImportError as exc:
@@ -608,6 +609,7 @@ class RgAnalysis(Analysis):
         plots: list[Path] = []
         plots.extend(plot_rg_timeseries(ctx, comparison_result))
         plots.extend(plot_rg_comparison_bars(ctx, comparison_result))
+        plots.extend(plot_rg_distributions(ctx, comparison_result))
         return plots
 
     def format(self, result: Any, output_format: str = "text") -> str:
