@@ -129,8 +129,14 @@ def plot_rmsd_timeseries(ctx: PlotContext, comparison_result: RMSDComparisonResu
             xlabel="Time (ns)",
             ylabel="RMSD (Å)",
         )
-        apply_legend(ax, ctx.plot_settings, bbox_to_anchor=None)
-        fig.tight_layout()
+        apply_legend(
+            ax,
+            ctx.plot_settings,
+            loc="center left",
+            bbox_to_anchor=(1.02, 0.5),
+            borderaxespad=0,
+        )
+        fig.tight_layout(rect=[0, 0, 0.78, 1])
 
         safe_label = _sanitize_run_label(run_label)
         output_path = get_output_path(
