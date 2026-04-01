@@ -589,3 +589,567 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
     assert comparison is not None
     assert comparison.anova_by_run is not None
     assert len(comparison.anova_by_run) == 2
+
+
+def test_rg_run_settings_fragment_mode_defaults() -> None:
+    """Fragment mode settings should retain fragment-aware defaults."""
+    settings = RgRunSettings(label="frags", selection="segid C", calculation_mode="fragments")
+
+    assert settings.calculation_mode == "fragments"
+    assert settings.fragment_weighting == "equal"
+    assert settings.save_fragment_distribution is True
+    assert settings.histogram_bins == 50
+
+
+def test_rg_run_settings_fragment_mode_mass_weighted() -> None:
+    """Fragment mode should accept explicit mass weighting."""
+    settings = RgRunSettings(
+        label="frags",
+        selection="segid C",
+        calculation_mode="fragments",
+        fragment_weighting="mass",
+    )
+
+    assert settings.calculation_mode == "fragments"
+    assert settings.fragment_weighting == "mass"
+
+
+def test_rg_run_settings_fragment_weighting_rejected_in_selection_mode() -> None:
+    """Selection mode should reject non-default fragment weighting."""
+    with pytest.raises(ValueError, match="fragment_weighting is only meaningful"):
+        RgRunSettings(
+            label="selection_mode",
+            selection="protein",
+            calculation_mode="selection",
+            fragment_weighting="mass",
+        )
+
+
+def test_rg_run_settings_histogram_bins_minimum() -> None:
+    """Histogram bin validation should enforce lower bound of 2."""
+    valid = RgRunSettings(
+        label="frags",
+        selection="segid C",
+        calculation_mode="fragments",
+        histogram_bins=2,
+    )
+    assert valid.histogram_bins == 2
+
+    with pytest.raises(ValueError, match="histogram_bins must be >= 2"):
+        RgRunSettings(
+            label="frags_invalid",
+            selection="segid C",
+            calculation_mode="fragments",
+            histogram_bins=1,
+        )
+
+
+def test_rg_run_settings_selection_mode_defaults_unchanged() -> None:
+    """Selection mode defaults should remain unchanged."""
+    settings = RgRunSettings(label="test", selection="protein")
+
+    assert settings.calculation_mode == "selection"
+    assert settings.fragment_weighting == "equal"
+    assert settings.save_fragment_distribution is True
+    assert settings.histogram_bins == 50
+
+
+def test_rg_run_result_fragment_metadata_defaults() -> None:
+    """Selection-mode run results should keep fragment metadata unset."""
+    result = _make_run_result(1, "protein_backbone", 15.0)
+
+    assert result.calculation_mode == "selection"
+    assert result.fragment_weighting is None
+    assert result.mean_fragments_per_frame is None
+    assert result.min_fragments_per_frame is None
+    assert result.max_fragments_per_frame is None
+    assert result.fragment_mean_rg is None
+    assert result.fragment_std_rg is None
+    assert result.fragment_median_rg is None
+    assert result.fragment_min_rg is None
+    assert result.fragment_max_rg is None
+    assert result.fragment_rg_p10 is None
+    assert result.fragment_rg_p25 is None
+    assert result.fragment_rg_p50 is None
+    assert result.fragment_rg_p75 is None
+    assert result.fragment_rg_p90 is None
+
+
+def test_rg_run_result_fragment_metadata_populated() -> None:
+    """Run result should retain explicitly provided fragment metadata."""
+    result = _make_run_result(1, "polymer_frags", 8.0)
+    result = result.model_copy(
+        update={
+            "calculation_mode": "fragments",
+            "fragment_weighting": "equal",
+            "mean_fragments_per_frame": 5.0,
+            "min_fragments_per_frame": 5,
+            "max_fragments_per_frame": 5,
+            "fragment_mean_rg": 8.2,
+            "fragment_std_rg": 1.1,
+            "fragment_median_rg": 8.0,
+            "fragment_min_rg": 5.5,
+            "fragment_max_rg": 11.0,
+            "fragment_rg_p10": 6.5,
+            "fragment_rg_p25": 7.2,
+            "fragment_rg_p50": 8.0,
+            "fragment_rg_p75": 9.0,
+            "fragment_rg_p90": 10.0,
+        }
+    )
+
+    assert result.calculation_mode == "fragments"
+    assert result.fragment_weighting == "equal"
+    assert result.mean_fragments_per_frame == pytest.approx(5.0)
+    assert result.min_fragments_per_frame == 5
+    assert result.max_fragments_per_frame == 5
+    assert result.fragment_mean_rg == pytest.approx(8.2)
+    assert result.fragment_std_rg == pytest.approx(1.1)
+    assert result.fragment_median_rg == pytest.approx(8.0)
+    assert result.fragment_min_rg == pytest.approx(5.5)
+    assert result.fragment_max_rg == pytest.approx(11.0)
+    assert result.fragment_rg_p10 == pytest.approx(6.5)
+    assert result.fragment_rg_p25 == pytest.approx(7.2)
+    assert result.fragment_rg_p50 == pytest.approx(8.0)
+    assert result.fragment_rg_p75 == pytest.approx(9.0)
+    assert result.fragment_rg_p90 == pytest.approx(10.0)
+
+
+def test_rg_aggregated_result_fragment_histogram_fields() -> None:
+    """Aggregated run result should store fragment histogram metadata."""
+    agg = RgRunAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="segid C",
+        replicates=[1, 2],
+        n_replicates=2,
+        run_label="polymer_frags",
+        selection="segid C",
+        overall_mean=8.0,
+        overall_sem=0.1,
+        overall_median=8.0,
+        per_replicate_means=[7.9, 8.1],
+        per_replicate_stds=[0.5, 0.5],
+        per_replicate_medians=[7.9, 8.1],
+        calculation_mode="fragments",
+        fragment_weighting="equal",
+        overall_mean_fragments_per_frame=5.0,
+        per_replicate_mean_fragments_per_frame=[5.0, 5.0],
+        fragment_histogram_edges=[5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+        fragment_histogram_density_mean=[0.1, 0.2, 0.3, 0.25, 0.15],
+        fragment_histogram_density_sem=[0.01, 0.02, 0.03, 0.02, 0.01],
+        reduced_histogram_edges=[7.0, 7.5, 8.0, 8.5, 9.0],
+        reduced_histogram_density_mean=[0.2, 0.4, 0.3, 0.1],
+        reduced_histogram_density_sem=[0.02, 0.04, 0.03, 0.01],
+    )
+
+    assert agg.fragment_histogram_edges is not None
+    assert agg.fragment_histogram_density_mean is not None
+    assert agg.fragment_histogram_density_sem is not None
+    assert agg.reduced_histogram_edges is not None
+    assert agg.reduced_histogram_density_mean is not None
+    assert agg.reduced_histogram_density_sem is not None
+    assert len(agg.fragment_histogram_edges) == 6
+    assert len(agg.fragment_histogram_density_mean) == 5
+    assert len(agg.fragment_histogram_density_sem) == 5
+    assert len(agg.reduced_histogram_edges) == 5
+    assert len(agg.reduced_histogram_density_mean) == 4
+    assert len(agg.reduced_histogram_density_sem) == 4
+
+
+def test_rg_aggregated_result_histogram_fields_default_none() -> None:
+    """Selection-mode aggregated result should leave histogram fields unset."""
+    agg = _make_aggregated_run("protein_backbone", "protein and name CA", [14.9, 15.1])
+
+    assert agg.fragment_histogram_edges is None
+    assert agg.fragment_histogram_density_mean is None
+    assert agg.fragment_histogram_density_sem is None
+    assert agg.reduced_histogram_edges is None
+    assert agg.reduced_histogram_density_mean is None
+    assert agg.reduced_histogram_density_sem is None
+
+
+def test_rg_run_summary_fragment_fields() -> None:
+    """Run summary should preserve fragment metadata fields."""
+    summary = RgRunSummary(
+        label="polymer_frags",
+        selection="segid C",
+        mean_rg=8.0,
+        sem_rg=0.1,
+        per_replicate_means=[7.9, 8.1],
+        calculation_mode="fragments",
+        fragment_weighting="equal",
+        mean_fragments_per_frame=5.0,
+    )
+
+    assert summary.label == "polymer_frags"
+    assert summary.selection == "segid C"
+    assert summary.calculation_mode == "fragments"
+    assert summary.fragment_weighting == "equal"
+    assert summary.mean_fragments_per_frame == pytest.approx(5.0)
+
+
+def test_rg_run_summary_selection_mode_defaults() -> None:
+    """Run summary defaults should represent selection mode."""
+    summary = RgRunSummary(
+        label="protein_backbone",
+        selection="protein and name CA",
+        mean_rg=15.0,
+        sem_rg=0.1,
+        per_replicate_means=[14.9, 15.0, 15.1],
+    )
+
+    assert summary.calculation_mode == "selection"
+    assert summary.fragment_weighting is None
+    assert summary.mean_fragments_per_frame is None
+
+
+def test_compare_passes_fragment_metadata_to_summaries(tmp_path: Path) -> None:
+    """compare should pass fragment metadata into condition run summaries."""
+
+    def _make_fragment_aggregated_run(
+        run_label: str,
+        selection: str,
+        per_replicate_means: list[float],
+    ) -> RgRunAggregatedResult:
+        """Create an aggregated run result with fragment metadata."""
+        mean_value = sum(per_replicate_means) / len(per_replicate_means)
+        return RgRunAggregatedResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string=selection,
+            replicates=[1, 2, 3][: len(per_replicate_means)],
+            n_replicates=len(per_replicate_means),
+            run_label=run_label,
+            selection=selection,
+            overall_mean=mean_value,
+            overall_sem=0.05,
+            overall_median=mean_value,
+            per_replicate_means=per_replicate_means,
+            per_replicate_stds=[0.2 for _ in per_replicate_means],
+            per_replicate_medians=per_replicate_means,
+            calculation_mode="fragments",
+            fragment_weighting="equal",
+            overall_mean_fragments_per_frame=5.0,
+            per_replicate_mean_fragments_per_frame=[5.0] * len(per_replicate_means),
+        )
+
+    analysis = RgAnalysis()
+    settings = RgSettings(
+        runs=[
+            RgRunSettings(label="polymer_frags", selection="segid C", calculation_mode="fragments")
+        ]
+    )
+    control = Condition("Control", Path("/fake/control.yaml"), (1, 2, 3), MagicMock())
+    treated = Condition("Treatment", Path("/fake/treatment.yaml"), (1, 2, 3), MagicMock())
+
+    control_agg = RgAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="segid C",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[_make_fragment_aggregated_run("polymer_frags", "segid C", [8.0, 8.1, 7.9])],
+        source_result_files=[],
+    )
+    treated_agg = RgAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="segid C",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[_make_fragment_aggregated_run("polymer_frags", "segid C", [7.5, 7.6, 7.4])],
+        source_result_files=[],
+    )
+
+    ctx = ComparisonContext(
+        name="rg_fragment_compare",
+        conditions=[control, treated],
+        excluded_conditions=[],
+        control_label="Control",
+        analysis_dirs={"Control": tmp_path / "control", "Treatment": tmp_path / "treated"},
+        results_dir=tmp_path / "comparison",
+        equilibration="10ns",
+        settings=settings,
+        recompute=False,
+        aggregated_results={"Control": control_agg, "Treatment": treated_agg},
+    )
+
+    comparison = analysis.compare(ctx)
+
+    assert comparison is not None
+    for condition_summary in comparison.conditions:
+        run_summary = condition_summary.get_run("polymer_frags")
+        assert run_summary.calculation_mode == "fragments"
+        assert run_summary.fragment_weighting == "equal"
+        assert run_summary.mean_fragments_per_frame == pytest.approx(5.0)
+
+
+def test_aggregate_fragment_mode_builds_histograms(condition: Condition, tmp_path: Path) -> None:
+    """aggregate should build fragment histogram metadata from NPZ sidecars."""
+    import numpy as np
+
+    rng = np.random.default_rng(42)
+    analysis = RgAnalysis()
+    run_label = "polymer_frags"
+
+    run_results: list[RgRunResult] = []
+    for rep in (1, 2):
+        run_dir = tmp_path / f"run_{rep}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        npz_path = run_dir / f"rg_{run_label}_timeseries.npz"
+
+        rg_values = rng.normal(loc=8.0, scale=0.5, size=50)
+        time_ns = np.linspace(0.0, 50.0, 50)
+        frames = np.arange(50)
+        fragment_rg_values = rng.normal(loc=8.0, scale=1.5, size=250)
+        fragment_counts_per_frame = np.full(50, 5, dtype=int)
+
+        np.savez(
+            npz_path,
+            rg_values=rg_values,
+            time_ns=time_ns,
+            frames=frames,
+            fragment_rg_values=fragment_rg_values,
+            fragment_counts_per_frame=fragment_counts_per_frame,
+        )
+
+        run_results.append(
+            _make_run_result(rep, run_label, float(np.mean(rg_values))).model_copy(
+                update={
+                    "selection": "segid C",
+                    "selection_string": "segid C",
+                    "npz_path": str(npz_path),
+                    "calculation_mode": "fragments",
+                    "fragment_weighting": "equal",
+                    "mean_fragments_per_frame": 5.0,
+                    "min_fragments_per_frame": 5,
+                    "max_fragments_per_frame": 5,
+                }
+            )
+        )
+
+    results = [
+        RgResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=rep,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="segid C",
+            run_results=[run_result],
+            n_frames_total=50,
+            n_frames_used=50,
+            trajectory_files=["/fake/traj.dcd"],
+        )
+        for rep, run_result in zip((1, 2), run_results)
+    ]
+
+    settings = RgSettings(
+        runs=[RgRunSettings(label=run_label, selection="segid C", calculation_mode="fragments")]
+    )
+    ctx = AggregateContext(
+        condition=condition,
+        replicates=(1, 2),
+        output_dir=tmp_path / "aggregated",
+        equilibration="10ns",
+        settings=settings,
+    )
+
+    aggregated = analysis.aggregate(ctx, results)
+
+    run_agg = aggregated.run_results[0]
+    assert run_agg.calculation_mode == "fragments"
+    assert run_agg.fragment_histogram_edges is not None
+    assert len(run_agg.fragment_histogram_edges) == 51
+    assert run_agg.fragment_histogram_density_mean is not None
+    assert len(run_agg.fragment_histogram_density_mean) == 50
+    assert run_agg.reduced_histogram_edges is not None
+    assert run_agg.overall_mean_fragments_per_frame == pytest.approx(5.0)
+
+
+def test_rg_plot_settings_distribution_defaults() -> None:
+    """Distribution plotting defaults should be enabled."""
+    settings = RgPlotSettings()
+
+    assert settings.generate_distribution_plots is True
+    assert settings.distribution_figsize == (12, 5)
+
+
+def test_rg_plot_settings_distribution_disabled() -> None:
+    """Distribution plotting can be disabled explicitly."""
+    settings = RgPlotSettings(generate_distribution_plots=False)
+
+    assert settings.generate_distribution_plots is False
+
+
+def test_format_table_fragment_mode() -> None:
+    """Table formatter should surface fragment mode metadata."""
+    conditions = [
+        RgConditionSummary(
+            label="Control",
+            config_path="/fake/control.yaml",
+            n_replicates=3,
+            run_summaries=[
+                RgRunSummary(
+                    label="polymer_frags",
+                    selection="segid C",
+                    mean_rg=8.0,
+                    sem_rg=0.1,
+                    per_replicate_means=[7.9, 8.0, 8.1],
+                    calculation_mode="fragments",
+                    fragment_weighting="equal",
+                    mean_fragments_per_frame=5.0,
+                ),
+            ],
+        ),
+        RgConditionSummary(
+            label="Treatment",
+            config_path="/fake/treatment.yaml",
+            n_replicates=3,
+            run_summaries=[
+                RgRunSummary(
+                    label="polymer_frags",
+                    selection="segid C",
+                    mean_rg=7.5,
+                    sem_rg=0.08,
+                    per_replicate_means=[7.4, 7.5, 7.6],
+                    calculation_mode="fragments",
+                    fragment_weighting="equal",
+                    mean_fragments_per_frame=5.0,
+                ),
+            ],
+        ),
+    ]
+
+    result = RgComparisonResult(
+        metric="mean_rg",
+        name="rg_fragment_compare",
+        n_runs=1,
+        run_labels=["polymer_frags"],
+        control_label="Control",
+        conditions=conditions,
+        pairwise_comparisons=[],
+        anova_by_run=None,
+        ranking_by_run={"polymer_frags": ["Treatment", "Control"]},
+        equilibration_time="10ns",
+        created_at=datetime.now(),
+        polyzymd_version="1.2.1",
+    )
+
+    text = format_rg_comparison(result, "table")
+
+    assert "fragments" in text
+
+
+def test_format_markdown_fragment_mode() -> None:
+    """Markdown formatter should surface fragment mode metadata."""
+    conditions = [
+        RgConditionSummary(
+            label="Control",
+            config_path="/fake/control.yaml",
+            n_replicates=3,
+            run_summaries=[
+                RgRunSummary(
+                    label="polymer_frags",
+                    selection="segid C",
+                    mean_rg=8.0,
+                    sem_rg=0.1,
+                    per_replicate_means=[7.9, 8.0, 8.1],
+                    calculation_mode="fragments",
+                    fragment_weighting="equal",
+                    mean_fragments_per_frame=5.0,
+                ),
+            ],
+        ),
+        RgConditionSummary(
+            label="Treatment",
+            config_path="/fake/treatment.yaml",
+            n_replicates=3,
+            run_summaries=[
+                RgRunSummary(
+                    label="polymer_frags",
+                    selection="segid C",
+                    mean_rg=7.5,
+                    sem_rg=0.08,
+                    per_replicate_means=[7.4, 7.5, 7.6],
+                    calculation_mode="fragments",
+                    fragment_weighting="equal",
+                    mean_fragments_per_frame=5.0,
+                ),
+            ],
+        ),
+    ]
+
+    result = RgComparisonResult(
+        metric="mean_rg",
+        name="rg_fragment_compare",
+        n_runs=1,
+        run_labels=["polymer_frags"],
+        control_label="Control",
+        conditions=conditions,
+        pairwise_comparisons=[],
+        anova_by_run=None,
+        ranking_by_run={"polymer_frags": ["Treatment", "Control"]},
+        equilibration_time="10ns",
+        created_at=datetime.now(),
+        polyzymd_version="1.2.1",
+    )
+
+    text = format_rg_comparison(result, "markdown")
+
+    assert "fragments" in text
+
+
+def test_load_condition_aggregated_missing_dir(tmp_path: Path) -> None:
+    """Condition aggregated loader should return None when directory is missing."""
+    from polyzymd.analyses.rg._plotters import _load_condition_aggregated
+
+    assert _load_condition_aggregated(tmp_path) is None
+
+
+def test_load_condition_aggregated_no_json(tmp_path: Path) -> None:
+    """Condition aggregated loader should return None without aggregated JSON files."""
+    from polyzymd.analyses.rg._plotters import _load_condition_aggregated
+
+    (tmp_path / "aggregated").mkdir(parents=True)
+
+    assert _load_condition_aggregated(tmp_path) is None
+
+
+def test_load_condition_aggregated_loads_json(tmp_path: Path) -> None:
+    """Condition aggregated loader should parse latest aggregated JSON payload."""
+    from polyzymd.analyses.rg._plotters import _load_condition_aggregated
+
+    payload = {
+        "run_results": [
+            {
+                "run_label": "polymer_frags",
+                "calculation_mode": "fragments",
+                "reduced_histogram_edges": [7.0, 7.5, 8.0, 8.5],
+                "reduced_histogram_density_mean": [0.2, 0.5, 0.3],
+                "reduced_histogram_density_sem": [0.02, 0.05, 0.03],
+            }
+        ]
+    }
+    json_path = tmp_path / "aggregated" / "rg_aggregated_rep1_2.json"
+    json_path.parent.mkdir(parents=True)
+    json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = _load_condition_aggregated(tmp_path)
+
+    assert loaded is not None
+    assert "run_results" in loaded
+    assert loaded["run_results"][0]["run_label"] == "polymer_frags"
