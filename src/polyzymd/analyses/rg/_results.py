@@ -1,0 +1,268 @@
+"""Rg analysis result models.
+
+This module defines Pydantic models for storing Rg analysis results:
+- RgRunResult: Single run (selection) within a single replicate
+- RgResult: All runs for one replicate
+- RgRunAggregatedResult: One run aggregated across replicates
+- RgAggregatedResult: All runs aggregated across replicates
+
+Supports multiple named Rg selections (runs) per analysis, following
+the multi-entry pattern established by the distances plugin.
+"""
+
+from __future__ import annotations
+
+from typing import ClassVar
+
+from pydantic import Field
+
+from polyzymd.analyses._results_base import (
+    AggregatedResultMixin,
+    BaseAnalysisResult,
+)
+
+
+class RgRunResult(BaseAnalysisResult):
+    """Rg result for a single named run in one replicate.
+
+    Stores per-frame Rg timeseries (as NPZ sidecar path) and summary
+    statistics for one selection.
+
+    Attributes
+    ----------
+    run_label : str
+        Human-readable label for this run (e.g., "protein_backbone").
+    selection : str
+        MDAnalysis selection string used for Rg calculation.
+    mean_rg : float
+        Mean Rg over analyzed frames (Angstroms).
+    std_rg : float
+        Standard deviation of per-frame Rg.
+    median_rg : float
+        Median Rg.
+    min_rg : float
+        Minimum Rg observed.
+    max_rg : float
+        Maximum Rg observed.
+    final_rg : float
+        Rg of the last frame (useful for convergence assessment).
+    sem_rg : float | None
+        Autocorrelation-corrected standard error of the mean.
+    n_frames_total : int
+        Total frames in trajectory.
+    n_frames_used : int
+        Frames used after equilibration.
+    npz_path : str | None
+        Path to NPZ sidecar containing per-frame Rg timeseries.
+    """
+
+    analysis_type: ClassVar[str] = "rg_run"
+
+    # Run identification
+    run_label: str = Field(..., description="Human-readable run label")
+    selection: str = Field(..., description="MDAnalysis selection for Rg calculation")
+
+    # Summary statistics
+    mean_rg: float = Field(..., description="Mean Rg (Angstroms)")
+    std_rg: float = Field(..., description="Standard deviation of per-frame Rg")
+    median_rg: float = Field(..., description="Median Rg")
+    min_rg: float = Field(..., description="Minimum Rg observed")
+    max_rg: float = Field(..., description="Maximum Rg observed")
+    final_rg: float = Field(..., description="Rg of last frame")
+
+    # Autocorrelation-corrected uncertainty
+    sem_rg: float | None = Field(
+        default=None, description="Standard error of the mean (autocorrelation-corrected)"
+    )
+    correlation_time_unit: str | None = Field(default=None, description="Unit of correlation time")
+    statistical_inefficiency: float | None = Field(
+        default=None, description="Factor by which variance is inflated due to correlation"
+    )
+    autocorrelation_warning: str | None = Field(
+        default=None, description="Warning if statistics may be unreliable"
+    )
+
+    # Frame info
+    n_frames_total: int = Field(..., description="Total frames in trajectory")
+    n_frames_used: int = Field(..., description="Frames used after equilibration")
+
+    # Timeseries sidecar
+    npz_path: str | None = Field(
+        default=None, description="Path to NPZ sidecar with per-frame Rg timeseries"
+    )
+
+    # Time array metadata (for plotting)
+    time_unit: str = Field(default="ns", description="Unit of time axis")
+    timestep_ps: float | None = Field(default=None, description="Timestep between frames in ps")
+
+    def summary(self) -> str:
+        """Return human-readable summary."""
+        lines = [
+            f"Rg Run: {self.run_label}",
+            "=" * 50,
+            f"Replicate: {self.replicate}",
+            f"Selection: {self.selection}",
+            f"Equilibration: {self._format_equilibration()}",
+            f"Frames used: {self.n_frames_used}/{self.n_frames_total}",
+            "",
+        ]
+
+        if self.sem_rg is not None:
+            lines.append(f"Mean: {self.mean_rg:.3f} +/- {self.sem_rg:.3f} A (SEM)")
+            if self.n_independent_frames is not None:
+                lines.append(f"  (n_independent = {self.n_independent_frames})")
+        else:
+            lines.append(f"Mean: {self.mean_rg:.3f} +/- {self.std_rg:.3f} A (std)")
+
+        lines.append(f"Median: {self.median_rg:.3f} A")
+        lines.append(f"Range: {self.min_rg:.3f} - {self.max_rg:.3f} A")
+        lines.append(f"Final: {self.final_rg:.3f} A")
+
+        if self.autocorrelation_warning:
+            lines.append("")
+            lines.append(f"WARNING: {self.autocorrelation_warning}")
+
+        return "\n".join(lines)
+
+
+class RgResult(BaseAnalysisResult):
+    """Rg results for all runs in one replicate.
+
+    Container for analyzing multiple Rg selections simultaneously.
+    """
+
+    analysis_type: ClassVar[str] = "rg"
+
+    # Collection of run results
+    run_results: list[RgRunResult] = Field(..., description="Results for each Rg run")
+
+    # Trajectory info (shared across runs)
+    n_frames_total: int = Field(..., description="Total frames in trajectory")
+    n_frames_used: int = Field(..., description="Frames used after equilibration")
+    trajectory_files: list[str] = Field(
+        default_factory=list, description="Trajectory files analyzed"
+    )
+
+    def summary(self) -> str:
+        """Return human-readable summary."""
+        lines = [
+            f"Rg Analysis (replicate {self.replicate})",
+            "=" * 50,
+            f"Runs analyzed: {len(self.run_results)}",
+            f"Equilibration: {self._format_equilibration()}",
+            f"Frames used: {self.n_frames_used}/{self.n_frames_total}",
+            "",
+        ]
+
+        for rr in self.run_results:
+            lines.append(f"{rr.run_label}: {rr.mean_rg:.3f} +/- {rr.std_rg:.3f} A")
+
+        return "\n".join(lines)
+
+    @property
+    def n_runs(self) -> int:
+        """Number of Rg runs analyzed."""
+        return len(self.run_results)
+
+
+class RgRunAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
+    """Aggregated Rg results for one run across replicates.
+
+    Attributes
+    ----------
+    run_label : str
+        Human-readable label for this run.
+    selection : str
+        MDAnalysis selection used.
+    overall_mean : float
+        Mean of replicate means.
+    overall_sem : float
+        SEM across replicate means.
+    per_replicate_means : list[float]
+        Mean Rg from each replicate.
+    per_replicate_stds : list[float]
+        Std dev from each replicate.
+    """
+
+    analysis_type: ClassVar[str] = "rg_run_aggregated"
+
+    # Replicate info
+    replicates: list[int] = Field(..., description="Replicate numbers included")
+    n_replicates: int = Field(..., description="Number of replicates")
+
+    # Run identification
+    run_label: str = Field(..., description="Human-readable run label")
+    selection: str = Field(..., description="MDAnalysis selection for Rg")
+
+    # Aggregated statistics
+    overall_mean: float = Field(..., description="Mean of replicate means")
+    overall_sem: float = Field(..., description="SEM across replicates")
+    overall_median: float = Field(..., description="Median of replicate medians")
+
+    # Per-replicate values
+    per_replicate_means: list[float] = Field(..., description="Mean Rg from each replicate")
+    per_replicate_stds: list[float] = Field(..., description="Std dev from each replicate")
+    per_replicate_medians: list[float] = Field(..., description="Median from each replicate")
+
+    def summary(self) -> str:
+        """Return human-readable summary."""
+        rep_range = self.replicate_range
+        lines = [
+            f"Rg Aggregated: {self.run_label}",
+            "=" * 50,
+            f"Replicates: {rep_range}",
+            f"Selection: {self.selection}",
+            f"Equilibration: {self._format_equilibration()}",
+            "",
+            f"Mean: {self.overall_mean:.3f} +/- {self.overall_sem:.3f} A",
+            f"Median: {self.overall_median:.3f} A",
+            "",
+            "Per-replicate means:",
+        ]
+
+        for rep, mean in zip(self.replicates, self.per_replicate_means):
+            lines.append(f"  Rep {rep}: {mean:.3f} A")
+
+        return "\n".join(lines)
+
+
+class RgAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
+    """Aggregated Rg results for all runs across replicates."""
+
+    analysis_type: ClassVar[str] = "rg_aggregated"
+
+    # Replicate info
+    replicates: list[int] = Field(..., description="Replicate numbers included")
+    n_replicates: int = Field(..., description="Number of replicates")
+
+    # Collection of aggregated run results
+    run_results: list[RgRunAggregatedResult] = Field(
+        ..., description="Aggregated results for each run"
+    )
+
+    # Source files
+    source_result_files: list[str] = Field(
+        default_factory=list, description="Paths to individual replicate result files"
+    )
+
+    def summary(self) -> str:
+        """Return human-readable summary."""
+        rep_range = self.replicate_range
+        lines = [
+            "Rg Aggregated Analysis",
+            "=" * 50,
+            f"Replicates: {rep_range}",
+            f"Runs analyzed: {len(self.run_results)}",
+            f"Equilibration: {self._format_equilibration()}",
+            "",
+        ]
+
+        for rr in self.run_results:
+            lines.append(f"{rr.run_label}: {rr.overall_mean:.3f} +/- {rr.overall_sem:.3f} A")
+
+        return "\n".join(lines)
+
+    @property
+    def n_runs(self) -> int:
+        """Number of Rg runs analyzed."""
+        return len(self.run_results)
