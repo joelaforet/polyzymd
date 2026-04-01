@@ -12,6 +12,8 @@ to interpret outputs, and what assumptions or tradeoffs matter.
 ## Analysis Interpretation and Best Practices
 
 - [Statistical Best Practices for Analysis](../tutorials/analysis_statistics_best_practices.md)
+- [RMSD Best Practices](../tutorials/analysis_rmsd_best_practices.md)
+- [Rg Best Practices](../tutorials/analysis_rg_best_practices.md)
 - [RMSF Best Practices](../tutorials/analysis_rmsf_best_practices.md)
 - [RMSF Reference Selection](../tutorials/analysis_reference_selection.md)
 - [RMSF Verification](../tutorials/analysis_rmsf_verification.md)
@@ -40,6 +42,8 @@ Architecture <../tutorials/architecture>
 Residue Assignment and Chain Conventions <../tutorials/residue_assignment>
 Colored Logging <../tutorials/colored_logging>
 Statistical Best Practices for Analysis <../tutorials/analysis_statistics_best_practices>
+RMSD Best Practices <../tutorials/analysis_rmsd_best_practices>
+Rg Best Practices <../tutorials/analysis_rg_best_practices>
 RMSF Best Practices <../tutorials/analysis_rmsf_best_practices>
 RMSF Reference Selection <../tutorials/analysis_reference_selection>
 RMSF Verification <../tutorials/analysis_rmsf_verification>

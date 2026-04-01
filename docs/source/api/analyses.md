@@ -46,6 +46,8 @@ adding new analysis types to PolyzyMD.
 
 | Plugin | Module | Comparison Style |
 |--------|--------|-----------------|
+| `rmsd` | `analyses.rmsd` | Custom (per-run) |
+| `rg` | `analyses.rg` | Custom (per-run) |
 | `rmsf` | `analyses.rmsf` | Default (scalar) |
 | `catalytic_triad` | `analyses.catalytic_triad` | Default (scalar) |
 | `secondary_structure` | `analyses.secondary_structure` | Default (scalar) |

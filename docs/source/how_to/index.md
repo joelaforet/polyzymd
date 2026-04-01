@@ -17,6 +17,8 @@ already know your goal and need the shortest practical route to it.
 
 Stable workflows:
 
+- [Run RMSD Analysis](../tutorials/analysis_rmsd_quickstart.md)
+- [Run Rg Analysis](../tutorials/analysis_rg_quickstart.md)
 - [Run RMSF Analysis](../tutorials/analysis_rmsf_quickstart.md)
 - [Run Distance Analysis](../tutorials/analysis_distances_quickstart.md)
 - [Run Contacts Analysis](../tutorials/analysis_contacts_quickstart.md)
@@ -51,6 +53,8 @@ Add Polymers to a Simulation <../tutorials/polymers>
 Generate Polymers from SMILES <../tutorials/dynamic_polymers>
 Export a System to GROMACS <../tutorials/gromacs_export>
 Troubleshoot Common Problems <../tutorials/troubleshooting>
+Run RMSD Analysis <../tutorials/analysis_rmsd_quickstart>
+Run Rg Analysis <../tutorials/analysis_rg_quickstart>
 Run RMSF Analysis <../tutorials/analysis_rmsf_quickstart>
 Run Distance Analysis <../tutorials/analysis_distances_quickstart>
 Run Contacts Analysis <../tutorials/analysis_contacts_quickstart>

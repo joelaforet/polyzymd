@@ -35,6 +35,8 @@ Package Structure
     │   ├── orchestrator.py  # Framework engine
     │   ├── stats.py      # Shared statistical utilities
     │   ├── shared/       # Reusable utilities (TrajectoryLoader, alignment, etc.)
+    │   ├── rmsd/         # RMSD plugin package
+    │   ├── rg/           # Rg plugin package
     │   ├── rmsf/         # RMSF plugin package
     │   ├── contacts/     # Contacts plugin package
     │   ├── distances/    # Distance analysis plugin package

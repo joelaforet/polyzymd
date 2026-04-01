@@ -11,7 +11,7 @@ You will:
 - generate figures with `polyzymd compare plot-all`
 
 ```{important}
-For the `v1.2.0` presentation release, the stable comparison stack is RMSF,
+For the `v1.3.0` release, the stable comparison stack is RMSD, Rg, RMSF,
 contacts, distances, catalytic triad, and secondary structure. Binding
 preference, exposure dynamics, binding free energy, and polymer affinity remain
 available, but PolyzyMD labels them as experimental.
@@ -111,6 +111,24 @@ plugins:
       - label: "Substrate-Ser77"
         selection_a: "resname SUB and name C1"
         selection_b: "protein and resid 77 and name OG"
+
+  rmsd:
+    runs:
+      - label: "Protein Backbone"
+        selection: "protein and name CA"
+        alignment_selection: "protein and name CA"
+        reference_mode: "centroid"
+      - label: "Active Site"
+        selection: "protein and (resid 77 or resid 133 or resid 156) and name CA"
+        alignment_selection: "protein and name CA"
+        reference_mode: "centroid"
+
+  rg:
+    runs:
+      - label: "Whole Protein"
+        selection: "protein"
+      - label: "Protein Backbone"
+        selection: "protein and name CA"
 ```
 
 ## Step 3: Validate the Config
@@ -227,6 +245,8 @@ print(pipeline_result["comparison_path"])
 
 Common next additions to `comparison.yaml` are:
 
+- `rmsd` for RMSD timeseries and structural stability comparison
+- `rg` for Radius of Gyration and structural compactness comparison
 - `contacts` for polymer coverage and contact fraction
 - `distances` for custom atom-pair distances
 - `catalytic_triad` for active-site geometry
@@ -234,6 +254,8 @@ Common next additions to `comparison.yaml` are:
 
 For end-to-end examples, see:
 
+- [Run RMSD Analysis](analysis_rmsd_quickstart.md)
+- [Run Rg Analysis](analysis_rg_quickstart.md)
 - [Run RMSF Analysis](analysis_rmsf_quickstart.md)
 - [Run Contacts Analysis](analysis_contacts_quickstart.md)
 - [Run Distance Analysis](analysis_distances_quickstart.md)

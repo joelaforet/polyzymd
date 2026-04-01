@@ -37,8 +37,10 @@ plugins:
 
 ## Stable Plugin Keys
 
-Stable release workflows for `v1.2.0`:
+Stable release workflows for `v1.3.0`:
 
+- `rmsd`
+- `rg`
 - `rmsf`
 - `contacts`
 - `distances`
@@ -74,6 +76,8 @@ Experimental but still available:
 ## Common Stable Commands
 
 ```bash
+polyzymd compare run rmsd
+polyzymd compare run rg
 polyzymd compare run rmsf
 polyzymd compare run contacts
 polyzymd compare run distances
@@ -104,6 +108,8 @@ docs, and generated figures.
 Typical comparison cache paths:
 
 ```text
+comparison/rmsd/result.json
+comparison/rg/result.json
 comparison/rmsf/result.json
 comparison/contacts/result.json
 comparison/distances/result.json
