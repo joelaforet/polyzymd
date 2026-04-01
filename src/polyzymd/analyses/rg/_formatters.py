@@ -13,6 +13,29 @@ from polyzymd.analyses.rg._comparison_results import RgComparisonResult
 logger = logging.getLogger(__name__)
 
 
+def _format_mode(run_summary: object) -> str | None:
+    """Format fragment-aware mode metadata for a run summary.
+
+    Parameters
+    ----------
+    run_summary : object
+        Run summary-like object containing mode metadata.
+
+    Returns
+    -------
+    str | None
+        Formatted mode string, or None when unavailable.
+    """
+    calculation_mode = getattr(run_summary, "calculation_mode", None)
+    fragment_weighting = getattr(run_summary, "fragment_weighting", None)
+
+    if calculation_mode != "fragments":
+        return None
+
+    weighting_label = "equal-weight" if fragment_weighting == "equal" else "mass-weight"
+    return f"Mode: fragments ({weighting_label})"
+
+
 def _format_pairwise_line(run_label: str, result: RgComparisonResult) -> list[str]:
     """Build console pairwise summary lines for one Rg run.
 
@@ -70,6 +93,13 @@ def _format_rg_table(result: RgComparisonResult) -> str:
                 f"{condition.label:<18} {run_summary.mean_rg:<15.2f} "
                 f"{run_summary.sem_rg:<8.2f} {rank:<4}"
             )
+            mode_line = _format_mode(run_summary)
+            if mode_line is not None:
+                lines.append(f"  {mode_line}")
+                if run_summary.mean_fragments_per_frame is not None:
+                    lines.append(
+                        f"  Mean fragments/frame: {run_summary.mean_fragments_per_frame:.1f}"
+                    )
 
         lines.append("")
         lines.extend(_format_pairwise_line(run_label, result))
@@ -117,6 +147,25 @@ def _format_rg_markdown(result: RgComparisonResult) -> str:
                 f"| {condition.label} | {run_summary.mean_rg:.2f} | "
                 f"{run_summary.sem_rg:.2f} | {rank} |"
             )
+
+        fragment_mode_summaries = []
+        for condition_label in ranking:
+            condition = result.get_condition(condition_label)
+            run_summary = condition.get_run(run_label)
+            mode_line = _format_mode(run_summary)
+            if mode_line is None:
+                continue
+
+            fragments_line = ""
+            if run_summary.mean_fragments_per_frame is not None:
+                fragments_line = (
+                    f"; Mean fragments/frame: {run_summary.mean_fragments_per_frame:.1f}"
+                )
+            fragment_mode_summaries.append(f"- {condition.label}: {mode_line}{fragments_line}")
+
+        if fragment_mode_summaries:
+            lines.append("")
+            lines.extend(fragment_mode_summaries)
 
         comparisons = result.get_comparisons_for_run(run_label)
         if comparisons:

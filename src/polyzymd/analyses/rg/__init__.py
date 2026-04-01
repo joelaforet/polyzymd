@@ -255,7 +255,8 @@ class RgAnalysis(Analysis):
             )
 
         aggregated_runs: list[RgRunAggregatedResult] = []
-        for run_label in run_labels:
+        for run in ctx.settings.runs:
+            run_label = run.label
             run_entries = []
             for result in results:
                 for run_result in result.run_results:
@@ -275,6 +276,120 @@ class RgAnalysis(Analysis):
             overall_median = float(np.mean(np.asarray(per_medians, dtype=np.float64)))
 
             template = run_entries[0]
+
+            per_replicate_mean_fragments_per_frame: list[float] | None = None
+            overall_mean_fragments_per_frame: float | None = None
+            fragment_histogram_edges: list[float] | None = None
+            fragment_histogram_density_mean: list[float] | None = None
+            fragment_histogram_density_sem: list[float] | None = None
+            reduced_histogram_edges: list[float] | None = None
+            reduced_histogram_density_mean: list[float] | None = None
+            reduced_histogram_density_sem: list[float] | None = None
+
+            if template.calculation_mode == "fragments":
+                per_replicate_mean_fragments_per_frame = [
+                    entry.mean_fragments_per_frame
+                    for entry in run_entries
+                    if entry.mean_fragments_per_frame is not None
+                ]
+                if per_replicate_mean_fragments_per_frame:
+                    overall_mean_fragments_per_frame = float(
+                        np.mean(
+                            np.asarray(
+                                per_replicate_mean_fragments_per_frame,
+                                dtype=np.float64,
+                            )
+                        )
+                    )
+
+                all_fragment_rg_per_rep: list[np.ndarray] = []
+                all_reduced_rg_per_rep: list[np.ndarray] = []
+                for entry in run_entries:
+                    if entry.npz_path is None:
+                        continue
+                    npz_path = Path(entry.npz_path)
+                    if not npz_path.exists():
+                        continue
+
+                    with np.load(npz_path) as npz_data:
+                        if "rg_values" in npz_data:
+                            reduced_values = np.asarray(npz_data["rg_values"], dtype=np.float64)
+                            if reduced_values.size > 0:
+                                all_reduced_rg_per_rep.append(reduced_values)
+
+                        if "fragment_rg_values" in npz_data:
+                            fragment_values = np.asarray(
+                                npz_data["fragment_rg_values"], dtype=np.float64
+                            )
+                            if fragment_values.size > 0:
+                                all_fragment_rg_per_rep.append(fragment_values)
+
+                if all_fragment_rg_per_rep:
+                    pooled_fragment_rg = np.concatenate(all_fragment_rg_per_rep)
+                    fragment_min = float(np.min(pooled_fragment_rg))
+                    fragment_max = float(np.max(pooled_fragment_rg))
+                    if fragment_min == fragment_max:
+                        fragment_min -= 1.0e-6
+                        fragment_max += 1.0e-6
+
+                    fragment_edges = np.linspace(
+                        fragment_min,
+                        fragment_max,
+                        run.histogram_bins + 1,
+                        dtype=np.float64,
+                    )
+                    fragment_densities = np.asarray(
+                        [
+                            np.histogram(rep_data, bins=fragment_edges, density=True)[0]
+                            for rep_data in all_fragment_rg_per_rep
+                        ],
+                        dtype=np.float64,
+                    )
+                    fragment_histogram_edges = fragment_edges.tolist()
+                    fragment_histogram_density_mean = np.mean(fragment_densities, axis=0).tolist()
+                    if len(all_fragment_rg_per_rep) > 1:
+                        fragment_histogram_density_sem = (
+                            np.std(fragment_densities, axis=0, ddof=1)
+                            / np.sqrt(len(all_fragment_rg_per_rep))
+                        ).tolist()
+                    else:
+                        fragment_histogram_density_sem = [
+                            0.0 for _ in range(len(fragment_histogram_density_mean))
+                        ]
+
+                if all_reduced_rg_per_rep:
+                    pooled_reduced_rg = np.concatenate(all_reduced_rg_per_rep)
+                    reduced_min = float(np.min(pooled_reduced_rg))
+                    reduced_max = float(np.max(pooled_reduced_rg))
+                    if reduced_min == reduced_max:
+                        reduced_min -= 1.0e-6
+                        reduced_max += 1.0e-6
+
+                    reduced_edges = np.linspace(
+                        reduced_min,
+                        reduced_max,
+                        run.histogram_bins + 1,
+                        dtype=np.float64,
+                    )
+                    reduced_densities = np.asarray(
+                        [
+                            np.histogram(rep_data, bins=reduced_edges, density=True)[0]
+                            for rep_data in all_reduced_rg_per_rep
+                        ],
+                        dtype=np.float64,
+                    )
+                    reduced_histogram_edges = reduced_edges.tolist()
+                    reduced_histogram_density_mean = np.mean(reduced_densities, axis=0).tolist()
+                    if len(all_reduced_rg_per_rep) > 1:
+                        reduced_histogram_density_sem = (
+                            np.std(reduced_densities, axis=0, ddof=1)
+                            / np.sqrt(len(all_reduced_rg_per_rep))
+                        ).tolist()
+                    else:
+                        reduced_histogram_density_sem = [
+                            0.0 for _ in range(len(reduced_histogram_density_mean))
+                        ]
+
             aggregated_runs.append(
                 RgRunAggregatedResult(
                     config_hash=first.config_hash,
@@ -293,6 +408,16 @@ class RgAnalysis(Analysis):
                     per_replicate_means=per_means,
                     per_replicate_stds=per_stds,
                     per_replicate_medians=per_medians,
+                    calculation_mode=template.calculation_mode,
+                    fragment_weighting=template.fragment_weighting,
+                    overall_mean_fragments_per_frame=overall_mean_fragments_per_frame,
+                    per_replicate_mean_fragments_per_frame=per_replicate_mean_fragments_per_frame,
+                    fragment_histogram_edges=fragment_histogram_edges,
+                    fragment_histogram_density_mean=fragment_histogram_density_mean,
+                    fragment_histogram_density_sem=fragment_histogram_density_sem,
+                    reduced_histogram_edges=reduced_histogram_edges,
+                    reduced_histogram_density_mean=reduced_histogram_density_mean,
+                    reduced_histogram_density_sem=reduced_histogram_density_sem,
                 )
             )
 
@@ -367,6 +492,9 @@ class RgAnalysis(Analysis):
                     mean_rg=run_result.overall_mean,
                     sem_rg=run_result.overall_sem,
                     per_replicate_means=run_result.per_replicate_means,
+                    calculation_mode=run_result.calculation_mode,
+                    fragment_weighting=run_result.fragment_weighting,
+                    mean_fragments_per_frame=run_result.overall_mean_fragments_per_frame,
                 )
                 for run_result in agg_result.run_results
             ]
