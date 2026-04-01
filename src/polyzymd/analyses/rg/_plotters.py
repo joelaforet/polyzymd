@@ -266,13 +266,18 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
             logger.warning("No conditions available in Rg comparison result")
             break
 
-        try:
-            first_run_summary = comparison_result.conditions[0].get_run(run_label)
-        except KeyError:
+        first_run_summary = None
+        for condition in comparison_result.conditions:
+            try:
+                first_run_summary = condition.get_run(run_label)
+                break
+            except KeyError:
+                continue
+
+        if first_run_summary is None:
             logger.warning(
-                "Run '%s' missing from first condition '%s'; skipping distribution plot",
+                "Run '%s' not found in any condition; skipping distribution plot",
                 run_label,
-                comparison_result.conditions[0].label,
             )
             continue
 
@@ -582,6 +587,16 @@ def _load_condition_aggregated(condition_dir: Path) -> dict | None:
     if not agg_dir.exists():
         return None
 
+    # Try the canonical path first (framework default: result.json)
+    canonical = agg_dir / "result.json"
+    if canonical.exists():
+        try:
+            return json.loads(canonical.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Failed to load aggregated Rg JSON %s: %s", canonical, exc)
+            return None
+
+    # Fallback: legacy naming patterns
     json_files = sorted(agg_dir.glob("rg_aggregated_*.json"))
     if not json_files:
         json_files = sorted(agg_dir.glob("rg_result_aggregated_*.json"))

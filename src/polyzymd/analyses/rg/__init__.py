@@ -34,7 +34,7 @@ from polyzymd.analyses.shared.statistics import compute_sem
 
 if TYPE_CHECKING:
     from polyzymd.analyses.rg._comparison_results import RgComparisonResult
-    from polyzymd.analyses.rg._results import RgResult
+    from polyzymd.analyses.rg._results import RgResult, RgRunResult
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +204,8 @@ class RgAnalysis(Analysis):
                 n_frames_used=n_frames_used,
                 timestep_ps=timestep_ps,
             )
-            run_results.append(run_result)
+            if run_result is not None:
+                run_results.append(run_result)
 
         result = RgResult(
             config_hash=config_hash,
@@ -265,7 +266,12 @@ class RgAnalysis(Analysis):
                         break
 
             if not run_entries:
-                logger.warning("No Rg entries found for run '%s'; skipping in aggregate", run_label)
+                logger.warning(
+                    "No Rg entries found for run '%s' in condition '%s' — selection may "
+                    "match no atoms in this condition; skipping in aggregate",
+                    run_label,
+                    ctx.condition.label,
+                )
                 continue
 
             per_means = [entry.mean_rg for entry in run_entries]
@@ -286,6 +292,30 @@ class RgAnalysis(Analysis):
             reduced_histogram_density_mean: list[float] | None = None
             reduced_histogram_density_sem: list[float] | None = None
 
+            # --- Load NPZ sidecars for histogram aggregation (both modes) ---
+            all_reduced_rg_per_rep: list[np.ndarray] = []
+            all_fragment_rg_per_rep: list[np.ndarray] = []
+            for entry in run_entries:
+                if entry.npz_path is None:
+                    continue
+                npz_path = Path(entry.npz_path)
+                if not npz_path.exists():
+                    continue
+
+                with np.load(npz_path) as npz_data:
+                    if "rg_values" in npz_data:
+                        reduced_values = np.asarray(npz_data["rg_values"], dtype=np.float64)
+                        if reduced_values.size > 0:
+                            all_reduced_rg_per_rep.append(reduced_values)
+
+                    if "fragment_rg_values" in npz_data:
+                        fragment_values = np.asarray(
+                            npz_data["fragment_rg_values"], dtype=np.float64
+                        )
+                        if fragment_values.size > 0:
+                            all_fragment_rg_per_rep.append(fragment_values)
+
+            # --- Fragment-specific aggregation (counts + fragment histogram) ---
             if template.calculation_mode == "fragments":
                 per_replicate_mean_fragments_per_frame = [
                     entry.mean_fragments_per_frame
@@ -301,28 +331,6 @@ class RgAnalysis(Analysis):
                             )
                         )
                     )
-
-                all_fragment_rg_per_rep: list[np.ndarray] = []
-                all_reduced_rg_per_rep: list[np.ndarray] = []
-                for entry in run_entries:
-                    if entry.npz_path is None:
-                        continue
-                    npz_path = Path(entry.npz_path)
-                    if not npz_path.exists():
-                        continue
-
-                    with np.load(npz_path) as npz_data:
-                        if "rg_values" in npz_data:
-                            reduced_values = np.asarray(npz_data["rg_values"], dtype=np.float64)
-                            if reduced_values.size > 0:
-                                all_reduced_rg_per_rep.append(reduced_values)
-
-                        if "fragment_rg_values" in npz_data:
-                            fragment_values = np.asarray(
-                                npz_data["fragment_rg_values"], dtype=np.float64
-                            )
-                            if fragment_values.size > 0:
-                                all_fragment_rg_per_rep.append(fragment_values)
 
                 if all_fragment_rg_per_rep:
                     pooled_fragment_rg = np.concatenate(all_fragment_rg_per_rep)
@@ -357,38 +365,39 @@ class RgAnalysis(Analysis):
                             0.0 for _ in range(len(fragment_histogram_density_mean))
                         ]
 
-                if all_reduced_rg_per_rep:
-                    pooled_reduced_rg = np.concatenate(all_reduced_rg_per_rep)
-                    reduced_min = float(np.min(pooled_reduced_rg))
-                    reduced_max = float(np.max(pooled_reduced_rg))
-                    if reduced_min == reduced_max:
-                        reduced_min -= 1.0e-6
-                        reduced_max += 1.0e-6
+            # --- Reduced-series histogram (both selection and fragment modes) ---
+            if all_reduced_rg_per_rep:
+                pooled_reduced_rg = np.concatenate(all_reduced_rg_per_rep)
+                reduced_min = float(np.min(pooled_reduced_rg))
+                reduced_max = float(np.max(pooled_reduced_rg))
+                if reduced_min == reduced_max:
+                    reduced_min -= 1.0e-6
+                    reduced_max += 1.0e-6
 
-                    reduced_edges = np.linspace(
-                        reduced_min,
-                        reduced_max,
-                        run.histogram_bins + 1,
-                        dtype=np.float64,
-                    )
-                    reduced_densities = np.asarray(
-                        [
-                            np.histogram(rep_data, bins=reduced_edges, density=True)[0]
-                            for rep_data in all_reduced_rg_per_rep
-                        ],
-                        dtype=np.float64,
-                    )
-                    reduced_histogram_edges = reduced_edges.tolist()
-                    reduced_histogram_density_mean = np.mean(reduced_densities, axis=0).tolist()
-                    if len(all_reduced_rg_per_rep) > 1:
-                        reduced_histogram_density_sem = (
-                            np.std(reduced_densities, axis=0, ddof=1)
-                            / np.sqrt(len(all_reduced_rg_per_rep))
-                        ).tolist()
-                    else:
-                        reduced_histogram_density_sem = [
-                            0.0 for _ in range(len(reduced_histogram_density_mean))
-                        ]
+                reduced_edges = np.linspace(
+                    reduced_min,
+                    reduced_max,
+                    run.histogram_bins + 1,
+                    dtype=np.float64,
+                )
+                reduced_densities = np.asarray(
+                    [
+                        np.histogram(rep_data, bins=reduced_edges, density=True)[0]
+                        for rep_data in all_reduced_rg_per_rep
+                    ],
+                    dtype=np.float64,
+                )
+                reduced_histogram_edges = reduced_edges.tolist()
+                reduced_histogram_density_mean = np.mean(reduced_densities, axis=0).tolist()
+                if len(all_reduced_rg_per_rep) > 1:
+                    reduced_histogram_density_sem = (
+                        np.std(reduced_densities, axis=0, ddof=1)
+                        / np.sqrt(len(all_reduced_rg_per_rep))
+                    ).tolist()
+                else:
+                    reduced_histogram_density_sem = [
+                        0.0 for _ in range(len(reduced_histogram_density_mean))
+                    ]
 
             aggregated_runs.append(
                 RgRunAggregatedResult(
@@ -470,7 +479,7 @@ class RgAnalysis(Analysis):
             percent_change,
         )
 
-        run_labels = [run.label for run in ctx.settings.runs]
+        configured_run_labels = [run.label for run in ctx.settings.runs]
 
         summaries: list[RgConditionSummary] = []
         for condition in ctx.conditions:
@@ -514,37 +523,75 @@ class RgAnalysis(Analysis):
 
         effective_control = ctx.effective_control
 
+        run_labels: list[str] = []
         ranking_by_run: dict[str, list[str]] = {}
-        for run_label in run_labels:
+        pairwise_comparisons: list[RgRunPairwiseComparison] = []
+        anova_by_run: list[RgRunANOVA] | None = []
+
+        for run_label in configured_run_labels:
+            summaries_with_run = [
+                summary for summary in summaries if self._has_run_summary(summary, run_label)
+            ]
+            if len(summaries_with_run) < 2:
+                logger.warning(
+                    "Run '%s' has data in fewer than 2 conditions; skipping run-level comparison",
+                    run_label,
+                )
+                continue
+
+            run_labels.append(run_label)
             ranked = sorted(
-                summaries,
+                summaries_with_run,
                 key=lambda summary: summary.get_run(run_label).mean_rg,
             )
             ranking_by_run[run_label] = [summary.label for summary in ranked]
 
-        pairwise_comparisons: list[RgRunPairwiseComparison] = []
-        for run_label in run_labels:
             if effective_control:
                 control_summary = next(
-                    summary for summary in summaries if summary.label == effective_control
+                    (
+                        summary
+                        for summary in summaries_with_run
+                        if summary.label == effective_control
+                    ),
+                    None,
                 )
-                control_run = control_summary.get_run(run_label)
-                for summary in summaries:
-                    if summary.label == effective_control:
-                        continue
-                    pairwise_comparisons.append(
-                        self._compare_run(
-                            run_label=run_label,
-                            condition_a=control_summary.label,
-                            condition_b=summary.label,
-                            run_a=control_run,
-                            run_b=summary.get_run(run_label),
-                        )
+                if control_summary is None:
+                    logger.warning(
+                        "Control condition '%s' has no data for run '%s'; using all-vs-all "
+                        "pairwise comparisons for this run",
+                        effective_control,
+                        run_label,
                     )
+                    for i, summary_a in enumerate(summaries_with_run):
+                        run_a = summary_a.get_run(run_label)
+                        for summary_b in summaries_with_run[i + 1 :]:
+                            pairwise_comparisons.append(
+                                self._compare_run(
+                                    run_label=run_label,
+                                    condition_a=summary_a.label,
+                                    condition_b=summary_b.label,
+                                    run_a=run_a,
+                                    run_b=summary_b.get_run(run_label),
+                                )
+                            )
+                else:
+                    control_run = control_summary.get_run(run_label)
+                    for summary in summaries_with_run:
+                        if summary.label == effective_control:
+                            continue
+                        pairwise_comparisons.append(
+                            self._compare_run(
+                                run_label=run_label,
+                                condition_a=control_summary.label,
+                                condition_b=summary.label,
+                                run_a=control_run,
+                                run_b=summary.get_run(run_label),
+                            )
+                        )
             else:
-                for i, summary_a in enumerate(summaries):
+                for i, summary_a in enumerate(summaries_with_run):
                     run_a = summary_a.get_run(run_label)
-                    for summary_b in summaries[i + 1 :]:
+                    for summary_b in summaries_with_run[i + 1 :]:
                         pairwise_comparisons.append(
                             self._compare_run(
                                 run_label=run_label,
@@ -555,11 +602,10 @@ class RgAnalysis(Analysis):
                             )
                         )
 
-        anova_by_run: list[RgRunANOVA] | None = None
-        if len(summaries) >= 3:
-            anova_by_run = []
-            for run_label in run_labels:
-                groups = [summary.get_run(run_label).per_replicate_means for summary in summaries]
+            if len(summaries_with_run) >= 3:
+                groups = [
+                    summary.get_run(run_label).per_replicate_means for summary in summaries_with_run
+                ]
                 anova_result = one_way_anova(*groups)
                 anova_by_run.append(
                     RgRunANOVA(
@@ -569,6 +615,15 @@ class RgAnalysis(Analysis):
                         significant=anova_result.significant,
                     )
                 )
+
+        if not run_labels:
+            logger.warning(
+                "Rg comparison skipped because no runs had data in at least 2 conditions"
+            )
+            return None
+
+        if not anova_by_run:
+            anova_by_run = None
 
         return RgComparisonResult(
             metric="mean_rg",
@@ -636,7 +691,7 @@ class RgAnalysis(Analysis):
         n_frames_total: int,
         n_frames_used: int,
         timestep_ps: float,
-    ) -> Any:
+    ) -> RgRunResult | None:
         """Compute one Rg run for a single replicate.
 
         Parameters
@@ -666,8 +721,9 @@ class RgAnalysis(Analysis):
 
         Returns
         -------
-        RgRunResult
-            Per-run Rg result for this replicate.
+        RgRunResult | None
+            Per-run Rg result for this replicate, or ``None`` when the
+            selection matches no atoms.
         """
         import numpy as np
 
@@ -678,7 +734,13 @@ class RgAnalysis(Analysis):
         u = loader.load_universe(replicate, cache=False)
         atom_group = u.select_atoms(run.selection)
         if len(atom_group) == 0:
-            raise ValueError(f"Run '{run.label}' selection matched no atoms: {run.selection!r}")
+            logger.warning(
+                "Run '%s' selection matched no atoms for replicate %d: %r — skipping run",
+                run.label,
+                replicate,
+                run.selection,
+            )
+            return None
 
         rg_values = np.empty(n_frames_used, dtype=np.float64)
         all_fragment_rg: list[float] = []
@@ -822,6 +884,28 @@ class RgAnalysis(Analysis):
             timestep_ps=timestep_ps,
             **frag_metadata,
         )
+
+    @staticmethod
+    def _has_run_summary(summary: Any, run_label: str) -> bool:
+        """Check whether a condition summary includes a given run
+
+        Parameters
+        ----------
+        summary : Any
+            Condition summary object
+        run_label : str
+            Run label to query
+
+        Returns
+        -------
+        bool
+            ``True`` when the run exists in the condition summary
+        """
+        try:
+            summary.get_run(run_label)
+            return True
+        except KeyError:
+            return False
 
     @staticmethod
     def _compare_run(
