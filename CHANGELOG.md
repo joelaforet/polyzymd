@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-04-01
+
+### Fixed
+
+- **`resid` restraint selections now match PDB residue numbers correctly.**
+  The restraint atom selection parser (`_parse_selection`) used OpenMM's
+  sequential 0-based `Residue.index` and assumed a simple `resid - 1`
+  conversion, which only worked when PDB numbering started at 1 with no gaps.
+  For structures with non-standard starting residue numbers (e.g., PDB 4TGL
+  starting at residue 5), the offset was wrong and selections like
+  `resid 144 and name OG` would silently target the wrong residue or fail
+  with "No atoms match selection". Now uses `Residue.id` (the PDB `resSeq`
+  number) for direct matching without any offset arithmetic.
+  (`core/restraints.py`)
+
 ## [1.2.0] - 2026-03-24
 
 ### Added
