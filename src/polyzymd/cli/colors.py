@@ -485,6 +485,10 @@ def echo_logo() -> None:
     dim = _logo_escape(_LOGO_DIM)
     reset = "\033[0m" if get_color_support() is not TerminalColorSupport.NONE else ""
 
+    # Two blank lines before the logo for vertical breathing room
+    click.echo()
+    click.echo()
+
     indent = "  "
     for left, right in zip(LOGO_POLYZY_LINES, LOGO_MD_LINES):
         click.echo(f"{indent}{gold}{left}{reset}{LOGO_GAP}{green}{right}{reset}")
