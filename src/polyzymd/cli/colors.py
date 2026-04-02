@@ -496,3 +496,4 @@ def echo_logo() -> None:
     click.echo()
     logo_width = len(LOGO_POLYZY_LINES[0]) + len(LOGO_GAP) + len(LOGO_MD_LINES[0])
     click.echo(f"{indent}{dim}{CREDIT_LINE:^{logo_width}}{reset}")
+    click.echo()
