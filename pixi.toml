@@ -65,6 +65,7 @@ packaging           = ">=23.0"       # conditional import in polyzymd
 # OpenFF stack — solver resolves compatible set
 openff-toolkit      = ">=0.16"
 openff-interchange  = ">=0.5"
+openff-packmol      = ">=0.1"        # new home of Interchange's Packmol wrapper
 openff-units        = ">=0.2"
 openff-forcefields  = ">=2024.0"     # data package for ForceField()
 smirnoff99frosst    = ">=1.1"        # data package for ForceField()
