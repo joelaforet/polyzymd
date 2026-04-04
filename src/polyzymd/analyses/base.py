@@ -609,6 +609,10 @@ class Analysis(ABC):
     name: ClassVar[str]
     Settings: ClassVar[type]  # type[BaseModel]
     AggregatedResultClass: ClassVar[type | None] = None
+    ReplicateResultClass: ClassVar[type | None] = None
+    # UX-only hint for runtime messaging (warnings/HPC suggestions)
+    # This does not change execution behavior
+    execution_cost_hint: ClassVar[str] = "medium"
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
@@ -925,6 +929,55 @@ class Analysis(ABC):
             if hasattr(cls, "model_validate_json"):
                 return cls.model_validate_json(path.read_text())
         return json.loads(path.read_text())
+
+    def _deserialize_replicate_result(self, path: Path) -> Any:
+        """Load a single replicate result from disk.
+
+        The default implementation uses :attr:`ReplicateResultClass` if set
+        (trying ``.load(path)`` first, then ``.model_validate_json()``), and
+        falls back to ``json.loads(path.read_text())`` for plain-dict results.
+
+        Parameters
+        ----------
+        path : Path
+            Path to JSON replicate result file.
+
+        Returns
+        -------
+        dict or BaseModel
+            Deserialized replicate result.
+        """
+        cls = type(self).ReplicateResultClass
+        if cls is not None:
+            if hasattr(cls, "load"):
+                return cls.load(path)
+            if hasattr(cls, "model_validate_json"):
+                return cls.model_validate_json(path.read_text())
+        return json.loads(path.read_text())
+
+    def _load_replicate_result(self, run_dir: Path) -> Any | None:
+        """Load replicate result from a run directory.
+
+        Looks for ``result.json`` in the provided run directory and returns
+        ``None`` when no result file exists.
+
+        Parameters
+        ----------
+        run_dir : Path
+            Replicate run directory (for example ``run_1``).
+
+        Returns
+        -------
+        dict or BaseModel or None
+            Deserialized replicate result, or ``None`` if no result file is
+            present.
+        """
+        if not run_dir.exists():
+            return None
+        result_path = self.replicate_result_path(run_dir)
+        if not result_path.exists():
+            return None
+        return self._deserialize_replicate_result(result_path)
 
     # === Utility methods (available to all subclasses) ===
 
