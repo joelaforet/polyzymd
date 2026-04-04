@@ -93,11 +93,10 @@ def resolve_selection_indices(
         Selected atom group and its universe-global atom indices.
     """
     atoms = universe.select_atoms(selection)
-    warn_if_multi_chain_selection(
-        atoms,
-        selection,
-        context=f"for SASA {role} selection in run '{run_label}'",
-    )
+    context = f"for SASA {role} selection in run '{run_label}'"
+    if role == "context":
+        context += " (multi-chain context selections are often intentional for SASA)"
+    warn_if_multi_chain_selection(atoms, selection, context=context)
     return atoms, np.asarray(atoms.indices, dtype=np.int64)
 
 
@@ -147,6 +146,8 @@ def compute_sasa(
     start_frame: int,
     stop_frame: int,
     timestep_ps: float,
+    chunk_size: int = 100,
+    stride: int = 1,
 ) -> SASAComputationResult:
     """Compute target SASA over a selected context.
 
@@ -170,6 +171,12 @@ def compute_sasa(
         Last frame index (exclusive).
     timestep_ps : float
         Timestep in ps.
+    chunk_size : int, optional
+        Number of analyzed frames processed per Shrake-Rupley chunk,
+        by default 100.
+    stride : int, optional
+        Frame stride applied before chunking (1 = analyze every frame),
+        by default 1.
 
     Returns
     -------
@@ -177,6 +184,11 @@ def compute_sasa(
         Raw atom-level, residue-level, and total SASA traces in Å².
     """
     import mdtraj as md
+
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be >= 1")
+    if stride <= 0:
+        raise ValueError("stride must be >= 1")
 
     target_atoms, target_indices = resolve_selection_indices(
         universe,
@@ -190,7 +202,9 @@ def compute_sasa(
         role="context",
         run_label=run_label,
     )
-    n_frames = max(0, stop_frame - start_frame)
+    frames = np.arange(start_frame, stop_frame, dtype=np.int64)
+    analyzed_frames = frames[::stride]
+    n_frames = int(analyzed_frames.size)
     if context_indices.size == 0:
         LOGGER.warning(
             "Run '%s' context selection matched zero atoms (%r); returning NaN SASA metrics",
@@ -205,13 +219,12 @@ def compute_sasa(
         )
 
     if target_indices.size == 0 or context_indices.size == 0 or n_frames == 0:
-        frames = np.arange(start_frame, stop_frame, dtype=np.int64)
-        time_ns = (frames.astype(np.float64) * timestep_ps) / 1000.0
+        time_ns = (analyzed_frames.astype(np.float64) * timestep_ps) / 1000.0
         return SASAComputationResult(
             atom_sasa_a2=np.empty((n_frames, target_indices.size), dtype=np.float64),
             residue_sasa_a2=np.empty((n_frames, 0), dtype=np.float64),
             total_sasa_a2=np.full(n_frames, np.nan, dtype=np.float64),
-            frames=frames,
+            frames=analyzed_frames,
             time_ns=time_ns,
             target_atom_indices=target_indices,
             context_atom_indices=context_indices,
@@ -250,36 +263,55 @@ def compute_sasa(
         context_atoms.write(tmp_pdb.name)
         template = md.load(tmp_pdb.name)
 
-    xyz_nm = np.empty((n_frames, len(context_atoms), 3), dtype=np.float32)
-    frames = np.arange(start_frame, stop_frame, dtype=np.int64)
-    for out_idx, frame_idx in enumerate(frames.tolist()):
-        universe.trajectory[frame_idx]
-        xyz_nm[out_idx] = context_atoms.positions.astype(np.float32) / 10.0
-
-    mdtraj_traj = md.Trajectory(xyz=xyz_nm, topology=template.topology)
-    atom_sasa_nm2 = np.asarray(
-        md.shrake_rupley(
-            mdtraj_traj,
-            mode="atom",
-            probe_radius=probe_radius_nm,
-            n_sphere_points=n_sphere_points,
-        ),
-        dtype=np.float64,
-    )
-
-    atom_sasa_target_a2 = atom_sasa_nm2[:, target_local_indices] * NM2_TO_A2
+    atom_sasa_target_a2 = np.empty((n_frames, target_local_indices.size), dtype=np.float64)
     residue_sasa_a2 = np.empty((n_frames, len(residue_items)), dtype=np.float64)
-    for idx, (_, atom_locals) in enumerate(residue_items):
-        residue_sasa_a2[:, idx] = np.sum(atom_sasa_nm2[:, atom_locals], axis=1) * NM2_TO_A2
+    total_sasa_a2 = np.empty(n_frames, dtype=np.float64)
 
-    total_sasa_a2 = np.sum(atom_sasa_target_a2, axis=1)
-    time_ns = (frames.astype(np.float64) * timestep_ps) / 1000.0
+    n_chunks = (n_frames + chunk_size - 1) // chunk_size
+    for chunk_idx, chunk_start in enumerate(range(0, n_frames, chunk_size)):
+        chunk_end = min(chunk_start + chunk_size, n_frames)
+        LOGGER.info(
+            "Computing SASA chunk %d/%d (frames %d-%d)...",
+            chunk_idx + 1,
+            n_chunks,
+            int(analyzed_frames[chunk_start]),
+            int(analyzed_frames[chunk_end - 1]),
+        )
+
+        chunk_frames = analyzed_frames[chunk_start:chunk_end]
+        xyz_nm = np.empty((chunk_frames.size, len(context_atoms), 3), dtype=np.float32)
+        for out_idx, frame_idx in enumerate(chunk_frames.tolist()):
+            universe.trajectory[frame_idx]
+            xyz_nm[out_idx] = context_atoms.positions.astype(np.float32) / 10.0
+
+        mdtraj_traj = md.Trajectory(xyz=xyz_nm, topology=template.topology)
+        atom_sasa_nm2 = np.asarray(
+            md.shrake_rupley(
+                mdtraj_traj,
+                mode="atom",
+                probe_radius=probe_radius_nm,
+                n_sphere_points=n_sphere_points,
+            ),
+            dtype=np.float64,
+        )
+
+        atom_sasa_target_chunk = atom_sasa_nm2[:, target_local_indices] * NM2_TO_A2
+        atom_sasa_target_a2[chunk_start:chunk_end, :] = atom_sasa_target_chunk
+
+        for idx, (_, atom_locals) in enumerate(residue_items):
+            residue_sasa_a2[chunk_start:chunk_end, idx] = (
+                np.sum(atom_sasa_nm2[:, atom_locals], axis=1) * NM2_TO_A2
+            )
+
+        total_sasa_a2[chunk_start:chunk_end] = np.sum(atom_sasa_target_chunk, axis=1)
+
+    time_ns = (analyzed_frames.astype(np.float64) * timestep_ps) / 1000.0
 
     return SASAComputationResult(
         atom_sasa_a2=atom_sasa_target_a2,
         residue_sasa_a2=residue_sasa_a2,
         total_sasa_a2=total_sasa_a2,
-        frames=frames,
+        frames=analyzed_frames,
         time_ns=time_ns,
         target_atom_indices=target_indices,
         context_atom_indices=context_indices,

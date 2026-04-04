@@ -45,6 +45,7 @@ class SASARunSettings(BaseModel):
         default=None,
         description="Selection of atoms considered during SASA computation",
     )
+    stride: int = Field(default=1, description="Frame stride (1 = every frame)")
 
     @field_validator("label", mode="after")
     @classmethod
@@ -82,6 +83,14 @@ class SASARunSettings(BaseModel):
             self.context_selection = self.target_selection
         return self
 
+    @field_validator("stride", mode="after")
+    @classmethod
+    def validate_stride(cls, value: int) -> int:
+        """Validate stride value."""
+        if value <= 0:
+            raise ValueError("stride must be >= 1")
+        return value
+
 
 class SASASettings(BaseModel):
     """Top-level SASA settings."""
@@ -89,6 +98,10 @@ class SASASettings(BaseModel):
     runs: list[SASARunSettings] = Field(default_factory=list, description="SASA runs to compute")
     probe_radius_nm: float = Field(default=0.14, description="Shrake-Rupley probe radius in nm")
     n_sphere_points: int = Field(default=960, description="Shrake-Rupley sphere point count")
+    chunk_size: int = Field(
+        default=100,
+        description="Frames per chunk for memory-efficient SASA computation",
+    )
 
     @field_validator("runs", mode="after")
     @classmethod
@@ -115,6 +128,14 @@ class SASASettings(BaseModel):
         """Validate sphere points."""
         if value < 100:
             raise ValueError("n_sphere_points must be >= 100")
+        return value
+
+    @field_validator("chunk_size", mode="after")
+    @classmethod
+    def validate_chunk_size(cls, value: int) -> int:
+        """Validate chunk size."""
+        if value <= 0:
+            raise ValueError("chunk_size must be >= 1")
         return value
 
 
@@ -195,6 +216,8 @@ class SASAAnalysis(Analysis):
                 start_frame=start_frame,
                 stop_frame=n_frames_total,
                 timestep_ps=timestep_ps,
+                chunk_size=settings.chunk_size,
+                stride=run.stride,
             )
 
             save_sasa_artifacts(

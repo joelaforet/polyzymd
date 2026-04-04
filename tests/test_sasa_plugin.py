@@ -123,6 +123,8 @@ def test_sasa_settings_validation() -> None:
     """SASA settings should enforce run and scalar constraints."""
     settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
     assert settings.runs[0].context_selection == "chainid A"
+    assert settings.runs[0].stride == 1
+    assert settings.chunk_size == 100
 
     with pytest.raises(ValueError, match="At least one SASA run"):
         SASASettings(runs=[])
@@ -149,6 +151,15 @@ def test_sasa_settings_validation() -> None:
             runs=[SASARunSettings(label="protein", target_selection="chainid A")],
             n_sphere_points=10,
         )
+
+    with pytest.raises(ValueError, match="chunk_size must be >= 1"):
+        SASASettings(
+            runs=[SASARunSettings(label="protein", target_selection="chainid A")],
+            chunk_size=0,
+        )
+
+    with pytest.raises(ValueError, match="stride must be >= 1"):
+        SASARunSettings(label="protein", target_selection="chainid A", stride=0)
 
 
 def test_compute_replicate_zero_atom_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -523,6 +534,70 @@ def test_compute_replicate_stores_raw_paths(
     assert run_result.raw_metadata_path is not None
     assert run_result.npz_path == run_result.raw_npz_path
     assert run_result.metadata_path == run_result.raw_metadata_path
+
+
+def test_compute_replicate_passes_chunk_and_stride(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """compute_replicate should pass chunk_size and stride to shared helper."""
+    analysis = SASAAnalysis()
+    condition = _make_condition("cond")
+    settings = SASASettings(
+        runs=[SASARunSettings(label="protein", target_selection="chainid A", stride=3)],
+        chunk_size=25,
+    )
+    ctx = make_replicate_context(
+        condition=condition,
+        replicate=1,
+        output_dir=tmp_path / "run_1",
+        settings=settings,
+        equilibration="0ns",
+    )
+
+    class _FakeLoader:
+        def __init__(self, _config: object) -> None:
+            pass
+
+        def load_universe(self, replicate: int, cache: bool = False):  # noqa: ARG002
+            return MagicMock(trajectory=list(range(5)))
+
+        def get_trajectory_info(self, replicate: int):  # noqa: ARG002
+            info = MagicMock()
+            info.trajectory_files = [Path("/fake/traj.dcd")]
+            return info
+
+        def get_timestep(self, replicate: int, unit: str = "ps"):  # noqa: ARG002
+            return 10.0
+
+    from polyzymd.analyses.shared.sasa import SASAComputationResult
+
+    seen_kwargs: dict[str, object] = {}
+
+    def _fake_compute_sasa(*args, **kwargs):  # noqa: ARG001
+        seen_kwargs.update(kwargs)
+        return SASAComputationResult(
+            atom_sasa_a2=np.asarray([[1.0]], dtype=np.float64),
+            residue_sasa_a2=np.asarray([[1.0]], dtype=np.float64),
+            total_sasa_a2=np.asarray([1.0], dtype=np.float64),
+            frames=np.asarray([0], dtype=np.int64),
+            time_ns=np.asarray([0.0], dtype=np.float64),
+            target_atom_indices=np.asarray([0], dtype=np.int64),
+            context_atom_indices=np.asarray([0], dtype=np.int64),
+            residue_keys=["A:1:ALA"],
+            residue_chainids=["A"],
+            residue_resids=[1],
+            residue_resnames=["ALA"],
+        )
+
+    monkeypatch.setattr("polyzymd.analyses.sasa.TrajectoryLoader", _FakeLoader)
+    monkeypatch.setattr("polyzymd.analyses.sasa.compute_config_hash", lambda _cfg: "hash")
+    monkeypatch.setattr("polyzymd.analyses.sasa.compute_sasa", _fake_compute_sasa)
+    monkeypatch.setattr("polyzymd.analyses.sasa.save_sasa_artifacts", lambda *args, **kwargs: None)
+    monkeypatch.setattr(analysis, "_check_cache", lambda *args, **kwargs: None)
+
+    _ = analysis.compute_replicate(ctx, 1)
+    assert seen_kwargs["chunk_size"] == 25
+    assert seen_kwargs["stride"] == 3
 
 
 def test_plot_helper_sanitize_label() -> None:
