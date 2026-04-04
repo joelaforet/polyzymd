@@ -611,6 +611,7 @@ class ContactsAnalysis(Analysis):
     """
 
     name: ClassVar[str] = "contacts"
+    execution_cost_hint: ClassVar[str] = "high"
     Settings: ClassVar[type] = ContactsSettings
     AggregatedResultClass: ClassVar[type] = AggregatedContactResult
     aliases: ClassVar[tuple[str, ...]] = ()

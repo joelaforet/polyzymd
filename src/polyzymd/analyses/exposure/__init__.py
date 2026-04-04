@@ -153,6 +153,7 @@ class ExposureAnalysis(Analysis):
     """
 
     name: ClassVar[str] = "exposure"
+    execution_cost_hint: ClassVar[str] = "high"
     Settings: ClassVar[type] = ExposureSettings
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ("contacts",)

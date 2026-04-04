@@ -182,6 +182,7 @@ class BindingFreeEnergyAnalysis(Analysis):
     """
 
     name: ClassVar[str] = "binding_free_energy"
+    execution_cost_hint: ClassVar[str] = "high"
     Settings: ClassVar[type] = BFESettings
     aliases: ClassVar[tuple[str, ...]] = ("bfe",)
     dependencies: ClassVar[tuple[str, ...]] = ("contacts",)

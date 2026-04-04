@@ -180,6 +180,7 @@ class PolymerAffinityAnalysis(Analysis):
     """
 
     name: ClassVar[str] = "polymer_affinity"
+    execution_cost_hint: ClassVar[str] = "high"
     Settings: ClassVar[type] = PolymerAffinitySettings
     aliases: ClassVar[tuple[str, ...]] = ("pa",)
     dependencies: ClassVar[tuple[str, ...]] = ("contacts",)
