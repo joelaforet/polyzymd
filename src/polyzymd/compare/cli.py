@@ -6,7 +6,9 @@ for initializing comparison projects and running comparisons.
 
 from __future__ import annotations
 
+import json
 import logging
+import shutil
 import sys
 from pathlib import Path
 
@@ -32,6 +34,73 @@ from polyzymd.core.experimental import (
 )
 
 LOGGER = logging.getLogger("polyzymd.compare.cli")
+
+
+def _resolve_hpc_dir(config: ComparisonConfig, analysis_name: str) -> Path:
+    """Return the analysis HPC artifact directory."""
+    source = config.source_path
+    if source is None:
+        return Path("comparison") / analysis_name / "_hpc"
+    return source.parent / "comparison" / analysis_name / "_hpc"
+
+
+def _resolve_manifest_task_condition(
+    manifest,
+    condition_index: int,
+):
+    """Resolve and validate manifest condition index.
+
+    Parameters
+    ----------
+    manifest : AnalysisJobManifest
+        Loaded job manifest.
+    condition_index : int
+        Requested condition index.
+
+    Returns
+    -------
+    ConditionTaskSpec
+        Condition spec from the frozen manifest.
+
+    Raises
+    ------
+    click.ClickException
+        If condition_index is not in manifest bounds.
+    """
+    if condition_index < 0 or condition_index >= len(manifest.condition_specs):
+        raise click.ClickException(
+            f"Condition index {condition_index} is out of range for "
+            f"manifest with {len(manifest.condition_specs)} conditions"
+        )
+    return manifest.condition_specs[condition_index]
+
+
+def _settings_from_manifest(plugin, manifest):
+    """Build plugin settings from the frozen manifest snapshot.
+
+    Parameters
+    ----------
+    plugin : Analysis
+        Analysis plugin instance.
+    manifest : AnalysisJobManifest
+        Loaded job manifest.
+
+    Returns
+    -------
+    BaseModel
+        Parsed plugin settings from manifest snapshot.
+
+    Raises
+    ------
+    click.ClickException
+        If snapshot settings do not validate for the plugin.
+    """
+    try:
+        return plugin.Settings.model_validate(manifest.settings_snapshot)
+    except Exception as exc:
+        raise click.ClickException(
+            f"Invalid settings_snapshot in manifest for analysis '{manifest.analysis_name}': {exc}"
+        ) from exc
 
 
 def _echo_branding() -> None:
@@ -846,3 +915,418 @@ def run_all(
     # Exit with error code if any comparison failed
     if failed:
         sys.exit(1)
+
+
+@compare.command("submit")
+@click.argument("analysis", type=str)
+@click.option(
+    "--comparison-yaml",
+    "comparison_yaml",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Path to comparison.yaml config file.",
+)
+@click.option("--partition", default="aa100", help="SLURM partition.")
+@click.option("--qos", default=None, help="SLURM QoS.")
+@click.option("--account", default=None, help="SLURM account/allocation.")
+@click.option("--pixi-path", default="pixi", show_default=True, help="Path to pixi executable.")
+@click.option("--ntasks", default=1, type=int, show_default=True)
+@click.option("--cpus-per-task", default=1, type=int, show_default=True)
+@click.option("--mem", default="4G", show_default=True, help="SLURM memory request.")
+@click.option("--time", "time_limit", default="01:00:00", show_default=True, help="SLURM walltime.")
+@click.option("--max-retries", default=3, type=int, show_default=True)
+@click.option("--mail-user", default=None, help="Email for failure notifications.")
+@click.option("--recompute", is_flag=True, help="Force recomputation in workers.")
+@click.option(
+    "--allow-partial",
+    is_flag=True,
+    help="Allow finalize to proceed when some conditions are missing aggregated results.",
+)
+@click.option("--equilibration", default=None, help="Override equilibration time.")
+@click.option("--dry-run", is_flag=True, help="Generate scripts without submitting jobs.")
+def submit_analysis_hpc(
+    analysis: str,
+    comparison_yaml: Path,
+    partition: str,
+    qos: str | None,
+    account: str | None,
+    pixi_path: str,
+    ntasks: int,
+    cpus_per_task: int,
+    mem: str,
+    time_limit: str,
+    max_retries: int,
+    mail_user: str | None,
+    recompute: bool,
+    allow_partial: bool,
+    equilibration: str | None,
+    dry_run: bool,
+):
+    """Submit replicate-level SLURM analysis DAG for one plugin."""
+    from polyzymd.analyses.discovery import get_analysis
+    from polyzymd.workflow.analysis_slurm import (
+        AnalysisSlurmResources,
+        build_manifest,
+        generate_aggregate_script,
+        generate_finalize_script,
+        generate_replicate_script,
+        submit_analysis_graph,
+    )
+
+    if not dry_run and shutil.which("sbatch") is None:
+        raise click.ClickException(
+            "SLURM is not available: 'sbatch' not found on PATH. The HPC submission "
+            "commands require a SLURM cluster. Run analysis locally with "
+            "'polyzymd compare run' instead."
+        )
+
+    config = ComparisonConfig.from_yaml(comparison_yaml)
+    analysis_cls = get_analysis(analysis)
+    plugin = analysis_cls()
+    resources = AnalysisSlurmResources(
+        pixi_path=pixi_path,
+        partition=partition,
+        qos=qos,
+        account=account,
+        ntasks=ntasks,
+        cpus_per_task=cpus_per_task,
+        mem=mem,
+        time=time_limit,
+        max_retries=max_retries,
+        mail_user=mail_user,
+    )
+    manifest = build_manifest(
+        plugin,
+        config,
+        resources,
+        recompute,
+        equilibration,
+        allow_partial=allow_partial,
+    )
+    hpc_dir = _resolve_hpc_dir(config, plugin.name)
+    hpc_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = hpc_dir / "manifest.json"
+    manifest.save(manifest_path)
+
+    replicate_count = sum(len(cond.replicate_specs) for cond in manifest.condition_specs)
+    aggregate_count = len(manifest.condition_specs)
+
+    if dry_run:
+        for cond in manifest.condition_specs:
+            for rep in cond.replicate_specs:
+                generate_replicate_script(manifest, rep, resources, hpc_dir)
+            generate_aggregate_script(manifest, cond, resources, hpc_dir)
+        generate_finalize_script(manifest, resources, hpc_dir)
+        total = replicate_count + aggregate_count + 1
+        click.echo(
+            f"Submitted {total} jobs ({replicate_count} replicate + {aggregate_count} aggregate + 1 finalize)"
+        )
+        click.echo("Dry run only: no jobs were submitted")
+        return
+
+    graph = submit_analysis_graph(manifest, resources, hpc_dir)
+    graph.save(hpc_dir / "job_graph.json")
+    total = replicate_count + aggregate_count + 1
+    click.echo(
+        f"Submitted {total} jobs ({replicate_count} replicate + {aggregate_count} aggregate + 1 finalize)"
+    )
+
+
+@compare.command("status")
+@click.argument("analysis", type=str)
+@click.option(
+    "--comparison-yaml",
+    "comparison_yaml",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Path to comparison.yaml config file.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON status.")
+def analysis_hpc_status(analysis: str, comparison_yaml: Path, as_json: bool):
+    """Show status for submitted analysis SLURM DAG."""
+    from polyzymd.analyses.discovery import get_analysis
+    from polyzymd.workflow.analysis_slurm import read_analysis_status
+
+    config = ComparisonConfig.from_yaml(comparison_yaml)
+    analysis_cls = get_analysis(analysis)
+    hpc_dir = _resolve_hpc_dir(config, analysis_cls.name)
+    status = read_analysis_status(hpc_dir)
+    if as_json:
+        click.echo(json.dumps(status, indent=2))
+        return
+
+    counts = status.get("counts", {})
+    click.echo(f"Analysis: {analysis_cls.name}")
+    click.echo(f"HPC dir: {hpc_dir}")
+    click.echo(
+        "States: "
+        f"pending={counts.get('pending', 0)} "
+        f"running={counts.get('running', 0)} "
+        f"retrying={counts.get('retrying', 0)} "
+        f"succeeded={counts.get('succeeded', 0)} "
+        f"failed={counts.get('failed', 0)} "
+        f"unknown={counts.get('unknown', 0)}"
+    )
+    warnings = status.get("warnings", [])
+    if warnings:
+        click.echo("⚠ Warnings:")
+        for warning in warnings:
+            click.echo(f"  - {warning}")
+
+
+@compare.command("finalize")
+@click.argument("analysis", type=str)
+@click.option(
+    "--comparison-yaml",
+    "comparison_yaml",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Path to comparison.yaml config file.",
+)
+@click.option("--recompute", is_flag=True, help="Retained for CLI compatibility.")
+@click.option(
+    "--allow-partial",
+    is_flag=True,
+    help="Allow finalize to proceed when some conditions are missing aggregated results.",
+)
+def finalize_analysis_hpc(
+    analysis: str,
+    comparison_yaml: Path,
+    recompute: bool,
+    allow_partial: bool,
+):
+    """Run comparison + plotting from aggregated on-disk results."""
+    del recompute
+    from polyzymd.analyses.discovery import get_analysis
+    from polyzymd.analyses.orchestrator import (
+        finalize_comparison_from_disk,
+        prepare_comparison_run,
+    )
+    from polyzymd.compare.io.paths import sanitize_label
+
+    config = ComparisonConfig.from_yaml(comparison_yaml)
+    analysis_cls = get_analysis(analysis)
+    plugin = analysis_cls()
+    valid_conditions, settings, equilibration, analysis_root = prepare_comparison_run(
+        plugin,
+        config,
+        None,
+    )
+    analysis_dirs: dict[str, Path] = {}
+    aggregated_results: dict[str, object] = {}
+    for condition in valid_conditions:
+        cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
+        aggregated = plugin._load_aggregated_result(cond_dir / "aggregated")
+        if aggregated is not None:
+            analysis_dirs[condition.label] = cond_dir
+            aggregated_results[condition.label] = aggregated
+
+    missing_conditions = [
+        condition.label
+        for condition in valid_conditions
+        if condition.label not in aggregated_results
+    ]
+    if missing_conditions:
+        click.echo(
+            "Warning: missing aggregated results for condition(s): "
+            f"{', '.join(missing_conditions)}",
+            err=True,
+        )
+        if not allow_partial:
+            raise click.ClickException(
+                "Finalize aborted due to missing aggregated results. "
+                "Re-run failed jobs or pass --allow-partial to continue."
+            )
+
+    effective_control = (
+        config.control
+        if config.control and any(cond.label == config.control for cond in valid_conditions)
+        else None
+    )
+
+    plot_settings = config.plot_settings
+    figures_base = plot_settings.output_dir
+    if not figures_base.is_absolute() and config.source_path is not None:
+        figures_base = config.source_path.parent / figures_base
+    figures_dir = plugin.figures_output_dir(figures_base)
+    results_dir = analysis_root.parent / "comparison" / plugin.name
+
+    config_for_finalize = config.model_copy(deep=True)
+    config_for_finalize.defaults.equilibration_time = equilibration
+    result = finalize_comparison_from_disk(
+        analysis=plugin,
+        config=config_for_finalize,
+        analysis_dirs=analysis_dirs,
+        aggregated_results=aggregated_results,
+        results_dir=results_dir,
+        figures_dir=figures_dir,
+        settings=settings,
+        effective_control=effective_control,
+        allow_partial=allow_partial,
+    )
+    click.echo(f"Saved result: {result['comparison_path']}")
+
+
+@compare.command("worker-replicate", hidden=True)
+@click.option("--manifest", "manifest_path", type=click.Path(path_type=Path), required=True)
+@click.option("--condition-index", type=int, required=True)
+@click.option("--replicate", type=int, required=True)
+def worker_replicate(manifest_path: Path, condition_index: int, replicate: int):
+    """Internal worker command for one replicate compute task."""
+    from polyzymd.analyses.discovery import get_analysis
+    from polyzymd.analyses.orchestrator import run_replicate_once
+    from polyzymd.compare.io.paths import sanitize_label
+    from polyzymd.workflow.analysis_slurm import AnalysisJobManifest, validate_manifest_snapshot
+
+    manifest = AnalysisJobManifest.load(manifest_path)
+    config = ComparisonConfig.from_yaml(Path(manifest.comparison_yaml))
+    analysis_cls = get_analysis(manifest.analysis_name)
+    plugin = analysis_cls()
+    valid_conditions, equilibration, analysis_root = validate_manifest_snapshot(
+        manifest,
+        plugin,
+        config,
+    )
+    settings = _settings_from_manifest(plugin, manifest)
+    cond_spec = _resolve_manifest_task_condition(manifest, condition_index)
+    condition = valid_conditions[condition_index]
+    if condition.label != cond_spec.condition_label:
+        raise click.ClickException(
+            "Manifest/config drift detected: condition labels no longer align with submission"
+        )
+    if replicate not in [spec.replicate for spec in cond_spec.replicate_specs]:
+        raise click.ClickException(
+            f"Replicate {replicate} was not present in submitted manifest for "
+            f"condition '{cond_spec.condition_label}'"
+        )
+    cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
+    run_dir = cond_dir / f"run_{replicate}"
+    result = run_replicate_once(
+        plugin,
+        condition,
+        settings,
+        equilibration,
+        run_dir,
+        replicate,
+        manifest.recompute,
+    )
+    if result is None:
+        raise click.ClickException("Replicate computation produced no result")
+
+
+@compare.command("worker-aggregate", hidden=True)
+@click.option("--manifest", "manifest_path", type=click.Path(path_type=Path), required=True)
+@click.option("--condition-index", type=int, required=True)
+def worker_aggregate(manifest_path: Path, condition_index: int):
+    """Internal worker command for one condition aggregation task."""
+    from polyzymd.analyses.discovery import get_analysis
+    from polyzymd.analyses.orchestrator import aggregate_condition_from_disk
+    from polyzymd.compare.io.paths import sanitize_label
+    from polyzymd.workflow.analysis_slurm import AnalysisJobManifest, validate_manifest_snapshot
+
+    manifest = AnalysisJobManifest.load(manifest_path)
+    config = ComparisonConfig.from_yaml(Path(manifest.comparison_yaml))
+    analysis_cls = get_analysis(manifest.analysis_name)
+    plugin = analysis_cls()
+    valid_conditions, equilibration, analysis_root = validate_manifest_snapshot(
+        manifest,
+        plugin,
+        config,
+    )
+    settings = _settings_from_manifest(plugin, manifest)
+    cond_spec = _resolve_manifest_task_condition(manifest, condition_index)
+    condition = valid_conditions[condition_index]
+    if condition.label != cond_spec.condition_label:
+        raise click.ClickException(
+            "Manifest/config drift detected: condition labels no longer align with submission"
+        )
+    cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
+    aggregate_condition_from_disk(
+        plugin,
+        condition,
+        settings,
+        equilibration,
+        cond_dir,
+        tuple(spec.replicate for spec in cond_spec.replicate_specs),
+    )
+
+
+@compare.command("worker-finalize", hidden=True)
+@click.option("--manifest", "manifest_path", type=click.Path(path_type=Path), required=True)
+def worker_finalize(manifest_path: Path):
+    """Internal worker command for comparison finalization."""
+    from polyzymd.analyses.discovery import get_analysis
+    from polyzymd.analyses.orchestrator import finalize_comparison_from_disk
+    from polyzymd.compare.io.paths import sanitize_label
+    from polyzymd.workflow.analysis_slurm import AnalysisJobManifest, validate_manifest_snapshot
+
+    manifest = AnalysisJobManifest.load(manifest_path)
+    config = ComparisonConfig.from_yaml(Path(manifest.comparison_yaml))
+    analysis_cls = get_analysis(manifest.analysis_name)
+    plugin = analysis_cls()
+    valid_conditions, equilibration, analysis_root = validate_manifest_snapshot(
+        manifest,
+        plugin,
+        config,
+    )
+    settings = _settings_from_manifest(plugin, manifest)
+
+    analysis_dirs: dict[str, Path] = {}
+    aggregated_results: dict[str, object] = {}
+    missing_conditions: list[str] = []
+    for cond_idx, condition in enumerate(valid_conditions):
+        cond_spec = _resolve_manifest_task_condition(manifest, cond_idx)
+        if condition.label != cond_spec.condition_label:
+            raise click.ClickException(
+                "Manifest/config drift detected: condition labels no longer align with submission"
+            )
+        cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
+        aggregated = plugin._load_aggregated_result(cond_dir / "aggregated")
+        if aggregated is not None:
+            analysis_dirs[condition.label] = cond_dir
+            aggregated_results[condition.label] = aggregated
+        else:
+            missing_conditions.append(condition.label)
+
+    partial_policy = getattr(manifest, "partial_policy", "strict")
+    allow_partial = partial_policy == "allow_partial"
+    if missing_conditions:
+        if allow_partial:
+            message = "Proceeding with partial finalize"
+        else:
+            message = "Strict policy enabled; finalize will fail"
+        click.echo(
+            "Warning: missing aggregated results for condition(s): "
+            f"{', '.join(missing_conditions)}. {message}.",
+            err=True,
+        )
+        if not allow_partial:
+            raise click.ClickException(
+                "Finalize aborted due to missing aggregated results under strict policy. "
+                "Re-run failed jobs or submit with --allow-partial."
+            )
+
+    effective_control = (
+        config.control
+        if config.control and any(cond.label == config.control for cond in valid_conditions)
+        else None
+    )
+
+    plot_settings = config.plot_settings
+    figures_base = plot_settings.output_dir
+    if not figures_base.is_absolute() and config.source_path is not None:
+        figures_base = config.source_path.parent / figures_base
+
+    config_for_finalize = config.model_copy(deep=True)
+    config_for_finalize.defaults.equilibration_time = equilibration
+    finalize_comparison_from_disk(
+        analysis=plugin,
+        config=config_for_finalize,
+        analysis_dirs=analysis_dirs,
+        aggregated_results=aggregated_results,
+        results_dir=analysis_root.parent / "comparison" / plugin.name,
+        figures_dir=plugin.figures_output_dir(figures_base),
+        settings=settings,
+        effective_control=effective_control,
+        allow_partial=allow_partial,
+    )
