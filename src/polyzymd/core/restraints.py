@@ -104,7 +104,7 @@ def _parse_selection(selection: str, topology: OpenMMTopology) -> List[int]:
                 "index": atom.index,
                 "name": atom.name.lower() if atom.name else "",
                 "resname": atom.residue.name.lower() if atom.residue else "",
-                "resid": atom.residue.index,  # 0-indexed internally
+                "resid": int(atom.residue.id),  # PDB residue number (resSeq)
                 "chain": atom.residue.chain.id if atom.residue and atom.residue.chain else "",
             }
         )
@@ -131,8 +131,8 @@ def _parse_selection(selection: str, topology: OpenMMTopology) -> List[int]:
         matching = set()
 
         if keyword == "resid":
-            # resid is 1-indexed in selection (matches PDB), 0-indexed internally
-            target_resid = int(value) - 1
+            # resid matches PDB residue number (resSeq) directly
+            target_resid = int(value)
             for atom in atoms_data:
                 if atom["resid"] == target_resid:
                     matching.add(atom["index"])

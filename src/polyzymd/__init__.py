@@ -26,7 +26,7 @@ Note:
     modules require a full pixi environment with OpenMM and OpenFF installed.
 """
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 __author__ = "Joseph R. Laforet Jr."
 __email__ = "jola3134@colorado.edu"
 

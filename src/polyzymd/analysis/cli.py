@@ -17,6 +17,7 @@ from typing import Optional
 
 import click
 
+from polyzymd.cli.colors import echo_logo
 from polyzymd.core.branding import SHORT_CREDIT_LINE
 from polyzymd.core.experimental import echo_experimental_warning
 
@@ -24,8 +25,8 @@ LOGGER = logging.getLogger("polyzymd.analysis")
 
 
 def _echo_branding() -> None:
-    """Print short PolyzyMD branding for top-level analysis commands."""
-    click.echo(SHORT_CREDIT_LINE)
+    """Print the PolyzyMD ASCII logo for top-level analysis commands."""
+    echo_logo()
 
 
 # =============================================================================
