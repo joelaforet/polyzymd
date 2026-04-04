@@ -19,7 +19,7 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
-from polyzymd.analyses.sasa._results import SASAAggregatedResult
+from polyzymd.analyses.sasa._results import SASAAggregatedResult, SASAResult
 from polyzymd.analyses.shared.config_hash import compute_config_hash
 from polyzymd.analyses.shared.loader import (
     TrajectoryLoader,
@@ -146,6 +146,8 @@ class SASAAnalysis(Analysis):
     min_replicates: ClassVar[int] = 1
     Settings: ClassVar[type] = SASASettings
     AggregatedResultClass: ClassVar[type | None] = SASAAggregatedResult
+    ReplicateResultClass: ClassVar[type | None] = SASAResult
+    execution_cost_hint: ClassVar[str] = "high"
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     # SASA is a mean-based observable (all frames contribute, SEM corrected via N_eff)

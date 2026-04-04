@@ -20,7 +20,9 @@ if TYPE_CHECKING:
 
     from polyzymd.analyses.base import PlotContext
     from polyzymd.analyses.sasa._comparison_results import SASAComparisonResult
-    from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
+
+# Runtime import — cast() evaluates the type argument in Python <3.12
+from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
 
 LOGGER = logging.getLogger(__name__)
 
