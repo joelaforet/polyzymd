@@ -6,7 +6,7 @@ import hashlib
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence, cast
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -123,7 +123,7 @@ class SASAAnalysis(Analysis):
     name: ClassVar[str] = "sasa"
     min_replicates: ClassVar[int] = 1
     Settings: ClassVar[type] = SASASettings
-    AggregatedResultClass: ClassVar[type] = SASAAggregatedResult
+    AggregatedResultClass: ClassVar[type | None] = SASAAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
 
@@ -135,7 +135,7 @@ class SASAAnalysis(Analysis):
         from polyzymd.analyses.sasa._results import SASAResult, SASARunResult
         from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
 
-        settings: SASASettings = ctx.settings
+        settings = cast(SASASettings, ctx.settings)
         sim_config = ctx.sim_config
 
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
@@ -216,12 +216,20 @@ class SASAAnalysis(Analysis):
                     replicate,
                 )
 
-            mean_sasa = float(np.nanmean(total)) if total.size else float("nan")
-            std_sasa = float(np.nanstd(total, ddof=0)) if total.size else float("nan")
-            median_sasa = float(np.nanmedian(total)) if total.size else float("nan")
-            min_sasa = float(np.nanmin(total)) if finite_total.size else float("nan")
-            max_sasa = float(np.nanmax(total)) if finite_total.size else float("nan")
-            final_sasa = float(total[-1]) if total.size else float("nan")
+            if finite_total.size:
+                mean_sasa = float(np.mean(finite_total))
+                std_sasa = float(np.std(finite_total, ddof=0))
+                median_sasa = float(np.median(finite_total))
+                min_sasa = float(np.min(finite_total))
+                max_sasa = float(np.max(finite_total))
+                final_sasa = float(total[-1]) if np.isfinite(total[-1]) else float("nan")
+            else:
+                mean_sasa = float("nan")
+                std_sasa = float("nan")
+                median_sasa = float("nan")
+                min_sasa = float("nan")
+                max_sasa = float("nan")
+                final_sasa = float("nan")
 
             sem_sasa: float | None = None
             correlation_time: float | None = None
@@ -316,7 +324,8 @@ class SASAAnalysis(Analysis):
                 ctx.condition.label,
             )
 
-        for run in ctx.settings.runs:
+        settings = cast(SASASettings, ctx.settings)
+        for run in settings.runs:
             entries = []
             for result in results:
                 match = next(
@@ -463,7 +472,8 @@ class SASAAnalysis(Analysis):
             percent_change,
         )
 
-        run_labels_configured = [run.label for run in ctx.settings.runs]
+        settings = cast(SASASettings, ctx.settings)
+        run_labels_configured = [run.label for run in settings.runs]
         summaries: list[SASAConditionSummary] = []
 
         for condition in ctx.conditions:

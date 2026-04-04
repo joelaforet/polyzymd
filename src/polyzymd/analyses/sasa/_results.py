@@ -28,6 +28,15 @@ class SASARunResult(BaseAnalysisResult):
         default=None,
         description="Standard error of the mean (autocorrelation-corrected)",
     )
+    correlation_time_unit: str | None = Field(default=None, description="Unit of correlation time")
+    statistical_inefficiency: float | None = Field(
+        default=None,
+        description="Factor by which variance is inflated due to correlation",
+    )
+    autocorrelation_warning: str | None = Field(
+        default=None,
+        description="Warning if autocorrelation-based statistics may be unreliable",
+    )
 
     n_frames_total: int = Field(..., description="Total frames in trajectory")
     n_frames_used: int = Field(..., description="Frames used after equilibration")
