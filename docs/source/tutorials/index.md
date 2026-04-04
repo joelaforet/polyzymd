@@ -9,6 +9,10 @@ want a worked example with a clear beginning, middle, and end.
   Build your first project scaffold and validate a minimal run.
 - [Analyze a Multi-Condition Study](analysis_complete_workflow.md)
   Follow the full path from finished trajectories to comparison figures.
+- [Measure Surface Accessibility with SASA](sasa_analysis.md)
+  Configure multi-run SASA analysis to quantify polymer shielding effects.
+- [Run Analysis Jobs on a SLURM Cluster](hpc_execution.md)
+  Submit analysis computations as parallel SLURM job DAGs.
 
 ## What Belongs Here
 
@@ -31,4 +35,6 @@ backbone. -->
 :maxdepth: 1
 
 Analyze a Multi-Condition Study <analysis_complete_workflow>
+Measure Surface Accessibility with SASA <sasa_analysis>
+Run Analysis Jobs on SLURM <hpc_execution>
 ```
