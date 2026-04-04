@@ -30,6 +30,7 @@ Usage
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
@@ -175,6 +176,134 @@ def _run_replicates(
     return results, successful, failed
 
 
+def run_replicate_once(
+    analysis: Analysis,
+    condition: Condition,
+    settings: BaseModel,
+    equilibration: str,
+    output_dir: Path,
+    replicate: int,
+    recompute: bool,
+) -> Any:
+    """Run ``compute_replicate()`` for a single replicate and save canonical output.
+
+    Parameters
+    ----------
+    analysis : Analysis
+        Analysis plugin instance.
+    condition : Condition
+        Condition being analyzed.
+    settings : BaseModel
+        Resolved analysis settings.
+    equilibration : str
+        Equilibration time string.
+    output_dir : Path
+        Replicate run directory (for example ``run_1``).
+    replicate : int
+        Replicate number.
+    recompute : bool
+        Whether to force recomputation.
+
+    Returns
+    -------
+    Any
+        Replicate result returned by the plugin.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    result_path = analysis.replicate_result_path(output_dir)
+    ctx = ReplicateContext(
+        condition=condition,
+        replicate=replicate,
+        sim_config=condition.sim_config,
+        output_dir=output_dir,
+        equilibration=equilibration,
+        recompute=recompute,
+        settings=settings,
+        result_path=result_path,
+    )
+    result = analysis.compute_replicate(ctx, replicate)
+    if result is None:
+        return None
+    _check_result_type(result, "compute_replicate", analysis.name)
+    analysis.save_result(result, result_path)
+    return result
+
+
+def aggregate_condition_from_disk(
+    analysis: Analysis,
+    condition: Condition,
+    settings: BaseModel,
+    equilibration: str,
+    output_dir: Path,
+    replicates: Sequence[int],
+) -> Any:
+    """Aggregate one condition by loading replicate results from disk.
+
+    Parameters
+    ----------
+    analysis : Analysis
+        Analysis plugin instance.
+    condition : Condition
+        Condition being aggregated.
+    settings : BaseModel
+        Resolved analysis settings.
+    equilibration : str
+        Equilibration time string.
+    output_dir : Path
+        Analysis output directory for the condition.
+    replicates : Sequence[int]
+        Replicate numbers to load.
+
+    Returns
+    -------
+    Any
+        Aggregated result returned by ``analysis.aggregate()``.
+
+    Raises
+    ------
+    ValueError
+        If fewer than ``analysis.min_replicates`` replicate results are available.
+    """
+    loaded_results: list[Any] = []
+    successful_reps: list[int] = []
+    for rep in replicates:
+        rep_dir = output_dir / f"run_{rep}"
+        result = analysis._load_replicate_result(rep_dir)
+        if result is None:
+            logger.warning(
+                "%s: missing replicate result for '%s' rep %d",
+                analysis.name,
+                condition.label,
+                rep,
+            )
+            continue
+        loaded_results.append(result)
+        successful_reps.append(rep)
+
+    if len(loaded_results) < analysis.min_replicates:
+        raise ValueError(
+            f"{analysis.name}: condition '{condition.label}' has {len(loaded_results)} "
+            f"replicate result(s) on disk, need at least {analysis.min_replicates}."
+        )
+
+    agg_dir = output_dir / "aggregated"
+    agg_dir.mkdir(parents=True, exist_ok=True)
+    agg_result_path = analysis.aggregate_result_path(agg_dir)
+    agg_ctx = AggregateContext(
+        condition=condition,
+        replicates=tuple(successful_reps),
+        output_dir=agg_dir,
+        equilibration=equilibration,
+        settings=settings,
+        result_path=agg_result_path,
+    )
+    aggregated = analysis.aggregate(agg_ctx, loaded_results)
+    _check_result_type(aggregated, "aggregate", analysis.name)
+    if aggregated is not None:
+        analysis.save_result(aggregated, agg_result_path)
+    return aggregated
+
+
 # ---------------------------------------------------------------------------
 # Single-condition analysis
 # ---------------------------------------------------------------------------
@@ -223,9 +352,59 @@ def run_analysis(
         return None
 
     # 1. Compute per-replicate
-    results, successful, failed = _run_replicates(
-        analysis, condition, settings, equilibration, output_dir, recompute
-    )
+    results: list[Any] = []
+    successful: list[int] = []
+    failed: list[int] = []
+    for rep in condition.replicates:
+        rep_dir = output_dir / f"run_{rep}"
+        try:
+            result = run_replicate_once(
+                analysis,
+                condition,
+                settings,
+                equilibration,
+                rep_dir,
+                rep,
+                recompute,
+            )
+            if result is None:
+                logger.warning(
+                    "  Skipping %s rep %d: compute_replicate returned None",
+                    condition.label,
+                    rep,
+                )
+                failed.append(rep)
+                continue
+            results.append(result)
+            successful.append(rep)
+        except FileNotFoundError as e:
+            logger.warning("  Skipping %s rep %d: data not found — %s", condition.label, rep, e)
+            failed.append(rep)
+        except Exception as e:
+            logger.warning(
+                "  Skipping %s rep %d: %s — %s",
+                condition.label,
+                rep,
+                type(e).__name__,
+                e,
+            )
+            failed.append(rep)
+
+    if len(results) < analysis.min_replicates:
+        raise ValueError(
+            f"{analysis.name}: condition '{condition.label}' has {len(results)} successful "
+            f"replicates, need at least {analysis.min_replicates}.  Failed: {failed}"
+        )
+
+    if failed:
+        logger.warning(
+            "  %s: %d replicate(s) failed %s, using %d of %d",
+            condition.label,
+            len(failed),
+            failed,
+            len(results),
+            len(condition.replicates),
+        )
 
     if not analysis.has_aggregate_stage:
         logger.info(f"{analysis.name}: skipping aggregate stage for '{condition.label}'")
@@ -252,6 +431,326 @@ def run_analysis(
     logger.info(f"  Aggregated {len(results)} replicates for '{condition.label}'")
 
     return aggregated
+
+
+def _prepare_conditions_with_filter(
+    analysis: Analysis,
+    config: ComparisonConfig,
+    settings: BaseModel,
+) -> tuple[list[Condition], list[Condition], list[Condition]]:
+    """Build and filter conditions with validation.
+
+    Returns
+    -------
+    tuple[list[Condition], list[Condition], list[Condition]]
+        ``(all_conditions, valid_conditions, excluded_conditions)``.
+    """
+    all_conditions = [Condition.from_condition_config(c) for c in config.conditions]
+    valid_conditions = analysis.filter_conditions(all_conditions, settings=settings)
+
+    valid_ids = [id(c) for c in valid_conditions]
+    input_ids = {id(c) for c in all_conditions}
+    if not set(valid_ids).issubset(input_ids):
+        logger.warning(
+            "%s: filter_conditions() returned conditions not in the original list",
+            analysis.name,
+        )
+    if len(set(valid_ids)) != len(valid_ids):
+        logger.warning(
+            "%s: filter_conditions() returned duplicate conditions — deduplicating",
+            analysis.name,
+        )
+        seen: set[int] = set()
+        deduped: list[Condition] = []
+        for c in valid_conditions:
+            if id(c) not in seen:
+                seen.add(id(c))
+                deduped.append(c)
+        valid_conditions = deduped
+
+    valid_id_set = {id(c) for c in valid_conditions}
+    excluded = [c for c in all_conditions if id(c) not in valid_id_set]
+    return all_conditions, valid_conditions, excluded
+
+
+def prepare_comparison_run(
+    analysis: Analysis,
+    config: ComparisonConfig,
+    equilibration: str | None,
+) -> tuple[list[Condition], BaseModel, str, Path]:
+    """Resolve shared comparison state before compute/aggregate/compare.
+
+    Parameters
+    ----------
+    analysis : Analysis
+        Analysis plugin instance.
+    config : ComparisonConfig
+        Comparison configuration.
+    equilibration : str | None
+        Optional equilibration override.
+
+    Returns
+    -------
+    tuple[list[Condition], BaseModel, str, Path]
+        ``(valid_conditions, settings, equilibration, analysis_root)``.
+    """
+    resolved_equilibration = equilibration or config.defaults.equilibration_time
+    analysis_root = (
+        config.source_path.parent / "analysis" if config.source_path else Path("analysis")
+    )
+    settings = _resolve_settings(analysis, config)
+    _all_conditions, valid_conditions, excluded = _prepare_conditions_with_filter(
+        analysis,
+        config,
+        settings,
+    )
+
+    if excluded:
+        logger.warning(
+            "%s: excluding %d condition(s): %s",
+            analysis.name,
+            len(excluded),
+            [c.label for c in excluded],
+        )
+
+    if len(valid_conditions) < 2:
+        raise ValueError(
+            f"{analysis.name}: need at least 2 valid conditions for comparison. "
+            f"Got {len(valid_conditions)}.  Excluded: {[c.label for c in excluded]}"
+        )
+
+    return valid_conditions, settings, resolved_equilibration, analysis_root
+
+
+def _print_execution_summary(
+    analysis: Analysis,
+    conditions: list[Condition],
+    settings: BaseModel,
+    equilibration: str,
+) -> None:
+    """Print execution summary and warn for potentially slow local runs.
+
+    This helper is messaging-only and does not change execution behavior.
+    """
+    del settings
+    total_replicates = sum(len(condition.replicates) for condition in conditions)
+    logger.info(
+        "%s\n"
+        "  %s — %d conditions × %d total replicate tasks\n"
+        "  Mode: sequential (local)\n"
+        "  Equilibration: %s\n"
+        "%s",
+        "=" * 60,
+        analysis.name,
+        len(conditions),
+        total_replicates,
+        equilibration,
+        "=" * 60,
+    )
+
+    is_expensive = getattr(analysis, "execution_cost_hint", "medium") == "high"
+    many_tasks = total_replicates > 10
+    if not (is_expensive or many_tasks):
+        return
+
+    if shutil.which("sbatch") is not None:
+        logger.warning(
+            "This analysis may take a long time to run locally\n"
+            "Consider submitting to SLURM for parallel execution:\n"
+            "  polyzymd compare submit %s",
+            analysis.name,
+        )
+    else:
+        logger.warning(
+            "This analysis may take a long time to run locally\n"
+            "If you have access to an HPC cluster with SLURM, consider:\n"
+            "  polyzymd compare submit %s",
+            analysis.name,
+        )
+
+
+def finalize_comparison_from_disk(
+    analysis: Analysis,
+    config: ComparisonConfig,
+    analysis_dirs: dict[str, Path],
+    aggregated_results: dict[str, Any],
+    results_dir: Path,
+    figures_dir: Path,
+    settings: BaseModel,
+    effective_control: str | None,
+    allow_partial: bool = False,
+) -> dict[str, Any]:
+    """Run compare and plot using already-aggregated condition results.
+
+    Parameters
+    ----------
+    analysis : Analysis
+        Analysis plugin instance.
+    config : ComparisonConfig
+        Comparison configuration.
+    analysis_dirs : dict[str, Path]
+        Mapping of condition label to analysis directory.
+    aggregated_results : dict[str, Any]
+        Mapping of condition label to aggregated result objects.
+    results_dir : Path
+        Directory for comparison result JSON.
+    figures_dir : Path
+        Output directory for generated figures.
+    settings : BaseModel
+        Resolved analysis settings.
+    effective_control : str | None
+        Control condition label if available in successful conditions.
+    allow_partial : bool, optional
+        If ``True``, proceed with dropped conditions. If ``False``, fail when
+        any configured condition lacks aggregated results.
+
+    Returns
+    -------
+    dict[str, Any]
+        Dictionary with ``comparison``, ``comparison_path``, and ``plots``.
+    """
+    all_conditions, valid_conditions, _excluded_by_filter = _prepare_conditions_with_filter(
+        analysis,
+        config,
+        settings,
+    )
+    condition_by_label = {c.label: c for c in valid_conditions}
+
+    valid_analysis_dirs: dict[str, Path] = {}
+    valid_aggregated_results: dict[str, Any] = {}
+    failed_conditions: list[Condition] = []
+    for label, cond_dir in analysis_dirs.items():
+        condition = condition_by_label.get(label)
+        if condition is None:
+            continue
+        agg_result = aggregated_results.get(label)
+        if analysis.has_aggregate_stage:
+            agg_dir = cond_dir / "aggregated"
+            agg_path = analysis.aggregate_result_path(agg_dir)
+            if agg_result is None and not agg_path.exists():
+                logger.warning(
+                    "%s: missing aggregated result for '%s' at %s",
+                    analysis.name,
+                    label,
+                    agg_path,
+                )
+                failed_conditions.append(condition)
+                continue
+
+        if agg_result is None and analysis.has_aggregate_stage:
+            agg_result = analysis._load_aggregated_result(cond_dir / "aggregated")
+            if agg_result is None:
+                logger.warning(
+                    "%s: failed to load aggregated result for '%s' from %s",
+                    analysis.name,
+                    label,
+                    cond_dir / "aggregated",
+                )
+                failed_conditions.append(condition)
+                continue
+
+        valid_analysis_dirs[label] = cond_dir
+        if agg_result is not None:
+            valid_aggregated_results[label] = agg_result
+
+    successful_labels = set(valid_analysis_dirs.keys())
+    dropped_conditions = [c for c in valid_conditions if c.label not in successful_labels]
+    if dropped_conditions:
+        failed_conditions.extend(
+            [condition for condition in dropped_conditions if condition not in failed_conditions]
+        )
+
+    if failed_conditions and not allow_partial:
+        raise ValueError(
+            f"{analysis.name}: missing aggregated results for condition(s): "
+            f"{[c.label for c in failed_conditions]}. "
+            "Re-run failed condition jobs or pass allow_partial=True to continue."
+        )
+
+    if failed_conditions and allow_partial:
+        logger.warning(
+            "%s: dropped condition(s) during finalize: %s",
+            analysis.name,
+            [c.label for c in failed_conditions],
+        )
+
+    conditions = [c for c in valid_conditions if c.label in valid_analysis_dirs]
+    excluded_conditions = [c for c in all_conditions if c.label not in valid_analysis_dirs]
+
+    if len(conditions) < 2:
+        raise ValueError(
+            f"{analysis.name}: need at least 2 successful conditions to compare after finalize. "
+            f"Got {len(conditions)}."
+        )
+
+    condition_labels = {condition.label for condition in conditions}
+    resolved_control = config.control if config.control is not None else effective_control
+    if resolved_control is not None and resolved_control not in condition_labels:
+        if allow_partial:
+            resolved_control = conditions[0].label
+            logger.warning(
+                "%s: configured control '%s' was dropped; using '%s' as effective control",
+                analysis.name,
+                effective_control,
+                resolved_control,
+            )
+        else:
+            raise ValueError(
+                f"{analysis.name}: control condition '{effective_control}' is missing from "
+                "successful finalized conditions."
+            )
+
+    logger.info(
+        "%s: finalizing comparison with conditions=%s effective_control=%s",
+        analysis.name,
+        [condition.label for condition in conditions],
+        resolved_control,
+    )
+
+    results_dir.mkdir(parents=True, exist_ok=True)
+    comparison_result_path = analysis.comparison_result_path(results_dir)
+    comp_ctx = ComparisonContext(
+        name=config.name,
+        conditions=conditions,
+        excluded_conditions=excluded_conditions,
+        control_label=resolved_control,
+        analysis_dirs=valid_analysis_dirs,
+        results_dir=results_dir,
+        equilibration=config.defaults.equilibration_time,
+        settings=settings,
+        recompute=False,
+        result_path=comparison_result_path,
+        failed_conditions=failed_conditions,
+        aggregated_results=valid_aggregated_results,
+    )
+
+    comparison_result = analysis.compare(comp_ctx)
+    if comparison_result is not None:
+        analysis.save_result(comparison_result, comparison_result_path)
+
+    raw_plot_settings = getattr(config, "plot_settings", None)
+    if raw_plot_settings is None:
+        from polyzymd.compare.config import PlotSettings
+
+        raw_plot_settings = PlotSettings()
+
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    plot_ctx = PlotContext(
+        conditions=conditions,
+        analysis_dirs=valid_analysis_dirs,
+        results_dir=results_dir,
+        output_dir=figures_dir,
+        settings=settings,
+        plot_settings=raw_plot_settings,
+        comparison_path=comparison_result_path,
+        control_label=resolved_control,
+    )
+    plots = analysis.plot(plot_ctx)
+    return {
+        "comparison": comparison_result,
+        "comparison_path": comparison_result_path,
+        "plots": plots,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -351,53 +850,17 @@ def run_comparison(
     """
     from polyzymd.compare.io.paths import sanitize_label
 
-    equilibration = equilibration or config.defaults.equilibration_time
-    analysis_root = (
-        config.source_path.parent / "analysis" if config.source_path else Path("analysis")
+    valid_conditions, settings, equilibration, analysis_root = prepare_comparison_run(
+        analysis,
+        config,
+        equilibration,
     )
-
-    # Resolve settings from config
-    settings = _resolve_settings(analysis, config)
-
-    # 1. Build conditions (loads SimulationConfig for each — required for
-    #    filter_conditions() which may inspect topologies)
-    all_conditions = [Condition.from_condition_config(c) for c in config.conditions]
-
-    # 2. Filter
-    valid_conditions = analysis.filter_conditions(all_conditions, settings=settings)
-    # Validate: filter_conditions must return a subset of the input, no duplicates.
-    # Use identity (id) consistently — Condition objects may not define __eq__.
-    valid_ids = [id(c) for c in valid_conditions]
-    input_ids = {id(c) for c in all_conditions}
-    if not set(valid_ids).issubset(input_ids):
-        logger.warning(
-            f"{analysis.name}: filter_conditions() returned conditions not in the original list"
-        )
-    if len(set(valid_ids)) != len(valid_ids):
-        logger.warning(
-            f"{analysis.name}: filter_conditions() returned duplicate conditions — deduplicating"
-        )
-        seen: set[int] = set()
-        deduped: list[Condition] = []
-        for c in valid_conditions:
-            if id(c) not in seen:
-                seen.add(id(c))
-                deduped.append(c)
-        valid_conditions = deduped
-    valid_id_set = {id(c) for c in valid_conditions}
-    excluded = [c for c in all_conditions if id(c) not in valid_id_set]
-
-    if excluded:
-        logger.warning(
-            f"{analysis.name}: excluding {len(excluded)} condition(s): "
-            f"{[c.label for c in excluded]}"
-        )
-
-    if len(valid_conditions) < 2:
-        raise ValueError(
-            f"{analysis.name}: need at least 2 valid conditions for comparison. "
-            f"Got {len(valid_conditions)}.  Excluded: {[c.label for c in excluded]}"
-        )
+    _print_execution_summary(analysis, valid_conditions, settings, equilibration)
+    all_conditions, _valid_for_excluded, excluded = _prepare_conditions_with_filter(
+        analysis,
+        config,
+        settings,
+    )
 
     # 3. Compute + aggregate per condition
     analysis_dirs: dict[str, Path] = {}
@@ -443,8 +906,6 @@ def run_comparison(
 
     # 4. Compare
     results_dir = analysis_root.parent / "comparison" / analysis.name
-    results_dir.mkdir(parents=True, exist_ok=True)
-    comparison_result_path = analysis.comparison_result_path(results_dir)
 
     # Resolve effective control
     control_label = config.control
@@ -453,25 +914,6 @@ def run_comparison(
         if control_label and any(c.label == control_label for c in valid_conditions)
         else None
     )
-
-    comp_ctx = ComparisonContext(
-        name=config.name,
-        conditions=valid_conditions,
-        excluded_conditions=excluded,
-        control_label=effective_control,
-        analysis_dirs=analysis_dirs,
-        results_dir=results_dir,
-        equilibration=equilibration,
-        settings=settings,
-        recompute=recompute,
-        result_path=comparison_result_path,
-        failed_conditions=failed_conditions,
-        aggregated_results=aggregated_results,
-    )
-
-    comparison_result = analysis.compare(comp_ctx)
-    if comparison_result is not None:
-        analysis.save_result(comparison_result, comparison_result_path)
 
     # 5. Plot
     # Guarantee plot_settings is never None — plugins should not need
@@ -492,26 +934,24 @@ def run_comparison(
         else:
             figures_base = analysis_root.parent / figures_base
     figures_dir = analysis.figures_output_dir(figures_base)
-    figures_dir.mkdir(parents=True, exist_ok=True)
-
-    plot_ctx = PlotContext(
-        conditions=valid_conditions,
+    final_config = config.model_copy(deep=True)
+    final_config.defaults.equilibration_time = equilibration
+    final_result = finalize_comparison_from_disk(
+        analysis=analysis,
+        config=final_config,
         analysis_dirs=analysis_dirs,
+        aggregated_results=aggregated_results,
         results_dir=results_dir,
-        output_dir=figures_dir,
+        figures_dir=figures_dir,
         settings=settings,
-        plot_settings=raw_plot_settings,
-        comparison_path=comparison_result_path,
-        control_label=effective_control,
+        effective_control=effective_control,
     )
-
-    plots = analysis.plot(plot_ctx)
 
     return {
         "aggregated": aggregated_results,
-        "comparison": comparison_result,
-        "comparison_path": comparison_result_path,
-        "plots": plots,
+        "comparison": final_result["comparison"],
+        "comparison_path": final_result["comparison_path"],
+        "plots": final_result["plots"],
     }
 
 
