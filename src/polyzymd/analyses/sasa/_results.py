@@ -48,12 +48,21 @@ class SASARunResult(BaseAnalysisResult):
         description="True when target or context selection matched zero atoms",
     )
 
+    raw_npz_path: str | None = Field(
+        default=None,
+        description="Path to NPZ sidecar with raw SASA traces",
+    )
+    raw_metadata_path: str | None = Field(
+        default=None,
+        description="Path to JSON metadata sidecar for NPZ payload",
+    )
     npz_path: str | None = Field(
-        default=None, description="Path to NPZ sidecar with raw SASA traces"
+        default=None,
+        description="Deprecated alias for raw_npz_path",
     )
     metadata_path: str | None = Field(
         default=None,
-        description="Path to JSON metadata sidecar for NPZ payload",
+        description="Deprecated alias for raw_metadata_path",
     )
     time_unit: str = Field(default="ns", description="Unit of time axis")
     timestep_ps: float | None = Field(default=None, description="Timestep between frames in ps")

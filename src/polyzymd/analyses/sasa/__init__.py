@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -126,6 +127,7 @@ class SASAAnalysis(Analysis):
     AggregatedResultClass: ClassVar[type | None] = SASAAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
+    # SASA is a mean-based observable (all frames contribute, SEM corrected via N_eff)
 
     def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
         """Compute SASA for all configured runs for a single replicate."""
@@ -140,7 +142,8 @@ class SASAAnalysis(Analysis):
 
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
         eq_str = f"eq{eq_value:.2f}{eq_unit}"
-        result_file = ctx.output_dir / f"sasa_{eq_str}.json"
+        settings_token = self._settings_cache_token(settings)
+        result_file = ctx.output_dir / f"sasa_{eq_str}_{settings_token}.json"
 
         cached = self._check_cache(
             SASAResult,
@@ -169,6 +172,7 @@ class SASAAnalysis(Analysis):
             )
 
         run_results: list[SASARunResult] = []
+        ctx.output_dir.mkdir(parents=True, exist_ok=True)
         for run in settings.runs:
             run_token = self._run_cache_token(
                 label=run.label,
@@ -282,6 +286,8 @@ class SASAAnalysis(Analysis):
                     n_context_atoms=int(raw.context_atom_indices.size),
                     n_target_residues=len(raw.residue_keys),
                     zero_atom_selection=zero_atom,
+                    raw_npz_path=str(npz_path),
+                    raw_metadata_path=str(metadata_path),
                     npz_path=str(npz_path),
                     metadata_path=str(metadata_path),
                     time_unit="ns",
@@ -366,12 +372,12 @@ class SASAAnalysis(Analysis):
             for entry in entries:
                 if (
                     entry.zero_atom_selection
-                    or entry.npz_path is None
-                    or entry.metadata_path is None
+                    or entry.raw_npz_path is None
+                    or entry.raw_metadata_path is None
                 ):
                     continue
-                npz_file = Path(entry.npz_path)
-                metadata_file = Path(entry.metadata_path)
+                npz_file = Path(entry.raw_npz_path)
+                metadata_file = Path(entry.raw_metadata_path)
                 if not npz_file.exists() or not metadata_file.exists():
                     continue
                 raw, _metadata = load_sasa_artifacts(npz_file, metadata_file)
@@ -524,9 +530,25 @@ class SASAAnalysis(Analysis):
             if len(available) < 2:
                 continue
 
+            comparable = []
+            for summary in available:
+                run_summary = summary.get_run(run_label)
+                finite_values = [
+                    value for value in run_summary.per_replicate_means if self._is_finite(value)
+                ]
+                if len(finite_values) >= 2 and self._is_finite(run_summary.mean_sasa):
+                    comparable.append(summary)
+
+            if len(comparable) < 2:
+                LOGGER.warning(
+                    "Run '%s' has insufficient finite replicate data across conditions; skipping",
+                    run_label,
+                )
+                continue
+
             run_labels.append(run_label)
             ranked = sorted(
-                available,
+                comparable,
                 key=lambda summary: (
                     not self._is_finite(summary.get_run(run_label).mean_sasa),
                     summary.get_run(run_label).mean_sasa,
@@ -536,12 +558,12 @@ class SASAAnalysis(Analysis):
 
             if effective_control:
                 control_summary = next(
-                    (summary for summary in available if summary.label == effective_control),
+                    (summary for summary in comparable if summary.label == effective_control),
                     None,
                 )
                 if control_summary is not None:
                     control_run = control_summary.get_run(run_label)
-                    for summary in available:
+                    for summary in comparable:
                         if summary.label == effective_control:
                             continue
                         candidate = self._compare_run(
@@ -557,9 +579,9 @@ class SASAAnalysis(Analysis):
                         if candidate is not None:
                             pairwise.append(candidate)
                 else:
-                    for i, summary_a in enumerate(available):
+                    for i, summary_a in enumerate(comparable):
                         run_a = summary_a.get_run(run_label)
-                        for summary_b in available[i + 1 :]:
+                        for summary_b in comparable[i + 1 :]:
                             candidate = self._compare_run(
                                 run_label=run_label,
                                 condition_a=summary_a.label,
@@ -573,9 +595,9 @@ class SASAAnalysis(Analysis):
                             if candidate is not None:
                                 pairwise.append(candidate)
             else:
-                for i, summary_a in enumerate(available):
+                for i, summary_a in enumerate(comparable):
                     run_a = summary_a.get_run(run_label)
-                    for summary_b in available[i + 1 :]:
+                    for summary_b in comparable[i + 1 :]:
                         candidate = self._compare_run(
                             run_label=run_label,
                             condition_a=summary_a.label,
@@ -589,9 +611,9 @@ class SASAAnalysis(Analysis):
                         if candidate is not None:
                             pairwise.append(candidate)
 
-            if len(available) >= 3:
+            if len(comparable) >= 3:
                 groups = []
-                for summary in available:
+                for summary in comparable:
                     values = [
                         v
                         for v in summary.get_run(run_label).per_replicate_means
@@ -681,6 +703,12 @@ class SASAAnalysis(Analysis):
         digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
         safe_label = label.replace(" ", "_").replace("-", "_").replace("/", "_").lower()
         return f"{safe_label}_{digest}"
+
+    @staticmethod
+    def _settings_cache_token(settings: SASASettings) -> str:
+        """Build a stable token for SASA settings-based cache invalidation."""
+        payload = json.dumps(settings.model_dump(mode="json"), sort_keys=True)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
     @staticmethod
     def _compare_run(

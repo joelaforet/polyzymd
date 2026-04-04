@@ -19,7 +19,10 @@ from polyzymd.analyses.sasa._comparison_results import (
 )
 from polyzymd.analyses.sasa._formatters import format_sasa_comparison
 from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
-from polyzymd.analyses.sasa._plotters import _sanitize_run_label
+from polyzymd.analyses.sasa._plotters import (
+    _load_replicate_timeseries_from_results,
+    _sanitize_run_label,
+)
 from polyzymd.analyses.sasa._results import (
     SASAAggregatedResult,
     SASAResult,
@@ -58,6 +61,8 @@ def _make_run_result(replicate: int, label: str, mean: float) -> SASARunResult:
         n_context_atoms=200,
         n_target_residues=5,
         zero_atom_selection=False,
+        raw_npz_path=None,
+        raw_metadata_path=None,
         npz_path=None,
         metadata_path=None,
         time_unit="ns",
@@ -203,6 +208,76 @@ def test_compute_replicate_zero_atom_path(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert np.isnan(result.run_results[0].mean_sasa)
 
 
+def test_cache_invalidation_includes_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Replicate cache filenames should vary when SASA settings change."""
+    analysis = SASAAnalysis()
+    condition = _make_condition("cond")
+
+    seen_paths: list[Path] = []
+
+    def _fake_check_cache(result_cls, cache_path, **kwargs):  # noqa: ARG001
+        seen_paths.append(cache_path)
+        return {"cached": True}
+
+    monkeypatch.setattr(analysis, "_check_cache", _fake_check_cache)
+
+    settings_a = SASASettings(
+        runs=[SASARunSettings(label="protein", target_selection="chainid A")],
+        probe_radius_nm=0.14,
+        n_sphere_points=960,
+    )
+    settings_b = SASASettings(
+        runs=[SASARunSettings(label="protein", target_selection="chainid A")],
+        probe_radius_nm=0.20,
+        n_sphere_points=960,
+    )
+
+    ctx_a = make_replicate_context(
+        condition=condition,
+        replicate=1,
+        output_dir=tmp_path / "run_a",
+        settings=settings_a,
+        equilibration="10ns",
+    )
+    ctx_b = make_replicate_context(
+        condition=condition,
+        replicate=1,
+        output_dir=tmp_path / "run_b",
+        settings=settings_b,
+        equilibration="10ns",
+    )
+
+    assert analysis.compute_replicate(ctx_a, 1) == {"cached": True}
+    assert analysis.compute_replicate(ctx_b, 1) == {"cached": True}
+    assert len(seen_paths) == 2
+    assert seen_paths[0].name != seen_paths[1].name
+
+
+def test_settings_cache_token_changes_on_run_parameters() -> None:
+    """Settings cache token should change when run parameters change."""
+    settings_a = SASASettings(
+        runs=[SASARunSettings(label="protein", target_selection="chainid A")],
+        probe_radius_nm=0.14,
+        n_sphere_points=960,
+    )
+    settings_b = SASASettings(
+        runs=[
+            SASARunSettings(
+                label="protein",
+                target_selection="chainid A and name CA",
+                context_selection="chainid A",
+            )
+        ],
+        probe_radius_nm=0.14,
+        n_sphere_points=960,
+    )
+    token_a = SASAAnalysis._settings_cache_token(settings_a)
+    token_b = SASAAnalysis._settings_cache_token(settings_b)
+    assert token_a != token_b
+
+
 def test_aggregate_nan_handling(tmp_path: Path) -> None:
     """aggregate should handle NaN replicate means gracefully."""
     analysis = SASAAnalysis()
@@ -302,6 +377,152 @@ def test_compare_and_format(tmp_path: Path) -> None:
     assert comparison.run_labels == ["protein"]
     text = analysis.format(comparison, "table")
     assert "SASA Comparison" in text
+
+
+def test_compare_skips_all_nan_runs(tmp_path: Path) -> None:
+    """Comparison should skip runs with all-NaN replicate values."""
+    analysis = SASAAnalysis()
+    settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
+
+    control = _make_condition("control")
+    treated = _make_condition("treated")
+    nan_run = _make_agg_run("protein", [float("nan"), float("nan"), float("nan")])
+    aggregated_results = {
+        "control": SASAAggregatedResult(
+            config_hash="hash",
+            polyzymd_version="1.0.0",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="chainid A",
+            replicates=[1, 2, 3],
+            n_replicates=3,
+            run_results=[nan_run],
+            source_result_files=[],
+        ),
+        "treated": SASAAggregatedResult(
+            config_hash="hash",
+            polyzymd_version="1.0.0",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="chainid A",
+            replicates=[1, 2, 3],
+            n_replicates=3,
+            run_results=[nan_run],
+            source_result_files=[],
+        ),
+    }
+
+    ctx = ComparisonContext(
+        name="sasa_compare_nan",
+        conditions=[control, treated],
+        excluded_conditions=[],
+        control_label="control",
+        analysis_dirs={"control": tmp_path / "control", "treated": tmp_path / "treated"},
+        results_dir=tmp_path / "comparison",
+        equilibration="10ns",
+        settings=settings,
+        recompute=False,
+        aggregated_results=aggregated_results,
+    )
+    assert analysis.compare(ctx) is None
+
+
+def test_timeseries_loader_uses_raw_npz_path_contract(tmp_path: Path) -> None:
+    """Timeseries loader should use raw_npz_path from result payload."""
+    condition_dir = tmp_path / "condition"
+    run_dir = condition_dir / "run_1"
+    run_dir.mkdir(parents=True)
+
+    npz_path = run_dir / "sasa_custom_token_abc123.npz"
+    np.savez_compressed(
+        npz_path,
+        total_sasa_a2=np.asarray([10.0, 12.0, 11.0], dtype=np.float64),
+        time_ns=np.asarray([0.0, 0.01, 0.02], dtype=np.float64),
+    )
+    payload = {
+        "run_results": [
+            {
+                "run_label": "protein",
+                "raw_npz_path": str(npz_path),
+            }
+        ]
+    }
+    (run_dir / "result.json").write_text(str(payload).replace("'", '"'), encoding="utf-8")
+
+    time_ns, matrix = _load_replicate_timeseries_from_results(condition_dir, "protein")
+    assert time_ns.size == 3
+    assert matrix.shape == (1, 3)
+
+
+def test_compute_replicate_stores_raw_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """compute_replicate should populate raw NPZ and metadata paths in run results."""
+    analysis = SASAAnalysis()
+    condition = _make_condition("cond")
+    settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
+    ctx = make_replicate_context(
+        condition=condition,
+        replicate=1,
+        output_dir=tmp_path / "run_1",
+        settings=settings,
+        equilibration="0ns",
+    )
+
+    class _FakeLoader:
+        def __init__(self, _config: object) -> None:
+            pass
+
+        def load_universe(self, replicate: int, cache: bool = False):  # noqa: ARG002
+            return MagicMock(trajectory=list(range(5)))
+
+        def get_trajectory_info(self, replicate: int):  # noqa: ARG002
+            info = MagicMock()
+            info.trajectory_files = [Path("/fake/traj.dcd")]
+            return info
+
+        def get_timestep(self, replicate: int, unit: str = "ps"):  # noqa: ARG002
+            return 10.0
+
+    from polyzymd.analyses.shared.sasa import SASAComputationResult
+
+    def _fake_compute_sasa(*args, **kwargs):  # noqa: ARG001
+        return SASAComputationResult(
+            atom_sasa_a2=np.asarray([[1.0]], dtype=np.float64),
+            residue_sasa_a2=np.asarray([[1.0]], dtype=np.float64),
+            total_sasa_a2=np.asarray([1.0], dtype=np.float64),
+            frames=np.asarray([0], dtype=np.int64),
+            time_ns=np.asarray([0.0], dtype=np.float64),
+            target_atom_indices=np.asarray([0], dtype=np.int64),
+            context_atom_indices=np.asarray([0], dtype=np.int64),
+            residue_keys=["A:1:ALA"],
+            residue_chainids=["A"],
+            residue_resids=[1],
+            residue_resnames=["ALA"],
+        )
+
+    def _fake_save(npz_path, metadata_path, result, **kwargs):  # noqa: ARG001
+        np.savez_compressed(
+            npz_path,
+            total_sasa_a2=np.asarray([1.0], dtype=np.float64),
+            time_ns=np.asarray([0.0], dtype=np.float64),
+        )
+        Path(metadata_path).write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr("polyzymd.analyses.sasa.TrajectoryLoader", _FakeLoader)
+    monkeypatch.setattr("polyzymd.analyses.sasa.compute_config_hash", lambda _cfg: "hash")
+    monkeypatch.setattr("polyzymd.analyses.sasa.compute_sasa", _fake_compute_sasa)
+    monkeypatch.setattr("polyzymd.analyses.sasa.save_sasa_artifacts", _fake_save)
+    monkeypatch.setattr(analysis, "_check_cache", lambda *args, **kwargs: None)
+
+    result = analysis.compute_replicate(ctx, 1)
+    run_result = result.run_results[0]
+    assert run_result.raw_npz_path is not None
+    assert run_result.raw_metadata_path is not None
+    assert run_result.npz_path == run_result.raw_npz_path
+    assert run_result.metadata_path == run_result.raw_metadata_path
 
 
 def test_plot_helper_sanitize_label() -> None:

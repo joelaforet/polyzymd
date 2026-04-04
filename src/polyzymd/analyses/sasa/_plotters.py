@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
@@ -32,7 +32,7 @@ def plot_sasa_comparison_bars(
     import matplotlib.pyplot as plt
     import numpy as np
 
-    plot_settings = _get_plot_settings(ctx)
+    plot_settings = cast(SASAPlotSettings, _get_plot_settings(ctx))
     generated: list[Path] = []
 
     for run_label in comparison_result.run_labels:
@@ -57,7 +57,7 @@ def plot_sasa_comparison_bars(
         positions = np.arange(len(labels), dtype=np.float64)
         colors = get_colors(len(labels), ctx.plot_settings)
 
-        fig, ax = plt.subplots(figsize=plot_settings.figsize)
+        fig, ax = plt.subplots(figsize=plot_settings.figsize)  # type: ignore[attr-defined]
         theme = ctx.plot_settings.theme
         ax.bar(
             positions,
@@ -108,16 +108,13 @@ def plot_sasa_timeseries(ctx: PlotContext, comparison_result: SASAComparisonResu
     import matplotlib.pyplot as plt
     import numpy as np
 
-    plot_settings = _get_plot_settings(ctx)
+    plot_settings = cast(SASAPlotSettings, _get_plot_settings(ctx))
     condition_labels = [condition.label for condition in comparison_result.conditions]
     colors = get_colors(len(condition_labels), ctx.plot_settings)
-    replicates_by_condition = {
-        condition.label: list(condition.replicates) for condition in ctx.conditions
-    }
 
     generated: list[Path] = []
     for run_label in comparison_result.run_labels:
-        fig, ax = plt.subplots(figsize=plot_settings.timeseries_figsize)
+        fig, ax = plt.subplots(figsize=plot_settings.timeseries_figsize)  # type: ignore[attr-defined]
         had_data = False
 
         for idx, condition_label in enumerate(condition_labels):
@@ -125,8 +122,7 @@ def plot_sasa_timeseries(ctx: PlotContext, comparison_result: SASAComparisonResu
             if condition_dir is None:
                 continue
 
-            replicates = replicates_by_condition.get(condition_label, [])
-            time_ns, sasa_matrix = _load_replicate_timeseries(condition_dir, run_label, replicates)
+            time_ns, sasa_matrix = _load_replicate_timeseries_from_results(condition_dir, run_label)
             if time_ns.size == 0 or sasa_matrix.size == 0:
                 continue
 
@@ -139,7 +135,7 @@ def plot_sasa_timeseries(ctx: PlotContext, comparison_result: SASAComparisonResu
             else:
                 sem_sasa = np.zeros_like(mean_sasa)
 
-            if plot_settings.show_per_replicate:
+            if plot_settings.show_per_replicate:  # type: ignore[attr-defined]
                 for row in sasa_matrix:
                     ax.plot(time_ns, row, color=color, linewidth=0.8, alpha=0.25, zorder=1)
 
@@ -172,7 +168,7 @@ def plot_sasa_timeseries(ctx: PlotContext, comparison_result: SASAComparisonResu
             bbox_to_anchor=(1.02, 0.5),
             borderaxespad=0,
         )
-        fig.tight_layout(rect=[0, 0, 0.78, 1])
+        fig.tight_layout(rect=(0.0, 0.0, 0.78, 1.0))
 
         output_path = get_output_path(
             ctx.output_dir,
@@ -191,13 +187,13 @@ def plot_sasa_residue_profiles(
     import matplotlib.pyplot as plt
     import numpy as np
 
-    plot_settings = _get_plot_settings(ctx)
+    plot_settings = cast(SASAPlotSettings, _get_plot_settings(ctx))
     condition_labels = [condition.label for condition in comparison_result.conditions]
     colors = get_colors(len(condition_labels), ctx.plot_settings)
     generated: list[Path] = []
 
     for run_label in comparison_result.run_labels:
-        fig, ax = plt.subplots(figsize=plot_settings.profile_figsize)
+        fig, ax = plt.subplots(figsize=plot_settings.profile_figsize)  # type: ignore[attr-defined]
         had_data = False
 
         for idx, condition_label in enumerate(condition_labels):
@@ -252,7 +248,7 @@ def plot_sasa_residue_profiles(
             bbox_to_anchor=(1.02, 0.5),
             borderaxespad=0,
         )
-        fig.tight_layout(rect=[0, 0, 0.78, 1])
+        fig.tight_layout(rect=(0.0, 0.0, 0.78, 1.0))
 
         output_path = get_output_path(
             ctx.output_dir,
@@ -264,25 +260,35 @@ def plot_sasa_residue_profiles(
     return generated
 
 
-def _load_replicate_timeseries(
+def _load_replicate_timeseries_from_results(
     condition_dir: Path,
     run_label: str,
-    replicates: list[int],
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Load per-replicate SASA timeseries for one condition and run."""
+    """Load per-replicate SASA timeseries using saved raw NPZ paths."""
     import numpy as np
+
+    condition_payload = _load_condition_result_payloads(condition_dir)
+    if not condition_payload:
+        return np.array([], dtype=np.float64), np.empty((0, 0), dtype=np.float64)
 
     times: list[np.ndarray] = []
     traces: list[np.ndarray] = []
-    for replicate in replicates:
-        npz_path = condition_dir / f"run_{replicate}" / f"sasa_{run_label}_timeseries.npz"
+    for run_result in condition_payload:
+        if run_result.get("run_label") != run_label:
+            continue
+
+        npz_value = run_result.get("raw_npz_path") or run_result.get("npz_path")
+        if not npz_value:
+            continue
+
+        npz_path = Path(npz_value)
         if not npz_path.exists():
             continue
         try:
             with np.load(npz_path) as payload:
                 total_sasa = np.asarray(payload["total_sasa_a2"], dtype=np.float64)
                 time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
-        except Exception as exc:  # noqa: BLE001
+        except (FileNotFoundError, KeyError, ValueError) as exc:
             LOGGER.warning("Failed to load SASA NPZ sidecar %s: %s", npz_path, exc)
             continue
 
@@ -309,9 +315,30 @@ def _load_condition_aggregated(condition_dir: Path) -> dict | None:
         return None
     try:
         return json.loads(agg_path.read_text(encoding="utf-8"))
-    except Exception as exc:  # noqa: BLE001
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
         LOGGER.warning("Failed to load aggregated SASA JSON %s: %s", agg_path, exc)
         return None
+
+
+def _load_condition_result_payloads(condition_dir: Path) -> list[dict]:
+    """Load all per-replicate result payloads for one condition."""
+    payloads: list[dict] = []
+    for run_dir in sorted(condition_dir.glob("run_*")):
+        candidates = [run_dir / "result.json", *sorted(run_dir.glob("sasa_*.json"))]
+        existing = [path for path in candidates if path.exists()]
+        if not existing:
+            continue
+        result_path = existing[-1]
+        try:
+            data = json.loads(result_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            LOGGER.warning("Failed to load SASA result JSON %s: %s", result_path, exc)
+            continue
+
+        for run_result in data.get("run_results", []):
+            if isinstance(run_result, dict):
+                payloads.append(run_result)
+    return payloads
 
 
 def _get_plot_settings(ctx: PlotContext) -> SASAPlotSettings:
@@ -320,9 +347,8 @@ def _get_plot_settings(ctx: PlotContext) -> SASAPlotSettings:
 
     if PlotSettingsRegistry.is_registered("sasa"):
         settings_class = PlotSettingsRegistry.get("sasa")
-        return getattr(ctx.plot_settings, "sasa", settings_class())
-
-    from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
+        settings = getattr(ctx.plot_settings, "sasa", settings_class())
+        return cast(SASAPlotSettings, settings)
 
     return SASAPlotSettings()
 

@@ -190,15 +190,20 @@ def compute_sasa(
         role="context",
         run_label=run_label,
     )
-    validate_target_subset(
-        target_indices,
-        context_indices,
-        run_label=run_label,
-        target_selection=target_selection,
-        context_selection=context_selection,
-    )
-
     n_frames = max(0, stop_frame - start_frame)
+    if context_indices.size == 0:
+        LOGGER.warning(
+            "Run '%s' context selection matched zero atoms (%r); returning NaN SASA metrics",
+            run_label,
+            context_selection,
+        )
+    if target_indices.size == 0:
+        LOGGER.warning(
+            "Run '%s' target selection matched zero atoms (%r); returning NaN SASA metrics",
+            run_label,
+            target_selection,
+        )
+
     if target_indices.size == 0 or context_indices.size == 0 or n_frames == 0:
         frames = np.arange(start_frame, stop_frame, dtype=np.int64)
         time_ns = (frames.astype(np.float64) * timestep_ps) / 1000.0
@@ -215,6 +220,14 @@ def compute_sasa(
             residue_resids=[],
             residue_resnames=[],
         )
+
+    validate_target_subset(
+        target_indices,
+        context_indices,
+        run_label=run_label,
+        target_selection=target_selection,
+        context_selection=context_selection,
+    )
 
     context_index_to_local = {int(idx): i for i, idx in enumerate(context_indices.tolist())}
     target_local_indices = np.asarray(
@@ -244,12 +257,15 @@ def compute_sasa(
         xyz_nm[out_idx] = context_atoms.positions.astype(np.float32) / 10.0
 
     mdtraj_traj = md.Trajectory(xyz=xyz_nm, topology=template.topology)
-    atom_sasa_nm2 = md.shrake_rupley(
-        mdtraj_traj,
-        mode="atom",
-        probe_radius=probe_radius_nm,
-        n_sphere_points=n_sphere_points,
-    ).astype(np.float64)
+    atom_sasa_nm2 = np.asarray(
+        md.shrake_rupley(
+            mdtraj_traj,
+            mode="atom",
+            probe_radius=probe_radius_nm,
+            n_sphere_points=n_sphere_points,
+        ),
+        dtype=np.float64,
+    )
 
     atom_sasa_target_a2 = atom_sasa_nm2[:, target_local_indices] * NM2_TO_A2
     residue_sasa_a2 = np.empty((n_frames, len(residue_items)), dtype=np.float64)

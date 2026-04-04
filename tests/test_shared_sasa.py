@@ -191,3 +191,30 @@ def test_compute_sasa_enforces_subset(monkeypatch: pytest.MonkeyPatch) -> None:
             stop_frame=2,
             timestep_ps=10.0,
         )
+
+
+def test_compute_sasa_zero_context_returns_nan(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """compute_sasa should return NaN traces when context selection is empty."""
+    target = _FakeAtomGroup([_FakeAtom(1, "A", 1, "ALA")])
+    empty = _FakeAtomGroup([])
+    universe = _FakeUniverse({"target": target, "context": empty}, n_frames=3)
+
+    with caplog.at_level("WARNING"):
+        result = compute_sasa(
+            universe,
+            run_label="zero_context",
+            target_selection="target",
+            context_selection="context",
+            probe_radius_nm=0.14,
+            n_sphere_points=960,
+            start_frame=0,
+            stop_frame=3,
+            timestep_ps=10.0,
+        )
+
+    assert result.total_sasa_a2.shape == (3,)
+    assert np.all(np.isnan(result.total_sasa_a2))
+    assert "context selection matched zero atoms" in caplog.text
