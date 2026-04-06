@@ -24,7 +24,7 @@ control: "No Polymer"  # optional
 
 conditions:
   - label: "No Polymer"
-    config: "../no_polymer/config.yaml"
+    config: "no_polymer/config.yaml"
     replicates: [1, 2, 3]
 
 defaults:
@@ -37,7 +37,7 @@ plugins:
 
 ## Stable Plugin Keys
 
-Stable release workflows for `v1.3.0`:
+Stable analysis plugins:
 
 - `rmsd`
 - `rg`
@@ -78,6 +78,9 @@ Experimental but still available:
 | `polyzymd compare finalize ANALYSIS` | Run comparison + plotting from on-disk aggregated results |
 
 ## Common Stable Commands
+
+All commands below assume you are inside the pixi environment
+(`pixi shell -e build`) or are prefixed with `pixi run -e build`.
 
 ```bash
 polyzymd compare run rmsd
