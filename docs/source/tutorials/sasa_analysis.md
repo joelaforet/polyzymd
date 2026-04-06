@@ -5,6 +5,23 @@ Area) analysis plugin to measure how polymer conjugation affects enzyme surface
 exposure. By the end, you will have configured a multi-run SASA analysis,
 executed it, and interpreted the comparison results.
 
+```{admonition} Page structure note
+:class: tip
+
+This page is primarily a **tutorial** (learning-oriented, guided workflow).
+Some sections contain reference-style and explanation-style content that
+supports the tutorial flow:
+
+- *What SASA Measures* and *Target vs Context Selections* provide conceptual
+  background (explanation mode).
+- *Common Configurations* and *Result Models* are recipe/reference material.
+
+These are kept inline for convenience. For a cleaner separation, consult the
+[Comparison Reference](../reference/analysis_comparison_reference.md) for
+lookup tables and the [Explanation](../explanation/index.md) section for
+deeper conceptual content.
+```
+
 ## What SASA Measures
 
 Solvent Accessible Surface Area quantifies how much of a protein's surface is
@@ -194,7 +211,7 @@ pixi run -e build polyzymd compare submit sasa \
 ```
 
 This submits a DAG of SLURM jobs that process replicates in parallel. See
-{doc}`hpc_execution` for the full HPC tutorial, including dry runs, monitoring,
+{doc}`../how_to/hpc_execution` for the full HPC guide, including dry runs, monitoring,
 and troubleshooting.
 
 :::{tip}
@@ -208,7 +225,7 @@ for systems with 50,000+ atoms.
 ### Comparison JSON
 
 The comparison result is saved to
-`comparison/sasa/sasa_comparison.json`. It contains:
+`comparison/sasa/result.json`. It contains:
 
 - **Per-condition summaries** with mean SASA ± SEM for each run
 - **Pairwise comparisons** between conditions for each run (t-test, Cohen's d,
@@ -294,15 +311,22 @@ The SASA plugin generates three types of plots:
 
 | Plot | File pattern | What it shows |
 |------|-------------|---------------|
-| **Comparison bars** | `sasa_bars_<run>.png` | Mean SASA ± SEM per condition, with replicate scatter points |
+| **Comparison bars** | `sasa_comparison_<run>.png` | Mean SASA ± SEM per condition, with replicate scatter points |
 | **Time series** | `sasa_timeseries_<run>.png` | Per-frame SASA traces overlaid for each condition |
-| **Residue profiles** | `sasa_residue_<run>.png` | Per-residue mean SASA across conditions |
+| **Residue profiles** | `sasa_profile_<run>.png` | Per-residue mean SASA across conditions |
 
 The bar plots are the most informative for quick assessment. Look for
 conditions where the `protein_with_polymer` bar is significantly lower than
 the `protein_isolated` bar — this is the polymer shielding signal.
 
 ## Common Configurations
+
+:::{admonition} Recipe collection (how-to mode)
+:class: note
+
+The configurations below are **task-oriented recipes** rather than step-by-step
+tutorial content. Use them as starting points for your own SASA analysis.
+:::
 
 ### Minimal: whole-protein SASA only
 
@@ -404,6 +428,13 @@ plugin still computes autocorrelation-corrected SEM on the subsampled data.
 
 ## Result Models
 
+:::{admonition} Reference material
+:class: note
+
+This section is **reference-style** content for plugin developers and advanced
+users who need to inspect the data models programmatically.
+:::
+
 For plugin developers or advanced users, the SASA result hierarchy is:
 
 | Model | Level | Key fields |
@@ -428,7 +459,7 @@ After following this tutorial, you have:
 
 ## See Also
 
-- {doc}`hpc_execution` — Submitting analysis jobs to SLURM
+- {doc}`../how_to/hpc_execution` — Submitting analysis jobs to SLURM
 - {doc}`analysis_compare_conditions` — Setting up comparison.yaml
 - {doc}`extending_analyses` — Writing your own analysis plugin
 - {doc}`analysis_statistics_best_practices` — Autocorrelation and uncertainty
