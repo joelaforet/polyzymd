@@ -56,7 +56,7 @@ marking the task as failed.
 
 ## The Example Study
 
-This tutorial uses a CALB enzyme study with three conditions:
+This guide uses a CALB enzyme study with three conditions:
 
 ```text
 calb_study/
@@ -122,7 +122,7 @@ that paths, partition names, and resource requests are correct.
 
 ```bash
 pixi run -e build polyzymd compare submit sasa \
-    --comparison-yaml comparison.yaml \
+    -f comparison.yaml \
     --partition aa100 \
     --mem 8G \
     --time 02:00:00 \
@@ -171,7 +171,7 @@ Once you are satisfied with the dry run, submit for real:
 
 ```bash
 pixi run -e build polyzymd compare submit sasa \
-    --comparison-yaml comparison.yaml \
+    -f comparison.yaml \
     --partition aa100 \
     --mem 8G \
     --time 02:00:00
@@ -200,7 +200,7 @@ Check the status of your submitted DAG at any time:
 
 ```bash
 pixi run -e build polyzymd compare status sasa \
-    --comparison-yaml comparison.yaml
+    -f comparison.yaml
 ```
 
 Sample output:
@@ -208,7 +208,7 @@ Sample output:
 ```text
 Analysis: sasa
 HPC dir: /path/to/calb_study/comparison/sasa/_hpc
-States: pending=0 running=2 retrying=0 succeeded=7 failed=0 unknown=0
+States: pending=0 running=2 retrying=0 succeeded=7 completed=0 failed=0 unknown=0
 ```
 
 The status reads JSON files that each worker updates atomically. The states
@@ -220,6 +220,7 @@ are:
 | `running` | Worker is currently executing |
 | `retrying` | Worker failed but is requeued for another attempt |
 | `succeeded` | Worker completed successfully |
+| `completed` | Task finished (used by finalize job) |
 | `failed` | Worker exhausted all retries |
 | `unknown` | Status file is corrupted or unreadable |
 
@@ -227,8 +228,22 @@ For machine-readable output (useful in scripts), add `--json`:
 
 ```bash
 pixi run -e build polyzymd compare status sasa \
-    --comparison-yaml comparison.yaml --json
+    -f comparison.yaml --json
 ```
+
+### Reconciling status with SLURM
+
+If workers were preempted or cancelled externally, the local status files may
+be stale. Use `--reconcile` to query `sacct` and update status files
+atomically:
+
+```bash
+pixi run -e build polyzymd compare status sasa \
+    -f comparison.yaml --reconcile
+```
+
+This checks all `pending`, `running`, and `retrying` tasks against SLURM's
+accounting database and updates any that have reached a terminal state.
 
 You can also use standard SLURM tools alongside PolyzyMD status:
 
@@ -251,13 +266,13 @@ Run finalize manually:
 
 ```bash
 pixi run -e build polyzymd compare finalize sasa \
-    --comparison-yaml comparison.yaml
+    -f comparison.yaml
 ```
 
 Output:
 
 ```text
-Saved result: /path/to/calb_study/comparison/sasa/sasa_comparison.json
+Saved result: /path/to/calb_study/comparison/sasa/result.json
 ```
 
 The finalize step runs `compare()` (cross-condition statistics) and `plot()`
@@ -270,7 +285,7 @@ If some conditions failed but you still want partial results, pass
 
 ```bash
 pixi run -e build polyzymd compare finalize sasa \
-    --comparison-yaml comparison.yaml --allow-partial
+    -f comparison.yaml --allow-partial
 ```
 
 You will see a warning listing the missing conditions, but the comparison
@@ -286,7 +301,7 @@ PATH. Use `--pixi-path` to provide the absolute path:
 
 ```bash
 pixi run -e build polyzymd compare submit sasa \
-    --comparison-yaml comparison.yaml \
+    -f comparison.yaml \
     --pixi-path /home/youruser/.pixi/bin/pixi \
     --partition aa100
 ```
@@ -302,7 +317,7 @@ memory allocation:
 
 ```bash
 pixi run -e build polyzymd compare submit sasa \
-    --comparison-yaml comparison.yaml \
+    -f comparison.yaml \
     --mem 16G \
     --partition aa100
 ```
@@ -317,7 +332,7 @@ Increase the wall-time limit:
 
 ```bash
 pixi run -e build polyzymd compare submit sasa \
-    --comparison-yaml comparison.yaml \
+    -f comparison.yaml \
     --time 04:00:00 \
     --partition aa100
 ```
@@ -350,6 +365,28 @@ Check `polyzymd compare status` to identify the failed conditions, inspect
 their logs, fix the issue, and resubmit. Alternatively, use `--allow-partial`
 to finalize with available data.
 
+### Job preempted on a shared partition
+
+If your cluster uses preemption, jobs may be killed and requeued
+automatically. PolyzyMD workers handle this via `#SBATCH --requeue` and
+built-in retry logic. If a worker exhausts all retries due to repeated
+preemption:
+
+1. Increase `--max-retries` (default: 3) when submitting.
+2. Use `--reconcile` with `polyzymd compare status` to sync stale status files.
+3. Target a non-preemptible partition or QoS if available.
+
+### Why `afterany` instead of `afterok`?
+
+The DAG uses `--dependency=afterany:...` rather than `afterok`. This means
+aggregate and finalize jobs **always start** regardless of whether upstream
+jobs succeeded or failed. This is intentional:
+
+- Aggregate jobs are designed to handle partial replicate data gracefully.
+- The finalize job can produce partial comparison results via `--allow-partial`.
+- Using `afterok` would silently block downstream jobs forever when a single
+  replicate fails, leaving the pipeline in a zombie state with no output.
+
 ## Resource Configuration Reference
 
 All resource options are passed as CLI flags to `polyzymd compare submit`:
@@ -370,6 +407,7 @@ All resource options are passed as CLI flags to `polyzymd compare submit`:
 | `--allow-partial` | off | Allow finalize with incomplete condition data |
 | `--equilibration` | *(from YAML)* | Override equilibration time |
 | `--dry-run` | off | Generate scripts without submitting |
+| `--job-arrays` | off | Submit one SLURM array job per condition instead of individual jobs |
 
 ## What You Have Now
 

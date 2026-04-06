@@ -17,3 +17,12 @@
    :undoc-members:
    :show-inheritance:
 ```
+
+## Analysis SLURM Orchestration
+
+```{eval-rst}
+.. automodule:: polyzymd.workflow.analysis_slurm
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```

@@ -73,6 +73,9 @@ Experimental but still available:
 | `polyzymd compare run-all` | Run every enabled plugin in one pass |
 | `polyzymd compare plot-all` | Generate configured figures |
 | `polyzymd compare plot-all --list-available` | List available plots and experimental labels |
+| `polyzymd compare submit ANALYSIS` | Submit a SLURM DAG for one analysis plugin |
+| `polyzymd compare status ANALYSIS` | Show status of a submitted SLURM DAG |
+| `polyzymd compare finalize ANALYSIS` | Run comparison + plotting from on-disk aggregated results |
 
 ## Common Stable Commands
 
