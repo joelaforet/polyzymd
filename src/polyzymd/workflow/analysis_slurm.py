@@ -1301,7 +1301,7 @@ def submit_analysis_graph(
         }
         try:
             submission_error_path.write_text(json.dumps(error_payload, indent=2))
-        except Exception as sidecar_exc:
+        except (OSError, TypeError, ValueError) as sidecar_exc:
             LOGGER.warning(
                 "Failed to write submission error sidecar at %s: %s",
                 submission_error_path,
@@ -1409,7 +1409,7 @@ def submit_analysis_graph_with_arrays(
         }
         try:
             submission_error_path.write_text(json.dumps(error_payload, indent=2))
-        except Exception as sidecar_exc:
+        except (OSError, TypeError, ValueError) as sidecar_exc:
             LOGGER.warning(
                 "Failed to write submission error sidecar at %s: %s",
                 submission_error_path,

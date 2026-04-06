@@ -98,7 +98,7 @@ def _settings_from_manifest(plugin, manifest):
     """
     try:
         return plugin.Settings.model_validate(manifest.settings_snapshot)
-    except Exception as exc:
+    except (ValueError, KeyError) as exc:
         raise click.ClickException(
             f"Invalid settings_snapshot in manifest for analysis '{manifest.analysis_name}': {exc}"
         ) from exc
