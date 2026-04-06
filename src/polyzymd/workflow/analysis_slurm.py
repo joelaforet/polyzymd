@@ -1105,7 +1105,13 @@ def reconcile_status_with_slurm(hpc_dir: Path) -> dict[str, Any]:
                 raise ValueError("Status payload field 'state' must be a string")
             if job_id_raw is not None and not isinstance(job_id_raw, str):
                 raise ValueError("Status payload field 'slurm_job_id' must be a string or null")
-        except (json.JSONDecodeError, KeyError, ValueError, FileNotFoundError) as exc:
+        except (
+            json.JSONDecodeError,
+            KeyError,
+            ValueError,
+            FileNotFoundError,
+            PermissionError,
+        ) as exc:
             LOGGER.warning(
                 "Skipping unreadable status file during reconciliation: %s (%s)", status_path, exc
             )
@@ -1148,7 +1154,13 @@ def reconcile_status_with_slurm(hpc_dir: Path) -> dict[str, Any]:
             if not isinstance(latest_state_raw, str):
                 raise ValueError("Status payload field 'state' must be a string")
             latest_state = latest_state_raw.strip().lower()
-        except (json.JSONDecodeError, KeyError, ValueError, FileNotFoundError) as exc:
+        except (
+            json.JSONDecodeError,
+            KeyError,
+            ValueError,
+            FileNotFoundError,
+            PermissionError,
+        ) as exc:
             LOGGER.warning(
                 "Skipping unreadable status file during reconciliation: %s (%s)", status_path, exc
             )
@@ -1510,7 +1522,6 @@ def read_analysis_status(hpc_dir: Path) -> dict[str, Any]:
             "running",
             "retrying",
             "succeeded",
-            "completed",
             "failed",
             "unknown",
         ]

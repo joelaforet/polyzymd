@@ -1138,7 +1138,6 @@ def analysis_hpc_status(analysis: str, config_file: Path, reconcile: bool, as_js
         f"running={counts.get('running', 0)} "
         f"retrying={counts.get('retrying', 0)} "
         f"succeeded={counts.get('succeeded', 0)} "
-        f"completed={counts.get('completed', 0)} "
         f"failed={counts.get('failed', 0)} "
         f"unknown={counts.get('unknown', 0)}"
     )

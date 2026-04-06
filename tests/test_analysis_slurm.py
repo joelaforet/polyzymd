@@ -1064,6 +1064,36 @@ def test_reconcile_status_updates_running_failed(
     assert "reconciled_at" in updated_payload
 
 
+def test_reconcile_retrying_task_is_actionable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reconciliation should include retrying tasks with SLURM job IDs."""
+    hpc_dir = tmp_path / "comparison" / "toy_slurm" / "_hpc"
+    rep_status = hpc_dir / "status" / "replicates" / "cond_a" / "rep_1.json"
+    update_task_status(rep_status, "retrying", 1)
+
+    payload = json.loads(rep_status.read_text())
+    payload["slurm_job_id"] = "3001"
+    rep_status.write_text(json.dumps(payload, indent=2))
+
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm._query_sacct",
+        lambda job_ids: {"3001": "FAILED"},
+    )
+    summary = reconcile_status_with_slurm(hpc_dir)
+
+    updated_payload = json.loads(rep_status.read_text())
+    assert summary["checked"] == 1
+    assert summary["updated"] == 1
+    assert updated_payload["state"] == "failed"
+    assert any(
+        change["job_id"] == "3001"
+        and change["old_state"] == "retrying"
+        and change["new_state"] == "failed"
+        for change in summary["changes"]
+    )
+
+
 def test_reconcile_status_skips_completed_files(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
