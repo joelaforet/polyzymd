@@ -309,7 +309,6 @@ def test_status_reconcile_prints_summary(monkeypatch, tmp_path: Path) -> None:
                 "running": 0,
                 "retrying": 0,
                 "succeeded": 0,
-                "completed": 0,
                 "failed": 3,
                 "unknown": 0,
             },

@@ -1175,6 +1175,16 @@ def reconcile_status_with_slurm(hpc_dir: Path) -> dict[str, Any]:
             )
             continue
 
+        latest_job_id = latest_payload.get("slurm_job_id")
+        if latest_job_id != job_id:
+            LOGGER.debug(
+                "Skipping status reconciliation for %s because slurm_job_id changed from %s to %s",
+                status_path,
+                job_id,
+                latest_job_id,
+            )
+            continue
+
         latest_payload["state"] = mapped_state
         latest_payload["reconciled_from"] = slurm_state
         latest_payload["reconciled_at"] = _utc_now()
@@ -1185,10 +1195,18 @@ def reconcile_status_with_slurm(hpc_dir: Path) -> dict[str, Any]:
         ):
             latest_payload["error_message"] = f"Reconciled from SLURM state {slurm_state}"
 
-        with NamedTemporaryFile("w", encoding="utf-8", dir=status_path.parent, delete=False) as tmp:
-            tmp.write(json.dumps(latest_payload, indent=2))
-            tmp_path = Path(tmp.name)
-        os.replace(tmp_path, status_path)
+        try:
+            with NamedTemporaryFile(
+                "w", encoding="utf-8", dir=status_path.parent, delete=False
+            ) as tmp:
+                tmp.write(json.dumps(latest_payload, indent=2))
+                tmp_path = Path(tmp.name)
+            os.replace(tmp_path, status_path)
+        except OSError as write_exc:
+            LOGGER.warning("Failed to write reconciled status for %s: %s", status_path, write_exc)
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+            continue
 
         changes.append(
             {
