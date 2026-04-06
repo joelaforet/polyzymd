@@ -35,6 +35,52 @@ plugins:
     selection: "protein and name CA"
 ```
 
+## Per-Plugin Statistical Settings
+
+Some plugins support per-plugin statistical settings configured under the
+`plugins:` block in `comparison.yaml`. These control false discovery rate
+correction, effect-size filtering, and output truncation for cross-condition
+comparisons.
+
+### Canonical YAML Example
+
+```yaml
+plugins:
+  contacts:
+    cutoff: 4.5
+    fdr_alpha: 0.05
+    min_effect_size: 0.5
+    top_residues: 10
+
+  binding_free_energy:
+    units: "kcal/mol"
+    fdr_alpha: 0.05
+
+  polymer_affinity:
+    surface_exposure_threshold: 0.2
+    fdr_alpha: 0.05
+```
+
+### Settings Support Matrix
+
+| Setting | contacts | binding_free_energy | polymer_affinity | Default |
+|---------|----------|---------------------|------------------|---------|
+| `fdr_alpha` | ✓ | ✓ | ✓ | 0.05 |
+| `min_effect_size` | ✓ | — | — | 0.5 |
+| `top_residues` | ✓ | — | — | 10 |
+
+### Setting Descriptions
+
+- **`fdr_alpha`** — Significance threshold for the Benjamini-Hochberg (BH)
+  false discovery rate correction applied to pairwise p-values. Lower values
+  are more conservative.
+- **`min_effect_size`** — Minimum Cohen's d required for practical
+  significance. Pairs that meet or exceed this threshold are highlighted with
+  "†" in formatted output; all pairs are shown regardless.
+- **`top_residues`** — Maximum number of contacted residues shown per
+  condition, ranked by aggregated `contact_fraction_mean`. Affects both saved
+  JSON and CLI output.
+
 ## Stable Plugin Keys
 
 Stable analysis plugins:
@@ -140,8 +186,26 @@ polyzymd compare plot-all
 - `Cohen's d`: effect size magnitude
 - `ANOVA`: omnibus test across multiple conditions
 - `SEM`: standard error of the mean across replicates
+- `Benjamini-Hochberg (BH)`: step-up procedure for controlling the false
+  discovery rate across multiple hypothesis tests
+- `Adjusted p-value (p_adj)`: p-value corrected for multiple comparisons via
+  the BH procedure
+- `False Discovery Rate (FDR)`: expected proportion of false positives among
+  rejected hypotheses
+- `Effect size threshold`: minimum Cohen's d required for a pairwise difference
+  to be considered practically significant
 
 For interpretation guidance rather than lookup, see:
 
 - [Statistical Best Practices for Analysis](../tutorials/analysis_statistics_best_practices.md)
 - [How to Compare Simulation Conditions](../tutorials/analysis_compare_conditions.md)
+
+:::{admonition} Version 1.3.0 migration
+:class: note
+
+In versions before 1.3.0, `fdr_alpha`, `min_effect_size`, and `top_residues`
+were accepted by the YAML schema but silently ignored at runtime. As of 1.3.0,
+these settings actively affect comparison results: pairwise p-values are
+BH-corrected, effect-size thresholds annotate pairwise output, and
+`top_residues` limits both CLI output and saved JSON.
+:::

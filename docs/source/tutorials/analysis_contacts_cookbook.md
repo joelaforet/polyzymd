@@ -101,6 +101,28 @@ polyzymd compare run contacts -f comparison.yaml
 
 `````
 
+### Statistical Settings for Cross-Condition Comparison
+
+The `comparison.yaml` example above includes three statistical settings that
+control how cross-condition results are reported:
+
+- **`fdr_alpha`** (default 0.05) — Benjamini-Hochberg FDR correction applied to
+  pairwise t-test p-values. All pairs × both metrics (coverage and
+  contact_fraction) form one hypothesis family; ANOVA p-values form a separate
+  small family. Formatters show both raw and BH-adjusted p-values, with
+  significance markers (`*`, `**`, `***`) based on adjusted values.
+
+- **`min_effect_size`** (default 0.5) — Minimum Cohen's d for practical
+  significance. Pairs that meet or exceed this threshold are highlighted with
+  "†" in output. All pairs are still shown regardless of this setting.
+
+- **`top_residues`** (default 10) — Number of top contacted residues shown per
+  condition, ranked by aggregated `contact_fraction_mean`. Affects both saved
+  JSON and CLI output.
+
+For a full description of these settings, see the
+[Comparison Reference](../reference/analysis_comparison_reference.md#per-plugin-statistical-settings).
+
 ```{tip}
 **YAML vs Python:** Use YAML for reproducible, shareable configurations. Use 
 Python when you need advanced features like `CompositeSelector`, custom contact 

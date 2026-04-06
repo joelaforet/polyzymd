@@ -306,6 +306,79 @@ a 100 ns trajectory may only contain ~10 independent samples.
 
 ---
 
+## Multiple Comparison Correction
+
+### Why It Matters
+
+When comparing *N* conditions pairwise, the number of hypothesis tests grows as
+*N*(*N*−1)/2. With 5 conditions this is already 10 tests; with 10 conditions,
+45 tests. Without correction, the probability of at least one false positive
+(the **familywise error rate**) increases rapidly — even when every null
+hypothesis is true.
+
+### Benjamini-Hochberg Procedure
+
+PolyzyMD uses the **Benjamini-Hochberg (BH)** step-up procedure to control the
+**false discovery rate** (FDR) — the expected proportion of false positives
+among rejected hypotheses. The algorithm:
+
+1. Rank all *m* p-values in ascending order: $p_{(1)} \le p_{(2)} \le \dots \le p_{(m)}$.
+2. For each rank *k*, compare $p_{(k)}$ to the threshold $(k / m) \times \alpha$.
+3. Find the largest *k* where $p_{(k)} \le (k / m) \times \alpha$.
+4. Reject all hypotheses with rank ≤ *k*.
+
+Adjusted p-values are computed with step-down monotonicity enforcement so that
+$p_{\text{adj},(k)} \le p_{\text{adj},(k+1)}$ always holds.
+
+### How PolyzyMD Applies BH Correction
+
+Each plugin defines its own hypothesis family:
+
+- **Contacts** — All pairwise t-test p-values (both coverage and
+  contact_fraction metrics) form **one hypothesis family**. ANOVA p-values
+  form a separate small family (typically 2 tests).
+- **Binding free energy** — Same-temperature pairwise entries form **one
+  family per temperature group**.
+- **Polymer affinity** — Same pattern as binding free energy: one family per
+  temperature group.
+
+### The `fdr_alpha` Parameter
+
+`fdr_alpha` is configured per plugin in `comparison.yaml` under the `plugins:`
+block. The default is 0.05. Lowering the value (e.g., 0.01) makes the
+correction more conservative; raising it allows more discoveries at the cost of
+a higher expected false positive rate.
+
+```yaml
+plugins:
+  contacts:
+    fdr_alpha: 0.01  # More conservative than default
+```
+
+### Raw vs Adjusted p-Values
+
+Both raw and BH-adjusted p-values are shown in formatted output. The
+`significant` field in saved JSON and the significance markers (`*`, `**`,
+`***`) in CLI tables are based on the **adjusted** value. This ensures that
+reported significance accounts for the number of comparisons performed.
+
+### Relationship to Within-Trajectory Statistics
+
+FDR correction and autocorrelation handling address **different** sources of
+statistical error:
+
+| Problem | Scope | PolyzyMD Solution |
+|---------|-------|-------------------|
+| **Autocorrelation** | Within a single trajectory — consecutive frames are not independent | Correct SEM via $N_{\text{eff}}$ or subsample by 2τ (see earlier sections) |
+| **Multiple comparisons** | Across conditions — many hypothesis tests inflate false positives | BH correction on pairwise p-values |
+
+Both corrections are important. Autocorrelation handling ensures that the
+per-condition uncertainty is not artificially small; FDR correction ensures
+that the cross-condition significance claims are not inflated by the number of
+tests performed.
+
+---
+
 ## LiveCoMS References
 
 This implementation follows the guidelines from:

@@ -131,6 +131,17 @@ plugins:
         selection: "protein and name CA"
 ```
 
+:::{admonition} Statistical settings for pairwise comparisons
+:class: tip
+
+Plugins that perform cross-condition statistical tests support per-plugin
+settings in the `plugins:` block. For example, contacts supports `fdr_alpha`,
+`min_effect_size`, and `top_residues`; binding free energy and polymer affinity
+support `fdr_alpha`. See the
+[Comparison Reference](../reference/analysis_comparison_reference.md#per-plugin-statistical-settings)
+for the full settings table.
+:::
+
 ## Step 3: Validate the Config
 
 ```bash

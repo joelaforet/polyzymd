@@ -278,7 +278,7 @@ Per-Condition Summary (sign: more negative = stronger adhesion)
 
 Pairwise Score Differences (Score_B - Score_A)
 --------------------------------------------------------------------------------
-  100% SBMA → SBMA-EGPMA 5%  :  ΔScore = -3.12 kT  (p = 0.003 **)
+  100% SBMA → SBMA-EGPMA 5%  :  ΔScore = -3.12 kT  p=0.003  p_adj=0.006  BH sig=Yes **
 ```
 
 ### Interpreting the Numbers
@@ -313,7 +313,9 @@ meaningful.
 | `cutoff` | float | `4.5` | Contact distance cutoff (Angstroms) |
 | `compute_binding_preference` | bool | `true` | Must be true for affinity analysis |
 
-`fdr_alpha` is configured in the same `plugins.polymer_affinity` block.
+`fdr_alpha` controls the Benjamini-Hochberg correction threshold applied to
+pairwise p-values within each temperature group. It is configured in the
+`plugins.polymer_affinity` block.
 
 ## CLI Reference
 
@@ -363,6 +365,20 @@ S_{\text{rep}} = N_{\text{rep}} \times \Delta G_{\mathrm{sel,rep}}
 
 Mean and SEM are computed across replicates. Pairwise t-tests use these
 per-replicate score distributions.
+
+### FDR Correction
+
+P-values from pairwise score comparisons are corrected for multiple
+comparisons using the **Benjamini-Hochberg** (BH) procedure. Same-temperature
+pairwise entries form one hypothesis family per temperature group.
+
+- `fdr_alpha` (default 0.05) is configured in `plugins.polymer_affinity`.
+- Both raw and BH-adjusted p-values are shown in formatted output.
+  Significance markers (`*`, `**`, `***`) use the adjusted value.
+- Output footnote: `* p_adj < {fdr_alpha} (BH-corrected)`
+
+For background on the BH procedure, see
+[Statistics Best Practices](analysis_statistics_best_practices.md#multiple-comparison-correction).
 
 When per-replicate files are unavailable, the plugin falls back to
 analytical error propagation:

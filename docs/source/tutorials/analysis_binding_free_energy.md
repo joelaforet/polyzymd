@@ -184,10 +184,10 @@ Pairwise ΔΔG Differences (ΔG_sel,B − ΔG_sel,A)
 --------------------------------------------------------------------------------
 
   100% SBMA  →  100% EGMA
-  Polymer      AA Group            ΔG_sel,A   ΔG_sel,B    ΔΔG_B−A    p-value
-  -----------------------------------------------------------------------------
-  EGM          aromatic              N/A       -0.523        N/A         --
-  SBM          aromatic           -0.243          N/A        N/A         --
+  Polymer      AA Group        ΔG_sel,A   ΔG_sel,B    ΔΔG_B−A    p-value    p_adj      BH sig
+  --------------------------------------------------------------------------------------------
+  EGM          aromatic           N/A       -0.523        N/A         --        --         --
+  SBM          aromatic        -0.243          N/A        N/A         --        --         --
 ```
 
 ### Interpreting the Numbers
@@ -221,7 +221,9 @@ values may still be real but require larger replicate sets to distinguish from n
 | `surface_exposure_threshold` | float | `0.2` | Minimum relative SASA to consider a residue exposed (0.0–1.0) |
 | `protein_partitions` | dict | `null` | Custom named partitions (see below) |
 
-`fdr_alpha` is configured in the same `plugins.binding_free_energy` block.
+`fdr_alpha` controls the Benjamini-Hochberg correction threshold applied to
+pairwise p-values within each temperature group. It is configured in the
+`plugins.binding_free_energy` block.
 
 ### Full YAML Example
 
@@ -390,9 +392,11 @@ condition**.
 ### FDR Correction
 
 P-values are corrected for multiple comparisons using the
-**Benjamini-Hochberg** false discovery rate procedure at the specified alpha
-(default 0.05). Adjusted p-values are stored in the JSON output but not
-currently shown in the table or markdown formatters.
+**Benjamini-Hochberg** (BH) false discovery rate procedure at the configured
+`fdr_alpha` (default 0.05). Same-temperature pairwise entries form one
+hypothesis family per temperature group. Both raw and BH-adjusted p-values
+are shown in the table and Markdown formatters, with significance determined
+by the adjusted value.
 
 ### Statistical Inefficiency and planned MetricType classification
 
