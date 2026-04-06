@@ -68,14 +68,14 @@ def test_submit_dry_run_prints_summary(monkeypatch, tmp_path: Path) -> None:
         [
             "submit",
             "toy",
-            "--comparison-yaml",
+            "-f",
             str(tmp_path / "comparison.yaml"),
             "--dry-run",
         ],
     )
 
     assert result.exit_code == 0
-    assert "Submitted 6 jobs (3 replicate + 2 aggregate + 1 finalize)" in result.output
+    assert "Would submit 6 jobs (3 replicate + 2 aggregate + 1 finalize)" in result.output
 
 
 def test_submit_dry_run_with_job_arrays_prints_array_summary(monkeypatch, tmp_path: Path) -> None:
@@ -123,7 +123,7 @@ def test_submit_dry_run_with_job_arrays_prints_array_summary(monkeypatch, tmp_pa
         [
             "submit",
             "toy",
-            "--comparison-yaml",
+            "-f",
             str(tmp_path / "comparison.yaml"),
             "--job-arrays",
             "--dry-run",
@@ -131,8 +131,8 @@ def test_submit_dry_run_with_job_arrays_prints_array_summary(monkeypatch, tmp_pa
     )
 
     assert result.exit_code == 0
-    assert "Submitted 2 array jobs + 2 aggregate + 1 finalize = 5 total" in result.output
-    assert "Submission mode: job arrays" in result.output
+    assert "Would submit 2 array jobs + 2 aggregate + 1 finalize = 5 total" in result.output
+    assert "Mode: job arrays" in result.output
 
 
 def test_submit_allow_partial_sets_manifest_policy(monkeypatch, tmp_path: Path) -> None:
@@ -186,7 +186,7 @@ def test_submit_allow_partial_sets_manifest_policy(monkeypatch, tmp_path: Path) 
         [
             "submit",
             "toy",
-            "--comparison-yaml",
+            "-f",
             str(tmp_path / "comparison.yaml"),
             "--allow-partial",
             "--dry-run",
@@ -217,7 +217,7 @@ def test_status_json_output(monkeypatch, tmp_path: Path) -> None:
 
     result = runner.invoke(
         compare,
-        ["status", "toy", "--comparison-yaml", str(tmp_path / "comparison.yaml"), "--json"],
+        ["status", "toy", "-f", str(tmp_path / "comparison.yaml"), "--json"],
     )
     assert result.exit_code == 0
     payload = json.loads(result.output)
@@ -252,7 +252,7 @@ def test_status_human_output_includes_unknown_and_warnings(monkeypatch, tmp_path
 
     result = runner.invoke(
         compare,
-        ["status", "toy", "--comparison-yaml", str(tmp_path / "comparison.yaml")],
+        ["status", "toy", "-f", str(tmp_path / "comparison.yaml")],
     )
     assert result.exit_code == 0
     assert "unknown=2" in result.output
@@ -319,7 +319,7 @@ def test_status_reconcile_prints_summary(monkeypatch, tmp_path: Path) -> None:
 
     result = runner.invoke(
         compare,
-        ["status", "toy", "--comparison-yaml", str(tmp_path / "comparison.yaml"), "--reconcile"],
+        ["status", "toy", "-f", str(tmp_path / "comparison.yaml"), "--reconcile"],
     )
     assert result.exit_code == 0
     assert "Reconciled 3 jobs:" in result.output
@@ -379,7 +379,7 @@ def test_finalize_command_loads_aggregated_and_runs(monkeypatch, tmp_path: Path)
 
     result = runner.invoke(
         compare,
-        ["finalize", "toy", "--comparison-yaml", str(tmp_path / "comparison.yaml")],
+        ["finalize", "toy", "-f", str(tmp_path / "comparison.yaml")],
     )
     assert result.exit_code == 0
     assert "Saved result:" in result.output
@@ -534,7 +534,7 @@ def test_finalize_with_missing_conditions(monkeypatch, tmp_path: Path) -> None:
 
     blocked = runner.invoke(
         compare,
-        ["finalize", "toy", "--comparison-yaml", str(tmp_path / "comparison.yaml")],
+        ["finalize", "toy", "-f", str(tmp_path / "comparison.yaml")],
     )
     assert blocked.exit_code != 0
     assert "Finalize aborted" in blocked.output
@@ -548,7 +548,7 @@ def test_finalize_with_missing_conditions(monkeypatch, tmp_path: Path) -> None:
         [
             "finalize",
             "toy",
-            "--comparison-yaml",
+            "-f",
             str(tmp_path / "comparison.yaml"),
             "--allow-partial",
         ],
@@ -702,7 +702,7 @@ def test_submit_without_sbatch(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("shutil.which", lambda name: None if name == "sbatch" else "/usr/bin/other")
     result = runner.invoke(
         compare,
-        ["submit", "toy", "--comparison-yaml", str(tmp_path / "comparison.yaml")],
+        ["submit", "toy", "-f", str(tmp_path / "comparison.yaml")],
     )
     assert result.exit_code != 0
     assert "sbatch' not found on PATH" in result.output

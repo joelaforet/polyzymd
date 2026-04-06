@@ -21,12 +21,6 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.sasa._results import SASAAggregatedResult, SASAResult
 from polyzymd.analyses.shared.config_hash import compute_config_hash
-from polyzymd.analyses.shared.loader import (
-    TrajectoryLoader,
-    convert_time,
-    parse_time_string,
-    time_to_frame,
-)
 from polyzymd.analyses.shared.sasa import compute_sasa, save_sasa_artifacts
 from polyzymd.analyses.shared.statistics import compute_sem
 
@@ -159,6 +153,12 @@ class SASAAnalysis(Analysis):
         from polyzymd.analyses._results_base import get_polyzymd_version
         from polyzymd.analyses.sasa._results import SASAResult, SASARunResult
         from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
+        from polyzymd.analyses.shared.loader import (
+            TrajectoryLoader,
+            convert_time,
+            parse_time_string,
+            time_to_frame,
+        )
 
         settings = cast(SASASettings, ctx.settings)
         sim_config = ctx.sim_config

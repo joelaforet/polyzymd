@@ -1113,7 +1113,11 @@ def reconcile_status_with_slurm(hpc_dir: Path) -> dict[str, Any]:
 
         local_state = local_state_raw.strip().lower()
         job_id = job_id_raw
-        if local_state in {"running", "pending"} and isinstance(job_id, str) and job_id.strip():
+        if (
+            local_state in {"running", "pending", "retrying"}
+            and isinstance(job_id, str)
+            and job_id.strip()
+        ):
             actionable.append((status_path, payload, job_id.strip()))
 
     if not actionable:
@@ -1169,7 +1173,10 @@ def reconcile_status_with_slurm(hpc_dir: Path) -> dict[str, Any]:
         ):
             latest_payload["error_message"] = f"Reconciled from SLURM state {slurm_state}"
 
-        status_path.write_text(json.dumps(latest_payload, indent=2))
+        with NamedTemporaryFile("w", encoding="utf-8", dir=status_path.parent, delete=False) as tmp:
+            tmp.write(json.dumps(latest_payload, indent=2))
+            tmp_path = Path(tmp.name)
+        os.replace(tmp_path, status_path)
 
         changes.append(
             {
@@ -1249,7 +1256,7 @@ def submit_analysis_graph(
         finalize_script = generate_finalize_script(manifest, resources, hpc_dir)
         finalizer_job_id = _submit_sbatch(finalize_script, dependency=aggregate_dependency)
         submitted_job_ids.append(finalizer_job_id)
-    except Exception as exc:
+    except (RuntimeError, subprocess.SubprocessError, OSError) as exc:
         cancel_results: dict[str, dict[str, Any]] = {}
         if submitted_job_ids:
             cancel_results = _cancel_jobs(submitted_job_ids)
@@ -1357,7 +1364,7 @@ def submit_analysis_graph_with_arrays(
         finalize_script = generate_finalize_script(manifest, resources, hpc_dir)
         finalizer_job_id = _submit_sbatch(finalize_script, dependency=aggregate_dependency)
         submitted_job_ids.append(finalizer_job_id)
-    except Exception as exc:
+    except (RuntimeError, subprocess.SubprocessError, OSError) as exc:
         cancel_results: dict[str, dict[str, Any]] = {}
         if submitted_job_ids:
             cancel_results = _cancel_jobs(submitted_job_ids)
@@ -1423,7 +1430,13 @@ def read_analysis_status(hpc_dir: Path) -> dict[str, Any]:
                 try:
                     status = TaskStatus.model_validate_json(status_file.read_text())
                     per_rep[status_file.stem] = status.model_dump()
-                except Exception as exc:
+                except (
+                    json.JSONDecodeError,
+                    KeyError,
+                    ValueError,
+                    FileNotFoundError,
+                    PermissionError,
+                ) as exc:
                     warning = f"Corrupted status file: {status_file} ({type(exc).__name__}: {exc})"
                     LOGGER.warning(warning)
                     warnings.append(warning)
@@ -1442,7 +1455,13 @@ def read_analysis_status(hpc_dir: Path) -> dict[str, Any]:
             try:
                 status = TaskStatus.model_validate_json(status_file.read_text())
                 condition_summary[status_file.stem] = status.model_dump()
-            except Exception as exc:
+            except (
+                json.JSONDecodeError,
+                KeyError,
+                ValueError,
+                FileNotFoundError,
+                PermissionError,
+            ) as exc:
                 warning = f"Corrupted status file: {status_file} ({type(exc).__name__}: {exc})"
                 LOGGER.warning(warning)
                 warnings.append(warning)
@@ -1459,7 +1478,13 @@ def read_analysis_status(hpc_dir: Path) -> dict[str, Any]:
     if finalize_path.exists():
         try:
             finalize = TaskStatus.model_validate_json(finalize_path.read_text()).model_dump()
-        except Exception as exc:
+        except (
+            json.JSONDecodeError,
+            KeyError,
+            ValueError,
+            FileNotFoundError,
+            PermissionError,
+        ) as exc:
             warning = f"Corrupted status file: {finalize_path} ({type(exc).__name__}: {exc})"
             LOGGER.warning(warning)
             warnings.append(warning)

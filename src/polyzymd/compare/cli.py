@@ -921,10 +921,11 @@ def run_all(
 @compare.command("submit")
 @click.argument("analysis", type=str)
 @click.option(
-    "--comparison-yaml",
-    "comparison_yaml",
+    "-f",
+    "--file",
+    "config_file",
     type=click.Path(path_type=Path),
-    required=True,
+    default="comparison.yaml",
     help="Path to comparison.yaml config file.",
 )
 @click.option("--partition", default="aa100", help="SLURM partition.")
@@ -952,7 +953,7 @@ def run_all(
 )
 def submit_analysis_hpc(
     analysis: str,
-    comparison_yaml: Path,
+    config_file: Path,
     partition: str,
     qos: str | None,
     account: str | None,
@@ -989,7 +990,7 @@ def submit_analysis_hpc(
             "'polyzymd compare run' instead."
         )
 
-    config = ComparisonConfig.from_yaml(comparison_yaml)
+    config = ComparisonConfig.from_yaml(config_file)
     analysis_cls = get_analysis(analysis)
     plugin = analysis_cls()
     resources = AnalysisSlurmResources(
@@ -1039,14 +1040,14 @@ def submit_analysis_hpc(
         if job_arrays:
             total = array_count + aggregate_count + 1
             click.echo(
-                "Submitted "
+                "Would submit "
                 f"{array_count} array jobs + {aggregate_count} aggregate + 1 finalize = {total} total"
             )
-            click.echo("Submission mode: job arrays")
+            click.echo("Mode: job arrays")
         else:
             total = replicate_count + aggregate_count + 1
             click.echo(
-                "Submitted "
+                "Would submit "
                 f"{total} jobs ({replicate_count} replicate + {aggregate_count} aggregate + 1 finalize)"
             )
         click.echo("Dry run only: no jobs were submitted")
@@ -1074,10 +1075,11 @@ def submit_analysis_hpc(
 @compare.command("status")
 @click.argument("analysis", type=str)
 @click.option(
-    "--comparison-yaml",
-    "comparison_yaml",
+    "-f",
+    "--file",
+    "config_file",
     type=click.Path(path_type=Path),
-    required=True,
+    default="comparison.yaml",
     help="Path to comparison.yaml config file.",
 )
 @click.option(
@@ -1086,12 +1088,12 @@ def submit_analysis_hpc(
     help="Reconcile pending/running status files with sacct before reporting.",
 )
 @click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON status.")
-def analysis_hpc_status(analysis: str, comparison_yaml: Path, reconcile: bool, as_json: bool):
+def analysis_hpc_status(analysis: str, config_file: Path, reconcile: bool, as_json: bool):
     """Show status for submitted analysis SLURM DAG."""
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.workflow.analysis_slurm import read_analysis_status, reconcile_status_with_slurm
 
-    config = ComparisonConfig.from_yaml(comparison_yaml)
+    config = ComparisonConfig.from_yaml(config_file)
     analysis_cls = get_analysis(analysis)
     hpc_dir = _resolve_hpc_dir(config, analysis_cls.name)
 
@@ -1150,10 +1152,11 @@ def analysis_hpc_status(analysis: str, comparison_yaml: Path, reconcile: bool, a
 @compare.command("finalize")
 @click.argument("analysis", type=str)
 @click.option(
-    "--comparison-yaml",
-    "comparison_yaml",
+    "-f",
+    "--file",
+    "config_file",
     type=click.Path(path_type=Path),
-    required=True,
+    default="comparison.yaml",
     help="Path to comparison.yaml config file.",
 )
 @click.option("--recompute", is_flag=True, help="Retained for CLI compatibility.")
@@ -1164,7 +1167,7 @@ def analysis_hpc_status(analysis: str, comparison_yaml: Path, reconcile: bool, a
 )
 def finalize_analysis_hpc(
     analysis: str,
-    comparison_yaml: Path,
+    config_file: Path,
     recompute: bool,
     allow_partial: bool,
 ):
@@ -1177,7 +1180,7 @@ def finalize_analysis_hpc(
     )
     from polyzymd.compare.io.paths import sanitize_label
 
-    config = ComparisonConfig.from_yaml(comparison_yaml)
+    config = ComparisonConfig.from_yaml(config_file)
     analysis_cls = get_analysis(analysis)
     plugin = analysis_cls()
     valid_conditions, settings, equilibration, analysis_root = prepare_comparison_run(

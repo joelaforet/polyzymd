@@ -210,7 +210,7 @@ def test_compute_replicate_zero_atom_path(monkeypatch: pytest.MonkeyPatch, tmp_p
             residue_resnames=[],
         )
 
-    monkeypatch.setattr("polyzymd.analyses.sasa.TrajectoryLoader", _FakeLoader)
+    monkeypatch.setattr("polyzymd.analyses.shared.loader.TrajectoryLoader", _FakeLoader)
     monkeypatch.setattr("polyzymd.analyses.sasa.compute_config_hash", lambda _cfg: "hash")
     monkeypatch.setattr("polyzymd.analyses.sasa.compute_sasa", _fake_compute_sasa)
     monkeypatch.setattr("polyzymd.analyses.sasa.save_sasa_artifacts", lambda *args, **kwargs: None)
@@ -573,7 +573,7 @@ def test_compute_replicate_stores_raw_paths(
         )
         Path(metadata_path).write_text("{}", encoding="utf-8")
 
-    monkeypatch.setattr("polyzymd.analyses.sasa.TrajectoryLoader", _FakeLoader)
+    monkeypatch.setattr("polyzymd.analyses.shared.loader.TrajectoryLoader", _FakeLoader)
     monkeypatch.setattr("polyzymd.analyses.sasa.compute_config_hash", lambda _cfg: "hash")
     monkeypatch.setattr("polyzymd.analyses.sasa.compute_sasa", _fake_compute_sasa)
     monkeypatch.setattr("polyzymd.analyses.sasa.save_sasa_artifacts", _fake_save)
@@ -640,7 +640,7 @@ def test_compute_replicate_passes_chunk_and_stride(
             residue_resnames=["ALA"],
         )
 
-    monkeypatch.setattr("polyzymd.analyses.sasa.TrajectoryLoader", _FakeLoader)
+    monkeypatch.setattr("polyzymd.analyses.shared.loader.TrajectoryLoader", _FakeLoader)
     monkeypatch.setattr("polyzymd.analyses.sasa.compute_config_hash", lambda _cfg: "hash")
     monkeypatch.setattr("polyzymd.analyses.sasa.compute_sasa", _fake_compute_sasa)
     monkeypatch.setattr("polyzymd.analyses.sasa.save_sasa_artifacts", lambda *args, **kwargs: None)
