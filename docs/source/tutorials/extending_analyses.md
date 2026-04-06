@@ -876,8 +876,11 @@ convenient one-line imports:
 | `shared.plotting` | `get_theme`, `apply_axis_style`, `apply_legend`, `get_colors`, `get_output_path`, `save_figure`, `grouped_bars` |
 
 Other submodules (`selections`, `aggregation`, `diagnostics`, `aa_classification`,
-`metric_type`, `logging_utils`) are available via direct import but are not
-re-exported from the package root:
+`logging_utils`) are available via direct import but are not re-exported from
+the package root:
+
+The `metric_type` classification is a planned future enhancement and is not
+yet implemented in the current codebase.
 
 ```python
 # Direct submodule import (not re-exported)

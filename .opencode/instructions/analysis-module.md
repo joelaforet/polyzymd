@@ -200,16 +200,18 @@ for label in labels:
 
 ## MetricType System (Autocorrelation Handling)
 
-Based on LiveCoMS best practices (Grossfield et al., 2018), metrics are classified
-by how they should handle autocorrelated MD data:
+This section is a planned future enhancement and is not implemented in the
+current codebase.
+
+Based on LiveCoMS best practices (Grossfield et al., 2018), metrics may be
+classified by how they should handle autocorrelated MD data.
+
+Planned (not yet implemented):
 
 | MetricType | Frame Strategy | Uncertainty Strategy | Examples |
 |------------|---------------|---------------------|----------|
 | **MEAN_BASED** | Use ALL frames | Correct SEM with N_eff = N/g | Contact fraction, triad proximity |
 | **VARIANCE_BASED** | Subsample by 2τ | Standard formula on independent samples | RMSF, fluctuation metrics |
-
-This classification lives in `analyses/shared/metric_type.py` and is used
-internally by the compute logic within each plugin.
 
 ## Key Classes
 
@@ -218,7 +220,7 @@ internally by the compute logic within each plugin.
 - **`DistanceCalculator`** — Inter-group distance tracking (in `distances/__init__.py`)
 - **`MolecularSelector`** — Strategy for atom group selection
 - **`ContactCriteria`** — Strategy for contact definitions
-- **`MetricType`** — Autocorrelation handling strategy
+- **`MetricType`** — Planned autocorrelation handling strategy (future)
 
 ### Caching
 

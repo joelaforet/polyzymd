@@ -106,6 +106,14 @@ Key rules:
 - **Result saving**: Existing plugins save results explicitly; the orchestrator has a fallback auto-save if the plugin doesn't
 - **No `compare/` files needed**: New plugins keep all logic inline; `compare/results/` are used by existing plugins for historical result models
 
+### Planned MetricType classification (future)
+
+The `MetricType` classification (`MEAN_BASED` and `VARIANCE_BASED`) is a
+planned enhancement and is not implemented in the current codebase.
+
+For now, reviewers should treat any `metric_type` checks as aspirational
+guidance rather than a required plugin contract.
+
 ## Design Principles (Critical for Contributors)
 
 This project prioritizes **extensibility** so users can contribute new analyses

@@ -394,12 +394,15 @@ P-values are corrected for multiple comparisons using the
 (default 0.05). Adjusted p-values are stored in the JSON output but not
 currently shown in the table or markdown formatters.
 
-### Statistical Inefficiency and MetricType
+### Statistical Inefficiency and planned MetricType classification
 
 Contact share is a **mean-based metric** (frame averages, not fluctuations).
 Its mean converges regardless of autocorrelation, though the SEM reported here
 is a naive cross-replicate SEM (not autocorrelation-corrected). With 3+
 independent replicates this is generally conservative and appropriate.
+
+The `MetricType` classification is a planned future enhancement and is not yet
+implemented in the current codebase.
 
 See [Statistics Best Practices](analysis_statistics_best_practices.md) for
 guidance on replicate counts and equilibration.
