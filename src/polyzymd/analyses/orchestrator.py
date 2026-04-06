@@ -157,6 +157,7 @@ def _run_replicates(
             logger.warning(f"  Skipping {condition.label} rep {rep}: data not found — {e}")
             failed.append(rep)
         except Exception as e:
+            logger.debug("Traceback for failed operation:", exc_info=True)
             logger.warning(f"  Skipping {condition.label} rep {rep}: {type(e).__name__} — {e}")
             failed.append(rep)
 
@@ -381,6 +382,7 @@ def run_analysis(
             logger.warning("  Skipping %s rep %d: data not found — %s", condition.label, rep, e)
             failed.append(rep)
         except Exception as e:
+            logger.debug("Traceback for failed operation:", exc_info=True)
             logger.warning(
                 "  Skipping %s rep %d: %s — %s",
                 condition.label,
@@ -895,6 +897,7 @@ def run_comparison(
                 analysis_dirs[cond.label] = cond_dir
             # else: compare-only plugin — None is expected, not a failure
         except Exception as e:
+            logger.debug("Traceback for failed operation:", exc_info=True)
             logger.error(f"  {cond.label}: {type(e).__name__} — {e}")
             failed_conditions.append(cond)
 
@@ -1017,6 +1020,7 @@ def run_all_comparisons(
                 analysis, config, recompute, equilibration=equilibration
             )
         except Exception as e:
+            logger.debug("Traceback for failed operation:", exc_info=True)
             logger.error(f"{analysis.name} comparison failed: {e}")
             results[analysis.name] = {"error": str(e)}
 

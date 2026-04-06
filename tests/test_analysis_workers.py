@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar, cast
@@ -13,6 +14,7 @@ from polyzymd.analyses.base import Analysis, Condition, MetricValue
 from polyzymd.analyses.orchestrator import (
     aggregate_condition_from_disk,
     finalize_comparison_from_disk,
+    run_analysis,
     run_replicate_once,
 )
 
@@ -57,6 +59,11 @@ class _WorkerAnalysis(Analysis):
         return [out]
 
 
+class _FailingWorkerAnalysis(_WorkerAnalysis):
+    def compute_replicate(self, ctx: Any, replicate: int) -> dict[str, Any]:
+        raise RuntimeError("test error")
+
+
 def test_run_replicate_once_saves_canonical_result(tmp_path: Path) -> None:
     """run_replicate_once should save result.json in the run directory."""
     analysis = _WorkerAnalysis()
@@ -75,6 +82,41 @@ def test_run_replicate_once_saves_canonical_result(tmp_path: Path) -> None:
     )
     assert result["value"] == 2.0
     assert (run_dir / "result.json").exists()
+
+
+def test_run_analysis_logs_warning_and_debug_traceback_on_worker_exception(
+    caplog,
+    tmp_path: Path,
+) -> None:
+    """run_analysis should log concise warning plus debug traceback on failure."""
+    analysis = _FailingWorkerAnalysis()
+    condition = Condition("Cond", tmp_path / "cfg.yaml", (1,), cast(Any, SimpleNamespace()))
+    settings = _WorkerSettings(scale=1.0)
+
+    caplog.set_level(logging.DEBUG, logger="polyzymd.analyses")
+
+    with pytest.raises(ValueError, match="need at least"):
+        run_analysis(
+            analysis=analysis,
+            condition=condition,
+            settings=settings,
+            equilibration="10ns",
+            output_dir=tmp_path / "analysis" / "cond" / "worker_toy",
+            recompute=False,
+        )
+
+    warning_messages = [
+        record.getMessage() for record in caplog.records if record.levelno == logging.WARNING
+    ]
+    debug_messages = [
+        record.getMessage() for record in caplog.records if record.levelno == logging.DEBUG
+    ]
+
+    assert any(
+        "Skipping Cond rep 1: RuntimeError — test error" in message for message in warning_messages
+    )
+    assert any("Traceback for failed operation:" in message for message in debug_messages)
+    assert "RuntimeError: test error" in caplog.text
 
 
 def test_aggregate_condition_from_disk_loads_replicates(tmp_path: Path) -> None:
