@@ -91,7 +91,6 @@ from polyzymd.analyses.shared.plotting import (
     save_figure,
     symmetric_clim,
 )
-
 from polyzymd.analyses.shared.statistics import (
     PerResidueStats,
     StatResult,

@@ -70,8 +70,8 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.shared import apply_axis_style, get_colors, get_output_path, save_figure
 from polyzymd.analyses.shared.groupings import ProteinAAClassification
-from polyzymd.core.experimental import prefix_experimental_output
 from polyzymd.compare.statistics import cohens_d, independent_ttest, one_way_anova, percent_change
+from polyzymd.core.experimental import prefix_experimental_output
 
 logger = logging.getLogger("polyzymd.analyses.polymer_bridging")
 
@@ -633,6 +633,7 @@ class PolymerBridgingAnalysis(Analysis):
             condition_summaries.append(ConditionSummary(label=label, n_replicates=n_reps, **extra))
 
         from datetime import datetime
+
         from polyzymd import __version__
 
         primary_ranking = all_rankings.get(metric_names[0], []) if metric_names else []
@@ -1031,8 +1032,9 @@ def _condition_has_polymer(cond: Condition, polymer_selection: str = "chainID C"
                 return True
 
     try:
-        from polyzymd.analyses.shared.loader import TrajectoryLoader
         import MDAnalysis as mda
+
+        from polyzymd.analyses.shared.loader import TrajectoryLoader
 
         loader = TrajectoryLoader(sim_config)
         for rep in cond.replicates:
