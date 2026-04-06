@@ -104,7 +104,7 @@ plugins:
         context_selection: "protein"
       - label: "protein_with_polymer"
         target_selection: "protein"
-        context_selection: "protein or chainID C"
+        context_selection: "protein or chainid C"
     probe_radius_nm: 0.14
     n_sphere_points: 960
 
@@ -208,7 +208,7 @@ Sample output:
 ```text
 Analysis: sasa
 HPC dir: /path/to/calb_study/comparison/sasa/_hpc
-States: pending=0 running=2 retrying=0 succeeded=7 failed=0 unknown=0
+States: pending=4 running=2 retrying=0 succeeded=7 failed=0 unknown=0
 ```
 
 The status reads JSON files that each worker updates atomically. The states
