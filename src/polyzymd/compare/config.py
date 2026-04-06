@@ -579,6 +579,31 @@ class ComparisonConfig(BaseModel):
             )
             data["plugins"] = data.pop("analysis_settings")
 
+        if "analysis_settings" in data:
+            logger.warning(
+                "comparison.yaml contains both 'plugins' and legacy 'analysis_settings'; "
+                "ignoring 'analysis_settings'."
+            )
+            data.pop("analysis_settings")
+
+        allowed_keys = {
+            "name",
+            "description",
+            "control",
+            "conditions",
+            "defaults",
+            "plugins",
+            "plot_settings",
+        }
+        unknown_keys = sorted(set(data.keys()) - allowed_keys)
+        for key in unknown_keys:
+            logger.warning(
+                "comparison.yaml contains unknown top-level key '%s'; it will be ignored. "
+                "Valid keys: %s",
+                key,
+                ", ".join(sorted(allowed_keys)),
+            )
+
         if "plugins" not in data:
             data["plugins"] = {}
 
@@ -775,6 +800,18 @@ plugins:
   #
   # secondary_structure:
   #   chain_id: "A"              # chain letter for the protein to analyze
+
+  # SASA (Solvent Accessible Surface Area) Analysis
+  #
+  # sasa:
+  #   runs:
+  #     - label: "protein_total"
+  #       target_selection: "protein"
+  #       context_selection: "protein"  # optional, defaults to target_selection
+  #       stride: 1
+  #   probe_radius_nm: 0.14
+  #   n_sphere_points: 960
+  #   chunk_size: 100
 
   # Catalytic Triad / Active Site Distances
   #

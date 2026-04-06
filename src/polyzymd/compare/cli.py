@@ -37,6 +37,14 @@ from polyzymd.core.experimental import (
 LOGGER = logging.getLogger("polyzymd.compare.cli")
 
 
+def _display_path(path: Path) -> str:
+    """Return a human-friendly display path, relative to CWD if possible."""
+    try:
+        return str(path.absolute().relative_to(Path.cwd().absolute()))
+    except ValueError:
+        return str(path.absolute())
+
+
 def _resolve_hpc_dir(config: ComparisonConfig, analysis_name: str) -> Path:
     """Return the analysis HPC artifact directory."""
     source = config.source_path
@@ -225,14 +233,14 @@ prepared simulation input), NOT a trajectory frame.
         click.echo(f"Created comparison project: {project_dir}")
         click.echo()
         click.echo("Next steps:")
-        click.echo(f"  1. Edit {config_path.relative_to(Path.cwd())}")
+        click.echo(f"  1. Edit {_display_path(config_path)}")
         click.echo("     - Add your simulation conditions (paths to config.yaml files)")
         click.echo("     - Define catalytic_triad for active site analysis")
         click.echo()
         click.echo("  2. For binding preference analysis, copy your enzyme PDB:")
-        click.echo(f"     cp /path/to/enzyme.pdb {project_dir.relative_to(Path.cwd())}/structures/")
+        click.echo(f"     cp /path/to/enzyme.pdb {_display_path(project_dir)}/structures/")
         click.echo()
-        click.echo(f"  3. cd {project_dir.relative_to(Path.cwd())}")
+        click.echo(f"  3. cd {_display_path(project_dir)}")
         click.echo("  4. Run comparisons:")
         click.echo("     polyzymd compare run rmsf      # Compare flexibility")
         click.echo("     polyzymd compare run triad     # Compare triad geometry")
@@ -240,7 +248,7 @@ prepared simulation input), NOT a trajectory frame.
         click.echo("     polyzymd compare run exposure  # Compare chaperone-like activity")
         click.echo()
 
-    except Exception as e:
+    except (OSError, IOError) as e:
         click.echo(f"Error creating project: {e}", err=True)
         sys.exit(1)
 
@@ -404,22 +412,14 @@ def run_comparison(
 ):
     """Run a comparison using the analysis plugin system.
 
-    This is a generic command that can run any discovered analysis plugin.
-    Use --list to see available comparison types.
+    Runs any discovered analysis plugin by name or alias. Use --list to see
+    all available comparison types.
 
     \b
-    Available comparison types:
-      - rmsf: Compare RMSF (flexibility) across conditions
-      - triad: Compare catalytic triad geometry across conditions
-      - contacts: Compare polymer-protein contacts across conditions
-      - exposure: Compare chaperone-like polymer activity across conditions
-
-    \b
-    Example:
+    Examples:
         polyzymd compare run rmsf
         polyzymd compare run triad --eq-time 10ns
         polyzymd compare run contacts --format markdown
-        polyzymd compare run exposure --format json
         polyzymd compare run --list
     """
     from polyzymd.analyses.discovery import get_analysis, list_all_names, list_analyses
