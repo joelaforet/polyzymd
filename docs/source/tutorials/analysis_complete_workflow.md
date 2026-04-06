@@ -1,5 +1,21 @@
 # Tutorial: Analyze a Study from Finished Simulations
 
+:::{admonition} Modern workflow available
+:class: note
+
+This tutorial documents the manual, condition-by-condition analysis workflow.
+For most users, the **comparison pipeline** is now the recommended approach —
+it handles compute, aggregation, comparison, and plotting automatically:
+
+```bash
+polyzymd compare init -n my_study
+# Edit comparison.yaml with your conditions
+polyzymd compare run-all --plot
+```
+
+See {doc}`analysis_compare_conditions` for the full guide.
+:::
+
 This tutorial walks through one complete PolyzyMD analysis story:
 
 - three simulation conditions already exist
