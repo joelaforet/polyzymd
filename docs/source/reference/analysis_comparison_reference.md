@@ -46,6 +46,7 @@ Stable release workflows for `v1.3.0`:
 - `distances`
 - `catalytic_triad`
 - `secondary_structure`
+- `sasa`
 
 Experimental but still available:
 
@@ -82,6 +83,7 @@ polyzymd compare run rmsf
 polyzymd compare run contacts
 polyzymd compare run distances
 polyzymd compare run triad
+polyzymd compare run sasa
 polyzymd compare run-all
 polyzymd compare plot-all
 ```
@@ -114,6 +116,7 @@ comparison/rmsf/result.json
 comparison/contacts/result.json
 comparison/distances/result.json
 comparison/catalytic_triad/result.json
+comparison/sasa/result.json
 ```
 
 ## Plotting Smoke Test

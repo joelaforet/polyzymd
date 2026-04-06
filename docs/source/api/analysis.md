@@ -24,8 +24,8 @@ For the unified analysis lifecycle, see the [Analyses Plugin API](analyses.md).
 
 ## Notes
 
-- Stable analysis workflows: RMSF, contacts, distances, catalytic triad, and
-  secondary structure.
+- Stable analysis workflows: RMSF, contacts, distances, catalytic triad,
+  secondary structure, and SASA.
 - Experimental workflows are documented separately in the user docs and are
   clearly labeled there.
 

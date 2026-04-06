@@ -12,7 +12,7 @@ You will:
 
 ```{important}
 For the `v1.3.0` release, the stable comparison stack is RMSD, Rg, RMSF,
-contacts, distances, catalytic triad, and secondary structure. Binding
+contacts, distances, catalytic triad, secondary structure, and SASA. Binding
 preference, exposure dynamics, binding free energy, and polymer affinity remain
 available, but PolyzyMD labels them as experimental.
 ```

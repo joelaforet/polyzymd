@@ -51,6 +51,7 @@ adding new analysis types to PolyzyMD.
 | `rmsf` | `analyses.rmsf` | Default (scalar) |
 | `catalytic_triad` | `analyses.catalytic_triad` | Default (scalar) |
 | `secondary_structure` | `analyses.secondary_structure` | Default (scalar) |
+| `sasa` | `analyses.sasa` | Custom (per-run) |
 | `distances` | `analyses.distances` | Custom |
 | `contacts` | `analyses.contacts` | Custom |
 | `exposure` | `analyses.exposure` | Custom |

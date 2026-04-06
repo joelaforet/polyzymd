@@ -22,6 +22,7 @@ Stable workflows:
 - [Run RMSF Analysis](../tutorials/analysis_rmsf_quickstart.md)
 - [Run Distance Analysis](../tutorials/analysis_distances_quickstart.md)
 - [Run Contacts Analysis](../tutorials/analysis_contacts_quickstart.md)
+- [Run SASA Analysis](../tutorials/sasa_analysis.md)
 - [Compare Simulation Conditions](../tutorials/analysis_compare_conditions.md)
 - [Run Catalytic Triad Analysis](../tutorials/analysis_triad_quickstart.md)
 
@@ -32,6 +33,10 @@ Experimental workflows:
 - [Experimental: Analyze Polymer Affinity](../tutorials/analysis_polymer_affinity.md)
 - [Experimental: Analyze Polymer Bridging](../tutorials/analysis_polymer_bridging.md)
 - [Experimental: Analyze Exposure Dynamics](../tutorials/analysis_exposure_dynamics.md)
+
+## HPC and Job Submission
+
+- [Submit Analysis Jobs to SLURM](hpc_execution.md)
 
 ## Recipe Collections
 
@@ -58,6 +63,7 @@ Run Rg Analysis <../tutorials/analysis_rg_quickstart>
 Run RMSF Analysis <../tutorials/analysis_rmsf_quickstart>
 Run Distance Analysis <../tutorials/analysis_distances_quickstart>
 Run Contacts Analysis <../tutorials/analysis_contacts_quickstart>
+Run SASA Analysis <../tutorials/sasa_analysis>
 Compare Simulation Conditions <../tutorials/analysis_compare_conditions>
 Run Catalytic Triad Analysis <../tutorials/analysis_triad_quickstart>
 Experimental: Analyze Binding Preference <../tutorials/analysis_binding_preference>
@@ -65,6 +71,7 @@ Experimental: Analyze Binding Free Energy <../tutorials/analysis_binding_free_en
 Experimental: Analyze Polymer Affinity <../tutorials/analysis_polymer_affinity>
 Experimental: Analyze Polymer Bridging <../tutorials/analysis_polymer_bridging>
 Experimental: Analyze Exposure Dynamics <../tutorials/analysis_exposure_dynamics>
+Submit Analysis Jobs to SLURM <hpc_execution>
 Contacts Cookbook <../tutorials/analysis_contacts_cookbook>
 Broken Molecule Debugging <../tutorials/broken_molecules_debugging>
 ```
