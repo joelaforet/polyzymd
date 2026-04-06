@@ -181,48 +181,77 @@ def format_contacts_console_table(
     # Pairwise aggregate comparisons
     if show_pairwise and result.pairwise_comparisons:
         lines.append("Aggregate Comparisons")
-        lines.append("-" * 95)
+        lines.append("-" * 118)
         header = (
             f"{'Comparison':<30} {'Metric':<15} {'% Change':<10} "
-            f"{'p-value':<12} {'Cohen d':<10} {'Effect':<12}"
+            f"{'p-value':<12} {'p-adj':<12} {'Cohen d':<10} {'Effect':<12} {'ES':<2}"
         )
         lines.append(header)
-        lines.append("-" * 95)
+        lines.append("-" * 118)
 
         for comp in result.pairwise_comparisons:
             comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
             for agg in comp.aggregate_comparisons:
                 sig_marker = "*" if agg.significant else ""
-                p_str = f"{agg.p_value:.4f}{sig_marker}"
+                p_str = f"{agg.p_value:.4f}"
+                p_adj = agg.p_value_adjusted
+                p_adj_str = f"{p_adj:.4f}{sig_marker}" if p_adj is not None else "--"
                 pct_str = f"{agg.percent_change:+.1f}%"
                 d_str = f"{agg.cohens_d:.2f}"
                 metric = agg.metric.replace("_", " ")[:14]
+                effect_marker = "†" if agg.meets_effect_size_threshold else ""
                 lines.append(
                     f"{comparison_name:<30} {metric:<15} {pct_str:<10} "
-                    f"{p_str:<12} {d_str:<10} {agg.effect_size_interpretation:<12}"
+                    f"{p_str:<12} {p_adj_str:<12} {d_str:<10} "
+                    f"{agg.effect_size_interpretation:<12} {effect_marker:<2}"
                 )
             # Add separator between comparisons if more than one
             if len(result.pairwise_comparisons) > 1:
                 lines.append("")
 
-        lines.append("-" * 95)
-        lines.append("* p < 0.05; positive % change = more contact in treatment")
+        lines.append("-" * 118)
+        lines.append(
+            "* p_adj < "
+            f"{result.fdr_alpha} (BH-corrected); "
+            f"† meets min effect size |d| >= {result.min_effect_size}"
+        )
+        lines.append("positive % change = more contact in treatment")
         lines.append("")
 
     # ANOVA
     if show_anova and result.anova:
         lines.append("One-way ANOVA")
-        lines.append("-" * 60)
-        lines.append(f"{'Metric':<25} {'F-stat':<12} {'p-value':<12} {'Significant':<12}")
-        lines.append("-" * 60)
+        lines.append("-" * 84)
+        lines.append(
+            f"{'Metric':<25} {'F-stat':<12} {'p-value':<12} {'p-adj':<12} {'Significant':<12}"
+        )
+        lines.append("-" * 84)
         for anova in result.anova:
             sig = "Yes*" if anova.significant else "No"
             metric = anova.metric.replace("_", " ")
-            lines.append(
-                f"{metric:<25} {anova.f_statistic:<12.3f} {anova.p_value:<12.4f} {sig:<12}"
+            p_adj_str = (
+                f"{anova.p_value_adjusted:.4f}" if anova.p_value_adjusted is not None else "--"
             )
-        lines.append("-" * 60)
-        lines.append("* p < 0.05")
+            lines.append(
+                f"{metric:<25} {anova.f_statistic:<12.3f} {anova.p_value:<12.4f} "
+                f"{p_adj_str:<12} {sig:<12}"
+            )
+        lines.append("-" * 84)
+        lines.append(f"* p_adj < {result.fdr_alpha} (BH-corrected)")
+        lines.append("")
+
+    if result.top_contacted_residues:
+        lines.append("Top Contacted Residues")
+        lines.append("-" * 80)
+        for cond_label, residues in result.top_contacted_residues.items():
+            lines.append(f"{cond_label} (top {result.top_residues})")
+            if not residues:
+                lines.append("  (no residue data)")
+                continue
+            for resid, resname, frac in residues:
+                lines.append(f"  {resid:>5} {resname:<4} {frac * 100:>7.2f}%")
+            lines.append("")
+        lines.append("-" * 80)
         lines.append("")
 
     # Interpretation
@@ -244,9 +273,12 @@ def format_contacts_console_table(
             # Find coverage comparison
             for agg in comp.aggregate_comparisons:
                 if agg.metric == "coverage" and agg.significant:
+                    p_for_display = (
+                        agg.p_value_adjusted if agg.p_value_adjusted is not None else agg.p_value
+                    )
                     lines.append(
                         f"  {comp.condition_b}: {agg.percent_change:+.1f}% coverage vs {comp.condition_a} "
-                        f"(p={agg.p_value:.4f}, d={agg.cohens_d:.2f})"
+                        f"(p_adj={p_for_display:.4f}, d={agg.cohens_d:.2f})"
                     )
 
     lines.append("")
@@ -397,10 +429,10 @@ def format_contacts_markdown(
         lines.append("## Aggregate Statistical Comparisons")
         lines.append("")
         lines.append(
-            "| Comparison | Metric | % Change | p-value | Cohen's d | Effect | Significant |"
+            "| Comparison | Metric | % Change | p-value | p-adj | Cohen's d | Effect | ES | Significant |"
         )
         lines.append(
-            "|------------|--------|----------|---------|-----------|--------|-------------|"
+            "|------------|--------|----------|---------|-------|-----------|--------|----|-------------|"
         )
 
         for comp in result.pairwise_comparisons:
@@ -408,29 +440,57 @@ def format_contacts_markdown(
             for agg in comp.aggregate_comparisons:
                 sig = "Yes*" if agg.significant else "No"
                 metric = agg.metric.replace("_", " ")
+                p_adj_str = (
+                    f"{agg.p_value_adjusted:.4f}" if agg.p_value_adjusted is not None else "--"
+                )
+                effect_marker = "†" if agg.meets_effect_size_threshold else ""
                 lines.append(
                     f"| {comparison_name} | {metric} | {agg.percent_change:+.1f}% | "
-                    f"{agg.p_value:.4f} | {agg.cohens_d:.2f} | "
-                    f"{agg.effect_size_interpretation} | {sig} |"
+                    f"{agg.p_value:.4f} | {p_adj_str} | {agg.cohens_d:.2f} | "
+                    f"{agg.effect_size_interpretation} | {effect_marker} | {sig} |"
                 )
 
         lines.append("")
-        lines.append("*p < 0.05; positive % change = more contact in treatment")
+        lines.append(
+            f"*p_adj < {result.fdr_alpha} (BH-corrected); "
+            f"† meets min effect size |d| >= {result.min_effect_size}"
+        )
+        lines.append("positive % change = more contact in treatment")
         lines.append("")
 
     # ANOVA
     if show_anova and result.anova:
         lines.append("## One-way ANOVA")
         lines.append("")
-        lines.append("| Metric | F-statistic | p-value | Significant |")
-        lines.append("|--------|-------------|---------|-------------|")
+        lines.append("| Metric | F-statistic | p-value | p-adj | Significant |")
+        lines.append("|--------|-------------|---------|-------|-------------|")
         for anova in result.anova:
             sig = "Yes*" if anova.significant else "No"
             metric = anova.metric.replace("_", " ")
-            lines.append(f"| {metric} | {anova.f_statistic:.3f} | {anova.p_value:.4f} | {sig} |")
+            p_adj_str = (
+                f"{anova.p_value_adjusted:.4f}" if anova.p_value_adjusted is not None else "--"
+            )
+            lines.append(
+                f"| {metric} | {anova.f_statistic:.3f} | {anova.p_value:.4f} | {p_adj_str} | {sig} |"
+            )
         lines.append("")
-        lines.append("*p < 0.05")
+        lines.append(f"*p_adj < {result.fdr_alpha} (BH-corrected)")
         lines.append("")
+
+    if result.top_contacted_residues:
+        lines.append("## Top Contacted Residues")
+        lines.append("")
+        for cond_label, residues in result.top_contacted_residues.items():
+            lines.append(f"### {cond_label} (top {result.top_residues})")
+            lines.append("")
+            lines.append("| Resid | Resname | Contact fraction |")
+            lines.append("|------:|---------|-----------------:|")
+            if not residues:
+                lines.append("| -- | -- | -- |")
+            else:
+                for resid, resname, frac in residues:
+                    lines.append(f"| {resid} | {resname} | {frac:.4f} |")
+            lines.append("")
 
     # Key findings
     lines.append("## Key Findings")
@@ -453,10 +513,14 @@ def format_contacts_markdown(
         for comp in result.pairwise_comparisons:
             for agg in comp.aggregate_comparisons:
                 if agg.significant:
+                    p_for_display = (
+                        agg.p_value_adjusted if agg.p_value_adjusted is not None else agg.p_value
+                    )
                     lines.append(
                         f"{finding_num}. {comp.condition_b} shows **{agg.percent_change:+.1f}%** "
                         f"{agg.metric.replace('_', ' ')} vs {comp.condition_a} "
-                        f"(p={agg.p_value:.4f}, d={agg.cohens_d:.2f} [{agg.effect_size_interpretation}])"
+                        f"(p_adj={p_for_display:.4f}, d={agg.cohens_d:.2f} "
+                        f"[{agg.effect_size_interpretation}])"
                     )
                     finding_num += 1
 

@@ -146,12 +146,16 @@ class AggregateComparisonResult(BaseModel):
         T-test statistic
     p_value : float
         Two-tailed p-value
+    p_value_adjusted : float | None
+        BH-adjusted p-value
     cohens_d : float
         Effect size
     effect_size_interpretation : str
         "negligible", "small", "medium", or "large"
     significant : bool
-        Whether p < alpha
+        Whether adjusted p-value is below threshold when FDR correction is applied
+    meets_effect_size_threshold : bool
+        Whether |Cohen's d| >= min_effect_size
     percent_change : float
         Percent change from A to B
     direction : str
@@ -167,9 +171,11 @@ class AggregateComparisonResult(BaseModel):
     condition_b_sem: float
     t_statistic: float
     p_value: float
+    p_value_adjusted: float | None = None
     cohens_d: float
     effect_size_interpretation: str
     significant: bool
+    meets_effect_size_threshold: bool = True
     percent_change: float
     direction: str
 
@@ -245,6 +251,8 @@ class ContactsANOVASummary(BaseModel):
         F-statistic from ANOVA
     p_value : float
         P-value for the test
+    p_value_adjusted : float | None
+        BH-adjusted p-value
     significant : bool
         Whether p < 0.05
     """
@@ -252,6 +260,7 @@ class ContactsANOVASummary(BaseModel):
     metric: str
     f_statistic: float
     p_value: float
+    p_value_adjusted: float | None = None
     significant: bool
 
 
@@ -291,6 +300,10 @@ class ContactsComparisonResult(BaseModel):
         Contact criteria used
     fdr_alpha : float
         FDR alpha used for Benjamini-Hochberg correction
+    min_effect_size : float
+        Minimum effect size threshold used for display tagging
+    top_residues : int
+        Number of top contacted residues retained per condition
     control_label : str, optional
         Label of the control condition
     conditions : list[ContactsConditionSummary]
@@ -318,7 +331,9 @@ class ContactsComparisonResult(BaseModel):
     protein_selection: str
     cutoff: float
     contact_criteria: str
-    fdr_alpha: float
+    fdr_alpha: float = 0.05
+    min_effect_size: float = 0.0
+    top_residues: int = 0
     control_label: str | None = None
     conditions: list[ContactsConditionSummary]
     pairwise_comparisons: list[ContactsPairwiseComparison]
@@ -333,6 +348,7 @@ class ContactsComparisonResult(BaseModel):
         default=None,
         description="Binding preference comparison across conditions (if computed)",
     )
+    top_contacted_residues: dict[str, list[tuple[int, str, float]]] | None = None
     equilibration_time: str
     created_at: datetime
     polyzymd_version: str = __version__

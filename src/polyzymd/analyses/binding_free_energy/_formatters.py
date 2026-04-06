@@ -71,6 +71,8 @@ def format_bfe_console_table(result: BindingFreeEnergyResult) -> str:
             lines.append("Pairwise ΔΔG Differences (ΔG_sel,B − ΔG_sel,A)")
             lines.append("-" * 80)
             _format_pairwise_block(lines, same_t_pairs, u)
+            lines.append("")
+            lines.append(f"* p_adj < {result.fdr_alpha} (BH-corrected)")
 
         if cross_t_pairs:
             lines.append("")
@@ -135,16 +137,31 @@ def _format_pairwise_block(
         lines.append(f"\n  {cond_a}  →  {cond_b}")
         lines.append(
             f"  {'Polymer':<12} {'AA Group':<22} {'ΔG_sel,A':>10} {'ΔG_sel,B':>10} "
-            f"{'ΔΔG_B−A':>10} {'p-value':>10}"
+            f"{'ΔΔG_B−A':>10} {'p-value':>10} {'p-adj':>10} {'sig':>5}"
         )
-        lines.append("  " + "-" * 77)
+        lines.append("  " + "-" * 97)
 
         for e in sorted(entries, key=lambda x: (x.polymer_type, x.protein_group)):
             dg_a = f"{e.delta_G_a:>+10.3f}" if e.delta_G_a is not None else "       N/A"
             dg_b = f"{e.delta_G_b:>+10.3f}" if e.delta_G_b is not None else "       N/A"
             ddg = f"{e.delta_delta_G:>+10.3f}" if e.delta_delta_G is not None else "       N/A"
             pval = f"{e.p_value:>10.4f}" if e.p_value is not None else "        --"
-            lines.append(f"  {e.polymer_type:<12} {e.protein_group:<22} {dg_a} {dg_b} {ddg} {pval}")
+            p_adj = (
+                f"{e.p_value_adjusted:>10.4f}" if e.p_value_adjusted is not None else "        --"
+            )
+            sig_marker = ""
+            if e.p_value_adjusted is not None:
+                if e.p_value_adjusted < 0.001:
+                    sig_marker = "***"
+                elif e.p_value_adjusted < 0.01:
+                    sig_marker = "**"
+                elif e.p_value_adjusted < 0.05:
+                    sig_marker = "*"
+            bh_sig = "Yes" if e.significant else "No"
+            lines.append(
+                f"  {e.polymer_type:<12} {e.protein_group:<22} {dg_a} {dg_b} {ddg} "
+                f"{pval} {p_adj}{sig_marker} {bh_sig:>5}"
+            )
 
 
 def format_bfe_markdown(result: BindingFreeEnergyResult) -> str:
@@ -224,20 +241,29 @@ def format_bfe_markdown(result: BindingFreeEnergyResult) -> str:
             lines.append(f"### {cond_a} → {cond_b}")
             lines.append("")
             lines.append(
-                f"| Polymer | AA Group | ΔG_sel,A ({u}) | ΔG_sel,B ({u}) | ΔΔG_B−A ({u}) | p-value |"
+                f"| Polymer | AA Group | ΔG_sel,A ({u}) | ΔG_sel,B ({u}) | "
+                f"ΔΔG_B−A ({u}) | p-value | p-adj | Sig. |"
             )
-            lines.append("|---------|----------|----------:|----------:|----------:|--------:|")
+            lines.append(
+                "|---------|----------|----------:|----------:|----------:|--------:|------:|------|"
+            )
 
             for e in sorted(entries, key=lambda x: (x.polymer_type, x.protein_group)):
                 dg_a = f"{e.delta_G_a:+.3f}" if e.delta_G_a is not None else "N/A"
                 dg_b = f"{e.delta_G_b:+.3f}" if e.delta_G_b is not None else "N/A"
                 ddg = f"{e.delta_delta_G:+.3f}" if e.delta_delta_G is not None else "N/A"
                 pval = f"{e.p_value:.4f}" if e.p_value is not None else "--"
+                p_adj = f"{e.p_value_adjusted:.4f}" if e.p_value_adjusted is not None else "--"
+                sig = "Yes" if e.significant else "No"
                 lines.append(
-                    f"| {e.polymer_type} | {e.protein_group} | {dg_a} | {dg_b} | {ddg} | {pval} |"
+                    f"| {e.polymer_type} | {e.protein_group} | {dg_a} | {dg_b} | {ddg} | "
+                    f"{pval} | {p_adj} | {sig} |"
                 )
 
             lines.append("")
+
+        lines.append(f"* p_adj < {result.fdr_alpha} (BH-corrected)")
+        lines.append("")
 
     return "\n".join(lines)
 

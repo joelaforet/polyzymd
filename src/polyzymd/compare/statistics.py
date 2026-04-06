@@ -8,6 +8,7 @@ All functions use SciPy for statistical calculations.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -98,6 +99,110 @@ class ANOVAResult:
             "p_value": self.p_value,
             "significant": self.significant,
         }
+
+
+@dataclass
+class BHResult:
+    """Result of Benjamini-Hochberg correction for one hypothesis.
+
+    Attributes
+    ----------
+    raw_p_value : float | None
+        Original uncorrected p-value.
+    adjusted_p_value : float | None
+        BH-adjusted p-value (q-value). None if raw was None.
+    significant : bool
+        Whether adjusted_p_value <= alpha.
+    rank : int | None
+        1-based rank among non-None p-values (smallest=1). None if raw was None.
+    """
+
+    raw_p_value: float | None
+    adjusted_p_value: float | None
+    significant: bool
+    rank: int | None
+
+
+def benjamini_hochberg(
+    p_values: Sequence[float | None],
+    alpha: float = 0.05,
+) -> list[BHResult]:
+    """Apply Benjamini-Hochberg FDR correction to a family of p-values.
+
+    Implements the Benjamini-Hochberg (1995) step-up procedure to control
+    the false discovery rate. The correction adjusts p-values such that
+    declaring significance at ``adjusted_p <= alpha`` controls the expected
+    proportion of false discoveries at level *alpha*.
+
+    ``None`` and ``NaN`` entries in *p_values* (e.g. cross-temperature pairs
+    where statistics are suppressed, or degenerate tests with undefined
+    p-values) are passed through — the corresponding ``BHResult`` has
+    ``adjusted_p_value=None`` and ``significant=False``.
+
+    Parameters
+    ----------
+    p_values : Sequence[float | None]
+        Raw two-tailed p-values. ``None`` entries are preserved.
+    alpha : float, optional
+        FDR significance threshold, by default 0.05.
+
+    Returns
+    -------
+    list[BHResult]
+        One entry per input p-value, in the same order.
+
+    References
+    ----------
+    Benjamini, Y. & Hochberg, Y. (1995). Controlling the false discovery
+    rate: a practical and powerful approach to multiple testing. *JRSS B*,
+    57(1), 289-300.
+    """
+    if not 0.0 < alpha <= 1.0:
+        raise ValueError(f"alpha must satisfy 0 < alpha <= 1, got {alpha}")
+
+    if not p_values:
+        return []
+
+    results: list[BHResult] = [
+        BHResult(raw_p_value=None, adjusted_p_value=None, significant=False, rank=None)
+        for _ in p_values
+    ]
+
+    indexed_non_null: list[tuple[int, float]] = []
+    for idx, p in enumerate(p_values):
+        if p is None:
+            continue
+        raw_p = float(p)
+        if math.isnan(raw_p):
+            continue
+        indexed_non_null.append((idx, raw_p))
+
+    if not indexed_non_null:
+        return results
+
+    indexed_non_null.sort(key=lambda item: item[1])
+    m = len(indexed_non_null)
+
+    sorted_p = np.asarray([item[1] for item in indexed_non_null], dtype=np.float64)
+    ranks = np.arange(1, m + 1, dtype=np.float64)
+
+    adjusted_sorted = sorted_p * m / ranks
+    adjusted_sorted = np.minimum.accumulate(adjusted_sorted[::-1])[::-1]
+    adjusted_sorted = np.clip(adjusted_sorted, 0.0, 1.0)
+
+    for rank_idx, ((original_idx, raw_p), adjusted_p) in enumerate(
+        zip(indexed_non_null, adjusted_sorted, strict=False),
+        start=1,
+    ):
+        adjusted = float(adjusted_p)
+        results[original_idx] = BHResult(
+            raw_p_value=raw_p,
+            adjusted_p_value=adjusted,
+            significant=adjusted <= alpha,
+            rank=rank_idx,
+        )
+
+    return results
 
 
 def independent_ttest(

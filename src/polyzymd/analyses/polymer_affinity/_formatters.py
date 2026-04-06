@@ -95,6 +95,8 @@ def format_affinity_console_table(result: PolymerAffinityScoreResult) -> str:
             lines.append("Pairwise Affinity Score Differences (Score_B − Score_A)")
             lines.append("-" * 90)
             _format_pairwise_block(lines, same_t_pairs)
+            lines.append("")
+            lines.append(f"* p_adj < {result.fdr_alpha} (BH-corrected)")
 
         if cross_t_pairs:
             lines.append("")
@@ -192,18 +194,22 @@ def _format_pairwise_block(
     for p in sorted(pairs, key=lambda x: (x.condition_a, x.condition_b)):
         delta_str = f"{p.delta_score:>+12.3f}" if p.delta_score is not None else "         N/A"
         pval_str = f"{p.p_value:>10.4f}" if p.p_value is not None else "        --"
+        p_adj_str = (
+            f"{p.p_value_adjusted:>10.4f}" if p.p_value_adjusted is not None else "        --"
+        )
         sig = ""
-        if p.p_value is not None:
-            if p.p_value < 0.001:
+        if p.p_value_adjusted is not None:
+            if p.p_value_adjusted < 0.001:
                 sig = " ***"
-            elif p.p_value < 0.01:
+            elif p.p_value_adjusted < 0.01:
                 sig = " **"
-            elif p.p_value < 0.05:
+            elif p.p_value_adjusted < 0.05:
                 sig = " *"
+        bh_sig = "Yes" if p.significant else "No"
         lines.append(
             f"  {p.condition_a:<25} → {p.condition_b:<25}  "
             f"Score_A={p.score_a:>+8.3f}  Score_B={p.score_b:>+8.3f}  "
-            f"Δ={delta_str}  p={pval_str}{sig}"
+            f"Δ={delta_str}  p={pval_str}  p_adj={p_adj_str}{sig}  sig={bh_sig}"
         )
 
 
@@ -334,28 +340,32 @@ def format_affinity_markdown(result: PolymerAffinityScoreResult) -> str:
         lines.append("## Pairwise Comparisons")
         lines.append("")
         lines.append(
-            "| Condition A | Condition B | Score A (kT) | Score B (kT) | Δ (kT) | p-value | Sig. |"
+            "| Condition A | Condition B | Score A (kT) | Score B (kT) | "
+            "Δ (kT) | p-value | p-adj | Sig. |"
         )
         lines.append(
-            "|-------------|-------------|------------:|------------:|------:|--------:|------|"
+            "|-------------|-------------|------------:|------------:|------:|--------:|------:|------|"
         )
 
         for p in sorted(same_t_pairs, key=lambda x: (x.condition_a, x.condition_b)):
             delta_str = f"{p.delta_score:+.3f}" if p.delta_score is not None else "N/A"
             pval_str = f"{p.p_value:.4f}" if p.p_value is not None else "--"
+            p_adj_str = f"{p.p_value_adjusted:.4f}" if p.p_value_adjusted is not None else "--"
             sig = ""
-            if p.p_value is not None:
-                if p.p_value < 0.001:
+            if p.p_value_adjusted is not None:
+                if p.p_value_adjusted < 0.001:
                     sig = "***"
-                elif p.p_value < 0.01:
+                elif p.p_value_adjusted < 0.01:
                     sig = "**"
-                elif p.p_value < 0.05:
+                elif p.p_value_adjusted < 0.05:
                     sig = "*"
             lines.append(
                 f"| {p.condition_a} | {p.condition_b} | {p.score_a:+.3f} | "
-                f"{p.score_b:+.3f} | {delta_str} | {pval_str} | {sig} |"
+                f"{p.score_b:+.3f} | {delta_str} | {pval_str} | {p_adj_str} | {sig} |"
             )
 
+        lines.append("")
+        lines.append(f"* p_adj < {result.fdr_alpha} (BH-corrected)")
         lines.append("")
 
     # Disclaimer

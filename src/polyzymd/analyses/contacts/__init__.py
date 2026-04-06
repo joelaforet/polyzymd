@@ -823,19 +823,12 @@ class ContactsAnalysis(Analysis):
         """
         from polyzymd import __version__
         from polyzymd.analyses.contacts._comparison_results import (
-            AggregateComparisonResult,
             BindingPreferenceComparisonEntry,
             BindingPreferenceComparisonSummary,
             ContactsANOVASummary,
             ContactsComparisonResult,
             ContactsConditionSummary,
             ContactsPairwiseComparison,
-        )
-        from polyzymd.compare.statistics import (
-            cohens_d,
-            independent_ttest,
-            one_way_anova,
-            percent_change,
         )
 
         settings = ctx.settings
@@ -907,9 +900,20 @@ class ContactsAnalysis(Analysis):
         if len(summaries) >= 3:
             anova_results = self._compute_contacts_anova(condition_data)
 
+        # Step 6b: Apply BH FDR correction
+        self._apply_fdr_correction(comparisons, anova_results, settings.fdr_alpha)
+
+        # Step 6c: Apply effect size threshold
+        self._apply_effect_size_threshold(comparisons, settings.min_effect_size)
+
         # Step 7: Rankings
         ranked_coverage = sorted(summaries, key=lambda s: s.coverage_mean, reverse=True)
         ranked_contact = sorted(summaries, key=lambda s: s.mean_contact_fraction, reverse=True)
+
+        # Step 7b: Top contacted residues
+        top_residues_data = self._compute_top_contacted_residues(
+            condition_data, settings.top_residues
+        )
 
         # Step 8: Binding preference comparison (optional)
         binding_pref_summary = self._load_or_compute_binding_preference(ctx, condition_data)
@@ -924,6 +928,8 @@ class ContactsAnalysis(Analysis):
             cutoff=settings.cutoff,
             contact_criteria="distance",
             fdr_alpha=settings.fdr_alpha,
+            min_effect_size=settings.min_effect_size,
+            top_residues=settings.top_residues,
             control_label=effective_control,
             conditions=summaries,
             pairwise_comparisons=comparisons,
@@ -932,6 +938,7 @@ class ContactsAnalysis(Analysis):
             ranking_by_contact_fraction=[s.label for s in ranked_contact],
             excluded_conditions=[c.label for c in ctx.excluded_conditions],
             binding_preference=binding_pref_summary,
+            top_contacted_residues=top_residues_data,
             equilibration_time=ctx.equilibration,
             created_at=datetime.now(),
             polyzymd_version=__version__,
@@ -1401,6 +1408,160 @@ class ContactsAnalysis(Analysis):
         )
 
         return results
+
+    @staticmethod
+    def _apply_fdr_correction(
+        comparisons: list[Any],
+        anova_results: list[Any],
+        fdr_alpha: float,
+    ) -> None:
+        """Apply Benjamini-Hochberg FDR correction to pairwise and ANOVA p-values.
+
+        Treats all pairwise aggregate comparisons as one family and ANOVA p-values
+        as a separate family
+        """
+        from polyzymd.compare.statistics import benjamini_hochberg
+
+        all_pairwise_agg = []
+        for comp in comparisons:
+            all_pairwise_agg.extend(comp.aggregate_comparisons)
+
+        if all_pairwise_agg:
+            logger.debug(
+                "Starting BH correction for contacts pairwise family: size=%d, alpha=%.4f",
+                len(all_pairwise_agg),
+                fdr_alpha,
+            )
+            raw_p = [agg.p_value for agg in all_pairwise_agg]
+            bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
+            changed_significance = 0
+            for agg, bh in zip(all_pairwise_agg, bh_results, strict=False):
+                if agg.significant != bh.significant:
+                    changed_significance += 1
+                agg.p_value_adjusted = bh.adjusted_p_value
+                agg.significant = bh.significant
+            n_significant = sum(1 for agg in all_pairwise_agg if agg.significant)
+            logger.info(
+                "Applied BH correction to %d contacts pairwise tests at α=%.3f: "
+                "%d remain significant, %d changed significance",
+                len(all_pairwise_agg),
+                fdr_alpha,
+                n_significant,
+                changed_significance,
+            )
+
+        if anova_results:
+            logger.debug(
+                "Starting BH correction for contacts ANOVA family: size=%d, alpha=%.4f",
+                len(anova_results),
+                fdr_alpha,
+            )
+            raw_p = [a.p_value for a in anova_results]
+            bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
+            changed_significance = 0
+            for anova, bh in zip(anova_results, bh_results, strict=False):
+                if anova.significant != bh.significant:
+                    changed_significance += 1
+                anova.p_value_adjusted = bh.adjusted_p_value
+                anova.significant = bh.significant
+            n_significant = sum(1 for anova in anova_results if anova.significant)
+            logger.info(
+                "Applied BH correction to %d contacts ANOVA tests at α=%.3f: "
+                "%d remain significant, %d changed significance",
+                len(anova_results),
+                fdr_alpha,
+                n_significant,
+                changed_significance,
+            )
+
+    @staticmethod
+    def _apply_effect_size_threshold(
+        comparisons: list[Any],
+        min_effect_size: float,
+    ) -> None:
+        """Tag aggregate comparisons that don't meet the effect size threshold."""
+        met_threshold = 0
+        failed_threshold = 0
+        for comp in comparisons:
+            for agg in comp.aggregate_comparisons:
+                agg.meets_effect_size_threshold = abs(agg.cohens_d) >= min_effect_size
+                if agg.meets_effect_size_threshold:
+                    met_threshold += 1
+                else:
+                    failed_threshold += 1
+        logger.info(
+            "Applied contacts effect-size threshold |d| >= %.3f: %d meet, %d fail",
+            min_effect_size,
+            met_threshold,
+            failed_threshold,
+        )
+
+    @staticmethod
+    def _compute_top_contacted_residues(
+        condition_data: list[tuple[Any, dict[str, Any]]],
+        top_n: int,
+    ) -> dict[str, list[tuple[int, str, float]]] | None:
+        """Compute top contacted residues per condition by contact_fraction_mean.
+
+        Parameters
+        ----------
+        condition_data : list
+            (Condition, data_dict) pairs where data_dict["agg_result"] has residue_stats
+        top_n : int
+            Number of top residues to include. 0 means disabled
+
+        Returns
+        -------
+        dict or None
+            {condition_label: [(resid, resname, contact_fraction_mean), ...]}
+            sorted descending by contact_fraction_mean. None if top_n <= 0
+        """
+        if top_n <= 0:
+            return None
+
+        logger.debug(
+            "Computing top contacted residues: top_n=%d across %d conditions",
+            top_n,
+            len(condition_data),
+        )
+
+        def _as_contact_fraction(residue_stat: Any) -> float:
+            """Convert residue contact fraction to float for robust sorting."""
+            value = getattr(residue_stat, "contact_fraction_mean", 0.0)
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+
+        result: dict[str, list[tuple[int, str, float]]] = {}
+        conditions_with_residue_data: list[str] = []
+        for cond, data in condition_data:
+            agg_result = data["agg_result"]
+            residue_stats = getattr(agg_result, "residue_stats", [])
+            if residue_stats:
+                conditions_with_residue_data.append(cond.label)
+            sorted_residues = sorted(
+                residue_stats,
+                key=_as_contact_fraction,
+                reverse=True,
+            )
+            result[cond.label] = [
+                (
+                    int(getattr(rs, "protein_resid", 0)),
+                    str(getattr(rs, "protein_resname", "UNK")),
+                    _as_contact_fraction(rs),
+                )
+                for rs in sorted_residues[:top_n]
+            ]
+
+        logger.info(
+            "Computed top %d contacted residues for %d conditions with residue data: %s",
+            top_n,
+            len(conditions_with_residue_data),
+            ", ".join(conditions_with_residue_data) if conditions_with_residue_data else "none",
+        )
+
+        return result
 
     # === Private helpers: binding preference ===
 

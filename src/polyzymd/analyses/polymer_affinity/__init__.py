@@ -250,6 +250,9 @@ class PolymerAffinityAnalysis(Analysis):
         # Step 4: Pairwise comparisons on total scores
         pairwise = self._compute_pairwise(condition_summaries, ctx.effective_control)
 
+        # Step 4b: Apply BH FDR correction per temperature group
+        self._apply_fdr_correction(pairwise, settings.fdr_alpha)
+
         # Step 5: Build result
         surface_threshold = settings.surface_exposure_threshold
 
@@ -262,6 +265,7 @@ class PolymerAffinityAnalysis(Analysis):
             polymer_types=all_polymer_types,
             protein_groups=all_protein_groups,
             surface_exposure_threshold=surface_threshold,
+            fdr_alpha=settings.fdr_alpha,
             equilibration_time=ctx.equilibration or "",
             created_at=datetime.now(),
             polyzymd_version=__version__,
@@ -1127,6 +1131,49 @@ class PolymerAffinityAnalysis(Analysis):
             t_statistic=t_stat,
             p_value=p_val,
         )
+
+    @staticmethod
+    def _apply_fdr_correction(
+        pairwise: list[Any],
+        fdr_alpha: float,
+    ) -> None:
+        """Apply BH correction to pairwise p-values per temperature group."""
+        from polyzymd.compare.statistics import benjamini_hochberg
+
+        same_temp = [p for p in pairwise if not p.cross_temperature and p.p_value is not None]
+        if not same_temp:
+            return
+
+        temp_groups: dict[float, list[Any]] = {}
+        for p in same_temp:
+            temp_groups.setdefault(p.temperature_a_K, []).append(p)
+
+        for temp, group in temp_groups.items():
+            logger.debug(
+                "Starting BH correction for polymer affinity temperature group %.2f K: "
+                "size=%d, alpha=%.4f",
+                temp,
+                len(group),
+                fdr_alpha,
+            )
+            raw_p = [e.p_value for e in group]
+            bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
+            changed_significance = 0
+            for entry, bh in zip(group, bh_results, strict=False):
+                if entry.significant != bh.significant:
+                    changed_significance += 1
+                entry.p_value_adjusted = bh.adjusted_p_value
+                entry.significant = bh.significant
+            n_significant = sum(1 for entry in group if entry.significant)
+            logger.info(
+                "Applied BH correction to %d polymer affinity tests at %.2f K (α=%.3f): "
+                "%d remain significant, %d changed significance",
+                len(group),
+                temp,
+                fdr_alpha,
+                n_significant,
+                changed_significance,
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -303,6 +303,10 @@ class AffinityScorePairwiseEntry(BaseModel):
         T-test statistic (None for cross-temperature pairs).
     p_value : float | None
         Two-tailed p-value (None for cross-temperature pairs).
+    p_value_adjusted : float | None
+        BH-adjusted p-value within same-temperature family.
+    significant : bool
+        Whether adjusted p-value < fdr_alpha.
     """
 
     condition_a: str
@@ -315,6 +319,8 @@ class AffinityScorePairwiseEntry(BaseModel):
     delta_score: float | None = None
     t_statistic: float | None = None
     p_value: float | None = None
+    p_value_adjusted: float | None = None
+    significant: bool = False
 
 
 class PolymerAffinityScoreResult(BaseModel):
@@ -356,6 +362,8 @@ class PolymerAffinityScoreResult(BaseModel):
         All protein groups analyzed.
     surface_exposure_threshold : float | None
         SASA threshold used (from settings).
+    fdr_alpha : float
+        FDR threshold used for BH correction.
     equilibration_time : str
         Equilibration time used.
     created_at : datetime
@@ -382,6 +390,7 @@ class PolymerAffinityScoreResult(BaseModel):
     polymer_types: list[str] = Field(default_factory=list)
     protein_groups: list[str] = Field(default_factory=list)
     surface_exposure_threshold: float | None = None
+    fdr_alpha: float = 0.05
     equilibration_time: str = ""
     created_at: datetime = Field(default_factory=datetime.now)
     polyzymd_version: str = Field(default_factory=lambda: __version__)
