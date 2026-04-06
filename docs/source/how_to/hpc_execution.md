@@ -82,15 +82,15 @@ control: "No Polymer"
 
 conditions:
   - label: "No Polymer"
-    config: "../noPoly_CALB_pNPB/config.yaml"
+    config: "noPoly_CALB_pNPB/config.yaml"
     replicates: [1, 2, 3]
 
   - label: "SBMA-100"
-    config: "../SBMA_100_CALB_pNPB/config.yaml"
+    config: "SBMA_100_CALB_pNPB/config.yaml"
     replicates: [1, 2, 3]
 
   - label: "EGMA-100"
-    config: "../EGMA_100_CALB_pNPB/config.yaml"
+    config: "EGMA_100_CALB_pNPB/config.yaml"
     replicates: [1, 2, 3]
 
 defaults:
@@ -132,7 +132,7 @@ pixi run -e build polyzymd compare submit sasa \
 You will see output like:
 
 ```text
-Submitted 10 jobs (6 replicate + 3 aggregate + 1 finalize)
+Would submit 13 jobs (9 replicate + 3 aggregate + 1 finalize)
 Dry run only: no jobs were submitted
 ```
 
@@ -180,7 +180,7 @@ pixi run -e build polyzymd compare submit sasa \
 Expected output:
 
 ```text
-Submitted 10 jobs (6 replicate + 3 aggregate + 1 finalize)
+Submitted 13 jobs (9 replicate + 3 aggregate + 1 finalize)
 ```
 
 The framework uses SLURM `--dependency=afterany:...` to wire the DAG. Aggregate
@@ -208,7 +208,7 @@ Sample output:
 ```text
 Analysis: sasa
 HPC dir: /path/to/calb_study/comparison/sasa/_hpc
-States: pending=0 running=2 retrying=0 succeeded=7 completed=0 failed=0 unknown=0
+States: pending=0 running=2 retrying=0 succeeded=7 failed=0 unknown=0
 ```
 
 The status reads JSON files that each worker updates atomically. The states
@@ -220,7 +220,6 @@ are:
 | `running` | Worker is currently executing |
 | `retrying` | Worker failed but is requeued for another attempt |
 | `succeeded` | Worker completed successfully |
-| `completed` | Task finished (used by finalize job) |
 | `failed` | Worker exhausted all retries |
 | `unknown` | Status file is corrupted or unreadable |
 
@@ -322,9 +321,11 @@ pixi run -e build polyzymd compare submit sasa \
     --partition aa100
 ```
 
-You can also reduce memory pressure by increasing the `chunk_size` in
-your SASA plugin settings (which processes fewer frames at once), although
-the default of 100 is already conservative.
+You can also reduce memory pressure by increasing the `stride` in
+your SASA plugin settings (which analyzes fewer frames), or by
+decreasing `chunk_size` (which processes fewer frames per batch
+at the cost of more I/O overhead). The default `chunk_size` of 100
+is already conservative for most systems.
 
 ### Job times out
 
@@ -408,6 +409,37 @@ All resource options are passed as CLI flags to `polyzymd compare submit`:
 | `--equilibration` | *(from YAML)* | Override equilibration time |
 | `--dry-run` | off | Generate scripts without submitting |
 | `--job-arrays` | off | Submit one SLURM array job per condition instead of individual jobs |
+
+### Using Job Arrays
+
+For studies with many replicates per condition, job arrays reduce the number
+of `sbatch` calls and make the SLURM queue easier to manage. Pass
+`--job-arrays` to submit one array job per condition instead of individual
+replicate jobs:
+
+```bash
+pixi run -e build polyzymd compare submit sasa \
+    -f comparison.yaml \
+    --partition aa100 \
+    --mem 8G \
+    --time 02:00:00 \
+    --job-arrays
+```
+
+With job arrays, the DAG structure changes:
+
+- **Without `--job-arrays`:** One `sbatch` call per replicate (e.g. 9 calls for 3×3).
+- **With `--job-arrays`:** One array `sbatch` call per condition (e.g. 3 calls for 3 conditions), each containing replicate tasks as array elements.
+
+Aggregate jobs depend on their condition's array job completing (`afterany`),
+and the finalize job depends on all aggregate jobs. Log files for array tasks
+include the array task ID in their filename.
+
+:::{note}
+Job arrays are opt-in because some clusters have restrictive array size
+limits or non-standard array scheduling behavior. Test with `--dry-run
+--job-arrays` first to inspect the generated scripts.
+:::
 
 ## What You Have Now
 
