@@ -7,9 +7,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
 from click.testing import CliRunner
 from pydantic import BaseModel
-import pytest
 
 from polyzymd.compare.cli import compare
 from polyzymd.workflow.analysis_slurm import (
@@ -76,6 +76,63 @@ def test_submit_dry_run_prints_summary(monkeypatch, tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "Submitted 6 jobs (3 replicate + 2 aggregate + 1 finalize)" in result.output
+
+
+def test_submit_dry_run_with_job_arrays_prints_array_summary(monkeypatch, tmp_path: Path) -> None:
+    """compare submit --job-arrays --dry-run should print array mode summary."""
+    runner = CliRunner()
+
+    class _FakeAnalysis:
+        name = "toy"
+
+    class _Cond:
+        def __init__(self, reps):
+            self.replicate_specs = [SimpleNamespace(replicate=r) for r in reps]
+            self.condition_slug = "cond"
+
+    manifest = SimpleNamespace(
+        condition_specs=[_Cond([1, 2]), _Cond([1])],
+        save=lambda path: Path(path).write_text("{}"),
+    )
+
+    monkeypatch.setattr(
+        "polyzymd.compare.config.ComparisonConfig.from_yaml",
+        lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.discovery.get_analysis", lambda name: lambda: _FakeAnalysis()
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.build_manifest", lambda *args, **kwargs: manifest
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_array_script",
+        lambda *args, **kwargs: tmp_path / "arr.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_aggregate_script",
+        lambda *args, **kwargs: tmp_path / "agg.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_finalize_script",
+        lambda *args, **kwargs: tmp_path / "fin.sh",
+    )
+
+    result = runner.invoke(
+        compare,
+        [
+            "submit",
+            "toy",
+            "--comparison-yaml",
+            str(tmp_path / "comparison.yaml"),
+            "--job-arrays",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Submitted 2 array jobs + 2 aggregate + 1 finalize = 5 total" in result.output
+    assert "Submission mode: job arrays" in result.output
 
 
 def test_submit_allow_partial_sets_manifest_policy(monkeypatch, tmp_path: Path) -> None:
@@ -201,6 +258,73 @@ def test_status_human_output_includes_unknown_and_warnings(monkeypatch, tmp_path
     assert "unknown=2" in result.output
     assert "⚠ Warnings:" in result.output
     assert "- corrupted status file: /tmp/bad.json" in result.output
+
+
+def test_status_reconcile_prints_summary(monkeypatch, tmp_path: Path) -> None:
+    """compare status --reconcile should print reconciliation summary."""
+    runner = CliRunner()
+
+    monkeypatch.setattr(
+        "polyzymd.compare.config.ComparisonConfig.from_yaml",
+        lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.discovery.get_analysis", lambda name: SimpleNamespace(name="toy")
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.reconcile_status_with_slurm",
+        lambda hpc_dir: {
+            "checked": 3,
+            "updated": 3,
+            "changes": [
+                {
+                    "job_id": "1001",
+                    "path": "/tmp/rep_1.json",
+                    "old_state": "running",
+                    "new_state": "failed",
+                    "slurm_state": "OUT_OF_MEMORY",
+                },
+                {
+                    "job_id": "1002",
+                    "path": "/tmp/rep_2.json",
+                    "old_state": "running",
+                    "new_state": "failed",
+                    "slurm_state": "OUT_OF_MEMORY",
+                },
+                {
+                    "job_id": "1003",
+                    "path": "/tmp/cond_a.json",
+                    "old_state": "pending",
+                    "new_state": "failed",
+                    "slurm_state": "CANCELLED",
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.read_analysis_status",
+        lambda hpc_dir: {
+            "counts": {
+                "pending": 0,
+                "running": 0,
+                "retrying": 0,
+                "succeeded": 0,
+                "completed": 0,
+                "failed": 3,
+                "unknown": 0,
+            },
+            "warnings": [],
+        },
+    )
+
+    result = runner.invoke(
+        compare,
+        ["status", "toy", "--comparison-yaml", str(tmp_path / "comparison.yaml"), "--reconcile"],
+    )
+    assert result.exit_code == 0
+    assert "Reconciled 3 jobs:" in result.output
+    assert "2 marked failed (SLURM: OUT_OF_MEMORY)" in result.output
+    assert "1 marked failed (SLURM: CANCELLED)" in result.output
 
 
 def test_finalize_command_loads_aggregated_and_runs(monkeypatch, tmp_path: Path) -> None:

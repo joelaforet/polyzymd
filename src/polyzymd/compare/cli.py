@@ -11,6 +11,7 @@ import logging
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 import yaml
@@ -944,6 +945,11 @@ def run_all(
 )
 @click.option("--equilibration", default=None, help="Override equilibration time.")
 @click.option("--dry-run", is_flag=True, help="Generate scripts without submitting jobs.")
+@click.option(
+    "--job-arrays",
+    is_flag=True,
+    help="Submit one SLURM array job per condition for replicate workers.",
+)
 def submit_analysis_hpc(
     analysis: str,
     comparison_yaml: Path,
@@ -961,6 +967,7 @@ def submit_analysis_hpc(
     allow_partial: bool,
     equilibration: str | None,
     dry_run: bool,
+    job_arrays: bool,
 ):
     """Submit replicate-level SLURM analysis DAG for one plugin."""
     from polyzymd.analyses.discovery import get_analysis
@@ -968,9 +975,11 @@ def submit_analysis_hpc(
         AnalysisSlurmResources,
         build_manifest,
         generate_aggregate_script,
+        generate_array_script,
         generate_finalize_script,
         generate_replicate_script,
         submit_analysis_graph,
+        submit_analysis_graph_with_arrays,
     )
 
     if not dry_run and shutil.which("sbatch") is None:
@@ -1009,27 +1018,57 @@ def submit_analysis_hpc(
     manifest.save(manifest_path)
 
     replicate_count = sum(len(cond.replicate_specs) for cond in manifest.condition_specs)
+    array_count = len(manifest.condition_specs)
     aggregate_count = len(manifest.condition_specs)
 
     if dry_run:
         for cond in manifest.condition_specs:
-            for rep in cond.replicate_specs:
-                generate_replicate_script(manifest, rep, resources, hpc_dir)
+            if job_arrays:
+                generate_array_script(
+                    cond,
+                    manifest,
+                    resources,
+                    [rep.replicate for rep in cond.replicate_specs],
+                    hpc_dir,
+                )
+            else:
+                for rep in cond.replicate_specs:
+                    generate_replicate_script(manifest, rep, resources, hpc_dir)
             generate_aggregate_script(manifest, cond, resources, hpc_dir)
         generate_finalize_script(manifest, resources, hpc_dir)
-        total = replicate_count + aggregate_count + 1
-        click.echo(
-            f"Submitted {total} jobs ({replicate_count} replicate + {aggregate_count} aggregate + 1 finalize)"
-        )
+        if job_arrays:
+            total = array_count + aggregate_count + 1
+            click.echo(
+                "Submitted "
+                f"{array_count} array jobs + {aggregate_count} aggregate + 1 finalize = {total} total"
+            )
+            click.echo("Submission mode: job arrays")
+        else:
+            total = replicate_count + aggregate_count + 1
+            click.echo(
+                "Submitted "
+                f"{total} jobs ({replicate_count} replicate + {aggregate_count} aggregate + 1 finalize)"
+            )
         click.echo("Dry run only: no jobs were submitted")
         return
 
-    graph = submit_analysis_graph(manifest, resources, hpc_dir)
+    if job_arrays:
+        graph = submit_analysis_graph_with_arrays(manifest, resources, hpc_dir)
+    else:
+        graph = submit_analysis_graph(manifest, resources, hpc_dir)
     graph.save(hpc_dir / "job_graph.json")
-    total = replicate_count + aggregate_count + 1
-    click.echo(
-        f"Submitted {total} jobs ({replicate_count} replicate + {aggregate_count} aggregate + 1 finalize)"
-    )
+    if job_arrays:
+        total = array_count + aggregate_count + 1
+        click.echo(
+            "Submitted "
+            f"{array_count} array jobs + {aggregate_count} aggregate + 1 finalize = {total} total"
+        )
+    else:
+        total = replicate_count + aggregate_count + 1
+        click.echo(
+            "Submitted "
+            f"{total} jobs ({replicate_count} replicate + {aggregate_count} aggregate + 1 finalize)"
+        )
 
 
 @compare.command("status")
@@ -1041,19 +1080,52 @@ def submit_analysis_hpc(
     required=True,
     help="Path to comparison.yaml config file.",
 )
+@click.option(
+    "--reconcile",
+    is_flag=True,
+    help="Reconcile pending/running status files with sacct before reporting.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Print machine-readable JSON status.")
-def analysis_hpc_status(analysis: str, comparison_yaml: Path, as_json: bool):
+def analysis_hpc_status(analysis: str, comparison_yaml: Path, reconcile: bool, as_json: bool):
     """Show status for submitted analysis SLURM DAG."""
     from polyzymd.analyses.discovery import get_analysis
-    from polyzymd.workflow.analysis_slurm import read_analysis_status
+    from polyzymd.workflow.analysis_slurm import read_analysis_status, reconcile_status_with_slurm
 
     config = ComparisonConfig.from_yaml(comparison_yaml)
     analysis_cls = get_analysis(analysis)
     hpc_dir = _resolve_hpc_dir(config, analysis_cls.name)
+
+    reconciliation_summary: dict[str, Any] | None = None
+    if reconcile:
+        reconciliation_summary = reconcile_status_with_slurm(hpc_dir)
+
     status = read_analysis_status(hpc_dir)
     if as_json:
+        if reconcile and reconciliation_summary is not None:
+            status = {**status, "reconciliation": reconciliation_summary}
         click.echo(json.dumps(status, indent=2))
         return
+
+    if reconcile and reconciliation_summary is not None:
+        change_counts: dict[tuple[str, str], int] = {}
+        for change in reconciliation_summary.get("changes", []):
+            key = (change["new_state"], change["slurm_state"])
+            change_counts[key] = change_counts.get(key, 0) + 1
+
+        if change_counts:
+            fragments = [
+                f"{count} marked {new_state} (SLURM: {slurm_state})"
+                for (new_state, slurm_state), count in sorted(change_counts.items())
+            ]
+            click.echo(
+                f"Reconciled {reconciliation_summary.get('updated', 0)} jobs: "
+                + ", ".join(fragments)
+            )
+        else:
+            click.echo(
+                f"Reconciled 0 jobs (checked {reconciliation_summary.get('checked', 0)} "
+                "pending/running tasks)"
+            )
 
     counts = status.get("counts", {})
     click.echo(f"Analysis: {analysis_cls.name}")
@@ -1064,6 +1136,7 @@ def analysis_hpc_status(analysis: str, comparison_yaml: Path, as_json: bool):
         f"running={counts.get('running', 0)} "
         f"retrying={counts.get('retrying', 0)} "
         f"succeeded={counts.get('succeeded', 0)} "
+        f"completed={counts.get('completed', 0)} "
         f"failed={counts.get('failed', 0)} "
         f"unknown={counts.get('unknown', 0)}"
     )
@@ -1171,7 +1244,11 @@ def finalize_analysis_hpc(
 @click.option("--manifest", "manifest_path", type=click.Path(path_type=Path), required=True)
 @click.option("--condition-index", type=int, required=True)
 @click.option("--replicate", type=int, required=True)
-def worker_replicate(manifest_path: Path, condition_index: int, replicate: int):
+def worker_replicate(
+    manifest_path: Path,
+    condition_index: int,
+    replicate: int,
+):
     """Internal worker command for one replicate compute task."""
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.analyses.orchestrator import run_replicate_once
