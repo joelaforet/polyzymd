@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -20,6 +22,7 @@ from polyzymd.analyses.sasa._comparison_results import (
 from polyzymd.analyses.sasa._formatters import format_sasa_comparison
 from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
 from polyzymd.analyses.sasa._plotters import (
+    _load_condition_result_payloads,
     _load_replicate_timeseries_from_results,
     _sanitize_run_label,
 )
@@ -287,6 +290,54 @@ def test_settings_cache_token_changes_on_run_parameters() -> None:
     token_a = SASAAnalysis._settings_cache_token(settings_a)
     token_b = SASAAnalysis._settings_cache_token(settings_b)
     assert token_a != token_b
+
+
+def test_run_cache_token_changes_when_stride_changes() -> None:
+    """Run cache token should differ when stride changes."""
+    token_stride_1 = SASAAnalysis._run_cache_token(
+        label="protein",
+        target_selection="chainid A",
+        context_selection="chainid A",
+        probe_radius_nm=0.14,
+        n_sphere_points=960,
+        stride=1,
+        equilibration="10ns",
+    )
+    token_stride_2 = SASAAnalysis._run_cache_token(
+        label="protein",
+        target_selection="chainid A",
+        context_selection="chainid A",
+        probe_radius_nm=0.14,
+        n_sphere_points=960,
+        stride=2,
+        equilibration="10ns",
+    )
+
+    assert token_stride_1 != token_stride_2
+
+
+def test_run_cache_token_stable_when_stride_same() -> None:
+    """Run cache token should match when stride is unchanged."""
+    token_a = SASAAnalysis._run_cache_token(
+        label="protein",
+        target_selection="chainid A",
+        context_selection="chainid A",
+        probe_radius_nm=0.14,
+        n_sphere_points=960,
+        stride=3,
+        equilibration="10ns",
+    )
+    token_b = SASAAnalysis._run_cache_token(
+        label="protein",
+        target_selection="chainid A",
+        context_selection="chainid A",
+        probe_radius_nm=0.14,
+        n_sphere_points=960,
+        stride=3,
+        equilibration="10ns",
+    )
+
+    assert token_a == token_b
 
 
 def test_aggregate_nan_handling(tmp_path: Path) -> None:
@@ -603,6 +654,65 @@ def test_compute_replicate_passes_chunk_and_stride(
 def test_plot_helper_sanitize_label() -> None:
     """Plot helper should normalize run labels for file names."""
     assert _sanitize_run_label("Protein/Core Run") == "protein_core_run"
+
+
+def test_plot_loader_prefers_canonical_result_json(tmp_path: Path) -> None:
+    """Result payload loader should prefer run/result.json over legacy files."""
+    run_dir = tmp_path / "condition" / "run_1"
+    run_dir.mkdir(parents=True)
+
+    canonical_payload = {"run_results": [{"run_label": "protein", "source": "canonical"}]}
+    fallback_payload = {"run_results": [{"run_label": "protein", "source": "fallback"}]}
+    (run_dir / "result.json").write_text(json.dumps(canonical_payload), encoding="utf-8")
+    (run_dir / "sasa_legacy.json").write_text(json.dumps(fallback_payload), encoding="utf-8")
+
+    payloads = _load_condition_result_payloads(tmp_path / "condition")
+    assert len(payloads) == 1
+    assert payloads[0]["source"] == "canonical"
+
+
+def test_plot_loader_falls_back_to_sasa_json_when_result_missing(tmp_path: Path) -> None:
+    """Result payload loader should use legacy SASA JSON when canonical is missing."""
+    run_dir = tmp_path / "condition" / "run_1"
+    run_dir.mkdir(parents=True)
+
+    fallback_payload = {"run_results": [{"run_label": "protein", "source": "fallback"}]}
+    (run_dir / "sasa_only.json").write_text(json.dumps(fallback_payload), encoding="utf-8")
+
+    payloads = _load_condition_result_payloads(tmp_path / "condition")
+    assert len(payloads) == 1
+    assert payloads[0]["source"] == "fallback"
+
+
+def test_plot_loader_skips_run_dir_when_no_result_files(tmp_path: Path) -> None:
+    """Result payload loader should skip run directories with no JSON results."""
+    run_dir = tmp_path / "condition" / "run_1"
+    run_dir.mkdir(parents=True)
+
+    payloads = _load_condition_result_payloads(tmp_path / "condition")
+    assert payloads == []
+
+
+def test_plot_loader_fallback_tie_breaks_by_filename(tmp_path: Path) -> None:
+    """Fallback loader should deterministically pick lexicographically largest filename on ties."""
+    run_dir = tmp_path / "condition" / "run_1"
+    run_dir.mkdir(parents=True)
+
+    older_name_payload = {"run_results": [{"run_label": "protein", "source": "aaa"}]}
+    newer_name_payload = {"run_results": [{"run_label": "protein", "source": "bbb"}]}
+    older_name_path = run_dir / "sasa_aaa.json"
+    newer_name_path = run_dir / "sasa_bbb.json"
+
+    older_name_path.write_text(json.dumps(older_name_payload), encoding="utf-8")
+    newer_name_path.write_text(json.dumps(newer_name_payload), encoding="utf-8")
+
+    same_mtime = 1_700_000_000
+    os.utime(older_name_path, (same_mtime, same_mtime))
+    os.utime(newer_name_path, (same_mtime, same_mtime))
+
+    payloads = _load_condition_result_payloads(tmp_path / "condition")
+    assert len(payloads) == 1
+    assert payloads[0]["source"] == "bbb"
 
 
 def test_plot_settings_registered() -> None:

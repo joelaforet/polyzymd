@@ -203,6 +203,7 @@ class SASAAnalysis(Analysis):
                 context_selection=run.context_selection or run.target_selection,
                 probe_radius_nm=settings.probe_radius_nm,
                 n_sphere_points=settings.n_sphere_points,
+                stride=run.stride,
                 equilibration=ctx.equilibration,
             )
             npz_path = ctx.output_dir / f"sasa_{run_token}.npz"
@@ -718,12 +719,13 @@ class SASAAnalysis(Analysis):
         context_selection: str,
         probe_radius_nm: float,
         n_sphere_points: int,
+        stride: int,
         equilibration: str,
     ) -> str:
         """Build a stable cache token for raw SASA artifacts."""
         payload = (
             f"{label}|{target_selection}|{context_selection}|{probe_radius_nm:.6f}|"
-            f"{n_sphere_points}|{equilibration}"
+            f"{n_sphere_points}|{stride}|{equilibration}"
         )
         digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
         safe_label = label.replace(" ", "_").replace("-", "_").replace("/", "_").lower()

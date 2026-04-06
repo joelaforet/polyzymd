@@ -326,11 +326,19 @@ def _load_condition_result_payloads(condition_dir: Path) -> list[dict]:
     """Load all per-replicate result payloads for one condition."""
     payloads: list[dict] = []
     for run_dir in sorted(condition_dir.glob("run_*")):
-        candidates = [run_dir / "result.json", *sorted(run_dir.glob("sasa_*.json"))]
-        existing = [path for path in candidates if path.exists()]
-        if not existing:
+        result_path = run_dir / "result.json"
+        if not result_path.exists():
+            fallback_paths = [path for path in run_dir.glob("sasa_*.json") if path.exists()]
+            if not fallback_paths:
+                continue
+            result_path = max(
+                fallback_paths,
+                key=lambda path: (path.stat().st_mtime, path.name),
+            )
+
+        if not result_path.exists():
             continue
-        result_path = existing[-1]
+
         try:
             data = json.loads(result_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError) as exc:
