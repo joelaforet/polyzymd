@@ -2790,6 +2790,49 @@ def test_plot_composition_absolute_smoke(tmp_path: Path) -> None:
     assert path.exists()
 
 
+def test_plot_composition_fraction_overlap_exceeds_one(tmp_path: Path) -> None:
+    """Composition fraction plot should not clip stacked fractions above 1.0."""
+    pytest.importorskip("matplotlib")
+    from polyzymd.analyses.hydrogen_bonds._plotters import plot_composition_fraction
+
+    output_dir = tmp_path / "plots"
+    output_dir.mkdir(parents=True)
+    # Two partitions with fractions summing to 1.4 (simulating overlap)
+    results = {
+        "CondA": HydrogenBondAggregatedResult(
+            replicates=[1],
+            n_replicates=1,
+            summaries=[_make_aggregated_summary("s", 5.0, 0.1, [5.0])],
+            composition_entries=[
+                AggregatedCompositionEntry(
+                    donor_partition="groupA",
+                    acceptor_partition="groupA",
+                    mean_hbonds_per_frame=3.5,
+                    sem_hbonds_per_frame=0.0,
+                    per_replicate_hbonds=[3.5],
+                    mean_fraction_of_total=0.7,
+                    sem_fraction_of_total=0.0,
+                    per_replicate_fraction=[0.7],
+                ),
+                AggregatedCompositionEntry(
+                    donor_partition="groupA",
+                    acceptor_partition="groupB",
+                    mean_hbonds_per_frame=3.5,
+                    sem_hbonds_per_frame=0.0,
+                    per_replicate_hbonds=[3.5],
+                    mean_fraction_of_total=0.7,
+                    sem_fraction_of_total=0.0,
+                    per_replicate_fraction=[0.7],
+                ),
+            ],
+        )
+    }
+
+    path = plot_composition_fraction(results, ["CondA"], output_dir, PlotSettings())
+    assert path is not None
+    assert path.exists()
+
+
 def test_plot_timeseries_smoke(tmp_path: Path) -> None:
     """plot_timeseries should create a figure file with minimal traces."""
     pytest.importorskip("matplotlib")

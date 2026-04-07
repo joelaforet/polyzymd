@@ -393,7 +393,8 @@ def plot_composition_fraction(
         )
         bottom += values_arr
 
-    ax.set_ylim(0.0, 1.0)
+    max_stack = float(np.max(bottom)) if len(bottom) > 0 else 1.0
+    ax.set_ylim(0.0, max(1.0, max_stack * 1.05))
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=20, ha="right")
     apply_axis_style(

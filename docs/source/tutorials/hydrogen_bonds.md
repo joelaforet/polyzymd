@@ -451,7 +451,9 @@ gets one stacked bar. Reveals how the total H-bond budget is distributed.
 
 **File:** `hbond_composition_fraction.png`
 
-Same as above but normalized to fractions (y-axis 0–1). Useful for comparing
+Same as above but normalized to fractions. The y-axis auto-scales: for disjoint
+partitions it ranges 0–1, but when `allow_overlapping_composition: true` is set
+and partitions overlap, stacked fractions may exceed 1.0. Useful for comparing
 the *relative* H-bond distribution even when total counts differ between
 conditions.
 
