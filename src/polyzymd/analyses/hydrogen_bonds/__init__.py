@@ -1,8 +1,8 @@
-"""Hydrogen bonds analysis plugin scaffold.
+"""Hydrogen-bond analysis plugin for cross-condition comparison workflows.
 
-This module defines settings models and a minimal analysis plugin class for
-hydrogen-bond analysis. Compute and aggregation logic are intentionally left as
-placeholders for later implementation steps.
+This module provides configuration models, per-replicate hydrogen-bond
+computation using MDAnalysis, aggregation across replicates, scalar metric
+extraction for the default comparison pipeline, and plotting integration.
 """
 
 from __future__ import annotations
@@ -131,6 +131,8 @@ class HydrogenBondSettings(BaseModel):
         Mapping of group names to MDAnalysis selection strings.
     summaries : list[HydrogenBondSummarySettings]
         Summary specifications to compute.
+        Accepts either a list of summary objects or a mapping of
+        ``summary_name -> summary_spec``.
     distance_cutoff : float
         Donor-acceptor distance cutoff in Angstroms.
     angle_cutoff : float
@@ -175,6 +177,67 @@ class HydrogenBondSettings(BaseModel):
         description="Number of top residue pairs to report",
     )
     composition: HydrogenBondCompositionSettings | None = None
+    timestep_ps: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Frame spacing in picoseconds used for time-axis plots. "
+            "If omitted, the value is read from trajectory metadata"
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_summary_mapping(cls, data: Any) -> dict[str, Any] | HydrogenBondSettings | Any:
+        """Normalize ``summaries`` mapping input to list form.
+
+        Parameters
+        ----------
+        data : Any
+            Raw input data passed to model validation.
+
+        Returns
+        -------
+        dict[str, Any] | HydrogenBondSettings | Any
+            Input data with ``summaries`` converted to list form when provided
+            as a mapping.
+
+        Raises
+        ------
+        ValueError
+            If a mapping-form summary specification is not an object or if a
+            provided summary name conflicts with its mapping key.
+        """
+
+        if not isinstance(data, dict):
+            return data
+
+        summaries = data.get("summaries")
+        if not isinstance(summaries, dict):
+            return data
+
+        normalized: list[dict[str, Any]] = []
+        for summary_name, summary_spec in summaries.items():
+            if not isinstance(summary_spec, dict):
+                raise ValueError(
+                    "Each summaries mapping entry must be an object with 'between' "
+                    f"or 'within' fields (got {type(summary_spec).__name__} for "
+                    f"{summary_name!r})"
+                )
+
+            item = dict(summary_spec)
+            declared_name = item.get("name")
+            if declared_name is not None and declared_name != summary_name:
+                raise ValueError(
+                    "Summary mapping key must match summary 'name' when both are provided "
+                    f"(got key {summary_name!r}, name {declared_name!r})"
+                )
+            item["name"] = summary_name
+            normalized.append(item)
+
+        new_data = dict(data)
+        new_data["summaries"] = normalized
+        return new_data
 
     @model_validator(mode="after")
     def validate_summary_references(self) -> HydrogenBondSettings:
@@ -217,7 +280,7 @@ class HydrogenBondSettings(BaseModel):
 
 
 class HydrogenBondsAnalysis(Analysis):
-    """Hydrogen-bond plugin scaffold with placeholder lifecycle methods.
+    """Hydrogen-bond analysis plugin.
 
     Notes
     -----
@@ -276,7 +339,11 @@ class HydrogenBondsAnalysis(Analysis):
 
         loader = TrajectoryLoader(sim_config)
         u = loader.load_universe(replicate)
-        timestep_ps = loader.get_timestep(replicate, unit="ps")
+        timestep_ps = (
+            float(settings.timestep_ps)
+            if settings.timestep_ps is not None
+            else float(loader.get_timestep(replicate, unit="ps"))
+        )
 
         n_total_frames = len(u.trajectory)
         if n_total_frames == 0:
@@ -373,6 +440,7 @@ class HydrogenBondsAnalysis(Analysis):
                 equilibration_time=eq_value,
                 equilibration_unit=eq_unit,
                 selection_string=union_sel,
+                timestep_ps=timestep_ps,
                 summaries=empty_summaries,
                 composition_entries=[],
             )
@@ -622,6 +690,7 @@ class HydrogenBondsAnalysis(Analysis):
             equilibration_time=eq_value,
             equilibration_unit=eq_unit,
             selection_string=union_sel,
+            timestep_ps=timestep_ps,
             summaries=summary_results,
             composition_entries=composition_entries,
         )
@@ -809,6 +878,7 @@ class HydrogenBondsAnalysis(Analysis):
             equilibration_time=results[0].equilibration_time,
             equilibration_unit=results[0].equilibration_unit,
             selection_string=results[0].selection_string,
+            timestep_ps=results[0].timestep_ps,
             replicates=list(ctx.replicates),
             n_replicates=n_replicates,
             summaries=aggregated_summaries,
@@ -1034,7 +1104,7 @@ class HydrogenBondsAnalysis(Analysis):
                 mean=mean_val,
                 sem=sem_val,
                 replicate_values=replicate_values,
-                higher_is_better=True,
+                higher_is_better=None,
                 direction_labels=("fewer H-bonds", "similar", "more H-bonds"),
             )
 
@@ -1073,7 +1143,7 @@ class HydrogenBondsAnalysis(Analysis):
                     metric_unit="",
                     metric_key=metric_keys[0],
                     output_format=output_format,
-                    higher_is_better=True,
+                    higher_is_better=None,
                 )
 
             if len(metric_keys) > 1:
@@ -1088,7 +1158,7 @@ class HydrogenBondsAnalysis(Analysis):
                             metric_unit="",
                             metric_key=metric_key,
                             output_format=output_format,
-                            higher_is_better=True,
+                            higher_is_better=None,
                         )
                     )
                 return "\n\n".join(chunks)

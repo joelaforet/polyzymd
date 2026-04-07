@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from polyzymd.analyses import get_analysis, list_analyses
 from polyzymd.analyses.base import (
     AggregateContext,
+    ANOVAResult,
     ComparisonResult,
     Condition,
     ConditionSummary,
@@ -39,7 +40,7 @@ from polyzymd.analyses.hydrogen_bonds._results import (
     ResidueRef,
     UndirectedResiduePairResult,
 )
-from polyzymd.analyses.stats import interpret_direction
+from polyzymd.analyses.stats import default_scalar_comparison, interpret_direction
 from polyzymd.compare.config import PlotSettings
 
 
@@ -135,6 +136,34 @@ def test_settings_custom() -> None:
     )
     assert set(settings.groups) == {"enzyme", "ligand", "polymer"}
     assert [summary.name for summary in settings.summaries] == ["enzyme_polymer", "ligand_internal"]
+
+
+def test_settings_accepts_mapping_summaries_form() -> None:
+    """Settings should accept summary mappings keyed by summary name."""
+    settings = HydrogenBondSettings(
+        groups={"protein_all": "protein", "polymer_all": "chainid C"},
+        summaries={
+            "protein_polymer": {"between": ("protein_all", "polymer_all")},
+        },
+    )
+
+    assert len(settings.summaries) == 1
+    assert settings.summaries[0].name == "protein_polymer"
+    assert settings.summaries[0].between == ("protein_all", "polymer_all")
+
+
+def test_settings_mapping_summary_name_conflict_rejected() -> None:
+    """Mapping key and explicit summary name must match when both are set."""
+    with pytest.raises(ValidationError, match="Summary mapping key must match"):
+        HydrogenBondSettings(
+            groups={"protein_all": "protein", "polymer_all": "chainid C"},
+            summaries={
+                "protein_polymer": {
+                    "name": "other_name",
+                    "between": ("protein_all", "polymer_all"),
+                },
+            },
+        )
 
 
 def test_between_summary() -> None:
@@ -1363,7 +1392,7 @@ def test_extract_metrics_basic() -> None:
     assert metric.mean == pytest.approx(3.0)
     assert metric.sem == pytest.approx(0.3)
     assert metric.replicate_values == pytest.approx([2.8, 3.2])
-    assert metric.higher_is_better is True
+    assert metric.higher_is_better is None
     assert metric.direction_labels == ("fewer H-bonds", "similar", "more H-bonds")
 
 
@@ -1458,10 +1487,11 @@ def test_format_comparison_result() -> None:
     assert isinstance(text, str)
     assert text.strip()
     assert "Hydrogen Bond Analysis" in text
+    assert "no direction preference" in text
 
 
 def test_format_multi_summary() -> None:
-    """format should include one formatted section per metric key."""
+    """format should isolate per-metric ranking and statistics by section."""
     analysis = HydrogenBondsAnalysis()
     result = ComparisonResult(
         analysis_type="hydrogen_bonds",
@@ -1490,7 +1520,7 @@ def test_format_multi_summary() -> None:
                 condition_b="Treatment",
                 metric="mean_hbonds_protein_polymer",
                 t_statistic=1.0,
-                p_value=0.2,
+                p_value=0.22,
                 cohens_d=0.4,
                 effect_size_interpretation="small",
                 direction="more H-bonds",
@@ -1502,18 +1532,32 @@ def test_format_multi_summary() -> None:
                 condition_b="Treatment",
                 metric="mean_hbonds_protein_internal",
                 t_statistic=1.2,
-                p_value=0.1,
+                p_value=0.01,
                 cohens_d=0.5,
                 effect_size_interpretation="small",
                 direction="more H-bonds",
-                significant=False,
+                significant=True,
                 percent_change=40.0,
             ),
         ],
         ranking=["Treatment", "Control"],
+        anova=[
+            ANOVAResult(
+                metric="mean_hbonds_protein_polymer",
+                f_statistic=2.1,
+                p_value=0.20,
+                significant=False,
+            ),
+            ANOVAResult(
+                metric="mean_hbonds_protein_internal",
+                f_statistic=7.7,
+                p_value=0.01,
+                significant=True,
+            ),
+        ],
         rankings_by_metric={
             "mean_hbonds_protein_polymer": ["Treatment", "Control"],
-            "mean_hbonds_protein_internal": ["Treatment", "Control"],
+            "mean_hbonds_protein_internal": ["Control", "Treatment"],
         },
         equilibration_time="10ns",
         created_at="2026-01-01T00:00:00",
@@ -1524,6 +1568,160 @@ def test_format_multi_summary() -> None:
 
     assert "H-bonds: protein_polymer" in text
     assert "H-bonds: protein_internal" in text
+
+    polymer_section = text.split("H-bonds: protein_polymer", maxsplit=1)[1].split(
+        "H-bonds: protein_internal", maxsplit=1
+    )[0]
+    internal_section = text.split("H-bonds: protein_internal", maxsplit=1)[1]
+
+    assert "Top-listed condition: Treatment" in polymer_section
+    assert "Top-listed condition: Control" not in polymer_section
+    assert "0.2200" in polymer_section
+    assert "0.0100" not in polymer_section
+    assert "Metric: mean_hbonds_protein_polymer" in polymer_section
+    assert "Metric: mean_hbonds_protein_internal" not in polymer_section
+
+    assert "Top-listed condition: Control" in internal_section
+    assert "Top-listed condition: Treatment" not in internal_section
+    assert "0.0100" in internal_section
+    assert "0.2200" not in internal_section
+    assert "Metric: mean_hbonds_protein_internal" in internal_section
+    assert "Metric: mean_hbonds_protein_polymer" not in internal_section
+
+
+def test_format_multi_summary_markdown() -> None:
+    """Markdown path should also isolate per-metric ranking and statistics."""
+    analysis = HydrogenBondsAnalysis()
+    result = ComparisonResult(
+        analysis_type="hydrogen_bonds",
+        name="hbonds_cmp",
+        conditions=[
+            ConditionSummary(
+                label="Control",
+                n_replicates=3,
+                mean_hbonds_protein_polymer_mean=2.0,
+                mean_hbonds_protein_polymer_sem=0.1,
+                mean_hbonds_protein_internal_mean=1.0,
+                mean_hbonds_protein_internal_sem=0.1,
+            ),
+            ConditionSummary(
+                label="Treatment",
+                n_replicates=3,
+                mean_hbonds_protein_polymer_mean=2.5,
+                mean_hbonds_protein_polymer_sem=0.1,
+                mean_hbonds_protein_internal_mean=1.4,
+                mean_hbonds_protein_internal_sem=0.1,
+            ),
+        ],
+        pairwise_comparisons=[
+            PairwiseResult(
+                condition_a="Control",
+                condition_b="Treatment",
+                metric="mean_hbonds_protein_polymer",
+                t_statistic=1.0,
+                p_value=0.22,
+                cohens_d=0.4,
+                effect_size_interpretation="small",
+                direction="more H-bonds",
+                significant=False,
+                percent_change=25.0,
+            ),
+            PairwiseResult(
+                condition_a="Control",
+                condition_b="Treatment",
+                metric="mean_hbonds_protein_internal",
+                t_statistic=1.2,
+                p_value=0.01,
+                cohens_d=0.5,
+                effect_size_interpretation="small",
+                direction="more H-bonds",
+                significant=True,
+                percent_change=40.0,
+            ),
+        ],
+        ranking=["Treatment", "Control"],
+        anova=[
+            ANOVAResult(
+                metric="mean_hbonds_protein_polymer",
+                f_statistic=2.1,
+                p_value=0.20,
+                significant=False,
+            ),
+            ANOVAResult(
+                metric="mean_hbonds_protein_internal",
+                f_statistic=7.7,
+                p_value=0.01,
+                significant=True,
+            ),
+        ],
+        rankings_by_metric={
+            "mean_hbonds_protein_polymer": ["Treatment", "Control"],
+            "mean_hbonds_protein_internal": ["Control", "Treatment"],
+        },
+        equilibration_time="10ns",
+        created_at="2026-01-01T00:00:00",
+        polyzymd_version="test",
+    )
+
+    md = analysis.format(result, output_format="markdown")
+
+    assert "H-bonds: protein_polymer" in md
+    assert "H-bonds: protein_internal" in md
+
+    polymer_section = md.split("H-bonds: protein_polymer", maxsplit=1)[1].split(
+        "H-bonds: protein_internal", maxsplit=1
+    )[0]
+    internal_section = md.split("H-bonds: protein_internal", maxsplit=1)[1]
+
+    # Top-listed condition must be metric-specific (markdown uses **Top-listed condition:**)
+    assert "**Top-listed condition:** Treatment" in polymer_section
+    assert "**Top-listed condition:** Control" not in polymer_section
+
+    assert "**Top-listed condition:** Control" in internal_section
+    assert "**Top-listed condition:** Treatment" not in internal_section
+
+    # P-values should be isolated to their respective sections
+    assert "0.22" in polymer_section
+    assert "0.01" not in polymer_section
+
+    assert "0.01" in internal_section
+    assert "0.22" not in internal_section
+
+
+def test_format_neutral_metric_keeps_condition_rows_and_neutral_language() -> None:
+    """Neutral metrics should render condition rows without best-language."""
+    analysis = HydrogenBondsAnalysis()
+
+    cond_a = HydrogenBondAggregatedResult(
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [1.8, 2.0, 2.2])],
+    )
+    cond_b = HydrogenBondAggregatedResult(
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        summaries=[_make_aggregated_summary("protein_polymer", 3.0, 0.1, [2.8, 3.0, 3.2])],
+    )
+
+    comparison = default_scalar_comparison(
+        analysis_name="hydrogen_bonds",
+        project_name="hbonds_cmp",
+        metrics_by_condition={
+            "Alpha": analysis.extract_metrics(cond_a),
+            "Beta": analysis.extract_metrics(cond_b),
+        },
+        control_label="Alpha",
+        equilibration="10ns",
+    )
+
+    text = analysis.format(comparison, output_format="text")
+
+    assert "Condition Summary" in text
+    assert "Alpha" in text
+    assert "Beta" in text
+    assert "no direction preference" in text
+    assert "Best" not in text
+    assert "best" not in text
 
 
 def test_format_non_comparison_result() -> None:

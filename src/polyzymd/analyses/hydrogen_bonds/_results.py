@@ -93,6 +93,7 @@ class HydrogenBondResult(BaseAnalysisResult):
 
     analysis_type: ClassVar[str] = "hydrogen_bonds"
 
+    timestep_ps: float | None = None
     summaries: list[HydrogenBondReplicateSummary]
     composition_entries: list[CompositionEntry] = Field(default_factory=list)
 
@@ -174,6 +175,7 @@ class HydrogenBondAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
 
     analysis_type: ClassVar[str] = "hydrogen_bonds_aggregated"
 
+    timestep_ps: float | None = None
     replicates: list[int]
     n_replicates: int
     summaries: list[HydrogenBondAggregatedSummary]

@@ -120,7 +120,7 @@ def plot_timeseries(
 
     plotted_any = False
     for idx, label in enumerate(labels):
-        _ = results.get(label)
+        result = results.get(label)
         traces = replicate_data.get(label, {}).get(summary_name, [])
         if not traces:
             continue
@@ -130,11 +130,15 @@ def plot_timeseries(
             continue
 
         trimmed = [np.asarray(trace[:min_len], dtype=float) for trace in traces]
+        timestep_ps = (
+            float(result.timestep_ps) if result is not None and result.timestep_ps else 1.0
+        )
+        time_ns = np.arange(min_len, dtype=float) * timestep_ps / 1000.0
         for trace in trimmed:
-            ax.plot(trace, color=colors[idx], alpha=0.2, linewidth=1.0)
+            ax.plot(time_ns, trace, color=colors[idx], alpha=0.2, linewidth=1.0)
 
         mean_trace = np.mean(np.vstack(trimmed), axis=0)
-        ax.plot(mean_trace, color=colors[idx], linewidth=2.2, label=label)
+        ax.plot(time_ns, mean_trace, color=colors[idx], linewidth=2.2, label=label)
         plotted_any = True
 
     if not plotted_any:
@@ -145,7 +149,7 @@ def plot_timeseries(
         ax,
         plot_settings,
         title=f"H-bond timeseries: {summary_name}",
-        xlabel="Frame index",
+        xlabel="Time (ns)",
         ylabel="H-bonds/frame",
     )
     apply_legend(ax, plot_settings)

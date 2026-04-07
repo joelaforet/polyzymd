@@ -892,9 +892,33 @@ plugins:
   #   # per partition.
   #   #
   #   # protein_partitions:
-  #   #   lid_helices:          # partition name (becomes plot title)
-  #   #     - lid_helix_5       # must be defined in protein_groups above
-  #   #     - lid_helix_10
+   #   #   lid_helices:          # partition name (becomes plot title)
+   #   #     - lid_helix_5       # must be defined in protein_groups above
+   #   #     - lid_helix_10
+
+  # Hydrogen-bond Analysis
+  #
+  # hydrogen_bonds:
+  #   distance_cutoff: 3.0
+  #   angle_cutoff: 150
+  #   groups:
+  #     protein_all: "protein"
+  #     substrate: "resname LIG"     # adjust to your ligand
+  #     polymer_all: "chainid C"
+  #   summaries:
+  #     protein_polymer:
+  #       between: [protein_all, polymer_all]
+  #     protein_substrate:
+  #       between: [protein_all, substrate]
+  #     protein_internal:
+  #       within: protein_all
+  #     polymer_internal:
+  #       within: polymer_all
+  #   composition:
+  #     partitions:
+  #       protein: "protein"
+  #       substrate: "resname LIG"
+  #       polymer: "chainid C"
 
   # EXPERIMENTAL: Exposure Dynamics Analysis (chaperone-like polymer activity)
   # Requires contacts analysis to be run first for each condition.

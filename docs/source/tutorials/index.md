@@ -11,6 +11,8 @@ want a worked example with a clear beginning, middle, and end.
   Follow the full path from finished trajectories to comparison figures.
 - [Measure Surface Accessibility with SASA](sasa_analysis.md)
   Configure multi-run SASA analysis to quantify polymer shielding effects.
+- [Analyze Hydrogen Bonds](hydrogen_bonds.md)
+  Configure flexible H-bond groups, summaries, and composition analysis.
 
 ## What Belongs Here
 
@@ -39,5 +41,6 @@ backbone. -->
 
 Analyze a Multi-Condition Study <analysis_complete_workflow>
 Measure Surface Accessibility with SASA <sasa_analysis>
+Analyze Hydrogen Bonds <hydrogen_bonds>
 Run Analysis Jobs on SLURM (redirect) <hpc_execution>
 ```

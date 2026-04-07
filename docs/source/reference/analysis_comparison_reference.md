@@ -93,6 +93,7 @@ Stable analysis plugins:
 - `catalytic_triad`
 - `secondary_structure`
 - `sasa`
+- `hydrogen_bonds` (aliases: `hbonds`, `hbond`)
 
 Experimental but still available:
 
@@ -101,6 +102,24 @@ Experimental but still available:
 - `binding_free_energy`
 - `polymer_affinity`
 - `polymer_bridging` (alias: `bridging`)
+
+## Plugin Summary Table
+
+| Plugin | Default compare? | Primary metric | Key feature | Statistical method |
+|--------|-----------------|----------------|-------------|-------------------|
+| `rmsd` | Yes | `mean_rmsd` | Backbone stability over time | FDR-corrected pairwise t-tests + ANOVA |
+| `rg` | Yes | `mean_rg` | Protein compactness | FDR-corrected pairwise t-tests + ANOVA |
+| `rmsf` | Yes | `mean_rmsf` | Per-residue flexibility | FDR-corrected pairwise t-tests + ANOVA |
+| `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests per residue |
+| `distances` | No (custom) | Multiple distance metrics | Named distance pairs | Per-distance t-tests + ANOVA |
+| `catalytic_triad` | Yes | `mean_triad_proximity` | Active-site geometry | FDR-corrected pairwise t-tests + ANOVA |
+| `secondary_structure` | Yes | `helix_fraction` | Secondary structure content | FDR-corrected pairwise t-tests + ANOVA |
+| `sasa` | No (custom) | Per-run mean SASA | Multi-run target/context model | Per-run pairwise t-tests + ANOVA |
+| `hydrogen_bonds` | Yes | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA |
+| `exposure` | No (custom) | Exposure dynamics metrics | Time-resolved surface exposure | Custom statistical pipeline |
+| `binding_free_energy` | No (custom) | Per-contact ΔG_sel | Free energy decomposition | Custom statistical pipeline |
+| `polymer_affinity` | No (custom) | Total interaction score | Combined contact + energetic scoring | Custom statistical pipeline |
+| `polymer_bridging` | No (custom) | Bridging event counts | Polymer-mediated inter-chain contacts | Custom statistical pipeline |
 
 ## Path Rules
 
@@ -136,6 +155,7 @@ polyzymd compare run contacts
 polyzymd compare run distances
 polyzymd compare run triad
 polyzymd compare run sasa
+polyzymd compare run hydrogen_bonds  # aliases: hbonds, hbond
 polyzymd compare run-all
 polyzymd compare plot-all
 ```
@@ -169,6 +189,7 @@ comparison/contacts/result.json
 comparison/distances/result.json
 comparison/catalytic_triad/result.json
 comparison/sasa/result.json
+comparison/hydrogen_bonds/result.json
 ```
 
 ## Plotting Smoke Test
