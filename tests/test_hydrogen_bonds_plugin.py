@@ -2530,3 +2530,253 @@ def test_full_lifecycle_mocked(tmp_path: Path) -> None:
     )
     assert isinstance(formatted, str)
     assert "Hydrogen Bond Analysis" in formatted
+
+
+def test_compute_replicate_hydrogens_sel_explicit(tmp_path: Path) -> None:
+    """compute_replicate should pass explicit element H selection, not None."""
+
+    captured_kwargs: list[dict] = []
+
+    class MockHydrogenBondAnalysis:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            self.results = types.SimpleNamespace(hbonds=np.empty((0, 6), dtype=float))
+            captured_kwargs.append(kwargs)
+
+        def run(self, start: int, stop: int | None, step: int, verbose: bool) -> None:
+            pass
+
+    atoms = {
+        0: _MockAtom(0, "A", 10, "SER", 0),
+        1: _MockAtom(1, "C", 100, "OEG", 1),
+    }
+    universe = MagicMock()
+    universe.trajectory = [object(), object(), object()]
+    universe.atoms = _MockAtomCollection(atoms)
+    selections = {
+        "chainid A": _MockAtomGroup([0]),
+        "chainid C": _MockAtomGroup([1]),
+    }
+    universe.select_atoms.side_effect = lambda selection, updating: selections[selection]
+
+    condition = Condition(
+        label="test",
+        config_path=Path("/tmp/config.yaml"),
+        replicates=(1,),
+        sim_config=MagicMock(),
+    )
+    settings = HydrogenBondSettings()
+    ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=condition.sim_config,
+        output_dir=tmp_path / "run_1",
+        equilibration="0ns",
+        recompute=True,
+        settings=settings,
+    )
+
+    analysis = HydrogenBondsAnalysis()
+    mock_modules = _make_mdanalysis_module(MockHydrogenBondAnalysis)
+
+    with (
+        patch.dict(sys.modules, mock_modules),
+        patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
+        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+    ):
+        mock_loader = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+        mock_loader.load_universe.return_value = universe
+        mock_loader.get_timestep.return_value = 10.0
+
+        analysis.compute_replicate(ctx, 1)
+
+    assert len(captured_kwargs) == 1
+    hydrogens_sel = captured_kwargs[0]["hydrogens_sel"]
+    assert hydrogens_sel is not None, "hydrogens_sel must not be None (causes NoDataError on PDB)"
+    assert "element H" in hydrogens_sel
+    expected = "((chainid A) or (chainid C)) and element H"
+    assert hydrogens_sel == expected
+
+
+class TestLoadReplicateResult:
+    """Tests for the custom _load_replicate_result override."""
+
+    def test_loads_canonical_result_json(self, tmp_path: Path) -> None:
+        """Should prefer canonical result.json when it exists."""
+        run_dir = tmp_path / "run_1"
+        run_dir.mkdir()
+
+        rep_result = HydrogenBondResult(
+            config_hash="abc123",
+            replicate=1,
+            equilibration_time=0.0,
+            equilibration_unit="ns",
+            selection_string="chainid A",
+            summaries=[],
+            composition_entries=[],
+        )
+        result_path = run_dir / "result.json"
+        result_path.write_text(rep_result.model_dump_json())
+
+        analysis = HydrogenBondsAnalysis()
+        loaded = analysis._load_replicate_result(run_dir)
+        assert loaded is not None
+
+    def test_falls_back_to_custom_cache(self, tmp_path: Path) -> None:
+        """Should load hbonds_eq*.json when result.json is absent."""
+        run_dir = tmp_path / "run_1"
+        run_dir.mkdir()
+
+        rep_result = HydrogenBondResult(
+            config_hash="abc123",
+            replicate=1,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="chainid A",
+            summaries=[],
+            composition_entries=[],
+        )
+        cache_path = run_dir / "hbonds_eq10ns_deadbeef.json"
+        cache_path.write_text(rep_result.model_dump_json())
+
+        analysis = HydrogenBondsAnalysis()
+        loaded = analysis._load_replicate_result(run_dir)
+        assert loaded is not None
+
+    def test_returns_none_for_empty_directory(self, tmp_path: Path) -> None:
+        """Should return None when no result files exist."""
+        run_dir = tmp_path / "run_1"
+        run_dir.mkdir()
+
+        analysis = HydrogenBondsAnalysis()
+        loaded = analysis._load_replicate_result(run_dir)
+        assert loaded is None
+
+    def test_returns_none_for_missing_directory(self, tmp_path: Path) -> None:
+        """Should return None when directory doesn't exist."""
+        run_dir = tmp_path / "run_nonexistent"
+
+        analysis = HydrogenBondsAnalysis()
+        loaded = analysis._load_replicate_result(run_dir)
+        assert loaded is None
+
+    def test_warns_on_multiple_cache_files(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Should warn when multiple hbonds_eq*.json files exist."""
+        import logging
+
+        run_dir = tmp_path / "run_1"
+        run_dir.mkdir()
+
+        rep_result = HydrogenBondResult(
+            config_hash="abc123",
+            replicate=1,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="chainid A",
+            summaries=[],
+            composition_entries=[],
+        )
+        json_content = rep_result.model_dump_json()
+
+        (run_dir / "hbonds_eq10ns_aaaa1111.json").write_text(json_content)
+        (run_dir / "hbonds_eq10ns_bbbb2222.json").write_text(json_content)
+
+        analysis = HydrogenBondsAnalysis()
+        with caplog.at_level(logging.WARNING, logger="polyzymd.analyses.hydrogen_bonds"):
+            loaded = analysis._load_replicate_result(run_dir)
+
+        assert loaded is not None
+        assert "Multiple hydrogen-bond cache files" in caplog.text
+        assert "--recompute" in caplog.text
+
+    def test_selects_most_recent_cache_by_mtime(self, tmp_path: Path) -> None:
+        """When multiple cache files exist, the most recently modified is loaded."""
+        import os
+        import time
+
+        run_dir = tmp_path / "run_1"
+        run_dir.mkdir()
+
+        old_result = HydrogenBondResult(
+            config_hash="old_hash",
+            replicate=1,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="chainid A",
+            summaries=[],
+            composition_entries=[],
+        )
+        new_result = HydrogenBondResult(
+            config_hash="new_hash",
+            replicate=1,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="chainid A",
+            summaries=[],
+            composition_entries=[],
+        )
+
+        old_path = run_dir / "hbonds_eq10ns_aaaa1111.json"
+        new_path = run_dir / "hbonds_eq10ns_bbbb2222.json"
+
+        old_path.write_text(old_result.model_dump_json())
+        old_mtime = time.time() - 1000
+        os.utime(old_path, (old_mtime, old_mtime))
+
+        new_path.write_text(new_result.model_dump_json())
+
+        analysis = HydrogenBondsAnalysis()
+        loaded = analysis._load_replicate_result(run_dir)
+
+        assert loaded is not None
+        assert loaded.config_hash == "new_hash"
+
+    def test_handles_stat_failure_gracefully(self, tmp_path: Path) -> None:
+        """Should return None when stat() raises OSError."""
+        run_dir = tmp_path / "run_1"
+        run_dir.mkdir()
+
+        rep_result = HydrogenBondResult(
+            config_hash="abc123",
+            replicate=1,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="chainid A",
+            summaries=[],
+            composition_entries=[],
+        )
+        cache_path = run_dir / "hbonds_eq10ns_deadbeef.json"
+        cache_path.write_text(rep_result.model_dump_json())
+
+        analysis = HydrogenBondsAnalysis()
+        original_stat = Path.stat
+
+        def _patched_stat(path_self: Path, *args: object, **kwargs: object) -> object:
+            if path_self == cache_path:
+                raise OSError("Permission denied")
+            return original_stat(path_self, *args, **kwargs)
+
+        with patch.object(Path, "stat", autospec=True, side_effect=_patched_stat):
+            loaded = analysis._load_replicate_result(run_dir)
+
+        assert loaded is None
+
+    def test_handles_corrupt_cache_gracefully(self, tmp_path: Path) -> None:
+        """Should return None when cache file contains invalid JSON."""
+        run_dir = tmp_path / "run_1"
+        run_dir.mkdir()
+
+        cache_path = run_dir / "hbonds_eq10ns_deadbeef.json"
+        cache_path.write_text("THIS IS NOT JSON")
+
+        analysis = HydrogenBondsAnalysis()
+        loaded = analysis._load_replicate_result(run_dir)
+        assert loaded is None
+
+
+def test_execution_cost_hint_is_high() -> None:
+    """execution_cost_hint should be 'high' — H-bond analysis is expensive."""
+    assert HydrogenBondsAnalysis.execution_cost_hint == "high"

@@ -230,7 +230,7 @@ class HydrogenBondsAnalysis(Analysis):
     name: ClassVar[str] = "hydrogen_bonds"
     Settings: ClassVar[type] = HydrogenBondSettings
     AggregatedResultClass: ClassVar[type | None] = HydrogenBondAggregatedResult
-    execution_cost_hint: ClassVar[str] = "medium"
+    execution_cost_hint: ClassVar[str] = "high"
     aliases: ClassVar[tuple[str, ...]] = ("hbonds", "hbond")
     has_compute_stage: ClassVar[bool] = True
     has_aggregate_stage: ClassVar[bool] = True
@@ -383,7 +383,7 @@ class HydrogenBondsAnalysis(Analysis):
         hbonds = HydrogenBondAnalysis(
             universe=u,
             donors_sel=union_sel,
-            hydrogens_sel=None,
+            hydrogens_sel=f"({union_sel}) and element H",
             acceptors_sel=union_sel,
             d_a_cutoff=settings.distance_cutoff,
             d_h_a_angle_cutoff=settings.angle_cutoff,
@@ -1229,6 +1229,67 @@ class HydrogenBondsAnalysis(Analysis):
                 plots.append(composition_fraction_plot)
 
         return plots
+
+    def _load_replicate_result(self, run_dir: Path) -> Any | None:
+        """Load replicate result from a run directory.
+
+        Overrides the base class to find custom-named cache files
+        (``hbonds_eq*.json``) when the canonical ``result.json`` is absent.
+
+        Parameters
+        ----------
+        run_dir : Path
+            Replicate run directory (for example ``run_1``).
+
+        Returns
+        -------
+        HydrogenBondResult or None
+            Deserialized replicate result, or ``None`` if no result file
+            is present.
+        """
+        # Try canonical path first (base class behavior)
+        result = super()._load_replicate_result(run_dir)
+        if result is not None:
+            return result
+
+        # Fall back to custom-named cache files
+        if not run_dir.exists():
+            return None
+
+        try:
+            candidates = sorted(run_dir.glob("hbonds_eq*.json"))
+        except OSError:
+            return None
+
+        if not candidates:
+            return None
+
+        if len(candidates) > 1:
+            logger.warning(
+                "Multiple hydrogen-bond cache files in %s — using most recent. "
+                "Run with --recompute to regenerate from current settings.",
+                run_dir,
+            )
+
+        # Use the most recently modified candidate
+        try:
+            best = max(candidates, key=lambda p: p.stat().st_mtime)
+        except OSError as exc:
+            logger.debug("Cannot stat cache candidates in %s: %s", run_dir, exc)
+            return None
+
+        logger.debug("Loading replicate result from custom cache %s", best)
+        try:
+            return self._deserialize_replicate_result(best)
+        except (
+            json.JSONDecodeError,
+            OSError,
+            PermissionError,
+            ValidationError,
+            KeyError,
+        ) as exc:
+            logger.debug("Failed to deserialize %s: %s", best, exc)
+            return None
 
     def _load_replicate_timeseries(
         self,
