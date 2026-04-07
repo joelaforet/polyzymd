@@ -6,6 +6,7 @@ This private module keeps plotting logic separate from the plugin lifecycle in
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -19,6 +20,8 @@ from polyzymd.analyses.shared.plotting import (
     get_output_path,
     save_figure,
 )
+
+logger = logging.getLogger("polyzymd.analyses.hydrogen_bonds")
 
 
 def _safe_name(name: str) -> str:
@@ -37,7 +40,7 @@ def plot_summary_comparison(
     output_dir: Path,
     plot_settings: Any,
 ) -> Path | None:
-    """Plot grouped bars of mean H-bonds per frame by condition and summary."""
+    """Plot faceted grouped bars by summary with independent y-axis scales."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -57,14 +60,20 @@ def plot_summary_comparison(
     if not summary_names:
         return None
 
-    x = np.arange(len(labels), dtype=float)
     n_summaries = len(summary_names)
-    bar_width = 0.8 / max(n_summaries, 1)
-    colors = get_colors(n_summaries, plot_settings)
+    x = np.arange(len(labels), dtype=float)
+    colors = get_colors(len(labels), plot_settings)
 
-    fig, ax = plt.subplots(figsize=(max(7.0, 1.8 * len(labels)), 5.0))
+    height_per_summary = 3.5
+    fig, axes = plt.subplots(
+        n_summaries,
+        1,
+        figsize=(max(7.0, 1.8 * len(labels)), height_per_summary * n_summaries),
+        squeeze=False,
+    )
 
     for summary_idx, summary_name in enumerate(summary_names):
+        ax = axes[summary_idx, 0]
         means: list[float] = []
         sems: list[float] = []
         for label in labels:
@@ -73,29 +82,28 @@ def plot_summary_comparison(
             means.append(float(summary.mean_hbonds_per_frame) if summary is not None else 0.0)
             sems.append(float(summary.sem_hbonds_per_frame) if summary is not None else 0.0)
 
-        offset = (summary_idx - n_summaries / 2 + 0.5) * bar_width
         ax.bar(
-            x + offset,
+            x,
             means,
-            width=bar_width,
+            width=0.72,
             yerr=sems,
-            color=colors[summary_idx],
+            color=colors,
             capsize=plot_settings.theme.bar_capsize,
             alpha=plot_settings.theme.bar_alpha,
             edgecolor=plot_settings.theme.bar_edgecolor,
             linewidth=plot_settings.theme.bar_linewidth,
-            label=summary_name,
+        )
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=20, ha="right")
+        apply_axis_style(
+            ax,
+            plot_settings,
+            title=f"Summary: {summary_name}",
+            ylabel="Mean H-bonds/frame",
         )
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=20, ha="right")
-    apply_axis_style(
-        ax,
-        plot_settings,
-        title="Hydrogen-bond summary comparison",
-        ylabel="Mean H-bonds/frame",
-    )
-    apply_legend(ax, plot_settings)
+    fig.suptitle("Hydrogen-bond summary comparison", y=0.995)
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.98))
 
     output_path = get_output_path(output_dir, "hbond_summary_comparison", plot_settings)
     return save_figure(fig, output_path, plot_settings)
@@ -109,7 +117,7 @@ def plot_timeseries(
     output_dir: Path,
     plot_settings: Any,
 ) -> Path | None:
-    """Plot per-frame H-bond timeseries for one summary across conditions."""
+    """Plot per-frame mean timeseries with ±1 SD band across replicates."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -129,16 +137,34 @@ def plot_timeseries(
         if min_len <= 0:
             continue
 
+        if any(len(trace) != min_len for trace in traces):
+            logger.warning(
+                "Timeseries length mismatch for condition '%s' summary '%s' — trimming "
+                "replicate traces to %d points",
+                label,
+                summary_name,
+                min_len,
+            )
+
         trimmed = [np.asarray(trace[:min_len], dtype=float) for trace in traces]
         timestep_ps = (
             float(result.timestep_ps) if result is not None and result.timestep_ps else 1.0
         )
         time_ns = np.arange(min_len, dtype=float) * timestep_ps / 1000.0
-        for trace in trimmed:
-            ax.plot(time_ns, trace, color=colors[idx], alpha=0.2, linewidth=1.0)
 
-        mean_trace = np.mean(np.vstack(trimmed), axis=0)
+        stacked = np.vstack(trimmed)
+        mean_trace = np.mean(stacked, axis=0)
         ax.plot(time_ns, mean_trace, color=colors[idx], linewidth=2.2, label=label)
+        if stacked.shape[0] > 1:
+            std_trace = np.std(stacked, axis=0)
+            ax.fill_between(
+                time_ns,
+                mean_trace - std_trace,
+                mean_trace + std_trace,
+                color=colors[idx],
+                alpha=0.2,
+                linewidth=0,
+            )
         plotted_any = True
 
     if not plotted_any:
@@ -177,19 +203,33 @@ def plot_top_pairs(
     import matplotlib.pyplot as plt
 
     scores: dict[str, float] = {}
+    presence_count: dict[str, int] = {}
     for label in labels:
         summary = _find_summary(results[label], summary_name) if label in results else None
         if summary is None:
             continue
+        seen_in_condition: set[str] = set()
         for pair in summary.undirected_pairs:
             pair_label = f"{pair.residue_a.label} — {pair.residue_b.label}"
             scores[pair_label] = max(scores.get(pair_label, 0.0), float(pair.mean_occupancy))
+            seen_in_condition.add(pair_label)
+        for pair_label in seen_in_condition:
+            presence_count[pair_label] = presence_count.get(pair_label, 0) + 1
 
-    if not scores:
+    filtered_scores = {
+        pair_label: score
+        for pair_label, score in scores.items()
+        if presence_count.get(pair_label, 0) >= 2
+    }
+
+    if not filtered_scores:
         return None
 
     top_labels = [
-        pair for pair, _ in sorted(scores.items(), key=lambda item: item[1], reverse=True)[:top_n]
+        pair
+        for pair, _ in sorted(filtered_scores.items(), key=lambda item: item[1], reverse=True)[
+            :top_n
+        ]
     ]
     y = np.arange(len(top_labels), dtype=float)
     n_conditions = len(labels)

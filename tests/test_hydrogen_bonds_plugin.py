@@ -40,7 +40,12 @@ from polyzymd.analyses.hydrogen_bonds._results import (
     ResidueRef,
     UndirectedResiduePairResult,
 )
-from polyzymd.analyses.stats import default_scalar_comparison, interpret_direction
+from polyzymd.analyses.stats import (
+    default_scalar_comparison,
+    format_pct,
+    interpret_direction,
+    rank_conditions,
+)
 from polyzymd.compare.config import PlotSettings
 
 
@@ -320,6 +325,46 @@ def test_aggregated_result_save_load(tmp_path: Path) -> None:
     assert loaded.summaries[0].name == "protein_polymer"
 
 
+def test_aggregated_summary_deserializes_legacy_std_unique_pairs_field() -> None:
+    """Legacy std field should populate sem_unique_pairs_per_frame."""
+    legacy_payload = {
+        "name": "protein_polymer",
+        "mode": "between",
+        "group_names": ["protein", "polymer"],
+        "n_replicates": 2,
+        "mean_hbonds_per_frame": 3.0,
+        "sem_hbonds_per_frame": 0.2,
+        "per_replicate_mean_hbonds": [2.8, 3.2],
+        "mean_unique_pairs_per_frame": 1.5,
+        "std_unique_pairs_per_frame": 0.4,
+        "mean_fraction_with_any": 0.8,
+        "sem_fraction_with_any": 0.05,
+        "per_replicate_fraction_with_any": [0.75, 0.85],
+    }
+    summary = HydrogenBondAggregatedSummary.model_validate(legacy_payload)
+    assert summary.sem_unique_pairs_per_frame == pytest.approx(0.4)
+
+
+def test_aggregated_summary_deserializes_new_sem_unique_pairs_field() -> None:
+    """New sem field name should deserialize directly."""
+    payload = {
+        "name": "protein_polymer",
+        "mode": "between",
+        "group_names": ["protein", "polymer"],
+        "n_replicates": 2,
+        "mean_hbonds_per_frame": 3.0,
+        "sem_hbonds_per_frame": 0.2,
+        "per_replicate_mean_hbonds": [2.8, 3.2],
+        "mean_unique_pairs_per_frame": 1.5,
+        "sem_unique_pairs_per_frame": 0.33,
+        "mean_fraction_with_any": 0.8,
+        "sem_fraction_with_any": 0.05,
+        "per_replicate_fraction_with_any": [0.75, 0.85],
+    }
+    summary = HydrogenBondAggregatedSummary.model_validate(payload)
+    assert summary.sem_unique_pairs_per_frame == pytest.approx(0.33)
+
+
 def test_result_summary() -> None:
     """Result summary should return a non-empty string."""
     result = HydrogenBondResult(
@@ -430,6 +475,77 @@ def test_compute_replicate_basic(tmp_path: Path) -> None:
     assert instances[0].run_args["start"] == 0
 
 
+def test_compute_replicate_warns_once_for_default_groups_and_summaries(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Default groups/summaries should emit one warning per analysis run."""
+
+    class MockHydrogenBondAnalysis:
+        def __init__(self, **kwargs) -> None:
+            self.results = types.SimpleNamespace(hbonds=np.empty((0, 6), dtype=float))
+
+        def run(self, start: int, stop: int | None, step: int, verbose: bool) -> None:
+            self.results.hbonds = np.empty((0, 6), dtype=float)
+
+    atoms = {
+        0: _MockAtom(0, "A", 10, "SER", 0),
+        1: _MockAtom(1, "C", 100, "OEG", 1),
+    }
+    universe = MagicMock()
+    universe.trajectory = [object(), object(), object()]
+    universe.atoms = _MockAtomCollection(atoms)
+    universe.select_atoms.side_effect = lambda selection, updating: {
+        "chainid A": _MockAtomGroup([0]),
+        "chainid C": _MockAtomGroup([1]),
+    }[selection]
+
+    condition = Condition(
+        label="test",
+        config_path=Path("/tmp/config.yaml"),
+        replicates=(1, 2),
+        sim_config=MagicMock(),
+    )
+    settings = HydrogenBondSettings()
+    ctx_1 = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=condition.sim_config,
+        output_dir=tmp_path / "run_1",
+        equilibration="0ns",
+        recompute=True,
+        settings=settings,
+    )
+    ctx_2 = ReplicateContext(
+        condition=condition,
+        replicate=2,
+        sim_config=condition.sim_config,
+        output_dir=tmp_path / "run_2",
+        equilibration="0ns",
+        recompute=True,
+        settings=settings,
+    )
+
+    analysis = HydrogenBondsAnalysis()
+    HydrogenBondsAnalysis._defaults_warned = False
+    mock_modules = _make_mdanalysis_module(MockHydrogenBondAnalysis)
+
+    with (
+        patch.dict(sys.modules, mock_modules),
+        patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
+        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        caplog.at_level("WARNING", logger="polyzymd.analyses.hydrogen_bonds"),
+    ):
+        mock_loader = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+        mock_loader.load_universe.return_value = universe
+        mock_loader.get_timestep.return_value = 10.0
+
+        analysis.compute_replicate(ctx_1, 1)
+        analysis.compute_replicate(ctx_2, 2)
+
+    assert caplog.text.count("No explicit groups/summaries in YAML config — using defaults") == 1
+
+
 def test_compute_replicate_empty_selection(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -453,7 +569,7 @@ def test_compute_replicate_empty_selection(
         replicates=(1,),
         sim_config=MagicMock(),
     )
-    settings = HydrogenBondSettings()
+    settings = HydrogenBondSettings(allow_empty_groups=True)
     ctx = ReplicateContext(
         condition=condition,
         replicate=1,
@@ -487,6 +603,54 @@ def test_compute_replicate_empty_selection(
     assert summary.counts_per_frame == [0, 0, 0]
     assert "matched no atoms" in caplog.text
     assert "No atoms selected for any summary" in caplog.text
+
+
+def test_compute_replicate_empty_group_raises_by_default(tmp_path: Path) -> None:
+    """Empty group selections should raise when allow_empty_groups is False."""
+
+    class MockHydrogenBondAnalysis:
+        def __init__(self, **kwargs) -> None:
+            self.results = types.SimpleNamespace(hbonds=np.empty((0, 6), dtype=float))
+
+        def run(self, start: int, stop: int | None, step: int, verbose: bool) -> None:
+            return None
+
+    universe = MagicMock()
+    universe.trajectory = [object(), object(), object()]
+    universe.atoms = _MockAtomCollection({})
+    universe.select_atoms.return_value = _MockAtomGroup([])
+
+    condition = Condition(
+        label="test",
+        config_path=Path("/tmp/config.yaml"),
+        replicates=(1,),
+        sim_config=MagicMock(),
+    )
+    ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=condition.sim_config,
+        output_dir=tmp_path / "run_1",
+        equilibration="0ns",
+        recompute=True,
+        settings=HydrogenBondSettings(),
+    )
+
+    analysis = HydrogenBondsAnalysis()
+    mock_modules = _make_mdanalysis_module(MockHydrogenBondAnalysis)
+
+    with (
+        patch.dict(sys.modules, mock_modules),
+        patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
+        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+    ):
+        mock_loader = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+        mock_loader.load_universe.return_value = universe
+        mock_loader.get_timestep.return_value = 10.0
+
+        with pytest.raises(ValueError, match="allow_empty_groups: true"):
+            analysis.compute_replicate(ctx, 1)
 
 
 def test_compute_replicate_cache_hit(tmp_path: Path) -> None:
@@ -732,6 +896,7 @@ def test_compute_composition_basic() -> None:
         universe=universe,
         start_frame=0,
         n_frames=5,
+        allow_overlapping=True,
     )
 
     by_pair = {(entry.donor_partition, entry.acceptor_partition): entry for entry in entries}
@@ -766,6 +931,7 @@ def test_composition_disjoint_warning(caplog: pytest.LogCaptureFixture) -> None:
             universe=universe,
             start_frame=0,
             n_frames=3,
+            allow_overlapping=True,
         )
 
     assert "composition fractions may not sum to 1.0" in caplog.text
@@ -796,6 +962,7 @@ def test_composition_warns_dynamic_selection(caplog: pytest.LogCaptureFixture) -
             universe=universe,
             start_frame=0,
             n_frames=3,
+            allow_overlapping=True,
         )
 
     assert "uses coordinate-dependent selection" in caplog.text
@@ -835,6 +1002,7 @@ def test_composition_skips_unpartitioned_atoms() -> None:
         universe=universe,
         start_frame=0,
         n_frames=4,
+        allow_overlapping=True,
     )
 
     assert len(entries) == 1
@@ -1181,6 +1349,14 @@ def test_aggregate_top_n_truncation(tmp_path: Path) -> None:
     assert summary.directed_pairs[0].mean_occupancy >= summary.directed_pairs[1].mean_occupancy
 
 
+def test_aggregate_error_message_includes_replicate_details(tmp_path: Path) -> None:
+    """Aggregate mismatch errors should include expected replicate IDs."""
+    analysis = HydrogenBondsAnalysis()
+    ctx = _make_aggregate_context(tmp_path, replicates=(1, 2, 3))
+    with pytest.raises(ValueError, match=r"replicates \[1, 2, 3\]"):
+        _ = analysis.aggregate(ctx, [_make_replicate_result(1, 1.0, 0.2)])
+
+
 def test_aggregate_saves_result(tmp_path: Path) -> None:
     """aggregate should write its result to ctx.result_path."""
     analysis = HydrogenBondsAnalysis()
@@ -1343,6 +1519,7 @@ def test_composition_overlap_uses_first_sorted_partition() -> None:
         universe=universe,
         start_frame=0,
         n_frames=2,
+        allow_overlapping=True,
     )
 
     assert len(entries) == 1
@@ -1574,15 +1751,15 @@ def test_format_multi_summary() -> None:
     )[0]
     internal_section = text.split("H-bonds: protein_internal", maxsplit=1)[1]
 
-    assert "Top-listed condition: Treatment" in polymer_section
-    assert "Top-listed condition: Control" not in polymer_section
+    assert "Highest value: Treatment" in polymer_section
+    assert "Highest value: Control" not in polymer_section
     assert "0.2200" in polymer_section
     assert "0.0100" not in polymer_section
     assert "Metric: mean_hbonds_protein_polymer" in polymer_section
     assert "Metric: mean_hbonds_protein_internal" not in polymer_section
 
-    assert "Top-listed condition: Control" in internal_section
-    assert "Top-listed condition: Treatment" not in internal_section
+    assert "Highest value: Control" in internal_section
+    assert "Highest value: Treatment" not in internal_section
     assert "0.0100" in internal_section
     assert "0.2200" not in internal_section
     assert "Metric: mean_hbonds_protein_internal" in internal_section
@@ -1673,12 +1850,11 @@ def test_format_multi_summary_markdown() -> None:
     )[0]
     internal_section = md.split("H-bonds: protein_internal", maxsplit=1)[1]
 
-    # Top-listed condition must be metric-specific (markdown uses **Top-listed condition:**)
-    assert "**Top-listed condition:** Treatment" in polymer_section
-    assert "**Top-listed condition:** Control" not in polymer_section
+    assert "**Highest value:** Treatment" in polymer_section
+    assert "**Highest value:** Control" not in polymer_section
 
-    assert "**Top-listed condition:** Control" in internal_section
-    assert "**Top-listed condition:** Treatment" not in internal_section
+    assert "**Highest value:** Control" in internal_section
+    assert "**Highest value:** Treatment" not in internal_section
 
     # P-values should be isolated to their respective sections
     assert "0.22" in polymer_section
@@ -2349,6 +2525,7 @@ def test_compute_multiple_summaries(tmp_path: Path) -> None:
             "polymer": "chainid C",
             "all_atoms": "chainid A or chainid C",
         },
+        allow_overlapping_composition=True,
         summaries=[
             HydrogenBondSummarySettings(name="protein_polymer", between=("protein", "polymer")),
             HydrogenBondSummarySettings(name="within_all", within="all_atoms"),
@@ -2536,6 +2713,49 @@ def test_plot_summary_comparison_smoke(tmp_path: Path) -> None:
     assert path.exists()
 
 
+def test_plot_summary_comparison_facets_multiple_summaries(tmp_path: Path) -> None:
+    """Summary comparison plot should create one subplot per summary."""
+    pytest.importorskip("matplotlib")
+    import matplotlib.pyplot as plt
+
+    from polyzymd.analyses.hydrogen_bonds._plotters import plot_summary_comparison
+
+    output_dir = tmp_path / "plots"
+    output_dir.mkdir(parents=True)
+    results = {
+        "CondA": HydrogenBondAggregatedResult(
+            replicates=[1],
+            n_replicates=1,
+            summaries=[
+                _make_aggregated_summary("s1", 2.0, 0.1, [2.0]),
+                _make_aggregated_summary("s2", 10.0, 0.2, [10.0]),
+            ],
+        ),
+        "CondB": HydrogenBondAggregatedResult(
+            replicates=[1],
+            n_replicates=1,
+            summaries=[
+                _make_aggregated_summary("s1", 3.0, 0.1, [3.0]),
+                _make_aggregated_summary("s2", 12.0, 0.2, [12.0]),
+            ],
+        ),
+    }
+
+    captured_nrows: list[int] = []
+    original_subplots = plt.subplots
+
+    def _capture_subplots(*args, **kwargs):
+        captured_nrows.append(args[0] if args else kwargs.get("nrows", 1))
+        return original_subplots(*args, **kwargs)
+
+    with patch("matplotlib.pyplot.subplots", side_effect=_capture_subplots):
+        path = plot_summary_comparison(results, ["CondA", "CondB"], output_dir, PlotSettings())
+
+    assert path is not None
+    assert path.exists()
+    assert captured_nrows and captured_nrows[0] == 2
+
+
 def test_plot_composition_absolute_smoke(tmp_path: Path) -> None:
     """plot_composition_absolute should create a figure file with minimal data."""
     pytest.importorskip("matplotlib")
@@ -2594,6 +2814,152 @@ def test_plot_timeseries_smoke(tmp_path: Path) -> None:
     )
     assert path is not None
     assert path.exists()
+
+
+def test_rank_conditions_neutral_sorted_by_value_descending() -> None:
+    """Neutral rankings should be ordered by descending metric values."""
+    metrics = {
+        "Alpha": get_analysis("hydrogen_bonds")().extract_metrics(
+            HydrogenBondAggregatedResult(
+                replicates=[1],
+                n_replicates=1,
+                summaries=[_make_aggregated_summary("s", 1.0, 0.1, [1.0])],
+            )
+        )["mean_hbonds_s"],
+        "Beta": get_analysis("hydrogen_bonds")().extract_metrics(
+            HydrogenBondAggregatedResult(
+                replicates=[1],
+                n_replicates=1,
+                summaries=[_make_aggregated_summary("s", 3.0, 0.1, [3.0])],
+            )
+        )["mean_hbonds_s"],
+        "Gamma": get_analysis("hydrogen_bonds")().extract_metrics(
+            HydrogenBondAggregatedResult(
+                replicates=[1],
+                n_replicates=1,
+                summaries=[_make_aggregated_summary("s", 2.0, 0.1, [2.0])],
+            )
+        )["mean_hbonds_s"],
+    }
+    assert rank_conditions(metrics) == ["Beta", "Gamma", "Alpha"]
+
+
+def test_format_pct_uses_semantic_infinity_labels() -> None:
+    """Percent formatter should use semantic labels for infinite values."""
+    assert format_pct(np.inf) == "new (control=0)"
+    assert format_pct(-np.inf) == "lost (treatment=0)"
+    assert format_pct(np.nan) == "undefined"
+
+
+def test_overlap_composition_raises_by_default() -> None:
+    """Overlapping composition partitions should raise by default."""
+    analysis = HydrogenBondsAnalysis()
+    composition_settings = HydrogenBondCompositionSettings(
+        partitions={"protein": "chainid A", "polymer": "chainid C"}
+    )
+    atoms = {
+        0: _MockAtom(0, "A", 10, "SER", 0),
+        1: _MockAtom(1, "C", 100, "OEG", 1),
+    }
+    universe = MagicMock()
+    universe.atoms = _MockAtomCollection(atoms)
+    universe.select_atoms.side_effect = lambda selection: {
+        "chainid A": _MockAtomGroup([0, 1]),
+        "chainid C": _MockAtomGroup([1]),
+    }[selection]
+
+    with pytest.raises(ValueError, match="allow_overlapping_composition: true"):
+        _ = analysis._compute_composition(
+            composition_settings=composition_settings,
+            hbond_array=np.empty((0, 6), dtype=float),
+            universe=universe,
+            start_frame=0,
+            n_frames=3,
+        )
+
+
+def test_unique_pairs_metric_and_aggregation(tmp_path: Path) -> None:
+    """Replicate and aggregate results should include unique-pairs statistics."""
+    analysis = HydrogenBondsAnalysis()
+    results = [
+        _make_replicate_result(1, 2.0, 0.4),
+        _make_replicate_result(2, 4.0, 0.6),
+    ]
+    results[0].summaries[0].mean_unique_pairs_per_frame = 1.0
+    results[1].summaries[0].mean_unique_pairs_per_frame = 3.0
+    ctx = _make_aggregate_context(tmp_path, replicates=(1, 2))
+
+    aggregated = analysis.aggregate(ctx, results)
+    summary = aggregated.summaries[0]
+    assert hasattr(summary, "mean_unique_pairs_per_frame")
+    assert summary.mean_unique_pairs_per_frame == pytest.approx(2.0)
+    assert summary.sem_unique_pairs_per_frame > 0.0
+
+
+def test_replicate_does_not_truncate_pairs_before_aggregation(tmp_path: Path) -> None:
+    """compute_replicate should keep all pairs and defer top_n truncation."""
+
+    class MockHydrogenBondAnalysis:
+        def __init__(self, **kwargs) -> None:
+            self.results = types.SimpleNamespace(hbonds=np.empty((0, 6), dtype=float))
+
+        def run(self, start: int, stop: int | None, step: int, verbose: bool) -> None:
+            self.results.hbonds = np.array(
+                [
+                    [0, 0, 10, 1, 2.8, 160.0],
+                    [0, 2, 10, 3, 2.8, 160.0],
+                ],
+                dtype=float,
+            )
+
+    atoms = {
+        0: _MockAtom(0, "A", 10, "SER", 0),
+        1: _MockAtom(1, "C", 100, "OEG", 1),
+        2: _MockAtom(2, "A", 11, "THR", 2),
+        3: _MockAtom(3, "C", 101, "OEG", 3),
+    }
+    universe = MagicMock()
+    universe.trajectory = [object(), object()]
+    universe.atoms = _MockAtomCollection(atoms)
+    universe.select_atoms.side_effect = lambda selection, updating: {
+        "chainid A": _MockAtomGroup([0, 2]),
+        "chainid C": _MockAtomGroup([1, 3]),
+    }[selection]
+
+    condition = Condition(
+        label="test",
+        config_path=Path("/tmp/config.yaml"),
+        replicates=(1,),
+        sim_config=MagicMock(),
+    )
+    settings = HydrogenBondSettings(top_n_pairs=1)
+    ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=condition.sim_config,
+        output_dir=tmp_path / "run_1",
+        equilibration="0ns",
+        recompute=True,
+        settings=settings,
+    )
+
+    analysis = HydrogenBondsAnalysis()
+    mock_modules = _make_mdanalysis_module(MockHydrogenBondAnalysis)
+
+    with (
+        patch.dict(sys.modules, mock_modules),
+        patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
+        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+    ):
+        mock_loader = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+        mock_loader.load_universe.return_value = universe
+        mock_loader.get_timestep.return_value = 10.0
+
+        result = analysis.compute_replicate(ctx, 1)
+
+    assert len(result.summaries[0].directed_residue_pairs) == 2
+    assert len(result.summaries[0].undirected_residue_pairs) == 2
 
 
 def test_full_lifecycle_mocked(tmp_path: Path) -> None:
