@@ -86,17 +86,17 @@ def format_pct(pct: float) -> str:
     str
         Formatted percent value.
 
-        - ``+inf`` as ``"+∞%"``
-        - ``-inf`` as ``"-∞%"``
-        - ``nan`` as ``"n/a"``
+        - ``+inf`` as ``"new (control=0)"``
+        - ``-inf`` as ``"lost (treatment=0)"``
+        - ``nan`` as ``"undefined"``
         - finite values as signed one-decimal percentages
     """
     pct = pct + 0.0
 
     if math.isnan(pct):
-        return "n/a"
+        return "undefined"
     if math.isinf(pct):
-        return "+∞%" if pct > 0 else "-∞%"
+        return "new (control=0)" if pct > 0 else "lost (treatment=0)"
     # Canonical percent format for finite values
     return f"{pct:+.1f}%"
 
@@ -252,7 +252,7 @@ def rank_conditions(
 
     Respects ``MetricValue.higher_is_better``: if ``True``, highest mean comes
     first; if ``False``, lowest mean comes first. If ``None``, conditions are
-    returned in a deterministic neutral order (alphabetical by label).
+    sorted by metric value descending for neutral display.
 
     Parameters
     ----------
@@ -269,7 +269,11 @@ def rank_conditions(
     # All MetricValues should agree on higher_is_better; use the first
     first_mv = next(iter(metrics_by_condition.values()))
     if first_mv.higher_is_better is None:
-        return sorted(metrics_by_condition.keys())
+        return sorted(
+            metrics_by_condition.keys(),
+            key=lambda lb: metrics_by_condition[lb].mean,
+            reverse=True,
+        )
     reverse = first_mv.higher_is_better
     return sorted(
         metrics_by_condition.keys(),
@@ -638,7 +642,7 @@ def _format_scalar_text(
         top_val = _get_mean(top_cond)
         if higher_is_better is None:
             lines.append(
-                f"Top-listed condition: {top_label} ({metric_label} = {top_val:.4f}{unit_str})"
+                f"Highest value: {top_label} (listed by value; no better/worse direction implied)"
             )
         else:
             lines.append(f"Best: {top_label} ({metric_label} = {top_val:.4f}{unit_str})")
@@ -778,8 +782,8 @@ def _format_scalar_markdown(
         top_val = _get_mean(top_cond)
         if higher_is_better is None:
             lines.append(
-                "1. **Top-listed condition:** "
-                f"{top_label} ({metric_label} = {top_val:.4f}{unit_str})"
+                "1. **Highest value:** "
+                f"{top_label} (listed by value; no better/worse direction implied)"
             )
         else:
             lines.append(

@@ -15,8 +15,8 @@ from polyzymd.analyses.contacts._comparison_results import AggregateComparisonRe
 from polyzymd.analyses.distances._comparison_results import (
     DistanceComparisonResult,
     DistanceConditionSummary,
-    DistancePairwiseComparison,
     DistancePairSummary,
+    DistancePairwiseComparison,
 )
 from polyzymd.analyses.distances._formatters import (
     format_distances_console_table,
@@ -84,9 +84,9 @@ def test_interpret_direction_nan_maps_to_unchanged() -> None:
 
 def test_format_pct_inf_nan_and_finite() -> None:
     """Percent formatter should render infinity and NaN safely."""
-    assert format_pct(math.inf) == "+∞%"
-    assert format_pct(-math.inf) == "-∞%"
-    assert format_pct(math.nan) == "n/a"
+    assert format_pct(math.inf) == "new (control=0)"
+    assert format_pct(-math.inf) == "lost (treatment=0)"
+    assert format_pct(math.nan) == "undefined"
     assert format_pct(12.3) == "+12.3%"
 
 
@@ -268,8 +268,8 @@ def test_comparison_result_inf_round_trip_json() -> None:
     assert loaded.pairwise_comparisons[0].percent_change > 0
 
 
-def test_format_scalar_comparison_text_uses_infinity_symbol() -> None:
-    """Text formatter should show +∞% for infinite percent changes."""
+def test_format_scalar_comparison_text_uses_semantic_infinity_label() -> None:
+    """Text formatter should show semantic labels for infinite changes."""
     comparison = ComparisonResult(
         analysis_type="test",
         name="format-test",
@@ -299,12 +299,12 @@ def test_format_scalar_comparison_text_uses_infinity_symbol() -> None:
     )
 
     output = format_scalar_comparison(comparison, output_format="text", metric_key="metric")
-    assert "+∞%" in output
-    assert "+inf%" not in output
+    assert "new (control=0)" in output
+    assert "+∞%" not in output
 
 
-def test_format_scalar_comparison_markdown_uses_infinity_symbol() -> None:
-    """Markdown formatter should show +∞% for infinite percent changes."""
+def test_format_scalar_comparison_markdown_uses_semantic_infinity_label() -> None:
+    """Markdown formatter should show semantic labels for infinite changes."""
     comparison = ComparisonResult(
         analysis_type="test",
         name="format-test",
@@ -334,8 +334,8 @@ def test_format_scalar_comparison_markdown_uses_infinity_symbol() -> None:
     )
 
     output = format_scalar_comparison(comparison, output_format="markdown", metric_key="metric")
-    assert "+∞%" in output
-    assert "+inf%" not in output
+    assert "new (control=0)" in output
+    assert "+∞%" not in output
 
 
 def test_pairwise_comparison_zero_control_not_similar() -> None:
@@ -441,7 +441,7 @@ def test_exposure_pairwise_comparison_zero_control_direction() -> None:
 
 
 def test_distances_formatter_zero_control_emits_infinity_with_direction() -> None:
-    """Distances formatter should report ∞% and direction when control distance is zero."""
+    """Distances formatter should report direction when control distance is zero."""
     pair_label = "Catalytic distance"
     control = DistanceConditionSummary(
         label="Control",
@@ -502,5 +502,5 @@ def test_distances_formatter_zero_control_emits_infinity_with_direction() -> Non
     console_output = format_distances_console_table(result, show_pairwise=False, show_anova=False)
     markdown_output = format_distances_markdown(result, show_pairwise=False, show_anova=False)
 
-    assert "∞% closer than control" in console_output
-    assert "∞% closer than control" in markdown_output
+    assert "closer than control" in console_output
+    assert "closer than control" in markdown_output
