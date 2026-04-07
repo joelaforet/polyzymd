@@ -19,6 +19,8 @@ For each pair:
 from __future__ import annotations
 
 from polyzymd.analyses.distances._comparison_results import DistanceComparisonResult
+from polyzymd.analyses.stats import format_pct, interpret_direction
+from polyzymd.compare.statistics import percent_change
 
 
 def format_distances_console_table(
@@ -153,7 +155,7 @@ def format_distances_console_table(
                 p_str = f"{comp.distance_p_value:.4f}{sig_marker}"
 
                 # Format percent change
-                pct_str = f"{comp.distance_percent_change:+.1f}%"
+                pct_str = format_pct(comp.distance_percent_change)
 
                 # Format Cohen's d
                 d_str = f"{comp.distance_cohens_d:.2f}"
@@ -182,7 +184,7 @@ def format_distances_console_table(
                     comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
                     sig_marker = "*" if comp.fraction_significant else ""
                     p_str = f"{comp.fraction_p_value:.4f}{sig_marker}"
-                    pct_str = f"{comp.fraction_percent_change:+.1f}%"
+                    pct_str = format_pct(comp.fraction_percent_change)
                     d_str = f"{comp.fraction_cohens_d:.2f}"
 
                     lines.append(
@@ -241,14 +243,13 @@ def format_distances_console_table(
             control_cond = result.get_condition(result.control_label)
             control_pair = control_cond.get_pair(pair_label)
 
-            if control_pair.mean_distance > 0:
-                pct_diff = (
-                    (best_pair.mean_distance - control_pair.mean_distance)
-                    / control_pair.mean_distance
-                    * 100
-                )
-                direction = "closer" if pct_diff < 0 else "farther"
-                lines.append(f"  -> {abs(pct_diff):.1f}% {direction} than control")
+            pct_diff = percent_change(control_pair.mean_distance, best_pair.mean_distance)
+            direction = interpret_direction(pct_diff, ("closer", "unchanged", "farther"))
+            if direction == "unchanged":
+                lines.append("  -> unchanged relative to control")
+            else:
+                magnitude = format_pct(pct_diff).lstrip("+-")
+                lines.append(f"  -> {magnitude} {direction} than control")
 
             # Check significance
             comp = result.get_pair_comparison(pair_label, best)
@@ -385,7 +386,7 @@ def format_distances_markdown(
                 comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
                 sig = "Yes*" if comp.distance_significant else "No"
                 lines.append(
-                    f"| {comparison_name} | {comp.distance_percent_change:+.1f}% | "
+                    f"| {comparison_name} | {format_pct(comp.distance_percent_change)} | "
                     f"{comp.distance_p_value:.4f} | {comp.distance_cohens_d:.2f} | "
                     f"{comp.distance_effect_interpretation} | {comp.distance_direction} | {sig} |"
                 )
@@ -407,7 +408,7 @@ def format_distances_markdown(
                     comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
                     sig = "Yes*" if comp.fraction_significant else "No"
                     lines.append(
-                        f"| {comparison_name} | {comp.fraction_percent_change:+.1f}% | "
+                        f"| {comparison_name} | {format_pct(comp.fraction_percent_change)} | "
                         f"{comp.fraction_p_value:.4f} | {comp.fraction_cohens_d:.2f} | "
                         f"{comp.fraction_effect_interpretation} | {comp.fraction_direction} | "
                         f"{sig} |"
@@ -465,14 +466,13 @@ def format_distances_markdown(
             control_cond = result.get_condition(result.control_label)
             control_pair = control_cond.get_pair(pair_label)
 
-            if control_pair.mean_distance > 0:
-                pct_diff = (
-                    (best_pair.mean_distance - control_pair.mean_distance)
-                    / control_pair.mean_distance
-                    * 100
-                )
-                direction = "closer" if pct_diff < 0 else "farther"
-                lines.append(f"   - {abs(pct_diff):.1f}% {direction} than control")
+            pct_diff = percent_change(control_pair.mean_distance, best_pair.mean_distance)
+            direction = interpret_direction(pct_diff, ("closer", "unchanged", "farther"))
+            if direction == "unchanged":
+                lines.append("   - unchanged relative to control")
+            else:
+                magnitude = format_pct(pct_diff).lstrip("+-")
+                lines.append(f"   - {magnitude} {direction} than control")
 
             comp = result.get_pair_comparison(pair_label, best)
             if comp and comp.distance_significant:

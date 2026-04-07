@@ -17,6 +17,7 @@ Note:
 from __future__ import annotations
 
 from polyzymd.analyses.contacts._comparison_results import ContactsComparisonResult
+from polyzymd.analyses.stats import format_pct
 from polyzymd.core.experimental import prefix_experimental_output
 
 
@@ -196,7 +197,7 @@ def format_contacts_console_table(
                 p_str = f"{agg.p_value:.4f}"
                 p_adj = agg.p_value_adjusted
                 p_adj_str = f"{p_adj:.4f}{sig_marker}" if p_adj is not None else "--"
-                pct_str = f"{agg.percent_change:+.1f}%"
+                pct_str = format_pct(agg.percent_change)
                 d_str = f"{agg.cohens_d:.2f}"
                 metric = agg.metric.replace("_", " ")[:14]
                 effect_marker = "†" if agg.meets_effect_size_threshold else ""
@@ -277,7 +278,7 @@ def format_contacts_console_table(
                         agg.p_value_adjusted if agg.p_value_adjusted is not None else agg.p_value
                     )
                     lines.append(
-                        f"  {comp.condition_b}: {agg.percent_change:+.1f}% coverage vs {comp.condition_a} "
+                        f"  {comp.condition_b}: {format_pct(agg.percent_change)} coverage vs {comp.condition_a} "
                         f"(p_adj={p_for_display:.4f}, d={agg.cohens_d:.2f})"
                     )
 
@@ -445,7 +446,7 @@ def format_contacts_markdown(
                 )
                 effect_marker = "†" if agg.meets_effect_size_threshold else ""
                 lines.append(
-                    f"| {comparison_name} | {metric} | {agg.percent_change:+.1f}% | "
+                    f"| {comparison_name} | {metric} | {format_pct(agg.percent_change)} | "
                     f"{agg.p_value:.4f} | {p_adj_str} | {agg.cohens_d:.2f} | "
                     f"{agg.effect_size_interpretation} | {effect_marker} | {sig} |"
                 )
@@ -517,7 +518,7 @@ def format_contacts_markdown(
                         agg.p_value_adjusted if agg.p_value_adjusted is not None else agg.p_value
                     )
                     lines.append(
-                        f"{finding_num}. {comp.condition_b} shows **{agg.percent_change:+.1f}%** "
+                        f"{finding_num}. {comp.condition_b} shows **{format_pct(agg.percent_change)}** "
                         f"{agg.metric.replace('_', ' ')} vs {comp.condition_a} "
                         f"(p_adj={p_for_display:.4f}, d={agg.cohens_d:.2f} "
                         f"[{agg.effect_size_interpretation}])"

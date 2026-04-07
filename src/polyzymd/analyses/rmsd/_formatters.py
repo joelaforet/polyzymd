@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from polyzymd.analyses.rmsd._comparison_results import RMSDComparisonResult
+from polyzymd.analyses.stats import format_pct
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def _format_pairwise_line(run_label: str, result: RMSDComparisonResult) -> list[
         sig_marker = "*" if comp.significant else ""
         lines.append(
             f"Pairwise: {comp.condition_b} vs {comp.condition_a} — "
-            f"Δ={comp.percent_change:+.1f}%, p={comp.p_value:.3f} {sig_marker}, "
+            f"Δ={format_pct(comp.percent_change)}, p={comp.p_value:.3f} {sig_marker}, "
             f"d={comp.cohens_d:.2f} ({comp.effect_interpretation}), {comp.direction}"
         )
     return lines
@@ -125,7 +126,7 @@ def _format_rmsd_markdown(result: RMSDComparisonResult) -> str:
                 sig_marker = "*" if comp.significant else ""
                 lines.append(
                     f"- Pairwise: {comp.condition_b} vs {comp.condition_a} — "
-                    f"Δ={comp.percent_change:+.1f}%, p={comp.p_value:.3f} {sig_marker}, "
+                    f"Δ={format_pct(comp.percent_change)}, p={comp.p_value:.3f} {sig_marker}, "
                     f"d={comp.cohens_d:.2f} ({comp.effect_interpretation}), {comp.direction}"
                 )
 

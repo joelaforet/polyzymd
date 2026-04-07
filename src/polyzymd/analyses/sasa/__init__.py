@@ -751,6 +751,7 @@ class SASAAnalysis(Analysis):
     ) -> Any:
         """Compare one SASA run between two conditions."""
         from polyzymd.analyses.sasa._comparison_results import SASARunPairwiseComparison
+        from polyzymd.analyses.stats import interpret_direction
 
         values_a = [value for value in run_a.per_replicate_means if SASAAnalysis._is_finite(value)]
         values_b = [value for value in run_b.per_replicate_means if SASAAnalysis._is_finite(value)]
@@ -760,12 +761,11 @@ class SASAAnalysis(Analysis):
         t_result = independent_ttest(values_a, values_b)
         d_result = cohens_d(values_a, values_b)
         pct_change = percent_change(run_a.mean_sasa, run_b.mean_sasa)
-        if pct_change < -1.0:
-            direction = "shielding"
-        elif pct_change > 1.0:
-            direction = "exposure"
-        else:
-            direction = "unchanged"
+        direction = interpret_direction(
+            pct_change,
+            direction_labels=("shielding", "unchanged", "exposure"),
+            threshold=1.0,
+        )
 
         return SASARunPairwiseComparison(
             run_label=run_label,

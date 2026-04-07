@@ -1274,6 +1274,7 @@ class ContactsAnalysis(Analysis):
             AggregateComparisonResult,
             ContactsPairwiseComparison,
         )
+        from polyzymd.analyses.stats import interpret_direction
         from polyzymd.compare.statistics import (
             cohens_d,
             independent_ttest,
@@ -1291,12 +1292,11 @@ class ContactsAnalysis(Analysis):
         pct = percent_change(summary_a.coverage_mean, summary_b.coverage_mean)
 
         # Direction: higher contact = increased
-        if abs(pct) < 1:
-            direction = "unchanged"
-        elif pct < 0:
-            direction = "decreased"
-        else:
-            direction = "increased"
+        direction = interpret_direction(
+            pct,
+            direction_labels=("decreased", "unchanged", "increased"),
+            threshold=1.0,
+        )
 
         aggregate_comps.append(
             AggregateComparisonResult(
@@ -1328,12 +1328,11 @@ class ContactsAnalysis(Analysis):
             summary_b.mean_contact_fraction,
         )
 
-        if abs(pct) < 1:
-            direction = "unchanged"
-        elif pct < 0:
-            direction = "decreased"
-        else:
-            direction = "increased"
+        direction = interpret_direction(
+            pct,
+            direction_labels=("decreased", "unchanged", "increased"),
+            threshold=1.0,
+        )
 
         aggregate_comps.append(
             AggregateComparisonResult(

@@ -756,18 +756,18 @@ class RMSDAnalysis(Analysis):
     ) -> Any:
         """Compare a single RMSD run between two conditions."""
         from polyzymd.analyses.rmsd._comparison_results import RMSDRunPairwiseComparison
+        from polyzymd.analyses.stats import interpret_direction
         from polyzymd.compare.statistics import cohens_d, independent_ttest, percent_change
 
         t_result = independent_ttest(run_a.per_replicate_means, run_b.per_replicate_means)
         d_result = cohens_d(run_a.per_replicate_means, run_b.per_replicate_means)
         pct_change = percent_change(run_a.mean_rmsd, run_b.mean_rmsd)
 
-        if pct_change < -1.0:
-            direction = "stabilizing"
-        elif pct_change > 1.0:
-            direction = "destabilizing"
-        else:
-            direction = "unchanged"
+        direction = interpret_direction(
+            pct_change,
+            direction_labels=("stabilizing", "unchanged", "destabilizing"),
+            threshold=1.0,
+        )
 
         return RMSDRunPairwiseComparison(
             run_label=run_label,

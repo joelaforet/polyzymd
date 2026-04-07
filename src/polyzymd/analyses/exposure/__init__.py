@@ -730,6 +730,7 @@ class ExposureAnalysis(Analysis):
         -------
         PairwiseComparison
         """
+        from polyzymd.analyses.stats import interpret_direction
         from polyzymd.compare.core.base import PairwiseComparison
         from polyzymd.compare.statistics import (
             cohens_d,
@@ -747,12 +748,11 @@ class ExposureAnalysis(Analysis):
         pct = percent_change(mean_a, mean_b)
 
         # Direction: higher chaperone fraction = more polymer-assisted events
-        if pct > 5.0:
-            direction = "increased"
-        elif pct < -5.0:
-            direction = "decreased"
-        else:
-            direction = "unchanged"
+        direction = interpret_direction(
+            pct,
+            direction_labels=("decreased", "unchanged", "increased"),
+            threshold=5.0,
+        )
 
         return PairwiseComparison(
             condition_a=cond_a.label,

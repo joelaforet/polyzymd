@@ -48,7 +48,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Self, Sequence
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from polyzymd.compare.config import ComparisonConfig, ConditionConfig, PlotSettings
@@ -376,6 +376,8 @@ class PairwiseResult(BaseModel):
         Percent change from condition_a to condition_b.
     """
 
+    model_config = ConfigDict(ser_json_inf_nan="strings")
+
     condition_a: str
     condition_b: str
     metric: str = "default"
@@ -447,6 +449,8 @@ class ComparisonResult(BaseModel):
     polyzymd_version : str
         PolyzyMD version string.
     """
+
+    model_config = ConfigDict(ser_json_inf_nan="strings")
 
     analysis_type: str
     name: str

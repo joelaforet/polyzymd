@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from polyzymd.compare.core.base import BaseComparisonResult, BaseConditionSummary
 
@@ -136,6 +136,8 @@ class RMSDRunPairwiseComparison(BaseModel):
         Percent change in mean RMSD.
     """
 
+    model_config = ConfigDict(ser_json_inf_nan="strings")
+
     run_label: str
     condition_a: str
     condition_b: str
@@ -206,6 +208,7 @@ class RMSDComparisonResult(BaseComparisonResult[RMSDConditionSummary, RMSDRunPai
     """
 
     comparison_type: ClassVar[str] = "rmsd"
+    model_config = ConfigDict(ser_json_inf_nan="strings")
 
     metric: str = "mean_rmsd"
     name: str

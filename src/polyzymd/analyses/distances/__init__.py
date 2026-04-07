@@ -1293,6 +1293,7 @@ class DistancesAnalysis(Analysis):
             Statistical comparison result.
         """
         from polyzymd.analyses.distances._comparison_results import DistancePairwiseComparison
+        from polyzymd.analyses.stats import interpret_direction
         from polyzymd.compare.statistics import (
             cohens_d,
             independent_ttest,
@@ -1308,12 +1309,11 @@ class DistancesAnalysis(Analysis):
         pct_dist = percent_change(pair_a.mean_distance, pair_b.mean_distance)
 
         # Direction: negative change = closer = improving
-        if pct_dist < -1:
-            direction_dist = "closer"
-        elif pct_dist > 1:
-            direction_dist = "farther"
-        else:
-            direction_dist = "unchanged"
+        direction_dist = interpret_direction(
+            pct_dist,
+            direction_labels=("closer", "unchanged", "farther"),
+            threshold=1.0,
+        )
 
         # Fraction metric comparison (optional)
         fraction_t = None
@@ -1342,12 +1342,11 @@ class DistancesAnalysis(Analysis):
             fraction_sig = ttest_frac.significant
 
             # Direction: positive change = more contact = improving
-            if pct_frac > 1:
-                fraction_dir = "more_contact"
-            elif pct_frac < -1:
-                fraction_dir = "less_contact"
-            else:
-                fraction_dir = "unchanged"
+            fraction_dir = interpret_direction(
+                pct_frac,
+                direction_labels=("less_contact", "unchanged", "more_contact"),
+                threshold=1.0,
+            )
 
             fraction_pct = pct_frac
 

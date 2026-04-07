@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from polyzymd.compare.core.base import BaseComparisonResult, BaseConditionSummary
 
@@ -48,6 +48,8 @@ class SASAConditionSummary(BaseConditionSummary):
 class SASARunPairwiseComparison(BaseModel):
     """Statistical comparison between two conditions for one SASA run."""
 
+    model_config = ConfigDict(ser_json_inf_nan="strings")
+
     run_label: str
     condition_a: str
     condition_b: str
@@ -73,6 +75,7 @@ class SASAComparisonResult(BaseComparisonResult[SASAConditionSummary, SASARunPai
     """Complete SASA comparison analysis result."""
 
     comparison_type: ClassVar[str] = "sasa"
+    model_config = ConfigDict(ser_json_inf_nan="strings")
 
     metric: str = "mean_sasa"
     name: str

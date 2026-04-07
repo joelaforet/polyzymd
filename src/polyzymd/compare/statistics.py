@@ -369,8 +369,22 @@ def percent_change(control_mean: float, treatment_mean: float) -> float:
     -------
     float
         Percent change: (treatment - control) / control * 100
-        Negative = reduction, Positive = increase
+        Negative = reduction, Positive = increase.
+
+        Special handling for zero control values:
+
+        - 0 -> 0 returns ``0.0``
+        - 0 -> positive returns ``math.inf``
+        - 0 -> negative returns ``-math.inf``
+
+        If either input is non-finite (NaN or +/-inf), returns ``math.nan``.
     """
+    if not (math.isfinite(control_mean) and math.isfinite(treatment_mean)):
+        return math.nan
+
     if control_mean == 0:
-        return 0.0
+        if treatment_mean == 0:
+            return 0.0
+        return math.inf if treatment_mean > 0 else -math.inf
+
     return (treatment_mean - control_mean) / control_mean * 100

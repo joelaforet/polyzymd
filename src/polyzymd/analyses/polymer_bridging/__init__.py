@@ -1424,6 +1424,8 @@ def _safe_pairwise_comparisons(
     metrics_by_condition: dict[str, MetricValue],
     control_label: str | None,
 ) -> list[PairwiseResult]:
+    from polyzymd.analyses.stats import interpret_direction
+
     labels = list(metrics_by_condition.keys())
     if control_label and control_label in metrics_by_condition:
         pairs = [(control_label, lb) for lb in labels if lb != control_label]
@@ -1448,11 +1450,7 @@ def _safe_pairwise_comparisons(
             p_val = 1.0
         if not np.isfinite(d_val):
             d_val = 0.0
-        direction = (
-            mv_a.direction_labels[1]
-            if abs(pct) < 1.0
-            else (mv_a.direction_labels[0] if pct < 0 else mv_a.direction_labels[2])
-        )
+        direction = interpret_direction(pct, mv_a.direction_labels)
         results.append(
             PairwiseResult(
                 condition_a=label_a,

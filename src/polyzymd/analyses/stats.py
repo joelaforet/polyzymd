@@ -23,6 +23,7 @@ polyzymd.compare.statistics : Lower-level statistical primitives (t-test,
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime
 from typing import Any
 
@@ -63,9 +64,57 @@ def interpret_direction(
     str
         One of the three direction labels.
     """
+    if math.isnan(pct_change):
+        return direction_labels[1]
+    if math.isinf(pct_change):
+        return direction_labels[2] if pct_change > 0 else direction_labels[0]
     if abs(pct_change) < threshold:
         return direction_labels[1]
     return direction_labels[0] if pct_change < 0 else direction_labels[2]
+
+
+def format_pct(pct: float) -> str:
+    """Format percent change values for human-readable output.
+
+    Parameters
+    ----------
+    pct : float
+        Percent change value.
+
+    Returns
+    -------
+    str
+        Formatted percent value.
+
+        - ``+inf`` as ``"+∞%"``
+        - ``-inf`` as ``"-∞%"``
+        - ``nan`` as ``"n/a"``
+        - finite values as signed one-decimal percentages
+    """
+    pct = pct + 0.0
+
+    if math.isnan(pct):
+        return "n/a"
+    if math.isinf(pct):
+        return "+∞%" if pct > 0 else "-∞%"
+    # Canonical percent format for finite values
+    return f"{pct:+.1f}%"
+
+
+def _format_pct(pct: float) -> str:
+    """Backward-compatible alias for ``format_pct``.
+
+    Parameters
+    ----------
+    pct : float
+        Percent change value.
+
+    Returns
+    -------
+    str
+        Formatted percent value.
+    """
+    return format_pct(pct)
 
 
 # ---------------------------------------------------------------------------
@@ -507,7 +556,7 @@ def _format_scalar_text(
             name = f"{comp.condition_b} vs {comp.condition_a}"
             sig_marker = "*" if comp.significant else ""
             p_str = f"{comp.p_value:.4f}{sig_marker}"
-            pct_str = f"{comp.percent_change:+.1f}%"
+            pct_str = format_pct(comp.percent_change)
             d_str = f"{comp.cohens_d:.2f}"
             lines.append(
                 f"{name:<30} {pct_str:<10} {p_str:<12} "
@@ -541,14 +590,20 @@ def _format_scalar_text(
         lines.append(f"Best: {best} ({metric_label} = {best_val:.4f}{unit_str})")
 
         if result.control_label and best != result.control_label:
+            from polyzymd.compare.statistics import percent_change
+
             ctrl = _get_cond(result.control_label)
             ctrl_val = _get_mean(ctrl)
-            if ctrl_val != 0:
-                pct = (best_val - ctrl_val) / ctrl_val * 100
-                direction = "lower" if pct < 0 else "higher"
-                lines.append(
-                    f"  -> {abs(pct):.1f}% {direction} than control ({result.control_label})"
-                )
+            pct = percent_change(ctrl_val, best_val)
+            if not math.isnan(pct):
+                direction = interpret_direction(pct, ("lower", "unchanged", "higher"))
+                if direction == "unchanged":
+                    lines.append(f"  -> unchanged relative to control ({result.control_label})")
+                else:
+                    magnitude = format_pct(pct).lstrip("+-")
+                    lines.append(
+                        f"  -> {magnitude} {direction} than control ({result.control_label})"
+                    )
         lines.append("")
 
     lines.append(f"Analysis completed: {result.created_at}")
@@ -613,7 +668,7 @@ def _format_scalar_markdown(
             name = f"{comp.condition_b} vs {comp.condition_a}"
             sig = "Yes" if comp.significant else "No"
             lines.append(
-                f"| {name} | {comp.percent_change:+.1f}% | "
+                f"| {name} | {format_pct(comp.percent_change)} | "
                 f"{comp.p_value:.4f} | {comp.cohens_d:.2f} | "
                 f"{comp.effect_size_interpretation} | {sig} |"
             )
@@ -639,12 +694,18 @@ def _format_scalar_markdown(
         best_val = _get_mean(best_cond)
         lines.append(f"1. **Best condition:** {best} ({metric_label} = {best_val:.4f}{unit_str})")
         if result.control_label and best != result.control_label:
+            from polyzymd.compare.statistics import percent_change
+
             ctrl = _get_cond(result.control_label)
             ctrl_val = _get_mean(ctrl)
-            if ctrl_val != 0:
-                pct = (best_val - ctrl_val) / ctrl_val * 100
-                direction = "lower" if pct < 0 else "higher"
-                lines.append(f"2. {abs(pct):.1f}% {direction} than control")
+            pct = percent_change(ctrl_val, best_val)
+            if not math.isnan(pct):
+                direction = interpret_direction(pct, ("lower", "unchanged", "higher"))
+                if direction == "unchanged":
+                    lines.append("2. unchanged relative to control")
+                else:
+                    magnitude = format_pct(pct).lstrip("+-")
+                    lines.append(f"2. {magnitude} {direction} than control")
         lines.append("")
 
     return "\n".join(lines)

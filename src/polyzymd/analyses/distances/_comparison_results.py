@@ -19,7 +19,7 @@ For each pair:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from polyzymd.compare.core.base import BaseComparisonResult, BaseConditionSummary
 
@@ -170,6 +170,8 @@ class DistancePairwiseComparison(BaseModel):
         Percent change in fraction below threshold.
     """
 
+    model_config = ConfigDict(ser_json_inf_nan="strings")
+
     pair_label: str
     condition_a: str
     condition_b: str
@@ -268,6 +270,7 @@ class DistanceComparisonResult(
     """
 
     comparison_type: ClassVar[str] = "distances"
+    model_config = ConfigDict(ser_json_inf_nan="strings")
 
     metric: str = "mean_distance"
     name: str

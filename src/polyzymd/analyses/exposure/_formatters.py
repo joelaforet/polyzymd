@@ -12,6 +12,7 @@ for different output formats: console tables, Markdown, and JSON.
 from __future__ import annotations
 
 from polyzymd.analyses.exposure._comparison_results import ExposureComparisonResult
+from polyzymd.analyses.stats import format_pct
 from polyzymd.core.experimental import prefix_experimental_output
 
 
@@ -157,7 +158,7 @@ def format_exposure_console_table(
             comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
             sig_marker = "*" if comp.significant else ""
             p_str = f"{comp.p_value:.4f}{sig_marker}"
-            pct_str = f"{comp.percent_change:+.1f}%"
+            pct_str = format_pct(comp.percent_change)
             d_str = f"{comp.cohens_d:.2f}"
             lines.append(
                 f"{comparison_name:<35} {pct_str:<10} "
@@ -353,7 +354,7 @@ def format_exposure_markdown(
             comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
             sig = "Yes*" if comp.significant else "No"
             lines.append(
-                f"| {comparison_name} | {comp.percent_change:+.1f}% | "
+                f"| {comparison_name} | {format_pct(comp.percent_change)} | "
                 f"{comp.p_value:.4f} | {comp.cohens_d:.2f} | "
                 f"{comp.effect_size_interpretation} | {sig} |"
             )
@@ -401,7 +402,7 @@ def format_exposure_markdown(
             if comp.significant:
                 lines.append(
                     f"{finding_num}. **{comp.condition_b}** shows "
-                    f"**{comp.percent_change:+.1f}%** chaperone fraction vs "
+                    f"**{format_pct(comp.percent_change)}** chaperone fraction vs "
                     f"{comp.condition_a} "
                     f"(p={comp.p_value:.4f}, d={comp.cohens_d:.2f} "
                     f"[{comp.effect_size_interpretation}])"

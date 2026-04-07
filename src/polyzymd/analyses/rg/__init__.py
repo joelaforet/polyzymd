@@ -937,18 +937,18 @@ class RgAnalysis(Analysis):
             Pairwise statistics and direction for this run.
         """
         from polyzymd.analyses.rg._comparison_results import RgRunPairwiseComparison
+        from polyzymd.analyses.stats import interpret_direction
         from polyzymd.compare.statistics import cohens_d, independent_ttest, percent_change
 
         t_result = independent_ttest(run_a.per_replicate_means, run_b.per_replicate_means)
         d_result = cohens_d(run_a.per_replicate_means, run_b.per_replicate_means)
         pct_change = percent_change(run_a.mean_rg, run_b.mean_rg)
 
-        if pct_change < -1.0:
-            direction = "compaction"
-        elif pct_change > 1.0:
-            direction = "expansion"
-        else:
-            direction = "unchanged"
+        direction = interpret_direction(
+            pct_change,
+            direction_labels=("compaction", "unchanged", "expansion"),
+            threshold=1.0,
+        )
 
         return RgRunPairwiseComparison(
             run_label=run_label,

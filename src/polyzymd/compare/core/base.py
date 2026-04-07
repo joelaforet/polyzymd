@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar, Generic, Self, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from polyzymd import __version__
 
@@ -61,6 +61,8 @@ class PairwiseComparison(BaseModel):
     percent_change : float
         Percent change from condition_a to condition_b.
     """
+
+    model_config = ConfigDict(ser_json_inf_nan="strings")
 
     condition_a: str
     condition_b: str
@@ -170,6 +172,8 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseC
     polyzymd_version : str
         Version of polyzymd used.
     """
+
+    model_config = ConfigDict(ser_json_inf_nan="strings")
 
     # Class variable - subclasses should override
     comparison_type: ClassVar[str] = "base"

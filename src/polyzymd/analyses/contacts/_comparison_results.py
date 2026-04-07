@@ -26,7 +26,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from polyzymd import __version__
 
@@ -161,6 +161,8 @@ class AggregateComparisonResult(BaseModel):
     direction : str
         "increased", "decreased", or "unchanged"
     """
+
+    model_config = ConfigDict(ser_json_inf_nan="strings")
 
     metric: str
     condition_a: str
@@ -323,6 +325,8 @@ class ContactsComparisonResult(BaseModel):
     polyzymd_version : str
         Version of polyzymd used
     """
+
+    model_config = ConfigDict(ser_json_inf_nan="strings")
 
     name: str
     contacts_name: str
