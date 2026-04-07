@@ -148,11 +148,16 @@ atoms into partitions, and reports both absolute counts (mean H-bonds/frame)
 and fractional shares per partition pair (e.g., protein→polymer,
 protein→protein, polymer→substrate).
 
+Composition is opt-in. If `composition` is omitted, no composition results are
+computed.
+
 :::{admonition} Partition disjointness
 :class: important
 
 Composition partitions should be disjoint (no shared atoms). If partitions
-overlap, the plugin warns and fractions may not sum to 1.0.
+overlap, the plugin raises an error by default. Set
+`allow_overlapping_composition: true` to allow overlap with warnings
+(fractions may not sum to 1.0).
 :::
 
 ### Other Settings
@@ -161,7 +166,26 @@ overlap, the plugin warns and fractions may not sum to 1.0.
 |-------|------|---------|-------------|
 | `update_selections` | bool | `true` | Re-evaluate atom selections each frame. Required for coordinate-dependent selections like `around`. For purely structural selections (`chainid`, `resname`), this adds overhead without changing results. |
 | `top_n_pairs` | int | `15` | Number of top residue pairs to report per summary |
+| `allow_empty_groups` | bool | `false` | If `false`, raise an error when a referenced group selection matches no atoms. Set `true` to warn and skip those summaries. |
+| `allow_overlapping_composition` | bool | `false` | If `false`, overlapping composition partitions raise an error. Set `true` to allow overlap with warnings. |
 | `timestep_ps` | float or null | `null` | Manual frame spacing in ps for time-axis plots. If null, read from trajectory metadata. |
+
+If you want composition partitions to mirror group selections, define them
+explicitly in YAML with the same keys/selections.
+
+:::{admonition} Technical Detail
+:class: note
+
+`update_selections: true` makes MDAnalysis re-evaluate atom selections every
+frame, which is important for coordinate-dependent selections such as
+`around`, `sphzone`, and `cyzone`.
+
+However, the plugin resolves group membership used for donor/acceptor
+pair-classification once at the start from the initial frame index sets. This
+means pair-tracking classification does not change if atoms move between groups
+later in the trajectory. This behavior is deliberate for performance and for
+consistent summary definitions across frames.
+:::
 
 :::{admonition} When to set update_selections to false
 :class: note
@@ -334,6 +358,8 @@ Each summary produces these fields in the aggregated result:
 | `mean_hbonds_per_frame` | Average number of H-bonds per frame, averaged across replicates |
 | `sem_hbonds_per_frame` | Standard error of the mean across replicates |
 | `per_replicate_mean_hbonds` | Per-replicate mean values (for statistical tests) |
+| `mean_unique_pairs_per_frame` | Mean number of unique donor-residue/acceptor-residue pairs per frame |
+| `sem_unique_pairs_per_frame` | Standard error across replicates for the unique-pairs metric |
 | `mean_fraction_with_any` | Fraction of frames that had at least one H-bond |
 
 The primary comparison metric is `mean_hbonds_per_frame` per summary. In the
@@ -392,26 +418,26 @@ theming system for consistent publication-quality output.
 
 **File:** `hbond_summary_comparison.png`
 
-Grouped bar chart with one cluster per condition and one bar per summary.
-Error bars show SEM across replicates. This is the primary overview plot —
-look for summaries where conditions differ significantly.
+Faceted grouped bars with one subplot per summary and one bar per condition.
+Each summary gets its own y-axis scale, improving readability when summaries
+have very different magnitudes. Error bars show SEM across replicates.
 
 ### Time series
 
 **File:** `hbond_timeseries_<summary>.png` (one per summary)
 
-Per-frame H-bond counts over time in physical units (ns). Individual replicate
-traces are shown in light color; the replicate mean is a bold overlay. Useful
-for detecting equilibration issues (early drift) or transient events
+Per-frame H-bond counts over time in physical units (ns). The mean across
+replicates is shown as a solid line with a ±1 SD shaded band (single-replicate
+runs show the trace only). Useful for detecting equilibration issues (early drift) or transient events
 (sudden spikes indicating a binding/unbinding event).
 
 ### Top residue pairs occupancy
 
 **File:** `hbond_top_pairs_<summary>.png` (one per summary)
 
-Horizontal grouped bar chart showing the top undirected residue pairs by
-mean occupancy. Each condition gets a bar per pair, making it easy to see
-which specific interactions differ between conditions.
+Horizontal grouped bar chart showing top undirected residue pairs by mean
+occupancy. To focus on cross-condition comparison, only pairs present in at
+least two conditions are shown.
 
 ### Composition absolute bars
 

@@ -50,6 +50,24 @@ logger = logging.getLogger("polyzymd.analyses.hydrogen_bonds")
 COORDINATE_DEPENDENT_SELECTION_KEYWORDS = frozenset(
     {"around", "point", "cyzone", "sphzone", "isolayer"}
 )
+DEFAULT_GROUPS = {"protein": "chainid A", "polymer": "chainid C"}
+
+
+def _default_summaries() -> list[HydrogenBondSummarySettings]:
+    """Return default summary definitions.
+
+    Returns
+    -------
+    list[HydrogenBondSummarySettings]
+        Default summary list used when none is provided.
+    """
+
+    return [
+        HydrogenBondSummarySettings(
+            name="protein_polymer",
+            between=("protein", "polymer"),
+        )
+    ]
 
 
 def _settings_hash(settings: HydrogenBondSettings) -> str:
@@ -119,7 +137,7 @@ class HydrogenBondCompositionSettings(BaseModel):
         Mapping of partition name to MDAnalysis selection string.
     """
 
-    partitions: dict[str, str]
+    partitions: dict[str, str] = Field(default_factory=dict)
 
 
 class HydrogenBondSettings(BaseModel):
@@ -141,21 +159,16 @@ class HydrogenBondSettings(BaseModel):
         Whether atom selections should update each frame.
     top_n_pairs : int
         Number of top residue pairs to report.
+    allow_empty_groups : bool
+        If False, raise when a group selection matches no atoms.
+    allow_overlapping_composition : bool
+        If False, raise when composition partitions overlap.
     composition : HydrogenBondCompositionSettings | None
         Optional composition-partition settings.
     """
 
-    groups: dict[str, str] = Field(
-        default_factory=lambda: {"protein": "chainid A", "polymer": "chainid C"}
-    )
-    summaries: list[HydrogenBondSummarySettings] = Field(
-        default_factory=lambda: [
-            HydrogenBondSummarySettings(
-                name="protein_polymer",
-                between=("protein", "polymer"),
-            )
-        ]
-    )
+    groups: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_GROUPS))
+    summaries: list[HydrogenBondSummarySettings] = Field(default_factory=_default_summaries)
     distance_cutoff: float = Field(
         default=3.0,
         gt=0,
@@ -175,6 +188,20 @@ class HydrogenBondSettings(BaseModel):
         default=15,
         ge=1,
         description="Number of top residue pairs to report",
+    )
+    allow_empty_groups: bool = Field(
+        default=False,
+        description=(
+            "If False (default), raise ValueError when a referenced group selection "
+            "matches no atoms. Set to True to warn and skip instead"
+        ),
+    )
+    allow_overlapping_composition: bool = Field(
+        default=False,
+        description=(
+            "If False (default), raise ValueError when composition partitions overlap. "
+            "Set to True to allow overlap and emit warnings"
+        ),
     )
     composition: HydrogenBondCompositionSettings | None = None
     timestep_ps: float | None = Field(
@@ -298,6 +325,7 @@ class HydrogenBondsAnalysis(Analysis):
     has_compute_stage: ClassVar[bool] = True
     has_aggregate_stage: ClassVar[bool] = True
     ReplicateResultClass: ClassVar[type | None] = HydrogenBondResult
+    _defaults_warned: ClassVar[bool] = False
 
     def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
         """Compute per-replicate hydrogen-bond results.
@@ -316,6 +344,20 @@ class HydrogenBondsAnalysis(Analysis):
         """
         settings: HydrogenBondSettings = ctx.settings
         sim_config = ctx.sim_config
+
+        if (
+            not self.__class__._defaults_warned
+            and settings.groups == DEFAULT_GROUPS
+            and settings.summaries == _default_summaries()
+        ):
+            logger.warning(
+                "No explicit groups/summaries in YAML config — using defaults:\n"
+                "  groups: %s\n"
+                "  summaries: %s",
+                settings.groups,
+                [summary.model_dump(mode="json") for summary in settings.summaries],
+            )
+            self.__class__._defaults_warned = True
 
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
 
@@ -368,11 +410,18 @@ class HydrogenBondsAnalysis(Analysis):
         for group_name, selection_str in settings.groups.items():
             atom_group = u.select_atoms(selection_str, updating=settings.update_selections)
             if len(atom_group) == 0:
-                logger.warning(
-                    "Group '%s' selection '%s' matched no atoms — will skip summaries using it",
-                    group_name,
-                    selection_str,
-                )
+                if settings.allow_empty_groups:
+                    logger.warning(
+                        "Group '%s' selection '%s' matched no atoms — will skip summaries using it",
+                        group_name,
+                        selection_str,
+                    )
+                else:
+                    raise ValueError(
+                        f"Group '{group_name}' selection '{selection_str}' matched no atoms in "
+                        "the universe. Fix the selection or set allow_empty_groups: true to "
+                        "warn and skip."
+                    )
             resolved_groups[group_name] = atom_group
 
         group_names = list(resolved_groups.keys())
@@ -427,6 +476,8 @@ class HydrogenBondsAnalysis(Analysis):
                     ),
                     n_frames_used=n_frames,
                     mean_hbonds_per_frame=0.0,
+                    mean_unique_pairs_per_frame=0.0,
+                    std_unique_pairs_per_frame=0.0,
                     fraction_frames_with_any_hbond=0.0,
                     counts_per_frame=empty_counts,
                     directed_residue_pairs=[],
@@ -469,6 +520,7 @@ class HydrogenBondsAnalysis(Analysis):
                 universe=u,
                 start_frame=start_frame,
                 n_frames=n_frames,
+                allow_overlapping=settings.allow_overlapping_composition,
             )
 
         # Group selections are resolved once and used for post-classification
@@ -512,6 +564,8 @@ class HydrogenBondsAnalysis(Analysis):
                         group_names=[g for g in group_names_for_summary if g is not None],
                         n_frames_used=n_frames,
                         mean_hbonds_per_frame=0.0,
+                        mean_unique_pairs_per_frame=0.0,
+                        std_unique_pairs_per_frame=0.0,
                         fraction_frames_with_any_hbond=0.0,
                         counts_per_frame=[0] * n_frames,
                         directed_residue_pairs=[],
@@ -521,6 +575,7 @@ class HydrogenBondsAnalysis(Analysis):
                 continue
 
             counts_per_frame: dict[int, int] = defaultdict(int)
+            unique_pairs_per_frame: dict[int, set[tuple[int, int]]] = defaultdict(set)
             directed_pairs: dict[
                 tuple[tuple[str, int, str], tuple[str, int, str]], dict[str, Any]
             ] = {}
@@ -583,6 +638,7 @@ class HydrogenBondsAnalysis(Analysis):
                         continue
 
                     counts_per_frame[frame] += 1
+                    unique_pairs_per_frame[frame].add((donor_resindex, acceptor_resindex))
 
                     donor_residue_key = donor_info[:3]
                     acceptor_residue_key = acceptor_info[:3]
@@ -608,7 +664,13 @@ class HydrogenBondsAnalysis(Analysis):
                 counts_per_frame.get(frame_idx, 0)
                 for frame_idx in range(start_frame, n_total_frames)
             ]
+            unique_pairs_counts = [
+                len(unique_pairs_per_frame.get(frame_idx, set()))
+                for frame_idx in range(start_frame, n_total_frames)
+            ]
             mean_hbonds = float(np.mean(counts_list)) if counts_list else 0.0
+            mean_unique_pairs = float(np.mean(unique_pairs_counts)) if unique_pairs_counts else 0.0
+            std_unique_pairs = float(np.std(unique_pairs_counts)) if unique_pairs_counts else 0.0
             fraction_with_any = (
                 float(np.mean([count > 0 for count in counts_list])) if counts_list else 0.0
             )
@@ -639,7 +701,6 @@ class HydrogenBondsAnalysis(Analysis):
                 )
 
             directed_results.sort(key=lambda pair: pair.occupancy, reverse=True)
-            directed_results = directed_results[: settings.top_n_pairs]
 
             undirected_results: list[UndirectedResiduePairResult] = []
             for residue_key_set, pair_data in undirected_pairs.items():
@@ -668,7 +729,6 @@ class HydrogenBondsAnalysis(Analysis):
                 )
 
             undirected_results.sort(key=lambda pair: pair.occupancy, reverse=True)
-            undirected_results = undirected_results[: settings.top_n_pairs]
 
             summary_results.append(
                 HydrogenBondReplicateSummary(
@@ -677,6 +737,8 @@ class HydrogenBondsAnalysis(Analysis):
                     group_names=[g for g in group_names_for_summary if g is not None],
                     n_frames_used=n_frames,
                     mean_hbonds_per_frame=mean_hbonds,
+                    mean_unique_pairs_per_frame=mean_unique_pairs,
+                    std_unique_pairs_per_frame=std_unique_pairs,
                     fraction_frames_with_any_hbond=fraction_with_any,
                     counts_per_frame=counts_list,
                     directed_residue_pairs=directed_results,
@@ -717,8 +779,9 @@ class HydrogenBondsAnalysis(Analysis):
 
         if len(results) != len(ctx.replicates):
             raise ValueError(
-                f"Mismatch: {len(results)} results but {len(ctx.replicates)} replicates "
-                "in context. This indicates a framework error."
+                f"Expected {len(ctx.replicates)} replicate results (replicates "
+                f"{list(ctx.replicates)}), got {len(results)}. Check that all replicates "
+                "computed successfully."
             )
 
         if not results:
@@ -754,12 +817,17 @@ class HydrogenBondsAnalysis(Analysis):
                 summary.mean_hbonds_per_frame if summary is not None else 0.0
                 for summary in per_rep_summaries
             ]
+            unique_pairs_values = [
+                summary.mean_unique_pairs_per_frame if summary is not None else 0.0
+                for summary in per_rep_summaries
+            ]
             fraction_values = [
                 summary.fraction_frames_with_any_hbond if summary is not None else 0.0
                 for summary in per_rep_summaries
             ]
 
             hbonds_stats = compute_sem(np.array(hbonds_values, dtype=float))
+            unique_pairs_stats = compute_sem(np.array(unique_pairs_values, dtype=float))
             fraction_stats = compute_sem(np.array(fraction_values, dtype=float))
 
             directed_map: dict[
@@ -859,6 +927,8 @@ class HydrogenBondsAnalysis(Analysis):
                     mean_hbonds_per_frame=float(hbonds_stats.mean),
                     sem_hbonds_per_frame=float(hbonds_stats.sem),
                     per_replicate_mean_hbonds=hbonds_values,
+                    mean_unique_pairs_per_frame=float(unique_pairs_stats.mean),
+                    sem_unique_pairs_per_frame=float(unique_pairs_stats.sem),
                     mean_fraction_with_any=float(fraction_stats.mean),
                     sem_fraction_with_any=float(fraction_stats.sem),
                     per_replicate_fraction_with_any=fraction_values,
@@ -900,6 +970,7 @@ class HydrogenBondsAnalysis(Analysis):
         universe: Any,
         start_frame: int,
         n_frames: int,
+        allow_overlapping: bool = False,
     ) -> list[CompositionEntry]:
         """Compute hydrogen-bond composition across disjoint partitions.
 
@@ -915,6 +986,9 @@ class HydrogenBondsAnalysis(Analysis):
             First analyzed trajectory frame index.
         n_frames : int
             Number of analyzed frames.
+        allow_overlapping : bool, optional
+            If ``True``, overlapping partitions are allowed with warnings.
+            If ``False`` (default), overlap raises ``ValueError``.
 
         Returns
         -------
@@ -944,7 +1018,10 @@ class HydrogenBondsAnalysis(Analysis):
                     )
                     break
 
-            atom_group = universe.select_atoms(selection_str)
+            try:
+                atom_group = universe.select_atoms(selection_str, updating=False)
+            except TypeError:
+                atom_group = universe.select_atoms(selection_str)
             if len(atom_group) == 0:
                 logger.warning("Composition partition '%s' matched no atoms", partition_name)
             partition_atoms[partition_name] = set(atom_group.indices.tolist())
@@ -954,13 +1031,20 @@ class HydrogenBondsAnalysis(Analysis):
             for partition_b in partition_names[i + 1 :]:
                 overlap = partition_atoms[partition_a] & partition_atoms[partition_b]
                 if overlap:
-                    logger.warning(
-                        "Composition partitions '%s' and '%s' overlap by %d atoms — "
-                        "composition fractions may not sum to 1.0",
-                        partition_a,
-                        partition_b,
-                        len(overlap),
-                    )
+                    if allow_overlapping:
+                        logger.warning(
+                            "Composition partitions '%s' and '%s' overlap by %d atoms — "
+                            "composition fractions may not sum to 1.0",
+                            partition_a,
+                            partition_b,
+                            len(overlap),
+                        )
+                    else:
+                        raise ValueError(
+                            f"Composition partitions '{partition_a}' and '{partition_b}' overlap "
+                            f"by {len(overlap)} atoms. Make partitions disjoint or set "
+                            "allow_overlapping_composition: true."
+                        )
 
         pair_counts: dict[tuple[str, str], int] = {}
         total_events = 0

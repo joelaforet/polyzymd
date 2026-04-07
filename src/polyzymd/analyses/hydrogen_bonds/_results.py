@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from polyzymd.analyses._results_base import AggregatedResultMixin, BaseAnalysisResult
 
@@ -73,6 +73,8 @@ class HydrogenBondReplicateSummary(BaseModel):
     group_names: list[str]
     n_frames_used: int
     mean_hbonds_per_frame: float
+    mean_unique_pairs_per_frame: float = 0.0
+    std_unique_pairs_per_frame: float = 0.0
     fraction_frames_with_any_hbond: float = Field(..., ge=0, le=1)
     counts_per_frame: list[int]
     directed_residue_pairs: list[DirectedResiduePairResult] = Field(default_factory=list)
@@ -143,6 +145,8 @@ class UndirectedPairAggregate(BaseModel):
 class HydrogenBondAggregatedSummary(BaseModel):
     """Aggregated per-summary results across replicates."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str
     mode: str
     group_names: list[str]
@@ -150,6 +154,14 @@ class HydrogenBondAggregatedSummary(BaseModel):
     mean_hbonds_per_frame: float
     sem_hbonds_per_frame: float
     per_replicate_mean_hbonds: list[float]
+    mean_unique_pairs_per_frame: float = 0.0
+    sem_unique_pairs_per_frame: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices(
+            "sem_unique_pairs_per_frame",
+            "std_unique_pairs_per_frame",
+        ),
+    )
     mean_fraction_with_any: float
     sem_fraction_with_any: float
     per_replicate_fraction_with_any: list[float]
