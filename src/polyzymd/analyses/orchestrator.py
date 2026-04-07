@@ -721,6 +721,7 @@ def finalize_comparison_from_disk(
         equilibration=config.defaults.equilibration_time,
         settings=settings,
         recompute=False,
+        fdr_alpha=getattr(config.defaults, "fdr_alpha", 0.05),
         result_path=comparison_result_path,
         failed_conditions=failed_conditions,
         aggregated_results=valid_aggregated_results,

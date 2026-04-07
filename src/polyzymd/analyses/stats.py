@@ -125,16 +125,9 @@ def _format_pct(pct: float) -> str:
 def pairwise_comparisons(
     metrics_by_condition: dict[str, MetricValue],
     control_label: str | None = None,
+    fdr_alpha: float = 0.05,
 ) -> list[PairwiseResult]:
     """Compute pairwise statistical comparisons for a single metric.
-
-    .. note::
-
-       When 3+ conditions are compared, the pairwise p-values are **not**
-       corrected for multiple comparisons (no Bonferroni or
-       Benjamini-Hochberg adjustment).  The accompanying ANOVA provides an
-       omnibus test, but individual pairwise p-values should be interpreted
-       cautiously.  Multiple-comparison correction is a planned enhancement.
 
     Parameters
     ----------
@@ -143,13 +136,19 @@ def pairwise_comparisons(
     control_label : str | None
         If provided, compare all conditions against this control.
         Otherwise, compare all unique pairs.
+    fdr_alpha : float, optional
+        False discovery rate threshold for Benjamini-Hochberg adjustment,
+        by default 0.05.
 
     Returns
     -------
     list[PairwiseResult]
-        Pairwise comparison results.
+        Pairwise comparison results with both raw and adjusted p-values.
+        The ``significant`` field is based on adjusted p-value when
+        available, otherwise on raw p-value.
     """
     from polyzymd.compare.statistics import (
+        benjamini_hochberg,
         cohens_d,
         independent_ttest,
         percent_change,
@@ -189,6 +188,15 @@ def pairwise_comparisons(
                 percent_change=pct,
             )
         )
+
+    raw_p_values = [result.p_value for result in results]
+    bh_results = benjamini_hochberg(raw_p_values, alpha=fdr_alpha)
+    for result, bh in zip(results, bh_results, strict=False):
+        result.p_value_adjusted = bh.adjusted_p_value
+        p_for_significance = (
+            bh.adjusted_p_value if bh.adjusted_p_value is not None else result.p_value
+        )
+        result.significant = p_for_significance < fdr_alpha
 
     return results
 
@@ -242,8 +250,9 @@ def rank_conditions(
 ) -> list[str]:
     """Rank condition labels by metric value.
 
-    Respects ``MetricValue.higher_is_better``: if ``True``, highest
-    mean comes first; if ``False``, lowest mean comes first.
+    Respects ``MetricValue.higher_is_better``: if ``True``, highest mean comes
+    first; if ``False``, lowest mean comes first. If ``None``, conditions are
+    returned in a deterministic neutral order (alphabetical by label).
 
     Parameters
     ----------
@@ -253,12 +262,14 @@ def rank_conditions(
     Returns
     -------
     list[str]
-        Condition labels in ranked order (best first).
+        Condition labels in display order.
     """
     if not metrics_by_condition:
         return []
     # All MetricValues should agree on higher_is_better; use the first
     first_mv = next(iter(metrics_by_condition.values()))
+    if first_mv.higher_is_better is None:
+        return sorted(metrics_by_condition.keys())
     reverse = first_mv.higher_is_better
     return sorted(
         metrics_by_condition.keys(),
@@ -278,6 +289,7 @@ def default_scalar_comparison(
     metrics_by_condition: dict[str, dict[str, MetricValue]],
     control_label: str | None = None,
     equilibration: str = "0ns",
+    fdr_alpha: float = 0.05,
 ) -> ComparisonResult:
     """Run the standard scalar comparison pipeline.
 
@@ -287,17 +299,11 @@ def default_scalar_comparison(
 
     For each metric:
     1. Pairwise t-tests + Cohen's d + percent-change.
+       Pairwise p-values are adjusted with Benjamini-Hochberg (BH)
+       correction, and significance is evaluated against the adjusted
+       p-values at ``fdr_alpha``.
     2. ANOVA (if 3+ conditions).
     3. Ranking.
-
-    .. note::
-
-       Pairwise t-tests use Welch's test (unequal variance).  When 3+
-       conditions are compared, pairwise p-values are **not** corrected
-       for multiple comparisons.  ANOVA provides an omnibus test; interpret
-       individual pairwise p-values with caution.  Multiple-comparison
-       correction (Bonferroni / Benjamini-Hochberg) is a planned
-       enhancement.
 
     Parameters
     ----------
@@ -312,6 +318,9 @@ def default_scalar_comparison(
         Control condition label.
     equilibration : str
         Equilibration time string.
+    fdr_alpha : float, optional
+        False discovery rate threshold used for BH-adjusted pairwise
+        significance, by default 0.05.
 
     Returns
     -------
@@ -360,7 +369,7 @@ def default_scalar_comparison(
             continue
 
         # Pairwise
-        pw = pairwise_comparisons(per_cond, control_label)
+        pw = pairwise_comparisons(per_cond, control_label, fdr_alpha=fdr_alpha)
         all_pairwise.extend(pw)
 
         # ANOVA
@@ -389,6 +398,7 @@ def default_scalar_comparison(
         analysis_type=analysis_name,
         name=project_name,
         control_label=control_label,
+        fdr_alpha=fdr_alpha,
         conditions=condition_summaries,
         pairwise_comparisons=all_pairwise,
         anova=all_anova if all_anova else None,
@@ -413,7 +423,7 @@ def format_scalar_comparison(
     metric_unit: str = "",
     metric_key: str | None = None,
     output_format: str = "text",
-    higher_is_better: bool = True,
+    higher_is_better: bool | None = True,
 ) -> str:
     """Format a :class:`ComparisonResult` for CLI display.
 
@@ -437,8 +447,9 @@ def format_scalar_comparison(
         auto-detected from the first pairwise comparison's metric name.
     output_format : str
         ``"text"``, ``"markdown"``, or ``"json"``.
-    higher_is_better : bool
-        Affects interpretation wording (lower RMSF = more stable, etc.).
+    higher_is_better : bool | None
+        Affects ranking wording. If ``None``, ranking direction is reported as
+        neutral.
 
     Returns
     -------
@@ -504,9 +515,23 @@ def _format_scalar_text(
     _get_mean,
     _get_sem,
     _get_cond,
-    higher_is_better: bool,
+    higher_is_better: bool | None,
 ) -> str:
     """Format as ASCII table (internal)."""
+    selected_ranking = result.ranking
+    if result.rankings_by_metric and metric_key in result.rankings_by_metric:
+        selected_ranking = result.rankings_by_metric[metric_key]
+
+    selected_pairwise = result.pairwise_comparisons
+    if metric_key and any(comp.metric == metric_key for comp in result.pairwise_comparisons):
+        selected_pairwise = [
+            comp for comp in result.pairwise_comparisons if comp.metric == metric_key
+        ]
+
+    selected_anova = result.anova
+    if result.anova and any(a.metric == metric_key for a in result.anova):
+        selected_anova = [a for a in result.anova if a.metric == metric_key]
+
     lines: list[str] = []
 
     # Header
@@ -519,14 +544,17 @@ def _format_scalar_text(
     lines.append("")
 
     # Condition ranking table
-    rank_desc = "lowest first" if not higher_is_better else "highest first"
+    if higher_is_better is None:
+        rank_desc = "no direction preference"
+    else:
+        rank_desc = "highest first" if higher_is_better else "lowest first"
     lines.append(f"Condition Summary (ranked by {metric_label}, {rank_desc})")
     lines.append("-" * 60)
     header = f"{'Rank':<5} {'Condition':<20} {metric_label:<14} {'SEM':<10} {'N':<4}"
     lines.append(header)
     lines.append("-" * 60)
 
-    for rank, label in enumerate(result.ranking, 1):
+    for rank, label in enumerate(selected_ranking, 1):
         cond = _get_cond(label)
         marker = "*" if label == result.control_label else " "
         mean_val = _get_mean(cond)
@@ -542,36 +570,57 @@ def _format_scalar_text(
     lines.append("")
 
     # Pairwise comparisons
-    if result.pairwise_comparisons:
+    if selected_pairwise:
         lines.append("Pairwise Comparisons")
         lines.append("-" * 80)
         cohens_label = "Cohen's d"
-        header = (
-            f"{'Comparison':<30} {'% Change':<10} {'p-value':<12} {cohens_label:<10} {'Effect':<12}"
-        )
+        has_adjusted = any(c.p_value_adjusted is not None for c in selected_pairwise)
+        if has_adjusted:
+            header = (
+                f"{'Comparison':<30} {'% Change':<10} {'p-value':<12} {'p (adj)':<12} "
+                f"{cohens_label:<10} {'Effect':<12}"
+            )
+        else:
+            header = (
+                f"{'Comparison':<30} {'% Change':<10} {'p-value':<12} "
+                f"{cohens_label:<10} {'Effect':<12}"
+            )
         lines.append(header)
         lines.append("-" * 80)
 
-        for comp in result.pairwise_comparisons:
+        for comp in selected_pairwise:
             name = f"{comp.condition_b} vs {comp.condition_a}"
             sig_marker = "*" if comp.significant else ""
             p_str = f"{comp.p_value:.4f}{sig_marker}"
             pct_str = format_pct(comp.percent_change)
             d_str = f"{comp.cohens_d:.2f}"
-            lines.append(
-                f"{name:<30} {pct_str:<10} {p_str:<12} "
-                f"{d_str:<10} {comp.effect_size_interpretation:<12}"
-            )
+            if has_adjusted:
+                p_adj = comp.p_value_adjusted
+                p_adj_str = "n/a" if p_adj is None else f"{p_adj:.4f}{sig_marker}"
+                lines.append(
+                    f"{name:<30} {pct_str:<10} {p_str:<12} {p_adj_str:<12} "
+                    f"{d_str:<10} {comp.effect_size_interpretation:<12}"
+                )
+            else:
+                lines.append(
+                    f"{name:<30} {pct_str:<10} {p_str:<12} "
+                    f"{d_str:<10} {comp.effect_size_interpretation:<12}"
+                )
 
         lines.append("-" * 80)
-        lines.append("* p < 0.05")
+        if has_adjusted and result.fdr_alpha is not None:
+            lines.append(f"* p_adj < {result.fdr_alpha} (BH-corrected)")
+        elif has_adjusted:
+            lines.append("* BH-corrected p_adj significant")
+        else:
+            lines.append("* p < 0.05")
         lines.append("")
 
     # ANOVA
-    if result.anova:
+    if selected_anova:
         lines.append("One-way ANOVA")
         lines.append("-" * 40)
-        for a in result.anova:
+        for a in selected_anova:
             sig = "Yes" if a.significant else "No"
             if a.metric != "default":
                 lines.append(f"Metric: {a.metric}")
@@ -581,20 +630,25 @@ def _format_scalar_text(
         lines.append("")
 
     # Interpretation
-    if result.ranking:
+    if selected_ranking:
         lines.append("Interpretation")
         lines.append("-" * 60)
-        best = result.ranking[0]
-        best_cond = _get_cond(best)
-        best_val = _get_mean(best_cond)
-        lines.append(f"Best: {best} ({metric_label} = {best_val:.4f}{unit_str})")
+        top_label = selected_ranking[0]
+        top_cond = _get_cond(top_label)
+        top_val = _get_mean(top_cond)
+        if higher_is_better is None:
+            lines.append(
+                f"Top-listed condition: {top_label} ({metric_label} = {top_val:.4f}{unit_str})"
+            )
+        else:
+            lines.append(f"Best: {top_label} ({metric_label} = {top_val:.4f}{unit_str})")
 
-        if result.control_label and best != result.control_label:
+        if result.control_label and top_label != result.control_label:
             from polyzymd.compare.statistics import percent_change
 
             ctrl = _get_cond(result.control_label)
             ctrl_val = _get_mean(ctrl)
-            pct = percent_change(ctrl_val, best_val)
+            pct = percent_change(ctrl_val, top_val)
             if not math.isnan(pct):
                 direction = interpret_direction(pct, ("lower", "unchanged", "higher"))
                 if direction == "unchanged":
@@ -622,9 +676,23 @@ def _format_scalar_markdown(
     _get_mean,
     _get_sem,
     _get_cond,
-    higher_is_better: bool,
+    higher_is_better: bool | None,
 ) -> str:
     """Format as Markdown (internal)."""
+    selected_ranking = result.ranking
+    if result.rankings_by_metric and metric_key in result.rankings_by_metric:
+        selected_ranking = result.rankings_by_metric[metric_key]
+
+    selected_pairwise = result.pairwise_comparisons
+    if metric_key and any(comp.metric == metric_key for comp in result.pairwise_comparisons):
+        selected_pairwise = [
+            comp for comp in result.pairwise_comparisons if comp.metric == metric_key
+        ]
+
+    selected_anova = result.anova
+    if result.anova and any(a.metric == metric_key for a in result.anova):
+        selected_anova = [a for a in result.anova if a.metric == metric_key]
+
     lines: list[str] = []
 
     lines.append(f"# {title}: {result.name}")
@@ -646,7 +714,7 @@ def _format_scalar_markdown(
         "|------|-----------|" + "-" * (len(metric_label) + len(unit_str) + 2) + "|-----|---|"
     )
 
-    for rank, label in enumerate(result.ranking, 1):
+    for rank, label in enumerate(selected_ranking, 1):
         cond = _get_cond(label)
         marker = " (control)" if label == result.control_label else ""
         mean_val = _get_mean(cond)
@@ -659,26 +727,42 @@ def _format_scalar_markdown(
     lines.append("")
 
     # Pairwise
-    if result.pairwise_comparisons:
+    if selected_pairwise:
         lines.append("## Statistical Comparisons")
         lines.append("")
-        lines.append("| Comparison | % Change | p-value | Cohen's d | Effect | Sig |")
-        lines.append("|------------|----------|---------|-----------|--------|-----|")
-        for comp in result.pairwise_comparisons:
+        has_adjusted = any(c.p_value_adjusted is not None for c in selected_pairwise)
+        if has_adjusted:
+            lines.append("| Comparison | % Change | p-value | p (adj) | Cohen's d | Effect | Sig |")
+            lines.append("|------------|----------|---------|---------|-----------|--------|-----|")
+        else:
+            lines.append("| Comparison | % Change | p-value | Cohen's d | Effect | Sig |")
+            lines.append("|------------|----------|---------|-----------|--------|-----|")
+        for comp in selected_pairwise:
             name = f"{comp.condition_b} vs {comp.condition_a}"
             sig = "Yes" if comp.significant else "No"
-            lines.append(
-                f"| {name} | {format_pct(comp.percent_change)} | "
-                f"{comp.p_value:.4f} | {comp.cohens_d:.2f} | "
-                f"{comp.effect_size_interpretation} | {sig} |"
-            )
+            if has_adjusted:
+                p_adj = "n/a" if comp.p_value_adjusted is None else f"{comp.p_value_adjusted:.4f}"
+                lines.append(
+                    f"| {name} | {format_pct(comp.percent_change)} | "
+                    f"{comp.p_value:.4f} | {p_adj} | {comp.cohens_d:.2f} | "
+                    f"{comp.effect_size_interpretation} | {sig} |"
+                )
+            else:
+                lines.append(
+                    f"| {name} | {format_pct(comp.percent_change)} | "
+                    f"{comp.p_value:.4f} | {comp.cohens_d:.2f} | "
+                    f"{comp.effect_size_interpretation} | {sig} |"
+                )
+        if has_adjusted and result.fdr_alpha is not None:
+            lines.append("")
+            lines.append(f"*Significance uses BH-adjusted p-values at α={result.fdr_alpha}.*")
         lines.append("")
 
     # ANOVA
-    if result.anova:
+    if selected_anova:
         lines.append("## ANOVA")
         lines.append("")
-        for a in result.anova:
+        for a in selected_anova:
             sig = "Yes" if a.significant else "No"
             lines.append(f"- **F-statistic:** {a.f_statistic:.3f}")
             lines.append(f"- **p-value:** {a.p_value:.4f}")
@@ -686,19 +770,27 @@ def _format_scalar_markdown(
         lines.append("")
 
     # Key findings
-    if result.ranking:
+    if selected_ranking:
         lines.append("## Key Findings")
         lines.append("")
-        best = result.ranking[0]
-        best_cond = _get_cond(best)
-        best_val = _get_mean(best_cond)
-        lines.append(f"1. **Best condition:** {best} ({metric_label} = {best_val:.4f}{unit_str})")
-        if result.control_label and best != result.control_label:
+        top_label = selected_ranking[0]
+        top_cond = _get_cond(top_label)
+        top_val = _get_mean(top_cond)
+        if higher_is_better is None:
+            lines.append(
+                "1. **Top-listed condition:** "
+                f"{top_label} ({metric_label} = {top_val:.4f}{unit_str})"
+            )
+        else:
+            lines.append(
+                f"1. **Best condition:** {top_label} ({metric_label} = {top_val:.4f}{unit_str})"
+            )
+        if result.control_label and top_label != result.control_label:
             from polyzymd.compare.statistics import percent_change
 
             ctrl = _get_cond(result.control_label)
             ctrl_val = _get_mean(ctrl)
-            pct = percent_change(ctrl_val, best_val)
+            pct = percent_change(ctrl_val, top_val)
             if not math.isnan(pct):
                 direction = interpret_direction(pct, ("lower", "unchanged", "higher"))
                 if direction == "unchanged":

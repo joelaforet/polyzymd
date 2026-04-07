@@ -201,6 +201,9 @@ class ComparisonContext:
         Equilibration time string.
     settings : BaseModel
         Analysis-specific settings.
+    fdr_alpha : float
+        False discovery rate threshold used for Benjamini-Hochberg
+        corrected pairwise significance in the default scalar comparison.
     recompute : bool
         Whether to force recomputation.
     result_path : Path | None
@@ -220,6 +223,7 @@ class ComparisonContext:
     equilibration: str
     settings: BaseModel
     recompute: bool
+    fdr_alpha: float = 0.05
     result_path: Path | None = None
     failed_conditions: list[Condition] = field(default_factory=list)
     aggregated_results: dict[str, Any] = field(default_factory=dict)
@@ -306,9 +310,10 @@ class MetricValue:
         Standard error of the mean.
     replicate_values : list[float]
         Per-replicate values (for t-tests / ANOVA).
-    higher_is_better : bool
-        If ``True``, higher values rank first.  If ``False``,
-        lower values rank first (e.g. RMSF).
+    higher_is_better : bool | None
+        If ``True``, higher values rank first. If ``False``, lower values rank
+        first (e.g. RMSF). If ``None``, no universal quality direction is
+        assumed and conditions are ranked alphabetically.
     direction_labels : tuple[str, str, str]
         ``(negative_label, unchanged_label, positive_label)`` for
         interpreting percent-change direction.  Defaults to
@@ -319,7 +324,7 @@ class MetricValue:
     mean: float
     sem: float
     replicate_values: list[float]
-    higher_is_better: bool = True
+    higher_is_better: bool | None = True
     direction_labels: tuple[str, str, str] = ("decreased", "unchanged", "increased")
 
 
@@ -364,6 +369,8 @@ class PairwiseResult(BaseModel):
         T-test statistic.
     p_value : float
         Two-tailed p-value.
+    p_value_adjusted : float | None
+        Benjamini-Hochberg adjusted p-value. ``None`` when not available.
     cohens_d : float
         Effect size (Cohen's d).
     effect_size_interpretation : str
@@ -371,7 +378,8 @@ class PairwiseResult(BaseModel):
     direction : str
         Interpretation of change (e.g. ``"stabilizing"``).
     significant : bool
-        Whether p < 0.05.
+        Whether the comparison is significant. Uses adjusted p-value when
+        available, otherwise raw p-value.
     percent_change : float
         Percent change from condition_a to condition_b.
     """
@@ -383,6 +391,7 @@ class PairwiseResult(BaseModel):
     metric: str = "default"
     t_statistic: float
     p_value: float
+    p_value_adjusted: float | None = None
     cohens_d: float
     effect_size_interpretation: str
     direction: str
@@ -432,6 +441,9 @@ class ComparisonResult(BaseModel):
         Comparison project name.
     control_label : str | None
         Control condition label.
+    fdr_alpha : float | None
+        False discovery rate threshold used for Benjamini-Hochberg
+        correction in pairwise tests. ``None`` when unknown.
     conditions : list[ConditionSummary]
         Per-condition summary statistics.
     pairwise_comparisons : list[PairwiseResult]
@@ -455,6 +467,7 @@ class ComparisonResult(BaseModel):
     analysis_type: str
     name: str
     control_label: str | None = None
+    fdr_alpha: float | None = None
     conditions: list[ConditionSummary] = Field(default_factory=list)
     pairwise_comparisons: list[PairwiseResult] = Field(default_factory=list)
     anova: list[ANOVAResult] | None = None
@@ -786,6 +799,7 @@ class Analysis(ABC):
             metrics_by_condition=metrics_by_condition,
             control_label=ctx.effective_control,
             equilibration=ctx.equilibration,
+            fdr_alpha=ctx.fdr_alpha,
         )
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
