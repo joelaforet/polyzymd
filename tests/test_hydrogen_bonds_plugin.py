@@ -606,7 +606,7 @@ def test_compute_replicate_empty_selection(
 
 
 def test_compute_replicate_empty_group_raises_by_default(tmp_path: Path) -> None:
-    """Empty group selections should raise when allow_empty_groups is False."""
+    """Empty group selections should raise when strict mode is enabled."""
 
     class MockHydrogenBondAnalysis:
         def __init__(self, **kwargs) -> None:
@@ -633,7 +633,7 @@ def test_compute_replicate_empty_group_raises_by_default(tmp_path: Path) -> None
         output_dir=tmp_path / "run_1",
         equilibration="0ns",
         recompute=True,
-        settings=HydrogenBondSettings(),
+        settings=HydrogenBondSettings(allow_empty_groups=False),
     )
 
     analysis = HydrogenBondsAnalysis()
@@ -934,7 +934,8 @@ def test_composition_disjoint_warning(caplog: pytest.LogCaptureFixture) -> None:
             allow_overlapping=True,
         )
 
-    assert "composition fractions may not sum to 1.0" in caplog.text
+    assert "Overlapping atoms will be counted in BOTH partitions" in caplog.text
+    assert "composition fractions may exceed 1.0" in caplog.text
 
 
 def test_composition_warns_dynamic_selection(caplog: pytest.LogCaptureFixture) -> None:
@@ -1492,8 +1493,8 @@ def test_aggregate_pair_alignment(tmp_path: Path) -> None:
     )
 
 
-def test_composition_overlap_uses_first_sorted_partition() -> None:
-    """Overlapping atoms should deterministically map to first sorted partition."""
+def test_composition_overlap_counts_all_partition_combinations() -> None:
+    """Overlapping atoms should contribute to all matching partition pairs."""
     analysis = HydrogenBondsAnalysis()
     composition_settings = HydrogenBondCompositionSettings(
         partitions={
@@ -1522,9 +1523,10 @@ def test_composition_overlap_uses_first_sorted_partition() -> None:
         allow_overlapping=True,
     )
 
-    assert len(entries) == 1
-    entry = entries[0]
-    assert (entry.donor_partition, entry.acceptor_partition) == ("a_partition", "a_partition")
+    by_pair = {(entry.donor_partition, entry.acceptor_partition): entry for entry in entries}
+    assert len(by_pair) == 2
+    assert ("z_partition", "a_partition") in by_pair
+    assert ("a_partition", "a_partition") in by_pair
 
 
 def _make_aggregated_summary(name: str, mean: float, sem: float, reps: list[float]) -> Any:
@@ -2846,8 +2848,8 @@ def test_rank_conditions_neutral_sorted_by_value_descending() -> None:
 
 def test_format_pct_uses_semantic_infinity_labels() -> None:
     """Percent formatter should use semantic labels for infinite values."""
-    assert format_pct(np.inf) == "new (control=0)"
-    assert format_pct(-np.inf) == "lost (treatment=0)"
+    assert format_pct(np.inf) == "new (baseline=0)"
+    assert format_pct(-np.inf) == "gone (current=0)"
     assert format_pct(np.nan) == "undefined"
 
 
@@ -3228,7 +3230,7 @@ class TestLoadReplicateResult:
     def test_warns_on_multiple_cache_files(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Should warn when multiple hbonds_eq*.json files exist."""
+        """Should refuse ambiguous same-equilibration cache sets."""
         import logging
 
         run_dir = tmp_path / "run_1"
@@ -3252,20 +3254,21 @@ class TestLoadReplicateResult:
         with caplog.at_level(logging.WARNING, logger="polyzymd.analyses.hydrogen_bonds"):
             loaded = analysis._load_replicate_result(run_dir)
 
-        assert loaded is not None
-        assert "Multiple hydrogen-bond cache files" in caplog.text
-        assert "--recompute" in caplog.text
+        assert loaded is None
+        assert "for equilibration '10ns'" in caplog.text
+        assert "Refusing ambiguous cache load" in caplog.text
 
-    def test_selects_most_recent_cache_by_mtime(self, tmp_path: Path) -> None:
-        """When multiple cache files exist, the most recently modified is loaded."""
-        import os
-        import time
+    def test_refuses_ambiguous_caches_across_equilibration_keys(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When multiple equilibration keys exist, fallback should refuse loading."""
+        import logging
 
         run_dir = tmp_path / "run_1"
         run_dir.mkdir()
 
-        old_result = HydrogenBondResult(
-            config_hash="old_hash",
+        eq10_result = HydrogenBondResult(
+            config_hash="eq10_hash",
             replicate=1,
             equilibration_time=10.0,
             equilibration_unit="ns",
@@ -3273,33 +3276,28 @@ class TestLoadReplicateResult:
             summaries=[],
             composition_entries=[],
         )
-        new_result = HydrogenBondResult(
-            config_hash="new_hash",
+        eq20_result = HydrogenBondResult(
+            config_hash="eq20_hash",
             replicate=1,
-            equilibration_time=10.0,
+            equilibration_time=20.0,
             equilibration_unit="ns",
             selection_string="chainid A",
             summaries=[],
             composition_entries=[],
         )
 
-        old_path = run_dir / "hbonds_eq10ns_aaaa1111.json"
-        new_path = run_dir / "hbonds_eq10ns_bbbb2222.json"
-
-        old_path.write_text(old_result.model_dump_json())
-        old_mtime = time.time() - 1000
-        os.utime(old_path, (old_mtime, old_mtime))
-
-        new_path.write_text(new_result.model_dump_json())
+        (run_dir / "hbonds_eq10ns_aaaa1111.json").write_text(eq10_result.model_dump_json())
+        (run_dir / "hbonds_eq20ns_bbbb2222.json").write_text(eq20_result.model_dump_json())
 
         analysis = HydrogenBondsAnalysis()
-        loaded = analysis._load_replicate_result(run_dir)
+        with caplog.at_level(logging.WARNING, logger="polyzymd.analyses.hydrogen_bonds"):
+            loaded = analysis._load_replicate_result(run_dir)
 
-        assert loaded is not None
-        assert loaded.config_hash == "new_hash"
+        assert loaded is None
+        assert "different equilibration settings" in caplog.text
 
     def test_handles_stat_failure_gracefully(self, tmp_path: Path) -> None:
-        """Should return None when stat() raises OSError."""
+        """Should return None when globbing cache files raises OSError."""
         run_dir = tmp_path / "run_1"
         run_dir.mkdir()
 
@@ -3316,14 +3314,7 @@ class TestLoadReplicateResult:
         cache_path.write_text(rep_result.model_dump_json())
 
         analysis = HydrogenBondsAnalysis()
-        original_stat = Path.stat
-
-        def _patched_stat(path_self: Path, *args: object, **kwargs: object) -> object:
-            if path_self == cache_path:
-                raise OSError("Permission denied")
-            return original_stat(path_self, *args, **kwargs)
-
-        with patch.object(Path, "stat", autospec=True, side_effect=_patched_stat):
+        with patch.object(Path, "glob", autospec=True, side_effect=OSError("Permission denied")):
             loaded = analysis._load_replicate_result(run_dir)
 
         assert loaded is None

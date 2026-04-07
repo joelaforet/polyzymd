@@ -190,10 +190,10 @@ class HydrogenBondSettings(BaseModel):
         description="Number of top residue pairs to report",
     )
     allow_empty_groups: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "If False (default), raise ValueError when a referenced group selection "
-            "matches no atoms. Set to True to warn and skip instead"
+            "If True (default), warn and skip summaries when a group selection matches "
+            "no atoms. Set to False to raise ValueError instead (strict mode)."
         ),
     )
     allow_overlapping_composition: bool = Field(
@@ -1033,8 +1033,9 @@ class HydrogenBondsAnalysis(Analysis):
                 if overlap:
                     if allow_overlapping:
                         logger.warning(
-                            "Composition partitions '%s' and '%s' overlap by %d atoms — "
-                            "composition fractions may not sum to 1.0",
+                            "Composition partitions '%s' and '%s' overlap by %d atoms. "
+                            "Overlapping atoms will be counted in BOTH partitions; "
+                            "composition fractions may exceed 1.0.",
                             partition_a,
                             partition_b,
                             len(overlap),
@@ -1063,21 +1064,24 @@ class HydrogenBondsAnalysis(Analysis):
                 if donor_resindex == acceptor_resindex:
                     continue
 
-                donor_partition = None
-                acceptor_partition = None
-                for partition_name, indices in sorted(partition_atoms.items()):
-                    if donor_partition is None and donor_ix in indices:
-                        donor_partition = partition_name
-                    if acceptor_partition is None and acceptor_ix in indices:
-                        acceptor_partition = partition_name
-                    if donor_partition is not None and acceptor_partition is not None:
-                        break
+                donor_partitions = [
+                    partition_name
+                    for partition_name, indices in partition_atoms.items()
+                    if donor_ix in indices
+                ]
+                acceptor_partitions = [
+                    partition_name
+                    for partition_name, indices in partition_atoms.items()
+                    if acceptor_ix in indices
+                ]
 
-                if donor_partition is None or acceptor_partition is None:
+                if not donor_partitions or not acceptor_partitions:
                     continue
 
-                pair_key = (donor_partition, acceptor_partition)
-                pair_counts[pair_key] = pair_counts.get(pair_key, 0) + 1
+                for donor_partition in donor_partitions:
+                    for acceptor_partition in acceptor_partitions:
+                        pair_key = (donor_partition, acceptor_partition)
+                        pair_counts[pair_key] = pair_counts.get(pair_key, 0) + 1
                 total_events += 1
 
         entries: list[CompositionEntry] = []
@@ -1419,18 +1423,36 @@ class HydrogenBondsAnalysis(Analysis):
             return None
 
         if len(candidates) > 1:
-            logger.warning(
-                "Multiple hydrogen-bond cache files in %s — using most recent. "
-                "Run with --recompute to regenerate from current settings.",
-                run_dir,
-            )
+            by_equilibration: dict[str, list[Path]] = {}
+            for path in candidates:
+                stem = path.stem
+                if not stem.startswith("hbonds_eq"):
+                    continue
+                remainder = stem[len("hbonds_eq") :]
+                eq_key = remainder.split("_", maxsplit=1)[0]
+                by_equilibration.setdefault(eq_key, []).append(path)
 
-        # Use the most recently modified candidate
-        try:
-            best = max(candidates, key=lambda p: p.stat().st_mtime)
-        except OSError as exc:
-            logger.debug("Cannot stat cache candidates in %s: %s", run_dir, exc)
-            return None
+            if len(by_equilibration) != 1:
+                logger.warning(
+                    "Multiple hydrogen-bond cache files in %s with different equilibration "
+                    "settings. Refusing ambiguous cache load; run with --recompute.",
+                    run_dir,
+                )
+                return None
+
+            only_eq, eq_candidates = next(iter(by_equilibration.items()))
+            if len(eq_candidates) != 1:
+                logger.warning(
+                    "Multiple hydrogen-bond cache files in %s for equilibration '%s'. "
+                    "Refusing ambiguous cache load; run with --recompute.",
+                    run_dir,
+                    only_eq,
+                )
+                return None
+
+            best = eq_candidates[0]
+        else:
+            best = candidates[0]
 
         logger.debug("Loading replicate result from custom cache %s", best)
         try:

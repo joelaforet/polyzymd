@@ -84,8 +84,8 @@ def test_interpret_direction_nan_maps_to_unchanged() -> None:
 
 def test_format_pct_inf_nan_and_finite() -> None:
     """Percent formatter should render infinity and NaN safely."""
-    assert format_pct(math.inf) == "new (control=0)"
-    assert format_pct(-math.inf) == "lost (treatment=0)"
+    assert format_pct(math.inf) == "new (baseline=0)"
+    assert format_pct(-math.inf) == "gone (current=0)"
     assert format_pct(math.nan) == "undefined"
     assert format_pct(12.3) == "+12.3%"
 
@@ -299,7 +299,7 @@ def test_format_scalar_comparison_text_uses_semantic_infinity_label() -> None:
     )
 
     output = format_scalar_comparison(comparison, output_format="text", metric_key="metric")
-    assert "new (control=0)" in output
+    assert "new (baseline=0)" in output
     assert "+∞%" not in output
 
 
@@ -334,7 +334,7 @@ def test_format_scalar_comparison_markdown_uses_semantic_infinity_label() -> Non
     )
 
     output = format_scalar_comparison(comparison, output_format="markdown", metric_key="metric")
-    assert "new (control=0)" in output
+    assert "new (baseline=0)" in output
     assert "+∞%" not in output
 
 

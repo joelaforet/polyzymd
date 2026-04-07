@@ -157,7 +157,7 @@ computed.
 Composition partitions should be disjoint (no shared atoms). If partitions
 overlap, the plugin raises an error by default. Set
 `allow_overlapping_composition: true` to allow overlap with warnings
-(fractions may not sum to 1.0).
+(overlapping atoms are counted in both partitions, so fractions may exceed 1.0).
 :::
 
 ### Other Settings
@@ -166,7 +166,7 @@ overlap, the plugin raises an error by default. Set
 |-------|------|---------|-------------|
 | `update_selections` | bool | `true` | Re-evaluate atom selections each frame. Required for coordinate-dependent selections like `around`. For purely structural selections (`chainid`, `resname`), this adds overhead without changing results. |
 | `top_n_pairs` | int | `15` | Number of top residue pairs to report per summary |
-| `allow_empty_groups` | bool | `false` | If `false`, raise an error when a referenced group selection matches no atoms. Set `true` to warn and skip those summaries. |
+| `allow_empty_groups` | bool | `true` | If `true` (default), warn and skip summaries when a referenced group selection matches no atoms. Set `false` for strict validation (raise `ValueError`). |
 | `allow_overlapping_composition` | bool | `false` | If `false`, overlapping composition partitions raise an error. Set `true` to allow overlap with warnings. |
 | `timestep_ps` | float or null | `null` | Manual frame spacing in ps for time-axis plots. If null, read from trajectory metadata. |
 

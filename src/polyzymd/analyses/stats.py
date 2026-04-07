@@ -86,8 +86,8 @@ def format_pct(pct: float) -> str:
     str
         Formatted percent value.
 
-        - ``+inf`` as ``"new (control=0)"``
-        - ``-inf`` as ``"lost (treatment=0)"``
+        - ``+inf`` as ``"new (baseline=0)"``
+        - ``-inf`` as ``"gone (current=0)"``
         - ``nan`` as ``"undefined"``
         - finite values as signed one-decimal percentages
     """
@@ -96,7 +96,7 @@ def format_pct(pct: float) -> str:
     if math.isnan(pct):
         return "undefined"
     if math.isinf(pct):
-        return "new (control=0)" if pct > 0 else "lost (treatment=0)"
+        return "new (baseline=0)" if pct > 0 else "gone (current=0)"
     # Canonical percent format for finite values
     return f"{pct:+.1f}%"
 
