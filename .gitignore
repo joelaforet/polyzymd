@@ -231,3 +231,11 @@ graphify-out/
 
 # Agent local preferences (personal, not shared)
 CLAUDE.local.md
+
+# Conjugation POC artifacts (simulation outputs, cached polymers)
+src/polyzymd/builders/conjugation/poc/output/*
+!src/polyzymd/builders/conjugation/poc/output/.gitkeep
+src/polyzymd/builders/conjugation/poc/.polymer_cache/
+
+# OpenCode local state
+.opencode/
