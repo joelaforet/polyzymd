@@ -38,10 +38,11 @@ logging.basicConfig(
 logger = logging.getLogger("conjugate_sim")
 
 # ── Paths ──────────────────────────────────────────────────────────────────
-WORK_DIR = Path("/home/joelaforet/Shirts-Lab-Linux/2026-virtual-workshops")
-NOTEBOOK_PATH = WORK_DIR / "conjugation_poc.py"
-OUTPUT_DIR = WORK_DIR / "simulation_output"
-OUTPUT_DIR.mkdir(exist_ok=True)
+_POC_DIR = Path(__file__).resolve().parent
+WORK_DIR = _POC_DIR
+NOTEBOOK_PATH = _POC_DIR / "conjugation_poc.py"
+OUTPUT_DIR = _POC_DIR / "output" / "simulation_output"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Simulation parameters (matching polyzymd sample_config.yaml) ───────────
 TARGET_TEMP = 310.0         # K

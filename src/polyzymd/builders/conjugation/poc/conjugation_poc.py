@@ -11,6 +11,7 @@ def _():
     from pathlib import Path
     import json
     import logging
+    import os
     import subprocess
 
     import numpy as np
@@ -26,24 +27,31 @@ def _():
     logger = logging.getLogger("conjugation_poc")
 
     # ── Paths ──────────────────────────────────────────────────────────────
-    PROTEIN_PDB = (
-        "/home/joelaforet/Shirts-Lab-Linux/openff-pablo/SBMA_EGMA_50_50_water_363K/"
-        "structures/NH3_terminal_His_proton_updated.pdb"
+    # All paths are relative to the polyzymd repo root.
+    # The POC directory is: <repo>/src/polyzymd/builders/conjugation/poc/
+    _POC_DIR = Path(__file__).resolve().parent
+    _REPO_ROOT = _POC_DIR.parents[4]  # up 5 levels: poc -> conjugation -> builders -> polyzymd -> src -> repo
+
+    PROTEIN_PDB = os.environ.get(
+        "CONJUGATION_PROTEIN_PDB",
+        str(_POC_DIR / "data" / "NH3_terminal_His_proton_updated.pdb"),
     )
     ASSEMBLED_PDB = Path(
-        "/home/joelaforet/Shirts-Lab-Linux/2026-virtual-workshops/conjugate_assembled.pdb"
+        os.environ.get("CONJUGATION_ASSEMBLED_PDB", str(_POC_DIR / "output" / "conjugate_assembled.pdb"))
     )
     MINIMIZED_PDB = Path(
-        "/home/joelaforet/Shirts-Lab-Linux/2026-virtual-workshops/conjugate_minimized.pdb"
+        os.environ.get("CONJUGATION_MINIMIZED_PDB", str(_POC_DIR / "output" / "conjugate_minimized.pdb"))
     )
-    POLYZYMD_PYTHON = (
-        "/home/joelaforet/Shirts-Lab-Linux/polyzymd/.pixi/envs/build/bin/python"
+    POLYZYMD_PYTHON = os.environ.get(
+        "CONJUGATION_BUILD_PYTHON",
+        str(_REPO_ROOT / ".pixi" / "envs" / "build" / "bin" / "python"),
     )
-    GENERATE_SCRIPT = (
-        "/home/joelaforet/Shirts-Lab-Linux/2026-virtual-workshops/generate_polymer.py"
+    GENERATE_SCRIPT = os.environ.get(
+        "CONJUGATION_GENERATE_SCRIPT",
+        str(_POC_DIR / "generate_polymer.py"),
     )
     POLYMER_CACHE = Path(
-        "/home/joelaforet/Shirts-Lab-Linux/2026-virtual-workshops/.polymer_cache_conjugation"
+        os.environ.get("CONJUGATION_POLYMER_CACHE", str(_POC_DIR / ".polymer_cache"))
     )
     MONOMER_GROUP_JSON = POLYMER_CACHE / "NHS-SBMA_monomer_group.json"
 
@@ -874,7 +882,7 @@ def _(
     _prot_rd = Chem.MolFromPDBFile(
         protein_mol.conformers[0]._parent.to_topology().to_pdb()
         if False  # placeholder — we need the actual PDB path
-        else "/home/joelaforet/Shirts-Lab-Linux/openff-pablo/SBMA_EGMA_50_50_water_363K/structures/NH3_terminal_His_proton_updated.pdb",
+        else PROTEIN_PDB,
         removeHs=False,
         sanitize=True,
     )
@@ -1122,10 +1130,7 @@ def _(
     """Cell 7: Write assembled PDB for visualization and minimization."""
 
     # Parse original protein PDB for ATOM lines
-    _pdb_path = (
-        "/home/joelaforet/Shirts-Lab-Linux/openff-pablo/SBMA_EGMA_50_50_water_363K/"
-        "structures/NH3_terminal_His_proton_updated.pdb"
-    )
+    _pdb_path = PROTEIN_PDB
     _atom_records: list[dict] = []
     with open(_pdb_path, "r", encoding="utf-8") as _f:
         for _line in _f:
