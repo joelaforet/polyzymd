@@ -154,15 +154,34 @@ cuda = "12.4"
 
 
 # =============================================================================
+# FEATURE: conjugation-poc
+# Additional dependencies for the conjugation proof-of-concept notebook
+# (src/polyzymd/builders/conjugation/poc/).
+# Uses the "build" (openmm-any) base — no CUDA required.
+# =============================================================================
+[feature.conjugation-poc.dependencies]
+scipy  = ">=1.10"
+marimo = ">=0.20"
+
+[feature.conjugation-poc.pypi-dependencies]
+py3dmol = ">=2.0"
+
+[feature.conjugation-poc.tasks]
+conjugation-poc = { cmd = "marimo edit src/polyzymd/builders/conjugation/poc/conjugation_poc.py", description = "Open the conjugation POC notebook" }
+conjugation-sim = { cmd = "python src/polyzymd/builders/conjugation/poc/run_conjugate_simulation.py", description = "Run the full conjugation simulation workflow" }
+
+
+# =============================================================================
 # ENVIRONMENTS
 # Each environment = base feature + one OpenMM/CUDA feature.
 # no-default-feature = true  prevents the default feature from polluting
 # GPU environments with unrelated deps.
 # =============================================================================
 [environments]
-build     = { features = ["base", "openmm-any"], no-default-feature = true, solve-group = "build" }
-cuda-12-6 = { features = ["base", "cuda-12-6"], no-default-feature = true, solve-group = "cuda-12-6" }
-cuda-12-4 = { features = ["base", "cuda-12-4"], no-default-feature = true, solve-group = "cuda-12-4" }
+build           = { features = ["base", "openmm-any"], no-default-feature = true, solve-group = "build" }
+cuda-12-6       = { features = ["base", "cuda-12-6"], no-default-feature = true, solve-group = "cuda-12-6" }
+cuda-12-4       = { features = ["base", "cuda-12-4"], no-default-feature = true, solve-group = "cuda-12-4" }
+conjugation-poc = { features = ["base", "openmm-any", "conjugation-poc"], no-default-feature = true, solve-group = "conjugation-poc" }
 
 
 # =============================================================================
