@@ -331,7 +331,10 @@ def _rewrite_pdb(
     while while_index < len(lines):
         line = lines[while_index]
         if not line.startswith(("ATOM", "HETATM")):
-            rewritten.append(line)
+            # Strip stale TER/END records — we regenerate them at the end
+            # Keep other metadata lines (CRYST1, REMARK, etc.) as-is
+            if not line.startswith(("TER", "END")):
+                rewritten.append(line)
             while_index += 1
             continue
 
@@ -520,6 +523,9 @@ def _rewrite_pdb(
             while_index += 1
             continue
 
+        # Fallback: unknown solvent species treated as single-atom residue.
+        # This is correct for this system (only water, Na+, Cl-) but would
+        # need grouping logic for multi-atom co-solvents.
         solvent_resid_counter += 1
         chain_id, residue_number = _chain_from_solvent_resid(solvent_resid_counter)
         rewritten.append(
@@ -542,8 +548,21 @@ def _rewrite_pdb(
         atom_index += 1
         while_index += 1
 
+    # Insert TER records at chain boundaries and trailing END
+    final_lines: list[str] = []
+    prev_chain: str | None = None
+    for out_line in rewritten:
+        if out_line.startswith(("ATOM", "HETATM")):
+            current_chain = out_line[21]
+            if prev_chain is not None and current_chain != prev_chain:
+                final_lines.append("TER\n")
+            prev_chain = current_chain
+        final_lines.append(out_line)
+    final_lines.append("TER\n")
+    final_lines.append("END\n")
+
     with path.open("w", encoding="utf-8") as handle:
-        handle.writelines(rewritten)
+        handle.writelines(final_lines)
 
     return {
         "n_protein_atoms": n_protein,

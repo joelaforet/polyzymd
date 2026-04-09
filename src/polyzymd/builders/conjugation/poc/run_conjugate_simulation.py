@@ -1096,14 +1096,16 @@ def main():
     # Step 2: Solvate
     solvated_topology = solvate_system(interchange, conjugate_off, free_polymer_offs)
 
-    crystal_pdb_path = _POC_DIR / "data" / "NH3_terminal_His_proton_updated.pdb"
+    # Use assembled PDB as reference — it has the correct post-conjugation
+    # protein atom count (2717) unlike the crystal PDB (2721).
+    assembled_pdb_path = _POC_DIR / "output" / "conjugate_assembled.pdb"
     # Crosslink NHS residues are at positions 5 and 15 in the assembled PDB
     crosslink_resids = (5, 15)
 
     convention_summary = apply_chain_convention(
         solvated_topology=solvated_topology,
         component_metadata=component_metadata,
-        crystal_pdb_path=crystal_pdb_path,
+        reference_pdb_path=assembled_pdb_path,
         crosslink_resids=crosslink_resids,
     )
     logger.info("Chain convention applied: %s", convention_summary)
