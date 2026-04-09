@@ -18,9 +18,11 @@ adding new analysis types to PolyzyMD.
 
 ### Orchestration
 
-- `run_analysis(name, config_path)` — run a single analysis (compute + aggregate)
-- `run_comparison(name, config_path)` — run full lifecycle (compute + aggregate + compare + plot)
-- `run_all_comparisons(config_path)` — run all configured analyses
+- `run_analysis(analysis: Analysis, condition: Condition, settings: Any, equilibration: str = "0ns", output_dir: Path | None = None, recompute: bool = False)` — run compute + aggregate for one condition
+- `run_comparison(analysis: Analysis, config: ComparisonConfig, recompute: bool = False, equilibration: str | None = None)` — run full lifecycle (compute + aggregate + compare + plot)
+- `run_all_comparisons(config: ComparisonConfig, analysis_names: list[str] | None = None, recompute: bool = False, equilibration: str | None = None)` — run multiple analyses from one comparison config
+
+`ComparisonConfig` is defined in `polyzymd.compare.config`.
 
 ### Base Class
 
