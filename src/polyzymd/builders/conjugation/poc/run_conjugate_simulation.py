@@ -3,16 +3,18 @@
 Full simulation workflow for polymer-protein conjugate.
 
 Steps:
-  1. Run conjugation_poc.py to build the conjugate and create the Interchange
-  2. Solvate with TIP3P water + 137 mM NaCl
-  3. Create solvated Interchange (ff14SB + Sage + TIP3P)
-  4. Energy minimization (full system)
-  5. Multi-stage equilibration:
-     - Stage 1: NVT heating 60K -> 310K (0.3 ns) with protein+polymer heavy atoms restrained
-     - Stage 2: NVT polymer relaxation at 310K (0.5 ns) with protein heavy atoms restrained
-     - Stage 3: NPT free equilibration at 310K (0.5 ns) no restraints
-  6. Production NPT (1 ns) at 310K, 1 atm
-  7. Validate: print energy, temperature, density from state data
+  1. Run conjugation_poc.py to build + vacuum-equilibrate the conjugate
+  2. Place free polymers around relaxed conjugate (Packmol)
+  2.5. Finalize component metadata with free polymer indices
+  3. Solvate with TIP3P water + 137 mM NaCl
+  4. Create solvated Interchange (ff14SB + Sage + TIP3P)
+  5. Energy minimization (full system)
+  6. Multi-stage equilibration:
+      - Stage 1: NVT heating 60K -> 310K (0.3 ns) with protein+polymer heavy atoms restrained
+      - Stage 2: NVT polymer relaxation at 310K (0.5 ns) with protein heavy atoms restrained
+      - Stage 3: NPT free equilibration at 310K (0.5 ns) no restraints
+  7. Production NPT (5 ns) at 310K, 1 atm
+  8. Validate
 
 Usage:
     pixi run -e conjugation python run_conjugate_simulation.py
@@ -32,6 +34,17 @@ try:
     from .pdb_convention import apply_chain_convention
 except ImportError:
     from pdb_convention import apply_chain_convention
+
+try:
+    from .free_polymer_placement import (
+        finalize_component_metadata,
+        place_free_polymers,
+    )
+except ImportError:
+    from free_polymer_placement import (
+        finalize_component_metadata,
+        place_free_polymers,
+    )
 
 # ── Configure logging ──────────────────────────────────────────────────────
 logging.basicConfig(
@@ -72,8 +85,8 @@ POLYMER_RELAX_DURATION_NS = 0.050  # 50 ps (reduced from 500 ps for POC)
 FREE_EQUIL_DURATION_NS = 0.050  # 50 ps (reduced from 500 ps for POC)
 
 # Production
-PRODUCTION_DURATION_NS = 0.100  # 100 ps for POC validation (500 ns for real)
-PRODUCTION_SAMPLES = 200  # trajectory frames
+PRODUCTION_DURATION_NS = 5.0  # 5 ns production run
+PRODUCTION_SAMPLES = 300  # trajectory frames
 
 # Minimization
 MINIMIZATION_MAX_ITER = 10000
@@ -123,28 +136,32 @@ def run_conjugation_notebook():
     ]:
         logging.getLogger(name).setLevel(logging.INFO)
 
-    interchange = defs["interchange"]
     conjugate_off = defs["conjugate_off"]
-    energy_before = defs["energy_before"]
     energy_after = defs["energy_after"]
     component_metadata = defs["component_metadata"]
-    free_polymer_offs = defs["free_polymer_offs"]
+    free_polymer_templates = defs["free_polymer_offs"]
     conjugated_sequences = defs["conjugated_sequences"]
     free_sequences = defs["free_sequences"]
+    n_conjugated = defs["N_CONJUGATED"]
+    conjugated_length = defs["CONJUGATED_LENGTH"]
+    n_free_polymers = defs["N_FREE_POLYMERS"]
+    free_polymer_length = defs["FREE_POLYMER_LENGTH"]
 
     assert component_metadata is not None, "component_metadata missing from notebook"
-    # Mirror notebook configuration: N_FREE_POLYMERS = 5
-    assert len(free_polymer_offs) == 5, f"Expected 5 free polymers, got {len(free_polymer_offs)}"
-    # Mirror notebook configuration: N_CONJUGATED = 2
-    assert len(component_metadata["conjugated_polymers"]) == 2
-    # Mirror notebook configuration: N_CONJUGATED = 2
-    assert len(conjugated_sequences) == 2
-    # Mirror notebook configuration: CONJUGATED_LENGTH = 10
-    assert all(len(s) == 10 for s in conjugated_sequences)
-    # Mirror notebook configuration: N_FREE_POLYMERS = 5
-    assert len(free_sequences) == 5
-    # Mirror notebook configuration: FREE_POLYMER_LENGTH = 5
-    assert all(len(s) == 5 for s in free_sequences)
+    assert len(component_metadata["conjugated_polymers"]) == n_conjugated, (
+        f"Expected {n_conjugated} conjugated polymers, "
+        f"got {len(component_metadata['conjugated_polymers'])}"
+    )
+    assert len(conjugated_sequences) == n_conjugated
+    assert all(len(s) == conjugated_length for s in conjugated_sequences)
+    assert len(free_polymer_templates) == n_free_polymers, (
+        f"Expected {n_free_polymers} free polymer templates, got {len(free_polymer_templates)}"
+    )
+    assert len(free_sequences) == n_free_polymers
+    assert all(len(s) == free_polymer_length for s in free_sequences)
+    assert "free_polymer_heavy" not in component_metadata.get("restraint_groups", {}), (
+        "Notebook metadata should not contain free polymer indices"
+    )
 
     dt = time.perf_counter() - t0
     logger.info(
@@ -154,13 +171,13 @@ def run_conjugation_notebook():
         energy_after,
     )
 
-    return interchange, conjugate_off, free_polymer_offs, component_metadata, defs
+    return conjugate_off, free_polymer_templates, component_metadata, defs
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Step 2: Solvate the conjugate
 # ═══════════════════════════════════════════════════════════════════════════
-def solvate_system(interchange, conjugate_off, free_polymer_offs):
+def solvate_system(conjugate_off, free_polymer_offs):
     """Solvate the conjugate with TIP3P water + NaCl ions.
 
     Returns a solvated OpenFF Topology with positions set as conformers.
@@ -1088,19 +1105,34 @@ def main():
     logger.info("=" * 70)
     logger.info("Output directory: %s", OUTPUT_DIR)
 
-    # Step 1: Build conjugate
-    interchange, conjugate_off, free_polymer_offs, component_metadata, defs = (
-        run_conjugation_notebook()
+    # Step 1: Build and vacuum-equilibrate conjugate (no free polymers)
+    conjugate_off, free_polymer_templates, component_metadata, defs = run_conjugation_notebook()
+
+    # Step 2: Place free polymers around relaxed conjugate using Packmol
+    logger.info("=" * 70)
+    logger.info("STEP 2: Placing free polymers around relaxed conjugate")
+    logger.info("=" * 70)
+    placed_free_polymer_offs = place_free_polymers(
+        conjugate_off=conjugate_off,
+        free_polymer_offs=free_polymer_templates,
+        working_directory=OUTPUT_DIR / "packmol_free_polymers",
     )
 
-    # Step 2: Solvate
-    solvated_topology = solvate_system(interchange, conjugate_off, free_polymer_offs)
+    # Step 2.5: Finalize component metadata with free polymer global indices
+    component_metadata = finalize_component_metadata(
+        base_metadata=component_metadata,
+        conjugate_off=conjugate_off,
+        placed_free_polymer_offs=placed_free_polymer_offs,
+    )
+
+    # Step 3: Solvate
+    solvated_topology = solvate_system(conjugate_off, placed_free_polymer_offs)
 
     # Use assembled PDB as reference — it has the correct post-conjugation
     # protein atom count (2717) unlike the crystal PDB (2721).
-    assembled_pdb_path = _POC_DIR / "output" / "conjugate_assembled.pdb"
-    # Crosslink NHS residues are at positions 5 and 15 in the assembled PDB
-    crosslink_resids = (5, 15)
+    assembled_pdb_path = Path(defs["assembled_path"])
+    # Crosslink residue IDs exported from notebook Cell 7
+    crosslink_resids = defs["crosslink_resids"]
 
     convention_summary = apply_chain_convention(
         solvated_topology=solvated_topology,
@@ -1114,18 +1146,18 @@ def main():
     solvated_interchange = create_solvated_interchange(
         solvated_topology,
         conjugate_off,
-        free_polymer_offs,
+        placed_free_polymer_offs,
     )
 
-    # Steps 4-6: Minimize, equilibrate, produce
+    # Steps 5-7: Minimize, equilibrate, produce
     energies = run_openmm_simulation(
         solvated_interchange,
         conjugate_off,
-        free_polymer_offs,
+        placed_free_polymer_offs,
         component_metadata,
     )
 
-    # Step 7: Validate
+    # Step 8: Validate
     success = validate_results(energies)
 
     total_dt = time.perf_counter() - total_t0

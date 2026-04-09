@@ -125,13 +125,15 @@ def apply_chain_convention(
         Summary counts for patched components and used chains
     """
 
-    canonical_records = _parse_protein_records(Path(reference_pdb_path))
+    all_reference_records = _parse_protein_records(Path(reference_pdb_path))
     protein_atom_indices = list(component_metadata["protein"]["atom_indices"])
-    if len(canonical_records) != len(protein_atom_indices):
+    n_protein = len(protein_atom_indices)
+    if len(all_reference_records) < n_protein:
         raise ValueError(
-            "Protein atom count mismatch between crystal PDB and metadata: "
-            f"{len(canonical_records)} != {len(protein_atom_indices)}"
+            "Reference PDB has fewer ATOM/HETATM records than protein atom count: "
+            f"{len(all_reference_records)} < {n_protein}"
         )
+    canonical_records = all_reference_records[:n_protein]
 
     molecules = list(solvated_topology.molecules)
     if not molecules:
