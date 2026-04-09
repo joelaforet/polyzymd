@@ -91,7 +91,9 @@ def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
         try:
             module = importlib.import_module(modname)
         except Exception:
-            logger.warning(f"Failed to import analysis module {modname}", exc_info=True)
+            if modname.startswith(package_prefix):
+                raise
+            logger.warning("Failed to import analysis module %s", modname, exc_info=True)
             continue
 
         for attr_name in dir(module):
