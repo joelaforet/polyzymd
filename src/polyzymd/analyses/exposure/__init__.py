@@ -583,11 +583,12 @@ class ExposureAnalysis(Analysis):
 
             # Analysis dir for this replicate — use run_N convention
             # (matches orchestrator's output_dir layout used by all plugins)
-            analysis_dir: Path
-            if exposure_analysis_dir is not None:
-                analysis_dir = exposure_analysis_dir / f"run_{replicate}"
-            else:
-                analysis_dir = Path(f"/tmp/exposure_run_{replicate}")
+            if exposure_analysis_dir is None:
+                raise ValueError(
+                    "exposure_analysis_dir is required — ensure the exposure plugin is "
+                    "configured with an output directory in comparison.yaml"
+                )
+            analysis_dir = exposure_analysis_dir / f"run_{replicate}"
 
             # SASA config
             sasa_config = SASAConfig(
