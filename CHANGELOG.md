@@ -106,6 +106,13 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   generation, code quality, CliRunner integration).
 - Removed 12 obsolete registry and smoke tests.
 
+### Known Limitations
+
+- **Contacts cache hash does not include analysis parameters such as cutoff.**
+  Cached contact results may be reused across runs with different cutoff values
+  (e.g., 4.0A vs 4.5A). Until cache-key hashing is expanded, clear the contacts
+  analysis cache when changing contact criteria.
+
 ## [1.2.1] - 2026-04-01
 
 ### Fixed
