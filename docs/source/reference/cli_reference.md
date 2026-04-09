@@ -641,7 +641,7 @@ Options:
 
 Must be run from a directory containing `config.yaml`.
 
-#### Example
+### Example
 
 ```bash
 cd my_simulation_project
@@ -938,7 +938,7 @@ Options:
   --debug                         Enable DEBUG logging
 ```
 
-#### Example
+### Example
 
 ```bash
 # Generate all configured plots
