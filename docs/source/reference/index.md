@@ -5,6 +5,7 @@ configuration fields, API signatures, defaults, or benchmark data.
 
 ## User-Facing Reference
 
+- [Data Requirements & Directory Layout](data_requirements.md)
 - [CLI Reference](cli_reference.md)
 - [Configuration Reference](configuration.md)
 - [Comparison and Plotting Reference](analysis_comparison_reference.md)
@@ -35,6 +36,7 @@ simulation, workflow, analysis, and compare as a reference navigation aid. -->
 :maxdepth: 1
 
 CLI Reference <cli_reference>
+Data Requirements & Directory Layout <data_requirements>
 Configuration Reference <configuration>
 Comparison and Plotting Reference <analysis_comparison_reference>
 Benchmarks <benchmarks>
