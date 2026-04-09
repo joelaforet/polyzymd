@@ -701,7 +701,8 @@ class ContactsAnalysis(Analysis):
             logger.info(f"  Saved: {output_file}")
 
             return result
-        except Exception as e:
+        except (FileNotFoundError, ValueError, OSError, IndexError) as e:
+            logger.debug("Full traceback:", exc_info=True)
             logger.warning(f"  Skipping replicate {replicate}: analysis failed with error: {e}")
             return None
 
