@@ -28,6 +28,11 @@ from pathlib import Path
 
 import numpy as np
 
+try:
+    from .pdb_convention import apply_chain_convention
+except ImportError:
+    from pdb_convention import apply_chain_convention
+
 # ── Configure logging ──────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -1090,6 +1095,18 @@ def main():
 
     # Step 2: Solvate
     solvated_topology = solvate_system(interchange, conjugate_off, free_polymer_offs)
+
+    crystal_pdb_path = _POC_DIR / "data" / "NH3_terminal_His_proton_updated.pdb"
+    # Crosslink NHS residues are at positions 5 and 15 in the assembled PDB
+    crosslink_resids = (5, 15)
+
+    convention_summary = apply_chain_convention(
+        solvated_topology=solvated_topology,
+        component_metadata=component_metadata,
+        crystal_pdb_path=crystal_pdb_path,
+        crosslink_resids=crosslink_resids,
+    )
+    logger.info("Chain convention applied: %s", convention_summary)
 
     # Step 3: Create solvated Interchange
     solvated_interchange = create_solvated_interchange(
