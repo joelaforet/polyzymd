@@ -1589,6 +1589,17 @@ def _(
 ):
     """Cell 7: Write assembled PDB following PolyzyMD chain convention."""
 
+    def _canonical_polymer_resname(raw_resname: str, is_crosslinked_nhs: bool) -> str:
+        """Map connectivity-driven residue names to canonical polymer names"""
+
+        if raw_resname in {"SB1", "SB2"}:
+            return "SBM"
+        if raw_resname in {"EG1", "EG2"}:
+            return "EGP"
+        if raw_resname in {"NH1", "NH2"}:
+            return "NHX" if is_crosslinked_nhs else "NHS"
+        return raw_resname
+
     _pdb_path = PROTEIN_PDB
     _atom_records = []
     with open(_pdb_path, "r", encoding="utf-8") as _f:
@@ -1632,6 +1643,16 @@ def _(
                 local_resids.add(_rd_info.GetResidueNumber())
         local_resids_sorted = sorted(local_resids)
         local_to_global = {r: chain_c_resid + i for i, r in enumerate(local_resids_sorted)}
+
+        _reactive_rd_atom = _polymer.rdmol.GetAtomWithIdx(_polymer.reactive_carbon_idx)
+        _reactive_rd_info = _reactive_rd_atom.GetPDBResidueInfo()
+        _reactive_local_resid = _reactive_rd_info.GetResidueNumber() if _reactive_rd_info else None
+        _crosslink_global_resid = (
+            local_to_global.get(_reactive_local_resid)
+            if _reactive_local_resid is not None
+            else None
+        )
+
         chain_c_resid += len(local_resids_sorted)
 
         _serial_map = {}
@@ -1641,8 +1662,15 @@ def _(
             _rd_atom = _polymer.rdmol.GetAtomWithIdx(_orig_idx)
             _rd_info = _rd_atom.GetPDBResidueInfo()
             _atom_name = _rd_info.GetName().strip() if _rd_info else f"{_atom.symbol}{_ri:03d}"
-            _res_name = _rd_info.GetResidueName().strip() if _rd_info else "POL"
             _local_resid = _rd_info.GetResidueNumber() if _rd_info else 1
+            _global_resid = local_to_global.get(_local_resid, chain_c_resid - 1)
+            _raw_res_name = _rd_info.GetResidueName().strip() if _rd_info else "POL"
+            _res_name = _canonical_polymer_resname(
+                _raw_res_name,
+                is_crosslinked_nhs=(
+                    _crosslink_global_resid is not None and _global_resid == _crosslink_global_resid
+                ),
+            )
 
             polymer_lines.append(
                 write_pdb_line(
@@ -1650,7 +1678,7 @@ def _(
                     atom_name=_atom_name,
                     residue_name=_res_name,
                     chain_id="C",
-                    residue_number=local_to_global.get(_local_resid, chain_c_resid - 1),
+                    residue_number=_global_resid,
                     x=float(_x),
                     y=float(_y),
                     z=float(_z),
