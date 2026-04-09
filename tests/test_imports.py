@@ -311,6 +311,119 @@ class TestReactionPathResolution:
 
 
 # ---------------------------------------------------------------------------
+# B12b – "default" sentinel preserved through path expansion
+# ---------------------------------------------------------------------------
+
+
+class TestReactionDefaultSentinel:
+    """The string "default" must pass through _expand_paths and
+    _convert_paths_to_relative untouched so that the Pydantic validator
+    in ReactionConfig.resolve_default_paths() can resolve it to bundled
+    ATRP reaction templates."""
+
+    # -- _expand_paths preserves "default" -----------------------------------
+
+    def test_expand_paths_preserves_default_initiation(self):
+        from polyzymd.config.loader import _expand_paths
+
+        data = {"reactions": {"initiation": "default"}}
+        result = _expand_paths(data, Path("/some/project"))
+        assert result["reactions"]["initiation"] == "default"
+
+    def test_expand_paths_preserves_default_polymerization(self):
+        from polyzymd.config.loader import _expand_paths
+
+        data = {"reactions": {"polymerization": "default"}}
+        result = _expand_paths(data, Path("/some/project"))
+        assert result["reactions"]["polymerization"] == "default"
+
+    def test_expand_paths_preserves_default_termination(self):
+        from polyzymd.config.loader import _expand_paths
+
+        data = {"reactions": {"termination": "default"}}
+        result = _expand_paths(data, Path("/some/project"))
+        assert result["reactions"]["termination"] == "default"
+
+    def test_expand_paths_preserves_default_case_insensitive(self):
+        """'Default', 'DEFAULT', ' default ' should all be preserved."""
+        from polyzymd.config.loader import _expand_paths
+
+        for variant in ("Default", "DEFAULT", " default ", "  Default  "):
+            data = {"reactions": {"initiation": variant}}
+            result = _expand_paths(data, Path("/some/project"))
+            assert result["reactions"]["initiation"] == variant, (
+                f"Sentinel variant {variant!r} was not preserved"
+            )
+
+    def test_expand_paths_still_expands_non_sentinel_reaction_paths(self):
+        """Regular .rxn paths must still be expanded to absolute."""
+        from polyzymd.config.loader import _expand_paths
+
+        data = {"reactions": {"initiation": "templates/init.rxn"}}
+        result = _expand_paths(data, Path("/configs"))
+        assert result["reactions"]["initiation"] == "/configs/templates/init.rxn"
+
+    # -- _convert_paths_to_relative preserves "default" ----------------------
+
+    def test_relativize_preserves_default_initiation(self):
+        from polyzymd.config.loader import _convert_paths_to_relative
+
+        data = {"reactions": {"initiation": "default"}}
+        result = _convert_paths_to_relative(data, Path("/some/project"))
+        assert result["reactions"]["initiation"] == "default"
+
+    def test_relativize_preserves_default_all_keys(self):
+        from polyzymd.config.loader import _convert_paths_to_relative
+
+        data = {
+            "reactions": {
+                "initiation": "default",
+                "polymerization": "default",
+                "termination": "default",
+            }
+        }
+        result = _convert_paths_to_relative(data, Path("/some/project"))
+        for key in ("initiation", "polymerization", "termination"):
+            assert result["reactions"][key] == "default"
+
+    # -- end-to-end: "default" resolves to bundled ATRP paths ----------------
+
+    def test_schema_resolves_default_to_bundled_paths(self):
+        """ReactionConfig must resolve "default" to real .rxn file paths."""
+        from polyzymd.config.schema import ReactionConfig
+
+        cfg = ReactionConfig(
+            initiation="default",
+            polymerization="default",
+            termination="default",
+        )
+        assert cfg.initiation.suffix == ".rxn"
+        assert cfg.polymerization.suffix == ".rxn"
+        assert cfg.termination.suffix == ".rxn"
+        assert cfg.initiation.exists()
+        assert cfg.polymerization.exists()
+        assert cfg.termination.exists()
+
+    def test_expand_then_validate_default_end_to_end(self):
+        """Simulates the full load path: _expand_paths → model_validate."""
+        from polyzymd.config.loader import _expand_paths
+        from polyzymd.config.schema import ReactionConfig
+
+        raw = {
+            "initiation": "default",
+            "polymerization": "default",
+            "termination": "default",
+        }
+        expanded = _expand_paths({"reactions": raw}, Path("/any/base/dir"))
+        cfg = ReactionConfig.model_validate(expanded["reactions"])
+        for field in ("initiation", "polymerization", "termination"):
+            path = getattr(cfg, field)
+            assert path.suffix == ".rxn"
+            assert "atrp" in path.name
+            assert path.exists()
+
+
+# ---------------------------------------------------------------------------
 # B13 – statepoint export handles concentration-based co-solvents
 # ---------------------------------------------------------------------------
 
