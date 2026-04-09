@@ -76,6 +76,16 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 ### Fixed
 
+- **`"default"` reaction template paths no longer rejected during config
+  loading.**  When a user specified `initiation: "default"` (or
+  `polymerization` / `termination`) in the YAML config, `_expand_paths()`
+  unconditionally treated the string as a relative filesystem path and
+  prepended the config directory, producing e.g.
+  `/ocean/projects/.../default`.  The Pydantic field validator in
+  `ReactionConfig` then rejected it because the path lacked a `.rxn`
+  extension.  The loader now recognises `"default"` as a sentinel value
+  and passes it through untouched so the validator can resolve it to the
+  bundled ATRP reaction templates.  (`config/loader.py`)
 - **Dead code removed.**  `catalytic_triad/_formatters.py` (427 lines, zero
   imports), `rmsf/_comparison_results_legacy.py`, ghost `compare/plotters/`
   directory, stale `__pycache__/` files.
