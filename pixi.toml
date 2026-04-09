@@ -157,11 +157,16 @@ cuda = "12.4"
 # FEATURE: conjugation-poc
 # Additional dependencies for the conjugation proof-of-concept notebook
 # (src/polyzymd/builders/conjugation/poc/).
-# Uses the "build" (openmm-any) base — no CUDA required.
+# Uses the "build" (openmm-any) base + pins CUDA <=13.0 so the runtime
+# libraries match the local GPU driver (RTX 2000 Ada, driver 580.126.09).
 # =============================================================================
 [feature.conjugation-poc.dependencies]
-scipy  = ">=1.10"
-marimo = ">=0.20"
+scipy        = ">=1.10"
+marimo       = ">=0.20"
+cuda-version = "<=13.0"
+
+[feature.conjugation-poc.system-requirements]
+cuda = "13.0"
 
 [feature.conjugation-poc.pypi-dependencies]
 py3dmol = ">=2.0"
