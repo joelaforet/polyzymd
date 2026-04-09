@@ -679,18 +679,50 @@ class ExposureAnalysis(Analysis):
         -------
         Path or None
         """
+
+        def _pick_latest(matches: list[Path], pattern: str) -> Path | None:
+            if not matches:
+                return None
+            if len(matches) > 1:
+                logger.debug(
+                    "Multiple contact result matches for replicate %d using pattern '%s': %s",
+                    replicate,
+                    pattern,
+                    [str(p) for p in matches],
+                )
+            return max(matches, key=lambda p: p.stat().st_mtime)
+
         result_filename = f"contacts_rep{replicate}.json"
 
         if contacts_dir is not None:
-            # Flat path (legacy layout)
+            # Exact matches first
             cond_path = contacts_dir / result_filename
             if cond_path.exists():
                 return cond_path
 
-            # Orchestrator layout: run_<N>/ subdirectory per replicate
-            run_path = contacts_dir / f"run_{replicate}" / result_filename
+            run_dir = contacts_dir / f"run_{replicate}"
+            run_path = run_dir / result_filename
             if run_path.exists():
                 return run_path
+
+            run_result_path = run_dir / "result.json"
+            if run_result_path.exists():
+                return run_result_path
+
+            # Parameterized filename fallbacks
+            cond_glob = _pick_latest(
+                [p for p in contacts_dir.glob(f"contacts*rep{replicate}.json") if p.is_file()],
+                f"contacts*rep{replicate}.json",
+            )
+            if cond_glob is not None:
+                return cond_glob
+
+            run_glob = _pick_latest(
+                [p for p in run_dir.glob(f"contacts*rep{replicate}.json") if p.is_file()],
+                f"run_{replicate}/contacts*rep{replicate}.json",
+            )
+            if run_glob is not None:
+                return run_glob
 
         return None
 
