@@ -184,6 +184,7 @@ def compute_replicate(self, ctx, replicate):
 2. **Contacts criteria mismatch** — cached 4.0A vs 4.5A cutoff disagreement
 3. **Docs sidebar** — after adding toctree entries, run `make clean html` (not just `make html`)
 4. **GitHub Issue #20** — tracks remaining analysis module TODOs
+5. **Pre-existing LSP type errors** — Pyright/Pylance reports false positives in `config/schema.py`, `builders/system_builder.py`, etc. due to missing type stubs for OpenMM/OpenFF. Does NOT affect runtime.
 
 ## Modular Instructions
 
@@ -193,5 +194,5 @@ See `.opencode/instructions/` for detailed rules on specific topics:
 - `environment.md` — pixi environment setup, dependency management, CI
 - `testing.md` — test infrastructure, running tests, writing new tests
 - `analysis-module.md` — analysis plugin system patterns and contracts
-- `documentation.md` — Sphinx/MyST conventions, API docs
+- `documentation.md` — Sphinx/MyST conventions, API docs, zero-warning build gate, `:no-index:` rules
 - `known-issues.md` — detailed bug descriptions and workarounds
