@@ -217,7 +217,8 @@ class ExposureAnalysis(Analysis):
             try:
                 summary = self._build_condition_summary(cond, ctx, settings)
                 summaries.append(summary)
-            except Exception as e:
+            except (FileNotFoundError, ValueError, OSError, IndexError) as e:
+                logger.debug("Full traceback:", exc_info=True)
                 logger.warning(f"  Skipping condition '{cond.label}': {e}")
 
         if len(summaries) < 2:
@@ -651,7 +652,8 @@ class ExposureAnalysis(Analysis):
             )
 
             return dynamics, enrichment
-        except Exception as e:
+        except (FileNotFoundError, ValueError, OSError, IndexError) as e:
+            logger.debug("Full traceback:", exc_info=True)
             logger.warning(f"    Skipping rep {replicate}: analysis failed with error: {e}")
             return None
 
