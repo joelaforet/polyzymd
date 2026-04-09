@@ -57,6 +57,7 @@ adding new analysis types to PolyzyMD.
 | `distances` | `analyses.distances` | Custom |
 | `contacts` | `analyses.contacts` | Custom |
 | `exposure` | `analyses.exposure` | Custom |
+| `hydrogen_bonds` | `analyses.hydrogen_bonds` | Default (scalar) |
 | `binding_free_energy` | `analyses.binding_free_energy` | Custom |
 | `polymer_affinity` | `analyses.polymer_affinity` | Custom |
 | `polymer_bridging` | `analyses.polymer_bridging` | Custom (experimental) |
