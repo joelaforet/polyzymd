@@ -754,26 +754,29 @@ For **result models**, Pydantic adds:
   string where a float is expected)
 - **Typed attribute access** — `result.mean_rg` instead of
   `result["mean_rg"]`, with IDE autocomplete
-- **NPZ sidecar storage** — `BaseAnalysisResult` (which inherits from
-  Pydantic's `BaseModel`) can offload large NumPy arrays to `.npz` files
-  alongside the JSON
+- **Structured extension path** — start with scaffold-generated `BaseModel`
+  classes, then upgrade to `BaseAnalysisResult` if you need helper I/O methods
+  or NPZ sidecar storage
 - **Nested structure** — complex result hierarchies with validated sub-models
 
 ### Pydantic model path
 
-Use models when you need validation, nested structure, strict typing, or
-sidecar storage for large arrays.
+Use models when you need validation, nested structure, strict typing, or more
+explicit result contracts.
 
 Key pieces:
 
-1. Result models inherit from `BaseAnalysisResult`
-   (`polyzymd.analyses._results_base.BaseAnalysisResult`)
-2. `BaseAnalysisResult` provides `save()` and `load()`
-3. `BaseAnalysisResult` supports NPZ sidecar storage when models include large
-   NumPy data
-4. Plugin class sets `AggregatedResultClass` to the aggregated model class
-5. Framework deserializes aggregated files through
-   `AggregatedResultClass.load(path)` (or model-JSON validation fallback)
+1. The scaffold `--style pydantic` path generates result models inheriting
+   from Pydantic `BaseModel`
+2. Plugin class sets `AggregatedResultClass` to the aggregated model class
+3. Framework deserializes aggregated files through
+   `AggregatedResultClass.model_validate_json(...)` (or `.load(path)` when the
+   class provides it)
+4. `BaseModel` classes are the simple default and do not include `.save()` /
+   `.load()` helpers
+5. If you need NPZ sidecars or model-level I/O helpers, manually upgrade your
+   result models to
+   `polyzymd.analyses._results_base.BaseAnalysisResult`
 
 ```python
 from pathlib import Path
@@ -781,16 +784,15 @@ from typing import ClassVar
 
 from pydantic import BaseModel
 
-from polyzymd.analyses._results_base import BaseAnalysisResult
 from polyzymd.analyses.base import Analysis
 
 
-class ReplicateResult(BaseAnalysisResult):
+class ReplicateResult(BaseModel):
     mean_rg: float
     replicate: int
 
 
-class AggregatedResult(BaseAnalysisResult):
+class AggregatedResult(BaseModel):
     mean_rg: float
     sem_rg: float
     replicate_values: list[float]
@@ -815,6 +817,9 @@ class SolventContactsAnalysis(Analysis):
         )
 ```
 
+If you later need NPZ sidecar storage or `.save()` / `.load()` helper methods,
+replace `BaseModel` with `BaseAnalysisResult` in those result classes.
+
 ```{important}
 **Gotcha: `AggregatedResultClass` requires model returns**
 
@@ -832,12 +837,12 @@ deserialization fails.
 
 | Aspect | Dicts | Pydantic models |
 |--------|-------|-----------------|
-| **Setup effort** | None — just return `{}` | Define result classes inheriting `BaseAnalysisResult` |
+| **Setup effort** | None — just return `{}` | Define result classes (scaffold uses `BaseModel` by default) |
 | **Validation** | None — typos in keys are silent | Automatic type checking on construction |
 | **Attribute access** | `result["mean_rg"]` | `result.mean_rg` with IDE autocomplete |
-| **Large array support** | Manual — save NumPy arrays yourself | NPZ sidecar via `BaseAnalysisResult.save()` |
+| **Large array support** | Manual — save NumPy arrays yourself | BaseModel: manual; BaseAnalysisResult: NPZ sidecar helpers |
 | **Nested structure** | Manual — dicts of dicts | Validated sub-models with typed fields |
-| **Serialization** | `json.dumps()` / `json.loads()` | `model.save(path)` / `Model.load(path)` |
+| **Serialization** | `json.dumps()` / `json.loads()` | BaseModel JSON by framework; optional `BaseAnalysisResult.save()` / `.load()` |
 | **Framework wiring** | No `AggregatedResultClass` needed | Set `AggregatedResultClass` on plugin class |
 | **Best for** | Scalar analyses, quick prototypes, new contributors | Complex results, per-residue arrays, production plugins |
 
