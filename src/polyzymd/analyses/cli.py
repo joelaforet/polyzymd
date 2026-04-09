@@ -393,11 +393,6 @@ def _output_validation_result(result: dict, output_format: str) -> None:
     help="Compute residence time statistics",
 )
 @click.option(
-    "--plot",
-    is_flag=True,
-    help="Generate contact map plot after analysis",
-)
-@click.option(
     "--recompute",
     is_flag=True,
     help="Force recompute even if cached results exist",
@@ -435,7 +430,6 @@ def contacts(
     protein_selection: str,
     grouping: str,
     residence_times: bool,
-    plot: bool,
     recompute: bool,
     output_dir: str | None,
     binding_preference: bool,
@@ -469,7 +463,7 @@ def contacts(
         polyzymd analyze contacts -c config.yaml -r 1-3 \\
             --polymer-selection "segid C and resname SBM" \\
             --protein-selection "protein and (resname TRP PHE TYR)" \\
-            --residence-times --plot
+            --residence-times
 
         # With binding preference analysis (enrichment ratios)
         polyzymd analyze contacts -c config.yaml -r 1-3 \\
@@ -813,19 +807,6 @@ def contacts(
                     f"  Surface-exposed coverage: {contacted_exposed}/{len(exposed_resids)} "
                     f"({contacted_exposed / len(exposed_resids):.1%})"
                 )
-
-        # Generate plot if requested
-        if plot:
-            require_matplotlib()
-            click.echo()
-            click.echo("Generating contact map plot...")
-            # TODO: Implement contact map plotting
-            click.echo(
-                click.style(
-                    "  Note: Contact map plotting not yet implemented",
-                    fg="yellow",
-                )
-            )
 
     except Exception as e:
         click.echo(click.style(f"Analysis failed: {e}", fg="red"), err=True)
