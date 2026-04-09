@@ -313,7 +313,8 @@ class MetricValue:
     higher_is_better : bool | None
         If ``True``, higher values rank first. If ``False``, lower values rank
         first (e.g. RMSF). If ``None``, no universal quality direction is
-        assumed and conditions are ranked alphabetically.
+        assumed and conditions are ranked by descending mean value for
+        neutral display.
     direction_labels : tuple[str, str, str]
         ``(negative_label, unchanged_label, positive_label)`` for
         interpreting percent-change direction.  Defaults to
