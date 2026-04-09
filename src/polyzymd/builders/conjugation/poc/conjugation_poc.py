@@ -409,8 +409,8 @@ def _(
         if len(hz_idx_list) < 2:
             raise ValueError(f"Lysine {_resid} has <2 NZ hydrogens")
 
-        nz_pos = protein_coords[nz_atom.molecule_atom_index]
-        outward = nz_pos - centroid_vec
+        _nz_pos = protein_coords[nz_atom.molecule_atom_index]
+        outward = _nz_pos - centroid_vec
         outward_norm = np.linalg.norm(outward)
         if outward_norm < 1e-8:
             raise ValueError(f"Lysine {_resid} has zero outward vector")
@@ -419,7 +419,7 @@ def _(
             resid=int(_resid),
             chain_id=str(nz_atom.metadata.get("chain_id", "A")),
             nz_index=nz_atom.molecule_atom_index,
-            nz_position=nz_pos,
+            nz_position=_nz_pos,
             ce_position=ce_pos,
             hz_indices=tuple(sorted(hz_idx_list)),
             outward_normal=outward / outward_norm,
@@ -528,10 +528,10 @@ def _(
         logger.info("Conjugated polymer for LYS %d: sequence=%s", resid, seq)
 
     free_sequences = []
-    for i in range(N_FREE_POLYMERS):
+    for _i in range(N_FREE_POLYMERS):
         seq = generate_weighted_sequence(FREE_POLYMER_LENGTH, rng)
         free_sequences.append(seq)
-        logger.info("Free polymer %d: sequence=%s", i, seq)
+        logger.info("Free polymer %d: sequence=%s", _i, seq)
 
     cap_charge_map = {}
     conjugated_prototypes = []
@@ -623,7 +623,9 @@ def _(
                     _queue.append(_n.GetIdx())
 
         _leaving_sorted = tuple(sorted(_leaving))
-        _retained_sorted = tuple(i for i in range(polymer_rdmol.GetNumAtoms()) if i not in _leaving)
+        _retained_sorted = tuple(
+            _i for _i in range(polymer_rdmol.GetNumAtoms()) if _i not in _leaving
+        )
 
         _core_rw = Chem.RWMol(_polymer_bo)
         for _idx in sorted(_leaving, reverse=True):
@@ -685,7 +687,7 @@ def _(
         )
         _product_charges_core = _product_charges_all[: _core.GetNumAtoms()]
         _retained_charges = np.array(
-            [_product_charges_core[_old_to_core[i]] for i in _retained_sorted]
+            [_product_charges_core[_old_to_core[_i]] for _i in _retained_sorted]
         )
 
         _cap_charge_map = {}
@@ -757,9 +759,9 @@ def _(
 
     assignments = []
     for _ci, _resid in enumerate(CONJUGATION_SITE_RESIDS):
-        site = reactive_sites[("A", _resid)]
+        _site = reactive_sites[("A", _resid)]
         prototype = conjugated_prototypes[_ci]
-        assignments.append((site, prototype))
+        assignments.append((_site, prototype))
         logger.info(
             "  LYS %d <- conjugated polymer %d (%d atoms)",
             _resid,
@@ -813,10 +815,10 @@ def _(
     def _write_simple_pdb(path: Path, coords: np.ndarray, elements: list[str]) -> None:
         """Write a minimal PDB file from coordinates and element symbols."""
         lines = []
-        for i, (xyz, elem) in enumerate(zip(coords, elements, strict=False)):
-            name = f"{elem}{i + 1:>3d}"[:4]
+        for _i, (xyz, elem) in enumerate(zip(coords, elements, strict=False)):
+            name = f"{elem}{_i + 1:>3d}"[:4]
             lines.append(
-                f"HETATM{i + 1:>5d} {name:<4s} UNK A   1    "
+                f"HETATM{_i + 1:>5d} {name:<4s} UNK A   1    "
                 f"{xyz[0]:>8.3f}{xyz[1]:>8.3f}{xyz[2]:>8.3f}"
                 f"  1.00  0.00          {elem:>2s}\n"
             )
@@ -873,7 +875,7 @@ def _(
 
     # ── Prepare polymer PDBs (retained atoms only, centered on reactive C) ─
     polymer_templates = []  # list of dicts with template info
-    for site, polymer in assignments:
+    for _site, polymer in assignments:
         retained_idx = np.asarray(polymer.retained_atom_indices, dtype=int)
         # Use the cached SDF conformer (from polymer generation)
         full_coords = polymer.off_molecule.conformers[0].m_as("angstrom")
@@ -885,7 +887,7 @@ def _(
 
         polymer_templates.append(
             {
-                "site": site,
+                "site": _site,
                 "polymer": polymer,
                 "full_coords": full_coords,
                 "retained_idx": retained_idx,
@@ -912,8 +914,8 @@ def _(
 
     # Shifted NZ positions (for sphere constraints)
     shifted_nz = {}
-    for site, _polymer in assignments:
-        shifted_nz[site.resid] = site.nz_position + coord_shift
+    for _site, _polymer in assignments:
+        shifted_nz[_site.resid] = _site.nz_position + coord_shift
 
     # Box size: bounding box of shifted coords + generous padding
     BOX_PADDING = 30.0
@@ -935,9 +937,9 @@ def _(
         # handles placement. We keep the original relative geometry)
         polymer_pdbs = []
         structure_extra_lines = []
-        for i, tmpl in enumerate(polymer_templates):
+        for _i, tmpl in enumerate(polymer_templates):
             shifted_retained = tmpl["retained_coords"] + coord_shift
-            pdb_path = work_dir / f"polymer_{i}.pdb"
+            pdb_path = work_dir / f"polymer_{_i}.pdb"
             _write_simple_pdb(pdb_path, shifted_retained, tmpl["elements"])
             polymer_pdbs.append(str(pdb_path))
 
@@ -1014,11 +1016,11 @@ def _(
     occupied = trimmed_protein_coords.copy()  # back in original frame
     placement_results: list[PlacementResult] = []
 
-    for i, tmpl in enumerate(polymer_templates):
+    for _i, tmpl in enumerate(polymer_templates):
         # Source: original retained coords (before shift)
         P = tmpl["retained_coords"]
         # Target: packed coords (undo shift)
-        Q = polymer_packed_coords[i] - coord_shift
+        Q = polymer_packed_coords[_i] - coord_shift
 
         R, t = _kabsch_align(P, Q)
 
@@ -1027,15 +1029,15 @@ def _(
 
         # Post-placement: translate so reactive C is exactly at
         # TARGET_BOND_LENGTH from NZ
-        nz_pos = tmpl["site"].nz_position
+        _nz_pos = tmpl["site"].nz_position
         rc_idx = tmpl["polymer"].reactive_carbon_idx
         current_rc = full_transformed[rc_idx]
-        nz_to_rc = current_rc - nz_pos
+        nz_to_rc = current_rc - _nz_pos
         nz_to_rc_dist = np.linalg.norm(nz_to_rc)
         if nz_to_rc_dist < 1e-8:
             raise RuntimeError(f"Reactive carbon coincides with NZ for LYS {tmpl['site'].resid}")
         nz_to_rc_hat = nz_to_rc / nz_to_rc_dist
-        target_rc = nz_pos + TARGET_BOND_LENGTH * nz_to_rc_hat
+        target_rc = _nz_pos + TARGET_BOND_LENGTH * nz_to_rc_hat
         translation = target_rc - current_rc
         full_transformed += translation
 
@@ -1064,7 +1066,7 @@ def _(
         logger.info(
             "LYS %d: Packmol placed, post-snap distance to NZ=%.3f A, min clearance=%.2f A",
             tmpl["site"].resid,
-            np.linalg.norm(full_transformed[rc_idx] - nz_pos),
+            np.linalg.norm(full_transformed[rc_idx] - _nz_pos),
             min_dist,
         )
 
@@ -1485,19 +1487,19 @@ def _(
     prot_removed_indices = _prot_removed
 
     protein_atom_indices = sorted(_prot_old_to_new.values())
-    protein_heavy_indices = [
+    _protein_heavy_indices = [
         _prot_old_to_new[orig]
         for orig in range(_n_prot_orig)
         if orig not in _prot_removed and protein_mol.atom(orig).atomic_number > 1
     ]
 
-    protein_backbone_heavy_indices = []
+    _protein_backbone_heavy_indices = []
     for orig in range(_n_prot_orig):
         if orig in _prot_removed:
             continue
         atom = protein_mol.atom(orig)
         if atom.atomic_number > 1 and atom.name in ("CA", "C", "N", "O"):
-            protein_backbone_heavy_indices.append(_prot_old_to_new[orig])
+            _protein_backbone_heavy_indices.append(_prot_old_to_new[orig])
 
     conjugated_polymer_ranges = []
     _offset = _prot_mod.GetNumAtoms()
@@ -1515,7 +1517,7 @@ def _(
         )
         _offset += n_retained
 
-    all_conjugate_heavy = protein_heavy_indices.copy()
+    all_conjugate_heavy = _protein_heavy_indices.copy()
     for cr in conjugated_polymer_ranges:
         all_conjugate_heavy.extend(cr["heavy_atom_indices"])
     all_conjugate_heavy.sort()
@@ -1547,14 +1549,14 @@ def _(
         "n_free_polymer_atoms": sum(m.n_atoms for m in placed_free_polymer_offs),
         "protein": {
             "atom_indices": protein_atom_indices,
-            "heavy_atom_indices": protein_heavy_indices,
-            "backbone_heavy_atom_indices": protein_backbone_heavy_indices,
+            "heavy_atom_indices": _protein_heavy_indices,
+            "backbone_heavy_atom_indices": _protein_backbone_heavy_indices,
         },
         "conjugated_polymers": conjugated_polymer_ranges,
         "free_polymers": free_polymer_ranges,
         "restraint_groups": {
-            "protein_heavy": protein_heavy_indices,
-            "protein_backbone_heavy": protein_backbone_heavy_indices,
+            "protein_heavy": _protein_heavy_indices,
+            "protein_backbone_heavy": _protein_backbone_heavy_indices,
             "conjugate_heavy": all_conjugate_heavy,
             "free_polymer_heavy": all_free_heavy,
         },
@@ -1563,8 +1565,8 @@ def _(
     logger.info(
         "Component metadata: %d protein heavy, %d backbone heavy, %d conjugate heavy, "
         "%d free heavy",
-        len(protein_heavy_indices),
-        len(protein_backbone_heavy_indices),
+        len(_protein_heavy_indices),
+        len(_protein_backbone_heavy_indices),
         len(all_conjugate_heavy),
         len(all_free_heavy),
     )
@@ -1799,9 +1801,9 @@ def _(
     are restrained to their initial positions.
     """
     try:
-        import openmm
-        from openmm import app as openmm_app
-        from openmm import unit as omm_unit
+        import openmm as _openmm
+        from openmm import app as _openmm_app
+        from openmm import unit as _omm_unit
     except ImportError as _exc:
         raise ImportError("OpenMM required for minimization") from _exc
 
@@ -1851,8 +1853,10 @@ def _(
     topology_omm = interchange.to_openmm_topology()
     _coords = conjugate_off.conformers[0].m_as(unit.angstrom)
 
-    restraint = openmm.CustomExternalForce("k*periodicdistance(x,y,z,x0,y0,z0)^2")
-    restraint.addGlobalParameter("k", 1000.0 * omm_unit.kilojoule_per_mole / omm_unit.nanometer**2)
+    restraint = _openmm.CustomExternalForce("k*periodicdistance(x,y,z,x0,y0,z0)^2")
+    restraint.addGlobalParameter(
+        "k", 1000.0 * _omm_unit.kilojoule_per_mole / _omm_unit.nanometer**2
+    )
     restraint.addPerParticleParameter("x0")
     restraint.addPerParticleParameter("y0")
     restraint.addPerParticleParameter("z0")
@@ -1860,23 +1864,23 @@ def _(
     for _idx in range(conjugate_off.n_atoms):
         if _idx in mobile:
             continue
-        x0, y0, z0 = coords_nm[_idx]
-        restraint.addParticle(_idx, [float(x0), float(y0), float(z0)])
+        _x0, _y0, _z0 = coords_nm[_idx]
+        restraint.addParticle(_idx, [float(_x0), float(_y0), float(_z0)])
     system.addForce(restraint)
 
-    integrator = openmm.VerletIntegrator(0.001 * omm_unit.picoseconds)
-    platform = openmm.Platform.getPlatformByName("Reference")
-    simulation = openmm_app.Simulation(topology_omm, system, integrator, platform)
-    simulation.context.setPositions(coords_nm * omm_unit.nanometers)
+    integrator = _openmm.VerletIntegrator(0.001 * _omm_unit.picoseconds)
+    platform = _openmm.Platform.getPlatformByName("Reference")
+    simulation = _openmm_app.Simulation(topology_omm, system, integrator, platform)
+    simulation.context.setPositions(coords_nm * _omm_unit.nanometers)
 
     before = simulation.context.getState(getEnergy=True)
-    energy_before = before.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
-    openmm.LocalEnergyMinimizer.minimize(
+    energy_before = before.getPotentialEnergy().value_in_unit(_omm_unit.kilojoule_per_mole)
+    _openmm.LocalEnergyMinimizer.minimize(
         simulation.context, tolerance=10.0, maxIterations=MINIMIZATION_MAX_ITER
     )
     after = simulation.context.getState(getEnergy=True, getPositions=True)
-    energy_after = after.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
-    minimized_coords = after.getPositions(asNumpy=True).value_in_unit(omm_unit.angstrom)
+    energy_after = after.getPotentialEnergy().value_in_unit(_omm_unit.kilojoule_per_mole)
+    minimized_coords = after.getPositions(asNumpy=True).value_in_unit(_omm_unit.angstrom)
 
     # Update conformer
     for _idx, xyz in enumerate(minimized_coords):
@@ -1891,10 +1895,10 @@ def _(
         _atom_index = 0
         _updated_atoms = 0
         _preserved_atoms = 0
-        n_simulated = len(minimized_coords)
+        _n_simulated = len(minimized_coords)
         for _line in _old_lines:
             if _line.startswith(("ATOM", "HETATM")):
-                if _atom_index < n_simulated:
+                if _atom_index < _n_simulated:
                     _x, _y, _z = minimized_coords[_atom_index]
                     _f.write(f"{_line[:30]}{_x:8.3f}{_y:8.3f}{_z:8.3f}{_line[54:]}")
                     _updated_atoms += 1
@@ -1905,10 +1909,10 @@ def _(
             else:
                 _f.write(_line)
 
-    if _updated_atoms != n_simulated:
+    if _updated_atoms != _n_simulated:
         raise RuntimeError(
             f"PDB write mismatch: wrote coords for {_updated_atoms} atoms "
-            f"but simulation had {n_simulated} atoms"
+            f"but simulation had {_n_simulated} atoms"
         )
 
     logger.info(
@@ -1963,9 +1967,9 @@ def _(
     heavy atoms, while polymers (conjugated + free) relax freely.
     """
     try:
-        import openmm
-        from openmm import app as openmm_app
-        from openmm import unit as omm_unit
+        import openmm as _openmm
+        from openmm import app as _openmm_app
+        from openmm import unit as _omm_unit
     except ImportError as _exc:
         raise ImportError("OpenMM required for equilibration") from _exc
 
@@ -1974,7 +1978,7 @@ def _(
         """Select the fastest available OpenMM platform."""
         for name in ("CUDA", "OpenCL", "CPU"):
             try:
-                platform = openmm.Platform.getPlatformByName(name)
+                platform = _openmm.Platform.getPlatformByName(name)
                 logger.info("Selected OpenMM platform: %s", name)
                 return platform
             except Exception:
@@ -1992,40 +1996,41 @@ def _(
     eq_coords_nm = eq_coords_angstrom * 0.1
 
     # ── Add protein heavy-atom restraints ──────────────────────────────────
-    protein_heavy_indices = component_metadata["restraint_groups"]["protein_heavy"]
+    _protein_heavy_indices = component_metadata["restraint_groups"]["protein_heavy"]
     logger.info(
         "Applying %.0f kJ/mol/nm^2 restraints to %d protein heavy atoms",
         PROTEIN_HEAVY_RESTRAINT_K,
-        len(protein_heavy_indices),
+        len(_protein_heavy_indices),
     )
 
-    eq_restraint = openmm.CustomExternalForce("k*periodicdistance(x,y,z,x0,y0,z0)^2")
+    eq_restraint = _openmm.CustomExternalForce("k*periodicdistance(x,y,z,x0,y0,z0)^2")
     eq_restraint.addGlobalParameter(
-        "k", PROTEIN_HEAVY_RESTRAINT_K * omm_unit.kilojoule_per_mole / omm_unit.nanometer**2
+        "k",
+        PROTEIN_HEAVY_RESTRAINT_K * _omm_unit.kilojoule_per_mole / _omm_unit.nanometer**2,
     )
     eq_restraint.addPerParticleParameter("x0")
     eq_restraint.addPerParticleParameter("y0")
     eq_restraint.addPerParticleParameter("z0")
 
-    for _idx in protein_heavy_indices:
-        x0, y0, z0 = eq_coords_nm[_idx]
-        eq_restraint.addParticle(_idx, [float(x0), float(y0), float(z0)])
+    for _idx in _protein_heavy_indices:
+        _x0, _y0, _z0 = eq_coords_nm[_idx]
+        eq_restraint.addParticle(_idx, [float(_x0), float(_y0), float(_z0)])
     eq_system.addForce(eq_restraint)
 
     # ── Stage A: Protein-restrained minimization ───────────────────────────
     logger.info("Stage A: Protein-restrained energy minimization...")
-    eq_integrator_min = openmm.VerletIntegrator(0.001 * omm_unit.picoseconds)
-    eq_sim_min = openmm_app.Simulation(eq_topology, eq_system, eq_integrator_min, eq_platform)
-    eq_sim_min.context.setPositions(eq_coords_nm * omm_unit.nanometers)
+    eq_integrator_min = _openmm.VerletIntegrator(0.001 * _omm_unit.picoseconds)
+    eq_sim_min = _openmm_app.Simulation(eq_topology, eq_system, eq_integrator_min, eq_platform)
+    eq_sim_min.context.setPositions(eq_coords_nm * _omm_unit.nanometers)
 
     state_before_min = eq_sim_min.context.getState(getEnergy=True)
     eq_energy_before_min = state_before_min.getPotentialEnergy().value_in_unit(
-        omm_unit.kilojoule_per_mole
+        _omm_unit.kilojoule_per_mole
     )
-    openmm.LocalEnergyMinimizer.minimize(eq_sim_min.context, tolerance=10.0, maxIterations=1000)
+    _openmm.LocalEnergyMinimizer.minimize(eq_sim_min.context, tolerance=10.0, maxIterations=1000)
     state_after_min = eq_sim_min.context.getState(getEnergy=True, getPositions=True)
     eq_energy_after_min = state_after_min.getPotentialEnergy().value_in_unit(
-        omm_unit.kilojoule_per_mole
+        _omm_unit.kilojoule_per_mole
     )
     minimized_positions = state_after_min.getPositions(asNumpy=True)
     logger.info(
@@ -2045,43 +2050,44 @@ def _(
     # Need a fresh system since we can't change integrator on existing context
     eq_system_nvt = interchange.to_openmm_system()
     # Re-add the same restraint force
-    eq_restraint_nvt = openmm.CustomExternalForce("k*periodicdistance(x,y,z,x0,y0,z0)^2")
+    eq_restraint_nvt = _openmm.CustomExternalForce("k*periodicdistance(x,y,z,x0,y0,z0)^2")
     eq_restraint_nvt.addGlobalParameter(
-        "k", PROTEIN_HEAVY_RESTRAINT_K * omm_unit.kilojoule_per_mole / omm_unit.nanometer**2
+        "k",
+        PROTEIN_HEAVY_RESTRAINT_K * _omm_unit.kilojoule_per_mole / _omm_unit.nanometer**2,
     )
     eq_restraint_nvt.addPerParticleParameter("x0")
     eq_restraint_nvt.addPerParticleParameter("y0")
     eq_restraint_nvt.addPerParticleParameter("z0")
     # Use the minimized positions as restraint reference
-    min_pos_nm = minimized_positions.value_in_unit(omm_unit.nanometer)
-    for _idx in protein_heavy_indices:
-        x0, y0, z0 = min_pos_nm[_idx]
-        eq_restraint_nvt.addParticle(_idx, [float(x0), float(y0), float(z0)])
+    min_pos_nm = minimized_positions.value_in_unit(_omm_unit.nanometer)
+    for _idx in _protein_heavy_indices:
+        _x0, _y0, _z0 = min_pos_nm[_idx]
+        eq_restraint_nvt.addParticle(_idx, [float(_x0), float(_y0), float(_z0)])
     eq_system_nvt.addForce(eq_restraint_nvt)
 
-    eq_integrator_nvt = openmm.LangevinMiddleIntegrator(
-        VACUUM_EQ_TEMP_K * omm_unit.kelvin,
-        VACUUM_EQ_FRICTION_PER_PS / omm_unit.picosecond,
-        VACUUM_EQ_TIMESTEP_FS * omm_unit.femtosecond,
+    eq_integrator_nvt = _openmm.LangevinMiddleIntegrator(
+        VACUUM_EQ_TEMP_K * _omm_unit.kelvin,
+        VACUUM_EQ_FRICTION_PER_PS / _omm_unit.picosecond,
+        VACUUM_EQ_TIMESTEP_FS * _omm_unit.femtosecond,
     )
 
-    eq_sim_nvt = openmm_app.Simulation(eq_topology, eq_system_nvt, eq_integrator_nvt, eq_platform)
+    eq_sim_nvt = _openmm_app.Simulation(eq_topology, eq_system_nvt, eq_integrator_nvt, eq_platform)
     eq_sim_nvt.context.setPositions(minimized_positions)
-    eq_sim_nvt.context.setVelocitiesToTemperature(VACUUM_EQ_TEMP_K * omm_unit.kelvin)
+    eq_sim_nvt.context.setVelocitiesToTemperature(VACUUM_EQ_TEMP_K * _omm_unit.kelvin)
 
     state_before_nvt = eq_sim_nvt.context.getState(getEnergy=True)
     eq_energy_before_nvt = state_before_nvt.getPotentialEnergy().value_in_unit(
-        omm_unit.kilojoule_per_mole
+        _omm_unit.kilojoule_per_mole
     )
 
     eq_sim_nvt.step(VACUUM_EQ_STEPS)
 
     state_after_nvt = eq_sim_nvt.context.getState(getEnergy=True, getPositions=True)
     eq_energy_after_nvt = state_after_nvt.getPotentialEnergy().value_in_unit(
-        omm_unit.kilojoule_per_mole
+        _omm_unit.kilojoule_per_mole
     )
     equilibrated_positions = state_after_nvt.getPositions(asNumpy=True)
-    equilibrated_coords_angstrom = equilibrated_positions.value_in_unit(omm_unit.angstrom)
+    equilibrated_coords_angstrom = equilibrated_positions.value_in_unit(_omm_unit.angstrom)
 
     logger.info(
         "  NVT: E_before=%.2f, E_after=%.2f kJ/mol",
@@ -2098,10 +2104,10 @@ def _(
         _atom_index = 0
         _updated_atoms = 0
         _preserved_atoms = 0
-        n_simulated = len(equilibrated_coords_angstrom)
+        _n_simulated = len(equilibrated_coords_angstrom)
         for _line in _template_lines:
             if _line.startswith(("ATOM", "HETATM")):
-                if _atom_index < n_simulated:
+                if _atom_index < _n_simulated:
                     _x, _y, _z = equilibrated_coords_angstrom[_atom_index]
                     _f.write(f"{_line[:30]}{_x:8.3f}{_y:8.3f}{_z:8.3f}{_line[54:]}")
                     _updated_atoms += 1
@@ -2112,10 +2118,10 @@ def _(
             else:
                 _f.write(_line)
 
-    if _updated_atoms != n_simulated:
+    if _updated_atoms != _n_simulated:
         raise RuntimeError(
             f"PDB write mismatch: wrote coords for {_updated_atoms} atoms "
-            f"but simulation had {n_simulated} atoms"
+            f"but simulation had {_n_simulated} atoms"
         )
 
     logger.info("Wrote equilibrated PDB: %s", equilibrated_output_path)
@@ -2166,10 +2172,10 @@ def _(
     # Simpler approach: extract backbone heavy (CA, C, N, O) from crystal by
     # PDB atom name, and compare to backbone heavy in the equilibrated structure.
 
-    protein_backbone_heavy_indices = component_metadata["protein"]["backbone_heavy_atom_indices"]
+    _protein_backbone_heavy_indices = component_metadata["protein"]["backbone_heavy_atom_indices"]
 
     # Extract backbone coords from equilibrated structure
-    eq_backbone_coords = equilibrated_coords_angstrom[protein_backbone_heavy_indices]
+    eq_backbone_coords = equilibrated_coords_angstrom[_protein_backbone_heavy_indices]
 
     # Extract backbone coords from crystal structure by matching PDB names
     _crystal_backbone_coords = []

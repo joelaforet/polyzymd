@@ -273,12 +273,28 @@ def create_solvated_interchange(solvated_topology, conjugate_off, free_polymer_o
     # The conjugate_off molecule has pre-computed charges (ff14SB for protein,
     # NAGL for polymer). Pass it via charge_from_molecules so the FF doesn't
     # try to re-compute charges.
+    # OpenFF requires charge_from_molecules entries to be isomorphically unique.
+    # Deduplicate free polymers (same sequence → same graph) keeping one per
+    # unique topology. OpenFF will match charges to all copies automatically.
+    _seen_smiles: set[str] = set()
+    _unique_free: list = []
+    for _fmol in free_polymer_offs:
+        _smi = _fmol.to_smiles()
+        if _smi not in _seen_smiles:
+            _seen_smiles.add(_smi)
+            _unique_free.append(_fmol)
+    logger.info(
+        "  Charge molecules: 1 conjugate + %d unique free polymers (of %d total)",
+        len(_unique_free),
+        len(free_polymer_offs),
+    )
+
     # Suppress per-atom logging flood from OpenFF nonbonded assignment
     _nonbonded_logger = logging.getLogger("openff.interchange.smirnoff._nonbonded")
     _prev_level = _nonbonded_logger.level
     _nonbonded_logger.setLevel(logging.WARNING)
     try:
-        charge_molecules = [conjugate_off, *free_polymer_offs]
+        charge_molecules = [conjugate_off, *_unique_free]
         solvated_interchange = ff.create_interchange(
             solvated_topology,
             charge_from_molecules=charge_molecules,
