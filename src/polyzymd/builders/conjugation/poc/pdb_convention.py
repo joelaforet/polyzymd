@@ -17,13 +17,13 @@ _CONJUGATED_RESNAME_MAP = {
 }
 
 
-def _parse_protein_records(crystal_pdb_path: Path) -> list[tuple[str, str, str]]:
-    """Parse canonical atom records from the crystal protein PDB
+def _parse_protein_records(reference_pdb_path: Path) -> list[tuple[str, str, str]]:
+    """Parse canonical atom records from the reference protein PDB
 
     Parameters
     ----------
-    crystal_pdb_path : Path
-        Path to the crystal protein PDB used as canonical naming source
+    reference_pdb_path : Path
+        Reference PDB containing the post-conjugation protein atoms (e.g. assembled PDB)
 
     Returns
     -------
@@ -33,7 +33,7 @@ def _parse_protein_records(crystal_pdb_path: Path) -> list[tuple[str, str, str]]
     """
 
     records: list[tuple[str, str, str]] = []
-    with crystal_pdb_path.open("r", encoding="utf-8") as handle:
+    with reference_pdb_path.open("r", encoding="utf-8") as handle:
         for line in handle:
             if not line.startswith(("ATOM", "HETATM")):
                 continue
@@ -43,7 +43,7 @@ def _parse_protein_records(crystal_pdb_path: Path) -> list[tuple[str, str, str]]
             records.append((atom_name, residue_name, residue_number))
 
     if not records:
-        raise ValueError(f"No ATOM/HETATM records found in {crystal_pdb_path}")
+        raise ValueError(f"No ATOM/HETATM records found in {reference_pdb_path}")
 
     return records
 
@@ -101,7 +101,7 @@ def _chain_for_solvent_offset(offset: int) -> str:
 def apply_chain_convention(
     solvated_topology: Any,
     component_metadata: dict[str, Any],
-    crystal_pdb_path: Path,
+    reference_pdb_path: Path,
     crosslink_resids: tuple[int, ...],
 ) -> dict[str, Any]:
     """Patch an OpenFF solvated topology to PolyzyMD chain convention
@@ -112,8 +112,10 @@ def apply_chain_convention(
         Solvated OpenFF ``Topology`` object to patch in place
     component_metadata : dict[str, Any]
         Metadata dictionary with component atom indices from the conjugation POC
-    crystal_pdb_path : Path
-        Path to the crystal protein PDB used to recover canonical protein naming
+    reference_pdb_path : Path
+        Path to a reference PDB whose first N ATOM/HETATM records provide canonical
+        protein naming. Use the assembled PDB (not the crystal PDB, which has
+        pre-conjugation atom count).
     crosslink_resids : tuple[int, ...]
         Assembled-PDB residue numbers corresponding to crosslinked NHS residues
 
@@ -123,7 +125,7 @@ def apply_chain_convention(
         Summary counts for patched components and used chains
     """
 
-    canonical_records = _parse_protein_records(Path(crystal_pdb_path))
+    canonical_records = _parse_protein_records(Path(reference_pdb_path))
     protein_atom_indices = list(component_metadata["protein"]["atom_indices"])
     if len(canonical_records) != len(protein_atom_indices):
         raise ValueError(
