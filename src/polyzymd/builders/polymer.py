@@ -79,7 +79,7 @@ class PolymerBuilder:
 
     1. Cached mode (legacy): Load pre-built SDF files from disk
        - Requires sdf_directory with pre-built polymer files
-        - Filenames: {type_prefix}_seq={sequence}_{length}-mer_charged.sdf
+       - Filenames: {type_prefix}_seq={sequence}_{length}-mer_charged.sdf
 
     2. Dynamic mode: Generate polymers on-the-fly using Polymerist
        - Requires monomer SMILES and ATRP reaction templates

@@ -736,9 +736,10 @@ class EquilibrationStageConfig(BaseModel):
     """Configuration for a single equilibration stage.
 
     Supports two temperature modes:
-    1. Constant temperature: Set 'temperature' field
-    2. Temperature ramping (simulated annealing): Set 'temperature_start' and
-       'temperature_end' fields
+
+    1. Constant temperature: Set 'temperature' field.
+    2. Temperature ramping (simulated annealing): Set 'temperature_start'
+       and 'temperature_end' fields.
 
     Position restraints can be applied to hold specific atom groups in place
     during the stage.
