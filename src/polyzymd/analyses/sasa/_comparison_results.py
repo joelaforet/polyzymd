@@ -55,6 +55,7 @@ class SASARunPairwiseComparison(BaseModel):
     condition_b: str
     t_statistic: float
     p_value: float
+    p_value_adjusted: float | None = None
     cohens_d: float
     effect_interpretation: str
     direction: str
@@ -82,6 +83,7 @@ class SASAComparisonResult(BaseComparisonResult[SASAConditionSummary, SASARunPai
     n_runs: int
     run_labels: list[str]
     control_label: str | None = None
+    fdr_alpha: float | None = None
     conditions: list[SASAConditionSummary]
     pairwise_comparisons: list[SASARunPairwiseComparison]
     anova: None = None  # type: ignore[assignment]
