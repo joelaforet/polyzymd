@@ -11,7 +11,7 @@ The RMSD analysis plugin was added in PolyzyMD 1.3.0.
 **Want to understand the statistics?** This guide focuses on getting results
 quickly. For proper uncertainty quantification (autocorrelation correction,
 SEM vs. SD) and interpretation of RMSD curves, see the
-[RMSD Best Practices Guide](analysis_rmsd_best_practices.md).
+[RMSD Best Practices Guide](../explanation/analysis_rmsd_best_practices.md).
 ```
 
 ## TL;DR
@@ -599,9 +599,9 @@ then use RMSF to identify which regions drive flexibility differences.
 
 ## Next Steps
 
-- **Understand RMSD interpretation**: [RMSD Best Practices](analysis_rmsd_best_practices.md)
+- **Understand RMSD interpretation**: [RMSD Best Practices](../explanation/analysis_rmsd_best_practices.md)
 - **Compare conditions**: [Comparing Conditions Guide](analysis_compare_conditions.md)
 - **RMSF analysis**: [RMSF Quick Start](analysis_rmsf_quickstart.md)
-- **Understand statistics**: [Statistical Best Practices](analysis_statistics_best_practices.md)
+- **Understand statistics**: [Statistical Best Practices](../explanation/analysis_statistics_best_practices.md)
 - **Distance analysis**: [Distance Quick Start](analysis_distances_quickstart.md)
 - **Contact analysis**: [Contacts Quick Start](analysis_contacts_quickstart.md)

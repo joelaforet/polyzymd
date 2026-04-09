@@ -150,6 +150,6 @@ figure to `scripts/benchmark_rmsf_output/`.
 
 ## See Also
 
-- [RMSF Quick Start](analysis_rmsf_quickstart.md) — Get RMSF results in 5 minutes
+- [RMSF Quick Start](../how_to/analysis_rmsf_quickstart.md) — Get RMSF results in 5 minutes
 - [RMSF Best Practices](analysis_rmsf_best_practices.md) — Statistical rigor, interpretation, pitfalls
 - [Reference Structure Selection](analysis_reference_selection.md) — Average, centroid, and external reference modes

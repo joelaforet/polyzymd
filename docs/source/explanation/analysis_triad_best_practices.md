@@ -5,7 +5,7 @@ including statistical considerations, interpretation guidelines, and worked
 examples from real enzyme-polymer systems.
 
 ```{note}
-**Just need quick results?** See the [Quick Start Guide](analysis_triad_quickstart.md)
+**Just need quick results?** See the [Quick Start Guide](../how_to/analysis_triad_quickstart.md)
 for copy-paste commands and minimal setup.
 ```
 
@@ -674,7 +674,7 @@ future release. In the meantime, you can:
 2. Use VMD/PyMOL to visualize triad geometry along trajectories
 3. Export distance timeseries for external analysis
 
-See the [RMSF plotting documentation](analysis_rmsf_quickstart.md#comparing-two-conditions)
+See the [RMSF plotting documentation](../how_to/analysis_rmsf_quickstart.md#comparing-two-conditions)
 for general guidance on comparing analysis results across conditions.
 ```
 
@@ -712,7 +712,7 @@ Comprehensive reference for hydrogen bond geometry in biomolecules.
 
 ## See Also
 
-- [Quick Start Guide](analysis_triad_quickstart.md) - Get results fast
-- [RMSF Analysis](analysis_rmsf_quickstart.md) - Analyze flexibility
-- [Comparing Conditions](analysis_compare_conditions.md) - Statistical comparisons
+- [Quick Start Guide](../how_to/analysis_triad_quickstart.md) - Get results fast
+- [RMSF Analysis](../how_to/analysis_rmsf_quickstart.md) - Analyze flexibility
+- [Comparing Conditions](../how_to/analysis_compare_conditions.md) - Statistical comparisons
 - [Statistical Best Practices](analysis_rmsf_best_practices.md) - Detailed statistics guide

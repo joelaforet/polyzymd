@@ -123,7 +123,7 @@ Check that your change:
 ## Related pages
 
 - contributor environment: {doc}`../contributor_guide/setup`
-- architecture overview: {doc}`architecture`
+- architecture overview: {doc}`../explanation/architecture`
 - packaging notes: {doc}`packaging`
 
 <!-- IMAGE OPPORTUNITY: Add a contributor workflow figure showing `branch ->

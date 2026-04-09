@@ -5,7 +5,7 @@ Get RMSF (Root Mean Square Fluctuation) results in under 5 minutes.
 ```{note}
 **Want to understand the statistics?** This guide focuses on getting results quickly.
 For proper uncertainty quantification and statistical best practices, see the
-[Best Practices Guide](analysis_rmsf_best_practices.md).
+[Best Practices Guide](../explanation/analysis_rmsf_best_practices.md).
 ```
 
 ## TL;DR
@@ -284,7 +284,7 @@ With Polymer vs No Polymer: -22.9%, p=0.0211*, d=4.06
 ```{tip}
 For proper statistical interpretation (understanding p-values with small N, 
 effect sizes, ANOVA for 3+ conditions), see the 
-[Best Practices Guide](analysis_rmsf_best_practices.md#comparing-conditions).
+[Best Practices Guide](../explanation/analysis_rmsf_best_practices.md#comparing-conditions).
 ```
 
 ## Output Files
@@ -422,7 +422,7 @@ plugins:
     reference_file: "/path/to/crystal_structure.pdb"
 ```
 
-See [Reference Structure Selection](analysis_reference_selection.md) for details
+See [Reference Structure Selection](../explanation/analysis_reference_selection.md) for details
 on when to use each mode.
 
 ## Troubleshooting
@@ -448,7 +448,7 @@ your trajectories are stored.
 **Cause**: Correlation time is long relative to simulation length
 
 **This is informational, not an error.** Your results are still valid, but
-uncertainties may be underestimated. See [Best Practices Guide](analysis_rmsf_best_practices.md#understanding-the-warnings) for details.
+uncertainties may be underestimated. See [Best Practices Guide](../explanation/analysis_rmsf_best_practices.md#understanding-the-warnings) for details.
 
 **Quick fixes**:
 - Use multiple replicates (recommended)
@@ -470,11 +470,11 @@ polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns --debug
 
 **Fix**: This is informational - analysis continues with available replicates.
 If this is unexpected, check that the simulation completed and paths are correct.
-See [Handling Incomplete Data](analysis_rmsf_best_practices.md#handling-incomplete-data)
+See [Handling Incomplete Data](../explanation/analysis_rmsf_best_practices.md#handling-incomplete-data)
 for details.
 
 ## Next Steps
 
-- **Understand the statistics**: [Best Practices Guide](analysis_rmsf_best_practices.md)
-- **Choose reference structures**: [Reference Selection Guide](analysis_reference_selection.md)
+- **Understand the statistics**: [Best Practices Guide](../explanation/analysis_rmsf_best_practices.md)
+- **Choose reference structures**: [Reference Selection Guide](../explanation/analysis_reference_selection.md)
 - **Analyze distances**: `polyzymd compare run distances --help`

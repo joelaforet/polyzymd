@@ -1353,9 +1353,9 @@ pixi run -e build pytest tests/test_solvent_contacts_plugin.py -v
 
 ## See Also
 
-- {doc}`architecture` — Overall system architecture
-- {doc}`analysis_statistics_best_practices` — Autocorrelation and uncertainty
-- {doc}`analysis_compare_conditions` — User guide for running comparisons
+- {doc}`../explanation/architecture` — Overall system architecture
+- {doc}`../explanation/analysis_statistics_best_practices` — Autocorrelation and uncertainty
+- {doc}`../how_to/analysis_compare_conditions` — User guide for running comparisons
 - API reference: `polyzymd.analyses.base.Analysis`
 
 (comparison-yaml)=
@@ -1467,5 +1467,5 @@ polyzymd compare run-all
 polyzymd compare plot-all
 ```
 
-See {doc}`analysis_compare_conditions` for a complete user guide on running
+See {doc}`../how_to/analysis_compare_conditions` for a complete user guide on running
 comparisons.

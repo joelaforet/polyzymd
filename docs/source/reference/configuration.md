@@ -80,7 +80,7 @@ substrate: null
 PolyzyMD supports two modes for polymer generation: **cached** (load from pre-built SDF files) and **dynamic** (generate on-the-fly from SMILES).
 
 ```{tip}
-For a complete guide on dynamic polymer generation, see {doc}`dynamic_polymers`.
+For a complete guide on dynamic polymer generation, see {doc}`../how_to/dynamic_polymers`.
 ```
 
 ### Basic Configuration (Cached Mode)
@@ -480,7 +480,7 @@ restraints:
     enabled: true                        # Enable/disable
 ```
 
-See {doc}`restraints` for detailed selection syntax.
+See {doc}`../how_to/restraints` for detailed selection syntax.
 
 ### Restraint Types
 
@@ -694,8 +694,8 @@ See the example configurations in `src/polyzymd/configs/examples/`:
 
 ## See Also
 
-- {doc}`dynamic_polymers` - Dynamic polymer generation from SMILES
-- {doc}`gromacs_export` - Running simulations with GROMACS
-- {doc}`polymers` - Polymer setup guide
-- {doc}`restraints` - Atom selection and restraints
+- {doc}`../how_to/dynamic_polymers` - Dynamic polymer generation from SMILES
+- {doc}`../how_to/gromacs_export` - Running simulations with GROMACS
+- {doc}`../how_to/polymers` - Polymer setup guide
+- {doc}`../how_to/restraints` - Atom selection and restraints
 - {doc}`cli_reference` - CLI documentation

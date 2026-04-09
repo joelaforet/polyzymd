@@ -19,7 +19,7 @@ available, but PolyzyMD labels them as experimental.
 
 ```{note}
 If you have not yet run a full analysis/comparison workflow, start with
-[Tutorial: Analyze a Study from Finished Simulations](analysis_complete_workflow.md).
+[Tutorial: Analyze a Study from Finished Simulations](../tutorials/analysis_complete_workflow.md).
 ```
 
 ## Before You Start
@@ -312,6 +312,6 @@ polyzymd compare run binding_free_energy
 
 ## See Also
 
-- [Tutorial: Analyze a Study from Finished Simulations](analysis_complete_workflow.md)
+- [Tutorial: Analyze a Study from Finished Simulations](../tutorials/analysis_complete_workflow.md)
 - [Comparison and Plotting Reference](../reference/analysis_comparison_reference.md)
-- [Statistical Best Practices for Analysis](analysis_statistics_best_practices.md)
+- [Statistical Best Practices for Analysis](../explanation/analysis_statistics_best_practices.md)

@@ -8,7 +8,7 @@ The Rg analysis plugin was added in PolyzyMD 1.3.0.
 ```
 
 ```{note}
-**Just need quick results?** See the [Quick Start Guide](analysis_rg_quickstart.md)
+**Just need quick results?** See the [Quick Start Guide](../how_to/analysis_rg_quickstart.md)
 for copy-paste commands and minimal setup.
 ```
 
@@ -646,9 +646,9 @@ Discussion of Rg as an order parameter for conformational sampling quality.
 
 ## See Also
 
-- [Quick Start Guide](analysis_rg_quickstart.md) — Get results fast
+- [Quick Start Guide](../how_to/analysis_rg_quickstart.md) — Get results fast
 - [Statistics Best Practices](analysis_statistics_best_practices.md) — Foundational statistics for MD
 - [RMSD Best Practices](analysis_rmsd_best_practices.md) — Complementary structural deviation analysis
 - [RMSF Best Practices](analysis_rmsf_best_practices.md) — Per-residue fluctuation analysis
-- [Compare Simulation Conditions](analysis_compare_conditions.md) — Full comparison workflow
+- [Compare Simulation Conditions](../how_to/analysis_compare_conditions.md) — Full comparison workflow
 - [LiveCoMS Best Practices](https://livecomsjournal.org/index.php/livecoms/article/view/v1i1e5067) — Full methodology paper

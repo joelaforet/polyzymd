@@ -158,9 +158,9 @@ Check that:
 
 ## Related pages
 
-- schema details: {doc}`configuration`
+- schema details: {doc}`../reference/configuration`
 - staged setup workflows: {doc}`equilibration`
-- first build tutorial: {doc}`quickstart`
+- first build tutorial: {doc}`../tutorials/quickstart`
 
 <!-- IMAGE OPPORTUNITY: Add a PyMOL screenshot of `solvated_system.pdb` with one
 protein atom and one ligand atom labeled, plus an annotation showing how those

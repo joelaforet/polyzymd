@@ -186,10 +186,10 @@ At this point you should have:
 
 ## Where to go next
 
-- Add a substrate or polymers: {doc}`configuration`
-- Add distance restraints: {doc}`restraints`
-- Tune staged equilibration: {doc}`equilibration`
-- Run on a cluster: {doc}`hpc_slurm`
+- Add a substrate or polymers: {doc}`../reference/configuration`
+- Add distance restraints: {doc}`../how_to/restraints`
+- Tune staged equilibration: {doc}`../how_to/equilibration`
+- Run on a cluster: {doc}`../how_to/hpc_slurm`
 
 <!-- IMAGE OPPORTUNITY: Add a screenshot of the generated project scaffold just
 after `polyzymd init`, with `config.yaml`, `structures/`, `job_scripts/`, and

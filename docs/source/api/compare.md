@@ -9,9 +9,9 @@ plotting.
 
 ## Where to Start
 
-- New plugin author: [Extending the Analysis Framework](../tutorials/extending_analyses.md)
+- New plugin author: [Extending the Analysis Framework](../contributor_guide/extending_analyses.md)
 - Plugin system API: [Analyses Plugin System API](analyses.md)
-- User workflow: [How to Compare Simulation Conditions](../tutorials/analysis_compare_conditions.md)
+- User workflow: [How to Compare Simulation Conditions](../how_to/analysis_compare_conditions.md)
 
 ## Package Map
 

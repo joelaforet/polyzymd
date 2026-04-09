@@ -5,7 +5,7 @@ LiveCoMS recommendations for uncertainty quantification in molecular dynamics
 simulations.
 
 ```{note}
-**Just need quick results?** See the [Quick Start Guide](analysis_rmsf_quickstart.md)
+**Just need quick results?** See the [Quick Start Guide](../how_to/analysis_rmsf_quickstart.md)
 for copy-paste commands and minimal setup.
 ```
 
@@ -735,7 +735,7 @@ Discussion of RMSD-based convergence assessment.
 
 ## See Also
 
-- [Quick Start Guide](analysis_rmsf_quickstart.md) — Get results fast
+- [Quick Start Guide](../how_to/analysis_rmsf_quickstart.md) — Get results fast
 - [Implementation Verification](analysis_rmsf_verification.md) — 3-way benchmark against MDAnalysis and GROMACS
 - [Statistics Best Practices](analysis_statistics_best_practices.md) — Foundational statistics for MD
 - [Reference Structure Selection](analysis_reference_selection.md) — Choose alignment reference

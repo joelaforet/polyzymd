@@ -13,7 +13,7 @@ polyzymd compare init -n my_study
 polyzymd compare run-all --plot
 ```
 
-See {doc}`analysis_compare_conditions` for the full guide.
+See {doc}`../how_to/analysis_compare_conditions` for the full guide.
 :::
 
 This tutorial walks through one complete PolyzyMD analysis story:
@@ -286,15 +286,15 @@ figures exist, and `polyzymd compare plot-all` completes without error.
 
 ## What to Do Next
 
-- Use [How to Compare Simulation Conditions](analysis_compare_conditions.md) for
+- Use [How to Compare Simulation Conditions](../how_to/analysis_compare_conditions.md) for
   a shorter operational version of this workflow
 - Use [Comparison and Plotting Reference](../reference/analysis_comparison_reference.md)
   for CLI, config, and output lookup
 - Explore metric-specific guides:
-  - [Run RMSF Analysis](analysis_rmsf_quickstart.md)
-  - [Run Contacts Analysis](analysis_contacts_quickstart.md)
-  - [Run Distance Analysis](analysis_distances_quickstart.md)
-  - [Run Catalytic Triad Analysis](analysis_triad_quickstart.md)
+  - [Run RMSF Analysis](../how_to/analysis_rmsf_quickstart.md)
+  - [Run Contacts Analysis](../how_to/analysis_contacts_quickstart.md)
+  - [Run Distance Analysis](../how_to/analysis_distances_quickstart.md)
+  - [Run Catalytic Triad Analysis](../how_to/analysis_triad_quickstart.md)
 
 Experimental workflows remain available, but they are intentionally outside the
 main tutorial path for this release.

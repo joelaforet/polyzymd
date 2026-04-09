@@ -57,7 +57,7 @@ pip install -e .
 ValidationError: enzyme -> pdb_path: field required
 ```
 
-**Solution:** Check your YAML has all required fields. See {doc}`configuration` for required fields.
+**Solution:** Check your YAML has all required fields. See {doc}`../reference/configuration` for required fields.
 
 ### "File not found"
 

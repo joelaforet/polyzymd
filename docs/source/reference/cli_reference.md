@@ -26,7 +26,7 @@ which subsystem (building, simulation, workflow, etc.) produced each log
 line. Colors are auto-detected based on your terminal capabilities and can
 be disabled with `--no-color` or the `NO_COLOR` environment variable.
 
-See the [Colored Logging Guide](colored_logging.md) for full details
+See the [Colored Logging Guide](../explanation/colored_logging.md) for full details
 including the color table, terminal support levels, and HPC notes.
 
 ### Logging Behavior
@@ -313,7 +313,7 @@ Submit self-resubmitting simulation jobs to SLURM for HPC execution.
 
 Each replicate gets one SLURM script that handles the full simulation
 lifecycle: building, equilibration, production segments, interruption
-recovery, and resubmission. See {doc}`hpc_slurm` for details.
+recovery, and resubmission. See {doc}`../how_to/hpc_slurm` for details.
 
 ```bash
 polyzymd submit --config <path> --replicates <range> [options]
@@ -377,7 +377,7 @@ The submit command creates one self-resubmitting SLURM script per replicate:
 ```
 
 Each job is identical and idempotent — it scans the filesystem to determine
-what work remains. See {doc}`hpc_slurm` for details.
+what work remains. See {doc}`../how_to/hpc_slurm` for details.
 
 ---
 
@@ -980,14 +980,14 @@ output:
 |------|---------|
 | 0 | Success |
 | 1 | Error (validation failure, build failure, etc.) |
-| 99 | Graceful shutdown — simulation was interrupted but interrupted state was saved (see {doc}`hpc_slurm`) |
+| 99 | Graceful shutdown — simulation was interrupted but interrupted state was saved (see {doc}`../how_to/hpc_slurm`) |
 
 ---
 
 ## See Also
 
-- {doc}`quickstart` - Getting started tutorial
+- {doc}`../tutorials/quickstart` - Getting started tutorial
 - {doc}`configuration` - Configuration file reference
-- {doc}`hpc_slurm` - HPC and SLURM guide
-- {doc}`analysis_rmsf_quickstart` - RMSF analysis tutorial
-- {doc}`analysis_compare_conditions` - Comparing simulation conditions
+- {doc}`../how_to/hpc_slurm` - HPC and SLURM guide
+- {doc}`../how_to/analysis_rmsf_quickstart` - RMSF analysis tutorial
+- {doc}`../how_to/analysis_compare_conditions` - Comparing simulation conditions

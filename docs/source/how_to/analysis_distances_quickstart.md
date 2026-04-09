@@ -5,7 +5,7 @@ Compute inter-atomic distances with proper statistical handling in under 5 minut
 ```{note}
 **Want to understand the statistics?** This guide focuses on getting results quickly.
 For proper uncertainty quantification (autocorrelation correction, SEM vs. SD),
-see the [Statistical Best Practices Guide](analysis_statistics_best_practices.md).
+see the [Statistical Best Practices Guide](../explanation/analysis_statistics_best_practices.md).
 ```
 
 ## TL;DR
@@ -613,12 +613,12 @@ This provides:
 - **Statistical tests**: t-tests, Cohen's d effect sizes, ANOVA
 - **Per-pair summaries**: Distance statistics for each defined pair
 
-See [Comparing Distances Across Conditions](analysis_compare_conditions.md#comparing-distances-across-conditions)
+See [Comparing Distances Across Conditions](analysis_compare_conditions.md)
 for full documentation.
 
 ## Next Steps
 
-- **Compare distances across conditions**: [Comparing Conditions Guide](analysis_compare_conditions.md#comparing-distances-across-conditions)
+- **Compare distances across conditions**: [Comparing Conditions Guide](analysis_compare_conditions.md)
 - **Catalytic triad analysis**: [Triad Quick Start](analysis_triad_quickstart.md)
-- **Understand statistics**: [Statistical Best Practices](analysis_statistics_best_practices.md)
+- **Understand statistics**: [Statistical Best Practices](../explanation/analysis_statistics_best_practices.md)
 - **Contact analysis**: [Contacts Quick Start](analysis_contacts_quickstart.md)

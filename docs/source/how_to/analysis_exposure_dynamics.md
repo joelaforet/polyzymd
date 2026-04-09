@@ -831,6 +831,6 @@ rm -rf condition_name/analysis/rep*/exposure/
 
 - [Contacts Analysis Quick Start](analysis_contacts_quickstart.md) — contacts analysis required before exposure analysis
 - [Binding Preference Analysis](analysis_binding_preference.md) — static SASA-based enrichment
-- [Statistics Best Practices](analysis_statistics_best_practices.md) — replicate aggregation, uncertainty
+- [Statistics Best Practices](../explanation/analysis_statistics_best_practices.md) — replicate aggregation, uncertainty
 - [Comparing Conditions](analysis_compare_conditions.md) — multi-condition workflows
 - [Equilibration](equilibration.md) — how equilibration frames affect trajectory-level analyses

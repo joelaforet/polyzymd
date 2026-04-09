@@ -218,8 +218,8 @@ polyzymd compare plot-all
 
 For interpretation guidance rather than lookup, see:
 
-- [Statistical Best Practices for Analysis](../tutorials/analysis_statistics_best_practices.md)
-- [How to Compare Simulation Conditions](../tutorials/analysis_compare_conditions.md)
+- [Statistical Best Practices for Analysis](../explanation/analysis_statistics_best_practices.md)
+- [How to Compare Simulation Conditions](../how_to/analysis_compare_conditions.md)
 
 :::{admonition} Version 1.3.0 migration
 :class: note

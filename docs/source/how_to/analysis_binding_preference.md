@@ -1211,5 +1211,5 @@ could mean:
 - [Contacts Analysis Quick Start](analysis_contacts_quickstart.md) — basic contacts analysis
 - [Contacts Analysis Cookbook](analysis_contacts_cookbook.md) — worked examples
 - [Surface Exposure Calculation](analysis_contacts_cookbook.md#recipe-4-active-site-contacts-vs-surface-contacts) — SASA filtering
-- [Statistics Best Practices](analysis_statistics_best_practices.md) — uncertainty quantification
+- [Statistics Best Practices](../explanation/analysis_statistics_best_practices.md) — uncertainty quantification
 - [Comparing Conditions](analysis_compare_conditions.md) — multi-condition workflows

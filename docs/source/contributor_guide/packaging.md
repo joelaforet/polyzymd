@@ -466,5 +466,5 @@ polyzymd/
 ## See Also
 
 - {doc}`contributing` - How to contribute to PolyzyMD
-- {doc}`architecture` - Internal architecture overview
-- {doc}`installation` - User installation guide
+- {doc}`../explanation/architecture` - Internal architecture overview
+- {doc}`../tutorials/installation` - User installation guide

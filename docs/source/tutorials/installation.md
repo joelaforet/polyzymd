@@ -76,7 +76,7 @@ polyzymd info
 
 Supported presets currently target CU Boulder Alpine/Blanca and PSC Bridges2.
 For submission details and cluster-specific notes, see
-{doc}`hpc_slurm`.
+{doc}`../how_to/hpc_slurm`.
 
 ### Choose the Right CUDA Environment
 
@@ -135,7 +135,7 @@ pixi shell -e cuda-12-6
 python -c "import openmm; print(openmm.Platform.getPlatformByName('CUDA').getName())"
 ```
 
-For broader installation and workflow issues, see {doc}`troubleshooting`.
+For broader installation and workflow issues, see {doc}`../how_to/troubleshooting`.
 
 ## Contributor Setup
 

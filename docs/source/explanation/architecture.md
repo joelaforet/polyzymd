@@ -73,7 +73,7 @@ compute → aggregate → compare → plot → format.
 
 To add a new analysis, create a package in `analyses/<name>/` that subclasses
 `Analysis`, or use `polyzymd new-analysis <name>` to scaffold one automatically.
-See {doc}`extending_analyses` for the full guide.
+See {doc}`../contributor_guide/extending_analyses` for the full guide.
 
 ### `compare/`
 
@@ -158,9 +158,9 @@ into module-level details or API reference pages.
 
 ## Related pages
 
-- contributor workflows: {doc}`contributing`
-- extending analyses: {doc}`extending_analyses`
-- SLURM usage: {doc}`hpc_slurm`
+- contributor workflows: {doc}`../contributor_guide/contributing`
+- extending analyses: {doc}`../contributor_guide/extending_analyses`
+- SLURM usage: {doc}`../how_to/hpc_slurm`
 - API details: {doc}`../api/overview`
 
 <!-- IMAGE OPPORTUNITY: Add a left-to-right architecture diagram showing

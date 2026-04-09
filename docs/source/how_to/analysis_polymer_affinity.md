@@ -378,7 +378,7 @@ pairwise entries form one hypothesis family per temperature group.
 - Output footnote: `* p_adj < {fdr_alpha} (BH-corrected)`
 
 For background on the BH procedure, see
-[Statistics Best Practices](analysis_statistics_best_practices.md#multiple-comparison-correction).
+[Statistics Best Practices](../explanation/analysis_statistics_best_practices.md#multiple-comparison-correction).
 
 When per-replicate files are unavailable, the plugin falls back to
 analytical error propagation:
@@ -487,6 +487,6 @@ indicate a cache or configuration mismatch.
 - [Binding Free Energy Analysis](analysis_binding_free_energy.md) — per-contact ΔG_sel (the component metric)
 - [Binding Preference Analysis](analysis_binding_preference.md) — the prerequisite enrichment analysis
 - [Contacts Analysis Quick Start](analysis_contacts_quickstart.md) — basic contact computation
-- [Statistics Best Practices](analysis_statistics_best_practices.md) — replicate planning
+- [Statistics Best Practices](../explanation/analysis_statistics_best_practices.md) — replicate planning
 - [Comparing Conditions](analysis_compare_conditions.md) — multi-condition workflows
-- [Extending the Analysis Framework](extending_analyses.md) — add a new plugin
+- [Extending the Analysis Framework](../contributor_guide/extending_analyses.md) — add a new plugin

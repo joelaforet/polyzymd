@@ -8,7 +8,7 @@ The RMSD analysis plugin was added in PolyzyMD 1.3.0.
 ```
 
 ```{note}
-**Just need quick results?** See the [Quick Start Guide](analysis_rmsd_quickstart.md)
+**Just need quick results?** See the [Quick Start Guide](../how_to/analysis_rmsd_quickstart.md)
 for copy-paste commands and minimal setup.
 ```
 
@@ -477,9 +477,9 @@ Analysis of how protein size affects expected RMSD values.
 
 ## See Also
 
-- [Quick Start Guide](analysis_rmsd_quickstart.md) — Get results fast
+- [Quick Start Guide](../how_to/analysis_rmsd_quickstart.md) — Get results fast
 - [Statistics Best Practices](analysis_statistics_best_practices.md) — Foundational statistics for MD
 - [RMSF Best Practices](analysis_rmsf_best_practices.md) — Per-residue fluctuation analysis
 - [Reference Structure Selection](analysis_reference_selection.md) — Choose alignment reference
-- [Compare Simulation Conditions](analysis_compare_conditions.md) — Full comparison workflow
+- [Compare Simulation Conditions](../how_to/analysis_compare_conditions.md) — Full comparison workflow
 - [LiveCoMS Best Practices](https://livecomsjournal.org/index.php/livecoms/article/view/v1i1e5067) — Full methodology paper

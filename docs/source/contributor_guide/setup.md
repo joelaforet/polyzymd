@@ -72,6 +72,6 @@ pixi install -e build
 ## Related Pages
 
 - {doc}`index`
-- {doc}`../tutorials/packaging`
-- {doc}`../tutorials/contributing`
-- {doc}`../tutorials/extending_analyses`
+- {doc}`packaging`
+- {doc}`contributing`
+- {doc}`extending_analyses`

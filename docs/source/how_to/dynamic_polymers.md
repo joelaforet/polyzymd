@@ -399,5 +399,5 @@ rm -rf .polymer_cache
 ## See Also
 
 - {doc}`polymers` - General polymer configuration guide
-- {doc}`configuration` - Complete configuration reference
+- {doc}`../reference/configuration` - Complete configuration reference
 - {doc}`gromacs_export` - Running with GROMACS

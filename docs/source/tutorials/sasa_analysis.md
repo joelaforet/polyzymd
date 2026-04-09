@@ -62,7 +62,7 @@ You need:
 - a working pixi environment (`pixi install -e build`)
 - completed simulation trajectories for at least two conditions
 - a `comparison.yaml` defining your conditions (see
-  {doc}`analysis_compare_conditions`)
+  {doc}`../how_to/analysis_compare_conditions`)
 - familiarity with the PolyzyMD chain convention (A=protein, B=substrate,
   C=polymer)
 
@@ -460,6 +460,6 @@ After following this tutorial, you have:
 ## See Also
 
 - {doc}`../how_to/hpc_execution` — Submitting analysis jobs to SLURM
-- {doc}`analysis_compare_conditions` — Setting up comparison.yaml
-- {doc}`extending_analyses` — Writing your own analysis plugin
-- {doc}`analysis_statistics_best_practices` — Autocorrelation and uncertainty
+- {doc}`../how_to/analysis_compare_conditions` — Setting up comparison.yaml
+- {doc}`../contributor_guide/extending_analyses` — Writing your own analysis plugin
+- {doc}`../explanation/analysis_statistics_best_practices` — Autocorrelation and uncertainty

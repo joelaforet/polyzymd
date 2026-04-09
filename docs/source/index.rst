@@ -57,7 +57,7 @@ Common Workflows
 - Build and submit a first simulation:
   :doc:`Run Your First PolyzyMD Simulation <tutorials/quickstart>`
 - Run a comparison study across multiple conditions:
-  :doc:`Compare Simulation Conditions <tutorials/analysis_compare_conditions>`
+  :doc:`Compare Simulation Conditions <how_to/analysis_compare_conditions>`
 - Generate comparison figures as a smoke test:
   :doc:`Analyze a Multi-Condition Study <tutorials/analysis_complete_workflow>`
 

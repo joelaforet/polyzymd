@@ -11,7 +11,7 @@ The Rg analysis plugin was added in PolyzyMD 1.3.0.
 **Want to understand the statistics?** This guide focuses on getting results
 quickly. For proper uncertainty quantification (autocorrelation correction,
 SEM vs. SD) and interpretation of Rg curves, see the
-[Rg Best Practices Guide](analysis_rg_best_practices.md).
+[Rg Best Practices Guide](../explanation/analysis_rg_best_practices.md).
 ```
 
 ## TL;DR
@@ -794,10 +794,10 @@ reference) but changing Rg (gradual expansion), or vice versa.
 
 ## Next Steps
 
-- **Understand Rg interpretation**: [Rg Best Practices](analysis_rg_best_practices.md)
+- **Understand Rg interpretation**: [Rg Best Practices](../explanation/analysis_rg_best_practices.md)
 - **Compare conditions**: [Comparing Conditions Guide](analysis_compare_conditions.md)
 - **RMSD analysis**: [RMSD Quick Start](analysis_rmsd_quickstart.md)
 - **RMSF analysis**: [RMSF Quick Start](analysis_rmsf_quickstart.md)
-- **Understand statistics**: [Statistical Best Practices](analysis_statistics_best_practices.md)
+- **Understand statistics**: [Statistical Best Practices](../explanation/analysis_statistics_best_practices.md)
 - **Distance analysis**: [Distance Quick Start](analysis_distances_quickstart.md)
 - **Contact analysis**: [Contacts Quick Start](analysis_contacts_quickstart.md)

@@ -180,9 +180,9 @@ Keep `protein_heavy` restraints for longer or reduce them more gradually.
 
 ## Related pages
 
-- first-run tutorial: {doc}`quickstart`
+- first-run tutorial: {doc}`../tutorials/quickstart`
 - distance restraints: {doc}`restraints`
-- config schema: {doc}`configuration`
+- config schema: {doc}`../reference/configuration`
 
 <!-- IMAGE OPPORTUNITY: Add a three-panel schematic for `heating -> restrained
 relaxation -> free equilibration`, with example restraint groups called out in

@@ -452,7 +452,7 @@ vmd replicate_1/gromacs/prod.gro replicate_1/gromacs/prod_centered.xtc
 
 ## See Also
 
-- {doc}`cli_reference` - Complete CLI documentation including GROMACS options
+- {doc}`../reference/cli_reference` - Complete CLI documentation including GROMACS options
 - {doc}`dynamic_polymers` - Dynamic polymer generation
-- {doc}`configuration` - Configuration file reference
-- {doc}`quickstart` - Getting started guide
+- {doc}`../reference/configuration` - Configuration file reference
+- {doc}`../tutorials/quickstart` - Getting started guide

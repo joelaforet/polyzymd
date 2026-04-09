@@ -14,7 +14,7 @@ manual dependency chains.
 - know which `pixi` CUDA environment matches your cluster
 - know which SLURM preset you want to use
 
-If you are still setting up the project itself, start with {doc}`quickstart`.
+If you are still setting up the project itself, start with {doc}`../tutorials/quickstart`.
 
 ## Step 1: validate and dry-run locally
 
@@ -172,9 +172,9 @@ scancel --signal=KILL <job_id>
 
 ## Related reference pages
 
-- command details: {doc}`cli_reference`
-- configuration fields: {doc}`configuration`
-- first-run setup: {doc}`quickstart`
+- command details: {doc}`../reference/cli_reference`
+- configuration fields: {doc}`../reference/configuration`
+- first-run setup: {doc}`../tutorials/quickstart`
 
 <!-- IMAGE OPPORTUNITY: Add a simple lifecycle diagram showing `submit ->
 run-segment -> check-progress -> resubmit`, plus a second annotated screenshot

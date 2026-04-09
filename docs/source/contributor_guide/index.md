@@ -6,13 +6,13 @@ PolyzyMD, understand the codebase, or add new capabilities.
 ## Start Here
 
 - [Set Up a Contributor Environment](setup.md)
-- [Contributing to PolyzyMD](../tutorials/contributing.md)
-- [Packaging and Distribution Notes](../tutorials/packaging.md)
-- [Architecture](../tutorials/architecture.md)
+- [Contributing to PolyzyMD](contributing.md)
+- [Packaging and Distribution Notes](packaging.md)
+- [Architecture](../explanation/architecture.md)
 
 ## Extension Workflows
 
-- **[Extend the Analysis Framework](../tutorials/extending_analyses.md)** —
+- **[Extend the Analysis Framework](extending_analyses.md)** —
   how to add a new analysis type as a plugin package, including compute,
   comparison, formatting, and plotting
 
@@ -29,10 +29,10 @@ config -> builders -> simulation -> workflow -> analysis -> analyses -> compare.
 :hidden:
 :maxdepth: 1
 
-Contributing to PolyzyMD <../tutorials/contributing>
+Contributing to PolyzyMD <contributing>
 Set Up a Contributor Environment <setup>
-Packaging and Distribution Notes <../tutorials/packaging>
-Extend the Analysis Framework <../tutorials/extending_analyses>
-Comparison Logic in an Analysis Plugin <../tutorials/extending_comparators>
-Plotting in an Analysis Plugin <../tutorials/extending_plotters>
+Packaging and Distribution Notes <packaging>
+Extend the Analysis Framework <extending_analyses>
+Comparison Logic in an Analysis Plugin <extending_comparators>
+Plotting in an Analysis Plugin <extending_plotters>
 ```

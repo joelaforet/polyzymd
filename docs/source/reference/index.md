@@ -5,10 +5,10 @@ configuration fields, API signatures, defaults, or benchmark data.
 
 ## User-Facing Reference
 
-- [CLI Reference](../tutorials/cli_reference.md)
-- [Configuration Reference](../tutorials/configuration.md)
+- [CLI Reference](cli_reference.md)
+- [Configuration Reference](configuration.md)
 - [Comparison and Plotting Reference](analysis_comparison_reference.md)
-- [Benchmarks](../tutorials/benchmarks.md)
+- [Benchmarks](benchmarks.md)
 
 ## API Reference
 
@@ -34,10 +34,10 @@ simulation, workflow, analysis, and compare as a reference navigation aid. -->
 :hidden:
 :maxdepth: 1
 
-CLI Reference <../tutorials/cli_reference>
-Configuration Reference <../tutorials/configuration>
+CLI Reference <cli_reference>
+Configuration Reference <configuration>
 Comparison and Plotting Reference <analysis_comparison_reference>
-Benchmarks <../tutorials/benchmarks>
+Benchmarks <benchmarks>
 API Overview <../api/overview>
 Configuration API <../api/config>
 Builders API <../api/builders>

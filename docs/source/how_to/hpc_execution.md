@@ -7,7 +7,7 @@ running analysis interactively on a login node.
 
 ```{note}
 This guide covers **analysis** job submission via `polyzymd compare submit`.
-For submitting **simulation** jobs, see {doc}`../tutorials/hpc_slurm`.
+For submitting **simulation** jobs, see {doc}`hpc_slurm`.
 ```
 
 ## Before You Start
@@ -20,7 +20,7 @@ You need:
 - a `comparison.yaml` that defines your conditions and analysis settings
 
 If you have not yet created a `comparison.yaml`, start with
-{doc}`../tutorials/analysis_compare_conditions`.
+{doc}`analysis_compare_conditions`.
 
 ## What the DAG Looks Like
 
@@ -453,6 +453,6 @@ After following this guide, you have:
 ## See Also
 
 - {doc}`../tutorials/sasa_analysis` — Tutorial for configuring and interpreting SASA analysis
-- {doc}`../tutorials/hpc_slurm` — Submitting simulation jobs to SLURM
-- {doc}`../tutorials/analysis_compare_conditions` — Setting up comparison.yaml
+- {doc}`hpc_slurm` — Submitting simulation jobs to SLURM
+- {doc}`analysis_compare_conditions` — Setting up comparison.yaml
 - {doc}`../tutorials/analysis_complete_workflow` — Full local analysis workflow

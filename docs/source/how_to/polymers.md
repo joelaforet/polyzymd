@@ -334,4 +334,4 @@ Start with small polymer systems (2 × 5-mer) to test your setup before scaling 
 
 - {doc}`dynamic_polymers` - Generate polymers from SMILES without pre-built SDF files
 - {doc}`gromacs_export` - Running simulations with GROMACS
-- {doc}`configuration` - Complete configuration reference
+- {doc}`../reference/configuration` - Complete configuration reference

@@ -11,7 +11,7 @@ and publication-ready figures.
 This page is primarily a **how-to guide** (task-oriented, practical). The
 Configuration Reference and Understanding the Output sections contain
 reference-style content kept inline for convenience. For general comparison
-workflow setup, see {doc}`analysis_compare_conditions`.
+workflow setup, see {doc}`../how_to/analysis_compare_conditions`.
 :::
 
 ## When to Use This Plugin
@@ -37,7 +37,7 @@ You need:
 - A working pixi environment (`pixi install -e build`)
 - Completed simulation trajectories for at least two conditions
 - A `comparison.yaml` defining your conditions (see
-  {doc}`analysis_compare_conditions`)
+  {doc}`../how_to/analysis_compare_conditions`)
 - Familiarity with the PolyzyMD chain convention (A=protein, B=substrate,
   C=polymer)
 
@@ -560,9 +560,9 @@ polyzymd compare run hbond
 
 ## See Also
 
-- {doc}`analysis_compare_conditions` — Setting up `comparison.yaml`
+- {doc}`../how_to/analysis_compare_conditions` — Setting up `comparison.yaml`
 - {doc}`../reference/analysis_comparison_reference` — Plugin listing and
   statistical terms
 - {doc}`../how_to/hpc_execution` — Submitting analysis jobs to SLURM
-- {doc}`analysis_statistics_best_practices` — Autocorrelation and uncertainty
-- {doc}`extending_analyses` — Writing your own analysis plugin
+- {doc}`../explanation/analysis_statistics_best_practices` — Autocorrelation and uncertainty
+- {doc}`../contributor_guide/extending_analyses` — Writing your own analysis plugin

@@ -660,7 +660,7 @@ Per-residue contact fractions include proper uncertainty quantification:
 ```{seealso}
 For a detailed explanation of autocorrelation, statistical inefficiency, and
 the LiveCoMS methodology, see the
-[Statistics Best Practices Guide](analysis_statistics_best_practices.md).
+[Statistics Best Practices Guide](../explanation/analysis_statistics_best_practices.md).
 ```
 
 ## Troubleshooting

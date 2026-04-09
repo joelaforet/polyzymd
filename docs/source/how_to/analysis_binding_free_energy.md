@@ -408,7 +408,7 @@ independent replicates this is generally conservative and appropriate.
 The `MetricType` classification is a planned future enhancement and is not yet
 implemented in the current codebase.
 
-See [Statistics Best Practices](analysis_statistics_best_practices.md) for
+See [Statistics Best Practices](../explanation/analysis_statistics_best_practices.md) for
 guidance on replicate counts and equilibration.
 
 ## Worked Example: Comparing Polymer Stabilization
@@ -520,6 +520,6 @@ within thermal noise.
 
 - [Binding Preference Analysis](analysis_binding_preference.md) — the prerequisite enrichment analysis
 - [Contacts Analysis Quick Start](analysis_contacts_quickstart.md) — basic contacts
-- [Statistics Best Practices](analysis_statistics_best_practices.md) — replicate planning
+- [Statistics Best Practices](../explanation/analysis_statistics_best_practices.md) — replicate planning
 - [Comparing Conditions](analysis_compare_conditions.md) — multi-condition workflows
-- [Extending the Analysis Framework](extending_analyses.md) — add a new plugin
+- [Extending the Analysis Framework](../contributor_guide/extending_analyses.md) — add a new plugin

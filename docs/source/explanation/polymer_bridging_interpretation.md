@@ -208,8 +208,8 @@ Suppose you have two conditions:
 
 ## See Also
 
-- {doc}`../tutorials/analysis_polymer_bridging` — configuration, CLI, and output reference
-- {doc}`../tutorials/analysis_binding_preference` — surface-normalized enrichment for
+- {doc}`../how_to/analysis_polymer_bridging` — configuration, CLI, and output reference
+- {doc}`../how_to/analysis_binding_preference` — surface-normalized enrichment for
   comparison
-- {doc}`../tutorials/analysis_statistics_best_practices` — replicate planning and
+- {doc}`analysis_statistics_best_practices` — replicate planning and
   statistical interpretation

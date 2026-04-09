@@ -64,7 +64,7 @@ adding new analysis types to PolyzyMD.
 
 ## Related Documentation
 
-- [Extending the Analysis Framework](../tutorials/extending_analyses.md) — tutorial
+- [Extending the Analysis Framework](../contributor_guide/extending_analyses.md) — tutorial
 - [Analysis Calculator API](analysis.md) — underlying compute layer
 - [Compare API](compare.md) — statistics and formatting
 - [API Overview](overview.rst)
