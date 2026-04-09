@@ -632,6 +632,25 @@ class PolymerBridgingAnalysis(Analysis):
             n_reps = len(next(iter(metrics.values())).replicate_values) if metrics else 0
             condition_summaries.append(ConditionSummary(label=label, n_replicates=n_reps, **extra))
 
+        # Apply Benjamini-Hochberg FDR correction across all pairwise tests
+        fdr_alpha = getattr(ctx, "fdr_alpha", 0.05)
+        if all_pairwise:
+            from polyzymd.compare.statistics import benjamini_hochberg
+
+            raw_p = [pw.p_value for pw in all_pairwise]
+            bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
+            for pw, bh in zip(all_pairwise, bh_results, strict=False):
+                pw.p_value_adjusted = bh.adjusted_p_value
+                pw.significant = bh.significant
+
+        if all_anova:
+            from polyzymd.compare.statistics import benjamini_hochberg
+
+            raw_p = [a.p_value for a in all_anova]
+            bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
+            for a, bh in zip(all_anova, bh_results, strict=False):
+                a.significant = bh.significant
+
         from datetime import datetime
 
         from polyzymd import __version__
@@ -641,6 +660,7 @@ class PolymerBridgingAnalysis(Analysis):
             analysis_type=self.name,
             name=ctx.name,
             control_label=ctx.effective_control,
+            fdr_alpha=fdr_alpha,
             conditions=condition_summaries,
             pairwise_comparisons=all_pairwise,
             anova=all_anova if all_anova else None,
@@ -1043,7 +1063,11 @@ def _condition_has_polymer(cond: Condition, polymer_selection: str = "chainID C"
             universe = mda.Universe(str(topo_path))
             if len(universe.select_atoms(polymer_selection)) > 0:
                 return True
-    except Exception:
+    except ImportError:
+        return False
+    except (FileNotFoundError, OSError):
+        return False
+    except (ValueError, TypeError):
         return False
 
     return False
