@@ -24,6 +24,9 @@ def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
     Converts relative paths to absolute paths based on the config file location.
     Also expands environment variables in path strings.
 
+    Sentinel values (e.g. ``"default"``) are passed through untouched so that
+    downstream Pydantic validators can resolve them to bundled resources.
+
     Args:
         data: Configuration dictionary
         base_path: Directory containing the config file
@@ -42,8 +45,15 @@ def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
         "termination",
     }
 
+    # Sentinel values that should be forwarded to Pydantic validators as-is,
+    # not treated as filesystem paths.
+    _SENTINEL_VALUES = {"default"}
+
     def expand_value(key: str, value: Any) -> Any:
         if key in path_keys and isinstance(value, str):
+            # Pass through sentinel values without path expansion
+            if value.lower().strip() in _SENTINEL_VALUES:
+                return value
             # Expand environment variables
             expanded = os.path.expandvars(value)
             path = Path(expanded)
@@ -81,8 +91,14 @@ def _convert_paths_to_relative(data: Dict[str, Any], base_path: Path) -> Dict[st
         "termination",
     }
 
+    # Sentinel values that should be forwarded as-is (see _expand_paths).
+    _SENTINEL_VALUES = {"default"}
+
     def relativize_value(key: str, value: Any) -> Any:
         if key in path_keys and isinstance(value, str):
+            # Pass through sentinel values without relativizing
+            if value.lower().strip() in _SENTINEL_VALUES:
+                return value
             path = Path(value)
             if path.is_absolute():
                 try:
