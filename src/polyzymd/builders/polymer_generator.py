@@ -921,7 +921,30 @@ class PolymerGenerator:
         logger.debug(f"Middle sequence (block identifiers): {middle_sequence}")
         logger.debug(f"Middle sequence map: {sequence_map}")
 
+        # Build an explicit sequence_map for middle-position block identifiers.
+        # This avoids Polymerist's default alphabetical mapping, which can
+        # silently mismatch block labels and 2-site fragments.
+        if middle_sequence:
+            unique_middle_chars = []
+            for ch in middle_sequence:
+                if ch not in unique_middle_chars:
+                    unique_middle_chars.append(ch)
+
+            sequence_map = {}
+            for ch in unique_middle_chars:
+                if ch not in monomer_names:
+                    raise ValueError(
+                        f"Middle sequence character '{ch}' not found in monomer_names {monomer_names}"
+                    )
+                sequence_map[ch] = self._get_middle_fragment_name(monomer_names[ch])
+
+            logger.debug(f"Explicit sequence_map: {sequence_map}")
+        else:
+            sequence_map = None
+            logger.debug("No middle sequence; only terminal fragments will be built")
+
         # Attempt building with retries for ring-piercing
+        chain = None
         for attempt in range(self.max_retries):
             logger.debug(f"Building polymer attempt {attempt + 1}/{self.max_retries}")
 
@@ -948,7 +971,7 @@ class PolymerGenerator:
                 )
         else:
             raise PolymerGenerationError(
-                f"Failed to build polymer after {self.max_retries} attempts due to ring-piercing"
+                f"Failed to build polymer after {self.max_retries} attempts"
             )
 
         # Save PDB
