@@ -55,6 +55,7 @@ def build_packmol_input(
     ignore_conect: bool = False,
     inner_exclusion_box_angstrom: "NDArray | None" = None,
     nloop: int | None = None,
+    structure_extra_lines: "list[list[str]] | None" = None,
 ) -> str:
     """Build the text content of a Packmol input file.
 
@@ -100,6 +101,15 @@ def build_packmol_input(
         Packmol's default is 50; for dense shell-packing with many
         molecules, higher values (200–500) improve convergence.
         Default is ``None`` (use Packmol's built-in default).
+    structure_extra_lines : list[list[str]] or None, optional
+        Per-structure extra Packmol directives. When provided, must be a
+        list parallel to *molecule_pdb_paths*. Each element is a list of
+        raw Packmol lines to insert into the corresponding structure block
+        before ``end structure``. Lines are automatically indented by 2
+        spaces to align under the ``structure`` block. Do not add leading
+        indentation. Use this for per-atom constraints such as
+        ``atoms <idx>`` / ``inside sphere`` / ``end atoms``. Default is
+        ``None`` (no extra lines).
 
     Returns
     -------
@@ -112,6 +122,9 @@ def build_packmol_input(
         effective_box = np.asarray(box_size_angstrom, dtype=float)
     else:
         effective_box = np.asarray(box_size_angstrom, dtype=float) - tolerance_angstrom
+
+    if structure_extra_lines is not None and len(structure_extra_lines) != len(molecule_pdb_paths):
+        raise ValueError("structure_extra_lines must have the same length as molecule_pdb_paths")
 
     # Pre-format the exclusion constraint line (if requested and not PBC)
     _exclusion_line: str | None = None
@@ -163,7 +176,7 @@ def build_packmol_input(
         )
 
     # One block per unique molecule type
-    for pdb_path, count in zip(molecule_pdb_paths, molecule_counts):
+    for idx, (pdb_path, count) in enumerate(zip(molecule_pdb_paths, molecule_counts)):
         if count == 0:
             continue
         block = [
@@ -177,6 +190,9 @@ def build_packmol_input(
             )
         if _exclusion_line is not None:
             block.append(_exclusion_line)
+        if structure_extra_lines is not None:
+            for extra_line in structure_extra_lines[idx]:
+                block.append(f"  {extra_line}")
         block.append("end structure")
         block.append("")
         lines.extend(block)

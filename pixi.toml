@@ -198,8 +198,6 @@ cuda-version = "=12.4"
 [feature.sim-cuda-12-4.system-requirements]
 cuda = "12.4"
 
-
-# =============================================================================
 # ENVIRONMENTS
 # Separate solve groups keep the NumPy 2 analysis/package stack isolated from
 # the legacy CUDA 12.4 simulation stack.

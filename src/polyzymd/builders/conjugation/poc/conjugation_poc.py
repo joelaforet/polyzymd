@@ -7,76 +7,106 @@ app = marimo.App()
 @app.cell
 def _():
     """Cell 1: Configuration, imports, and shared utilities."""
-    from dataclasses import dataclass, field
-    from pathlib import Path
-    import json
     import logging
-    import os
-    import subprocess
+    from dataclasses import dataclass
+    from os import environ
+    from pathlib import Path
 
     import numpy as np
-    from scipy.spatial import KDTree
-    from scipy.spatial.transform import Rotation
-    from rdkit import Chem
-    from rdkit.Chem import AllChem
-
     from openff.toolkit import ForceField, Molecule, Topology
     from openff.units import Quantity, unit
+    from polymerist.polymers.monomers import MonomerGroup
+    from rdkit import Chem
+    from scipy.spatial import KDTree
+    from scipy.spatial.transform import Rotation
+
+    from polyzymd.builders.fragment_generator import FragmentGenerator
+    from polyzymd.builders.polymer_generator import PolymerGenerator
 
     logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     logger = logging.getLogger("conjugation_poc")
 
     # ── Paths ──────────────────────────────────────────────────────────────
-    # All paths are relative to the polyzymd repo root.
-    # The POC directory is: <repo>/src/polyzymd/builders/conjugation/poc/
     _POC_DIR = Path(__file__).resolve().parent
-    _REPO_ROOT = _POC_DIR.parents[4]  # up 5 levels: poc -> conjugation -> builders -> polyzymd -> src -> repo
 
-    PROTEIN_PDB = os.environ.get(
+    PROTEIN_PDB = environ.get(
         "CONJUGATION_PROTEIN_PDB",
         str(_POC_DIR / "data" / "NH3_terminal_His_proton_updated.pdb"),
     )
     ASSEMBLED_PDB = Path(
-        os.environ.get("CONJUGATION_ASSEMBLED_PDB", str(_POC_DIR / "output" / "conjugate_assembled.pdb"))
+        environ.get(
+            "CONJUGATION_ASSEMBLED_PDB", str(_POC_DIR / "output" / "conjugate_assembled.pdb")
+        )
     )
     MINIMIZED_PDB = Path(
-        os.environ.get("CONJUGATION_MINIMIZED_PDB", str(_POC_DIR / "output" / "conjugate_minimized.pdb"))
+        environ.get(
+            "CONJUGATION_MINIMIZED_PDB", str(_POC_DIR / "output" / "conjugate_minimized.pdb")
+        )
     )
-    POLYZYMD_PYTHON = os.environ.get(
-        "CONJUGATION_BUILD_PYTHON",
-        str(_REPO_ROOT / ".pixi" / "envs" / "build" / "bin" / "python"),
+    EQUILIBRATED_PDB = Path(
+        environ.get(
+            "CONJUGATION_EQUILIBRATED_PDB",
+            str(_POC_DIR / "output" / "conjugate_equilibrated.pdb"),
+        )
     )
-    GENERATE_SCRIPT = os.environ.get(
-        "CONJUGATION_GENERATE_SCRIPT",
-        str(_POC_DIR / "generate_polymer.py"),
-    )
-    POLYMER_CACHE = Path(
-        os.environ.get("CONJUGATION_POLYMER_CACHE", str(_POC_DIR / ".polymer_cache"))
-    )
-    MONOMER_GROUP_JSON = POLYMER_CACHE / "NHS-SBMA_monomer_group.json"
+    POLYMER_CACHE = Path(environ.get("CONJUGATION_POLYMER_CACHE", str(_POC_DIR / ".polymer_cache")))
+    MONOMER_GROUP_JSON = POLYMER_CACHE / "SBMA-EGPMA-NHS_monomer_group.json"
+
+    _DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
+    ATRP_INITIATION_RXN = _DATA_DIR / "reactions" / "atrp_initiation.rxn"
+    ATRP_POLYMERIZATION_RXN = _DATA_DIR / "reactions" / "atrp_polymerization.rxn"
+    ATRP_TERMINATION_RXN = _DATA_DIR / "reactions" / "atrp_termination.rxn"
+
+    # ── Monomer definitions ────────────────────────────────────────────────
+    MONOMER_SMILES = {
+        "SBMA": "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]",
+        "EGPMA": "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])Oc1c([H])c([H])c([H])c([H])c1[H])C([H])([H])[H]",
+        "NHS": "CC(=C)C(=O)ON1C(=O)CCC1=O",
+    }
+    MONOMER_NAMES = {"A": "SBMA", "B": "EGPMA", "C": "NHS"}
+    MONOMER_PROBABILITIES = {"A": 0.945, "B": 0.045, "C": 0.01}
+    RESIDUE_NAMES = {"SBMA": "SB", "EGPMA": "EG", "NHS": "NH"}
+    NHS_LABEL = "C"
 
     # ── Conjugation parameters ─────────────────────────────────────────────
-    ELIGIBLE_LYS_RESIDS = [23, 35, 44]
+    CONJUGATION_SITE_RESIDS = (23, 44)
     N_CONJUGATED = 2
-    POLYMER_SEQUENCE = "BAB"  # A=NHS, B=SBMA; first residue contains NHS
-    MONOMER_NAMES = {"A": "NHS", "B": "SBMA"}
-    RESIDUE_NAMES = {"NHS": "NH", "SBMA": "SB"}
+    CONJUGATED_LENGTH = 10
+    CENTER_INDEX = CONJUGATED_LENGTH // 2
+
+    # ── Free polymer parameters ────────────────────────────────────────────
+    N_FREE_POLYMERS = 5
+    FREE_POLYMER_LENGTH = 5
 
     # ── Placement parameters ───────────────────────────────────────────────
-    N_CONFORMERS = 50
-    N_CONE_SAMPLES = 50
-    N_SPIN_SAMPLES = 50
-    COLLISION_DISTANCE = 1.5       # angstrom
-    BOND_ANGLE_TOLERANCE = 25.0    # degrees
-    TARGET_BOND_LENGTH = 1.33      # angstrom (amide C-N)
-    TARGET_BOND_ANGLE = 120.0      # degrees (at NZ)
+    PACKMOL_TOLERANCE = 2.0
+    PACKMOL_REACTIVE_SPHERE_RADIUS = 5.0
+    PACKMOL_NLOOP = 500
+    PACKMOL_MOVEBADRANDOM = True
+    COLLISION_DISTANCE = 1.5
+    TARGET_BOND_LENGTH = 1.33
+    TARGET_BOND_ANGLE = 120.0
     RNG_SEED = 42
+
+    # ── Free polymer placement ─────────────────────────────────────────────
+    FREE_SHELL_MIN_A = 15.0
+    FREE_SHELL_MAX_A = 35.0
+    N_FREE_PLACEMENT_TRIES = 200
+    FREE_COLLISION_DISTANCE = 2.0
 
     # ── Force field / minimization ─────────────────────────────────────────
     PROTEIN_FF = "ff14sb_off_impropers_0.0.4.offxml"
     SMALL_MOL_FF = "openff-2.0.0.offxml"
     MINIMIZATION_MAX_ITER = 500
     LINKAGE_NEIGHBORHOOD_BONDS = 3
+
+    # ── Vacuum equilibration parameters ────────────────────────────────────
+    PROTEIN_HEAVY_RESTRAINT_K = 5000.0  # kJ/mol/nm^2
+    VACUUM_EQ_TEMP_K = 310.0
+    VACUUM_EQ_TIMESTEP_FS = 1.0
+    VACUUM_EQ_STEPS = 10000  # 10 ps
+    VACUUM_EQ_FRICTION_PER_PS = 1.0
+    PROTEIN_RMSD_THRESHOLD_A = 1.0
 
     # ── Data classes ───────────────────────────────────────────────────────
     @dataclass(frozen=True)
@@ -100,6 +130,7 @@ def _():
         outward_normal : np.ndarray
             Unit vector from protein centroid toward NZ.
         """
+
         resid: int
         chain_id: str
         nz_index: int
@@ -128,6 +159,7 @@ def _():
             NAGL partial charges for the retained atoms (product state),
             indexed by retained_atom_indices order.
         """
+
         off_molecule: Molecule
         rdmol: object  # Chem.Mol
         reactive_carbon_idx: int
@@ -150,10 +182,72 @@ def _():
         min_protein_distance : float
             Best minimum distance to occupied atoms (angstrom).
         """
+
         site: ReactiveSite
         polymer: PolymerPrototype
         placed_coords: np.ndarray
         min_protein_distance: float
+
+    @dataclass(frozen=True)
+    class FreePlacementResult:
+        """Record of a successfully placed free polymer.
+
+        Attributes
+        ----------
+        polymer_id : str
+            Identifier of the free polymer
+        sequence : str
+            Monomer sequence used for this polymer
+        off_molecule : Molecule
+            OpenFF molecule carrying the placed conformer
+        placed_coords : np.ndarray
+            Final placed Cartesian coordinates in angstrom
+        """
+
+        polymer_id: str
+        sequence: str
+        off_molecule: Molecule
+        placed_coords: np.ndarray
+
+    def generate_weighted_sequence(length: int, rng: np.random.Generator) -> str:
+        """Generate a random polymer sequence from monomer probabilities.
+
+        Parameters
+        ----------
+        length : int
+            Number of residues to sample
+        rng : np.random.Generator
+            Random generator used for weighted sampling
+
+        Returns
+        -------
+        str
+            Sequence string in monomer label alphabet
+        """
+
+        labels = list(MONOMER_PROBABILITIES.keys())
+        probs = [MONOMER_PROBABILITIES[x] for x in labels]
+        return "".join(rng.choice(labels, size=length, p=probs))
+
+    def generate_conjugated_sequence(length: int, rng: np.random.Generator) -> str:
+        """Generate a conjugated polymer sequence with forced center NHS.
+
+        Parameters
+        ----------
+        length : int
+            Number of residues to sample
+        rng : np.random.Generator
+            Random generator used for weighted sampling
+
+        Returns
+        -------
+        str
+            Sequence string where the center residue is NHS
+        """
+
+        seq = list(generate_weighted_sequence(length, rng))
+        seq[CENTER_INDEX] = NHS_LABEL
+        return "".join(seq)
 
     # ── PDB writing utilities ──────────────────────────────────────────────
     def write_pdb_line(
@@ -188,31 +282,48 @@ def _():
 
     return (
         ASSEMBLED_PDB,
-        AllChem,
-        BOND_ANGLE_TOLERANCE,
-        COLLISION_DISTANCE,
+        ATRP_INITIATION_RXN,
+        ATRP_POLYMERIZATION_RXN,
+        ATRP_TERMINATION_RXN,
+        CENTER_INDEX,
         Chem,
-        ELIGIBLE_LYS_RESIDS,
+        COLLISION_DISTANCE,
+        CONJUGATED_LENGTH,
+        CONJUGATION_SITE_RESIDS,
+        EQUILIBRATED_PDB,
         ForceField,
-        GENERATE_SCRIPT,
+        FREE_COLLISION_DISTANCE,
+        FREE_POLYMER_LENGTH,
+        FREE_SHELL_MAX_A,
+        FREE_SHELL_MIN_A,
+        FragmentGenerator,
+        FreePlacementResult,
         KDTree,
         LINKAGE_NEIGHBORHOOD_BONDS,
         MINIMIZATION_MAX_ITER,
         MINIMIZED_PDB,
         MONOMER_GROUP_JSON,
         MONOMER_NAMES,
+        MONOMER_PROBABILITIES,
+        MONOMER_SMILES,
+        MonomerGroup,
         Molecule,
-        N_CONFORMERS,
         N_CONJUGATED,
-        N_CONE_SAMPLES,
-        N_SPIN_SAMPLES,
+        N_FREE_PLACEMENT_TRIES,
+        N_FREE_POLYMERS,
+        NHS_LABEL,
+        PACKMOL_MOVEBADRANDOM,
+        PACKMOL_NLOOP,
+        PACKMOL_REACTIVE_SPHERE_RADIUS,
+        PACKMOL_TOLERANCE,
         POLYMER_CACHE,
-        POLYMER_SEQUENCE,
-        POLYZYMD_PYTHON,
         PROTEIN_FF,
+        PROTEIN_HEAVY_RESTRAINT_K,
         PROTEIN_PDB,
+        PROTEIN_RMSD_THRESHOLD_A,
         Path,
         PlacementResult,
+        PolymerGenerator,
         PolymerPrototype,
         Quantity,
         RESIDUE_NAMES,
@@ -223,10 +334,14 @@ def _():
         TARGET_BOND_ANGLE,
         TARGET_BOND_LENGTH,
         Topology,
-        json,
+        VACUUM_EQ_FRICTION_PER_PS,
+        VACUUM_EQ_STEPS,
+        VACUUM_EQ_TEMP_K,
+        VACUUM_EQ_TIMESTEP_FS,
+        generate_conjugated_sequence,
+        generate_weighted_sequence,
         logger,
         np,
-        subprocess,
         unit,
         write_conect_line,
         write_pdb_line,
@@ -235,11 +350,10 @@ def _():
 
 @app.cell
 def _(
-    ELIGIBLE_LYS_RESIDS,
+    CONJUGATION_SITE_RESIDS,
     ForceField,
     PROTEIN_FF,
     PROTEIN_PDB,
-    Quantity,
     ReactiveSite,
     Topology,
     logger,
@@ -264,7 +378,7 @@ def _(
 
     # ── Identify reactive lysine sites ─────────────────────────────────────
     reactive_sites: dict[tuple[str, int], ReactiveSite] = {}
-    for _resid in ELIGIBLE_LYS_RESIDS:
+    for _resid in CONJUGATION_SITE_RESIDS:
         nz_atom = None
         for _atom in protein_mol.atoms:
             if (
@@ -321,7 +435,18 @@ def _(
 
     # ── Extract ff14SB charges for every protein atom ──────────────────────
     protein_ff = ForceField(PROTEIN_FF)
-    protein_interchange = protein_ff.create_interchange(protein_top)
+
+    # Suppress per-atom INFO logging from OpenFF's LibraryCharges handler.
+    # It emits one line per atom during charge assignment, flooding marimo output.
+    import logging as _logging
+
+    _nonbonded_logger = _logging.getLogger("openff.interchange.smirnoff._nonbonded")
+    _prev_level = _nonbonded_logger.level
+    _nonbonded_logger.setLevel(_logging.WARNING)
+    try:
+        protein_interchange = protein_ff.create_interchange(protein_top)
+    finally:
+        _nonbonded_logger.setLevel(_prev_level)
     _charges = protein_interchange["Electrostatics"].charges
     protein_charge_arr = np.array(
         [
@@ -334,527 +459,692 @@ def _(
         len(protein_charge_arr),
         protein_charge_arr.sum(),
     )
-
     return (
         centroid_vec,
         protein_charge_arr,
         protein_coords,
         protein_mol,
-        protein_top,
         reactive_sites,
     )
 
 
 @app.cell
 def _(
-    AllChem,
+    ATRP_INITIATION_RXN,
+    ATRP_POLYMERIZATION_RXN,
+    ATRP_TERMINATION_RXN,
+    CENTER_INDEX,
     Chem,
-    GENERATE_SCRIPT,
+    CONJUGATED_LENGTH,
+    CONJUGATION_SITE_RESIDS,
+    FREE_POLYMER_LENGTH,
+    FragmentGenerator,
     MONOMER_GROUP_JSON,
     MONOMER_NAMES,
+    MONOMER_SMILES,
+    MonomerGroup,
     Molecule,
+    N_FREE_POLYMERS,
+    NHS_LABEL,
     POLYMER_CACHE,
-    POLYMER_SEQUENCE,
-    POLYZYMD_PYTHON,
+    PolymerGenerator,
     PolymerPrototype,
-    Quantity,
+    RNG_SEED,
     RESIDUE_NAMES,
-    json,
+    generate_conjugated_sequence,
+    generate_weighted_sequence,
     logger,
     np,
-    subprocess,
     unit,
 ):
-    """Cell 3: Generate polymer via polyzymd subprocess, load PDB, identify NHS
-    reactive group, compute product-state NAGL charges."""
+    """Cell 3: Build conjugated/free polymers and charge conjugated prototypes."""
 
-    # ── Generate polymer PDB via subprocess ────────────────────────────────
-    # The subprocess runs in the polyzymd build env (Python 3.11 + mbuild).
-    _cmd = [
-        POLYZYMD_PYTHON,
-        GENERATE_SCRIPT,
-        "--cache-dir", str(POLYMER_CACHE),
-        "--monogrp-json", str(MONOMER_GROUP_JSON),
-        "--sequence", POLYMER_SEQUENCE,
-        "--monomer-names", json.dumps(MONOMER_NAMES),
-        "--residue-names", json.dumps(RESIDUE_NAMES),
-    ]
-
-    # Check if PDB already cached
-    _monomers_used = []
-    for ch in POLYMER_SEQUENCE:
-        if ch not in [m for m, _ in zip(MONOMER_NAMES.values(), range(len(_monomers_used)))]:
-            _monomers_used.append(MONOMER_NAMES[ch])
-    _unique_labels = []
-    for ch in POLYMER_SEQUENCE:
-        if ch not in _unique_labels:
-            _unique_labels.append(ch)
-    _prefix = "-".join(MONOMER_NAMES[ch] for ch in _unique_labels)
-    _expected_pdb = POLYMER_CACHE / f"{_prefix}_seq={POLYMER_SEQUENCE}_{len(POLYMER_SEQUENCE)}-mer.pdb"
-
-    if _expected_pdb.exists():
-        logger.info("Using cached polymer PDB: %s", _expected_pdb)
-        polymer_pdb_path = _expected_pdb
+    if not MONOMER_GROUP_JSON.exists():
+        logger.info("Generating 3-monomer MonomerGroup (SBMA + EGPMA + NHS)...")
+        fragment_gen = FragmentGenerator(
+            initiation_rxn_path=ATRP_INITIATION_RXN,
+            polymerization_rxn_path=ATRP_POLYMERIZATION_RXN,
+            termination_rxn_path=ATRP_TERMINATION_RXN,
+            cache_directory=POLYMER_CACHE,
+        )
+        _monomer_group = fragment_gen.load_or_generate(
+            monomer_smiles=MONOMER_SMILES,
+            type_prefix="SBMA-EGPMA-NHS",
+        )
     else:
-        logger.info("Generating polymer via subprocess...")
-        _result = subprocess.run(
-            _cmd, capture_output=True, text=True, timeout=300
+        _monomer_group = MonomerGroup.from_file(MONOMER_GROUP_JSON)
+
+    _polymer_gen = PolymerGenerator(
+        monomer_group=_monomer_group,
+        cache_directory=POLYMER_CACHE,
+    )
+
+    rng = np.random.default_rng(RNG_SEED)
+
+    conjugated_sequences = []
+    for resid in CONJUGATION_SITE_RESIDS:
+        seq = generate_conjugated_sequence(CONJUGATED_LENGTH, rng)
+        conjugated_sequences.append(seq)
+        logger.info("Conjugated polymer for LYS %d: sequence=%s", resid, seq)
+
+    free_sequences = []
+    for i in range(N_FREE_POLYMERS):
+        seq = generate_weighted_sequence(FREE_POLYMER_LENGTH, rng)
+        free_sequences.append(seq)
+        logger.info("Free polymer %d: sequence=%s", i, seq)
+
+    cap_charge_map = {}
+    conjugated_prototypes = []
+
+    for _ci, (seq, _resid) in enumerate(
+        zip(conjugated_sequences, CONJUGATION_SITE_RESIDS, strict=False)
+    ):
+        _ = _polymer_gen.generate_polymer(
+            sequence=seq,
+            monomer_names=MONOMER_NAMES,
+            residue_names=RESIDUE_NAMES,
         )
-        if _result.returncode != 0:
-            raise RuntimeError(
-                f"Polymer generation failed:\nstdout={_result.stdout}\nstderr={_result.stderr}"
+
+        _polymer_filename = _polymer_gen._make_polymer_filename(seq, MONOMER_NAMES, charged=False)
+        polymer_pdb_path = POLYMER_CACHE / f"{_polymer_filename}.pdb"
+        polymer_sdf_path = polymer_pdb_path.with_suffix(".sdf")
+        if not polymer_pdb_path.exists() or not polymer_sdf_path.exists():
+            raise FileNotFoundError(
+                f"Missing cached polymer files for sequence {seq}: "
+                f"{polymer_pdb_path} / {polymer_sdf_path}"
             )
-        polymer_pdb_path = _result.stdout.strip().split("\n")[-1]
-        logger.info("Generated polymer PDB: %s", polymer_pdb_path)
 
-    # ── Load polymer PDB with RDKit ────────────────────────────────────────
-    # RDKit reads CONECT records → full connectivity, but all bonds are single.
-    # We keep this version for the final merge in Cell 6 (create_interchange
-    # works fine with all-single-bond molecules).
-    polymer_rdmol = Chem.MolFromPDBFile(str(polymer_pdb_path), removeHs=False, sanitize=True)
-    if polymer_rdmol is None:
-        raise ValueError(f"RDKit failed to load {polymer_pdb_path}")
-    logger.info(
-        "Polymer RDKit: %d atoms, %d bonds",
-        polymer_rdmol.GetNumAtoms(),
-        polymer_rdmol.GetNumBonds(),
-    )
+        logger.info("Conjugated polymer %d (LYS %d): loading %s", _ci, _resid, polymer_pdb_path)
 
-    # Create a SECOND copy with correct bond orders (C=O, S=O, C=C) for NAGL
-    # charging.  DetermineBonds uses 3D geometry to infer bond orders.
-    from rdkit.Chem import rdDetermineBonds
-    _polymer_bo = Chem.MolFromPDBFile(str(polymer_pdb_path), removeHs=False, sanitize=False)
-    rdDetermineBonds.DetermineConnectivity(_polymer_bo)
-    rdDetermineBonds.DetermineBondOrders(_polymer_bo)
-    Chem.SanitizeMol(_polymer_bo)
-    logger.info("Applied DetermineBonds for NAGL charging model")
+        polymer_rdmol = Chem.MolFromPDBFile(str(polymer_pdb_path), removeHs=False, sanitize=True)
+        if polymer_rdmol is None:
+            raise ValueError(f"RDKit failed to load {polymer_pdb_path}")
 
-    # Also create an OpenFF Molecule (for conformer access and later merging)
-    polymer_off = Molecule.from_rdkit(
-        polymer_rdmol, allow_undefined_stereo=True, hydrogens_are_explicit=True,
-    )
+        _suppl = Chem.SDMolSupplier(str(polymer_sdf_path), removeHs=False, sanitize=False)
+        _polymer_bo = max((m for m in _suppl if m is not None), key=lambda m: m.GetNumAtoms())
+        Chem.SanitizeMol(_polymer_bo)
 
-    # ── Identify NHS reactive carbon and leaving group ─────────────────────
-    # In the PDB-loaded molecule all bonds are single, so SMARTS with "=O"
-    # won't match.  Instead, use topology: the ester carbonyl C in the NH2
-    # residue is the ONLY carbon bonded to exactly 2 oxygens.
-    _nh2_indices = set()
-    for _atom in polymer_rdmol.GetAtoms():
-        _info = _atom.GetPDBResidueInfo()
-        if _info and _info.GetResidueName().strip() == "NH2":
-            _nh2_indices.add(_atom.GetIdx())
-
-    if not _nh2_indices:
-        raise ValueError("No NH2 (NHS) residue found in polymer PDB")
-
-    _reactive_c = None
-    _ester_o = None
-    for _idx in _nh2_indices:
-        _atom = polymer_rdmol.GetAtomWithIdx(_idx)
-        if _atom.GetSymbol() != "C":
-            continue
-        _o_nbrs = [
-            n.GetIdx() for n in _atom.GetNeighbors() if n.GetSymbol() == "O"
-        ]
-        if len(_o_nbrs) == 2:
-            _reactive_c = _idx
-            # The ester O is the one bonded to N (succinimide ring)
-            for _o_idx in _o_nbrs:
-                for _n in polymer_rdmol.GetAtomWithIdx(_o_idx).GetNeighbors():
-                    if _n.GetSymbol() == "N" and _n.GetIdx() in _nh2_indices:
-                        _ester_o = _o_idx
-                        break
-                if _ester_o is not None:
-                    break
-            break
-
-    if _reactive_c is None or _ester_o is None:
-        raise ValueError("Could not identify NHS ester carbonyl C and bridging O")
-
-    # BFS from ester O (excluding reactive C) to find the leaving group
-    _leaving: set[int] = set()
-    _queue = [_ester_o]
-    _visited = {_reactive_c}
-    while _queue:
-        _cur = _queue.pop(0)
-        if _cur in _visited:
-            continue
-        _visited.add(_cur)
-        _leaving.add(_cur)
-        for _n in polymer_rdmol.GetAtomWithIdx(_cur).GetNeighbors():
-            if _n.GetIdx() not in _visited:
-                _queue.append(_n.GetIdx())
-
-    _leaving_sorted = tuple(sorted(_leaving))
-    _retained_sorted = tuple(
-        i for i in range(polymer_rdmol.GetNumAtoms()) if i not in _leaving
-    )
-    logger.info(
-        "NHS reactive C=%d, leaving group=%d atoms, retained=%d atoms",
-        _reactive_c,
-        len(_leaving_sorted),
-        len(_retained_sorted),
-    )
-
-    # ── Compute product-state NAGL charges ─────────────────────────────────
-    # Strategy: remove leaving group from the polymer, attach a small lysine-
-    # sidechain cap (NH-CH2-CH2-CH2-CH2) at the reactive C to mimic the
-    # product amide bond, then charge the whole thing with NAGL.
-    # The cap charges are discarded; only retained-polymer charges are kept.
-
-    # Step 1: Remove leaving group from the bond-order-corrected polymer mol
-    # (using _polymer_bo so the product has correct C=O, S=O, C=C bond orders
-    #  for accurate NAGL charge assignment).
-    _core_rw = Chem.RWMol(_polymer_bo)
-    for _idx in sorted(_leaving, reverse=True):
-        _core_rw.RemoveAtom(_idx)
-    _core = _core_rw.GetMol()
-    Chem.SanitizeMol(_core)
-
-    _old_to_core: dict[int, int] = {}
-    _cursor = 0
-    for _old_idx in range(polymer_rdmol.GetNumAtoms()):
-        if _old_idx not in _leaving:
-            _old_to_core[_old_idx] = _cursor
-            _cursor += 1
-    _rc_core = _old_to_core[_reactive_c]
-
-    # Step 2: Build lysine sidechain cap: NH-CH2-CH2-CH2-CH2
-    # from_smiles("NCCCC") gives NH2-CH2-CH2-CH2-CH3 (primary amine, 3 bonds on N).
-    # We must remove one H from N before bonding to reactive C (amide = 3 bonds on N).
-    _cap = Molecule.from_smiles("NCCCC", allow_undefined_stereo=True)
-    _cap.generate_conformers(n_conformers=1)
-    _cap_rd = _cap.to_rdkit()
-    _cap_rw = Chem.RWMol(_cap_rd)
-    _cap_n = _cap_rw.GetAtomWithIdx(0)
-    _h_drop = None
-    for _b in _cap_n.GetBonds():
-        _nbr = _b.GetOtherAtomIdx(0)
-        if _cap_rw.GetAtomWithIdx(_nbr).GetSymbol() == "H":
-            _h_drop = _nbr
-            break
-    if _h_drop is not None:
-        _cap_rw.RemoveAtom(_h_drop)
-    _cap_rd = _cap_rw.GetMol()
-    Chem.SanitizeMol(_cap_rd)
-
-    # Step 3: Combine core + cap, add amide bond
-    _merged_for_charge = AllChem.CombineMols(_core, _cap_rd)
-    _merged_rw = Chem.RWMol(_merged_for_charge)
-    _cap_offset = _core.GetNumAtoms()
-    _merged_rw.AddBond(_rc_core, _cap_offset, Chem.BondType.SINGLE)
-    _product_rd = _merged_rw.GetMol()
-    Chem.SanitizeMol(_product_rd)
-
-    _product_off = Molecule.from_rdkit(
-        _product_rd, allow_undefined_stereo=True, hydrogens_are_explicit=True,
-    )
-    # No conformer needed — NAGL charges from graph, not geometry.
-
-    # Step 4: Assign NAGL charges
-    try:
-        from openff.toolkit.utils.nagl_wrapper import NAGLToolkitWrapper
-        _product_off.assign_partial_charges(
-            partial_charge_method="openff-gnn-am1bcc-0.1.0-rc.3.pt",
-            toolkit_registry=NAGLToolkitWrapper(),
+        polymer_off = Molecule.from_rdkit(
+            polymer_rdmol,
+            allow_undefined_stereo=True,
+            hydrogens_are_explicit=True,
         )
-        logger.info("Product-state charges assigned via NAGL")
-    except (ImportError, ValueError, RuntimeError) as _exc:
-        logger.warning("NAGL failed (%s), falling back to am1bcc", _exc)
-        _product_off.assign_partial_charges(partial_charge_method="am1bcc")
 
-    # Step 5: Extract charges for retained polymer atoms only
-    _product_charges_all = np.array(
-        [c.m_as(unit.elementary_charge) for c in _product_off.partial_charges]
+        # Middle residues start at PDB residue 1 because polymerist appends
+        # terminal 1-site fragments at the end, so sequence index 5 maps to residue 5
+        reactive_residue_number = CENTER_INDEX
+        _nh2_indices = set()
+        for _atom in polymer_rdmol.GetAtoms():
+            _info = _atom.GetPDBResidueInfo()
+            if (
+                _info
+                and _info.GetResidueName().strip().startswith(RESIDUE_NAMES["NHS"])
+                and _info.GetResidueNumber() == reactive_residue_number
+            ):
+                _nh2_indices.add(_atom.GetIdx())
+
+        if not _nh2_indices:
+            raise ValueError(
+                f"No NHS residue at center (residue {reactive_residue_number}) for sequence {seq}"
+            )
+
+        _reactive_c = None
+        _ester_o = None
+        for _idx in _nh2_indices:
+            _atom = polymer_rdmol.GetAtomWithIdx(_idx)
+            if _atom.GetSymbol() != "C":
+                continue
+            _o_nbrs = [n.GetIdx() for n in _atom.GetNeighbors() if n.GetSymbol() == "O"]
+            if len(_o_nbrs) == 2:
+                _reactive_c = _idx
+                for _o_idx in _o_nbrs:
+                    for _n in polymer_rdmol.GetAtomWithIdx(_o_idx).GetNeighbors():
+                        if _n.GetSymbol() == "N" and _n.GetIdx() in _nh2_indices:
+                            _ester_o = _o_idx
+                            break
+                    if _ester_o is not None:
+                        break
+                break
+
+        if _reactive_c is None or _ester_o is None:
+            raise ValueError("Could not identify NHS ester carbonyl C and bridging O")
+
+        _leaving: set[int] = set()
+        _queue = [_ester_o]
+        _visited = {_reactive_c}
+        while _queue:
+            _cur = _queue.pop(0)
+            if _cur in _visited:
+                continue
+            _visited.add(_cur)
+            _leaving.add(_cur)
+            for _n in polymer_rdmol.GetAtomWithIdx(_cur).GetNeighbors():
+                if _n.GetIdx() not in _visited:
+                    _queue.append(_n.GetIdx())
+
+        _leaving_sorted = tuple(sorted(_leaving))
+        _retained_sorted = tuple(i for i in range(polymer_rdmol.GetNumAtoms()) if i not in _leaving)
+
+        _core_rw = Chem.RWMol(_polymer_bo)
+        for _idx in sorted(_leaving, reverse=True):
+            _core_rw.RemoveAtom(_idx)
+        _core = _core_rw.GetMol()
+        Chem.SanitizeMol(_core)
+
+        _old_to_core = {}
+        _cursor = 0
+        for _old_idx in range(polymer_rdmol.GetNumAtoms()):
+            if _old_idx not in _leaving:
+                _old_to_core[_old_idx] = _cursor
+                _cursor += 1
+        _rc_core = _old_to_core[_reactive_c]
+
+        _cap = Molecule.from_smiles("NCCCC", allow_undefined_stereo=True)
+        _cap.generate_conformers(n_conformers=1)
+        _cap_rd = _cap.to_rdkit()
+        _cap_rw = Chem.RWMol(_cap_rd)
+        _cap_n = _cap_rw.GetAtomWithIdx(0)
+        _h_drop = None
+        for _b in _cap_n.GetBonds():
+            _nbr = _b.GetOtherAtomIdx(0)
+            if _cap_rw.GetAtomWithIdx(_nbr).GetSymbol() == "H":
+                _h_drop = _nbr
+                break
+        if _h_drop is not None:
+            _cap_rw.RemoveAtom(_h_drop)
+        _cap_rd = _cap_rw.GetMol()
+        Chem.SanitizeMol(_cap_rd)
+
+        _merged_for_charge = Chem.CombineMols(_core, _cap_rd)
+        _merged_rw = Chem.RWMol(_merged_for_charge)
+        _cap_offset = _core.GetNumAtoms()
+        _merged_rw.AddBond(_rc_core, _cap_offset, Chem.BondType.SINGLE)
+        _merged_rw.GetAtomWithIdx(_cap_offset).SetNumRadicalElectrons(0)
+        _product_rd = _merged_rw.GetMol()
+        Chem.SanitizeMol(_product_rd)
+
+        _product_off = Molecule.from_rdkit(
+            _product_rd,
+            allow_undefined_stereo=True,
+            hydrogens_are_explicit=True,
+        )
+
+        try:
+            from openff.toolkit.utils.nagl_wrapper import NAGLToolkitWrapper
+
+            _product_off.assign_partial_charges(
+                partial_charge_method="openff-gnn-am1bcc-0.1.0-rc.3.pt",
+                toolkit_registry=NAGLToolkitWrapper(),
+            )
+        except (ImportError, ValueError, RuntimeError) as _exc:
+            logger.warning("NAGL failed (%s), falling back to am1bcc", _exc)
+            _product_off.assign_partial_charges(partial_charge_method="am1bcc")
+
+        _product_charges_all = np.array(
+            [c.m_as(unit.elementary_charge) for c in _product_off.partial_charges]
+        )
+        _product_charges_core = _product_charges_all[: _core.GetNumAtoms()]
+        _retained_charges = np.array(
+            [_product_charges_core[_old_to_core[i]] for i in _retained_sorted]
+        )
+
+        _cap_charge_map = {}
+        _cap_atom_names = ["NZ", "CE", "CD", "CG", "CB"]
+        _cap_heavy_cursor = 0
+        for _ci in range(_cap_offset, _product_off.n_atoms):
+            _ca = _product_off.atom(_ci)
+            if _ca.atomic_number > 1:
+                if _cap_heavy_cursor < len(_cap_atom_names):
+                    _cap_charge_map[_cap_atom_names[_cap_heavy_cursor]] = float(
+                        _product_charges_all[_ci]
+                    )
+                _cap_heavy_cursor += 1
+
+        _cap_n_atom = _product_off.atom(_cap_offset)
+        for _bond in _cap_n_atom.bonds:
+            _nbr_idx = _bond.atom1_index if _bond.atom2_index == _cap_offset else _bond.atom2_index
+            if _product_off.atom(_nbr_idx).atomic_number == 1:
+                _cap_charge_map["HZ1"] = float(_product_charges_all[_nbr_idx])
+                break
+
+        if not cap_charge_map:
+            cap_charge_map = _cap_charge_map
+
+        conjugated_prototypes.append(
+            PolymerPrototype(
+                off_molecule=polymer_off,
+                rdmol=polymer_rdmol,
+                reactive_carbon_idx=_reactive_c,
+                leaving_group_indices=_leaving_sorted,
+                retained_atom_indices=_retained_sorted,
+                product_charges=_retained_charges,
+            )
+        )
+
+    free_polymer_offs = []
+    for _fi, seq in enumerate(free_sequences):
+        charged_off = _polymer_gen.generate_polymer(
+            sequence=seq,
+            monomer_names=MONOMER_NAMES,
+            residue_names=RESIDUE_NAMES,
+        )
+        _free_off = Molecule(charged_off)
+        free_polymer_offs.append(_free_off)
+        logger.info(
+            "Free polymer %d: %d atoms, charge=%.4f",
+            _fi,
+            _free_off.n_atoms,
+            sum(c.m_as(unit.elementary_charge) for c in _free_off.partial_charges),
+        )
+
+    return (
+        cap_charge_map,
+        conjugated_prototypes,
+        conjugated_sequences,
+        free_polymer_offs,
+        free_sequences,
     )
-    # The first _core.GetNumAtoms() entries in _product_off correspond to core atoms
-    # which map 1:1 with retained polymer atoms.
-    _product_charges_core = _product_charges_all[: _core.GetNumAtoms()]
-
-    # Map core indices back to original polymer indices for the retained atoms
-    _core_to_old = {v: k for k, v in _old_to_core.items()}
-    _retained_charges = np.array(
-        [_product_charges_core[_old_to_core[i]] for i in _retained_sorted]
-    )
-    logger.info(
-        "Product charges: %d retained atoms, sum=%.6f e",
-        len(_retained_charges),
-        _retained_charges.sum(),
-    )
-
-    # Also extract cap-atom charges for patching the conjugated lysine.
-    # Cap atoms in the product molecule start at index _cap_offset.
-    # Cap structure after H removal: N(0) - C(1) - C(2) - C(3) - C(4)
-    # These map to lysine atoms:     NZ     CE     CD     CG     CB
-    _cap_charge_map = {}
-    _cap_atom_names = ["NZ", "CE", "CD", "CG", "CB"]
-    _cap_heavy_cursor = 0
-    for _ci in range(_cap_offset, _product_off.n_atoms):
-        _ca = _product_off.atom(_ci)
-        if _ca.atomic_number > 1:
-            if _cap_heavy_cursor < len(_cap_atom_names):
-                _cap_charge_map[_cap_atom_names[_cap_heavy_cursor]] = float(
-                    _product_charges_all[_ci]
-                )
-            _cap_heavy_cursor += 1
-        else:
-            # Cap H atoms — the first one bonded to N is HZ1
-            if _cap_heavy_cursor == 1:  # just finished N, this H is on N
-                _cap_charge_map["HZ1"] = float(_product_charges_all[_ci])
-
-    logger.info("Cap charge map (for LYS patch): %s", _cap_charge_map)
-
-    polymer_prototype = PolymerPrototype(
-        off_molecule=polymer_off,
-        rdmol=polymer_rdmol,
-        reactive_carbon_idx=_reactive_c,
-        leaving_group_indices=_leaving_sorted,
-        retained_atom_indices=_retained_sorted,
-        product_charges=_retained_charges,
-    )
-
-    cap_charge_map = _cap_charge_map
-    return cap_charge_map, polymer_prototype
 
 
 @app.cell
 def _(
-    N_CONJUGATED,
-    RNG_SEED,
+    CONJUGATION_SITE_RESIDS,
+    conjugated_prototypes,
     logger,
-    np,
-    polymer_prototype,
-    reactive_sites,
+    reactive_sites: "dict[tuple[str, int], ReactiveSite]",
 ):
-    """Cell 4: Assign polymer prototypes to reactive lysine sites."""
+    """Cell 4: Assign conjugated polymer prototypes to fixed lysine sites."""
 
-    site_list = sorted(reactive_sites.values(), key=lambda s: s.resid)
-    if len(site_list) < N_CONJUGATED:
-        raise ValueError(
-            f"Requested {N_CONJUGATED} conjugations but only {len(site_list)} sites"
+    assignments = []
+    for _ci, _resid in enumerate(CONJUGATION_SITE_RESIDS):
+        site = reactive_sites[("A", _resid)]
+        prototype = conjugated_prototypes[_ci]
+        assignments.append((site, prototype))
+        logger.info(
+            "  LYS %d <- conjugated polymer %d (%d atoms)",
+            _resid,
+            _ci,
+            prototype.off_molecule.n_atoms,
         )
-
-    rng = np.random.default_rng(RNG_SEED)
-    site_indices = rng.choice(len(site_list), size=N_CONJUGATED, replace=False)
-
-    # All conjugation sites use the same polymer prototype in this PoC.
-    assignments: list[tuple] = [
-        (site_list[int(idx)], polymer_prototype) for idx in site_indices
-    ]
-    for _site, _poly in assignments:
-        logger.info("  LYS %d <- polymer (%d atoms)", _site.resid, _poly.off_molecule.n_atoms)
     return (assignments,)
 
 
 @app.cell
 def _(
-    BOND_ANGLE_TOLERANCE,
-    COLLISION_DISTANCE,
+    FREE_COLLISION_DISTANCE,
+    FREE_SHELL_MAX_A,
+    FREE_SHELL_MIN_A,
+    FreePlacementResult,
     KDTree,
-    N_CONFORMERS,
-    N_CONE_SAMPLES,
-    N_SPIN_SAMPLES,
+    Molecule,
+    N_FREE_PLACEMENT_TRIES,
+    PACKMOL_MOVEBADRANDOM,
+    PACKMOL_NLOOP,
+    PACKMOL_REACTIVE_SPHERE_RADIUS,
+    PACKMOL_TOLERANCE,
+    Path,
     PlacementResult,
     RNG_SEED,
-    TARGET_BOND_ANGLE,
+    Rotation,
     TARGET_BOND_LENGTH,
-    assignments,
+    assignments: list[tuple],
     centroid_vec,
+    free_polymer_offs,
+    free_sequences,
     logger,
     np,
     protein_coords,
-    protein_mol,
-    reactive_sites,
+    reactive_sites: "dict[tuple[str, int], ReactiveSite]",
 ):
-    """Cell 5: Geometric placement of polymers at lysine sites.
+    """Cell 5: Packmol-based polymer placement at lysine conjugation sites.
 
-    Uses cone + spin sampling around the CE→NZ direction to place each
-    polymer's reactive carbon at the target amide bond length from NZ,
-    then spins the polymer around the NZ→C axis to find a collision-free
-    orientation.
+    Uses Packmol to place each conjugated polymer near its target lysine NZ,
+    with per-atom sphere constraints on the reactive carbon. After Packmol
+    packing, a post-placement translation snaps the reactive carbon to
+    TARGET_BOND_LENGTH from NZ.
+
+    Free (non-covalent) polymers use shell-based random placement (unchanged).
     """
+    import tempfile
 
-    def _rodrigues_rotate(v: np.ndarray, axis: np.ndarray, theta: float) -> np.ndarray:
-        ct = np.cos(theta)
-        st = np.sin(theta)
-        return v * ct + np.cross(axis, v) * st + axis * np.dot(axis, v) * (1 - ct)
+    from polyzymd.utils.packmol import build_packmol_input, run_packmol
 
-    def _place_one(
-        site,
-        polymer,
-        occupied_coords: np.ndarray,
-        centroid: np.ndarray,
-    ) -> PlacementResult:
-        rng_local = np.random.default_rng(RNG_SEED + int(site.resid))
-
-        ce_to_nz = site.nz_position - site.ce_position
-        ce_to_nz_hat = ce_to_nz / np.linalg.norm(ce_to_nz)
-
-        nz_outward = site.nz_position - centroid
-        proj = np.dot(nz_outward, ce_to_nz_hat) * ce_to_nz_hat
-        perp = nz_outward - proj
-        perp_norm = np.linalg.norm(perp)
-        if perp_norm < 1e-8:
-            arb = np.array([1.0, 0.0, 0.0])
-            if abs(np.dot(arb, ce_to_nz_hat)) > 0.9:
-                arb = np.array([0.0, 1.0, 0.0])
-            perp = arb - np.dot(arb, ce_to_nz_hat) * ce_to_nz_hat
-            perp_norm = np.linalg.norm(perp)
-        outward_perp = perp / perp_norm
-
-        cone_half_angle = np.radians(180.0 - TARGET_BOND_ANGLE)
-
-        retained_idx = np.asarray(polymer.retained_atom_indices, dtype=int)
-        collision_mask = retained_idx != polymer.reactive_carbon_idx
-        collision_checked_idx = retained_idx[collision_mask]
-
-        occupied_tree = KDTree(occupied_coords)
-
-        # Generate conformers from the precursor molecule
-        polymer_mol_copy = Molecule(polymer.off_molecule)
-        try:
-            polymer_mol_copy.generate_conformers(n_conformers=N_CONFORMERS)
-        except Exception:
-            pass
-        conformers = [c.m_as("angstrom") for c in polymer_mol_copy.conformers]
-
-        best_coords = None
-        best_clearance = -1.0
-        total_attempts = 0
-
-        for conf_coords in conformers:
-            reactive_pos = conf_coords[polymer.reactive_carbon_idx]
-            retained_com = conf_coords[retained_idx].mean(axis=0)
-            com_dir = retained_com - reactive_pos
-            com_norm = np.linalg.norm(com_dir)
-            if com_norm < 1e-8:
-                continue
-            com_hat = com_dir / com_norm
-
-            for _cone_idx in range(N_CONE_SAMPLES):
-                spin_axis_angle = rng_local.uniform(0, 2 * np.pi)
-                spun_perp = _rodrigues_rotate(outward_perp, ce_to_nz_hat, spin_axis_angle)
-                nz_to_c_dir = _rodrigues_rotate(ce_to_nz_hat, spun_perp, cone_half_angle)
-                nz_to_c_dir = nz_to_c_dir / np.linalg.norm(nz_to_c_dir)
-
-                c_target = site.nz_position + TARGET_BOND_LENGTH * nz_to_c_dir
-
-                cross = np.cross(com_hat, nz_to_c_dir)
-                cross_norm = np.linalg.norm(cross)
-                dot = np.dot(com_hat, nz_to_c_dir)
-                if cross_norm < 1e-8:
-                    if dot > 0:
-                        R_align = np.eye(3)
-                    else:
-                        arb2 = np.array([1.0, 0.0, 0.0])
-                        if abs(np.dot(arb2, com_hat)) > 0.9:
-                            arb2 = np.array([0.0, 1.0, 0.0])
-                        flip_axis = np.cross(com_hat, arb2)
-                        flip_axis /= np.linalg.norm(flip_axis)
-                        R_align = 2 * np.outer(flip_axis, flip_axis) - np.eye(3)
-                else:
-                    axis = cross / cross_norm
-                    angle = np.arctan2(cross_norm, dot)
-                    K = np.array([
-                        [0, -axis[2], axis[1]],
-                        [axis[2], 0, -axis[0]],
-                        [-axis[1], axis[0], 0],
-                    ])
-                    R_align = np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
-
-                centered = conf_coords - reactive_pos
-                aligned = (R_align @ centered.T).T + c_target
-
-                for _spin_idx in range(N_SPIN_SAMPLES):
-                    total_attempts += 1
-                    spin_angle = rng_local.uniform(0, 2 * np.pi)
-                    ct = np.cos(spin_angle)
-                    st = np.sin(spin_angle)
-                    ux, uy, uz = nz_to_c_dir
-                    R_spin = np.array([
-                        [ct + ux*ux*(1-ct), ux*uy*(1-ct) - uz*st, ux*uz*(1-ct) + uy*st],
-                        [uy*ux*(1-ct) + uz*st, ct + uy*uy*(1-ct), uy*uz*(1-ct) - ux*st],
-                        [uz*ux*(1-ct) - uy*st, uz*uy*(1-ct) + ux*st, ct + uz*uz*(1-ct)],
-                    ])
-                    spun = (R_spin @ (aligned - c_target).T).T + c_target
-
-                    check_pts = spun[collision_checked_idx]
-                    dists, _ = occupied_tree.query(check_pts)
-                    min_dist = float(np.min(dists))
-                    if min_dist < COLLISION_DISTANCE:
-                        continue
-
-                    nz_to_ce = site.ce_position - site.nz_position
-                    nz_to_c = spun[polymer.reactive_carbon_idx] - site.nz_position
-                    denom = np.linalg.norm(nz_to_ce) * np.linalg.norm(nz_to_c)
-                    if denom == 0.0:
-                        continue
-                    cosine = np.dot(nz_to_ce, nz_to_c) / denom
-                    bond_angle = float(np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0))))
-                    if abs(bond_angle - TARGET_BOND_ANGLE) > BOND_ANGLE_TOLERANCE:
-                        continue
-
-                    if min_dist > best_clearance:
-                        best_coords = spun.copy()
-                        best_clearance = min_dist
-
-        if best_coords is None:
-            raise RuntimeError(
-                f"No valid placement for LYS {site.resid} after {total_attempts} attempts"
+    # ── Helper: write a PDB from coordinates + elements ────────────────────
+    def _write_simple_pdb(path: Path, coords: np.ndarray, elements: list[str]) -> None:
+        """Write a minimal PDB file from coordinates and element symbols."""
+        lines = []
+        for i, (xyz, elem) in enumerate(zip(coords, elements, strict=False)):
+            name = f"{elem}{i + 1:>3d}"[:4]
+            lines.append(
+                f"HETATM{i + 1:>5d} {name:<4s} UNK A   1    "
+                f"{xyz[0]:>8.3f}{xyz[1]:>8.3f}{xyz[2]:>8.3f}"
+                f"  1.00  0.00          {elem:>2s}\n"
             )
-        logger.info(
-            "LYS %d: clearance %.2f A (%d attempts)",
-            site.resid, best_clearance, total_attempts,
-        )
-        return PlacementResult(
-            site=site,
-            polymer=polymer,
-            placed_coords=best_coords,
-            min_protein_distance=best_clearance,
-        )
+        lines.append("END\n")
+        path.write_text("".join(lines))
 
-    # ── Exclude only the HZ atoms being removed + NZ from occupied coords ──
-    # NZ is excluded because the reactive C will bond directly to it at close
-    # range.  All other lysine atoms (CE, CD, CG, CB, backbone) remain as
-    # collision targets so the polymer doesn't clash with them.
+    # ── Helper: Kabsch alignment ───────────────────────────────────────────
+    def _kabsch_align(P: np.ndarray, Q: np.ndarray):
+        """Compute rotation R and translation t that minimizes ||R@P + t - Q||.
+
+        Parameters
+        ----------
+        P : (N, 3) source points (template)
+        Q : (N, 3) target points (packed)
+
+        Returns
+        -------
+        R : (3, 3) rotation matrix
+        t : (3,) translation vector
+        """
+        centroid_p = P.mean(axis=0)
+        centroid_q = Q.mean(axis=0)
+        P_c = P - centroid_p
+        Q_c = Q - centroid_q
+        H = P_c.T @ Q_c
+        U, _, Vt = np.linalg.svd(H)
+        d = np.linalg.det(Vt.T @ U.T)
+        S = np.diag([1.0, 1.0, d])  # correct for reflection
+        R = Vt.T @ S @ U.T
+        t = centroid_q - R @ centroid_p
+        return R, t
+
+    # ── Prepare protein PDB for Packmol (exclude NZ + removable HZ) ───────
+    # Exclude NZ and the 2 HZ atoms being removed at each conjugation site
+    # This prevents Packmol from over-blocking the bond-forming region
     exclude_indices: set[int] = set()
     for _site_key in reactive_sites:
         _site_obj = reactive_sites[_site_key]
-        # Exclude NZ
         exclude_indices.add(_site_obj.nz_index)
-        # Exclude the HZ that will be removed (last 2 of the sorted list)
         for _hz in _site_obj.hz_indices[1:]:
             exclude_indices.add(_hz)
 
     keep_mask = np.ones(len(protein_coords), dtype=bool)
     keep_mask[list(exclude_indices)] = False
-    occupied = protein_coords[keep_mask].copy()
+    trimmed_protein_coords = protein_coords[keep_mask]
 
-    placement_results: list[PlacementResult] = []
-    for _site, _polymer in assignments:
-        _placement = _place_one(_site, _polymer, occupied, centroid_vec)
-        placement_results.append(_placement)
-        retained_coords = _placement.placed_coords[
-            np.asarray(_polymer.retained_atom_indices, dtype=int)
-        ]
-        occupied = np.vstack((occupied, retained_coords))
-        logger.info(
-            "Placed polymer at LYS %d with clearance %.3f A",
-            _site.resid, _placement.min_protein_distance,
+    # Get element symbols for trimmed protein (needed for PDB writing)
+    # We need to recover the element for each kept atom. Since protein_coords
+    # come from protein_mol (Cell 2), we can use the same OpenFF molecule
+    # But protein_mol isn't passed to Cell 5. Instead, we use a simple
+    # heuristic: write all as carbon (Packmol only needs coords for steric
+    # exclusion; element doesn't affect packing)
+    trimmed_elements = ["C"] * len(trimmed_protein_coords)
+
+    # ── Prepare polymer PDBs (retained atoms only, centered on reactive C) ─
+    polymer_templates = []  # list of dicts with template info
+    for site, polymer in assignments:
+        retained_idx = np.asarray(polymer.retained_atom_indices, dtype=int)
+        # Use the cached SDF conformer (from polymer generation)
+        full_coords = polymer.off_molecule.conformers[0].m_as("angstrom")
+        retained_coords = full_coords[retained_idx]
+        reactive_c_local = np.where(retained_idx == polymer.reactive_carbon_idx)[0][0]
+
+        # Elements for retained atoms
+        elements = [polymer.off_molecule.atoms[i].symbol for i in retained_idx]
+
+        polymer_templates.append(
+            {
+                "site": site,
+                "polymer": polymer,
+                "full_coords": full_coords,
+                "retained_idx": retained_idx,
+                "retained_coords": retained_coords,
+                "reactive_c_local": reactive_c_local,
+                "elements": elements,
+            }
         )
 
-    return (placement_results,)
+    # ── Compute bounding box + coordinate shift ────────────────────────────
+    # Packmol requires positive coordinates. Compute bounding box of all
+    # components and shift everything to the positive octant
+    all_coords = [trimmed_protein_coords]
+    for tmpl in polymer_templates:
+        all_coords.append(tmpl["retained_coords"])
+    combined = np.vstack(all_coords)
+    global_min = combined.min(axis=0)
+    # Add padding so nothing sits at exactly 0
+    SHIFT_PADDING = 10.0
+    coord_shift = -global_min + SHIFT_PADDING
+
+    # Shifted protein coords
+    shifted_protein = trimmed_protein_coords + coord_shift
+
+    # Shifted NZ positions (for sphere constraints)
+    shifted_nz = {}
+    for site, _polymer in assignments:
+        shifted_nz[site.resid] = site.nz_position + coord_shift
+
+    # Box size: bounding box of shifted coords + generous padding
+    BOX_PADDING = 30.0
+    shifted_all = np.vstack(
+        [shifted_protein] + [tmpl["retained_coords"] + coord_shift for tmpl in polymer_templates]
+    )
+    box_size = shifted_all.max(axis=0) + BOX_PADDING
+
+    # ── Write PDB files to temp directory ──────────────────────────────────
+    with tempfile.TemporaryDirectory(prefix="packmol_conjugation_") as _tmp_dir:
+        work_dir = Path(_tmp_dir)
+        logger.info("Packmol working directory: %s", work_dir)
+
+        # Write trimmed protein PDB
+        protein_pdb = work_dir / "protein_trimmed.pdb"
+        _write_simple_pdb(protein_pdb, shifted_protein, trimmed_elements)
+
+        # Write polymer PDBs (shifted, NOT centered on reactive C — Packmol
+        # handles placement. We keep the original relative geometry)
+        polymer_pdbs = []
+        structure_extra_lines = []
+        for i, tmpl in enumerate(polymer_templates):
+            shifted_retained = tmpl["retained_coords"] + coord_shift
+            pdb_path = work_dir / f"polymer_{i}.pdb"
+            _write_simple_pdb(pdb_path, shifted_retained, tmpl["elements"])
+            polymer_pdbs.append(str(pdb_path))
+
+            # Per-atom constraint: reactive carbon inside sphere near NZ
+            nz_shifted = shifted_nz[tmpl["site"].resid]
+            # Packmol uses 1-based indexing
+            rc_1based = tmpl["reactive_c_local"] + 1
+            extra = [
+                f"atoms {rc_1based}",
+                (
+                    "inside sphere "
+                    f"{nz_shifted[0]:.6f} {nz_shifted[1]:.6f} {nz_shifted[2]:.6f} "
+                    f"{PACKMOL_REACTIVE_SPHERE_RADIUS:.1f}"
+                ),
+                "end atoms",
+            ]
+            structure_extra_lines.append(extra)
+
+        # ── Build and run Packmol ──────────────────────────────────────────
+        input_text = build_packmol_input(
+            molecule_pdb_paths=polymer_pdbs,
+            molecule_counts=[1] * len(polymer_pdbs),
+            box_size_angstrom=box_size,
+            tolerance_angstrom=PACKMOL_TOLERANCE,
+            solute_pdb_path=str(protein_pdb),
+            use_pbc=False,
+            movebadrandom=PACKMOL_MOVEBADRANDOM,
+            nloop=PACKMOL_NLOOP,
+            structure_extra_lines=structure_extra_lines,
+        )
+
+        logger.info("Packmol input:\n%s", input_text)
+        output_pdb = run_packmol(input_text, work_dir)
+        logger.info("Packmol output: %s", output_pdb)
+
+        # ── Parse Packmol output ───────────────────────────────────────────
+        # Read all ATOM/HETATM lines from the output PDB
+        packed_coords_all = []
+        with open(output_pdb, "r") as f:
+            for line in f:
+                if line.startswith(("ATOM", "HETATM")):
+                    x = float(line[30:38])
+                    y = float(line[38:46])
+                    z = float(line[46:54])
+                    packed_coords_all.append([x, y, z])
+        packed_coords_all = np.array(packed_coords_all)
+
+        n_protein = len(shifted_protein)
+        expected_packed_atoms = n_protein + sum(
+            len(tmpl["retained_coords"]) for tmpl in polymer_templates
+        )
+        if len(packed_coords_all) != expected_packed_atoms:
+            raise RuntimeError(
+                f"Packmol output has {len(packed_coords_all)} atoms, "
+                f"expected {expected_packed_atoms} (protein={n_protein} + "
+                f"polymers={expected_packed_atoms - n_protein})"
+            )
+
+        # Slice: first N_protein atoms are the fixed protein, then each polymer
+        polymer_packed_coords = []
+        offset = n_protein
+        for tmpl in polymer_templates:
+            n_atoms = len(tmpl["retained_coords"])
+            polymer_packed_coords.append(packed_coords_all[offset : offset + n_atoms])
+            offset += n_atoms
+
+    # ── Kabsch alignment + post-placement refinement ───────────────────────
+    # For each polymer:
+    # 1. Kabsch-align the original retained template → packed retained coords
+    # 2. Apply the same transform to the FULL original coords
+    # 3. Translate so reactive C is at TARGET_BOND_LENGTH from NZ
+    # 4. Undo the coordinate shift
+
+    occupied = trimmed_protein_coords.copy()  # back in original frame
+    placement_results: list[PlacementResult] = []
+
+    for i, tmpl in enumerate(polymer_templates):
+        # Source: original retained coords (before shift)
+        P = tmpl["retained_coords"]
+        # Target: packed coords (undo shift)
+        Q = polymer_packed_coords[i] - coord_shift
+
+        R, t = _kabsch_align(P, Q)
+
+        # Apply transform to FULL original coords
+        full_transformed = (R @ tmpl["full_coords"].T).T + t
+
+        # Post-placement: translate so reactive C is exactly at
+        # TARGET_BOND_LENGTH from NZ
+        nz_pos = tmpl["site"].nz_position
+        rc_idx = tmpl["polymer"].reactive_carbon_idx
+        current_rc = full_transformed[rc_idx]
+        nz_to_rc = current_rc - nz_pos
+        nz_to_rc_dist = np.linalg.norm(nz_to_rc)
+        if nz_to_rc_dist < 1e-8:
+            raise RuntimeError(f"Reactive carbon coincides with NZ for LYS {tmpl['site'].resid}")
+        nz_to_rc_hat = nz_to_rc / nz_to_rc_dist
+        target_rc = nz_pos + TARGET_BOND_LENGTH * nz_to_rc_hat
+        translation = target_rc - current_rc
+        full_transformed += translation
+
+        # Informational sanity check after snapping to bond length
+        protein_tree = KDTree(protein_coords)
+        snap_dists, _ = protein_tree.query(full_transformed)
+        min_post_snap_protein_dist = float(np.min(snap_dists))
+        if min_post_snap_protein_dist < 1.0:
+            logger.warning(
+                "LYS %d: post-snap minimum polymer-protein distance %.3f A (< 1.0 A)",
+                tmpl["site"].resid,
+                min_post_snap_protein_dist,
+            )
+
+        # Check clearance against occupied atoms
+        retained_idx = tmpl["retained_idx"]
+        collision_mask = retained_idx != tmpl["polymer"].reactive_carbon_idx
+        check_pts = full_transformed[retained_idx[collision_mask]]
+        if len(occupied) > 0:
+            tree = KDTree(occupied)
+            dists, _ = tree.query(check_pts)
+            min_dist = float(np.min(dists))
+        else:
+            min_dist = float("inf")
+
+        logger.info(
+            "LYS %d: Packmol placed, post-snap distance to NZ=%.3f A, min clearance=%.2f A",
+            tmpl["site"].resid,
+            np.linalg.norm(full_transformed[rc_idx] - nz_pos),
+            min_dist,
+        )
+
+        placement_results.append(
+            PlacementResult(
+                site=tmpl["site"],
+                polymer=tmpl["polymer"],
+                placed_coords=full_transformed,
+                min_protein_distance=min_dist,
+            )
+        )
+
+        # Add retained coords to occupied set for next polymer
+        occupied = np.vstack((occupied, full_transformed[retained_idx]))
+
+    # ── Free polymer placement (unchanged from original) ───────────────────
+    free_placement_results: list[FreePlacementResult] = []
+    for _fi, _free_off in enumerate(free_polymer_offs):
+        rng_free = np.random.default_rng(RNG_SEED + 1000 + _fi)
+
+        if not _free_off.conformers:
+            raise RuntimeError(f"No conformers for free polymer {_fi}")
+
+        placed = False
+        for _ in range(N_FREE_PLACEMENT_TRIES):
+            conf_coords = _free_off.conformers[0].m_as("angstrom")
+
+            centered = conf_coords - conf_coords.mean(axis=0)
+            rot = Rotation.random(random_state=rng_free.integers(0, 2**31))
+            rotated = rot.apply(centered)
+
+            direction = rng_free.standard_normal(3)
+            direction /= np.linalg.norm(direction)
+            radius = rng_free.uniform(FREE_SHELL_MIN_A, FREE_SHELL_MAX_A)
+            _offset = centroid_vec + radius * direction
+            trial = rotated + _offset
+
+            occupied_tree = KDTree(occupied)
+            dists, _ = occupied_tree.query(trial)
+            min_dist = float(np.min(dists))
+            if min_dist >= FREE_COLLISION_DISTANCE:
+                from openff.units import Quantity as Q
+                from openff.units import unit as u
+
+                _free_off._conformers = [Q(trial, u.angstrom)]
+
+                occupied = np.vstack((occupied, trial))
+                free_placement_results.append(
+                    FreePlacementResult(
+                        polymer_id=f"free_{_fi}",
+                        sequence=free_sequences[_fi],
+                        off_molecule=_free_off,
+                        placed_coords=trial,
+                    )
+                )
+                placed = True
+                logger.info("Placed free polymer %d: clearance %.2f A", _fi, min_dist)
+                break
+
+        if not placed:
+            raise RuntimeError(
+                f"Failed to place free polymer {_fi} after {N_FREE_PLACEMENT_TRIES} tries"
+            )
+
+    placed_free_polymer_offs = [res.off_molecule for res in free_placement_results]
+
+    return free_placement_results, placed_free_polymer_offs, placement_results
 
 
 @app.cell
 def _(
     Chem,
     Molecule,
+    PROTEIN_PDB,
     Quantity,
     cap_charge_map,
     logger,
     np,
-    placement_results,
+    placed_free_polymer_offs,
+    placement_results: "list[PlacementResult]",
     protein_charge_arr,
     protein_coords,
     protein_mol,
@@ -880,9 +1170,7 @@ def _(
 
     # Start from protein RDKit mol
     _prot_rd = Chem.MolFromPDBFile(
-        protein_mol.conformers[0]._parent.to_topology().to_pdb()
-        if False  # placeholder — we need the actual PDB path
-        else PROTEIN_PDB,
+        PROTEIN_PDB,
         removeHs=False,
         sanitize=True,
     )
@@ -896,24 +1184,9 @@ def _(
     # ── Track cumulative modifications ─────────────────────────────────────
     # As we remove H atoms and add polymers, indices shift.  Track via
     # old→new maps at each stage.
-    _current_rd = _prot_rd
     _n_prot_orig = _prot_rd.GetNumAtoms()
 
-    # Global map: original-protein-idx → current-merged-idx
-    _prot_global_map: dict[int, int] = {i: i for i in range(_n_prot_orig)}
     _prot_removed: set[int] = set()  # original protein indices removed so far
-
-    # For charge building: track which atoms are protein vs polymer
-    # and store per-atom charges
-    _charges: list[float] = []
-    _source_labels: list[str] = []  # "protein" or "polymer_N"
-
-    # For coordinate building
-    _coord_blocks: list[np.ndarray] = [protein_coords.copy()]
-    _prot_h_removed_indices: list[int] = []  # original protein indices of removed H
-
-    # Collect per-site info for PDB assembly
-    _polymer_atom_ranges: list[tuple[int, int]] = []  # (start, end) in merged mol
 
     for _pi, _placement in enumerate(placement_results):
         _site = _placement.site
@@ -924,7 +1197,6 @@ def _(
         # hz_indices are in the ORIGINAL protein_mol ordering.
         _hz_to_remove = list(_site.hz_indices[1:])  # remove last 2, keep first
         _prot_removed.update(_hz_to_remove)
-        _prot_h_removed_indices.extend(_hz_to_remove)
 
     # ── Build modified protein (remove all HZ at once) ─────────────────────
     _prot_rw = Chem.RWMol(_prot_rd)
@@ -940,18 +1212,16 @@ def _(
         if _old not in _prot_removed:
             _prot_old_to_new[_old] = _cursor
             _cursor += 1
-    _n_prot_mod = _prot_mod.GetNumAtoms()
-
     # Build protein charge array (remove HZ entries, redistribute charge)
     _prot_charges_mod: list[float] = []
-    _prot_keep_mask = np.ones(_n_prot_orig, dtype=bool)
-    _prot_keep_mask[list(_prot_removed)] = False
     for _old in range(_n_prot_orig):
         if _old not in _prot_removed:
             _prot_charges_mod.append(float(protein_charge_arr[_old]))
 
     # Build protein coordinate array (remove H entries)
-    _prot_coords_mod = protein_coords[_prot_keep_mask]
+    _prot_coords_mod = protein_coords[
+        np.array([_old not in _prot_removed for _old in range(_n_prot_orig)], dtype=bool)
+    ]
 
     # ── Now merge polymers one by one ──────────────────────────────────────
     _merged = _prot_mod
@@ -998,15 +1268,34 @@ def _(
 
         logger.info(
             "Merged polymer %d at LYS %d: merged total=%d atoms",
-            _pi, _site.resid, _merged.GetNumAtoms(),
+            _pi,
+            _site.resid,
+            _merged.GetNumAtoms(),
         )
 
     # ── Patch lysine junction charges ──────────────────────────────────────
     # For each conjugated lysine, replace the ff14SB charges on
-    # NZ, CE, CD, CG, CB, HZ1 with the cap-derived charges.
+    # NZ, CE, CD, CG, CB with the cap-derived charges.  Also patch the
+    # retained NZ hydrogen (HZ1 equivalent) — identified by index rather
+    # than name, since OpenFF/CCD may use non-standard H names (e.g. H10).
     for _placement in placement_results:
         _site = _placement.site
         for _atom_name, _cap_q in cap_charge_map.items():
+            if _atom_name == "HZ1":
+                # The retained HZ is the first in hz_indices (others removed).
+                _hz_orig_idx = _site.hz_indices[0]
+                if _hz_orig_idx in _prot_old_to_new:
+                    _new_idx = _prot_old_to_new[_hz_orig_idx]
+                    _old_q = _merged_charges[_new_idx]
+                    _merged_charges[_new_idx] = _cap_q
+                    logger.info(
+                        "  Patched LYS %d HZ1 (atom %d): %.4f → %.4f",
+                        _site.resid,
+                        _hz_orig_idx,
+                        _old_q,
+                        _cap_q,
+                    )
+                continue
             # Find the protein atom by name in the original ordering
             for _atom in protein_mol.atoms:
                 if (
@@ -1022,7 +1311,10 @@ def _(
                         _merged_charges[_new_idx] = _cap_q
                         logger.info(
                             "  Patched LYS %d %s: %.4f → %.4f",
-                            _site.resid, _atom_name, _old_q, _cap_q,
+                            _site.resid,
+                            _atom_name,
+                            _old_q,
+                            _cap_q,
                         )
                     break
 
@@ -1035,24 +1327,27 @@ def _(
     _merged_noconf = _merged_noconf.GetMol()
 
     conjugate_off = Molecule.from_rdkit(
-        _merged_noconf, allow_undefined_stereo=True, hydrogens_are_explicit=True,
+        _merged_noconf,
+        allow_undefined_stereo=True,
+        hydrogens_are_explicit=True,
     )
     conjugate_off.add_conformer(Quantity(_merged_coords, unit.angstrom))
 
     # ── Fix formal charges on protein atoms ────────────────────────────────
     # RDKit assigns different formal charges than OpenFF/CCD for some residues
-    # (e.g. ARG NH1 gets FC=+1 in RDKit but FC=0 in OpenFF).  We correct
-    # these where safe (i.e., where the new FC doesn't violate valence rules).
+    # (e.g. ARG NH1 gets FC=+1 in RDKit but FC=0 in OpenFF, and HIS ND1 gets
+    # FC=+1 for aromatic perception while CCD uses FC=0).
+    #
+    # We correct most of them, but SKIP aromatic atoms (e.g. HIS ND1) because
+    # create_interchange() roundtrips through RDKit, which would reject the
+    # change as a valence violation.  The construction-accounting charge target
+    # below accounts for these uncorrectable FC mismatches.
     #
     # Conjugated lysine NZ changes from +1 (protonated NH3+) to
     # 0 (amide N) after removing 2 HZ and forming the crosslink bond.
-    #
-    # We do NOT change HIS ND1 because it is aromatic and FC=0 would break
-    # kekulization.
-    _conjugated_nz_indices = {
-        _prot_old_to_new[p.site.nz_index] for p in placement_results
-    }
+    _conjugated_nz_indices = {_prot_old_to_new[p.site.nz_index] for p in placement_results}
     _n_fc_fixed = 0
+    _fc_skipped: list[tuple[int, int, int]] = []  # (new_idx, current_fc, target_fc)
     for _orig_idx in range(protein_mol.n_atoms):
         if _orig_idx in _prot_removed:
             continue
@@ -1064,15 +1359,20 @@ def _(
         _current_fc = conjugate_off.atom(_new_idx).formal_charge.m
         if _target_fc == _current_fc:
             continue
-        # Safety check: don't change FC on aromatic atoms (e.g. HIS ND1)
-        # which could break kekulization
+        # Safety: don't change FC on aromatic atoms — create_interchange()
+        # roundtrips through RDKit which enforces kekulization/valence rules.
         _rd_atom = _merged.GetAtomWithIdx(_new_idx)
         if _rd_atom.GetIsAromatic():
+            _fc_skipped.append((_new_idx, _current_fc, _target_fc))
             logger.info(
-                "  Skipping FC fix for aromatic atom %d (%s): keeping FC=%d",
+                "  Skipping FC fix for aromatic atom %d (%s %s %s): "
+                "keeping FC=%d (target=%d) — will absorb in partial charges",
                 _orig_idx,
+                protein_mol.atom(_orig_idx).metadata.get("residue_name", "?"),
+                protein_mol.atom(_orig_idx).metadata.get("residue_number", "?"),
                 protein_mol.atom(_orig_idx).name,
                 _current_fc,
+                _target_fc,
             )
             continue
         conjugate_off.atom(_new_idx).formal_charge = _target_fc
@@ -1084,76 +1384,228 @@ def _(
             _current_fc,
             _target_fc,
         )
-    logger.info("Fixed %d formal charges", _n_fc_fixed)
+    logger.info("Fixed %d formal charges (%d skipped aromatic)", _n_fc_fixed, len(_fc_skipped))
 
-    # Assign charges
+    # ── Compute target net charge from construction accounting ────────────
+    # We derive the intended system charge from first principles rather than
+    # trusting sum(formal_charge) on the merged molecule, as a cross-check.
+    _protein_formal_charge = sum(a.formal_charge.m for a in protein_mol.atoms)
+    _conjugation_fc_delta = -1 * len(placement_results)
+    _polymer_fc_total = 0
+    for _placement in placement_results:
+        _poly_off = _placement.polymer.off_molecule
+        _retained = set(_placement.polymer.retained_atom_indices)
+        _polymer_fc_total += sum(_poly_off.atom(i).formal_charge.m for i in _retained)
+    _target_charge = _protein_formal_charge + _conjugation_fc_delta + _polymer_fc_total
+
+    # The molecule's formal charge (as seen by create_interchange) may differ
+    # from _target_charge if aromatic atoms had uncorrectable FC mismatches.
+    # create_interchange requires partial charges to sum to the molecule FC,
+    # so we must target that value.  But we handle the discrepancy surgically:
+    # for each skipped aromatic atom, absorb the FC delta directly into its
+    # partial charge (rather than smearing it across all atoms).
+    _molecule_fc = sum(a.formal_charge.m for a in conjugate_off.atoms)
+    _fc_discrepancy = _molecule_fc - _target_charge
+
+    # ── Charge ledger ──────────────────────────────────────────────────────
     _charge_arr = np.array(_merged_charges)
-    # Ensure total charge matches formal charge
-    _formal_charge = sum(a.formal_charge.m for a in conjugate_off.atoms)
     _charge_sum = _charge_arr.sum()
-    _charge_diff = _formal_charge - _charge_sum
-    if abs(_charge_diff) > 0.01:
-        logger.warning(
-            "Charge mismatch: formal=%.4f, sum=%.4f, diff=%.4f — redistributing",
-            _formal_charge, _charge_sum, _charge_diff,
+    logger.info("── Charge ledger ──")
+    logger.info("  Protein formal charge (from CCD):  %+.0f", _protein_formal_charge)
+    logger.info(
+        "  Conjugation FC delta (%d sites):   %+.0f",
+        len(placement_results),
+        _conjugation_fc_delta,
+    )
+    logger.info(
+        "  Polymer formal charge (%d chains):  %+.0f",
+        len(placement_results),
+        _polymer_fc_total,
+    )
+    logger.info("  Target net charge (physical):       %+.0f", _target_charge)
+    logger.info("  Molecule FC (after corrections):    %+.0f", _molecule_fc)
+    if _fc_discrepancy != 0:
+        logger.info(
+            "  FC discrepancy (uncorrectable):     %+.0f (from %d skipped aromatic atoms)",
+            _fc_discrepancy,
+            len(_fc_skipped),
         )
-        # Spread the difference evenly across all atoms
-        _charge_arr += _charge_diff / len(_charge_arr)
+    logger.info("  Partial charge sum (pre-fix):       %+.4f", _charge_sum)
+
+    # Step 1: For each skipped aromatic atom, adjust its partial charge by
+    # (current_fc − target_fc) so the ff14SB charge reflects the correct
+    # physical state despite the incorrect formal charge.
+    for _new_idx, _current_fc, _target_fc_val in _fc_skipped:
+        _delta = _current_fc - _target_fc_val
+        _old_q = _charge_arr[_new_idx]
+        _charge_arr[_new_idx] += _delta
+        logger.info(
+            "  Absorbed FC artifact on atom %d: q %.4f → %.4f (delta %+d)",
+            _new_idx,
+            _old_q,
+            _charge_arr[_new_idx],
+            _delta,
+        )
+
+    # Step 2: Redistribute the remaining small residual (ff14SB/NAGL junction
+    # mismatch) evenly across all atoms to hit the molecule FC exactly.
+    _charge_sum_after_absorb = _charge_arr.sum()
+    _residual = _molecule_fc - _charge_sum_after_absorb
+    logger.info("  After absorbing FC artifacts:       %+.4f", _charge_sum_after_absorb)
+    logger.info("  Residual to redistribute:           %+.4f", _residual)
+
+    if abs(_residual) > 1.0:
+        raise ValueError(
+            "Charge mismatch too large to redistribute safely: "
+            f"molecule_fc={_molecule_fc:.4f}, sum={_charge_sum_after_absorb:.4f}, "
+            f"residual={_residual:.4f}. Check charge construction."
+        )
+    if abs(_residual) > 0.01:
+        logger.info(
+            "  Redistributing %.4f e across %d atoms (%.6f e/atom)",
+            _residual,
+            len(_charge_arr),
+            _residual / len(_charge_arr),
+        )
+        _charge_arr += _residual / len(_charge_arr)
+    else:
+        logger.info("  Residual within tolerance (<=0.01 e), no redistribution needed")
+
     conjugate_off.partial_charges = Quantity(_charge_arr, unit.elementary_charge)
 
     logger.info(
-        "Conjugate molecule: %d atoms, formal charge=%.0f, partial charge sum=%.4f",
+        "Conjugate molecule: %d atoms, physical charge=%+.0f, "
+        "molecule FC=%+.0f, partial charge sum=%.4f",
         conjugate_off.n_atoms,
-        _formal_charge,
+        _target_charge,
+        _molecule_fc,
         _charge_arr.sum(),
     )
 
-    merged_rdmol = _merged
-    prot_old_to_new = _prot_old_to_new
     prot_removed_indices = _prot_removed
-    return (conjugate_off, merged_rdmol, prot_old_to_new, prot_removed_indices)
+
+    protein_atom_indices = sorted(_prot_old_to_new.values())
+    protein_heavy_indices = [
+        _prot_old_to_new[orig]
+        for orig in range(_n_prot_orig)
+        if orig not in _prot_removed and protein_mol.atom(orig).atomic_number > 1
+    ]
+
+    protein_backbone_heavy_indices = []
+    for orig in range(_n_prot_orig):
+        if orig in _prot_removed:
+            continue
+        atom = protein_mol.atom(orig)
+        if atom.atomic_number > 1 and atom.name in ("CA", "C", "N", "O"):
+            protein_backbone_heavy_indices.append(_prot_old_to_new[orig])
+
+    conjugated_polymer_ranges = []
+    _offset = _prot_mod.GetNumAtoms()
+    for _pi, _placement in enumerate(placement_results):
+        n_retained = len(_placement.polymer.retained_atom_indices)
+        conj_indices = list(range(_offset, _offset + n_retained))
+        conj_heavy = [i for i in conj_indices if conjugate_off.atom(i).atomic_number > 1]
+        conjugated_polymer_ranges.append(
+            {
+                "polymer_id": f"conj_{_pi}",
+                "site_resid": _placement.site.resid,
+                "atom_indices": conj_indices,
+                "heavy_atom_indices": conj_heavy,
+            }
+        )
+        _offset += n_retained
+
+    all_conjugate_heavy = protein_heavy_indices.copy()
+    for cr in conjugated_polymer_ranges:
+        all_conjugate_heavy.extend(cr["heavy_atom_indices"])
+    all_conjugate_heavy.sort()
+
+    free_polymer_ranges = []
+    free_offset = conjugate_off.n_atoms
+    for _fi, free_off_mol in enumerate(placed_free_polymer_offs):
+        n_free = free_off_mol.n_atoms
+        free_indices = list(range(free_offset, free_offset + n_free))
+        free_heavy = [
+            i for i in free_indices if free_off_mol.atom(i - free_offset).atomic_number > 1
+        ]
+        free_polymer_ranges.append(
+            {
+                "polymer_id": f"free_{_fi}",
+                "atom_indices": free_indices,
+                "heavy_atom_indices": free_heavy,
+            }
+        )
+        free_offset += n_free
+
+    all_free_heavy = []
+    for fr in free_polymer_ranges:
+        all_free_heavy.extend(fr["heavy_atom_indices"])
+    all_free_heavy.sort()
+
+    component_metadata = {
+        "n_conjugate_atoms": conjugate_off.n_atoms,
+        "n_free_polymer_atoms": sum(m.n_atoms for m in placed_free_polymer_offs),
+        "protein": {
+            "atom_indices": protein_atom_indices,
+            "heavy_atom_indices": protein_heavy_indices,
+            "backbone_heavy_atom_indices": protein_backbone_heavy_indices,
+        },
+        "conjugated_polymers": conjugated_polymer_ranges,
+        "free_polymers": free_polymer_ranges,
+        "restraint_groups": {
+            "protein_heavy": protein_heavy_indices,
+            "protein_backbone_heavy": protein_backbone_heavy_indices,
+            "conjugate_heavy": all_conjugate_heavy,
+            "free_polymer_heavy": all_free_heavy,
+        },
+    }
+
+    logger.info(
+        "Component metadata: %d protein heavy, %d backbone heavy, %d conjugate heavy, "
+        "%d free heavy",
+        len(protein_heavy_indices),
+        len(protein_backbone_heavy_indices),
+        len(all_conjugate_heavy),
+        len(all_free_heavy),
+    )
+
+    return component_metadata, conjugate_off, prot_removed_indices
 
 
 @app.cell
 def _(
     ASSEMBLED_PDB,
+    PROTEIN_PDB,
     Path,
+    free_placement_results,
     logger,
     np,
-    placement_results,
-    protein_coords,
-    protein_mol,
+    placement_results: "list[PlacementResult]",
     prot_removed_indices,
     write_conect_line,
     write_pdb_line,
 ):
-    """Cell 7: Write assembled PDB for visualization and minimization."""
+    """Cell 7: Write assembled PDB following PolyzyMD chain convention."""
 
-    # Parse original protein PDB for ATOM lines
     _pdb_path = PROTEIN_PDB
-    _atom_records: list[dict] = []
+    _atom_records = []
     with open(_pdb_path, "r", encoding="utf-8") as _f:
         for _line in _f:
             if _line.startswith(("ATOM", "HETATM")):
-                _atom_records.append({
-                    "line": _line,
-                    "serial": int(_line[6:11]),
-                    "name": _line[12:16].strip(),
-                    "resname": _line[17:20].strip(),
-                    "chain": _line[21].strip() or "A",
-                    "resid": int(_line[22:26]),
-                })
+                _atom_records.append(
+                    {
+                        "line": _line,
+                        "serial": int(_line[6:11]),
+                        "name": _line[12:16].strip(),
+                        "resname": _line[17:20].strip(),
+                        "chain": _line[21].strip() or "A",
+                        "resid": int(_line[22:26]),
+                    }
+                )
 
-    # Map original protein atom index to PDB serial
-    # (assumes PDB ATOM lines are in the same order as Topology.from_pdb atoms)
-    _orig_idx_to_serial: dict[int, int] = {}
-    for _i, _rec in enumerate(_atom_records):
-        _orig_idx_to_serial[_i] = _rec["serial"]
-
-    # Write protein atoms, skipping removed H
-    kept_lines: list[str] = []
-    _serial_lookup: dict[int, int] = {}  # original idx → serial in output
-    _existing_serials: set[int] = set()
+    _serial_lookup = {}
+    _existing_serials = set()
+    kept_lines = []
     for _orig_idx, _rec in enumerate(_atom_records):
         if _orig_idx in prot_removed_indices:
             continue
@@ -1163,33 +1615,43 @@ def _(
 
     _next_serial = max(_existing_serials) + 1
 
-    # Write polymer atoms
-    polymer_lines: list[str] = []
-    conect_map: dict[int, set[int]] = {}
+    polymer_lines = []
+    conect_map = {}
+    chain_c_resid = 1
 
     for _pi, _placement in enumerate(placement_results):
         _polymer = _placement.polymer
-        _poly_chain = "C"
-        _poly_resid = 1001 + _pi
 
-        _serial_map: dict[int, int] = {}  # polymer retained idx → serial
+        local_resids = set()
+        for _orig_idx in _polymer.retained_atom_indices:
+            _rd_atom = _polymer.rdmol.GetAtomWithIdx(_orig_idx)
+            _rd_info = _rd_atom.GetPDBResidueInfo()
+            if _rd_info:
+                local_resids.add(_rd_info.GetResidueNumber())
+        local_resids_sorted = sorted(local_resids)
+        local_to_global = {r: chain_c_resid + i for i, r in enumerate(local_resids_sorted)}
+        chain_c_resid += len(local_resids_sorted)
+
+        _serial_map = {}
         for _ri, _orig_idx in enumerate(_polymer.retained_atom_indices):
             _atom = _polymer.off_molecule.atoms[_orig_idx]
             _x, _y, _z = _placement.placed_coords[_orig_idx]
-            # Use PDB residue info from RDKit if available
             _rd_atom = _polymer.rdmol.GetAtomWithIdx(_orig_idx)
             _rd_info = _rd_atom.GetPDBResidueInfo()
             _atom_name = _rd_info.GetName().strip() if _rd_info else f"{_atom.symbol}{_ri:03d}"
             _res_name = _rd_info.GetResidueName().strip() if _rd_info else "POL"
+            _local_resid = _rd_info.GetResidueNumber() if _rd_info else 1
 
             polymer_lines.append(
                 write_pdb_line(
                     serial=_next_serial,
                     atom_name=_atom_name,
                     residue_name=_res_name,
-                    chain_id=_poly_chain,
-                    residue_number=_rd_info.GetResidueNumber() + 1000 * (_pi + 1) if _rd_info else _poly_resid,
-                    x=float(_x), y=float(_y), z=float(_z),
+                    chain_id="C",
+                    residue_number=local_to_global.get(_local_resid, chain_c_resid - 1),
+                    x=float(_x),
+                    y=float(_y),
+                    z=float(_z),
                     element=_atom.symbol,
                     record="HETATM",
                 )
@@ -1197,7 +1659,6 @@ def _(
             _serial_map[_orig_idx] = _next_serial
             _next_serial += 1
 
-        # CONECT records for intra-polymer bonds (retained atoms only)
         _retained_set = set(_polymer.retained_atom_indices)
         for _bond in _polymer.off_molecule.bonds:
             _i = _bond.atom1_index
@@ -1208,45 +1669,103 @@ def _(
                 conect_map.setdefault(_si, set()).add(_sj)
                 conect_map.setdefault(_sj, set()).add(_si)
 
-        # CONECT for the crosslink bond (NZ — reactive C)
         _nz_serial = _serial_lookup[_placement.site.nz_index]
         _rc_serial = _serial_map[_polymer.reactive_carbon_idx]
         conect_map.setdefault(_nz_serial, set()).add(_rc_serial)
         conect_map.setdefault(_rc_serial, set()).add(_nz_serial)
 
-    # Write the assembled PDB
+        polymer_lines.append("TER\n")
+
+    for _fp in free_placement_results:
+        _off_mol = _fp.off_molecule
+        _coords = _fp.placed_coords
+
+        _rd_mol = _off_mol.to_rdkit()
+        local_resids = set()
+        for _ai in range(_off_mol.n_atoms):
+            _rd_atom = _rd_mol.GetAtomWithIdx(_ai)
+            _rd_info = _rd_atom.GetPDBResidueInfo()
+            if _rd_info:
+                local_resids.add(_rd_info.GetResidueNumber())
+            else:
+                local_resids.add(1)
+        local_resids_sorted = sorted(local_resids)
+        local_to_global = {r: chain_c_resid + i for i, r in enumerate(local_resids_sorted)}
+        chain_c_resid += len(local_resids_sorted)
+
+        _serial_map_free = {}
+        for _ai in range(_off_mol.n_atoms):
+            _atom = _off_mol.atoms[_ai]
+            _x, _y, _z = _coords[_ai]
+            _rd_atom = _rd_mol.GetAtomWithIdx(_ai)
+            _rd_info = _rd_atom.GetPDBResidueInfo()
+            _atom_name = _rd_info.GetName().strip() if _rd_info else f"{_atom.symbol}{_ai:03d}"
+            _res_name = _rd_info.GetResidueName().strip() if _rd_info else "POL"
+            _local_resid = _rd_info.GetResidueNumber() if _rd_info else 1
+
+            polymer_lines.append(
+                write_pdb_line(
+                    serial=_next_serial,
+                    atom_name=_atom_name,
+                    residue_name=_res_name,
+                    chain_id="C",
+                    residue_number=local_to_global.get(_local_resid, chain_c_resid - 1),
+                    x=float(_x),
+                    y=float(_y),
+                    z=float(_z),
+                    element=_atom.symbol,
+                    record="HETATM",
+                )
+            )
+            _serial_map_free[_ai] = _next_serial
+            _next_serial += 1
+
+        for _bond in _off_mol.bonds:
+            _si = _serial_map_free[_bond.atom1_index]
+            _sj = _serial_map_free[_bond.atom2_index]
+            conect_map.setdefault(_si, set()).add(_sj)
+            conect_map.setdefault(_sj, set()).add(_si)
+
+        polymer_lines.append("TER\n")
+
     assembled_path = Path(ASSEMBLED_PDB)
     with open(assembled_path, "w", encoding="utf-8") as _f:
         for _line in kept_lines:
             _f.write(_line)
+        _f.write("TER\n")
         for _line in polymer_lines:
             _f.write(_line)
-        _f.write("TER\n")
         for _serial in sorted(conect_map):
             _bonded = sorted(conect_map[_serial])
             _f.write(write_conect_line(_serial, _bonded))
         _f.write("END\n")
 
-    logger.info("Wrote assembled PDB: %s", assembled_path)
+    logger.info(
+        "Wrote assembled PDB: %s (chain A=protein, C=polymers, resid 1-%d)",
+        assembled_path,
+        chain_c_resid - 1,
+    )
     return (assembled_path,)
 
 
 @app.cell
-def _(
-    ForceField,
-    PROTEIN_FF,
-    SMALL_MOL_FF,
-    conjugate_off,
-    logger,
-):
+def _(ForceField, PROTEIN_FF, SMALL_MOL_FF, conjugate_off, logger):
     """Cell 8: Create Interchange from the merged conjugate molecule."""
 
     conjugate_top = conjugate_off.to_topology()
 
     ff = ForceField(PROTEIN_FF, SMALL_MOL_FF)
-    interchange = ff.create_interchange(
-        conjugate_top, charge_from_molecules=[conjugate_off]
-    )
+
+    # Suppress per-atom INFO logging from OpenFF's LibraryCharges handler.
+    import logging as _logging
+
+    _nonbonded_logger = _logging.getLogger("openff.interchange.smirnoff._nonbonded")
+    _prev_level = _nonbonded_logger.level
+    _nonbonded_logger.setLevel(_logging.WARNING)
+    try:
+        interchange = ff.create_interchange(conjugate_top, charge_from_molecules=[conjugate_off])
+    finally:
+        _nonbonded_logger.setLevel(_prev_level)
     logger.info(
         "Created interchange: %d atoms, %d bonds",
         interchange.topology.n_atoms,
@@ -1262,10 +1781,15 @@ def _(
     MINIMIZED_PDB,
     Molecule,
     assembled_path,
+    component_metadata,
+    conjugated_sequences,
     conjugate_off,
+    free_placement_results,
+    free_polymer_offs,
+    free_sequences,
     interchange,
     logger,
-    placement_results,
+    placement_results: "list[PlacementResult]",
     unit,
 ):
     """Cell 9: OpenMM local energy minimization with position restraints.
@@ -1288,9 +1812,7 @@ def _(
             next_frontier: set[int] = set()
             for idx in frontier:
                 for bond in molecule.atom(idx).bonds:
-                    nbr = (
-                        bond.atom1_index if bond.atom2_index == idx else bond.atom2_index
-                    )
+                    nbr = bond.atom1_index if bond.atom2_index == idx else bond.atom2_index
                     if nbr not in reached:
                         reached.add(nbr)
                         next_frontier.add(nbr)
@@ -1322,9 +1844,7 @@ def _(
         raise ValueError("No crosslink bonds found in conjugate molecule")
     logger.info("Linkage seeds: %s", linkage_seeds)
 
-    mobile = _atoms_within_n_bonds(
-        conjugate_off, linkage_seeds, LINKAGE_NEIGHBORHOOD_BONDS
-    )
+    mobile = _atoms_within_n_bonds(conjugate_off, linkage_seeds, LINKAGE_NEIGHBORHOOD_BONDS)
     logger.info("Mobile atoms (within %d bonds): %d", LINKAGE_NEIGHBORHOOD_BONDS, len(mobile))
 
     system = interchange.to_openmm_system()
@@ -1332,9 +1852,7 @@ def _(
     _coords = conjugate_off.conformers[0].m_as(unit.angstrom)
 
     restraint = openmm.CustomExternalForce("k*periodicdistance(x,y,z,x0,y0,z0)^2")
-    restraint.addGlobalParameter(
-        "k", 1000.0 * omm_unit.kilojoule_per_mole / omm_unit.nanometer**2
-    )
+    restraint.addGlobalParameter("k", 1000.0 * omm_unit.kilojoule_per_mole / omm_unit.nanometer**2)
     restraint.addPerParticleParameter("x0")
     restraint.addPerParticleParameter("y0")
     restraint.addPerParticleParameter("z0")
@@ -1367,53 +1885,396 @@ def _(
     # Write minimized PDB by updating coordinates in the assembled PDB
     with open(assembled_path, "r", encoding="utf-8") as _f:
         _old_lines = _f.readlines()
-    _atom_lines = [l for l in _old_lines if l.startswith(("ATOM", "HETATM"))]
-    _other_lines = [l for l in _old_lines if not l.startswith(("ATOM", "HETATM"))]
-
-    _updated: list[str] = []
-    for _i, _line in enumerate(_atom_lines):
-        _x, _y, _z = minimized_coords[_i]
-        _updated.append(f"{_line[:30]}{_x:8.3f}{_y:8.3f}{_z:8.3f}{_line[54:]}")
 
     output_path = MINIMIZED_PDB
     with open(output_path, "w", encoding="utf-8") as _f:
-        for _line in _updated:
-            _f.write(_line)
-        for _line in _other_lines:
-            _f.write(_line)
+        _atom_index = 0
+        _updated_atoms = 0
+        _preserved_atoms = 0
+        n_simulated = len(minimized_coords)
+        for _line in _old_lines:
+            if _line.startswith(("ATOM", "HETATM")):
+                if _atom_index < n_simulated:
+                    _x, _y, _z = minimized_coords[_atom_index]
+                    _f.write(f"{_line[:30]}{_x:8.3f}{_y:8.3f}{_z:8.3f}{_line[54:]}")
+                    _updated_atoms += 1
+                else:
+                    _f.write(_line)
+                    _preserved_atoms += 1
+                _atom_index += 1
+            else:
+                _f.write(_line)
+
+    if _updated_atoms != n_simulated:
+        raise RuntimeError(
+            f"PDB write mismatch: wrote coords for {_updated_atoms} atoms "
+            f"but simulation had {n_simulated} atoms"
+        )
+
+    logger.info(
+        "Minimized PDB coordinate update: %d simulated atoms updated, %d template atoms preserved",
+        _updated_atoms,
+        _preserved_atoms,
+    )
 
     logger.info(
         "Minimization: E_before=%.2f, E_after=%.2f kJ/mol",
-        energy_before, energy_after,
+        energy_before,
+        energy_after,
     )
-    return energy_after, energy_before, output_path
+    return (
+        component_metadata,
+        conjugated_sequences,
+        energy_after,
+        energy_before,
+        free_polymer_offs,
+        free_sequences,
+        output_path,
+    )
+
+
+@app.cell
+def _(
+    EQUILIBRATED_PDB,
+    PROTEIN_HEAVY_RESTRAINT_K,
+    PROTEIN_PDB,
+    PROTEIN_RMSD_THRESHOLD_A,
+    VACUUM_EQ_FRICTION_PER_PS,
+    VACUUM_EQ_STEPS,
+    VACUUM_EQ_TEMP_K,
+    VACUUM_EQ_TIMESTEP_FS,
+    assembled_path,
+    component_metadata,
+    conjugate_off,
+    interchange,
+    logger,
+    np,
+    output_path,
+    unit,
+):
+    """Cell 9.5: Protein-restrained vacuum equilibration + RMSD verification.
+
+    After Cell 9's local linkage minimization, this cell performs:
+    1. Protein-restrained energy minimization (all polymer atoms free)
+    2. Short NVT equilibration at 310K (protein heavy atoms restrained)
+    3. RMSD verification of protein vs original crystal structure
+
+    The protein is held in place by strong harmonic restraints on all
+    heavy atoms, while polymers (conjugated + free) relax freely.
+    """
+    try:
+        import openmm
+        from openmm import app as openmm_app
+        from openmm import unit as omm_unit
+    except ImportError as _exc:
+        raise ImportError("OpenMM required for equilibration") from _exc
+
+    # ── Platform selection: CUDA → OpenCL → CPU ───────────────────────────
+    def _select_platform():
+        """Select the fastest available OpenMM platform."""
+        for name in ("CUDA", "OpenCL", "CPU"):
+            try:
+                platform = openmm.Platform.getPlatformByName(name)
+                logger.info("Selected OpenMM platform: %s", name)
+                return platform
+            except Exception:
+                continue
+        raise RuntimeError("No suitable OpenMM platform found")
+
+    eq_platform = _select_platform()
+
+    # ── Build system from interchange ──────────────────────────────────────
+    eq_system = interchange.to_openmm_system()
+    eq_topology = interchange.to_openmm_topology()
+
+    # Get current coordinates (post-Cell 9 minimization)
+    eq_coords_angstrom = conjugate_off.conformers[0].m_as(unit.angstrom)
+    eq_coords_nm = eq_coords_angstrom * 0.1
+
+    # ── Add protein heavy-atom restraints ──────────────────────────────────
+    protein_heavy_indices = component_metadata["restraint_groups"]["protein_heavy"]
+    logger.info(
+        "Applying %.0f kJ/mol/nm^2 restraints to %d protein heavy atoms",
+        PROTEIN_HEAVY_RESTRAINT_K,
+        len(protein_heavy_indices),
+    )
+
+    eq_restraint = openmm.CustomExternalForce("k*periodicdistance(x,y,z,x0,y0,z0)^2")
+    eq_restraint.addGlobalParameter(
+        "k", PROTEIN_HEAVY_RESTRAINT_K * omm_unit.kilojoule_per_mole / omm_unit.nanometer**2
+    )
+    eq_restraint.addPerParticleParameter("x0")
+    eq_restraint.addPerParticleParameter("y0")
+    eq_restraint.addPerParticleParameter("z0")
+
+    for _idx in protein_heavy_indices:
+        x0, y0, z0 = eq_coords_nm[_idx]
+        eq_restraint.addParticle(_idx, [float(x0), float(y0), float(z0)])
+    eq_system.addForce(eq_restraint)
+
+    # ── Stage A: Protein-restrained minimization ───────────────────────────
+    logger.info("Stage A: Protein-restrained energy minimization...")
+    eq_integrator_min = openmm.VerletIntegrator(0.001 * omm_unit.picoseconds)
+    eq_sim_min = openmm_app.Simulation(eq_topology, eq_system, eq_integrator_min, eq_platform)
+    eq_sim_min.context.setPositions(eq_coords_nm * omm_unit.nanometers)
+
+    state_before_min = eq_sim_min.context.getState(getEnergy=True)
+    eq_energy_before_min = state_before_min.getPotentialEnergy().value_in_unit(
+        omm_unit.kilojoule_per_mole
+    )
+    openmm.LocalEnergyMinimizer.minimize(eq_sim_min.context, tolerance=10.0, maxIterations=1000)
+    state_after_min = eq_sim_min.context.getState(getEnergy=True, getPositions=True)
+    eq_energy_after_min = state_after_min.getPotentialEnergy().value_in_unit(
+        omm_unit.kilojoule_per_mole
+    )
+    minimized_positions = state_after_min.getPositions(asNumpy=True)
+    logger.info(
+        "  Minimization: E_before=%.2f, E_after=%.2f kJ/mol",
+        eq_energy_before_min,
+        eq_energy_after_min,
+    )
+
+    # ── Stage B: Short NVT equilibration ───────────────────────────────────
+    logger.info(
+        "Stage B: NVT equilibration at %.1f K for %d steps (%.1f ps)...",
+        VACUUM_EQ_TEMP_K,
+        VACUUM_EQ_STEPS,
+        VACUUM_EQ_STEPS * VACUUM_EQ_TIMESTEP_FS / 1000.0,
+    )
+
+    # Need a fresh system since we can't change integrator on existing context
+    eq_system_nvt = interchange.to_openmm_system()
+    # Re-add the same restraint force
+    eq_restraint_nvt = openmm.CustomExternalForce("k*periodicdistance(x,y,z,x0,y0,z0)^2")
+    eq_restraint_nvt.addGlobalParameter(
+        "k", PROTEIN_HEAVY_RESTRAINT_K * omm_unit.kilojoule_per_mole / omm_unit.nanometer**2
+    )
+    eq_restraint_nvt.addPerParticleParameter("x0")
+    eq_restraint_nvt.addPerParticleParameter("y0")
+    eq_restraint_nvt.addPerParticleParameter("z0")
+    # Use the minimized positions as restraint reference
+    min_pos_nm = minimized_positions.value_in_unit(omm_unit.nanometer)
+    for _idx in protein_heavy_indices:
+        x0, y0, z0 = min_pos_nm[_idx]
+        eq_restraint_nvt.addParticle(_idx, [float(x0), float(y0), float(z0)])
+    eq_system_nvt.addForce(eq_restraint_nvt)
+
+    eq_integrator_nvt = openmm.LangevinMiddleIntegrator(
+        VACUUM_EQ_TEMP_K * omm_unit.kelvin,
+        VACUUM_EQ_FRICTION_PER_PS / omm_unit.picosecond,
+        VACUUM_EQ_TIMESTEP_FS * omm_unit.femtosecond,
+    )
+
+    eq_sim_nvt = openmm_app.Simulation(eq_topology, eq_system_nvt, eq_integrator_nvt, eq_platform)
+    eq_sim_nvt.context.setPositions(minimized_positions)
+    eq_sim_nvt.context.setVelocitiesToTemperature(VACUUM_EQ_TEMP_K * omm_unit.kelvin)
+
+    state_before_nvt = eq_sim_nvt.context.getState(getEnergy=True)
+    eq_energy_before_nvt = state_before_nvt.getPotentialEnergy().value_in_unit(
+        omm_unit.kilojoule_per_mole
+    )
+
+    eq_sim_nvt.step(VACUUM_EQ_STEPS)
+
+    state_after_nvt = eq_sim_nvt.context.getState(getEnergy=True, getPositions=True)
+    eq_energy_after_nvt = state_after_nvt.getPotentialEnergy().value_in_unit(
+        omm_unit.kilojoule_per_mole
+    )
+    equilibrated_positions = state_after_nvt.getPositions(asNumpy=True)
+    equilibrated_coords_angstrom = equilibrated_positions.value_in_unit(omm_unit.angstrom)
+
+    logger.info(
+        "  NVT: E_before=%.2f, E_after=%.2f kJ/mol",
+        eq_energy_before_nvt,
+        eq_energy_after_nvt,
+    )
+
+    # ── Write equilibrated PDB ─────────────────────────────────────────────
+    with open(output_path, "r", encoding="utf-8") as _f:
+        _template_lines = _f.readlines()
+
+    equilibrated_output_path = EQUILIBRATED_PDB
+    with open(equilibrated_output_path, "w", encoding="utf-8") as _f:
+        _atom_index = 0
+        _updated_atoms = 0
+        _preserved_atoms = 0
+        n_simulated = len(equilibrated_coords_angstrom)
+        for _line in _template_lines:
+            if _line.startswith(("ATOM", "HETATM")):
+                if _atom_index < n_simulated:
+                    _x, _y, _z = equilibrated_coords_angstrom[_atom_index]
+                    _f.write(f"{_line[:30]}{_x:8.3f}{_y:8.3f}{_z:8.3f}{_line[54:]}")
+                    _updated_atoms += 1
+                else:
+                    _f.write(_line)
+                    _preserved_atoms += 1
+                _atom_index += 1
+            else:
+                _f.write(_line)
+
+    if _updated_atoms != n_simulated:
+        raise RuntimeError(
+            f"PDB write mismatch: wrote coords for {_updated_atoms} atoms "
+            f"but simulation had {n_simulated} atoms"
+        )
+
+    logger.info("Wrote equilibrated PDB: %s", equilibrated_output_path)
+    logger.info(
+        "Equilibrated PDB coordinate update: %d simulated atoms updated, %d template atoms preserved",
+        _updated_atoms,
+        _preserved_atoms,
+    )
+
+    # ── RMSD verification ──────────────────────────────────────────────────
+    # Compare protein heavy atoms in equilibrated structure vs original crystal.
+    # Load original crystal structure coordinates.
+    from rdkit import Chem as _Chem
+
+    _crystal_rd = _Chem.MolFromPDBFile(PROTEIN_PDB, removeHs=False, sanitize=True)
+    if _crystal_rd is None:
+        raise ValueError("Failed to load crystal structure for RMSD comparison")
+    _crystal_conf = _crystal_rd.GetConformer()
+    _crystal_all_coords = np.array(
+        [list(_crystal_conf.GetAtomPosition(i)) for i in range(_crystal_rd.GetNumAtoms())]
+    )
+
+    # protein_heavy_indices maps into the merged conjugate molecule.
+    # The protein atoms in the merged molecule have the same order as the
+    # original protein, minus the removed HZ atoms. We need to figure out
+    # which original crystal atoms correspond to which merged heavy atoms.
+    #
+    # component_metadata["protein"]["heavy_atom_indices"] gives us the
+    # indices in the merged molecule. These correspond to the non-removed
+    # heavy atoms from the original protein, in order.
+    #
+    # For RMSD, we extract:
+    #   - equilibrated_coords_angstrom[protein_heavy_indices] = equilibrated heavy
+    #   - crystal heavy atom coords (skipping removed atoms, heavy only)
+    #
+    # Build the crystal heavy atom coords matching the merged ordering:
+    # The merged protein was built by removing specific H atoms (hz_indices[1:])
+    # from the original. So the protein atoms in merged order are all original
+    # atoms except the removed ones, in original order. Heavy atoms are the
+    # subset with atomic_number > 1.
+    #
+    # Since we don't have prot_removed_indices in this cell, we use a simpler
+    # approach: the crystal heavy atom positions are at the same indices as
+    # protein_heavy_indices but in the ORIGINAL protein (before any removal).
+    # Actually, protein_heavy_indices are indices in the MERGED molecule.
+    # We need the original indices.
+    #
+    # Simpler approach: extract backbone heavy (CA, C, N, O) from crystal by
+    # PDB atom name, and compare to backbone heavy in the equilibrated structure.
+
+    protein_backbone_heavy_indices = component_metadata["protein"]["backbone_heavy_atom_indices"]
+
+    # Extract backbone coords from equilibrated structure
+    eq_backbone_coords = equilibrated_coords_angstrom[protein_backbone_heavy_indices]
+
+    # Extract backbone coords from crystal structure by matching PDB names
+    _crystal_backbone_coords = []
+    for _ai in range(_crystal_rd.GetNumAtoms()):
+        _rd_atom = _crystal_rd.GetAtomWithIdx(_ai)
+        _info = _rd_atom.GetPDBResidueInfo()
+        if _info is None:
+            continue
+        _aname = _info.GetName().strip()
+        if _aname in ("CA", "C", "N", "O") and _rd_atom.GetAtomicNum() > 1:
+            _crystal_backbone_coords.append(_crystal_all_coords[_ai])
+    _crystal_backbone_coords = np.array(_crystal_backbone_coords)
+
+    crystal_backbone_count = len(_crystal_backbone_coords)
+    equilibrated_backbone_count = len(eq_backbone_coords)
+    if crystal_backbone_count != equilibrated_backbone_count:
+        raise RuntimeError(
+            "Backbone atom count mismatch for RMSD comparison: "
+            f"crystal={crystal_backbone_count}, equilibrated={equilibrated_backbone_count}"
+        )
+
+    # Kabsch-aligned RMSD
+    def _kabsch_rmsd(P: np.ndarray, Q: np.ndarray) -> float:
+        """Compute RMSD after optimal superposition (Kabsch algorithm)."""
+        assert P.shape == Q.shape, f"Shape mismatch: {P.shape} vs {Q.shape}"
+        centroid_p = P.mean(axis=0)
+        centroid_q = Q.mean(axis=0)
+        P_c = P - centroid_p
+        Q_c = Q - centroid_q
+        H = P_c.T @ Q_c
+        U, _, Vt = np.linalg.svd(H)
+        d = np.linalg.det(Vt.T @ U.T)
+        S = np.diag([1.0, 1.0, d])
+        R = Vt.T @ S @ U.T
+        Q_aligned = (R @ P_c.T).T
+        diff = Q_aligned - Q_c
+        return float(np.sqrt(np.mean(np.sum(diff**2, axis=1))))
+
+    # Compute backbone RMSD
+    protein_backbone_rmsd = _kabsch_rmsd(_crystal_backbone_coords, eq_backbone_coords)
+
+    logger.info(
+        "Protein backbone RMSD (vs crystal): %.4f A (threshold: %.1f A)",
+        protein_backbone_rmsd,
+        PROTEIN_RMSD_THRESHOLD_A,
+    )
+
+    if protein_backbone_rmsd > PROTEIN_RMSD_THRESHOLD_A:
+        raise RuntimeError(
+            "RMSD CHECK FAILED: protein backbone RMSD "
+            f"{protein_backbone_rmsd:.4f} A exceeds threshold "
+            f"{PROTEIN_RMSD_THRESHOLD_A:.1f} A"
+        )
+
+    protein_rmsd_passed = True
+    logger.info("RMSD CHECK PASSED: protein structure preserved during equilibration.")
+
+    return (
+        eq_energy_after_min,
+        eq_energy_after_nvt,
+        eq_energy_before_min,
+        eq_energy_before_nvt,
+        equilibrated_output_path,
+        protein_backbone_rmsd,
+        protein_rmsd_passed,
+    )
 
 
 @app.cell
 def _(
     energy_after,
     energy_before,
+    eq_energy_after_min,
+    eq_energy_after_nvt,
+    eq_energy_before_min,
+    eq_energy_before_nvt,
+    equilibrated_output_path,
     logger,
     output_path,
-    placement_results,
+    placement_results: "list[PlacementResult]",
+    protein_backbone_rmsd,
+    protein_rmsd_passed,
 ):
     """Cell 10: Summary and visualization."""
     import marimo as mo
 
     summary_rows = []
     for _i, _p in enumerate(placement_results):
-        summary_rows.append({
-            "id": _i,
-            "resid": _p.site.resid,
-            "clearance_A": round(_p.min_protein_distance, 3),
-        })
+        summary_rows.append(
+            {
+                "id": _i,
+                "resid": _p.site.resid,
+                "clearance_A": round(_p.min_protein_distance, 3),
+            }
+        )
 
     logger.info("Summary: %s", summary_rows)
+
+    # Use equilibrated PDB for visualization if available
+    _viz_path = equilibrated_output_path if equilibrated_output_path else output_path
 
     try:
         import py3Dmol
 
-        with open(output_path, "r", encoding="utf-8") as _f:
+        with open(_viz_path, "r", encoding="utf-8") as _f:
             pdb_block = _f.read()
         viewer = py3Dmol.view(width=900, height=600)
         viewer.addModel(pdb_block, "pdb")
@@ -1427,16 +2288,26 @@ def _(
         viewer.zoomTo()
         viz = mo.Html(viewer._make_html())
     except ImportError:
-        viz = mo.md(f"py3Dmol not available. PDB: `{output_path}`")
+        viz = mo.md(f"py3Dmol not available. PDB: `{_viz_path}`")
 
     summary = {
         "n_conjugates": len(placement_results),
-        "energy_before_kj_mol": float(energy_before),
-        "energy_after_kj_mol": float(energy_after),
-        "output_pdb": str(output_path),
+        "linkage_minimization": {
+            "energy_before_kj_mol": float(energy_before),
+            "energy_after_kj_mol": float(energy_after),
+        },
+        "vacuum_equilibration": {
+            "restraint_min_before_kj_mol": float(eq_energy_before_min),
+            "restraint_min_after_kj_mol": float(eq_energy_after_min),
+            "nvt_before_kj_mol": float(eq_energy_before_nvt),
+            "nvt_after_kj_mol": float(eq_energy_after_nvt),
+        },
+        "protein_backbone_rmsd_A": float(protein_backbone_rmsd),
+        "protein_rmsd_passed": protein_rmsd_passed,
+        "output_pdb": str(equilibrated_output_path),
         "rows": summary_rows,
     }
-    return summary, viz
+    return
 
 
 @app.cell
