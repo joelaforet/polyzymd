@@ -51,7 +51,7 @@ Before seeing the full code, here is what each piece does and why it exists.
 ### `name` (required)
 
 A unique, lowercase string identifier. Used in CLI commands
-(`polyzymd compare run rg`), config files, and output directories.
+(`polyzymd compare run solvent_contacts`), config files, and output directories.
 
 ### `Settings` (required)
 
@@ -111,21 +111,21 @@ Here is a single, complete plugin file that uses real framework utilities.
 This is the pattern you should follow for new analyses.
 
 ```{important}
-The `RgAnalysis` implementation below is a **tutorial illustration** in docs.
-Treat it as a reference template for your own plugin file. It is not presented
-here as a required built-in deployed analysis.
+The `SolventContactsAnalysis` implementation below is a walkthrough example for
+a hypothetical `solvent_contacts` plugin name that does not collide with
+built-in plugins.
 ```
 
-Create `src/polyzymd/analyses/rg/` as a package in your own branch or downstream
+Create `src/polyzymd/analyses/solvent_contacts/` as a package in your own branch or downstream
 project, or use the scaffold command to generate the boilerplate automatically
 (the scaffold includes compute, aggregate, comparison, plotting, and tests):
 
 ```bash
 # Default: dict-based results (simplest starting point)
-polyzymd new-analysis rg
+polyzymd new-analysis solvent_contacts
 
 # Typed Pydantic result models (better for complex analyses)
-polyzymd new-analysis rg --style pydantic
+polyzymd new-analysis solvent_contacts --style pydantic
 ```
 
 The `--style` flag controls how results are structured:
@@ -139,7 +139,7 @@ The `--style` flag controls how results are structured:
 If creating manually:
 
 ```python
-"""Radius of gyration analysis plugin."""
+"""Solvent contacts analysis plugin."""
 from __future__ import annotations
 
 import logging
@@ -162,34 +162,47 @@ from polyzymd.analyses.stats import format_scalar_comparison
 logger = logging.getLogger(__name__)
 
 
-class RgAnalysis(Analysis):
-    """Radius of gyration: compactness of the protein structure."""
+class SolventContactsAnalysis(Analysis):
+    """Solvent contacts around a selected protein region."""
 
-    name: ClassVar[str] = "rg"
+    name: ClassVar[str] = "solvent_contacts"
 
     class Settings(BaseModel):
-        """Settings for radius of gyration analysis.
+        """Settings for solvent contact-fraction analysis.
 
         Attributes
         ----------
         selection : str
-            MDAnalysis selection string for atoms to include in Rg
-            calculation. Defaults to C-alpha atoms
+            MDAnalysis selection string for target atoms
+        solvent_selection : str
+            MDAnalysis selection for solvent atoms used in contacts
+        cutoff : float
+            Contact cutoff distance in Angstrom
         """
 
         selection: str = Field(
             default="protein and name CA",
-            description="MDAnalysis atom selection for Rg calculation",
+            description="MDAnalysis atom selection for target atoms",
+        )
+        solvent_selection: str = Field(
+            default="resname HOH and name O",
+            description="MDAnalysis atom selection for solvent contact atoms",
+        )
+        cutoff: float = Field(
+            default=4.5,
+            gt=0,
+            description="Distance cutoff in Angstrom for a contact",
         )
 
     def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, Any]:
-        """Compute mean Rg for one replicate.
+        """Compute solvent contact fraction for one replicate.
 
         Uses TrajectoryLoader for topology discovery, trajectory segment
         daisy-chaining, and equilibration frame skipping
         """
         # Lazy-import heavy third-party dependency
         import MDAnalysis as mda  # noqa: F401
+        from MDAnalysis.analysis.distances import distance_array
 
         loader = TrajectoryLoader(ctx.sim_config)
         u = loader.load_universe(replicate)
@@ -199,42 +212,49 @@ class RgAnalysis(Analysis):
         eq_time_ps = convert_time(eq_value, eq_unit, "ps")
         start_frame = int(eq_time_ps / timestep_ps)
 
-        atoms = u.select_atoms(ctx.settings.selection)
-        rg_values = []
+        target_atoms = u.select_atoms(ctx.settings.selection)
+        solvent_atoms = u.select_atoms(ctx.settings.solvent_selection)
+        contact_fractions = []
         for _ts in u.trajectory[start_frame:]:
-            rg_values.append(atoms.radius_of_gyration())
+            if len(target_atoms) == 0 or len(solvent_atoms) == 0:
+                contact_fractions.append(0.0)
+                continue
+            dists = distance_array(target_atoms.positions, solvent_atoms.positions)
+            contact_pairs = np.sum(dists <= ctx.settings.cutoff)
+            normalizer = len(target_atoms) * len(solvent_atoms)
+            contact_fractions.append(float(contact_pairs / normalizer))
 
         return {
-            "mean_rg": float(np.mean(rg_values)),
-            "std_rg": float(np.std(rg_values)),
-            "n_frames": len(rg_values),
+            "mean_contact_fraction": float(np.mean(contact_fractions)),
+            "std_contact_fraction": float(np.std(contact_fractions)),
+            "n_frames": len(contact_fractions),
             "replicate": replicate,
         }
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> dict[str, Any]:
-        """Average Rg across replicates with SEM."""
-        values = [r["mean_rg"] for r in results]
+        """Average contact fraction across replicates with SEM."""
+        values = [r["mean_contact_fraction"] for r in results]
         return {
-            "mean_rg": float(np.mean(values)),
-            "sem_rg": float(np.std(values, ddof=1) / np.sqrt(len(values))),
+            "mean_contact_fraction": float(np.mean(values)),
+            "sem_contact_fraction": float(np.std(values, ddof=1) / np.sqrt(len(values))),
             "replicate_values": values,
         }
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
-        """Expose Rg as a scalar metric for automatic t-tests and ANOVA."""
+        """Expose contact fraction as scalar metric for default comparison."""
         return {
-            "mean_rg": MetricValue(
-                name="mean_rg",
-                mean=summary["mean_rg"],
-                sem=summary["sem_rg"],
+            "mean_contact_fraction": MetricValue(
+                name="mean_contact_fraction",
+                mean=summary["mean_contact_fraction"],
+                sem=summary["sem_contact_fraction"],
                 replicate_values=summary["replicate_values"],
                 higher_is_better=False,
-                direction_labels=("compacting", "unchanged", "expanding"),
+                direction_labels=("more exposed", "unchanged", "more shielded"),
             )
         }
 
     def plot(self, ctx: PlotContext) -> list[Path]:
-        """Generate an Rg bar chart comparing conditions."""
+        """Generate a contact-fraction bar chart comparing conditions."""
         import matplotlib.pyplot as plt
 
         from polyzymd.analyses.shared import apply_axis_style, get_colors, get_theme, save_figure
@@ -256,8 +276,8 @@ class RgAnalysis(Analysis):
             if summary is None:
                 continue
             plot_labels.append(label)
-            means.append(summary["mean_rg"])
-            sems.append(summary["sem_rg"])
+            means.append(summary["mean_contact_fraction"])
+            sems.append(summary["sem_contact_fraction"])
 
         if not plot_labels:
             return []
@@ -269,9 +289,14 @@ class RgAnalysis(Analysis):
 
         fig, ax = plt.subplots(figsize=(8, 5))
         ax.bar(plot_labels, means, yerr=sems, capsize=5, color=colors[: len(plot_labels)])
-        apply_axis_style(ax, plot_settings, title="Rg Comparison Across Conditions", ylabel="Radius of Gyration (Å)")
+        apply_axis_style(
+            ax,
+            plot_settings,
+            title="Solvent Contact Fraction Across Conditions",
+            ylabel="Contact fraction",
+        )
 
-        output_path = ctx.output_dir / "rg_comparison.png"
+        output_path = ctx.output_dir / "solvent_contacts_comparison.png"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         save_figure(fig, output_path, plot_settings)
         plt.close(fig)
@@ -284,10 +309,10 @@ class RgAnalysis(Analysis):
         if isinstance(result, ComparisonResult):
             return format_scalar_comparison(
                 result,
-                title="Radius of Gyration Comparison",
-                metric_label="Mean Rg",
-                metric_unit="Å",
-                metric_key="mean_rg",
+                title="Solvent Contacts Comparison",
+                metric_label="Mean contact fraction",
+                metric_unit="",
+                metric_key="mean_contact_fraction",
                 output_format=output_format,
                 higher_is_better=False,
             )
@@ -300,7 +325,7 @@ compatible with default framework formatting/statistics.
 ## Base Class Helpers
 
 The `Analysis` base class provides three utility methods that reduce
-boilerplate across the lifecycle. The `RgAnalysis` example above uses
+boilerplate across the lifecycle. The `SolventContactsAnalysis` example above uses
 `_build_plot_data()` in its `plot()` method, but all three are available
 to every plugin.
 
@@ -348,11 +373,11 @@ Loads a Pydantic result from disk if the cache file exists and
 
 ```python
 def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> dict:
-    result_file = ctx.output_dir / "rg_result.json"
+    result_file = ctx.output_dir / "solvent_contacts_result.json"
 
     # One line replaces the 5-line cache check pattern
     cached = self._check_cache(
-        RgReplicateResult, result_file,
+        SolventContactsReplicateResult, result_file,
         recompute=ctx.recompute, sim_config=ctx.sim_config,
     )
     if cached is not None:
@@ -432,7 +457,7 @@ def plot(self, ctx):
 ```
 
 **Why this matters for testing:** when you mock `TrajectoryLoader` in tests,
-you write `@patch("polyzymd.analyses.rg.TrajectoryLoader")`. This replaces
+you write `@patch("polyzymd.analyses.solvent_contacts.TrajectoryLoader")`. This replaces
 the module-level name. If `TrajectoryLoader` were imported lazily inside the
 method, the patch target would be different and easier to get wrong.
 
@@ -710,7 +735,7 @@ class MyAnalysis(Analysis):
         }
 ```
 
-This is the path used in the complete `RgAnalysis` example earlier in this
+This is the path used in the complete `SolventContactsAnalysis` example earlier in this
 tutorial. The framework handles serialization, deserialization, and the full
 comparison lifecycle without any Pydantic result models.
 
@@ -771,8 +796,8 @@ class AggregatedResult(BaseAnalysisResult):
     replicate_values: list[float]
 
 
-class RgAnalysis(Analysis):
-    name: ClassVar[str] = "rg"
+class SolventContactsAnalysis(Analysis):
+    name: ClassVar[str] = "solvent_contacts"
     AggregatedResultClass = AggregatedResult
 
     class Settings(BaseModel):
@@ -1053,7 +1078,7 @@ plotting), not as maturity rankings.
 ### Test file naming
 
 Name your test file `tests/test_<name>_plugin.py` (for example,
-`tests/test_rg_plugin.py`).
+`tests/test_solvent_contacts_plugin.py`).
 
 ### Testing strategy
 
@@ -1076,38 +1101,38 @@ from polyzymd.analyses import get_analysis, list_analyses
 from polyzymd.analyses.base import MetricValue
 
 
-class TestRgDiscovery:
+class TestSolventContactsDiscovery:
     """Test that the plugin is discoverable."""
 
     def test_discovered(self):
-        assert "rg" in list_analyses()
+        assert "solvent_contacts" in list_analyses()
 
     def test_class_variables(self):
-        cls = get_analysis("rg")
-        assert cls.name == "rg"
+        cls = get_analysis("solvent_contacts")
+        assert cls.name == "solvent_contacts"
         assert hasattr(cls, "Settings")
 
     def test_settings_defaults(self):
-        cls = get_analysis("rg")
+        cls = get_analysis("solvent_contacts")
         settings = cls.Settings()
         assert settings.selection == "protein and name CA"
 
 
-class TestRgMetrics:
+class TestSolventContactsMetrics:
     """Test metric extraction for default comparison."""
 
     def test_extract_metrics(self):
-        cls = get_analysis("rg")
+        cls = get_analysis("solvent_contacts")
         analysis = cls()
         summary = {
-            "mean_rg": 15.2,
-            "sem_rg": 0.3,
-            "replicate_values": [14.9, 15.5],
+            "mean_contact_fraction": 0.142,
+            "sem_contact_fraction": 0.010,
+            "replicate_values": [0.136, 0.148],
         }
         metrics = analysis.extract_metrics(summary)
-        assert "mean_rg" in metrics
-        assert isinstance(metrics["mean_rg"], MetricValue)
-        assert metrics["mean_rg"].higher_is_better is False
+        assert "mean_contact_fraction" in metrics
+        assert isinstance(metrics["mean_contact_fraction"], MetricValue)
+        assert metrics["mean_contact_fraction"].higher_is_better is False
 ```
 
 ### Testing `compute_replicate()` with mocked trajectories
@@ -1124,12 +1149,12 @@ from polyzymd.analyses import get_analysis
 from polyzymd.analyses.base import Condition, ReplicateContext
 
 
-class TestRgCompute:
+class TestSolventContactsCompute:
     """Test compute_replicate with mocked trajectories."""
 
-    @patch("polyzymd.analyses.rg.TrajectoryLoader")
+    @patch("polyzymd.analyses.solvent_contacts.TrajectoryLoader")
     def test_computes_metric(self, mock_loader_cls, tmp_path):
-        cls = get_analysis("rg")
+        cls = get_analysis("solvent_contacts")
         analysis = cls()
         settings = cls.Settings()
 
@@ -1137,9 +1162,13 @@ class TestRgCompute:
         mock_loader_cls.return_value = mock_loader
 
         mock_universe = MagicMock()
-        mock_atoms = MagicMock()
-        mock_atoms.radius_of_gyration = MagicMock(side_effect=[15.0 + i * 0.01 for i in range(50)])
-        mock_universe.select_atoms.return_value = mock_atoms
+        mock_target = MagicMock()
+        mock_target.__len__.return_value = 10
+        mock_target.positions = [[0.0, 0.0, 0.0]] * 10
+        mock_solvent = MagicMock()
+        mock_solvent.__len__.return_value = 20
+        mock_solvent.positions = [[1.0, 1.0, 1.0]] * 20
+        mock_universe.select_atoms.side_effect = [mock_target, mock_solvent]
 
         mock_trajectory = MagicMock()
         mock_trajectory.__getitem__.return_value = range(50)
@@ -1165,14 +1194,15 @@ class TestRgCompute:
         )
 
         result = analysis.compute_replicate(ctx, replicate=1)
-        assert "mean_rg" in result
-        assert result["mean_rg"] > 0
+        assert "mean_contact_fraction" in result
+        assert result["mean_contact_fraction"] >= 0
         assert result["replicate"] == 1
 ```
 
 Note the patch target:
-`@patch("polyzymd.analyses.rg.TrajectoryLoader")`. This works because
-`TrajectoryLoader` is imported at module level in `rg/__init__.py`.
+`@patch("polyzymd.analyses.solvent_contacts.TrajectoryLoader")`. This works
+because `TrajectoryLoader` is imported at module level in
+`solvent_contacts/__init__.py`.
 
 ### Testing `aggregate()`
 
@@ -1188,11 +1218,11 @@ from polyzymd.analyses import get_analysis
 from polyzymd.analyses.base import AggregateContext, Condition
 
 
-class TestRgAggregate:
+class TestSolventContactsAggregate:
     """Test aggregation across replicates."""
 
     def test_aggregate(self, tmp_path):
-        cls = get_analysis("rg")
+        cls = get_analysis("solvent_contacts")
         analysis = cls()
         settings = cls.Settings()
 
@@ -1211,15 +1241,15 @@ class TestRgAggregate:
         )
 
         results = [
-            {"mean_rg": 15.0, "replicate": 1},
-            {"mean_rg": 15.5, "replicate": 2},
-            {"mean_rg": 14.8, "replicate": 3},
+            {"mean_contact_fraction": 0.12, "replicate": 1},
+            {"mean_contact_fraction": 0.10, "replicate": 2},
+            {"mean_contact_fraction": 0.11, "replicate": 3},
         ]
 
         agg = analysis.aggregate(ctx, results)
-        expected_mean = np.mean([15.0, 15.5, 14.8])
-        assert abs(agg["mean_rg"] - expected_mean) < 1e-10
-        assert agg["replicate_values"] == [15.0, 15.5, 14.8]
+        expected_mean = np.mean([0.12, 0.10, 0.11])
+        assert abs(agg["mean_contact_fraction"] - expected_mean) < 1e-10
+        assert agg["replicate_values"] == [0.12, 0.10, 0.11]
 ```
 
 ### Testing `compare()` with filesystem-backed aggregated results
@@ -1239,19 +1269,19 @@ from polyzymd.analyses.base import ComparisonContext, Condition
 
 class TestCompare:
     def test_compare_two_conditions(self, tmp_path):
-        cls = get_analysis("rg")
+        cls = get_analysis("solvent_contacts")
         analysis = cls()
 
         # Set up filesystem with aggregated results
-        for label, value in [("WT", 15.0), ("Mutant", 16.5)]:
-            agg_dir = tmp_path / label / "rg" / "aggregated"
+        for label, value in [("WT", 0.12), ("Mutant", 0.18)]:
+            agg_dir = tmp_path / label / "solvent_contacts" / "aggregated"
             agg_dir.mkdir(parents=True)
             (agg_dir / "result.json").write_text(
                 json.dumps(
                     {
-                        "mean_rg": value,
-                        "sem_rg": 0.3,
-                        "replicate_values": [value - 0.2, value + 0.2],
+                        "mean_contact_fraction": value,
+                        "sem_contact_fraction": 0.01,
+                        "replicate_values": [value - 0.01, value + 0.01],
                     }
                 ),
                 encoding="utf-8",
@@ -1278,8 +1308,8 @@ class TestCompare:
             excluded_conditions=[],
             control_label="WT",
             analysis_dirs={
-                "WT": tmp_path / "WT" / "rg",
-                "Mutant": tmp_path / "Mutant" / "rg",
+                "WT": tmp_path / "WT" / "solvent_contacts",
+                "Mutant": tmp_path / "Mutant" / "solvent_contacts",
             },
             results_dir=tmp_path / "results",
             equilibration="10ns",
@@ -1313,7 +1343,7 @@ This avoids backend/display errors and keeps plotting tests deterministic.
 Run tests with:
 
 ```bash
-pixi run -e build pytest tests/test_rg_plugin.py -v
+pixi run -e build pytest tests/test_solvent_contacts_plugin.py -v
 ```
 
 ## See Also
