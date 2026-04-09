@@ -23,28 +23,22 @@ import numpy as np
 from numpy.typing import NDArray
 
 if TYPE_CHECKING:
+    from MDAnalysis.core.universe import Universe
+
     from polyzymd.config.schema import SimulationConfig
 
 LOGGER = logging.getLogger(__name__)
 
-# MDAnalysis is optional - only import when needed
-try:
-    import MDAnalysis as mda
-    from MDAnalysis.core.universe import Universe
-
-    HAS_MDANALYSIS = True
-except ImportError:
-    HAS_MDANALYSIS = False
-    Universe = None  # type: ignore
-
 
 def _require_mdanalysis(feature_name: str = "trajectory analysis") -> None:
     """Raise ImportError if MDAnalysis is not available."""
-    if not HAS_MDANALYSIS:
+    try:
+        import MDAnalysis  # noqa: F401
+    except ImportError:
         raise ImportError(
             f"MDAnalysis is required for {feature_name}.\n"
             "Install with: pip install polyzymd[analysis]"
-        )
+        ) from None
 
 
 def _require_matplotlib(feature_name: str = "plotting") -> None:
@@ -209,6 +203,7 @@ class TrajectoryLoader:
         continuous trajectory using MDAnalysis's ChainReader.
         """
         _require_mdanalysis()
+        import MDAnalysis as mda
 
         if cache and replicate in self._universe_cache:
             return self._universe_cache[replicate]
