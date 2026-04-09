@@ -625,12 +625,16 @@ class RgAnalysis(Analysis):
         if not anova_by_run:
             anova_by_run = None
 
+        fdr_alpha = getattr(ctx, "fdr_alpha", 0.05)
+        self._apply_fdr_correction(pairwise_comparisons, anova_by_run, fdr_alpha)
+
         return RgComparisonResult(
             metric="mean_rg",
             name=ctx.name,
             n_runs=len(run_labels),
             run_labels=run_labels,
             control_label=effective_control,
+            fdr_alpha=fdr_alpha,
             conditions=summaries,
             pairwise_comparisons=pairwise_comparisons,
             anova_by_run=anova_by_run,
@@ -962,6 +966,41 @@ class RgAnalysis(Analysis):
             significant=t_result.significant,
             percent_change=pct_change,
         )
+
+    @staticmethod
+    def _apply_fdr_correction(
+        pairwise: list[Any],
+        anova_by_run: list[Any] | None,
+        fdr_alpha: float,
+    ) -> None:
+        """Apply Benjamini-Hochberg FDR correction to pairwise and ANOVA p-values.
+
+        Treats all pairwise comparisons as one family and ANOVA tests as
+        a separate family.
+
+        Parameters
+        ----------
+        pairwise : list
+            Pairwise comparison results (mutated in place).
+        anova_by_run : list or None
+            ANOVA results (mutated in place).
+        fdr_alpha : float
+            FDR significance threshold.
+        """
+        from polyzymd.compare.statistics import benjamini_hochberg
+
+        if pairwise:
+            raw_p = [comp.p_value for comp in pairwise]
+            bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
+            for comp, bh in zip(pairwise, bh_results, strict=False):
+                comp.p_value_adjusted = bh.adjusted_p_value
+                comp.significant = bh.significant
+
+        if anova_by_run:
+            raw_p = [a.p_value for a in anova_by_run]
+            bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
+            for a, bh in zip(anova_by_run, bh_results, strict=False):
+                a.significant = bh.significant
 
     @staticmethod
     def _make_aggregated_filename(

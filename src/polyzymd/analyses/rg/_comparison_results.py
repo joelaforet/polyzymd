@@ -130,6 +130,8 @@ class RgRunPairwiseComparison(BaseModel):
         T-test statistic for mean Rg.
     p_value : float
         Two-tailed p-value.
+    p_value_adjusted : float | None
+        FDR-adjusted p-value (Benjamini-Hochberg), if correction was applied.
     cohens_d : float
         Effect size (Cohen's d).
     effect_interpretation : str
@@ -138,7 +140,7 @@ class RgRunPairwiseComparison(BaseModel):
         "compaction" (lower Rg), "expansion" (higher Rg),
         or "unchanged".
     significant : bool
-        Whether p < 0.05.
+        Whether the comparison is statistically significant (uses adjusted p-value after FDR correction).
     percent_change : float
         Percent change in mean Rg.
     """
@@ -150,6 +152,7 @@ class RgRunPairwiseComparison(BaseModel):
     condition_b: str
     t_statistic: float
     p_value: float
+    p_value_adjusted: float | None = None
     cohens_d: float
     effect_interpretation: str
     direction: str
@@ -199,6 +202,8 @@ class RgComparisonResult(BaseComparisonResult[RgConditionSummary, RgRunPairwiseC
         Labels for each run.
     control_label : str | None
         Label of the control condition.
+    fdr_alpha : float | None
+        False discovery rate threshold used for Benjamini-Hochberg correction.
     conditions : list[RgConditionSummary]
         Summary for each condition.
     pairwise_comparisons : list[RgRunPairwiseComparison]
@@ -222,6 +227,7 @@ class RgComparisonResult(BaseComparisonResult[RgConditionSummary, RgRunPairwiseC
     n_runs: int
     run_labels: list[str]
     control_label: str | None = None
+    fdr_alpha: float | None = None
     conditions: list[RgConditionSummary]
     pairwise_comparisons: list[RgRunPairwiseComparison]
     anova: None = None  # type: ignore[assignment]
