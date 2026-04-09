@@ -69,13 +69,13 @@ def _():
     NHS_LABEL = "C"
 
     # ── Conjugation parameters ─────────────────────────────────────────────
-    CONJUGATION_SITE_RESIDS = (23, 44)
-    N_CONJUGATED = 2
+    CONJUGATION_SITE_RESIDS = (23,)
+    N_CONJUGATED = 1
     CONJUGATED_LENGTH = 10
     CENTER_INDEX = CONJUGATED_LENGTH // 2
 
     # ── Free polymer parameters ────────────────────────────────────────────
-    N_FREE_POLYMERS = 5
+    N_FREE_POLYMERS = 36
     FREE_POLYMER_LENGTH = 5
 
     # ── Placement parameters ───────────────────────────────────────────────
@@ -87,12 +87,6 @@ def _():
     TARGET_BOND_LENGTH = 1.33
     TARGET_BOND_ANGLE = 120.0
     RNG_SEED = 42
-
-    # ── Free polymer placement ─────────────────────────────────────────────
-    FREE_SHELL_MIN_A = 15.0
-    FREE_SHELL_MAX_A = 35.0
-    N_FREE_PLACEMENT_TRIES = 200
-    FREE_COLLISION_DISTANCE = 2.0
 
     # ── Force field / minimization ─────────────────────────────────────────
     PROTEIN_FF = "ff14sb_off_impropers_0.0.4.offxml"
@@ -188,27 +182,6 @@ def _():
         placed_coords: np.ndarray
         min_protein_distance: float
 
-    @dataclass(frozen=True)
-    class FreePlacementResult:
-        """Record of a successfully placed free polymer.
-
-        Attributes
-        ----------
-        polymer_id : str
-            Identifier of the free polymer
-        sequence : str
-            Monomer sequence used for this polymer
-        off_molecule : Molecule
-            OpenFF molecule carrying the placed conformer
-        placed_coords : np.ndarray
-            Final placed Cartesian coordinates in angstrom
-        """
-
-        polymer_id: str
-        sequence: str
-        off_molecule: Molecule
-        placed_coords: np.ndarray
-
     def generate_weighted_sequence(length: int, rng: np.random.Generator) -> str:
         """Generate a random polymer sequence from monomer probabilities.
 
@@ -292,12 +265,8 @@ def _():
         CONJUGATION_SITE_RESIDS,
         EQUILIBRATED_PDB,
         ForceField,
-        FREE_COLLISION_DISTANCE,
         FREE_POLYMER_LENGTH,
-        FREE_SHELL_MAX_A,
-        FREE_SHELL_MIN_A,
         FragmentGenerator,
-        FreePlacementResult,
         KDTree,
         LINKAGE_NEIGHBORHOOD_BONDS,
         MINIMIZATION_MAX_ITER,
@@ -309,7 +278,6 @@ def _():
         MonomerGroup,
         Molecule,
         N_CONJUGATED,
-        N_FREE_PLACEMENT_TRIES,
         N_FREE_POLYMERS,
         NHS_LABEL,
         PACKMOL_MOVEBADRANDOM,
@@ -773,26 +741,16 @@ def _(
 
 @app.cell
 def _(
-    FREE_COLLISION_DISTANCE,
-    FREE_SHELL_MAX_A,
-    FREE_SHELL_MIN_A,
-    FreePlacementResult,
     KDTree,
     Molecule,
-    N_FREE_PLACEMENT_TRIES,
     PACKMOL_MOVEBADRANDOM,
     PACKMOL_NLOOP,
     PACKMOL_REACTIVE_SPHERE_RADIUS,
     PACKMOL_TOLERANCE,
     Path,
     PlacementResult,
-    RNG_SEED,
-    Rotation,
     TARGET_BOND_LENGTH,
     assignments: list[tuple],
-    centroid_vec,
-    free_polymer_offs,
-    free_sequences,
     logger,
     np,
     protein_coords,
@@ -805,7 +763,6 @@ def _(
     packing, a post-placement translation snaps the reactive carbon to
     TARGET_BOND_LENGTH from NZ.
 
-    Free (non-covalent) polymers use shell-based random placement (unchanged).
     """
     import tempfile
 
@@ -1082,58 +1039,7 @@ def _(
         # Add retained coords to occupied set for next polymer
         occupied = np.vstack((occupied, full_transformed[retained_idx]))
 
-    # ── Free polymer placement (unchanged from original) ───────────────────
-    free_placement_results: list[FreePlacementResult] = []
-    for _fi, _free_off in enumerate(free_polymer_offs):
-        rng_free = np.random.default_rng(RNG_SEED + 1000 + _fi)
-
-        if not _free_off.conformers:
-            raise RuntimeError(f"No conformers for free polymer {_fi}")
-
-        placed = False
-        for _ in range(N_FREE_PLACEMENT_TRIES):
-            conf_coords = _free_off.conformers[0].m_as("angstrom")
-
-            centered = conf_coords - conf_coords.mean(axis=0)
-            rot = Rotation.random(random_state=rng_free.integers(0, 2**31))
-            rotated = rot.apply(centered)
-
-            direction = rng_free.standard_normal(3)
-            direction /= np.linalg.norm(direction)
-            radius = rng_free.uniform(FREE_SHELL_MIN_A, FREE_SHELL_MAX_A)
-            _offset = centroid_vec + radius * direction
-            trial = rotated + _offset
-
-            occupied_tree = KDTree(occupied)
-            dists, _ = occupied_tree.query(trial)
-            min_dist = float(np.min(dists))
-            if min_dist >= FREE_COLLISION_DISTANCE:
-                from openff.units import Quantity as Q
-                from openff.units import unit as u
-
-                _free_off._conformers = [Q(trial, u.angstrom)]
-
-                occupied = np.vstack((occupied, trial))
-                free_placement_results.append(
-                    FreePlacementResult(
-                        polymer_id=f"free_{_fi}",
-                        sequence=free_sequences[_fi],
-                        off_molecule=_free_off,
-                        placed_coords=trial,
-                    )
-                )
-                placed = True
-                logger.info("Placed free polymer %d: clearance %.2f A", _fi, min_dist)
-                break
-
-        if not placed:
-            raise RuntimeError(
-                f"Failed to place free polymer {_fi} after {N_FREE_PLACEMENT_TRIES} tries"
-            )
-
-    placed_free_polymer_offs = [res.off_molecule for res in free_placement_results]
-
-    return free_placement_results, placed_free_polymer_offs, placement_results
+    return (placement_results,)
 
 
 @app.cell
@@ -1145,7 +1051,6 @@ def _(
     cap_charge_map,
     logger,
     np,
-    placed_free_polymer_offs,
     placement_results: "list[PlacementResult]",
     protein_charge_arr,
     protein_coords,
@@ -1522,53 +1427,26 @@ def _(
         all_conjugate_heavy.extend(cr["heavy_atom_indices"])
     all_conjugate_heavy.sort()
 
-    free_polymer_ranges = []
-    free_offset = conjugate_off.n_atoms
-    for _fi, free_off_mol in enumerate(placed_free_polymer_offs):
-        n_free = free_off_mol.n_atoms
-        free_indices = list(range(free_offset, free_offset + n_free))
-        free_heavy = [
-            i for i in free_indices if free_off_mol.atom(i - free_offset).atomic_number > 1
-        ]
-        free_polymer_ranges.append(
-            {
-                "polymer_id": f"free_{_fi}",
-                "atom_indices": free_indices,
-                "heavy_atom_indices": free_heavy,
-            }
-        )
-        free_offset += n_free
-
-    all_free_heavy = []
-    for fr in free_polymer_ranges:
-        all_free_heavy.extend(fr["heavy_atom_indices"])
-    all_free_heavy.sort()
-
     component_metadata = {
         "n_conjugate_atoms": conjugate_off.n_atoms,
-        "n_free_polymer_atoms": sum(m.n_atoms for m in placed_free_polymer_offs),
         "protein": {
             "atom_indices": protein_atom_indices,
             "heavy_atom_indices": _protein_heavy_indices,
             "backbone_heavy_atom_indices": _protein_backbone_heavy_indices,
         },
         "conjugated_polymers": conjugated_polymer_ranges,
-        "free_polymers": free_polymer_ranges,
         "restraint_groups": {
             "protein_heavy": _protein_heavy_indices,
             "protein_backbone_heavy": _protein_backbone_heavy_indices,
             "conjugate_heavy": all_conjugate_heavy,
-            "free_polymer_heavy": all_free_heavy,
         },
     }
 
     logger.info(
-        "Component metadata: %d protein heavy, %d backbone heavy, %d conjugate heavy, "
-        "%d free heavy",
+        "Component metadata: %d protein heavy, %d backbone heavy, %d conjugate heavy",
         len(_protein_heavy_indices),
         len(_protein_backbone_heavy_indices),
         len(all_conjugate_heavy),
-        len(all_free_heavy),
     )
 
     return component_metadata, conjugate_off, prot_removed_indices
@@ -1579,7 +1457,6 @@ def _(
     ASSEMBLED_PDB,
     PROTEIN_PDB,
     Path,
-    free_placement_results,
     logger,
     np,
     placement_results: "list[PlacementResult]",
@@ -1631,6 +1508,7 @@ def _(
     polymer_lines = []
     conect_map = {}
     chain_c_resid = 1
+    _all_crosslink_resids = []
 
     for _pi, _placement in enumerate(placement_results):
         _polymer = _placement.polymer
@@ -1652,6 +1530,8 @@ def _(
             if _reactive_local_resid is not None
             else None
         )
+        if _crosslink_global_resid is not None:
+            _all_crosslink_resids.append(_crosslink_global_resid)
 
         chain_c_resid += len(local_resids_sorted)
 
@@ -1706,58 +1586,6 @@ def _(
 
         polymer_lines.append("TER\n")
 
-    for _fp in free_placement_results:
-        _off_mol = _fp.off_molecule
-        _coords = _fp.placed_coords
-
-        _rd_mol = _off_mol.to_rdkit()
-        local_resids = set()
-        for _ai in range(_off_mol.n_atoms):
-            _rd_atom = _rd_mol.GetAtomWithIdx(_ai)
-            _rd_info = _rd_atom.GetPDBResidueInfo()
-            if _rd_info:
-                local_resids.add(_rd_info.GetResidueNumber())
-            else:
-                local_resids.add(1)
-        local_resids_sorted = sorted(local_resids)
-        local_to_global = {r: chain_c_resid + i for i, r in enumerate(local_resids_sorted)}
-        chain_c_resid += len(local_resids_sorted)
-
-        _serial_map_free = {}
-        for _ai in range(_off_mol.n_atoms):
-            _atom = _off_mol.atoms[_ai]
-            _x, _y, _z = _coords[_ai]
-            _rd_atom = _rd_mol.GetAtomWithIdx(_ai)
-            _rd_info = _rd_atom.GetPDBResidueInfo()
-            _atom_name = _rd_info.GetName().strip() if _rd_info else f"{_atom.symbol}{_ai:03d}"
-            _res_name = _rd_info.GetResidueName().strip() if _rd_info else "POL"
-            _local_resid = _rd_info.GetResidueNumber() if _rd_info else 1
-
-            polymer_lines.append(
-                write_pdb_line(
-                    serial=_next_serial,
-                    atom_name=_atom_name,
-                    residue_name=_res_name,
-                    chain_id="C",
-                    residue_number=local_to_global.get(_local_resid, chain_c_resid - 1),
-                    x=float(_x),
-                    y=float(_y),
-                    z=float(_z),
-                    element=_atom.symbol,
-                    record="HETATM",
-                )
-            )
-            _serial_map_free[_ai] = _next_serial
-            _next_serial += 1
-
-        for _bond in _off_mol.bonds:
-            _si = _serial_map_free[_bond.atom1_index]
-            _sj = _serial_map_free[_bond.atom2_index]
-            conect_map.setdefault(_si, set()).add(_sj)
-            conect_map.setdefault(_sj, set()).add(_si)
-
-        polymer_lines.append("TER\n")
-
     assembled_path = Path(ASSEMBLED_PDB)
     with open(assembled_path, "w", encoding="utf-8") as _f:
         for _line in kept_lines:
@@ -1775,7 +1603,8 @@ def _(
         assembled_path,
         chain_c_resid - 1,
     )
-    return (assembled_path,)
+    crosslink_resids = tuple(_all_crosslink_resids)
+    return (assembled_path, crosslink_resids)
 
 
 @app.cell
@@ -1811,12 +1640,7 @@ def _(
     MINIMIZED_PDB,
     Molecule,
     assembled_path,
-    component_metadata,
-    conjugated_sequences,
     conjugate_off,
-    free_placement_results,
-    free_polymer_offs,
-    free_sequences,
     interchange,
     logger,
     placement_results: "list[PlacementResult]",
@@ -1954,15 +1778,7 @@ def _(
         energy_before,
         energy_after,
     )
-    return (
-        component_metadata,
-        conjugated_sequences,
-        energy_after,
-        energy_before,
-        free_polymer_offs,
-        free_sequences,
-        output_path,
-    )
+    return (energy_after, energy_before, output_path)
 
 
 @app.cell
@@ -2116,6 +1932,11 @@ def _(
     )
     equilibrated_positions = state_after_nvt.getPositions(asNumpy=True)
     equilibrated_coords_angstrom = equilibrated_positions.value_in_unit(_omm_unit.angstrom)
+
+    # Update conjugate_off conformer with equilibrated coordinates
+    # so downstream consumers get relaxed geometry
+    for _idx, _xyz in enumerate(equilibrated_coords_angstrom):
+        conjugate_off.conformers[0][_idx, :] = _xyz * unit.angstrom
 
     logger.info(
         "  NVT: E_before=%.2f, E_after=%.2f kJ/mol",
