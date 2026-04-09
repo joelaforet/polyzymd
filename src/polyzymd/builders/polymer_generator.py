@@ -180,6 +180,11 @@ class PolymerGenerator:
         Raises:
             PolymerGenerationError: If building fails after max_retries
         """
+        if len(sequence) < 2:
+            raise ValueError(
+                f"Sequence must be at least 2 characters (head + tail), got '{sequence}'"
+            )
+
         # Parse sequence - head and tail are terminals, middle is for repeating
         head_label = sequence[0]
         tail_label = sequence[-1]
@@ -200,19 +205,45 @@ class PolymerGenerator:
         )
         logger.debug(f"Middle sequence (block identifiers): {middle_sequence}")
 
+        # Build an explicit sequence_map for middle-position block identifiers.
+        # This avoids Polymerist's default alphabetical mapping, which can
+        # silently mismatch block labels and 2-site fragments.
+        if middle_sequence:
+            unique_middle_chars = []
+            for ch in middle_sequence:
+                if ch not in unique_middle_chars:
+                    unique_middle_chars.append(ch)
+
+            sequence_map = {}
+            for ch in unique_middle_chars:
+                if ch not in monomer_names:
+                    raise ValueError(
+                        f"Middle sequence character '{ch}' not found in monomer_names {monomer_names}"
+                    )
+                sequence_map[ch] = self._get_middle_fragment_name(monomer_names[ch])
+
+            logger.debug(f"Explicit sequence_map: {sequence_map}")
+        else:
+            sequence_map = None
+            logger.debug("No middle sequence; only terminal fragments will be built")
+
         # Attempt building with retries for ring-piercing
+        chain = None
         for attempt in range(self.max_retries):
             logger.debug(f"Building polymer attempt {attempt + 1}/{self.max_retries}")
 
-            # Pass the raw middle sequence - Polymerist will map block identifiers
-            # to 2-site fragments based on zip ordering with MonomerGroup iteration
-            chain = build_linear_polymer(
-                monomers=monogrp_local,
-                n_monomers=len(sequence),
-                sequence=middle_sequence,
-                energy_minimize=True,
-                allow_partial_sequences=True,
-            )
+            try:
+                chain = build_linear_polymer(
+                    monomers=monogrp_local,
+                    n_monomers=len(sequence),
+                    sequence=middle_sequence if middle_sequence else "A",
+                    sequence_map=sequence_map,
+                    energy_minimize=True,
+                    allow_partial_sequences=True,
+                )
+            except Exception as exc:
+                logger.warning(f"Build failed on attempt {attempt + 1}: {exc}")
+                continue
 
             # Check for ring-piercing
             poly_mol = mbmol_to_rdmol(chain)
@@ -227,7 +258,7 @@ class PolymerGenerator:
                 )
         else:
             raise PolymerGenerationError(
-                f"Failed to build polymer after {self.max_retries} attempts due to ring-piercing"
+                f"Failed to build polymer after {self.max_retries} attempts"
             )
 
         # Save PDB

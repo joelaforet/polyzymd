@@ -170,6 +170,114 @@ class TestBoxSizeArithmetic:
 
 
 # ---------------------------------------------------------------------------
+# structure_extra_lines tests
+# ---------------------------------------------------------------------------
+
+
+class TestStructureExtraLines:
+    """Per-structure extra lines are inserted correctly and validated."""
+
+    def test_extra_lines_absent_by_default(self):
+        text = build_packmol_input(PDBS, COUNTS, BOX_3A, TOL)
+        assert "atoms 42" not in text
+        assert "inside sphere 10.5 20.3 15.7 5.0" not in text
+        assert "end atoms" not in text
+
+    def test_extra_lines_inserted_before_end_structure(self):
+        extra_lines = [["atoms 1", "end atoms"], []]
+        text = build_packmol_input(
+            PDBS,
+            COUNTS,
+            BOX_3A,
+            TOL,
+            structure_extra_lines=extra_lines,
+        )
+
+        block_start = text.index("structure mol0.pdb")
+        block_end = text.index("end structure", block_start)
+        atoms_pos = text.index("  atoms 1", block_start)
+        end_atoms_pos = text.index("  end atoms", block_start)
+
+        assert block_start < atoms_pos < end_atoms_pos < block_end
+
+    def test_extra_lines_with_atoms_constraint(self):
+        extra_lines = [["atoms 42", "inside sphere 10.5 20.3 15.7 5.0", "end atoms"], []]
+        text = build_packmol_input(
+            PDBS,
+            COUNTS,
+            BOX_3A,
+            TOL,
+            structure_extra_lines=extra_lines,
+        )
+
+        assert "  atoms 42" in text
+        assert "  inside sphere 10.5 20.3 15.7 5.0" in text
+        assert "  end atoms" in text
+
+    def test_extra_lines_empty_list_no_effect(self):
+        text_default = build_packmol_input(PDBS, COUNTS, BOX_3A, TOL)
+        text_empty = build_packmol_input(
+            PDBS,
+            COUNTS,
+            BOX_3A,
+            TOL,
+            structure_extra_lines=[[], []],
+        )
+        assert text_empty == text_default
+
+    def test_extra_lines_length_mismatch_raises(self):
+        with pytest.raises(ValueError, match="structure_extra_lines"):
+            build_packmol_input(
+                PDBS,
+                COUNTS,
+                BOX_3A,
+                TOL,
+                structure_extra_lines=[[]],
+            )
+
+    def test_extra_lines_skips_zero_count(self):
+        pdbs = ["mol0.pdb", "mol1.pdb"]
+        counts = [0, 2]
+        extra_lines = [["atoms 999", "end atoms"], ["atoms 42", "end atoms"]]
+        text = build_packmol_input(
+            pdbs,
+            counts,
+            BOX_3A,
+            TOL,
+            structure_extra_lines=extra_lines,
+        )
+
+        assert "structure mol0.pdb" not in text
+        assert "  atoms 999" not in text
+        assert "structure mol1.pdb" in text
+        assert "  atoms 42" in text
+
+    def test_extra_lines_multiple_structures(self):
+        extra_lines = [
+            ["atoms 11", "end atoms"],
+            ["atoms 22", "end atoms"],
+        ]
+        text = build_packmol_input(
+            PDBS,
+            COUNTS,
+            BOX_3A,
+            TOL,
+            structure_extra_lines=extra_lines,
+        )
+
+        mol0_start = text.index("structure mol0.pdb")
+        mol1_start = text.index("structure mol1.pdb")
+
+        mol0_block = text[mol0_start:mol1_start]
+        mol1_block = text[mol1_start:]
+
+        assert "  atoms 11" in mol0_block
+        assert "  atoms 22" not in mol0_block
+        assert "  atoms 22" in mol1_block
+        assert "  atoms 11" not in mol1_block
+
+
+# ---------------------------------------------------------------------------
 # PolymerPackingConfig schema test
 # ---------------------------------------------------------------------------
 
