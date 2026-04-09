@@ -8,6 +8,7 @@ configuration fields, API signatures, defaults, or benchmark data.
 - [Data Requirements & Directory Layout](data_requirements.md)
 - [CLI Reference](cli_reference.md)
 - [Configuration Reference](configuration.md)
+- [Comparison YAML Schema](comparison_yaml.md)
 - [Comparison and Plotting Reference](analysis_comparison_reference.md)
 - [Benchmarks](benchmarks.md)
 
@@ -38,6 +39,7 @@ simulation, workflow, analysis, and compare as a reference navigation aid. -->
 CLI Reference <cli_reference>
 Data Requirements & Directory Layout <data_requirements>
 Configuration Reference <configuration>
+Comparison YAML Schema <comparison_yaml>
 Comparison and Plotting Reference <analysis_comparison_reference>
 Benchmarks <benchmarks>
 API Overview <../api/overview>
