@@ -235,6 +235,157 @@ def plot_rmsd_comparison_bars(
     return generated
 
 
+def plot_rmsd_convergence_diagnostics(
+    ctx: PlotContext,
+    comparison_result: RMSDComparisonResult,
+) -> list[Path]:
+    """Plot per-replicate sliding-window convergence diagnostics.
+
+    Parameters
+    ----------
+    ctx : PlotContext
+        Framework-provided plot context.
+    comparison_result : RMSDComparisonResult
+        RMSD comparison result with condition and run labels.
+
+    Returns
+    -------
+    list[Path]
+        Paths to generated convergence diagnostic figures.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    plot_settings = _get_plot_settings(ctx)
+    if not plot_settings.show_convergence_plots:
+        return []
+
+    replicates_by_condition = {
+        condition.label: list(condition.replicates) for condition in ctx.conditions
+    }
+    generated: list[Path] = []
+
+    run_thresholds = {run.label: run.convergence_slope_threshold for run in ctx.settings.runs}
+
+    for condition in comparison_result.conditions:
+        condition_dir = ctx.analysis_dirs.get(condition.label)
+        if condition_dir is None:
+            logger.warning(
+                "No analysis directory found for condition '%s' in RMSD convergence plot",
+                condition.label,
+            )
+            continue
+
+        replicates = replicates_by_condition.get(condition.label, [])
+        if not replicates:
+            continue
+
+        for run_label in comparison_result.run_labels:
+            fig, axes = plt.subplots(
+                nrows=len(replicates),
+                ncols=1,
+                figsize=plot_settings.convergence_figsize,
+                squeeze=False,
+                sharex=True,
+            )
+            had_data = False
+
+            for row_idx, replicate in enumerate(replicates):
+                ax = axes[row_idx, 0]
+                payload = _load_replicate_convergence_payload(condition_dir, run_label, replicate)
+                if payload is None:
+                    ax.set_visible(False)
+                    continue
+
+                time_ns = payload["time_ns"]
+                rmsd_values = payload["rmsd_values"]
+                window_times = payload["window_start_times_ns"]
+                window_means = payload["window_mean_values"]
+                slope_times = payload["slope_times_ns"]
+                slopes = payload["slopes"]
+                converged = payload["converged"]
+                convergence_time_ns = payload["convergence_time_ns"]
+                threshold = run_thresholds.get(run_label, 0.0005)
+
+                ax.plot(
+                    time_ns,
+                    rmsd_values,
+                    color="gray",
+                    alpha=0.3,
+                    linewidth=1.0,
+                    label="Raw RMSD",
+                    zorder=1,
+                )
+                if window_times.size > 0 and window_means.size > 0:
+                    ax.plot(
+                        window_times,
+                        window_means,
+                        color="C0",
+                        linewidth=2.5,
+                        label="Window mean",
+                        zorder=3,
+                    )
+
+                slope_ax = ax.twinx()
+                if slope_times.size > 0 and slopes.size > 0:
+                    slope_ax.plot(
+                        slope_times,
+                        slopes,
+                        color="red",
+                        linewidth=1.5,
+                        label="Slope",
+                        zorder=2,
+                    )
+                slope_ax.axhline(threshold, color="red", linestyle=":", linewidth=1.2)
+                slope_ax.axhline(-threshold, color="red", linestyle=":", linewidth=1.2)
+                slope_ax.set_ylabel("Slope (Å/ns)")
+
+                if converged and convergence_time_ns is not None:
+                    ax.axvline(
+                        convergence_time_ns,
+                        color="black",
+                        linestyle="--",
+                        linewidth=1.5,
+                    )
+                    y_max = float(np.max(rmsd_values))
+                    ax.text(
+                        convergence_time_ns,
+                        y_max,
+                        f"Converged at {convergence_time_ns:.1f} ns",
+                        ha="left",
+                        va="bottom",
+                        fontsize=9,
+                        bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "black"},
+                    )
+
+                apply_axis_style(
+                    ax,
+                    ctx.plot_settings,
+                    title=f"Replicate {replicate}",
+                    ylabel="RMSD (Å)",
+                )
+                had_data = True
+
+            if not had_data:
+                plt.close(fig)
+                continue
+
+            axes[-1, 0].set_xlabel("Time (ns)")
+            fig.suptitle(f"RMSD convergence — {condition.label} — {run_label}")
+            fig.tight_layout(rect=[0, 0, 1, 0.97])
+
+            safe_condition = _sanitize_run_label(condition.label)
+            safe_run = _sanitize_run_label(run_label)
+            output_path = get_output_path(
+                ctx.output_dir,
+                f"rmsd_convergence_{safe_condition}_{safe_run}",
+                ctx.plot_settings,
+            )
+            generated.append(save_figure(fig, output_path, ctx.plot_settings))
+
+    return generated
+
+
 def _load_replicate_timeseries(
     condition_dir: Path,
     run_label: str,
@@ -352,3 +503,79 @@ def _sanitize_run_label(run_label: str) -> str:
     """
     sanitized = run_label.replace(" ", "_").replace("-", "_").replace("/", "_")
     return sanitized.lower()
+
+
+def _load_replicate_convergence_payload(
+    condition_dir: Path,
+    run_label: str,
+    replicate: int,
+) -> dict[str, np.ndarray | float | bool | None] | None:
+    """Load convergence payload from RMSD NPZ sidecar.
+
+    Parameters
+    ----------
+    condition_dir : Path
+        Condition analysis directory.
+    run_label : str
+        RMSD run label.
+    replicate : int
+        Replicate number.
+
+    Returns
+    -------
+    dict[str, np.ndarray | float | bool | None] | None
+        Parsed payload, or ``None`` when NPZ is missing or invalid.
+    """
+    import numpy as np
+
+    npz_path = condition_dir / f"run_{replicate}" / f"rmsd_{run_label}_timeseries.npz"
+    if not npz_path.exists():
+        logger.warning("Missing RMSD NPZ sidecar: %s", npz_path)
+        return None
+
+    try:
+        payload = np.load(npz_path)
+        time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
+        rmsd_values = np.asarray(payload["rmsd_values"], dtype=np.float64)
+        window_start_times_ns = np.asarray(
+            payload.get("convergence_window_start_ns", np.array([], dtype=np.float64)),
+            dtype=np.float64,
+        )
+        window_mean_values = np.asarray(
+            payload.get("convergence_window_mean_rmsd", np.array([], dtype=np.float64)),
+            dtype=np.float64,
+        )
+        slope_times_ns = np.asarray(
+            payload.get("convergence_slope_time_ns", np.array([], dtype=np.float64)),
+            dtype=np.float64,
+        )
+        slopes = np.asarray(
+            payload.get("convergence_slope", np.array([], dtype=np.float64)),
+            dtype=np.float64,
+        )
+        converged = bool(payload.get("convergence_converged", np.asarray(False)).item())
+        convergence_time_raw = payload.get("convergence_time_ns")
+        convergence_time_ns = None
+        if convergence_time_raw is not None:
+            value = float(np.asarray(convergence_time_raw).item())
+            if np.isfinite(value):
+                convergence_time_ns = value
+    except Exception as exc:
+        logger.warning("Failed to load RMSD NPZ sidecar %s: %s", npz_path, exc)
+        return None
+
+    if time_ns.ndim != 1 or rmsd_values.ndim != 1 or len(time_ns) == 0 or len(rmsd_values) == 0:
+        logger.warning("Unexpected NPZ shape for %s; expected non-empty 1D arrays", npz_path)
+        return None
+
+    n_common = min(len(time_ns), len(rmsd_values))
+    return {
+        "time_ns": time_ns[:n_common],
+        "rmsd_values": rmsd_values[:n_common],
+        "window_start_times_ns": window_start_times_ns,
+        "window_mean_values": window_mean_values,
+        "slope_times_ns": slope_times_ns,
+        "slopes": slopes,
+        "converged": converged,
+        "convergence_time_ns": convergence_time_ns,
+    }
