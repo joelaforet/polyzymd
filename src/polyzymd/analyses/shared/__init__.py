@@ -67,6 +67,10 @@ from polyzymd.analyses.shared.constants import (
     DEFAULT_DISTANCE_THRESHOLD,
     DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
 )
+from polyzymd.analyses.shared.convergence import (
+    ConvergenceResult,
+    find_convergence_time,
+)
 from polyzymd.analyses.shared.defaults import AnalysisDefaults
 from polyzymd.analyses.shared.loader import (
     TrajectoryInfo,
@@ -142,6 +146,9 @@ __all__ = [
     # Config hash
     "compute_config_hash",
     "validate_config_hash",
+    # Convergence
+    "ConvergenceResult",
+    "find_convergence_time",
     # Plotting
     "get_theme",
     "apply_axis_style",
