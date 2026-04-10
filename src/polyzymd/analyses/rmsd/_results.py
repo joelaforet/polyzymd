@@ -103,6 +103,21 @@ class RMSDRunResult(BaseAnalysisResult):
         default=None, description="Warning if statistics may be unreliable"
     )
 
+    # Convergence diagnostics
+    converged: bool = Field(default=False, description="Whether RMSD trace converged")
+    convergence_assessable: bool = Field(
+        default=False,
+        description="Whether convergence could be assessed from available data",
+    )
+    convergence_time_ns: float | None = Field(
+        default=None,
+        description="Detected convergence start time in ns",
+    )
+    convergence_message: str | None = Field(
+        default=None,
+        description="Convergence diagnostic message",
+    )
+
     # Frame info
     n_frames_total: int = Field(..., description="Total frames in trajectory")
     n_frames_used: int = Field(..., description="Frames used after equilibration")
@@ -228,6 +243,16 @@ class RMSDRunAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     per_replicate_means: list[float] = Field(..., description="Mean RMSD from each replicate")
     per_replicate_stds: list[float] = Field(..., description="Std dev from each replicate")
     per_replicate_medians: list[float] = Field(..., description="Median from each replicate")
+
+    # Convergence summary
+    per_replicate_convergence_times_ns: list[float | None] = Field(default_factory=list)
+    per_replicate_convergence_assessable: list[bool] = Field(default_factory=list)
+    n_converged_replicates: int = Field(default=0)
+    n_assessable_replicates: int = Field(default=0)
+    convergence_fraction: float = Field(default=0.0)
+    all_converged: bool = Field(default=False)
+    mean_convergence_time_ns: float | None = Field(default=None)
+    median_convergence_time_ns: float | None = Field(default=None)
 
     def summary(self) -> str:
         """Return human-readable summary."""

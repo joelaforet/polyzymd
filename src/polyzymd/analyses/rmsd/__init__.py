@@ -89,6 +89,26 @@ class RMSDRunSettings(BaseModel):
         default=None,
         description="Selection for centroid mode; defaults to alignment_selection",
     )
+    convergence_window_size_ns: float = Field(
+        default=15.0,
+        gt=0,
+        description="Sliding window size for convergence detection in ns",
+    )
+    convergence_step_size_ns: float = Field(
+        default=5.0,
+        gt=0,
+        description="Sliding window step size for convergence detection in ns",
+    )
+    convergence_slope_threshold: float = Field(
+        default=0.0005,
+        gt=0,
+        description="Absolute slope threshold for convergence detection",
+    )
+    convergence_sustained_for_ns: float = Field(
+        default=15.0,
+        gt=0,
+        description="Required sustained converged duration in ns",
+    )
 
     @field_validator("reference_mode", mode="after")
     @classmethod
@@ -116,6 +136,16 @@ class RMSDRunSettings(BaseModel):
             raise ValueError(
                 f"reference_file does not exist: {ref_path}. "
                 "Provide a valid path to the external PDB reference structure."
+            )
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_convergence_window_step(self) -> "RMSDRunSettings":
+        """Validate convergence window and step compatibility."""
+        if self.convergence_step_size_ns > self.convergence_window_size_ns:
+            raise ValueError(
+                "convergence_step_size_ns must be less than or equal to convergence_window_size_ns"
             )
         return self
 
@@ -551,6 +581,7 @@ class RMSDAnalysis(Analysis):
         from polyzymd.analyses._results_base import get_polyzymd_version
         from polyzymd.analyses.rmsd._results import RMSDRunResult
         from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
+        from polyzymd.analyses.shared.convergence import find_convergence_time
 
         u = loader.load_universe(replicate, cache=False)
 
@@ -639,6 +670,15 @@ class RMSDAnalysis(Analysis):
             if n_independent_frames > 0:
                 sem_rmsd = float(std_rmsd / np.sqrt(float(n_independent_frames)))
 
+        convergence_result = find_convergence_time(
+            time_ns,
+            rmsd_values,
+            window_size_ns=run.convergence_window_size_ns,
+            step_size_ns=run.convergence_step_size_ns,
+            slope_threshold=run.convergence_slope_threshold,
+            sustained_for_ns=run.convergence_sustained_for_ns,
+        )
+
         npz_filename = f"rmsd_{run.label}_timeseries.npz"
         npz_path = ctx.output_dir / npz_filename
         np.savez_compressed(
@@ -646,6 +686,19 @@ class RMSDAnalysis(Analysis):
             rmsd_values=rmsd_values,
             time_ns=time_ns,
             frames=frames,
+            convergence_window_start_ns=np.asarray(
+                convergence_result.window_start_times_ns,
+                dtype=np.float64,
+            ),
+            convergence_window_mean_rmsd=np.asarray(
+                convergence_result.window_mean_values,
+                dtype=np.float64,
+            ),
+            convergence_slope_time_ns=np.asarray(
+                convergence_result.slope_times_ns,
+                dtype=np.float64,
+            ),
+            convergence_slope=np.asarray(convergence_result.slopes, dtype=np.float64),
         )
 
         return RMSDRunResult(
@@ -673,6 +726,10 @@ class RMSDAnalysis(Analysis):
             correlation_time_unit=correlation_time_unit,
             statistical_inefficiency=statistical_inefficiency,
             autocorrelation_warning=autocorrelation_warning,
+            converged=convergence_result.converged,
+            convergence_assessable=convergence_result.assessable,
+            convergence_time_ns=convergence_result.convergence_time_ns,
+            convergence_message=convergence_result.message,
             n_frames_total=n_frames_total,
             n_frames_used=n_frames_used,
             npz_path=str(npz_path),
