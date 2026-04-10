@@ -9,6 +9,14 @@ from __future__ import annotations
 import logging
 
 from polyzymd.analyses.rmsd._comparison_results import RMSDComparisonResult, RMSDRunSummary
+from polyzymd.analyses.shared.multi_run_formatting import (
+    format_anova_line,
+    format_pairwise_line,
+    make_ranked_markdown_header,
+    make_ranked_rows,
+    make_ranked_table_header,
+    make_section_title,
+)
 from polyzymd.analyses.stats import format_pct
 
 logger = logging.getLogger(__name__)
@@ -42,9 +50,16 @@ def _format_pairwise_line(run_label: str, result: RMSDComparisonResult) -> list[
 
         sig_marker = "*" if comp.significant else ""
         lines.append(
-            f"Pairwise: {comp.condition_b} vs {comp.condition_a} — "
-            f"Δ={format_pct(comp.percent_change)}, p={comp.p_value:.3f} {sig_marker}, "
-            f"d={comp.cohens_d:.2f} ({comp.effect_interpretation}), {comp.direction}"
+            format_pairwise_line(
+                condition_a=comp.condition_a,
+                condition_b=comp.condition_b,
+                direction=comp.direction,
+                p_value=comp.p_value,
+                effect_size=comp.cohens_d,
+                effect_label=comp.effect_interpretation,
+                percent_change=comp.percent_change,
+                significant=comp.significant,
+            )
         )
     return lines
 
@@ -65,20 +80,21 @@ def _format_rmsd_table(result: RMSDComparisonResult) -> str:
     lines: list[str] = []
 
     for run_label in result.run_labels:
-        lines.append("")
-        lines.append(f"RMSD Comparison: {run_label}")
-        lines.append("=" * 43)
-        lines.append(f"{'Condition':<18} {'Mean RMSD (Å)':<15} {'SEM':<8} {'Rank':<4}")
-        lines.append("-" * 44)
+        lines.extend(make_section_title(f"RMSD Comparison: {run_label}", 43))
+        lines.extend(make_ranked_table_header(mean_label="Mean RMSD (Å)"))
 
         ranking = result.get_ranking(run_label)
-        for rank, condition_label in enumerate(ranking, 1):
+        ranked_rows = make_ranked_rows(
+            ranking,
+            lambda label, run_label=run_label: (
+                result.get_condition(label).get_run(run_label).mean_rmsd,
+                result.get_condition(label).get_run(run_label).sem_rmsd,
+            ),
+        )
+        for condition_label, mean_rmsd, sem_rmsd, rank in ranked_rows:
             condition = result.get_condition(condition_label)
             run_summary = condition.get_run(run_label)
-            lines.append(
-                f"{condition.label:<18} {run_summary.mean_rmsd:<15.2f} "
-                f"{run_summary.sem_rmsd:<8.2f} {rank:<4}"
-            )
+            lines.append(f"{condition.label:<18} {mean_rmsd:<15.2f} {sem_rmsd:<8.2f} {rank:<4}")
             lines.append(_format_convergence_line(run_summary))
 
         lines.append("")
@@ -94,9 +110,12 @@ def _format_rmsd_table(result: RMSDComparisonResult) -> str:
                     note = anova.note or "Inferential statistics not computed"
                     lines.append(f"ANOVA: {note}")
                 else:
-                    sig_marker = "*" if anova.significant else ""
                     lines.append(
-                        f"ANOVA: F={anova.f_statistic:.2f}, p={anova.p_value:.3f} {sig_marker}"
+                        format_anova_line(
+                            f_statistic=anova.f_statistic,
+                            p_value=anova.p_value,
+                            significant=anova.significant,
+                        )
                     )
 
     return "\n".join(lines)
@@ -120,17 +139,20 @@ def _format_rmsd_markdown(result: RMSDComparisonResult) -> str:
     for run_label in result.run_labels:
         lines.append(f"## RMSD Comparison: {run_label}")
         lines.append("")
-        lines.append("| Condition | Mean RMSD (Å) | SEM | Rank |")
-        lines.append("|-----------|---------------|-----|------|")
+        lines.extend(make_ranked_markdown_header(mean_label="Mean RMSD (Å)"))
 
         ranking = result.get_ranking(run_label)
-        for rank, condition_label in enumerate(ranking, 1):
+        ranked_rows = make_ranked_rows(
+            ranking,
+            lambda label, run_label=run_label: (
+                result.get_condition(label).get_run(run_label).mean_rmsd,
+                result.get_condition(label).get_run(run_label).sem_rmsd,
+            ),
+        )
+        for condition_label, mean_rmsd, sem_rmsd, rank in ranked_rows:
             condition = result.get_condition(condition_label)
             run_summary = condition.get_run(run_label)
-            lines.append(
-                f"| {condition.label} | {run_summary.mean_rmsd:.2f} | "
-                f"{run_summary.sem_rmsd:.2f} | {rank} |"
-            )
+            lines.append(f"| {condition.label} | {mean_rmsd:.2f} | {sem_rmsd:.2f} | {rank} |")
             lines.append(f"  - {_format_convergence_line(run_summary)}")
 
         comparisons = result.get_comparisons_for_run(run_label)
@@ -145,11 +167,18 @@ def _format_rmsd_markdown(result: RMSDComparisonResult) -> str:
                     )
                     continue
 
-                sig_marker = "*" if comp.significant else ""
                 lines.append(
-                    f"- Pairwise: {comp.condition_b} vs {comp.condition_a} — "
-                    f"Δ={format_pct(comp.percent_change)}, p={comp.p_value:.3f} {sig_marker}, "
-                    f"d={comp.cohens_d:.2f} ({comp.effect_interpretation}), {comp.direction}"
+                    "- "
+                    + format_pairwise_line(
+                        condition_a=comp.condition_a,
+                        condition_b=comp.condition_b,
+                        direction=comp.direction,
+                        p_value=comp.p_value,
+                        effect_size=comp.cohens_d,
+                        effect_label=comp.effect_interpretation,
+                        percent_change=comp.percent_change,
+                        significant=comp.significant,
+                    )
                 )
 
         if result.anova_by_run:
@@ -162,9 +191,13 @@ def _format_rmsd_markdown(result: RMSDComparisonResult) -> str:
                     note = anova.note or "Inferential statistics not computed"
                     lines.append(f"- ANOVA: {note}")
                 else:
-                    sig_marker = "*" if anova.significant else ""
                     lines.append(
-                        f"- ANOVA: F={anova.f_statistic:.2f}, p={anova.p_value:.3f} {sig_marker}"
+                        "- "
+                        + format_anova_line(
+                            f_statistic=anova.f_statistic,
+                            p_value=anova.p_value,
+                            significant=anova.significant,
+                        )
                     )
 
         lines.append("")
