@@ -12,6 +12,7 @@ Covers:
 """
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -121,6 +122,118 @@ def _write_interrupted_segment_on_disk(
         f"total_steps={total_steps}\n"
         f"remaining_steps={remaining}\n"
     )
+
+
+def _write_normal_segment(working_dir: Path, seg_idx: int) -> None:
+    """Write minimal files simulating a normally completed segment."""
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    (seg_dir / f"production_{seg_idx}_state.xml").write_text("<State/>")
+    (seg_dir / f"production_{seg_idx}_system.xml").write_text("<System/>")
+    (seg_dir / f"production_{seg_idx}_checkpoint.chk").write_bytes(b"\x00" * 16)
+    params = {
+        "__values__": {
+            "integ_params": {
+                "__values__": {
+                    "num_samples": 100,
+                    "time_step": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 2.0, "unit": "femtosecond"},
+                    },
+                    "total_time": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 10.0, "unit": "nanosecond"},
+                    },
+                }
+            },
+            "thermo_params": {"__values__": {}},
+        }
+    }
+    (seg_dir / f"production_{seg_idx}_parameters.json").write_text(json.dumps(params))
+
+
+def _write_interrupted_segment(
+    working_dir: Path, seg_idx: int, steps_completed: int = 3000000
+) -> None:
+    """Write files for a gracefully interrupted segment."""
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    (seg_dir / "interrupted_state.xml").write_text("<State/>")
+    (seg_dir / "interrupted_system.xml").write_text("<System/>")
+    (seg_dir / "interrupted_checkpoint.chk").write_bytes(b"\x00" * 16)
+    (seg_dir / "INTERRUPTED").write_text(
+        f"segment_index={seg_idx}\n"
+        f"steps_completed={steps_completed}\n"
+        f"total_steps=5000000\n"
+        f"remaining_steps={5000000 - steps_completed}\n"
+    )
+    params = {
+        "__values__": {
+            "integ_params": {
+                "__values__": {
+                    "num_samples": 100,
+                    "time_step": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 2.0, "unit": "femtosecond"},
+                    },
+                    "total_time": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 10.0, "unit": "nanosecond"},
+                    },
+                }
+            },
+            "thermo_params": {"__values__": {}},
+        }
+    }
+    (seg_dir / f"production_{seg_idx}_parameters.json").write_text(json.dumps(params))
+
+
+def _write_hard_killed_segment(
+    working_dir: Path,
+    seg_idx: int,
+    with_system_xml: bool = True,
+    with_csv: bool = False,
+    csv_steps: int = 80000,
+) -> None:
+    """Write files for a hard-killed segment: checkpoint plus optional CSV."""
+    import os
+    import time as _time
+
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    chk_path = seg_dir / f"production_{seg_idx}_checkpoint.chk"
+    chk_path.write_bytes(b"\x00" * 16)
+    if with_system_xml:
+        (seg_dir / f"production_{seg_idx}_system.xml").write_text("<System/>")
+    if with_csv:
+        (seg_dir / f"production_{seg_idx}_state_data.csv").write_text(
+            f'#"Step","Time (ps)","PE (kJ/mole)"\n'
+            f"0,0.0,-100000.0\n"
+            f"{csv_steps},{csv_steps * 0.002},-100000.0\n"
+        )
+
+    params = {
+        "__values__": {
+            "integ_params": {
+                "__values__": {
+                    "num_samples": 100,
+                    "time_step": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 2.0, "unit": "femtosecond"},
+                    },
+                    "total_time": {
+                        "__class__": "Quantity",
+                        "__values__": {"value": 10.0, "unit": "nanosecond"},
+                    },
+                }
+            },
+            "thermo_params": {"__values__": {}},
+        }
+    }
+    (seg_dir / f"production_{seg_idx}_parameters.json").write_text(json.dumps(params))
+
+    old_time = _time.time() - 1200
+    os.utime(chk_path, (old_time, old_time))
 
 
 # ---------------------------------------------------------------------------
@@ -302,9 +415,9 @@ class TestProgressIO:
         assert flush_idx is not None, "f.flush() not found in save_progress"
         assert fsync_idx is not None, "os.fsync() not found in save_progress"
         assert replace_idx is not None, "os.replace() not found in save_progress"
-        assert flush_idx < fsync_idx < replace_idx, (
-            f"Expected order: flush ({flush_idx}) < fsync ({fsync_idx}) < replace ({replace_idx})"
-        )
+        assert (
+            flush_idx < fsync_idx < replace_idx
+        ), f"Expected order: flush ({flush_idx}) < fsync ({fsync_idx}) < replace ({replace_idx})"
 
 
 # ---------------------------------------------------------------------------
@@ -1427,3 +1540,389 @@ class TestStatusDerivationIntegration:
         """Empty working directory → NOT_STARTED (regression check)."""
         p = scan_filesystem(tmp_path, timestep_fs=2.0)
         assert p.status == SimulationStatus.NOT_STARTED
+
+
+class TestFailedSegmentCleanup:
+    """FAILED segment directories get removed before retry."""
+
+    def test_failed_dir_removed(self, tmp_path):
+        """Simulates the cleanup logic from main.py run_segment()."""
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        (seg_dir / "some_partial_file.txt").write_text("partial")
+
+        failed_seg = SegmentRecord(index=0, steps_completed=0, status=SegmentStatus.FAILED)
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[failed_seg],
+            replicate=1,
+        )
+
+        failed_segments = [
+            segment for segment in progress.segments if segment.status == SegmentStatus.FAILED
+        ]
+        for failed in failed_segments:
+            failed_dir = tmp_path / f"production_{failed.index}"
+            if failed_dir.exists():
+                shutil.rmtree(failed_dir)
+            progress.segments = [
+                segment for segment in progress.segments if segment.index != failed.index
+            ]
+
+        assert not seg_dir.exists()
+        assert len(progress.segments) == 0
+        assert progress.next_segment_index == 0
+
+    def test_failed_after_completed_cleanup(self, tmp_path):
+        """Only the FAILED segment is removed; completed segments survive."""
+        seg0_dir = tmp_path / "production_0"
+        seg0_dir.mkdir()
+        (seg0_dir / "production_0_state.xml").write_text("<State/>")
+
+        seg1_dir = tmp_path / "production_1"
+        seg1_dir.mkdir()
+        (seg1_dir / "partial.txt").write_text("x")
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=5000000,
+                    status=SegmentStatus.COMPLETED,
+                    samples_written=125,
+                ),
+                SegmentRecord(index=1, steps_completed=0, status=SegmentStatus.FAILED),
+            ],
+            replicate=1,
+        )
+
+        failed_segments = [
+            segment for segment in progress.segments if segment.status == SegmentStatus.FAILED
+        ]
+        for failed in failed_segments:
+            failed_dir = tmp_path / f"production_{failed.index}"
+            if failed_dir.exists():
+                shutil.rmtree(failed_dir)
+            progress.segments = [
+                segment for segment in progress.segments if segment.index != failed.index
+            ]
+
+        assert seg0_dir.exists()
+        assert not seg1_dir.exists()
+        assert len(progress.segments) == 1
+        assert progress.segments[0].index == 0
+        assert progress.next_segment_index == 1
+
+
+class TestEndToEndRecoveryFlow:
+    """Integration test: filesystem scan and recovery classification."""
+
+    def test_hard_killed_seg0_becomes_interrupted(self, tmp_path):
+        """Segment 0 hard-killed becomes INTERRUPTED and resumes."""
+        _write_hard_killed_segment(tmp_path, 0, with_csv=True, csv_steps=200000)
+
+        progress = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(progress.segments) == 1
+        assert progress.segments[0].status == SegmentStatus.INTERRUPTED
+        assert progress.segments[0].steps_completed == 200000
+
+        progress.total_steps_requested = 10000000
+        progress.total_samples_requested = 250
+
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 1
+        assert info["steps_to_run"] == 10000000 - 200000
+
+    def test_truly_empty_seg_is_failed(self, tmp_path):
+        """Empty directory is FAILED and should be retried."""
+        (tmp_path / "production_0").mkdir()
+        progress = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert progress.segments[0].status == SegmentStatus.FAILED
+
+    def test_completed_then_hard_killed(self, tmp_path):
+        """Segment 0 completed, segment 1 hard-killed gives correct recovery."""
+        _write_normal_segment(tmp_path, 0)
+        _write_hard_killed_segment(tmp_path, 1, with_csv=True, csv_steps=300000)
+
+        progress = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert progress.segments[0].status == SegmentStatus.COMPLETED
+        assert progress.segments[1].status == SegmentStatus.INTERRUPTED
+
+        progress.total_steps_requested = 10000000
+        progress.total_samples_requested = 250
+        total_done = progress.total_steps_completed
+        assert total_done == 5300000
+
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 2
+        assert info["steps_to_run"] == 10000000 - 5300000
+
+
+class TestRunningSegmentConcurrencyGuard:
+    """Prevent starting a new segment while one is still RUNNING."""
+
+    def test_running_segment_blocks_new_segment(self, tmp_path):
+        """If any segment is RUNNING, the guard prevents advancing."""
+        from polyzymd.simulation.signals import EXIT_CODE_CONCURRENT
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=5000000,
+                    status=SegmentStatus.COMPLETED,
+                    samples_written=125,
+                ),
+                SegmentRecord(
+                    index=1,
+                    steps_completed=1000000,
+                    status=SegmentStatus.RUNNING,
+                ),
+            ],
+            replicate=1,
+        )
+
+        running_segments = [
+            segment for segment in progress.segments if segment.status == SegmentStatus.RUNNING
+        ]
+        assert len(running_segments) == 1
+        assert running_segments[0].index == 1
+        assert EXIT_CODE_CONCURRENT == 2
+
+    def test_no_running_segments_allows_advance(self, tmp_path):
+        """With no RUNNING segments, the guard is a no-op."""
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=5000000,
+                    status=SegmentStatus.COMPLETED,
+                    samples_written=125,
+                ),
+                SegmentRecord(
+                    index=1,
+                    steps_completed=1000000,
+                    status=SegmentStatus.INTERRUPTED,
+                ),
+            ],
+            replicate=1,
+        )
+
+        running_segments = [
+            segment for segment in progress.segments if segment.status == SegmentStatus.RUNNING
+        ]
+        assert len(running_segments) == 0
+
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 2
+
+    def test_scan_filesystem_classifies_recent_checkpoint_as_running(self, tmp_path):
+        """A segment with a recent checkpoint is RUNNING."""
+        import os
+        import time as _time
+
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        chk = seg_dir / "production_0_checkpoint.chk"
+        chk.write_bytes(b"\x00" * 16)
+        (seg_dir / "production_0_system.xml").write_text("<System/>")
+        now = _time.time()
+        os.utime(chk, (now, now))
+
+        progress = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(progress.segments) == 1
+        assert progress.segments[0].status == SegmentStatus.RUNNING
+
+    def test_scan_filesystem_classifies_stale_checkpoint_as_interrupted(self, tmp_path):
+        """A segment with a stale checkpoint is INTERRUPTED."""
+        import os
+        import time as _time
+
+        seg_dir = tmp_path / "production_0"
+        seg_dir.mkdir()
+        chk = seg_dir / "production_0_checkpoint.chk"
+        chk.write_bytes(b"\x00" * 16)
+        (seg_dir / "production_0_system.xml").write_text("<System/>")
+        old = _time.time() - 1200
+        os.utime(chk, (old, old))
+
+        progress = scan_filesystem(tmp_path, timestep_fs=2.0)
+        assert len(progress.segments) == 1
+        assert progress.segments[0].status == SegmentStatus.INTERRUPTED
+
+
+class TestHardKillRetryInPlace:
+    """Hard-killed segments without INTERRUPTED marker are retried in place."""
+
+    def test_hard_killed_segment_cleaned_up(self, tmp_path):
+        """Hard-killed last segment is removed so the index is retried."""
+        _write_normal_segment(tmp_path, 0)
+        _write_hard_killed_segment(tmp_path, 1, with_csv=True, csv_steps=300000)
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=5000000,
+                    status=SegmentStatus.COMPLETED,
+                    samples_written=125,
+                ),
+                SegmentRecord(
+                    index=1,
+                    steps_completed=300000,
+                    status=SegmentStatus.INTERRUPTED,
+                ),
+            ],
+            replicate=1,
+        )
+        save_progress(tmp_path, progress)
+
+        last_seg = max(progress.segments, key=lambda segment: segment.index)
+        assert last_seg.status == SegmentStatus.INTERRUPTED
+        last_seg_dir = tmp_path / f"production_{last_seg.index}"
+        interrupted_marker = last_seg_dir / "INTERRUPTED"
+        assert last_seg_dir.exists()
+        assert not interrupted_marker.exists()
+
+        shutil.rmtree(last_seg_dir)
+        progress.segments = [
+            segment for segment in progress.segments if segment.index != last_seg.index
+        ]
+        save_progress(tmp_path, progress)
+
+        assert not last_seg_dir.exists()
+        assert len(progress.segments) == 1
+        assert progress.segments[0].index == 0
+
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 1
+
+    def test_graceful_interrupted_segment_not_cleaned_up(self, tmp_path):
+        """Gracefully interrupted segment with marker is preserved."""
+        _write_normal_segment(tmp_path, 0)
+        _write_interrupted_segment(tmp_path, 1, steps_completed=3000000)
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=5000000,
+                    status=SegmentStatus.COMPLETED,
+                    samples_written=125,
+                ),
+                SegmentRecord(
+                    index=1,
+                    steps_completed=3000000,
+                    status=SegmentStatus.INTERRUPTED,
+                ),
+            ],
+            replicate=1,
+        )
+
+        last_seg = max(progress.segments, key=lambda segment: segment.index)
+        last_seg_dir = tmp_path / f"production_{last_seg.index}"
+        interrupted_marker = last_seg_dir / "INTERRUPTED"
+        assert interrupted_marker.exists()
+
+        should_cleanup = (
+            last_seg.status == SegmentStatus.INTERRUPTED
+            and last_seg_dir.exists()
+            and not interrupted_marker.exists()
+        )
+        assert not should_cleanup
+
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 2
+
+    def test_hard_killed_seg0_retried_from_scratch(self, tmp_path):
+        """Hard-killed segment 0 is cleaned up so run restarts from scratch."""
+        _write_hard_killed_segment(tmp_path, 0, with_csv=True, csv_steps=100000)
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=100000,
+                    status=SegmentStatus.INTERRUPTED,
+                ),
+            ],
+            replicate=1,
+        )
+        save_progress(tmp_path, progress)
+
+        last_seg = max(progress.segments, key=lambda segment: segment.index)
+        last_seg_dir = tmp_path / f"production_{last_seg.index}"
+        interrupted_marker = last_seg_dir / "INTERRUPTED"
+        assert not interrupted_marker.exists()
+
+        shutil.rmtree(last_seg_dir)
+        progress.segments = [
+            segment for segment in progress.segments if segment.index != last_seg.index
+        ]
+        save_progress(tmp_path, progress)
+
+        assert not last_seg_dir.exists()
+        assert len(progress.segments) == 0
+
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 0
+
+    def test_completed_segment_not_affected_by_hard_kill_guard(self, tmp_path):
+        """A COMPLETED last segment is not affected by hard-kill logic."""
+        _write_normal_segment(tmp_path, 0)
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=10000000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=5000000,
+                    status=SegmentStatus.COMPLETED,
+                    samples_written=125,
+                ),
+            ],
+            replicate=1,
+        )
+
+        last_seg = max(progress.segments, key=lambda segment: segment.index)
+        assert last_seg.status != SegmentStatus.INTERRUPTED
+
+        info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
+        assert info is not None
+        assert info["segment_index"] == 1

@@ -458,14 +458,32 @@ water   3
         assert resids[0:6] == [1, 1, 1, 2, 2, 2], f"Protein resids: {resids[0:6]}"
 
         # Polymer copy 0 (10 atoms, 3 residues): continues from protein → 3, 3, 3, 4, 4, 4, 4, 5, 5, 5
-        assert resids[6:16] == [3, 3, 3, 4, 4, 4, 4, 5, 5, 5], (
-            f"Polymer copy 0 resids: {resids[6:16]}"
-        )
+        assert resids[6:16] == [
+            3,
+            3,
+            3,
+            4,
+            4,
+            4,
+            4,
+            5,
+            5,
+            5,
+        ], f"Polymer copy 0 resids: {resids[6:16]}"
 
         # Polymer copy 1 (10 atoms, 3 residues): continues → 6, 6, 6, 7, 7, 7, 7, 8, 8, 8
-        assert resids[16:26] == [6, 6, 6, 7, 7, 7, 7, 8, 8, 8], (
-            f"Polymer copy 1 resids: {resids[16:26]}"
-        )
+        assert resids[16:26] == [
+            6,
+            6,
+            6,
+            7,
+            7,
+            7,
+            7,
+            8,
+            8,
+            8,
+        ], f"Polymer copy 1 resids: {resids[16:26]}"
 
         # Water (9 atoms): single-residue, numbering preserved as-is
         assert resids[26:35] == [1, 1, 1, 2, 2, 2, 3, 3, 3], f"Water resids: {resids[26:35]}"

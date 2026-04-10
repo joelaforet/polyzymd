@@ -826,8 +826,8 @@ class TestDeserializeResult:
     """AggregatedResultClass loads via DistanceAggregatedResult.load()."""
 
     def test_aggregated_result_class_set(self):
-        from polyzymd.analyses.distances._results import DistanceAggregatedResult
         from polyzymd.analyses.distances import DistancesAnalysis
+        from polyzymd.analyses.distances._results import DistanceAggregatedResult
 
         assert DistancesAnalysis.AggregatedResultClass is DistanceAggregatedResult
 

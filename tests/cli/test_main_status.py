@@ -1,23 +1,11 @@
-"""Tests for the ``polyzymd status`` command and supporting helpers.
+"""Tests for the ``polyzymd status`` command and supporting helpers."""
 
-Covers:
-- render_progress_bar() — bar width, clamping, color-by-status
-- discover_replicate_dirs() — glob-based discovery, sorting, filtering
-- status CLI — end-to-end output via Click CliRunner
-"""
-
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
 
-from polyzymd.cli.colors import (
-    TerminalColorSupport,
-    render_progress_bar,
-    set_color_support,
-)
+from polyzymd.cli.colors import TerminalColorSupport, set_color_support
 from polyzymd.cli.main import cli
 from polyzymd.simulation.progress import (
     SegmentRecord,
@@ -26,83 +14,11 @@ from polyzymd.simulation.progress import (
     SimulationStatus,
 )
 
-# ---------------------------------------------------------------------------
-# render_progress_bar
-# ---------------------------------------------------------------------------
-
-
-class TestRenderProgressBar:
-    """Unit tests for render_progress_bar()."""
-
-    def setup_method(self):
-        """Disable color so we can inspect raw characters."""
-        set_color_support(TerminalColorSupport.NONE)
-
-    def test_default_width_is_40(self):
-        bar = render_progress_bar(0.5, "running")
-        assert len(bar) == 40
-
-    def test_custom_width(self):
-        bar = render_progress_bar(0.5, "running", width=20)
-        assert len(bar) == 20
-
-    def test_zero_fraction_all_empty(self):
-        bar = render_progress_bar(0.0, "not_started")
-        assert bar == "\u2591" * 40  # all ░
-
-    def test_full_fraction_all_filled(self):
-        bar = render_progress_bar(1.0, "completed")
-        assert bar == "\u2588" * 40  # all █
-
-    def test_half_fraction(self):
-        bar = render_progress_bar(0.5, "running", width=10)
-        assert bar == "\u2588" * 5 + "\u2591" * 5
-
-    def test_fraction_clamped_above_one(self):
-        bar = render_progress_bar(1.5, "completed", width=10)
-        assert bar == "\u2588" * 10
-
-    def test_fraction_clamped_below_zero(self):
-        bar = render_progress_bar(-0.5, "not_started", width=10)
-        assert bar == "\u2591" * 10
-
-    def test_truecolor_wraps_ansi(self):
-        set_color_support(TerminalColorSupport.TRUECOLOR)
-        bar = render_progress_bar(1.0, "completed", width=5)
-        assert "\033[38;2;" in bar
-        assert "\033[0m" in bar
-        # The actual bar chars should still be present
-        assert "\u2588" * 5 in bar
-
-    def test_basic_color_wraps_ansi(self):
-        set_color_support(TerminalColorSupport.BASIC)
-        bar = render_progress_bar(0.5, "failed", width=10)
-        assert "\033[91m" in bar  # red basic ANSI
-        assert "\033[0m" in bar
-
-    def test_extended_color_wraps_ansi(self):
-        set_color_support(TerminalColorSupport.EXTENDED)
-        bar = render_progress_bar(0.5, "interrupted", width=10)
-        assert "\033[38;5;" in bar
-        assert "\033[0m" in bar
-
-    def test_unknown_status_uses_not_found_color(self):
-        set_color_support(TerminalColorSupport.TRUECOLOR)
-        bar = render_progress_bar(0.0, "some_unknown_status", width=5)
-        # Should use not_found gray (128,128,128)
-        assert "\033[38;2;128;128;128m" in bar
-
-
-# ---------------------------------------------------------------------------
-# discover_replicate_dirs
-# ---------------------------------------------------------------------------
-
 
 def _make_mock_config(scratch_dir: Path, template: str | None = None):
-    """Create a mock SimulationConfig with the fields discover_replicate_dirs needs."""
+    """Create a mock SimulationConfig with status helper fields."""
     mock = MagicMock()
 
-    # Polymer config
     monomer_a = MagicMock()
     monomer_a.label = "A"
     monomer_a.probability = 0.5
@@ -131,26 +47,21 @@ class TestDiscoverReplicateDirs:
     """Unit tests for SimulationConfig.discover_replicate_dirs()."""
 
     def test_finds_matching_directories(self, tmp_path):
-        """Discovers run1, run2, run3 directories."""
         from polyzymd.config.schema import SimulationConfig
 
-        # Create directories matching the expected pattern
         base_name = "fnIII_apo_OEGMA-SBMA_A50_B50_100ns_310K"
         for i in (1, 2, 3):
             (tmp_path / f"{base_name}_run{i}").mkdir()
 
         mock = _make_mock_config(tmp_path)
-
-        # Call the real method on the mock by binding it
         result = SimulationConfig.discover_replicate_dirs(mock)
 
         assert len(result) == 3
-        assert [r[0] for r in result] == [1, 2, 3]
-        for num, path in result:
-            assert path.name.endswith(f"_run{num}")
+        assert [replicate[0] for replicate in result] == [1, 2, 3]
+        for number, path in result:
+            assert path.name.endswith(f"_run{number}")
 
     def test_returns_sorted(self, tmp_path):
-        """Results are sorted by replicate number even if created out of order."""
         from polyzymd.config.schema import SimulationConfig
 
         base_name = "fnIII_apo_OEGMA-SBMA_A50_B50_100ns_310K"
@@ -160,10 +71,9 @@ class TestDiscoverReplicateDirs:
         mock = _make_mock_config(tmp_path)
         result = SimulationConfig.discover_replicate_dirs(mock)
 
-        assert [r[0] for r in result] == [1, 2, 5, 8]
+        assert [replicate[0] for replicate in result] == [1, 2, 5, 8]
 
     def test_ignores_files(self, tmp_path):
-        """Only directories are returned, not files."""
         from polyzymd.config.schema import SimulationConfig
 
         base_name = "fnIII_apo_OEGMA-SBMA_A50_B50_100ns_310K"
@@ -177,7 +87,6 @@ class TestDiscoverReplicateDirs:
         assert result[0][0] == 1
 
     def test_empty_when_no_dirs(self, tmp_path):
-        """Returns empty list if no matching dirs exist."""
         from polyzymd.config.schema import SimulationConfig
 
         mock = _make_mock_config(tmp_path)
@@ -186,7 +95,6 @@ class TestDiscoverReplicateDirs:
         assert result == []
 
     def test_ignores_non_matching_dirs(self, tmp_path):
-        """Directories that don't match the pattern are ignored."""
         from polyzymd.config.schema import SimulationConfig
 
         base_name = "fnIII_apo_OEGMA-SBMA_A50_B50_100ns_310K"
@@ -199,11 +107,6 @@ class TestDiscoverReplicateDirs:
 
         assert len(result) == 1
         assert result[0][0] == 1
-
-
-# ---------------------------------------------------------------------------
-# status CLI command (end-to-end)
-# ---------------------------------------------------------------------------
 
 
 def _write_progress_json(
@@ -257,13 +160,11 @@ class TestStatusCli:
         set_color_support(TerminalColorSupport.NONE)
 
     def _make_dummy_config(self, tmp_path: Path) -> Path:
-        """Create a dummy config file (content doesn't matter — we mock from_yaml)."""
         config_path = tmp_path / "config.yaml"
         config_path.write_text("name: test\n")
         return config_path
 
     def test_status_shows_completed_replicate(self, tmp_path):
-        """A completed replicate shows 100% and 'completed'."""
         scratch = tmp_path / "scratch"
         scratch.mkdir()
 
@@ -285,7 +186,6 @@ class TestStatusCli:
         assert "run1" in result.output
 
     def test_status_shows_interrupted_replicate(self, tmp_path):
-        """An interrupted replicate shows partial progress."""
         scratch = tmp_path / "scratch"
         scratch.mkdir()
 
@@ -312,7 +212,6 @@ class TestStatusCli:
         assert "need attention" in result.output
 
     def test_status_multiple_replicates(self, tmp_path):
-        """Multiple replicates shown in order."""
         scratch = tmp_path / "scratch"
         scratch.mkdir()
 
@@ -338,11 +237,7 @@ class TestStatusCli:
         )
 
         mock_cfg = _mock_sim_config(scratch)
-        mock_cfg.discover_replicate_dirs.return_value = [
-            (1, rep1),
-            (2, rep2),
-            (3, rep3),
-        ]
+        mock_cfg.discover_replicate_dirs.return_value = [(1, rep1), (2, rep2), (3, rep3)]
 
         config_path = self._make_dummy_config(tmp_path)
         runner = CliRunner()
@@ -357,7 +252,6 @@ class TestStatusCli:
         assert "need attention" in result.output
 
     def test_status_no_replicates_found(self, tmp_path):
-        """When no replicate dirs exist, show helpful message."""
         scratch = tmp_path / "scratch"
         scratch.mkdir()
 
@@ -374,7 +268,6 @@ class TestStatusCli:
         assert "No replicate directories found" in result.output
 
     def test_status_all_completed(self, tmp_path):
-        """When all replicates are done, show success message."""
         scratch = tmp_path / "scratch"
         scratch.mkdir()
 
@@ -397,7 +290,6 @@ class TestStatusCli:
         assert "All 2 replicates completed" in result.output
 
     def test_status_dir_exists_but_no_progress(self, tmp_path):
-        """Directory exists but no progress.json -> shows not_started."""
         scratch = tmp_path / "scratch"
         scratch.mkdir()
 
@@ -418,7 +310,6 @@ class TestStatusCli:
         assert "0.0%" in result.output
 
     def test_status_invalid_config(self, tmp_path):
-        """Invalid config file produces error."""
         bad_config = tmp_path / "bad.yaml"
         bad_config.write_text("name: test\n")
 
@@ -434,7 +325,6 @@ class TestStatusCli:
         assert "Error" in result.output
 
     def test_status_header_shows_system_name(self, tmp_path):
-        """Header includes system name derived from naming template."""
         scratch = tmp_path / "scratch"
         scratch.mkdir()
 
@@ -455,17 +345,9 @@ class TestStatusCli:
         assert "fnIII_apo_none_100ns_310K" in result.output
 
     def test_status_ns_includes_interrupted_segments(self, tmp_path):
-        """ns column accounts for steps in INTERRUPTED segments, not just COMPLETED."""
         scratch = tmp_path / "scratch"
         scratch.mkdir()
 
-        # Simulate a replicate with 2 segments: one interrupted, one running.
-        # total_steps_requested = 50_000_000 (100 ns at 2 fs/step)
-        # Segment 0: INTERRUPTED at 25_000_000 steps (50 ns worth)
-        # Segment 1: RUNNING at 10_000_000 steps (20 ns worth)
-        # Total completed steps = 35_000_000 => 70 ns
-        # time_completed_ns() would return 0.0 (no COMPLETED segments)
-        # Correct ns = 35_000_000 * 2.0 / 1e6 = 70.0
         rep_dir = scratch / "fnIII_apo_none_100ns_310K_run1"
         progress = SimulationProgress(
             config_path="/tmp/config.yaml",
@@ -506,11 +388,9 @@ class TestStatusCli:
             result = runner.invoke(cli, ["status", "-c", str(config_path)])
 
         assert result.exit_code == 0, f"Output: {result.output}"
-        # Should show 70.0 ns (from steps), NOT 0.0 ns (from time_completed_ns)
         assert "70.0/100.0 ns" in result.output
 
     def test_status_summary_not_all_completed_when_running(self, tmp_path):
-        """'All N replicates completed!' must NOT appear when some are running."""
         scratch = tmp_path / "scratch"
         scratch.mkdir()
 
@@ -518,7 +398,7 @@ class TestStatusCli:
         rep1 = scratch / f"{base}_run1"
         rep2 = scratch / f"{base}_run2"
 
-        _write_progress_json(rep1)  # completed
+        _write_progress_json(rep1)
         _write_progress_json(
             rep2,
             completed_steps=25_000_000,
@@ -542,7 +422,6 @@ class TestStatusCli:
         assert "1/2 completed" in result.output
 
     def test_status_summary_mixed_attention_and_running(self, tmp_path):
-        """Both 'need attention' and 'still running' lines shown for mixed states."""
         scratch = tmp_path / "scratch"
         scratch.mkdir()
 
@@ -551,7 +430,7 @@ class TestStatusCli:
         rep2 = scratch / f"{base}_run2"
         rep3 = scratch / f"{base}_run3"
 
-        _write_progress_json(rep1)  # completed
+        _write_progress_json(rep1)
         _write_progress_json(
             rep2,
             completed_steps=25_000_000,
@@ -568,11 +447,7 @@ class TestStatusCli:
         )
 
         mock_cfg = _mock_sim_config(scratch)
-        mock_cfg.discover_replicate_dirs.return_value = [
-            (1, rep1),
-            (2, rep2),
-            (3, rep3),
-        ]
+        mock_cfg.discover_replicate_dirs.return_value = [(1, rep1), (2, rep2), (3, rep3)]
 
         config_path = self._make_dummy_config(tmp_path)
         runner = CliRunner()
@@ -586,22 +461,6 @@ class TestStatusCli:
         assert "still running" in result.output
 
     def test_status_stale_running_reclassified_by_filesystem_scan(self, tmp_path):
-        """A stale 'running' replicate is reclassified to 'interrupted' by filesystem scan.
-
-        When progress.json says 'running' but the checkpoint file is older
-        than CHECKPOINT_RECENCY_SECONDS (10 min), validate_progress() via
-        scan_filesystem() reclassifies the segment as 'interrupted'.
-
-        Without production_N/ dirs on disk, validate_progress() keeps the
-        progress file records but recomputes overall status. Since the
-        segments remain unchanged (no filesystem segments to override),
-        the status stays as-is from progress.json. The stale detection
-        in production relies on actual checkpoint file age.
-
-        This test verifies that a stale running replicate (no production
-        dirs to confirm it's alive) shows as needing attention because the
-        filesystem scan finds no evidence of an active simulation.
-        """
         scratch = tmp_path / "scratch"
         scratch.mkdir()
 
@@ -609,13 +468,7 @@ class TestStatusCli:
         rep1 = scratch / f"{base}_run1"
         rep2 = scratch / f"{base}_run2"
 
-        _write_progress_json(rep1)  # completed
-
-        # rep2: "running" per progress.json, but no production dirs on disk.
-        # The filesystem scan finds no segments, but validate_progress keeps
-        # the progress file's segment record ("in progress file but not on
-        # filesystem"). The segment keeps its RUNNING status, so the overall
-        # status remains RUNNING — but the summary should NOT say "All completed".
+        _write_progress_json(rep1)
         _write_progress_json(
             rep2,
             completed_steps=25_000_000,
@@ -637,13 +490,7 @@ class TestStatusCli:
         assert "All 2 replicates completed" not in result.output
 
     def test_status_stale_running_with_old_checkpoint_becomes_interrupted(self, tmp_path):
-        """A replicate with an old checkpoint file is reclassified to interrupted.
-
-        When a production_N/ directory has a .chk file older than
-        CHECKPOINT_RECENCY_SECONDS, scan_filesystem() marks it as
-        INTERRUPTED. validate_progress() then overrides the progress
-        file's RUNNING status with the filesystem's INTERRUPTED.
-        """
+        import os
         import time
 
         scratch = tmp_path / "scratch"
@@ -653,7 +500,6 @@ class TestStatusCli:
         rep_dir = scratch / f"{base}_run1"
         rep_dir.mkdir(parents=True)
 
-        # Write progress.json saying "running"
         _write_progress_json(
             rep_dir,
             completed_steps=25_000_000,
@@ -662,15 +508,11 @@ class TestStatusCli:
             duration_ns=50.0,
         )
 
-        # Create a production_0/ directory with an old checkpoint file
         prod_dir = rep_dir / "production_0"
         prod_dir.mkdir()
         chk_file = prod_dir / "production_0_checkpoint.chk"
         chk_file.write_bytes(b"fake checkpoint data")
-        # Backdate the checkpoint to make it older than CHECKPOINT_RECENCY_SECONDS (600s)
-        old_time = time.time() - 1200  # 20 minutes ago
-        import os
-
+        old_time = time.time() - 1200
         os.utime(str(chk_file), (old_time, old_time))
 
         mock_cfg = _mock_sim_config(scratch)
@@ -683,7 +525,6 @@ class TestStatusCli:
             result = runner.invoke(cli, ["status", "-c", str(config_path)])
 
         assert result.exit_code == 0, f"Output: {result.output}"
-        # The filesystem scan should reclassify to interrupted
         assert "interrupted" in result.output
         assert "need attention" in result.output
         assert "All 1 replicates completed" not in result.output

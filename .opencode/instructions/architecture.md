@@ -118,7 +118,7 @@ class AnalysisConfig(BaseModel):
 3. For default comparison: implement `extract_metrics()`
 4. Implement `plot()` using `_build_plot_data()` and shared plotting helpers
 5. Optionally implement `format()`
-6. Test with `pixi run -e build pytest tests/test_<name>_plugin.py -v`
+6. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
 7. The CLI automatically discovers it via `polyzymd compare run <name>`
 
 See `analyses/base.py` for the full contract, `analysis-module.md` for

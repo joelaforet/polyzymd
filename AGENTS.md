@@ -168,7 +168,7 @@ def compute_replicate(self, ctx, replicate):
 3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
 4. **Study a matching example**: scaffold output for the simplest lifecycle, `rmsf/` for default compare with plots, `contacts/` for custom compare
 5. **Write your plugin** in `analyses/<name>/` — start with all logic in `__init__.py`; extract plotting to `_plotters.py` as complexity grows
-6. **Test**: `pixi run -e build pytest tests/test_<name>_plugin.py -v`
+6. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
 
 ## Code Style
 

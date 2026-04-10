@@ -31,13 +31,13 @@ from polyzymd.analyses.rg import RgAnalysis
 from polyzymd.analyses.rg._comparison_results import RgRunPairwiseComparison
 from polyzymd.analyses.rmsd._comparison_results import RMSDRunPairwiseComparison
 from polyzymd.analyses.sasa._comparison_results import SASARunPairwiseComparison
+from polyzymd.analyses.shared.inferential_statistics import percent_change
 from polyzymd.analyses.stats import (
     format_pct,
     format_scalar_comparison,
     interpret_direction,
     pairwise_comparisons,
 )
-from polyzymd.analyses.shared.inferential_statistics import percent_change
 
 
 def test_percent_change_zero_to_zero_is_zero() -> None:

@@ -13,44 +13,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from polyzymd.analyses.shared.paths import sanitize_label
 from polyzymd.analyses.shared.result_io import (
     canonical_comparison_result_path,
     find_comparison_result,
 )
-
-
-class TestSanitizeLabel:
-    """Tests for ``sanitize_label``.
-
-    Parameters
-    ----------
-    None
-        This class contains pure unit tests for string sanitization behavior.
-    """
-
-    @pytest.mark.parametrize(
-        ("label", "expected"),
-        [
-            ("SBMA-EGMA 25%", "SBMA-EGMA_25pct"),
-            ("No Polymer (Control)", "No_Polymer_Control"),
-            ("  spaces  ", "spaces"),
-            ("multiple___underscores", "multiple_underscores"),
-            ("with.dots-and.dashes", "with.dots-and.dashes"),
-            ("", ""),
-        ],
-    )
-    def test_sanitize_label_cases(self, label: str, expected: str) -> None:
-        """Sanitize labels across spaces, symbols, and edge cases.
-
-        Parameters
-        ----------
-        label : str
-            Input label.
-        expected : str
-            Expected sanitized output.
-        """
-        assert sanitize_label(label) == expected
 
 
 class TestFindComparisonResult:

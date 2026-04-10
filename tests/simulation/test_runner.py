@@ -4,6 +4,9 @@ These tests verify runner logic using mocks to avoid requiring a full
 OpenMM simulation setup (GPU, topology, system, etc.).
 """
 
+from pathlib import Path
+from unittest.mock import MagicMock
+
 import pytest
 
 
@@ -83,6 +86,7 @@ class TestBarostatTemperatureRampUpdate:
     def test_barostat_update_present_in_ramp_loop(self):
         """The ramp loop must call context.setParameter for the barostat temperature."""
         import inspect
+
         from polyzymd.simulation.runner import SimulationRunner
 
         source = inspect.getsource(SimulationRunner.run_equilibration_stage)
@@ -93,6 +97,7 @@ class TestBarostatTemperatureRampUpdate:
     def test_barostat_update_conditional_on_npt(self):
         """Barostat temperature update must be conditional on NPT ensemble."""
         import inspect
+
         from polyzymd.simulation.runner import SimulationRunner
 
         source = inspect.getsource(SimulationRunner.run_equilibration_stage)
@@ -120,13 +125,14 @@ class TestBarostatTemperatureRampUpdate:
     def test_ramp_loop_has_two_barostat_updates(self):
         """There should be two barostat updates: one in the ramp loop and one at final temp."""
         import inspect
+
         from polyzymd.simulation.runner import SimulationRunner
 
         source = inspect.getsource(SimulationRunner.run_equilibration_stage)
         count = source.count("MonteCarloBarostat.Temperature()")
-        assert count == 2, (
-            f"Expected 2 barostat temperature updates (ramp loop + final), found {count}"
-        )
+        assert (
+            count == 2
+        ), f"Expected 2 barostat temperature updates (ramp loop + final), found {count}"
 
 
 class TestRampInterruptTemperature:
@@ -145,6 +151,7 @@ class TestRampInterruptTemperature:
         ``current_temp += stage.temperature_increment``.
         """
         import inspect
+
         from polyzymd.simulation.runner import SimulationRunner
 
         source = inspect.getsource(SimulationRunner.run_equilibration_stage)
@@ -185,6 +192,7 @@ class TestRampInterruptTemperature:
         appears between is_interrupted() and current_temp += increment.
         """
         import inspect
+
         from polyzymd.simulation.runner import SimulationRunner
 
         source = inspect.getsource(SimulationRunner.run_equilibration_stage)
@@ -234,6 +242,7 @@ class TestRampResumeFastForward:
         not from resume_temperature.
         """
         import inspect
+
         from polyzymd.simulation.runner import SimulationRunner
 
         source = inspect.getsource(SimulationRunner.run_equilibration_stage)
@@ -296,10 +305,9 @@ class TestRampResumeFastForward:
             break
 
         # After running 100, 110, 120, the next should be 130
-        assert first_run_temp == pytest.approx(130.0), (
-            f"Expected next temperature 130.0 K after running 100, 110, 120 K; "
-            f"got {first_run_temp}"
-        )
+        assert first_run_temp == pytest.approx(
+            130.0
+        ), f"Expected next temperature 130.0 K after running 100, 110, 120 K; got {first_run_temp}"
 
     def test_fast_forward_handles_no_resume(self):
         """Fresh start (no resume) should begin at temperature_start."""
@@ -347,12 +355,10 @@ class TestRampResumeFastForward:
             break
 
         # All ramp chunks completed, should go to final temp section
-        assert first_run_temp is None, (
-            "Expected no non-skipped chunk (all ramp chunks done)"
-        )
-        assert current_temp == pytest.approx(130.0), (
-            f"current_temp should equal temp_end ({temp_end}) after fast-forward"
-        )
+        assert first_run_temp is None, "Expected no non-skipped chunk (all ramp chunks done)"
+        assert current_temp == pytest.approx(
+            130.0
+        ), f"current_temp should equal temp_end ({temp_end}) after fast-forward"
 
 
 # ---------------------------------------------------------------------------
@@ -370,9 +376,9 @@ class TestLoadCheckpointRestoresVelocities:
         from polyzymd.simulation.runner import SimulationRunner
 
         src = inspect.getsource(SimulationRunner.load_checkpoint)
-        assert "getVelocities=True" in src, (
-            "load_checkpoint must call getState with getVelocities=True"
-        )
+        assert (
+            "getVelocities=True" in src
+        ), "load_checkpoint must call getState with getVelocities=True"
 
     def test_current_velocities_assigned(self):
         """_current_velocities must be set from state.getVelocities()."""
@@ -381,9 +387,214 @@ class TestLoadCheckpointRestoresVelocities:
         from polyzymd.simulation.runner import SimulationRunner
 
         src = inspect.getsource(SimulationRunner.load_checkpoint)
-        assert "_current_velocities" in src, (
-            "load_checkpoint must update self._current_velocities"
+        assert "_current_velocities" in src, "load_checkpoint must update self._current_velocities"
+        assert "getVelocities()" in src, "load_checkpoint must call state.getVelocities()"
+
+
+def _write_eq_stage(
+    working_dir: Path,
+    stage_index: int,
+    stage_name: str,
+    completed: bool = True,
+    interrupted: bool = False,
+    steps_completed: int = 50000,
+    total_steps: int = 100000,
+    current_temperature: float = 300.0,
+    is_temperature_ramping: bool = False,
+) -> None:
+    """Write equilibration stage files on disk."""
+    dir_name = f"equilibration_{stage_index}_{stage_name}"
+    stage_dir = working_dir / dir_name
+    stage_dir.mkdir(parents=True, exist_ok=True)
+
+    if completed or interrupted:
+        (stage_dir / f"{dir_name}_checkpoint.chk").write_bytes(b"\x00" * 16)
+
+    if interrupted:
+        (stage_dir / "EQ_INTERRUPTED").write_text(
+            f"stage_index={stage_index}\n"
+            f"stage_name={stage_name}\n"
+            f"steps_completed={steps_completed}\n"
+            f"total_steps={total_steps}\n"
+            f"current_temperature={current_temperature}\n"
+            f"is_temperature_ramping={is_temperature_ramping}\n"
         )
-        assert "getVelocities()" in src, (
-            "load_checkpoint must call state.getVelocities()"
+
+
+class TestEqInterruptedMarker:
+    """Tests for EQ_INTERRUPTED marker write/read cycle."""
+
+    def test_marker_format(self, tmp_path):
+        """Verify the marker file format written by run_equilibration_stage."""
+        stage_dir = tmp_path / "equilibration_2_npt_eq"
+        stage_dir.mkdir()
+        marker = stage_dir / "EQ_INTERRUPTED"
+        marker.write_text(
+            "stage_index=2\n"
+            "stage_name=npt_eq\n"
+            "steps_completed=75000\n"
+            "total_steps=100000\n"
+            "current_temperature=350.5\n"
+            "is_temperature_ramping=True\n"
         )
+
+        info = {}
+        for line in marker.read_text().strip().splitlines():
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if key == "steps_completed":
+                info["steps_completed"] = int(value)
+            elif key == "total_steps":
+                info["total_steps"] = int(value)
+            elif key == "current_temperature":
+                info["current_temperature"] = float(value)
+            elif key == "is_temperature_ramping":
+                info["is_temperature_ramping"] = value.lower() == "true"
+
+        assert info["steps_completed"] == 75000
+        assert info["total_steps"] == 100000
+        assert info["current_temperature"] == 350.5
+        assert info["is_temperature_ramping"] is True
+
+
+class TestFindCompletedEqStages:
+    """_find_completed_eq_stages handles completed/interrupted stages."""
+
+    def _make_runner(self, working_dir):
+        """Create a minimal mock SimulationRunner for eq stage detection."""
+        try:
+            from polyzymd.simulation.runner import SimulationRunner
+
+            runner = SimulationRunner.__new__(SimulationRunner)
+            runner._working_dir = Path(working_dir)
+            return runner
+        except ImportError:
+            pytest.skip("polyzymd.simulation.runner not importable")
+
+    def _make_stage(self, name):
+        """Create a minimal mock EquilibrationStageConfig."""
+        stage = MagicMock()
+        stage.name = name
+        return stage
+
+    def test_all_completed(self, tmp_path):
+        stages = [self._make_stage("heating"), self._make_stage("npt_eq")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        _write_eq_stage(tmp_path, 1, "npt_eq", completed=True)
+        runner = self._make_runner(tmp_path)
+        completed = runner._find_completed_eq_stages(stages)
+        assert completed == [0, 1]
+
+    def test_stops_at_interrupted(self, tmp_path):
+        """Interrupted stage (with EQ_INTERRUPTED marker) is NOT completed."""
+        stages = [self._make_stage("heating"), self._make_stage("npt_eq")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        _write_eq_stage(tmp_path, 1, "npt_eq", interrupted=True)
+        runner = self._make_runner(tmp_path)
+        completed = runner._find_completed_eq_stages(stages)
+        assert completed == [0]
+
+    def test_stops_at_first_gap(self, tmp_path):
+        stages = [
+            self._make_stage("heating"),
+            self._make_stage("npt_eq"),
+            self._make_stage("final"),
+        ]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        _write_eq_stage(tmp_path, 2, "final", completed=True)
+        runner = self._make_runner(tmp_path)
+        completed = runner._find_completed_eq_stages(stages)
+        assert completed == [0]
+
+    def test_empty(self, tmp_path):
+        stages = [self._make_stage("heating")]
+        runner = self._make_runner(tmp_path)
+        completed = runner._find_completed_eq_stages(stages)
+        assert completed == []
+
+
+class TestFindInterruptedEqStage:
+    """_find_interrupted_eq_stage detects mid-stage interrupts."""
+
+    def _make_runner(self, working_dir):
+        try:
+            from polyzymd.simulation.runner import SimulationRunner
+
+            runner = SimulationRunner.__new__(SimulationRunner)
+            runner._working_dir = Path(working_dir)
+            return runner
+        except ImportError:
+            pytest.skip("polyzymd.simulation.runner not importable")
+
+    def _make_stage(self, name):
+        stage = MagicMock()
+        stage.name = name
+        return stage
+
+    def test_finds_interrupted_stage(self, tmp_path):
+        stages = [self._make_stage("heating"), self._make_stage("npt_eq")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        _write_eq_stage(
+            tmp_path,
+            1,
+            "npt_eq",
+            interrupted=True,
+            steps_completed=75000,
+            total_steps=100000,
+            current_temperature=300.0,
+        )
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[0])
+        assert info is not None
+        assert info["stage_index"] == 1
+        assert info["steps_completed"] == 75000
+        assert info["total_steps"] == 100000
+        assert info["current_temperature"] == 300.0
+
+    def test_no_interrupted_stage(self, tmp_path):
+        stages = [self._make_stage("heating"), self._make_stage("npt_eq")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[0])
+        assert info is None
+
+    def test_all_completed_returns_none(self, tmp_path):
+        stages = [self._make_stage("heating")]
+        _write_eq_stage(tmp_path, 0, "heating", completed=True)
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[0])
+        assert info is None
+
+    def test_interrupted_without_checkpoint_returns_none(self, tmp_path):
+        """EQ_INTERRUPTED marker without checkpoint can't resume."""
+        stages = [self._make_stage("heating")]
+        dir_name = "equilibration_0_heating"
+        stage_dir = tmp_path / dir_name
+        stage_dir.mkdir()
+        (stage_dir / "EQ_INTERRUPTED").write_text(
+            "stage_index=0\nstage_name=heating\n"
+            "steps_completed=5000\ntotal_steps=10000\n"
+            "current_temperature=300.0\nis_temperature_ramping=False\n"
+        )
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[])
+        assert info is None
+
+    def test_temperature_ramping_metadata(self, tmp_path):
+        stages = [self._make_stage("ramp")]
+        _write_eq_stage(
+            tmp_path,
+            0,
+            "ramp",
+            interrupted=True,
+            steps_completed=25000,
+            total_steps=50000,
+            current_temperature=200.0,
+            is_temperature_ramping=True,
+        )
+        runner = self._make_runner(tmp_path)
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[])
+        assert info is not None
+        assert info["is_temperature_ramping"] is True
+        assert info["current_temperature"] == 200.0

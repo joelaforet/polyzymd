@@ -989,8 +989,8 @@ class TestDeserializeResult:
     """Test AggregatedResultClass and _deserialize_result hook."""
 
     def test_aggregated_result_class_set(self):
-        from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
         from polyzymd.analyses.contacts import ContactsAnalysis
+        from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
 
         assert ContactsAnalysis.AggregatedResultClass is AggregatedContactResult
 

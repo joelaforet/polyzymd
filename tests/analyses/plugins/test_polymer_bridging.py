@@ -10,9 +10,9 @@ from pydantic import BaseModel
 
 from polyzymd.analyses.base import AggregateContext, Condition, PlotContext, ReplicateContext
 from polyzymd.analyses.polymer_bridging import (
-    PolymerBridgingObservation,
     PolymerBridgingAggregatedResult,
     PolymerBridgingAnalysis,
+    PolymerBridgingObservation,
     PolymerBridgingReplicateResult,
     PolymerBridgingSettings,
     _compute_bridging_statistics_from_frames,

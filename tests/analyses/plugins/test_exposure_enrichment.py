@@ -27,9 +27,9 @@ import pytest
 sys.path.insert(0, "src")
 
 from polyzymd.analyses.exposure._enrichment import (
+    _EPS,
     ChaperoneEnrichmentResult,
     GroupEnrichmentEntry,
-    _EPS,
     compute_chaperone_enrichment,
 )
 
@@ -48,9 +48,9 @@ class _MockSegmentContacts:
     _binary: np.ndarray  # pre-built boolean array
 
     def to_binary_array(self, n_frames: int) -> np.ndarray:
-        assert len(self._binary) == n_frames, (
-            f"to_binary_array called with n_frames={n_frames} but binary has {len(self._binary)}"
-        )
+        assert (
+            len(self._binary) == n_frames
+        ), f"to_binary_array called with n_frames={n_frames} but binary has {len(self._binary)}"
         return self._binary.copy()
 
 
@@ -323,9 +323,9 @@ class TestEnrichmentKnownAnswer:
         # observed[t] = 1/2 = 0.5 always (exactly 1 of 2 aromatic residues contacted each frame)
         # expected[t] = 2/4 = 0.5 always
         # enrichment = 0.5/0.5 - 1 = 0.0
-        assert abs(aro.enrichment_residue) < 1e-6, (
-            f"Null case enrichment should be 0.0, got {aro.enrichment_residue}"
-        )
+        assert (
+            abs(aro.enrichment_residue) < 1e-6
+        ), f"Null case enrichment should be 0.0, got {aro.enrichment_residue}"
 
     def test_full_contact_single_group_known_enrichment(self):
         """All aromatic residues contacted every frame; zero nonpolar contacted.
@@ -372,12 +372,12 @@ class TestEnrichmentKnownAnswer:
         non = result.get("SBM", "nonpolar")
         assert aro is not None and non is not None
 
-        assert abs(aro.enrichment_residue - 4.0) < 1e-4, (
-            f"Aromatic enrichment: expected 4.0, got {aro.enrichment_residue}"
-        )
-        assert abs(non.enrichment_residue - (-1.0)) < 1e-4, (
-            f"Nonpolar enrichment: expected -1.0, got {non.enrichment_residue}"
-        )
+        assert (
+            abs(aro.enrichment_residue - 4.0) < 1e-4
+        ), f"Aromatic enrichment: expected 4.0, got {aro.enrichment_residue}"
+        assert (
+            abs(non.enrichment_residue - (-1.0)) < 1e-4
+        ), f"Nonpolar enrichment: expected -1.0, got {non.enrichment_residue}"
 
     def test_single_group_only_enrichment_is_zero(self):
         """If there is only one AA group and polymer contacts all exposed residues,
@@ -408,9 +408,9 @@ class TestEnrichmentKnownAnswer:
         result = compute_chaperone_enrichment(sasa, cr)
         e = result.get("SBM", "nonpolar")
         assert e is not None
-        assert abs(e.enrichment_residue) < 1e-6, (
-            f"Single-group all-contacted enrichment should be 0.0, got {e.enrichment_residue}"
-        )
+        assert (
+            abs(e.enrichment_residue) < 1e-6
+        ), f"Single-group all-contacted enrichment should be 0.0, got {e.enrichment_residue}"
 
     def test_no_contacts_gives_minus_one(self):
         """If the polymer never contacts ANY residue, observed = 0 for every group,
@@ -446,9 +446,9 @@ class TestEnrichmentKnownAnswer:
         for ag in ["aromatic", "nonpolar", "charged_negative"]:
             e = result.get("SBM", ag)
             assert e is not None, f"Expected entry for {ag}"
-            assert abs(e.enrichment_residue - (-1.0)) < 1e-6, (
-                f"No-contact enrichment for {ag} should be -1.0, got {e.enrichment_residue}"
-            )
+            assert (
+                abs(e.enrichment_residue - (-1.0)) < 1e-6
+            ), f"No-contact enrichment for {ag} should be -1.0, got {e.enrichment_residue}"
 
 
 # ---------------------------------------------------------------------------
@@ -498,9 +498,9 @@ class TestPhysicalConstraints:
 
         result = compute_chaperone_enrichment(sasa, cr)
         for e in result.entries:
-            assert e.enrichment_residue >= -1.0 - 1e-9, (
-                f"enrichment_residue={e.enrichment_residue} < -1 for {e.polymer_type}/{e.aa_group}"
-            )
+            assert (
+                e.enrichment_residue >= -1.0 - 1e-9
+            ), f"enrichment_residue={e.enrichment_residue} < -1 for {e.polymer_type}/{e.aa_group}"
             assert e.enrichment_atom >= -1.0 - 1e-9, f"enrichment_atom={e.enrichment_atom} < -1"
 
     def test_observed_and_expected_in_unit_interval(self):
@@ -538,15 +538,15 @@ class TestPhysicalConstraints:
 
         result = compute_chaperone_enrichment(sasa, cr)
         for e in result.entries:
-            assert 0.0 <= e.observed_contact_fraction <= 1.0 + 1e-9, (
-                f"observed_contact_fraction={e.observed_contact_fraction} out of [0,1]"
-            )
-            assert 0.0 <= e.expected_contact_fraction_residue <= 1.0 + 1e-9, (
-                f"expected_contact_fraction_residue={e.expected_contact_fraction_residue} out of [0,1]"
-            )
-            assert 0.0 <= e.expected_contact_fraction_atom <= 1.0 + 1e-9, (
-                f"expected_contact_fraction_atom={e.expected_contact_fraction_atom} out of [0,1]"
-            )
+            assert (
+                0.0 <= e.observed_contact_fraction <= 1.0 + 1e-9
+            ), f"observed_contact_fraction={e.observed_contact_fraction} out of [0,1]"
+            assert (
+                0.0 <= e.expected_contact_fraction_residue <= 1.0 + 1e-9
+            ), f"expected_contact_fraction_residue={e.expected_contact_fraction_residue} out of [0,1]"
+            assert (
+                0.0 <= e.expected_contact_fraction_atom <= 1.0 + 1e-9
+            ), f"expected_contact_fraction_atom={e.expected_contact_fraction_atom} out of [0,1]"
 
     def test_monotonicity_more_contacts_higher_enrichment(self):
         """Increasing the contact rate of a group must increase its enrichment.
@@ -586,9 +586,9 @@ class TestPhysicalConstraints:
             e = result.get("SBM", "aromatic")
             enrichments.append(e.enrichment_residue if e is not None else float("-inf"))
 
-        assert enrichments[0] < enrichments[1] < enrichments[2], (
-            f"Enrichment must increase with contact rate: {enrichments}"
-        )
+        assert (
+            enrichments[0] < enrichments[1] < enrichments[2]
+        ), f"Enrichment must increase with contact rate: {enrichments}"
 
     def test_buried_residues_do_not_inflate_enrichment(self):
         """Contacts on buried residues must not contribute to enrichment.
@@ -679,9 +679,9 @@ class TestPhysicalConstraints:
 
         result = compute_chaperone_enrichment(sasa, cr)
         # Aromatic never exposed → should be absent
-        assert result.get("SBM", "aromatic") is None, (
-            "Never-exposed group should have no enrichment entry"
-        )
+        assert (
+            result.get("SBM", "aromatic") is None
+        ), "Never-exposed group should have no enrichment entry"
         # Nonpolar always exposed → should be present
         assert result.get("SBM", "nonpolar") is not None
 
@@ -855,6 +855,7 @@ class TestRealDataSanity:
     @pytest.fixture
     def real_sasa(self):
         import pathlib
+
         from polyzymd.analyses.exposure._sasa_trajectory import SASATrajectoryResult
 
         sasa_dir = (
@@ -869,6 +870,7 @@ class TestRealDataSanity:
     @pytest.fixture
     def real_contacts(self):
         import pathlib
+
         from polyzymd.analyses.contacts._results import ContactResult
 
         contact_path = (
@@ -891,9 +893,9 @@ class TestRealDataSanity:
 
     def test_relative_sasa_nonnegative(self, real_sasa):
         """Relative SASA cannot be negative (SASA is a physical area)."""
-        assert (real_sasa.relative_sasa_per_frame >= 0).all(), (
-            "Negative relative SASA values found — indicates unit conversion error"
-        )
+        assert (
+            real_sasa.relative_sasa_per_frame >= 0
+        ).all(), "Negative relative SASA values found — indicates unit conversion error"
 
     def test_some_residues_exposed_some_buried(self, real_sasa):
         """A real MD trajectory must have both exposed and buried residues.
@@ -919,9 +921,9 @@ class TestRealDataSanity:
                 f"expected_contact_fraction_residue={e.expected_contact_fraction_residue} "
                 f"out of [0,1] for {e.polymer_type}/{e.aa_group}"
             )
-            assert e.enrichment_residue >= -1.0 - 1e-6, (
-                f"enrichment_residue={e.enrichment_residue} < -1 for {e.polymer_type}/{e.aa_group}"
-            )
+            assert (
+                e.enrichment_residue >= -1.0 - 1e-6
+            ), f"enrichment_residue={e.enrichment_residue} < -1 for {e.polymer_type}/{e.aa_group}"
 
     def test_n_frames_with_exposed_leq_total_frames(self, real_sasa, real_contacts):
         """n_frames_with_exposed must not exceed the total number of trajectory frames."""
@@ -945,9 +947,9 @@ class TestRealDataSanity:
         # The intersection must be non-empty (most protein residues should match)
         matched = sasa_resids & contact_resids
         total_contact_resids = len(contact_resids)
-        assert len(matched) > 0, (
-            "No SASA residues match any contact residues — resid indexing mismatch"
-        )
+        assert (
+            len(matched) > 0
+        ), "No SASA residues match any contact residues — resid indexing mismatch"
 
         match_frac = len(matched) / total_contact_resids
         assert match_frac > 0.8, (

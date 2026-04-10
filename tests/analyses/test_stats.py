@@ -7,8 +7,8 @@ import json
 import pytest
 
 from polyzymd.analyses.base import ComparisonResult, ConditionSummary, MetricValue, PairwiseResult
-from polyzymd.analyses.stats import format_scalar_comparison, pairwise_comparisons
 from polyzymd.analyses.shared.inferential_statistics import EffectSize, TTestResult
+from polyzymd.analyses.stats import format_scalar_comparison, pairwise_comparisons
 
 
 def _metric(mean: float, values: list[float]) -> MetricValue:
@@ -173,3 +173,125 @@ def test_format_scalar_comparison_backward_compatible_without_adjusted_pvalues()
     assert "p (adj)" not in markdown_output
     assert "p-value" in text_output
     assert "| Comparison | % Change | p-value |" in markdown_output
+
+
+class TestStats:
+    """Test the shared statistical utility functions."""
+
+    def test_interpret_direction(self):
+        from polyzymd.analyses.stats import interpret_direction
+
+        assert interpret_direction(5.0) == "increased"
+        assert interpret_direction(-5.0) == "decreased"
+        assert interpret_direction(0.5) == "unchanged"
+        assert interpret_direction(0.5, threshold=0.3) == "increased"
+
+    def test_interpret_direction_custom_labels(self):
+        from polyzymd.analyses.stats import interpret_direction
+
+        labels = ("stabilizing", "unchanged", "destabilizing")
+        assert interpret_direction(-10.0, labels) == "stabilizing"
+        assert interpret_direction(10.0, labels) == "destabilizing"
+
+    def test_pairwise_comparisons_control(self):
+        from polyzymd.analyses.stats import pairwise_comparisons
+
+        metrics = {
+            "Control": MetricValue("m", 1.0, 0.1, [0.9, 1.0, 1.1]),
+            "Treatment A": MetricValue("m", 0.5, 0.05, [0.45, 0.5, 0.55]),
+            "Treatment B": MetricValue("m", 0.8, 0.08, [0.75, 0.8, 0.85]),
+        }
+        results = pairwise_comparisons(metrics, control_label="Control")
+        assert len(results) == 2
+        assert all(r.condition_a == "Control" for r in results)
+        assert {r.condition_b for r in results} == {"Treatment A", "Treatment B"}
+        for result in results:
+            assert hasattr(result, "t_statistic")
+            assert hasattr(result, "p_value")
+            assert hasattr(result, "cohens_d")
+            assert hasattr(result, "percent_change")
+            assert hasattr(result, "significant")
+
+    def test_pairwise_comparisons_all_pairs(self):
+        from polyzymd.analyses.stats import pairwise_comparisons
+
+        metrics = {
+            "A": MetricValue("m", 1.0, 0.1, [0.9, 1.0, 1.1]),
+            "B": MetricValue("m", 2.0, 0.2, [1.8, 2.0, 2.2]),
+            "C": MetricValue("m", 3.0, 0.3, [2.7, 3.0, 3.3]),
+        }
+        results = pairwise_comparisons(metrics)
+        assert len(results) == 3
+
+    def test_anova_test_with_3_conditions(self):
+        from polyzymd.analyses.stats import anova_test
+
+        metrics = {
+            "A": MetricValue("m", 1.0, 0.1, [0.9, 1.0, 1.1]),
+            "B": MetricValue("m", 5.0, 0.2, [4.8, 5.0, 5.2]),
+            "C": MetricValue("m", 3.0, 0.3, [2.7, 3.0, 3.3]),
+        }
+        result = anova_test(metrics, "test_metric")
+        assert result is not None
+        assert hasattr(result, "f_statistic")
+        assert hasattr(result, "p_value")
+        assert result.significant is True
+
+    def test_anova_test_too_few_conditions(self):
+        from polyzymd.analyses.stats import anova_test
+
+        metrics = {
+            "A": MetricValue("m", 1.0, 0.1, [0.9, 1.1]),
+            "B": MetricValue("m", 2.0, 0.2, [1.8, 2.2]),
+        }
+        result = anova_test(metrics)
+        assert result is None
+
+    def test_rank_conditions_higher_is_better(self):
+        from polyzymd.analyses.stats import rank_conditions
+
+        metrics = {
+            "Low": MetricValue("m", 1.0, 0.1, [1.0], higher_is_better=True),
+            "High": MetricValue("m", 3.0, 0.1, [3.0], higher_is_better=True),
+            "Mid": MetricValue("m", 2.0, 0.1, [2.0], higher_is_better=True),
+        }
+        ranking = rank_conditions(metrics)
+        assert ranking == ["High", "Mid", "Low"]
+
+    def test_rank_conditions_lower_is_better(self):
+        from polyzymd.analyses.stats import rank_conditions
+
+        metrics = {
+            "Low": MetricValue("m", 1.0, 0.1, [1.0], higher_is_better=False),
+            "High": MetricValue("m", 3.0, 0.1, [3.0], higher_is_better=False),
+            "Mid": MetricValue("m", 2.0, 0.1, [2.0], higher_is_better=False),
+        }
+        ranking = rank_conditions(metrics)
+        assert ranking == ["Low", "Mid", "High"]
+
+    def test_default_scalar_comparison(self):
+        from polyzymd.analyses.stats import default_scalar_comparison
+
+        metrics_by_condition = {
+            "Control": {
+                "metric_a": MetricValue("metric_a", 1.0, 0.1, [0.9, 1.0, 1.1]),
+            },
+            "Treatment": {
+                "metric_a": MetricValue("metric_a", 0.5, 0.05, [0.45, 0.5, 0.55]),
+            },
+        }
+        result = default_scalar_comparison(
+            analysis_name="test",
+            project_name="Test Project",
+            metrics_by_condition=metrics_by_condition,
+            control_label="Control",
+            equilibration="10ns",
+        )
+        assert result.analysis_type == "test"
+        assert result.name == "Test Project"
+        assert len(result.pairwise_comparisons) == 1
+        assert result.anova is None
+        assert result.ranking == ["Control", "Treatment"] or result.ranking == [
+            "Treatment",
+            "Control",
+        ]
