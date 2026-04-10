@@ -1,7 +1,8 @@
-"""CLI commands for the compare module.
+"""CLI commands for the compare command group.
 
-This module provides the `polyzymd compare` command group with subcommands
-for initializing comparison projects and running comparisons.
+This module lives under ``polyzymd.cli`` and provides the ``polyzymd compare``
+command group with subcommands for initializing comparison projects and running
+comparisons.
 """
 
 from __future__ import annotations
@@ -16,12 +17,12 @@ from typing import Any
 import click
 import yaml
 
-from polyzymd.cli.colors import echo_logo
-from polyzymd.compare.cli_utils import (
+from polyzymd.cli._compare_utils import (
     common_compare_options,
     load_comparison_config,
     validate_and_report,
 )
+from polyzymd.cli.colors import echo_logo
 from polyzymd.config.comparison import (
     ComparisonConfig,
     generate_comparison_template,
@@ -34,7 +35,7 @@ from polyzymd.core.experimental import (
     normalize_experimental_features,
 )
 
-LOGGER = logging.getLogger("polyzymd.compare.cli")
+LOGGER = logging.getLogger("polyzymd.cli.compare")
 
 
 def _display_path(path: Path) -> str:

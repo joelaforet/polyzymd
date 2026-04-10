@@ -11,7 +11,7 @@ import pytest
 from click.testing import CliRunner
 from pydantic import BaseModel
 
-from polyzymd.compare.cli import compare
+from polyzymd.cli.compare import compare
 from polyzymd.workflow.analysis_slurm import (
     ConditionTaskSpec,
     ReplicateTaskSpec,

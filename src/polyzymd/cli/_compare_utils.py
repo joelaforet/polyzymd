@@ -1,4 +1,4 @@
-"""Shared utilities for compare CLI subcommands.
+"""Shared utilities for compare subcommands in ``polyzymd.cli``.
 
 Provides decorators and helper functions that reduce boilerplate across
 the ``polyzymd compare`` subcommands (run, run-all, plot-all).
