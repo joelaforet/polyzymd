@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from polyzymd.exporters.interchange import ExportFormat, export_system, get_supported_formats
@@ -140,3 +143,42 @@ class TestBuildCommandFormatFlag:
         result = runner.invoke(cli, ["build", "--help"])
         assert result.exit_code == 0
         assert "gromacs" in result.output.lower()
+
+
+class TestExportSystemGromacsPath:
+    """Tests for GROMACS dispatch in export_system()."""
+
+    @patch("polyzymd.exporters.gromacs.GromacsExporter")
+    def test_gromacs_dispatch_calls_exporter(self, mock_exporter_cls: MagicMock) -> None:
+        """GROMACS format should instantiate exporter and return export result."""
+        interchange_obj = MagicMock(name="interchange")
+        sim_config = MagicMock(name="sim_config")
+        output_dir = Path("/tmp/out")
+        component_info: dict[str, object] = {}
+        expected = {"gro": Path("/tmp/out/test.gro")}
+
+        mock_exporter = MagicMock()
+        mock_exporter.export.return_value = expected
+        mock_exporter_cls.return_value = mock_exporter
+
+        result = export_system(
+            interchange=interchange_obj,
+            config=sim_config,
+            output_dir=output_dir,
+            fmt="gromacs",
+            component_info=component_info,
+            prefix="test",
+            gmx_command="gmx",
+        )
+
+        mock_exporter_cls.assert_called_once_with(
+            interchange=interchange_obj,
+            config=sim_config,
+            component_info=component_info,
+        )
+        mock_exporter.export.assert_called_once_with(
+            output_dir=output_dir,
+            prefix="test",
+            gmx_command="gmx",
+        )
+        assert result == expected

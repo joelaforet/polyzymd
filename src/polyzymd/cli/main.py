@@ -131,6 +131,11 @@ def _resolve_replicates_option(
         )
 
     if replicate is not None:
+        if replicate <= 0:
+            raise click.BadParameter(
+                f"Replicate must be a positive integer, got {replicate}.",
+                param_hint="'--replicate'",
+            )
         click.echo(
             f"Warning: --replicate is deprecated in '{command_name}', use --replicates instead.",
             err=True,
@@ -482,6 +487,7 @@ def build(
                 colored_echo("Files generated:", phase="export")
                 colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
                 colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
+                colored_echo("  - *.itp (molecule parameters)", phase="export")
                 colored_echo(
                     f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export"
                 )
@@ -809,6 +815,7 @@ def _run_gromacs_impl(
     colored_echo("Files generated:", phase="export")
     colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
     colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
+    colored_echo("  - *.itp (molecule parameters)", phase="export")
     colored_echo(f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export")
     for eq_mdp in export_result["eq_mdps"]:
         colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")

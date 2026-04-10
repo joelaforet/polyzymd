@@ -6,10 +6,48 @@ Tests the _resolve_replicates_option() helper and the updated
 
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import click
 import pytest
+from click.testing import CliRunner
 
-from polyzymd.cli.main import _resolve_replicates_option
+from polyzymd.cli.main import _resolve_replicates_option, cli
+
+
+def _make_dry_run_config() -> SimpleNamespace:
+    """Create a minimal config-like object for build --dry-run tests."""
+
+    return SimpleNamespace(
+        name="test_sim",
+        description="test description",
+        enzyme=SimpleNamespace(name="TestEnzyme", pdb_path=Path("structures/enzyme.pdb")),
+        substrate=None,
+        polymers=None,
+        solvent=SimpleNamespace(
+            primary=SimpleNamespace(model="tip3p"),
+            box=SimpleNamespace(padding=1.2),
+            ions=SimpleNamespace(nacl_concentration=0.15),
+        ),
+        force_field=SimpleNamespace(protein="amber14", small_molecule="openff-2.2.0"),
+        thermodynamics=SimpleNamespace(temperature=300.0, pressure=1.0),
+        simulation_phases=SimpleNamespace(
+            equilibration_stages=[
+                SimpleNamespace(name="heating", duration=0.2, ensemble="NVT"),
+                SimpleNamespace(name="free_equilibration", duration=0.8, ensemble="NPT"),
+            ],
+            production=SimpleNamespace(duration=10.0, samples=250),
+        ),
+        output=SimpleNamespace(
+            projects_directory=Path("/tmp/projects"),
+            effective_scratch_directory=Path("/tmp/scratch"),
+            scratch_directory=Path("/tmp/scratch"),
+        ),
+        restraints=[],
+        get_working_directory=lambda rep: Path(f"/tmp/scratch/run_{rep}"),
+    )
 
 
 class TestResolveReplicatesOption:
@@ -184,3 +222,85 @@ class TestDryRunOutput:
         runner = CliRunner()
         result = runner.invoke(cli, ["run-gromacs", "--help"])
         assert "--dry-run" in result.output
+
+
+class TestDeprecatedReplicateValidation:
+    """Unit tests for deprecated --replicate validation."""
+
+    def test_replicate_zero_raises(self) -> None:
+        """Replicate zero should raise BadParameter."""
+        with pytest.raises(click.BadParameter):
+            _resolve_replicates_option(None, 0, "build")
+
+    def test_replicate_negative_raises(self) -> None:
+        """Negative replicate should raise BadParameter."""
+        with pytest.raises(click.BadParameter):
+            _resolve_replicates_option(None, -1, "build")
+
+    def test_replicate_positive_still_works(self) -> None:
+        """Positive replicate should still resolve correctly."""
+        assert _resolve_replicates_option(None, 3, "build") == [3]
+
+
+class TestBuildDryRunEndToEnd:
+    """End-to-end CliRunner tests for build dry-run behavior."""
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_build_dry_run_succeeds(self, mock_from_yaml, tmp_path: Path) -> None:
+        """Build dry-run should exit successfully and print dry-run header."""
+        mock_from_yaml.return_value = _make_dry_run_config()
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["build", "-c", str(config_path), "--dry-run"])
+
+        assert result.exit_code == 0
+        assert "DRY RUN" in result.output
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_build_dry_run_with_deprecated_replicate_warns(
+        self,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """Deprecated --replicate should still work and emit warning."""
+        mock_from_yaml.return_value = _make_dry_run_config()
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            ["build", "-c", str(config_path), "--replicate", "1", "--dry-run"],
+        )
+
+        assert result.exit_code == 0
+        stderr = getattr(result, "stderr", "")
+        assert "deprecated" in f"{result.output}\n{stderr}".lower()
+
+    def test_build_with_replicate_zero_fails(self, tmp_path: Path) -> None:
+        """Replicate zero should fail with positive-integer guidance."""
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["build", "-c", str(config_path), "--replicate", "0"])
+
+        assert result.exit_code != 0
+        stderr = getattr(result, "stderr", "")
+        message = f"{result.output}\n{stderr}".lower()
+        assert "positive" in message or "must be" in message
+
+    def test_build_with_replicate_negative_fails(self, tmp_path: Path) -> None:
+        """Negative replicate should fail with positive-integer guidance."""
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["build", "-c", str(config_path), "--replicate", "-1"])
+
+        assert result.exit_code != 0
+        stderr = getattr(result, "stderr", "")
+        message = f"{result.output}\n{stderr}".lower()
+        assert "positive" in message or "must be" in message
