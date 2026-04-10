@@ -422,6 +422,17 @@ GROMACS trajectory support in `polyzymd compare` is planned
 
 ---
 
+## Submission Issues
+
+### "I ran submit --dry-run but no scripts were created"
+
+**Cause**: In v1.3.0, `submit --dry-run` is preview-only and writes nothing to disk.
+
+**Fix**: Use `submit --generate-only` to create scripts without submitting them.
+See the {doc}`/reference/cli_reference` for the full options reference.
+
+---
+
 ## Getting Help
 
 ### Collect Debug Information

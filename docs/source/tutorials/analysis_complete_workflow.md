@@ -28,9 +28,10 @@ By the end, you will have a working comparison workspace with JSON results and
 figures for a small three-condition study.
 
 ```{important}
-This tutorial uses the stable `v1.2.0` comparison stack: RMSF, contacts,
-distances, and catalytic triad. Experimental workflows are linked at the end,
-but they are not part of the main tutorial path.
+This tutorial uses the stable `v1.3.0` comparison stack: RMSD, Rg, RMSF,
+contacts, distances, catalytic triad, secondary structure, SASA, and hydrogen
+bonds. Experimental workflows are linked at the end, but they are not part of
+the main tutorial path.
 ```
 
 ## Before You Start

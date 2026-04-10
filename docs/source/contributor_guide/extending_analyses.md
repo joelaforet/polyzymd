@@ -905,6 +905,21 @@ convenient one-line imports:
 | `shared.config_hash` | `compute_config_hash`, `validate_config_hash` |
 | `shared.plotting` | `get_theme`, `apply_axis_style`, `apply_legend`, `get_colors`, `get_output_path`, `save_figure`, `grouped_bars` |
 
+#### Convergence detection
+
+`analyses/shared/convergence.py` provides `find_convergence_time()`, a
+sliding-window slope heuristic for detecting sustained convergence in any
+timeseries. The RMSD plugin uses it to annotate per-run convergence
+diagnostics, but it is generic enough for any signal (e.g., Rg, energy).
+
+```python
+from polyzymd.analyses.shared.convergence import find_convergence_time
+
+result = find_convergence_time(time_ns, rmsd_values)
+if result.converged:
+    print(f"Converged at {result.convergence_time_ns:.1f} ns")
+```
+
 Other submodules (`selections`, `aggregation`, `diagnostics`, `aa_classification`,
 `logging_utils`) are available via direct import but are not re-exported from
 the package root:

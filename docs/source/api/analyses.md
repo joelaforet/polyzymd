@@ -62,6 +62,24 @@ adding new analysis types to PolyzyMD.
 | `polymer_affinity` | `analyses.polymer_affinity` | Custom |
 | `polymer_bridging` | `analyses.polymer_bridging` | Custom (experimental) |
 
+## Shared Utilities
+
+The `analyses/shared/` package provides reusable infrastructure used across
+plugins.
+
+### Convergence Diagnostics
+
+The `convergence` module provides a sliding-window slope heuristic for
+detecting sustained convergence in timeseries data (e.g., RMSD traces).
+
+```{eval-rst}
+.. automodule:: polyzymd.analyses.shared.convergence
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :no-index:
+```
+
 ## Related Documentation
 
 - [Extending the Analysis Framework](../contributor_guide/extending_analyses.md) — tutorial
