@@ -10,6 +10,8 @@ Covers:
 - Pixi environment activation in generated scripts
 """
 
+from pathlib import Path
+
 import pytest
 
 from polyzymd.workflow.slurm import (
@@ -353,9 +355,44 @@ class TestJobNameGeneration:
         """Floating-point probabilities must round to clean integer percentages."""
         submitter = self._make_submitter("LipA", 300.0, {"A": 0.333, "B": 0.667})
         name = submitter._create_job_name(1)
-        # int(0.333 * 100) = 33, int(0.667 * 100) = 66
+        # rounded percentages should align with {:.0f} behavior
         assert "A33" in name
-        assert "B66" in name
+        assert "B67" in name
+
+
+class TestSubmissionResultStateSemantics:
+    """Tests for generate-only vs dry-run submission state semantics."""
+
+    def test_generate_only_sets_generated_only_flag(self, tmp_path):
+        """Generate-only result should set is_generated_only and clear is_dry_run."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow.daisy_chain import DaisyChainConfig, DaisyChainSubmitter
+
+        sim_config = MagicMock()
+        sim_config.enzyme.name = "Fibronectin_8_to_10"
+        sim_config.thermodynamics.temperature = 310.0
+        sim_config.polymers = None
+        sim_config.output.slurm_logs_subdir = "slurm_logs"
+        sim_config.get_working_directory.return_value = Path("/tmp")
+
+        dc_config = MagicMock(spec=DaisyChainConfig)
+        dc_config.generate_only = True
+        dc_config.dry_run = False
+        dc_config.force = False
+        dc_config.slurm_config = MagicMock()
+        dc_config.slurm_config.exclude = ""
+        dc_config.output_script_dir = tmp_path
+        dc_config.config_path = "/fake/config.yaml"
+
+        submitter = DaisyChainSubmitter(sim_config=sim_config, dc_config=dc_config)
+        script_path = tmp_path / "run_rep1.sh"
+        script_path.write_text("#!/bin/bash\n", encoding="utf-8")
+
+        result = submitter._submit_job(script_path=script_path, replicate=1)
+
+        assert result.is_generated_only is True
+        assert result.is_dry_run is False
 
 
 # ---------------------------------------------------------------------------

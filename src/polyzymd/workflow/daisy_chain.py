@@ -120,7 +120,7 @@ def create_job_name(sim_config: SimulationConfig, replicate: int) -> str:
     if sim_config.polymers and sim_config.polymers.enabled:
         prefix = sim_config.polymers.type_prefix
         probs = {m.label: m.probability for m in sim_config.polymers.monomers}
-        composition = "_".join(f"{lbl}{int(probs[lbl] * 100)}" for lbl in sorted(probs))
+        composition = "_".join(f"{lbl}{int(round(probs[lbl] * 100))}" for lbl in sorted(probs))
         polymer_info = f"_{prefix}_{composition}"
 
     return f"r{replicate}_{temp}K_{enzyme}{polymer_info}"
@@ -244,6 +244,8 @@ class SubmissionResult:
         Replicate number.
     is_dry_run : bool
         Whether this was a dry run.
+    is_generated_only : bool
+        Whether this was a generate-only script output.
     """
 
     job_id: str
@@ -251,6 +253,7 @@ class SubmissionResult:
     segment_index: int
     replicate: int
     is_dry_run: bool = False
+    is_generated_only: bool = False
 
 
 class DaisyChainSubmitter:
@@ -430,7 +433,8 @@ class DaisyChainSubmitter:
                 script_path=script_path,
                 segment_index=0,
                 replicate=replicate,
-                is_dry_run=True,
+                is_dry_run=False,
+                is_generated_only=True,
             )
 
         if self._dc_config.dry_run:
@@ -442,6 +446,7 @@ class DaisyChainSubmitter:
                 segment_index=0,
                 replicate=replicate,
                 is_dry_run=True,
+                is_generated_only=False,
             )
 
         # Use --export=NONE to start with clean environment, letting the
@@ -465,6 +470,7 @@ class DaisyChainSubmitter:
                 segment_index=0,
                 replicate=replicate,
                 is_dry_run=False,
+                is_generated_only=False,
             )
 
         except subprocess.CalledProcessError as e:
@@ -523,6 +529,7 @@ class DaisyChainSubmitter:
                 segment_index=0,
                 replicate=replicate,
                 is_dry_run=True,
+                is_generated_only=False,
             )
             self._job_chains[replicate] = [result]
             LOGGER.info(f"[DRY RUN] Would generate script: {script_path}")
