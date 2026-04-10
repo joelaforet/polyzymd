@@ -102,6 +102,11 @@ class TestValidateReplicateRange:
         """Accept mixed ranges and values."""
         assert validate_replicate_range("1-3,5,7-9") is True
 
+    def test_validate_with_whitespace(self) -> None:
+        """Whitespace around separators should be accepted."""
+        assert validate_replicate_range("1, 2, 3") is True
+        assert validate_replicate_range("1 - 3") is True
+
     def test_invalid_format_raises(self) -> None:
         """Reject malformed range syntax."""
         with pytest.raises(ValueError):

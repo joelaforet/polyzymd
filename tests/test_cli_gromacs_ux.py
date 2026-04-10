@@ -20,6 +20,8 @@ from polyzymd.cli.main import _resolve_replicates_option, cli
 def _make_dry_run_config() -> SimpleNamespace:
     """Create a minimal config-like object for build --dry-run tests."""
 
+    # Use SimpleNamespace to avoid importing full SimulationConfig internals in unit tests
+    # This keeps the test lightweight and avoids heavy dependency requirements
     return SimpleNamespace(
         name="test_sim",
         description="test description",
@@ -203,8 +205,8 @@ class TestInternalCommandsUnchanged:
 class TestDryRunOutput:
     """Tests for the enhanced --dry-run validation report."""
 
-    def test_dry_run_shows_validation_report_header(self) -> None:
-        """--dry-run should show 'DRY RUN — Validation Report' header."""
+    def test_build_help_shows_dry_run_flag(self) -> None:
+        """'polyzymd build --help' should include the --dry-run flag."""
         from click.testing import CliRunner
 
         from polyzymd.cli.main import cli
@@ -213,8 +215,8 @@ class TestDryRunOutput:
         result = runner.invoke(cli, ["build", "--help"])
         assert "--dry-run" in result.output
 
-    def test_run_gromacs_dry_run_in_help(self) -> None:
-        """run-gromacs --help should mention --dry-run."""
+    def test_run_gromacs_help_shows_dry_run_flag(self) -> None:
+        """'polyzymd run-gromacs --help' should include the --dry-run flag."""
         from click.testing import CliRunner
 
         from polyzymd.cli.main import cli

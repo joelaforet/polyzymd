@@ -151,13 +151,14 @@ class TestExportSystemGromacsPath:
     @patch("polyzymd.exporters.gromacs.GromacsExporter")
     def test_gromacs_dispatch_calls_exporter(self, mock_exporter_cls: MagicMock) -> None:
         """GROMACS format should instantiate exporter and return export result."""
+        # Cannot spec these without importing heavy OpenFF/OpenMM-backed classes
         interchange_obj = MagicMock(name="interchange")
         sim_config = MagicMock(name="sim_config")
         output_dir = Path("/tmp/out")
         component_info: dict[str, object] = {}
         expected = {"gro": Path("/tmp/out/test.gro")}
 
-        mock_exporter = MagicMock()
+        mock_exporter = MagicMock(spec_set=["export"])
         mock_exporter.export.return_value = expected
         mock_exporter_cls.return_value = mock_exporter
 
