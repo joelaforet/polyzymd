@@ -2,13 +2,207 @@
 
 from __future__ import annotations
 
+import math
+from datetime import datetime
 from types import SimpleNamespace
 
+import pytest
+
+from polyzymd.analyses.base import (
+    ANOVASummary as CanonicalANOVASummary,
+)
+from polyzymd.analyses.base import (
+    BaseComparisonResult as CanonicalBaseComparisonResult,
+)
+from polyzymd.analyses.base import (
+    BaseConditionSummary as CanonicalBaseConditionSummary,
+)
+from polyzymd.analyses.base import (
+    PairwiseComparison as CanonicalPairwiseComparison,
+)
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
     filter_summaries_with_run,
 )
+from polyzymd.compare.core.base import (
+    ANOVASummary,
+    BaseComparisonResult,
+    BaseConditionSummary,
+    PairwiseComparison,
+)
+
+
+class _ConditionSummary(BaseConditionSummary):
+    @property
+    def primary_metric_value(self) -> float:
+        return 0.0
+
+    @property
+    def primary_metric_sem(self) -> float:
+        return 0.0
+
+
+class _ComparisonResult(BaseComparisonResult[_ConditionSummary, PairwiseComparison]):
+    pass
+
+
+def test_compare_core_base_exports_canonical_classes() -> None:
+    """Legacy compare.core.base imports should alias canonical analysis classes."""
+    assert PairwiseComparison is CanonicalPairwiseComparison
+    assert ANOVASummary is CanonicalANOVASummary
+    assert BaseConditionSummary is CanonicalBaseConditionSummary
+    assert BaseComparisonResult is CanonicalBaseComparisonResult
+
+
+def test_base_comparison_get_comparison_prefers_pair_lookup() -> None:
+    """Tuple key lookup should disambiguate all-vs-all pairwise comparisons."""
+    result = _ComparisonResult(
+        metric="mean_value",
+        name="test_project",
+        control_label=None,
+        conditions=[
+            _ConditionSummary(
+                label="A",
+                config_path="/fake/a.yaml",
+                n_replicates=2,
+                replicate_values=[1.0, 1.1],
+            ),
+            _ConditionSummary(
+                label="B",
+                config_path="/fake/b.yaml",
+                n_replicates=2,
+                replicate_values=[1.2, 1.3],
+            ),
+            _ConditionSummary(
+                label="C",
+                config_path="/fake/c.yaml",
+                n_replicates=2,
+                replicate_values=[1.4, 1.5],
+            ),
+        ],
+        pairwise_comparisons=[
+            PairwiseComparison(
+                condition_a="A",
+                condition_b="C",
+                t_statistic=1.0,
+                p_value=0.20,
+                cohens_d=0.2,
+                effect_size_interpretation="small",
+                direction="increased",
+                significant=False,
+                percent_change=5.0,
+            ),
+            PairwiseComparison(
+                condition_a="B",
+                condition_b="C",
+                t_statistic=2.0,
+                p_value=0.01,
+                cohens_d=0.8,
+                effect_size_interpretation="large",
+                direction="decreased",
+                significant=True,
+                percent_change=-5.0,
+            ),
+        ],
+        ranking=["B", "A", "C"],
+        equilibration_time="10ns",
+        created_at=datetime.now(),
+        polyzymd_version="1.2.1",
+    )
+
+    exact = result.get_comparison(("B", "C"))
+    assert exact is not None
+    assert exact.condition_a == "B"
+    assert exact.condition_b == "C"
+
+
+def test_base_comparison_get_comparison_supports_legacy_condition_b_lookup() -> None:
+    """String lookup should remain available for backward compatibility."""
+    result = _ComparisonResult(
+        metric="mean_value",
+        name="test_project",
+        conditions=[
+            _ConditionSummary(
+                label="Control",
+                config_path="/fake/control.yaml",
+                n_replicates=2,
+                replicate_values=[1.0, 1.1],
+            ),
+            _ConditionSummary(
+                label="Treatment",
+                config_path="/fake/treatment.yaml",
+                n_replicates=2,
+                replicate_values=[0.9, 0.8],
+            ),
+        ],
+        pairwise_comparisons=[
+            PairwiseComparison(
+                condition_a="Control",
+                condition_b="Treatment",
+                t_statistic=3.0,
+                p_value=0.02,
+                cohens_d=1.0,
+                effect_size_interpretation="large",
+                direction="decreased",
+                significant=True,
+                percent_change=-10.0,
+            )
+        ],
+        ranking=["Treatment", "Control"],
+        equilibration_time="10ns",
+        created_at=datetime.now(),
+        polyzymd_version="1.2.1",
+    )
+
+    legacy = result.get_comparison("Treatment")
+    assert legacy is not None
+    assert legacy.condition_a == "Control"
+    assert legacy.condition_b == "Treatment"
+
+
+def test_base_comparison_get_comparison_tuple_falls_back_to_condition_b_lookup() -> None:
+    """Tuple lookup should fall back to legacy condition_b behavior when needed."""
+    result = _ComparisonResult(
+        metric="mean_value",
+        name="test_project",
+        conditions=[
+            _ConditionSummary(
+                label="Control",
+                config_path="/fake/control.yaml",
+                n_replicates=2,
+                replicate_values=[1.0, 1.1],
+            ),
+            _ConditionSummary(
+                label="Treatment",
+                config_path="/fake/treatment.yaml",
+                n_replicates=2,
+                replicate_values=[0.9, 0.8],
+            ),
+        ],
+        pairwise_comparisons=[
+            PairwiseComparison(
+                condition_a="Control",
+                condition_b="Treatment",
+                t_statistic=3.0,
+                p_value=0.02,
+                cohens_d=1.0,
+                effect_size_interpretation="large",
+                direction="decreased",
+                significant=True,
+                percent_change=-10.0,
+            )
+        ],
+        ranking=["Treatment", "Control"],
+        equilibration_time="10ns",
+        created_at=datetime.now(),
+        polyzymd_version="1.2.1",
+    )
+
+    fallback = result.get_comparison(("NotControl", "Treatment"))
+    assert fallback is not None
+    assert fallback.condition_a == "Control"
+    assert fallback.condition_b == "Treatment"
 
 
 def test_filter_summaries_with_run_keeps_only_matching_entries() -> None:
@@ -56,6 +250,16 @@ def test_build_condition_pairs_control_missing_skip() -> None:
         ["A", "B", "C"], control_label="Control", on_control_missing="skip"
     )
     assert pairs == []
+
+
+def test_build_condition_pairs_rejects_invalid_control_missing_policy() -> None:
+    """build_condition_pairs should reject unsupported control-missing policies."""
+    with pytest.raises(ValueError, match="on_control_missing"):
+        build_condition_pairs(
+            ["A", "B", "C"],
+            control_label="Control",
+            on_control_missing="fallback",
+        )
 
 
 def test_apply_fdr_correction_updates_pairwise_and_anova() -> None:
@@ -107,3 +311,54 @@ def test_apply_fdr_correction_supports_custom_callbacks() -> None:
     assert pairwise[0].keep is False
     assert pairwise[1].adjusted == 0.50
     assert pairwise[1].keep is False
+
+
+def test_apply_fdr_correction_handles_none_and_nan_p_values() -> None:
+    """apply_fdr_correction should preserve None/NaN entries as non-significant."""
+    pairwise = [
+        SimpleNamespace(p_value=0.01, p_value_adjusted=None, significant=False),
+        SimpleNamespace(p_value=None, p_value_adjusted=1.0, significant=True),
+        SimpleNamespace(p_value=math.nan, p_value_adjusted=1.0, significant=True),
+    ]
+
+    apply_fdr_correction(pairwise, anova_by_run=None, fdr_alpha=0.05)
+
+    assert pairwise[0].p_value_adjusted == 0.01
+    assert pairwise[0].significant is True
+    assert pairwise[1].p_value_adjusted is None
+    assert pairwise[1].significant is False
+    assert pairwise[2].p_value_adjusted is None
+    assert pairwise[2].significant is False
+
+
+def test_apply_fdr_correction_mixed_testable_and_non_testable_entries() -> None:
+    """apply_fdr_correction should update only entries with valid p-values."""
+    pairwise = [
+        SimpleNamespace(
+            p_value=0.02,
+            p_value_adjusted=None,
+            significant=False,
+            testable=True,
+        ),
+        SimpleNamespace(
+            p_value=None,
+            p_value_adjusted=0.99,
+            significant=True,
+            testable=False,
+        ),
+        SimpleNamespace(
+            p_value=0.20,
+            p_value_adjusted=None,
+            significant=False,
+            testable=True,
+        ),
+    ]
+
+    apply_fdr_correction(pairwise, anova_by_run=None, fdr_alpha=0.05)
+
+    assert pairwise[0].p_value_adjusted == 0.04
+    assert pairwise[0].significant is True
+    assert pairwise[1].p_value_adjusted is None
+    assert pairwise[1].significant is False
+    assert pairwise[2].p_value_adjusted == 0.20
+    assert pairwise[2].significant is False

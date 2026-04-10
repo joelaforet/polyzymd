@@ -1,16 +1,10 @@
-"""Shared pytest fixtures for PolyzyMD plugin tests.
+"""Shared pytest fixtures for common plugin test inputs.
 
-These fixtures wrap the factories in ``tests/_support/analysis_testkit.py``
-and can be used directly in any test file by adding the fixture name as a
-function argument.
+This module exposes a focused subset of reusable fixtures used across tests:
 
-Examples
---------
-::
-
-    def test_compute(condition, tmp_path):
-        ctx = make_replicate_context(condition=condition, output_dir=tmp_path / "run_1")
-        ...
+- default condition fixtures (single and paired control/treatment)
+- a fake MDAnalysis universe fixture
+- a pre-configured trajectory loader mock fixture
 """
 
 from __future__ import annotations
@@ -25,7 +19,6 @@ from tests._support.analysis_testkit import (
     make_condition,
     make_mock_trajectory_loader,
 )
-
 
 # ---------------------------------------------------------------------------
 # Condition fixtures

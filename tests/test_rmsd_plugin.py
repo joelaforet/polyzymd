@@ -540,6 +540,138 @@ def test_format_markdown() -> None:
     assert "| Condition | Mean RMSD (Å) | SEM | Rank |" in text
 
 
+def test_format_markdown_regression_includes_non_significant_and_non_testable() -> None:
+    """Markdown formatter should keep stable output for edge comparison states."""
+    result = RMSDComparisonResult(
+        metric="mean_rmsd",
+        name="regression_case",
+        n_runs=1,
+        run_labels=["run_1"],
+        control_label="Control",
+        conditions=[
+            RMSDConditionSummary(
+                label="Control",
+                config_path="/fake/control.yaml",
+                n_replicates=2,
+                run_summaries=[
+                    RMSDRunSummary(
+                        label="run_1",
+                        selection="protein and name CA",
+                        mean_rmsd=1.00,
+                        sem_rmsd=0.10,
+                        per_replicate_means=[0.95, 1.05],
+                        n_converged_replicates=2,
+                        n_assessable_replicates=2,
+                        convergence_fraction=1.0,
+                        all_converged=True,
+                        mean_convergence_time_ns=10.0,
+                        median_convergence_time_ns=10.0,
+                    )
+                ],
+            ),
+            RMSDConditionSummary(
+                label="Treatment_A",
+                config_path="/fake/treatment_a.yaml",
+                n_replicates=2,
+                run_summaries=[
+                    RMSDRunSummary(
+                        label="run_1",
+                        selection="protein and name CA",
+                        mean_rmsd=1.05,
+                        sem_rmsd=0.09,
+                        per_replicate_means=[1.00, 1.10],
+                        n_converged_replicates=1,
+                        n_assessable_replicates=2,
+                        convergence_fraction=0.5,
+                        all_converged=False,
+                        mean_convergence_time_ns=12.5,
+                        median_convergence_time_ns=12.5,
+                    )
+                ],
+            ),
+            RMSDConditionSummary(
+                label="Treatment_B",
+                config_path="/fake/treatment_b.yaml",
+                n_replicates=1,
+                run_summaries=[
+                    RMSDRunSummary(
+                        label="run_1",
+                        selection="protein and name CA",
+                        mean_rmsd=1.08,
+                        sem_rmsd=0.00,
+                        per_replicate_means=[1.08],
+                        n_converged_replicates=0,
+                        n_assessable_replicates=1,
+                        convergence_fraction=0.0,
+                        all_converged=False,
+                        mean_convergence_time_ns=None,
+                        median_convergence_time_ns=None,
+                    )
+                ],
+            ),
+        ],
+        pairwise_comparisons=[
+            RMSDRunPairwiseComparison(
+                run_label="run_1",
+                condition_a="Control",
+                condition_b="Treatment_A",
+                t_statistic=1.5,
+                p_value=0.120,
+                cohens_d=0.6,
+                effect_interpretation="medium",
+                direction="destabilizing",
+                significant=False,
+                percent_change=5.0,
+                testable=True,
+            ),
+            RMSDRunPairwiseComparison(
+                run_label="run_1",
+                condition_a="Control",
+                condition_b="Treatment_B",
+                effect_interpretation="negligible",
+                direction="destabilizing",
+                significant=False,
+                percent_change=8.0,
+                testable=False,
+                note="Insufficient replicate count",
+            ),
+        ],
+        anova_by_run=[
+            RMSDRunANOVA(
+                run_label="run_1",
+                significant=False,
+                testable=False,
+                note="Insufficient data for ANOVA",
+            )
+        ],
+        ranking_by_run={"run_1": ["Control", "Treatment_A", "Treatment_B"]},
+        equilibration_time="10ns",
+        created_at=datetime.now(),
+        polyzymd_version="1.2.1",
+    )
+
+    text = format_rmsd_comparison(result, "markdown")
+
+    assert text == (
+        "## RMSD Comparison: run_1\n"
+        "\n"
+        "| Condition | Mean RMSD (Å) | SEM | Rank |\n"
+        "|-----------|---------------|-----|------|\n"
+        "| Control | 1.00 | 0.10 | 1 |\n"
+        "  - Convergence: 2/2 replicates converged (2 assessable), median t_conv = 10.0 ns\n"
+        "| Treatment_A | 1.05 | 0.09 | 2 |\n"
+        "  - Convergence: 1/2 replicates converged (2 assessable), median t_conv = 12.5 ns\n"
+        "| Treatment_B | 1.08 | 0.00 | 3 |\n"
+        "  - Convergence: 0/1 replicates converged (1 assessable), median t_conv = n/a\n"
+        "\n"
+        "- Pairwise: Treatment_A vs Control — Δ=+5.0%, p=0.120 , d=0.60 (medium), destabilizing\n"
+        "- Pairwise: Treatment_B vs Control — Δ=+8.0%, destabilizing; "
+        "Insufficient replicate count\n"
+        "\n"
+        "- ANOVA: Insufficient data for ANOVA\n"
+    )
+
+
 def test_format_json() -> None:
     """JSON formatting should return valid JSON with expected keys."""
     text = format_rmsd_comparison(_make_comparison_result(), "json")

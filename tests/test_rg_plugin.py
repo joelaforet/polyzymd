@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -364,6 +365,117 @@ def test_format_markdown() -> None:
     text = format_rg_comparison(_make_comparison_result(), "markdown")
     assert "## Rg Comparison: protein_backbone" in text
     assert "| Condition | Mean Rg (A) | SEM | Rank |" in text
+
+
+def test_format_markdown_regression_includes_non_significant_and_non_testable_like_case() -> None:
+    """Markdown formatter should keep stable output across edge pairwise states."""
+    result = RgComparisonResult(
+        metric="mean_rg",
+        name="regression_case",
+        n_runs=1,
+        run_labels=["run_1"],
+        control_label="Control",
+        conditions=[
+            RgConditionSummary(
+                label="Control",
+                config_path="/fake/control.yaml",
+                n_replicates=2,
+                run_summaries=[
+                    RgRunSummary(
+                        label="run_1",
+                        selection="protein and name CA",
+                        mean_rg=10.0,
+                        sem_rg=0.10,
+                        per_replicate_means=[9.9, 10.1],
+                    )
+                ],
+            ),
+            RgConditionSummary(
+                label="Treatment_A",
+                config_path="/fake/treatment_a.yaml",
+                n_replicates=2,
+                run_summaries=[
+                    RgRunSummary(
+                        label="run_1",
+                        selection="protein and name CA",
+                        mean_rg=10.3,
+                        sem_rg=0.12,
+                        per_replicate_means=[10.2, 10.4],
+                    )
+                ],
+            ),
+            RgConditionSummary(
+                label="Treatment_B",
+                config_path="/fake/treatment_b.yaml",
+                n_replicates=1,
+                run_summaries=[
+                    RgRunSummary(
+                        label="run_1",
+                        selection="protein and name CA",
+                        mean_rg=10.5,
+                        sem_rg=0.00,
+                        per_replicate_means=[10.5],
+                    )
+                ],
+            ),
+        ],
+        pairwise_comparisons=[
+            RgRunPairwiseComparison(
+                run_label="run_1",
+                condition_a="Control",
+                condition_b="Treatment_A",
+                t_statistic=1.2,
+                p_value=0.200,
+                cohens_d=0.4,
+                effect_interpretation="small",
+                direction="expansion",
+                significant=False,
+                percent_change=3.0,
+            ),
+            RgRunPairwiseComparison(
+                run_label="run_1",
+                condition_a="Control",
+                condition_b="Treatment_B",
+                t_statistic=math.nan,
+                p_value=math.nan,
+                cohens_d=math.nan,
+                effect_interpretation="negligible",
+                direction="unchanged",
+                significant=False,
+                percent_change=math.nan,
+            ),
+        ],
+        anova_by_run=[
+            RgRunANOVA(
+                run_label="run_1",
+                f_statistic=1.1,
+                p_value=0.200,
+                significant=False,
+            )
+        ],
+        ranking_by_run={"run_1": ["Control", "Treatment_A", "Treatment_B"]},
+        equilibration_time="10ns",
+        created_at=datetime.now(),
+        polyzymd_version="1.2.1",
+    )
+
+    text = format_rg_comparison(result, "markdown")
+
+    assert text == (
+        "## Rg Comparison: run_1\n"
+        "\n"
+        "| Condition | Mean Rg (A) | SEM | Rank |\n"
+        "|-----------|---------------|-----|------|\n"
+        "| Control | 10.00 | 0.10 | 1 |\n"
+        "| Treatment_A | 10.30 | 0.12 | 2 |\n"
+        "| Treatment_B | 10.50 | 0.00 | 3 |\n"
+        "\n"
+        "- Pairwise: Treatment_A vs Control — Δ=+3.0%, p=0.200 , d=0.40 (small), expansion\n"
+        "- Pairwise: Treatment_B vs Control — Δ=undefined, p=nan , d=nan (negligible), "
+        "unchanged\n"
+        "\n"
+        "- ANOVA: F=1.10, p=0.200 \n"
+    )
 
 
 def test_format_json() -> None:

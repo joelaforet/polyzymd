@@ -15,7 +15,7 @@ def make_section_title(title: str, width: int) -> list[str]:
 def make_ranked_table_header(*, mean_label: str) -> list[str]:
     """Build standard ranked-table headers for text output."""
     header = f"{'Condition':<18} {mean_label:<15} {'SEM':<8} {'Rank':<4}"
-    return [header, "-" * 44]
+    return [header, "-" * len(header)]
 
 
 def make_ranked_markdown_header(*, mean_label: str) -> list[str]:

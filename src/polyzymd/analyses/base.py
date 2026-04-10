@@ -650,21 +650,39 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseR
                 return condition
         raise KeyError(f"Condition '{label}' not found")
 
-    def get_comparison(self, label: str) -> Any | None:
-        """Get pairwise comparison for a condition vs control.
+    def get_comparison(self, label: str | tuple[str, str]) -> Any | None:
+        """Get a pairwise comparison by condition pair.
 
         Parameters
         ----------
-        label : str
-            Treatment condition label
+        label : str | tuple[str, str]
+            Comparison key.
+
+            - ``(condition_a, condition_b)`` performs an exact pair lookup
+            - ``condition_b`` performs legacy lookup by treatment label only
 
         Returns
         -------
         Any | None
             The comparison, or None if not found
+
+        Notes
+        -----
+        Legacy lookup by ``condition_b`` can be ambiguous for all-vs-all
+        comparisons. Prefer tuple lookup for unambiguous retrieval.
         """
+        if isinstance(label, tuple):
+            condition_a, condition_b = label
+            for comparison in self.pairwise_comparisons:
+                if comparison.condition_a == condition_a and comparison.condition_b == condition_b:
+                    return comparison
+            # Backward-compat fallback: try condition_b-only lookup
+            legacy_label = condition_b
+        else:
+            legacy_label = label
+
         for comparison in self.pairwise_comparisons:
-            if comparison.condition_b == label:
+            if comparison.condition_b == legacy_label:
                 return comparison
         return None
 

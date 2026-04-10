@@ -17,7 +17,6 @@ from polyzymd.analyses.shared.multi_run_formatting import (
     make_ranked_table_header,
     make_section_title,
 )
-from polyzymd.analyses.stats import format_pct
 
 logger = logging.getLogger(__name__)
 

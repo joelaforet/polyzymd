@@ -80,7 +80,17 @@ def build_condition_pairs(
     -------
     list[tuple[str, str]]
         Pair list as ``(condition_a, condition_b)`` tuples.
+
+    Raises
+    ------
+    ValueError
+        Raised when ``on_control_missing`` is not ``"all_pairs"`` or ``"skip"``.
     """
+    if on_control_missing not in ("all_pairs", "skip"):
+        raise ValueError(
+            f"on_control_missing must be 'all_pairs' or 'skip', got {on_control_missing!r}"
+        )
+
     if len(condition_labels) < 2:
         return []
 

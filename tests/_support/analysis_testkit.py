@@ -26,9 +26,10 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 from typing import Any, Sequence
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, create_autospec
 
 import numpy as np
+from pydantic import BaseModel
 
 from polyzymd.analyses.base import (
     AggregateContext,
@@ -37,6 +38,23 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.shared.loader import TrajectoryInfo, TrajectoryLoader
+from polyzymd.config.schema import SimulationConfig
+
+
+class _DefaultSettings(BaseModel):
+    """Minimal settings model used for default test contexts."""
+
+
+def _default_sim_config_mock() -> MagicMock:
+    """Create a typed SimulationConfig mock for context factories."""
+    return create_autospec(SimulationConfig, instance=True)
+
+
+def _default_settings() -> BaseModel:
+    """Create a minimal typed settings object for context factories."""
+    return _DefaultSettings()
+
 
 # ---------------------------------------------------------------------------
 # Fake MDAnalysis objects
@@ -191,11 +209,16 @@ def make_mock_trajectory_loader(
     if universe is None:
         universe = FakeUniverse()
 
-    loader = MagicMock()
+    loader = create_autospec(TrajectoryLoader, instance=True, spec_set=True)
     loader.load_universe.return_value = universe
 
-    traj_info = MagicMock()
-    traj_info.trajectory_files = [Path("/fake/traj.dcd")]
+    traj_info = TrajectoryInfo(
+        topology_file=Path("/fake/topology.pdb"),
+        trajectory_files=[Path("/fake/traj.dcd")],
+        n_segments=1,
+        working_directory=Path("/fake"),
+        replicate=1,
+    )
     loader.get_trajectory_info.return_value = traj_info
     loader.get_timestep.return_value = universe.trajectory.dt
 
@@ -252,13 +275,13 @@ def make_condition(
     replicates : tuple[int, ...]
         Replicate numbers.
     sim_config : Any
-        Simulation config mock.  If ``None``, a ``MagicMock()`` is used.
+        Simulation config object. If ``None``, an autospecced ``SimulationConfig`` mock is used.
     """
     return Condition(
         label=label,
         config_path=Path(config_path),
         replicates=replicates,
-        sim_config=sim_config if sim_config is not None else MagicMock(),
+        sim_config=sim_config if sim_config is not None else _default_sim_config_mock(),
     )
 
 
@@ -281,7 +304,7 @@ def make_replicate_context(
     output_dir : Path | None
         Output directory.  If ``None``, a ``Path("/tmp/run_1")`` is used.
     settings : Any | None
-        Plugin settings.  If ``None``, a ``MagicMock()`` is used.
+        Plugin settings. If ``None``, a minimal ``BaseModel`` settings object is used.
     equilibration : str
         Equilibration time string.
     recompute : bool
@@ -296,7 +319,7 @@ def make_replicate_context(
         output_dir=out,
         equilibration=equilibration,
         recompute=recompute,
-        settings=settings if settings is not None else MagicMock(),
+        settings=settings if settings is not None else _default_settings(),
         result_path=out / "result.json",
     )
 
@@ -330,7 +353,7 @@ def make_aggregate_context(
         replicates=replicates,
         output_dir=out,
         equilibration=equilibration,
-        settings=settings if settings is not None else MagicMock(),
+        settings=settings if settings is not None else _default_settings(),
         result_path=out / "result.json",
     )
 
@@ -367,7 +390,7 @@ def make_comparison_context(
         analysis_dirs=analysis_dirs,
         results_dir=results_dir or Path("/tmp/results"),
         equilibration=equilibration,
-        settings=settings if settings is not None else MagicMock(),
+        settings=settings if settings is not None else _default_settings(),
         recompute=recompute,
         aggregated_results=aggregated_results or {},
     )
@@ -399,6 +422,6 @@ def make_plot_context(
         analysis_dirs=analysis_dirs,
         results_dir=results_dir or Path("/tmp/results"),
         output_dir=output_dir or Path("/tmp/figures"),
-        settings=settings if settings is not None else MagicMock(),
+        settings=settings if settings is not None else _default_settings(),
         plot_settings=plot_settings,
     )
