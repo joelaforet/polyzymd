@@ -515,10 +515,10 @@ def prepare_comparison_run(
             [c.label for c in excluded],
         )
 
-    if len(valid_conditions) < 2:
+    if len(valid_conditions) < 1:
         raise ValueError(
-            f"{analysis.name}: need at least 2 valid conditions for comparison. "
-            f"Got {len(valid_conditions)}.  Excluded: {[c.label for c in excluded]}"
+            f"{analysis.name}: no valid conditions remain after filtering. "
+            f"Excluded: {[c.label for c in excluded]}"
         )
 
     return valid_conditions, settings, resolved_equilibration, analysis_root
@@ -679,11 +679,8 @@ def finalize_comparison_from_disk(
     conditions = [c for c in valid_conditions if c.label in valid_analysis_dirs]
     excluded_conditions = [c for c in all_conditions if c.label not in valid_analysis_dirs]
 
-    if len(conditions) < 2:
-        raise ValueError(
-            f"{analysis.name}: need at least 2 successful conditions to compare after finalize. "
-            f"Got {len(conditions)}."
-        )
+    if len(conditions) < 1:
+        raise ValueError(f"{analysis.name}: no successful conditions remain after finalize.")
 
     condition_labels = {condition.label for condition in conditions}
     resolved_control = config.control if config.control is not None else effective_control
@@ -905,8 +902,8 @@ def run_comparison(
     # Remove failed conditions from the valid set
     valid_conditions = [c for c in valid_conditions if c not in failed_conditions]
 
-    if len(valid_conditions) < 2:
-        raise ValueError(f"{analysis.name}: fewer than 2 conditions succeeded analysis.")
+    if len(valid_conditions) < 1:
+        raise ValueError(f"{analysis.name}: no conditions succeeded analysis.")
 
     # 4. Compare
     results_dir = analysis_root.parent / "comparison" / analysis.name

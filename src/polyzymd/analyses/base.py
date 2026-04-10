@@ -788,10 +788,8 @@ class Analysis(ABC):
                 if extracted:
                     metrics_by_condition[cond.label] = extracted
 
-        if len(metrics_by_condition) < 2:
-            logger.warning(
-                f"{self.name}: fewer than 2 conditions have metrics — skipping comparison."
-            )
+        if not metrics_by_condition:
+            logger.warning(f"{self.name}: no conditions have metrics — skipping comparison.")
             return None
 
         return default_scalar_comparison(

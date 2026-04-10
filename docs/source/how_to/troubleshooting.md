@@ -407,7 +407,7 @@ ValueError: System state doesn't match checkpoint
 
 ### Analysis supports OpenMM trajectories only
 
-The `polyzymd analyze` command family currently expects OpenMM-produced
+The `polyzymd compare` analysis workflow currently expects OpenMM-produced
 trajectories (DCD format) in PolyzyMD's standard directory layout
 (`production_N/production_N_trajectory.dcd`). GROMACS XTC trajectories
 are not yet supported.
@@ -417,7 +417,7 @@ are not yet supported.
 - Use native GROMACS analysis tools (`gmx rms`, `gmx rmsf`, etc.)
 - Use MDAnalysis directly with your GROMACS topology and XTC files
 
-GROMACS trajectory support in `polyzymd analyze` is planned for v1.2.1
+GROMACS trajectory support in `polyzymd compare` is planned
 ([#47](https://github.com/joelaforet/polyzymd/issues/47)).
 
 ---

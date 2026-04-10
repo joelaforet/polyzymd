@@ -71,8 +71,9 @@ conditions plus the later comparison workspace. -->
 Start in the control condition:
 
 ```bash
-cd my_enzyme_study/noPoly_enzyme_DMSO
-polyzymd analyze init
+cd my_enzyme_study
+polyzymd compare init noPoly_enzyme_DMSO
+cd noPoly_enzyme_DMSO
 ```
 
 Edit the generated `analysis.yaml` so it enables a small stable analysis set:
@@ -134,13 +135,13 @@ Run the same command in each condition directory:
 
 ```bash
 cd noPoly_enzyme_DMSO
-polyzymd analyze run
+polyzymd compare run-all
 
 cd ../SBMA_100_enzyme_DMSO
-polyzymd analyze run
+polyzymd compare run-all
 
 cd ../EGMA_100_enzyme_DMSO
-polyzymd analyze run
+polyzymd compare run-all
 ```
 
 After each run, expect an `analysis/` directory with subdirectories such as:

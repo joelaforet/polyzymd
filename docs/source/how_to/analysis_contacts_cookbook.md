@@ -54,8 +54,9 @@ contacts:
 
 **Run with:**
 ```bash
-polyzymd analyze init      # Create template (if needed)
-polyzymd analyze run       # Run all enabled analyses
+polyzymd compare init contacts_study
+# Edit comparison.yaml with your condition(s) and plugins.contacts
+polyzymd compare run contacts
 ```
 
 **Best for:** Single-condition analysis, reproducible configuration, CI/CD pipelines.
@@ -183,18 +184,15 @@ produce the polymer×AA-class interaction matrix. For that breakdown, use Python
 ````
 
 ````{tab-item} CLI
-Run separate contact analyses for each polymer type:
+Run separate contact comparisons for each polymer type by updating
+`plugins.contacts.polymer_selection` in `comparison.yaml` between runs:
 
 ```bash
 # Analyze SBMA contacts only
-polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
-    --polymer-selection "segid C and resname SBM" \
-    -o analysis/contacts_sbma/
+polyzymd compare run contacts -f comparison.yaml
 
-# Analyze EGMA contacts only
-polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
-    --polymer-selection "segid C and resname EGM" \
-    -o analysis/contacts_egma/
+# Update polymer_selection to "segid C and resname EGM", then rerun
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 Then compare the JSON outputs manually or load both in Python for analysis.
@@ -301,7 +299,7 @@ contacts:
 ```
 
 ```bash
-polyzymd analyze run
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 The JSON output includes per-residue data with AA classifications. To get 
@@ -309,10 +307,10 @@ the coverage breakdown, load the result in Python or use CLI post-processing.
 ````
 
 ````{tab-item} CLI
-Run contacts analysis with default grouping:
+Run contacts comparison using settings from `comparison.yaml`:
 
 ```bash
-polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 The console output shows overall coverage. For AA-class breakdown, load the 
@@ -417,7 +415,7 @@ contacts:
 ```
 
 ```bash
-polyzymd analyze run
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 The JSON output includes residence time data per polymer type. Load in Python 
@@ -425,10 +423,10 @@ to compare across polymer types.
 ````
 
 ````{tab-item} CLI
-Use the `--residence-times` flag:
+Enable `compute_residence_times: true` in `comparison.yaml`, then run:
 
 ```bash
-polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns --residence-times
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 **Output:**
@@ -527,41 +525,31 @@ conjugation might affect catalytic function.
 
 ````{tab-item} YAML
 Run two analyses with different `protein_selection` values. Create two 
-`analysis.yaml` files or use CLI overrides:
+`comparison.yaml` variants or edit `comparison.yaml` between runs:
 
-**Option 1: Separate analysis.yaml files**
+**Option 1: Separate comparison.yaml files**
 
 ```yaml
-# analysis_active_site.yaml
-replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "10ns"
-
-contacts:
-  enabled: true
-  polymer_selection: "chainID C"
-  protein_selection: "protein and (resid 75-80 or resid 130-140 or resid 153-160)"
-  cutoff: 4.5
+# comparison_active_site.yaml (excerpt)
+plugins:
+  contacts:
+    polymer_selection: "chainID C"
+    protein_selection: "protein and (resid 75-80 or resid 130-140 or resid 153-160)"
+    cutoff: 4.5
 ```
 
 ```yaml
-# analysis_surface.yaml
-replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "10ns"
-
-contacts:
-  enabled: true
-  polymer_selection: "chainID C"
-  protein_selection: "protein and not (resid 75-80 or resid 130-140 or resid 153-160)"
-  cutoff: 4.5
+# comparison_surface.yaml (excerpt)
+plugins:
+  contacts:
+    polymer_selection: "chainID C"
+    protein_selection: "protein and not (resid 75-80 or resid 130-140 or resid 153-160)"
+    cutoff: 4.5
 ```
 
 ```bash
-polyzymd analyze run -c analysis_active_site.yaml -o analysis/contacts_active_site/
-polyzymd analyze run -c analysis_surface.yaml -o analysis/contacts_surface/
+polyzymd compare run contacts -f comparison_active_site.yaml
+polyzymd compare run contacts -f comparison_surface.yaml
 ```
 
 **Option 2: Use CLI overrides (no extra YAML files)**
@@ -570,18 +558,15 @@ See the CLI tab for this approach.
 ````
 
 ````{tab-item} CLI
-Run region-specific analyses using `--protein-selection`:
+Run region-specific analyses by updating `plugins.contacts.protein_selection`
+in `comparison.yaml` and rerunning:
 
 ```bash
 # Active site region (example: LipA catalytic triad vicinity)
-polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
-    --protein-selection "protein and (resid 75-80 or resid 130-140 or resid 153-160)" \
-    -o analysis/contacts_active_site/
+polyzymd compare run contacts -f comparison.yaml
 
-# Surface residues (everything else)
-polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
-    --protein-selection "protein and not (resid 75-80 or resid 130-140 or resid 153-160)" \
-    -o analysis/contacts_surface/
+# Surface residues: update protein_selection, then rerun
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 Then compare JSON outputs in Python or manually.
@@ -730,7 +715,7 @@ contacts:
 ```
 
 ```bash
-polyzymd analyze run
+polyzymd compare run contacts -f comparison.yaml
 ```
 
 ```{note}
@@ -742,8 +727,7 @@ reference atoms. The `not` inverts this to get surface-only residues.
 ````{tab-item} CLI
 ```bash
 # Surface residues only (exclude active site vicinity)
-polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
-    --protein-selection "protein and not (byres (resid 77 133 156) around 8.0)"
+polyzymd compare run contacts -f comparison.yaml
 ```
 ````
 

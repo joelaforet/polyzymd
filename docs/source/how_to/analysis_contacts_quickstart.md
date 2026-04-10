@@ -11,14 +11,15 @@ contact fractions with proper statistical treatment.
 ## TL;DR
 
 ```bash
-# Single replicate analysis
-polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns
+# Initialize a comparison workspace
+polyzymd compare init contacts_study
+cd contacts_study
 
-# Custom cutoff distance (default: 4.0 Å)
-polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns --cutoff 5.0
+# Configure plugins.contacts in comparison.yaml, then run contacts
+polyzymd compare run contacts
 
-# Force recompute (ignore cache)
-polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns --recompute
+# Or run all enabled analyses
+polyzymd compare run-all
 ```
 
 ## Prerequisites
@@ -41,8 +42,8 @@ The contacts analyzer uses PolyzyMD's standard chain assignment:
 | C | Polymers |
 | D+ | Solvent (water, ions, co-solvents) |
 
-By default, the command analyzes contacts between `segid C` (polymers) and 
-`protein` (chain A).
+By default, contacts analysis uses the selections configured in
+`plugins.contacts` in `comparison.yaml`.
 
 ## Basic Usage
 
@@ -50,31 +51,41 @@ By default, the command analyzes contacts between `segid C` (polymers) and
 
 `````{tab-set}
 ````{tab-item} YAML (Recommended)
-Create an `analysis.yaml` file alongside your `config.yaml`:
+Create a `comparison.yaml` file and configure `plugins.contacts`:
 
 ```yaml
-# analysis.yaml
-replicates: [1]
+# comparison.yaml
+name: "contacts_study"
+control: "No Polymer"
 
-defaults:
-  equilibration_time: "10ns"
+conditions:
+  - label: "No Polymer"
+    config: "../no_polymer/config.yaml"
+    replicates: [1, 2, 3]
 
-contacts:
-  enabled: true
-  cutoff: 4.0
+  - label: "SBMA"
+    config: "../sbma_100/config.yaml"
+    replicates: [1, 2, 3]
+
+plugins:
+  contacts:
+    polymer_selection: "chainID C"
+    protein_selection: "protein"
+    cutoff: 4.5
+    compute_residence_times: true
 ```
 
-Then run all enabled analyses:
+Then run contacts analysis:
 
 ```bash
-polyzymd analyze run
+polyzymd compare run contacts
 ```
 ````
 
 ````{tab-item} CLI
 ```bash
-cd /path/to/your/project
-polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns
+cd /path/to/contacts_study
+polyzymd compare run contacts -f comparison.yaml
 ```
 ````
 
@@ -135,60 +146,62 @@ Contact Analysis Complete
   in contact with polymer (averaged across all residues)
 - **Contacted residues**: Count of residues with any polymer contact
 
-## Using analysis.yaml
+## Using comparison.yaml
 
-For reproducible, version-controlled analysis configuration, use `analysis.yaml` 
-instead of CLI flags. Place this file alongside your `config.yaml`.
+For reproducible, version-controlled contacts analysis, configure
+`plugins.contacts` in `comparison.yaml` and run through `polyzymd compare`.
 
 ### Multi-Replicate Analysis with Full Options
 
 `````{tab-set}
 ````{tab-item} YAML (Recommended)
-Create an `analysis.yaml` file with all configuration options:
+Create a `comparison.yaml` file with all contacts options:
 
 ```yaml
-# analysis.yaml
-replicates: [1, 2, 3]
+# comparison.yaml
+name: "contacts_study"
+control: "No Polymer"
+
+conditions:
+  - label: "No Polymer"
+    config: "../no_polymer/config.yaml"
+    replicates: [1, 2, 3]
+
+  - label: "SBMA"
+    config: "../sbma_100/config.yaml"
+    replicates: [1, 2, 3]
 
 defaults:
   equilibration_time: "10ns"
 
-contacts:
-  enabled: true
-  polymer_selection: "chainID C"      # MDAnalysis selection for polymer
-  protein_selection: "protein"        # MDAnalysis selection for protein
-  cutoff: 4.5                         # Contact distance in Angstroms
-  polymer_types: ["SBM", "EGM"]       # Optional: filter by monomer type
-  grouping: "aa_class"                # aa_class | secondary_structure | none
-  compute_residence_times: true       # Enable residence time statistics
+plugins:
+  contacts:
+    polymer_selection: "chainID C"      # MDAnalysis selection for polymer
+    protein_selection: "protein"        # MDAnalysis selection for protein
+    cutoff: 4.5                          # Contact distance in Angstroms
+    polymer_types: ["SBM", "EGM"]      # Optional: filter by monomer type
+    grouping: "aa_class"                # aa_class | secondary_structure | none
+    compute_residence_times: true        # Enable residence time statistics
 ```
 
-Then run all enabled analyses:
+Then run contacts analysis:
 
 ```bash
-# Initialize a template (if starting fresh)
-polyzymd analyze init
+# Run contacts only
+polyzymd compare run contacts
 
-# Run all analyses defined in analysis.yaml
-polyzymd analyze run
-
-# Force recompute
-polyzymd analyze run --recompute
+# Or run all enabled analyses
+polyzymd compare run-all
 ```
 ````
 
 ````{tab-item} CLI
 ```bash
-# Run contacts analysis across multiple replicates with all options
-polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
-    --cutoff 4.5 \
-    --polymer-selection "chainID C" \
-    --protein-selection "protein" \
-    --residence-times
+# Run contacts using settings from comparison.yaml
+polyzymd compare run contacts -f comparison.yaml
 
-# Force recompute
-polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns \
-    --cutoff 4.5 --residence-times --recompute
+# Run all enabled analyses
+polyzymd compare run-all -f comparison.yaml
 ```
 ````
 
@@ -236,9 +249,8 @@ print(f"Contact fraction: {aggregated.mean_contact_fraction:.1%} ± {aggregated.
 | `compute_residence_times` | bool | `true` | Compute residence time statistics |
 
 ```{tip}
-**When to use analysis.yaml vs CLI:** Use `analysis.yaml` for standard, 
-reproducible workflows. Use CLI flags (`polyzymd analyze contacts ...`) for 
-one-off analyses or when exploring different parameters.
+**Workflow recommendation:** Configure contacts settings in `comparison.yaml`
+and run `polyzymd compare run contacts` for reproducible analyses.
 ```
 
 ## Residence Time Analysis
@@ -252,25 +264,20 @@ different polymer types.
 `````{tab-set}
 ````{tab-item} YAML (Recommended)
 ```yaml
-# analysis.yaml
-replicates: [1]
-
-defaults:
-  equilibration_time: "10ns"
-
-contacts:
-  enabled: true
-  compute_residence_times: true  # Enable residence time statistics
+# comparison.yaml (excerpt)
+plugins:
+  contacts:
+    compute_residence_times: true  # Enable residence time statistics
 ```
 
 ```bash
-polyzymd analyze run
+polyzymd compare run contacts
 ```
 ````
 
 ````{tab-item} CLI
 ```bash
-polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns --residence-times
+polyzymd compare run contacts -f comparison.yaml
 ```
 ````
 
@@ -316,25 +323,28 @@ statistical uncertainty:
 `````{tab-set}
 ````{tab-item} YAML (Recommended)
 ```yaml
-# analysis.yaml
-replicates: [1, 2, 3]
+# comparison.yaml (excerpt)
+conditions:
+  - label: "No Polymer"
+    config: "../no_polymer/config.yaml"
+    replicates: [1, 2, 3]
+  - label: "SBMA"
+    config: "../sbma_100/config.yaml"
+    replicates: [1, 2, 3]
 
-defaults:
-  equilibration_time: "10ns"
-
-contacts:
-  enabled: true
-  compute_residence_times: true
+plugins:
+  contacts:
+    compute_residence_times: true
 ```
 
 ```bash
-polyzymd analyze run
+polyzymd compare run contacts
 ```
 ````
 
 ````{tab-item} CLI
 ```bash
-polyzymd analyze contacts -c config.yaml -r 1-3 --eq-time 10ns --residence-times
+polyzymd compare run contacts -f comparison.yaml
 ```
 ````
 
@@ -400,19 +410,14 @@ residence_time_ns = mean_frames * 0.1  # ns
 The JSON output also includes `mean_ps` and `max_ps` fields computed using the 
 timestep from your configuration.
 
-## Command Options
+## Command Pattern
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-c, --config` | Required | Path to config.yaml |
-| `-r, --replicates` | `"1"` | Replicate specification: `'1-5'`, `'1,3,5'`, or `'1'` |
-| `--eq-time` | `"0ns"` | Equilibration time to skip |
-| `--cutoff` | `4.0` | Contact distance cutoff in Angstroms |
-| `--polymer-selection` | `"segid C"` | MDAnalysis selection for polymers |
-| `--protein-selection` | `"protein"` | MDAnalysis selection for protein |
-| `--residence-times` | False | Compute and display residence time statistics by polymer type |
-| `--recompute` | False | Force recompute even if cached |
-| `-o, --output-dir` | Auto | Custom output directory |
+Contacts analysis is configured in `comparison.yaml` under `plugins.contacts`.
+Run with:
+
+```bash
+polyzymd compare run contacts -f comparison.yaml
+```
 
 ## Output Files
 
@@ -438,20 +443,15 @@ The JSON file contains per-residue contact data including:
 `````{tab-set}
 ````{tab-item} YAML (Recommended)
 ```yaml
-# analysis.yaml - Only SBMA monomers
-replicates: [1]
-
-defaults:
-  equilibration_time: "10ns"
-
-contacts:
-  enabled: true
-  polymer_selection: "segid C and resname SBM"  # Only SBMA
-  protein_selection: "protein"
+# comparison.yaml (excerpt) - Only SBMA monomers
+plugins:
+  contacts:
+    polymer_selection: "segid C and resname SBM"  # Only SBMA
+    protein_selection: "protein"
 ```
 
 ```bash
-polyzymd analyze run
+polyzymd compare run contacts
 ```
 
 To analyze EGMA instead, change the selection:
@@ -464,13 +464,11 @@ contacts:
 
 ````{tab-item} CLI
 ```bash
-# Only SBMA monomers
-polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns \
-    --polymer-selection "segid C and resname SBM"
+# Only SBMA monomers (configured in comparison.yaml)
+polyzymd compare run contacts -f comparison.yaml
 
-# Only EGMA monomers  
-polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns \
-    --polymer-selection "segid C and resname EGM"
+# Only EGMA monomers: update polymer_selection in comparison.yaml, then rerun
+polyzymd compare run contacts -f comparison.yaml
 ```
 ````
 
@@ -510,20 +508,15 @@ print(f"EGMA coverage: {egma_result.coverage:.1%}")
 `````{tab-set}
 ````{tab-item} YAML (Recommended)
 ```yaml
-# analysis.yaml - Only aromatic residues
-replicates: [1]
-
-defaults:
-  equilibration_time: "10ns"
-
-contacts:
-  enabled: true
-  polymer_selection: "segid C"
-  protein_selection: "protein and (resname TRP PHE TYR)"  # Aromatics only
+# comparison.yaml (excerpt) - Only aromatic residues
+plugins:
+  contacts:
+    polymer_selection: "segid C"
+    protein_selection: "protein and (resname TRP PHE TYR)"  # Aromatics only
 ```
 
 ```bash
-polyzymd analyze run
+polyzymd compare run contacts
 ```
 
 For active site analysis:
@@ -536,13 +529,11 @@ contacts:
 
 ````{tab-item} CLI
 ```bash
-# Only aromatic residues
-polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns \
-    --protein-selection "protein and (resname TRP PHE TYR)"
+# Only aromatic residues (configured in comparison.yaml)
+polyzymd compare run contacts -f comparison.yaml
 
-# Active site region
-polyzymd analyze contacts -c config.yaml -r 1 --eq-time 10ns \
-    --protein-selection "protein and (resid 75-80 or resid 130-140)"
+# Active site region: update protein_selection in comparison.yaml, then rerun
+polyzymd compare run contacts -f comparison.yaml
 ```
 ````
 

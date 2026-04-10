@@ -186,10 +186,9 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
 
 @cli.command(
     help=(
-        "Build input files only; no simulation is executed. Engine-agnostic: "
-        "prepare default OpenMM inputs or export with --format gromacs. "
-        "Use run-gromacs for build+run GROMACS workflows, or submit for "
-        "OpenMM SLURM jobs."
+        "Build simulation input files (OpenMM, GROMACS, LAMMPS, AMBER) without "
+        "running. Use --format to select the output engine. "
+        "Use run-gromacs to also execute locally, or submit for OpenMM SLURM jobs."
     )
 )
 @click.option(
@@ -656,9 +655,10 @@ def build(
     "run-gromacs",
     help=(
         "Build the system and run the full local GROMACS workflow "
-        "(EM -> equilibration -> production). Use --dry-run to export files "
-        "without execution. For export-only use build --format gromacs. "
-        "Integrated GROMACS SLURM submission is planned for v1.4.0."
+        "(EM -> equilibration -> production). Use --dry-run to validate the "
+        "configuration without building or running. For export-only use "
+        "build --format gromacs. Integrated GROMACS SLURM submission is "
+        "planned for v1.4.0."
     ),
 )
 @click.option(
@@ -702,7 +702,7 @@ def build(
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Export files but don't run simulation",
+    help="Validate config and show planned output without building",
 )
 def run_gromacs(
     config: str,
@@ -720,16 +720,17 @@ def run_gromacs(
     workflow: energy minimization, equilibration, production, and trajectory
     post-processing.
 
-    Use ``--dry-run`` to stop after file generation. If you only need exported
-    inputs without execution, use ``build --format gromacs`` instead. Integrated
-    SLURM submission for GROMACS is planned for v1.4.0; for now, cluster
-    submission is manual.
+    Use ``--dry-run`` to validate the configuration and preview planned output
+    without building or running. If you only need exported inputs without
+    execution, use ``build --format gromacs`` instead. Integrated SLURM
+    submission for GROMACS is planned for v1.4.0; for now, cluster submission
+    is manual.
 
     \b
     Notes:
         - Requires GROMACS to be installed and accessible
         - Use --gmx-path to specify a custom GROMACS executable
-        - Use --dry-run to export files without running the simulation
+        - Use --dry-run to validate without building or running
     """
     from pydantic import ValidationError as PydanticValidationError
 
@@ -813,7 +814,7 @@ def _run_gromacs_impl(
     gmx_path : str
         Path to GROMACS executable.
     dry_run : bool
-        If True, export files but don't run simulation.
+        If True, validate configuration without building or running.
     """
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
@@ -821,6 +822,52 @@ def _run_gromacs_impl(
     # Determine output directory for GROMACS files
     gromacs_dir = sim_config.output.projects_directory / f"replicate_{replicate}" / "gromacs"
     working_dir = sim_config.get_working_directory(replicate)
+
+    if dry_run:
+        colored_echo("=" * 60, phase="export")
+        colored_echo("DRY RUN — GROMACS Validation Report", phase="export")
+        colored_echo("=" * 60, phase="export")
+        colored_echo(phase="export")
+
+        colored_echo(f"Replicate: {replicate}", phase="export")
+        colored_echo("System Components:", phase="export")
+        colored_echo(f"  Chain A (Protein): {sim_config.enzyme.name}", phase="export")
+        if sim_config.substrate:
+            colored_echo(f"  Chain B (Substrate): {sim_config.substrate.name}", phase="export")
+        else:
+            colored_echo("  Chain B (Substrate): none (apo system)", phase="export")
+        if sim_config.polymers and sim_config.polymers.enabled:
+            colored_echo(f"  Chain C (Polymer): {sim_config.polymers.type_prefix}", phase="export")
+            colored_echo(f"    Count: {sim_config.polymers.count}", phase="export")
+            colored_echo(f"    Length: {sim_config.polymers.length} monomers", phase="export")
+        else:
+            colored_echo("  Chain C (Polymer): none (no polymer)", phase="export")
+        colored_echo(f"  Chain D+ (Solvent): {sim_config.solvent.primary.model}", phase="export")
+        colored_echo(phase="export")
+
+        colored_echo("Planned output:", phase="export")
+        colored_echo(f"  Working directory: {working_dir}", phase="export")
+        colored_echo(f"  GROMACS directory: {gromacs_dir}", phase="export")
+        colored_echo("Files that would be generated:", phase="export")
+        colored_echo("  - *.gro (coordinates)", phase="export")
+        colored_echo("  - *.top (topology)", phase="export")
+        colored_echo("  - *.itp (molecule parameters)", phase="export")
+        colored_echo("  - em.mdp (energy minimization)", phase="export")
+        eq_stages = sim_config.simulation_phases.equilibration_stages
+        if eq_stages:
+            for i, stage in enumerate(eq_stages, 1):
+                colored_echo(f"  - eq_{i:02d}_{stage.name}.mdp (equilibration)", phase="export")
+        colored_echo("  - prod.mdp (production)", phase="export")
+        colored_echo("  - run_*_gromacs.sh (run script)", phase="export")
+        colored_echo(phase="export")
+
+        colored_echo(
+            "Dry run complete. Use 'build --format gromacs' to generate files, or remove "
+            "--dry-run to build and run.",
+            phase="export",
+        )
+        colored_echo("=" * 60, phase="export")
+        return
 
     click.echo(f"Building system for replicate {replicate}...")
     builder = SystemBuilder.from_config(sim_config)
@@ -859,16 +906,6 @@ def _run_gromacs_impl(
         for component, define in export_result["posres_defines"].items():
             colored_echo(f"  - {component}: #ifdef {define}", phase="export")
     colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
-
-    if dry_run:
-        colored_echo(
-            "\n--dry-run specified: Files exported but simulation not started.", phase="export"
-        )
-        colored_echo(
-            f"To run manually: cd {gromacs_dir} && ./{export_result['run_script'].name}",
-            phase="export",
-        )
-        return
 
     # Run GROMACS workflow
     colored_echo("\nStarting GROMACS simulation...", phase="export")
@@ -1117,7 +1154,7 @@ def submit(
 # =============================================================================
 
 
-@cli.command("run-segment")
+@cli.command("run-segment", hidden=True)
 @click.option(
     "-c",
     "--config",
@@ -1623,7 +1660,7 @@ def _run_continuation_segment(
 # =============================================================================
 
 
-@cli.command("check-progress")
+@cli.command("check-progress", hidden=True)
 @click.option(
     "-c",
     "--config",
@@ -2632,11 +2669,9 @@ def new_analysis(
 
 
 def _register_optional_command_groups() -> None:
-    """Register analysis/compare command groups only when optional deps are importable."""
-    from polyzymd.analyses.cli import analyze
+    """Register optional command groups when deps are importable."""
     from polyzymd.compare.cli import compare
 
-    cli.add_command(analyze)
     cli.add_command(compare)
 
 

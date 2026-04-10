@@ -681,7 +681,7 @@ class TestCompare:
 
         assert result.anova_by_pair is None
 
-    def test_compare_returns_none_with_single_condition(self, tmp_path):
+    def test_compare_returns_result_with_single_condition(self, tmp_path):
         analysis, ctx, labels = self._make_analysis_and_ctx(tmp_path, n_conditions=1)
 
         def mock_load(agg_dir):
@@ -690,7 +690,9 @@ class TestCompare:
         with patch.object(analysis, "_load_aggregated_result", side_effect=mock_load):
             result = analysis.compare(ctx)
 
-        assert result is None
+        assert result is not None
+        assert len(result.conditions) == 1
+        assert result.pairwise_comparisons == []
 
     def test_compare_no_control(self, tmp_path):
         analysis, ctx, labels = self._make_analysis_and_ctx(tmp_path, n_conditions=3, control=None)

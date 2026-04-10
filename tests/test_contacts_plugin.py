@@ -782,7 +782,7 @@ class TestCompare:
         # No ANOVA with < 3 conditions
         assert len(result.anova) == 0
 
-    def test_compare_returns_none_with_insufficient_conditions(self, tmp_path):
+    def test_compare_returns_result_with_single_condition(self, tmp_path):
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
 
@@ -807,8 +807,17 @@ class TestCompare:
             recompute=False,
         )
 
-        result = analysis.compare(ctx)
-        assert result is None
+        with (
+            patch.object(
+                analysis, "_load_aggregated_result", return_value=_make_mock_agg_result(3, 5)
+            ),
+            patch.object(analysis, "_load_or_compute_binding_preference", return_value=None),
+        ):
+            result = analysis.compare(ctx)
+
+        assert result is not None
+        assert len(result.conditions) == 1
+        assert result.pairwise_comparisons == []
 
     def test_compare_excluded_conditions_recorded(self, tmp_path):
         from polyzymd.analyses.base import ComparisonContext, Condition

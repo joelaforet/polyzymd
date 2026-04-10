@@ -1005,7 +1005,7 @@ class DistancesAnalysis(Analysis):
         Returns
         -------
         DistanceComparisonResult | None
-            Comparison result, or ``None`` if fewer than 2 conditions.
+            Comparison result, or ``None`` if no conditions have data.
         """
         from polyzymd import __version__
         from polyzymd.analyses.distances._comparison_results import (
@@ -1074,8 +1074,8 @@ class DistancesAnalysis(Analysis):
                 )
             )
 
-        if len(summaries) < 2:
-            logger.warning("distances: fewer than 2 conditions have results — skipping comparison.")
+        if not summaries:
+            logger.warning("distances: no conditions have results — skipping comparison.")
             return None
 
         # Resolve effective control
@@ -1110,35 +1110,36 @@ class DistancesAnalysis(Analysis):
         # Pairwise comparisons (per-pair)
         comparisons: list[DistancePairwiseComparison] = []
 
-        for pair_label in pair_labels:
-            if effective_control:
-                control = next(s for s in summaries if s.label == effective_control)
-                control_pair = control.get_pair(pair_label)
-                for summary in summaries:
-                    if summary.label == effective_control:
-                        continue
-                    treatment_pair = summary.get_pair(pair_label)
-                    comp = self._compare_pair(
-                        pair_label,
-                        control.label,
-                        summary.label,
-                        control_pair,
-                        treatment_pair,
-                    )
-                    comparisons.append(comp)
-            else:
-                for i, summary_a in enumerate(summaries):
-                    pair_a = summary_a.get_pair(pair_label)
-                    for summary_b in summaries[i + 1 :]:
-                        pair_b = summary_b.get_pair(pair_label)
+        if len(summaries) >= 2:
+            for pair_label in pair_labels:
+                if effective_control:
+                    control = next(s for s in summaries if s.label == effective_control)
+                    control_pair = control.get_pair(pair_label)
+                    for summary in summaries:
+                        if summary.label == effective_control:
+                            continue
+                        treatment_pair = summary.get_pair(pair_label)
                         comp = self._compare_pair(
                             pair_label,
-                            summary_a.label,
-                            summary_b.label,
-                            pair_a,
-                            pair_b,
+                            control.label,
+                            summary.label,
+                            control_pair,
+                            treatment_pair,
                         )
                         comparisons.append(comp)
+                else:
+                    for i, summary_a in enumerate(summaries):
+                        pair_a = summary_a.get_pair(pair_label)
+                        for summary_b in summaries[i + 1 :]:
+                            pair_b = summary_b.get_pair(pair_label)
+                            comp = self._compare_pair(
+                                pair_label,
+                                summary_a.label,
+                                summary_b.label,
+                                pair_a,
+                                pair_b,
+                            )
+                            comparisons.append(comp)
 
         # ANOVA (if 3+ conditions) — per-pair
         anova_by_pair: list[DistancePairANOVA] | None = None

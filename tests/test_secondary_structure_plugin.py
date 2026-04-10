@@ -838,8 +838,8 @@ class TestCompare:
             assert "Control" in call_kwargs["metrics_by_condition"]
             assert "Treatment" in call_kwargs["metrics_by_condition"]
 
-    def test_compare_returns_none_with_single_condition(self, ss_analysis, tmp_path):
-        """compare() should return None with fewer than 2 conditions having metrics."""
+    def test_compare_returns_result_with_single_condition(self, ss_analysis, tmp_path):
+        """compare() should return a result with one condition having metrics."""
         cond = Condition(
             label="Only",
             config_path=Path("/fake/c.yaml"),
@@ -873,7 +873,9 @@ class TestCompare:
         ):
             result = ss_analysis.compare(ctx)
 
-        assert result is None
+        assert result is not None
+        assert len(result.conditions) == 1
+        assert result.pairwise_comparisons == []
 
 
 # ============================================================================

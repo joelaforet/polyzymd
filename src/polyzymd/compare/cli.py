@@ -280,7 +280,7 @@ def validate(config_file: Path, output_format: str):
     Validates:
       - YAML syntax and structure
       - Required fields present
-      - At least 2 conditions defined
+      - At least 1 condition defined
       - Condition labels are unique
       - Control label matches a condition (if specified)
       - Config files exist for each condition

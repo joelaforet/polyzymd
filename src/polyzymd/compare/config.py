@@ -695,8 +695,8 @@ class ComparisonConfig(BaseModel):
         errors = []
 
         # Check minimum conditions
-        if len(self.conditions) < 2:
-            errors.append("Need at least 2 conditions to compare")
+        if len(self.conditions) < 1:
+            errors.append("Need at least 1 condition")
 
         # Check config files exist
         for cond in self.conditions:

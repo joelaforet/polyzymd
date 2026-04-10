@@ -92,7 +92,7 @@ from polyzymd.analyses.shared.aa_classification import DEFAULT_AA_CLASS_SELECTIO
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
-    from polyzymd.analyses._analysis_config import ContactsConfig
+    from polyzymd.analyses.contacts import ContactsSettings
     from polyzymd.analyses.contacts._results import ContactResult
     from polyzymd.analyses.shared.surface_exposure import SurfaceExposureResult
 
@@ -3862,9 +3862,9 @@ def compute_binding_preference_from_config(
     contact_result: "ContactResult",
     universe: "Universe",
     enzyme_pdb_path: Path | str,
-    config: "ContactsConfig",
+    config: "ContactsSettings",
 ) -> BindingPreferenceResult:
-    """Compute binding preference using ContactsConfig settings.
+    """Compute binding preference using contacts plugin settings.
 
     This is a convenience function that orchestrates the full binding
     preference computation using configuration from analysis.yaml.
@@ -3881,8 +3881,8 @@ def compute_binding_preference_from_config(
         MDAnalysis Universe (used for resolving selections)
     enzyme_pdb_path : Path or str
         Path to enzyme PDB file for SASA calculation
-    config : ContactsConfig
-        Configuration from analysis.yaml with binding preference settings
+    config : ContactsSettings
+        Contacts plugin settings with binding preference configuration
 
     Returns
     -------
@@ -3897,8 +3897,8 @@ def compute_binding_preference_from_config(
 
     Examples
     --------
-    >>> from polyzymd.analyses._analysis_config import ContactsConfig
-    >>> config = ContactsConfig(
+    >>> from polyzymd.analyses.contacts import ContactsSettings
+    >>> config = ContactsSettings(
     ...     compute_binding_preference=True,
     ...     surface_exposure_threshold=0.2,
     ... )

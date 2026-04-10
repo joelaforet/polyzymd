@@ -721,7 +721,7 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
 
 
 def test_compare_skips_run_missing_in_some_conditions(tmp_path: Path) -> None:
-    """compare should handle runs missing from a condition."""
+    """compare should keep rankings for partially available runs."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
     control = Condition("Control", Path("/fake/control.yaml"), (1, 2, 3), MagicMock())
@@ -773,7 +773,7 @@ def test_compare_skips_run_missing_in_some_conditions(tmp_path: Path) -> None:
     comparison = analysis.compare(ctx)
 
     assert comparison is not None
-    assert comparison.run_labels == ["protein_backbone"]
+    assert comparison.run_labels == ["protein_backbone", "polymer_core"]
     assert len(comparison.pairwise_comparisons) == 1
 
 

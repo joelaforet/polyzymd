@@ -820,7 +820,7 @@ class ContactsAnalysis(Analysis):
         Returns
         -------
         ContactsComparisonResult | None
-            Comparison result, or ``None`` if fewer than 2 conditions.
+            Comparison result, or ``None`` when no conditions are available.
         """
         from polyzymd import __version__
         from polyzymd.analyses.contacts._comparison_results import (
@@ -838,8 +838,8 @@ class ContactsAnalysis(Analysis):
         logger.info(f"Conditions: {len(ctx.conditions)}")
         logger.info(f"Equilibration: {ctx.equilibration}")
 
-        if len(ctx.conditions) < 2:
-            logger.warning("contacts: fewer than 2 conditions — skipping comparison.")
+        if not ctx.conditions:
+            logger.warning("contacts: no conditions provided — skipping comparison.")
             return None
 
         # Step 1: Load aggregated results and build condition data
@@ -866,8 +866,8 @@ class ContactsAnalysis(Analysis):
                 )
             )
 
-        if len(condition_data) < 2:
-            logger.warning("contacts: fewer than 2 conditions have results — skipping.")
+        if not condition_data:
+            logger.warning("contacts: no conditions have valid results — skipping.")
             return None
 
         # Step 2: Validate identical residue sets
@@ -894,7 +894,11 @@ class ContactsAnalysis(Analysis):
         effective_control = ctx.effective_control
 
         # Step 5: Pairwise comparisons (dual metrics)
-        comparisons = self._compute_contacts_pairwise(summaries, condition_data, effective_control)
+        comparisons: list[ContactsPairwiseComparison] = []
+        if len(summaries) >= 2:
+            comparisons = self._compute_contacts_pairwise(
+                summaries, condition_data, effective_control
+            )
 
         # Step 6: ANOVA if 3+ conditions
         anova_results: list[ContactsANOVASummary] = []

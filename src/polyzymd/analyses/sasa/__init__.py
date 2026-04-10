@@ -539,8 +539,8 @@ class SASAAnalysis(Analysis):
                 )
             )
 
-        if len(summaries) < 2:
-            LOGGER.warning("SASA comparison skipped because fewer than 2 conditions have results")
+        if not summaries:
+            LOGGER.warning("SASA comparison skipped because no conditions have results")
             return None
 
         run_labels: list[str] = []
@@ -553,7 +553,7 @@ class SASAAnalysis(Analysis):
             available = [
                 summary for summary in summaries if self._has_run_summary(summary, run_label)
             ]
-            if len(available) < 2:
+            if not available:
                 continue
 
             comparable = []
@@ -565,9 +565,9 @@ class SASAAnalysis(Analysis):
                 if len(finite_values) >= 2 and self._is_finite(run_summary.mean_sasa):
                     comparable.append(summary)
 
-            if len(comparable) < 2:
+            if not comparable:
                 LOGGER.warning(
-                    "Run '%s' has insufficient finite replicate data across conditions; skipping",
+                    "Run '%s' has no finite replicate data across conditions; skipping",
                     run_label,
                 )
                 continue
@@ -582,28 +582,45 @@ class SASAAnalysis(Analysis):
             )
             ranking_by_run[run_label] = [summary.label for summary in ranked]
 
-            if effective_control:
-                control_summary = next(
-                    (summary for summary in comparable if summary.label == effective_control),
-                    None,
-                )
-                if control_summary is not None:
-                    control_run = control_summary.get_run(run_label)
-                    for summary in comparable:
-                        if summary.label == effective_control:
-                            continue
-                        candidate = self._compare_run(
-                            run_label=run_label,
-                            condition_a=control_summary.label,
-                            condition_b=summary.label,
-                            run_a=control_run,
-                            run_b=summary.get_run(run_label),
-                            independent_ttest=independent_ttest,
-                            cohens_d=cohens_d,
-                            percent_change=percent_change,
-                        )
-                        if candidate is not None:
-                            pairwise.append(candidate)
+            if len(comparable) >= 2:
+                if effective_control:
+                    control_summary = next(
+                        (summary for summary in comparable if summary.label == effective_control),
+                        None,
+                    )
+                    if control_summary is not None:
+                        control_run = control_summary.get_run(run_label)
+                        for summary in comparable:
+                            if summary.label == effective_control:
+                                continue
+                            candidate = self._compare_run(
+                                run_label=run_label,
+                                condition_a=control_summary.label,
+                                condition_b=summary.label,
+                                run_a=control_run,
+                                run_b=summary.get_run(run_label),
+                                independent_ttest=independent_ttest,
+                                cohens_d=cohens_d,
+                                percent_change=percent_change,
+                            )
+                            if candidate is not None:
+                                pairwise.append(candidate)
+                    else:
+                        for i, summary_a in enumerate(comparable):
+                            run_a = summary_a.get_run(run_label)
+                            for summary_b in comparable[i + 1 :]:
+                                candidate = self._compare_run(
+                                    run_label=run_label,
+                                    condition_a=summary_a.label,
+                                    condition_b=summary_b.label,
+                                    run_a=run_a,
+                                    run_b=summary_b.get_run(run_label),
+                                    independent_ttest=independent_ttest,
+                                    cohens_d=cohens_d,
+                                    percent_change=percent_change,
+                                )
+                                if candidate is not None:
+                                    pairwise.append(candidate)
                 else:
                     for i, summary_a in enumerate(comparable):
                         run_a = summary_a.get_run(run_label)
@@ -620,22 +637,6 @@ class SASAAnalysis(Analysis):
                             )
                             if candidate is not None:
                                 pairwise.append(candidate)
-            else:
-                for i, summary_a in enumerate(comparable):
-                    run_a = summary_a.get_run(run_label)
-                    for summary_b in comparable[i + 1 :]:
-                        candidate = self._compare_run(
-                            run_label=run_label,
-                            condition_a=summary_a.label,
-                            condition_b=summary_b.label,
-                            run_a=run_a,
-                            run_b=summary_b.get_run(run_label),
-                            independent_ttest=independent_ttest,
-                            cohens_d=cohens_d,
-                            percent_change=percent_change,
-                        )
-                        if candidate is not None:
-                            pairwise.append(candidate)
 
             if len(comparable) >= 3:
                 groups = []

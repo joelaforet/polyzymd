@@ -335,7 +335,7 @@ def default_scalar_comparison(
     from polyzymd import __version__
 
     if not metrics_by_condition:
-        raise ValueError("metrics_by_condition is empty — need at least 2 conditions.")
+        raise ValueError("metrics_by_condition is empty — need at least 1 condition.")
 
     # Discover metric names from ALL conditions (union), preserving first-seen order
     seen: set[str] = set()
@@ -369,19 +369,21 @@ def default_scalar_comparison(
             if metric_name in metrics:
                 per_cond[label] = metrics[metric_name]
 
-        if len(per_cond) < 2:
+        if not per_cond:
             continue
 
-        # Pairwise
-        pw = pairwise_comparisons(per_cond, control_label, fdr_alpha=fdr_alpha)
-        all_pairwise.extend(pw)
+        # Pairwise comparisons require at least 2 conditions
+        if len(per_cond) >= 2:
+            pw = pairwise_comparisons(per_cond, control_label, fdr_alpha=fdr_alpha)
+            all_pairwise.extend(pw)
 
-        # ANOVA
-        anova = anova_test(per_cond, metric_name)
-        if anova is not None:
-            all_anova.append(anova)
+        # ANOVA requires at least 3 conditions
+        if len(per_cond) >= 3:
+            anova = anova_test(per_cond, metric_name)
+            if anova is not None:
+                all_anova.append(anova)
 
-        # Ranking
+        # Ranking always works when at least 1 condition exists
         all_rankings[metric_name] = rank_conditions(per_cond)
 
     # Build condition summaries

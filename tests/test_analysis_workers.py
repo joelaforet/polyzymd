@@ -267,11 +267,11 @@ def test_finalize_partial_recomputes_control_when_original_missing(
     assert "using 'B' as effective control" in caplog.text
 
 
-def test_finalize_partial_requires_two_successful_conditions(
+def test_finalize_partial_with_one_condition_succeeds(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    """Partial finalize should fail when fewer than two conditions survive."""
+    """Partial finalize should succeed when one condition survives."""
     analysis = _WorkerAnalysis()
     cond_a = Condition("A", tmp_path / "a.yaml", (1,), cast(Any, SimpleNamespace()))
     cond_b = Condition("B", tmp_path / "b.yaml", (1,), cast(Any, SimpleNamespace()))
@@ -295,19 +295,62 @@ def test_finalize_partial_requires_two_successful_conditions(
         "polyzymd.analyses.orchestrator.Condition.from_condition_config", _fake_from_cond
     )
 
-    with pytest.raises(ValueError, match="need at least 2 successful conditions"):
+    out = finalize_comparison_from_disk(
+        analysis=analysis,
+        config=cast(Any, config),
+        analysis_dirs={"B": tmp_path / "analysis" / "B" / "worker_toy"},
+        aggregated_results={
+            "B": {
+                "mean_value": 2.0,
+                "sem_value": 0.0,
+                "replicate_values": [2.0],
+                "n_replicates": 1,
+            }
+        },
+        results_dir=tmp_path / "comparison" / "worker_toy",
+        figures_dir=tmp_path / "figures" / "worker_toy",
+        settings=_WorkerSettings(),
+        effective_control="A",
+        allow_partial=True,
+    )
+    assert out["comparison"] is not None
+    assert out["comparison"].conditions[0].label == "B"
+
+
+def test_finalize_partial_raises_with_zero_successful_conditions(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Partial finalize should fail when no conditions survive."""
+    analysis = _WorkerAnalysis()
+    cond_a = Condition("A", tmp_path / "a.yaml", (1,), cast(Any, SimpleNamespace()))
+    cond_b = Condition("B", tmp_path / "b.yaml", (1,), cast(Any, SimpleNamespace()))
+
+    class _CondCfg:
+        def __init__(self, label: str):
+            self.label = label
+
+    config = SimpleNamespace(
+        name="proj",
+        control="A",
+        conditions=[_CondCfg("A"), _CondCfg("B")],
+        defaults=SimpleNamespace(equilibration_time="10ns"),
+        plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+    )
+
+    def _fake_from_cond(cond_cfg):
+        return cond_a if cond_cfg.label == "A" else cond_b
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.orchestrator.Condition.from_condition_config", _fake_from_cond
+    )
+
+    with pytest.raises(ValueError, match="no successful conditions remain"):
         finalize_comparison_from_disk(
             analysis=analysis,
             config=cast(Any, config),
-            analysis_dirs={"B": tmp_path / "analysis" / "B" / "worker_toy"},
-            aggregated_results={
-                "B": {
-                    "mean_value": 2.0,
-                    "sem_value": 0.0,
-                    "replicate_values": [2.0],
-                    "n_replicates": 1,
-                }
-            },
+            analysis_dirs={},
+            aggregated_results={},
             results_dir=tmp_path / "comparison" / "worker_toy",
             figures_dir=tmp_path / "figures" / "worker_toy",
             settings=_WorkerSettings(),

@@ -462,7 +462,7 @@ class RgAnalysis(Analysis):
         Returns
         -------
         RgComparisonResult | None
-            Comparison result, or ``None`` if fewer than two conditions have data.
+            Comparison result, or ``None`` if no conditions have data.
         """
         from polyzymd import __version__
         from polyzymd.analyses.rg._comparison_results import (
@@ -517,8 +517,8 @@ class RgAnalysis(Analysis):
                 )
             )
 
-        if len(summaries) < 2:
-            logger.warning("Rg comparison skipped because fewer than 2 conditions have results")
+        if not summaries:
+            logger.warning("Rg comparison skipped because no conditions have results")
             return None
 
         effective_control = ctx.effective_control
@@ -532,9 +532,9 @@ class RgAnalysis(Analysis):
             summaries_with_run = [
                 summary for summary in summaries if self._has_run_summary(summary, run_label)
             ]
-            if len(summaries_with_run) < 2:
+            if not summaries_with_run:
                 logger.warning(
-                    "Run '%s' has data in fewer than 2 conditions; skipping run-level comparison",
+                    "Run '%s' has no condition data; skipping run-level comparison",
                     run_label,
                 )
                 continue
@@ -546,22 +546,50 @@ class RgAnalysis(Analysis):
             )
             ranking_by_run[run_label] = [summary.label for summary in ranked]
 
-            if effective_control:
-                control_summary = next(
-                    (
-                        summary
-                        for summary in summaries_with_run
-                        if summary.label == effective_control
-                    ),
-                    None,
-                )
-                if control_summary is None:
-                    logger.warning(
-                        "Control condition '%s' has no data for run '%s'; using all-vs-all "
-                        "pairwise comparisons for this run",
-                        effective_control,
-                        run_label,
+            if len(summaries_with_run) >= 2:
+                if effective_control:
+                    control_summary = next(
+                        (
+                            summary
+                            for summary in summaries_with_run
+                            if summary.label == effective_control
+                        ),
+                        None,
                     )
+                    if control_summary is None:
+                        logger.warning(
+                            "Control condition '%s' has no data for run '%s'; using all-vs-all "
+                            "pairwise comparisons for this run",
+                            effective_control,
+                            run_label,
+                        )
+                        for i, summary_a in enumerate(summaries_with_run):
+                            run_a = summary_a.get_run(run_label)
+                            for summary_b in summaries_with_run[i + 1 :]:
+                                pairwise_comparisons.append(
+                                    self._compare_run(
+                                        run_label=run_label,
+                                        condition_a=summary_a.label,
+                                        condition_b=summary_b.label,
+                                        run_a=run_a,
+                                        run_b=summary_b.get_run(run_label),
+                                    )
+                                )
+                    else:
+                        control_run = control_summary.get_run(run_label)
+                        for summary in summaries_with_run:
+                            if summary.label == effective_control:
+                                continue
+                            pairwise_comparisons.append(
+                                self._compare_run(
+                                    run_label=run_label,
+                                    condition_a=control_summary.label,
+                                    condition_b=summary.label,
+                                    run_a=control_run,
+                                    run_b=summary.get_run(run_label),
+                                )
+                            )
+                else:
                     for i, summary_a in enumerate(summaries_with_run):
                         run_a = summary_a.get_run(run_label)
                         for summary_b in summaries_with_run[i + 1 :]:
@@ -574,33 +602,6 @@ class RgAnalysis(Analysis):
                                     run_b=summary_b.get_run(run_label),
                                 )
                             )
-                else:
-                    control_run = control_summary.get_run(run_label)
-                    for summary in summaries_with_run:
-                        if summary.label == effective_control:
-                            continue
-                        pairwise_comparisons.append(
-                            self._compare_run(
-                                run_label=run_label,
-                                condition_a=control_summary.label,
-                                condition_b=summary.label,
-                                run_a=control_run,
-                                run_b=summary.get_run(run_label),
-                            )
-                        )
-            else:
-                for i, summary_a in enumerate(summaries_with_run):
-                    run_a = summary_a.get_run(run_label)
-                    for summary_b in summaries_with_run[i + 1 :]:
-                        pairwise_comparisons.append(
-                            self._compare_run(
-                                run_label=run_label,
-                                condition_a=summary_a.label,
-                                condition_b=summary_b.label,
-                                run_a=run_a,
-                                run_b=summary_b.get_run(run_label),
-                            )
-                        )
 
             if len(summaries_with_run) >= 3:
                 groups = [
@@ -617,9 +618,7 @@ class RgAnalysis(Analysis):
                 )
 
         if not run_labels:
-            logger.warning(
-                "Rg comparison skipped because no runs had data in at least 2 conditions"
-            )
+            logger.warning("Rg comparison skipped because no runs had data in any condition")
             return None
 
         if not anova_by_run:

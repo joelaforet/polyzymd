@@ -591,7 +591,7 @@ class PolymerBridgingAnalysis(Analysis):
             if extracted:
                 metrics_by_condition[cond.label] = extracted
 
-        if len(metrics_by_condition) < 2:
+        if not metrics_by_condition:
             return None
 
         metric_names: list[str] = []
@@ -612,9 +612,10 @@ class PolymerBridgingAnalysis(Analysis):
                 for label, metrics in metrics_by_condition.items()
                 if metric_name in metrics
             }
-            if len(per_cond) < 2:
+            if not per_cond:
                 continue
-            all_pairwise.extend(_safe_pairwise_comparisons(per_cond, ctx.effective_control))
+            if len(per_cond) >= 2:
+                all_pairwise.extend(_safe_pairwise_comparisons(per_cond, ctx.effective_control))
             maybe_anova = _safe_anova(per_cond, metric_name)
             if maybe_anova is not None:
                 all_anova.append(maybe_anova)
@@ -1423,7 +1424,7 @@ def _filter_comparison_result(result: ComparisonResult, metric_key: str) -> Comp
         )
         conditions.append(cond_summary)
 
-    if len(conditions) < 2:
+    if not conditions:
         return None
 
     pairwise = [p for p in result.pairwise_comparisons if p.metric == metric_key]

@@ -193,8 +193,11 @@ polyzymd validate -c config_gromacs.yaml
 # Full workflow (build + run)
 polyzymd run-gromacs -c config_gromacs.yaml --replicates 1
 
-# Or dry-run to just export files
+# Or dry-run to validate without building or running
 polyzymd run-gromacs -c config_gromacs.yaml --replicates 1 --dry-run
+
+# To export files without running, use build instead:
+polyzymd build -c config_gromacs.yaml --format gromacs --replicates 1
 ```
 
 ---
@@ -441,10 +444,10 @@ polyzymd run-gromacs -c config.yaml --replicates 1
 ## Post-Processing and Analysis
 
 ```{note}
-The `polyzymd analyze` command family currently supports OpenMM-produced
+The `polyzymd compare` analysis workflow currently supports OpenMM-produced
 trajectories only (DCD format in PolyzyMD's standard directory layout).
 To analyze GROMACS trajectories, use native GROMACS tools as shown below,
-or MDAnalysis directly. GROMACS XTC trajectory support in `polyzymd analyze`
+or MDAnalysis directly. GROMACS XTC trajectory support in `polyzymd compare`
 is planned for a future release (see [#47](https://github.com/joelaforet/polyzymd/issues/47)).
 ```
 

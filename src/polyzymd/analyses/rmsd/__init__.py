@@ -358,7 +358,7 @@ class RMSDAnalysis(Analysis):
         Returns
         -------
         RMSDComparisonResult | None
-            Comparison result, or ``None`` if fewer than two conditions have data.
+            Comparison result, or ``None`` if no conditions have data.
         """
         from polyzymd import __version__
         from polyzymd.analyses.rmsd._comparison_results import (
@@ -410,8 +410,8 @@ class RMSDAnalysis(Analysis):
                 )
             )
 
-        if len(summaries) < 2:
-            logger.warning("RMSD comparison skipped because fewer than 2 conditions have results")
+        if not summaries:
+            logger.warning("RMSD comparison skipped because no conditions have results")
             return None
 
         effective_control = ctx.effective_control
@@ -425,37 +425,38 @@ class RMSDAnalysis(Analysis):
             ranking_by_run[run_label] = [summary.label for summary in ranked]
 
         pairwise_comparisons: list[RMSDRunPairwiseComparison] = []
-        for run_label in run_labels:
-            if effective_control:
-                control_summary = next(
-                    summary for summary in summaries if summary.label == effective_control
-                )
-                control_run = control_summary.get_run(run_label)
-                for summary in summaries:
-                    if summary.label == effective_control:
-                        continue
-                    pairwise_comparisons.append(
-                        self._compare_run(
-                            run_label=run_label,
-                            condition_a=control_summary.label,
-                            condition_b=summary.label,
-                            run_a=control_run,
-                            run_b=summary.get_run(run_label),
-                        )
+        if len(summaries) >= 2:
+            for run_label in run_labels:
+                if effective_control:
+                    control_summary = next(
+                        summary for summary in summaries if summary.label == effective_control
                     )
-            else:
-                for i, summary_a in enumerate(summaries):
-                    run_a = summary_a.get_run(run_label)
-                    for summary_b in summaries[i + 1 :]:
+                    control_run = control_summary.get_run(run_label)
+                    for summary in summaries:
+                        if summary.label == effective_control:
+                            continue
                         pairwise_comparisons.append(
                             self._compare_run(
                                 run_label=run_label,
-                                condition_a=summary_a.label,
-                                condition_b=summary_b.label,
-                                run_a=run_a,
-                                run_b=summary_b.get_run(run_label),
+                                condition_a=control_summary.label,
+                                condition_b=summary.label,
+                                run_a=control_run,
+                                run_b=summary.get_run(run_label),
                             )
                         )
+                else:
+                    for i, summary_a in enumerate(summaries):
+                        run_a = summary_a.get_run(run_label)
+                        for summary_b in summaries[i + 1 :]:
+                            pairwise_comparisons.append(
+                                self._compare_run(
+                                    run_label=run_label,
+                                    condition_a=summary_a.label,
+                                    condition_b=summary_b.label,
+                                    run_a=run_a,
+                                    run_b=summary_b.get_run(run_label),
+                                )
+                            )
 
         anova_by_run: list[RMSDRunANOVA] | None = None
         if len(summaries) >= 3:

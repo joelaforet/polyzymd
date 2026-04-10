@@ -184,7 +184,7 @@ class ExposureAnalysis(Analysis):
         Returns
         -------
         ExposureComparisonResult or None
-            Comparison result, or ``None`` if fewer than 2 valid conditions.
+            Comparison result, or ``None`` when no valid conditions are available.
         """
         from polyzymd import __version__
         from polyzymd.analyses.exposure._comparison_results import (
@@ -207,8 +207,8 @@ class ExposureAnalysis(Analysis):
         logger.info(f"  Equilibration: {ctx.equilibration}")
 
         conditions = ctx.conditions
-        if len(conditions) < 2:
-            logger.warning("Fewer than 2 conditions — skipping exposure comparison")
+        if not conditions:
+            logger.warning("No conditions provided — skipping exposure comparison")
             return None
 
         # Step 1: Load/compute per condition
@@ -221,11 +221,8 @@ class ExposureAnalysis(Analysis):
                 logger.debug("Full traceback:", exc_info=True)
                 logger.warning(f"  Skipping condition '{cond.label}': {e}")
 
-        if len(summaries) < 2:
-            logger.warning(
-                f"Only {len(summaries)} condition(s) with valid data — "
-                "need at least 2 for comparison"
-            )
+        if not summaries:
+            logger.warning("No conditions with valid data — skipping exposure comparison")
             return None
 
         # Step 2: Determine effective control
@@ -233,18 +230,19 @@ class ExposureAnalysis(Analysis):
 
         # Step 3: Pairwise comparisons on chaperone_fraction
         comparisons: list[PairwiseComparison] = []
-        if effective_control:
-            control_summary = next((s for s in summaries if s.label == effective_control), None)
-            if control_summary:
-                treatments = [s for s in summaries if s.label != effective_control]
-                for treatment in treatments:
-                    comp = self._compare_pair(control_summary, treatment)
-                    comparisons.append(comp)
-        else:
-            for i, cond_a in enumerate(summaries):
-                for cond_b in summaries[i + 1 :]:
-                    comp = self._compare_pair(cond_a, cond_b)
-                    comparisons.append(comp)
+        if len(summaries) >= 2:
+            if effective_control:
+                control_summary = next((s for s in summaries if s.label == effective_control), None)
+                if control_summary:
+                    treatments = [s for s in summaries if s.label != effective_control]
+                    for treatment in treatments:
+                        comp = self._compare_pair(control_summary, treatment)
+                        comparisons.append(comp)
+            else:
+                for i, cond_a in enumerate(summaries):
+                    for cond_b in summaries[i + 1 :]:
+                        comp = self._compare_pair(cond_a, cond_b)
+                        comparisons.append(comp)
 
         # Step 4: ANOVA if 3+ conditions
         anova: ANOVASummary | None = None

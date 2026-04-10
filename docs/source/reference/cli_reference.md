@@ -620,124 +620,15 @@ Example configs: polyzymd/configs/examples/
 
 ---
 
-## polyzymd analyze
+## Analysis command migration note
 
-Analyze MD trajectories with various metrics.
+The legacy `polyzymd analyze` command group was removed in **v1.3.0**.
+Use the `polyzymd compare` workflow instead:
 
-```bash
-polyzymd analyze COMMAND [OPTIONS]
-
-Commands:
-  init       Initialize analysis.yaml in current directory
-  validate   Validate analysis.yaml configuration
-  run        Run all enabled analyses from analysis.yaml
-  rmsf       Compute RMSF (Root Mean Square Fluctuation) analysis
-  distances  Compute inter-atomic distance analysis
-```
-
-### polyzymd analyze init
-
-Initialize analysis configuration for a simulation project.
-
-```bash
-polyzymd analyze init [OPTIONS]
-
-Options:
-  --eq-time TEXT    Default equilibration time [default: 10ns]
-```
-
-Must be run from a directory containing `config.yaml`.
-
-### Example
-
-```bash
-cd my_simulation_project
-polyzymd analyze init
-polyzymd analyze init --eq-time 20ns
-```
-
-### polyzymd analyze validate
-
-Validate an analysis.yaml configuration file without running analyses.
-
-```bash
-polyzymd analyze validate [OPTIONS]
-
-Options:
-  -f, --file PATH        Path to analysis.yaml [default: analysis.yaml]
-  --format [table|json]  Output format [default: table]
-```
-
-#### What It Checks
-
-- YAML syntax and structure
-- Required fields present
-- Replicates list is non-empty
-- Distance pairs defined if distances enabled
-- Triad pairs defined if catalytic_triad enabled
-- Contact selections defined if contacts enabled
-
-#### Example
-
-```bash
-# Basic validation
-polyzymd analyze validate
-
-# Validate specific file
-polyzymd analyze validate -f path/to/analysis.yaml
-
-# JSON output for CI integration
-polyzymd analyze validate --format json
-```
-
-**Output (success):**
-```
-Validating: /path/to/analysis.yaml
-
-✓ Configuration is valid
-
-  Replicates: [1, 2, 3]
-  Equilibration time: 10ns
-  Enabled analyses: rmsf, contacts
-```
-
-**Output (errors):**
-```
-Validating: /path/to/analysis.yaml
-
-✗ Configuration has errors
-
-  • No replicates specified
-  • Distance analysis enabled but no pairs defined
-```
-
-**JSON output:**
-```json
-{
-  "file": "/path/to/analysis.yaml",
-  "valid": true,
-  "errors": [],
-  "summary": {
-    "replicates": [1, 2, 3],
-    "equilibration_time": "10ns",
-    "enabled_analyses": ["rmsf", "contacts"]
-  }
-}
-```
-
-### polyzymd analyze rmsf (removed)
-
-`polyzymd analyze rmsf` was removed.
-Use `polyzymd compare run rmsf` instead:
-
-```bash
-polyzymd compare run rmsf [OPTIONS]
-```
-
-This command runs RMSF comparison across conditions and requires a
-`plugins.rmsf` section in `comparison.yaml`.
-
-For full options and examples, see [polyzymd compare run rmsf](#polyzymd-compare-run-rmsf).
+- `polyzymd compare init`
+- `polyzymd compare validate`
+- `polyzymd compare run <analysis>`
+- `polyzymd compare run-all`
 
 ---
 
