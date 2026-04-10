@@ -7,7 +7,7 @@ Tests cover:
 - AffinityScorePairwiseEntry model
 - PolymerAffinityAnalysis compare helpers (no I/O, synthetic data)
 - Formatters (console table, markdown, JSON)
-- Registry and import checks
+- Plugin metadata and import checks
 """
 
 from __future__ import annotations
@@ -648,12 +648,12 @@ class TestPolymerAffinityFormatters:
 
 
 # ---------------------------------------------------------------------------
-# Registry / Import Tests
+# Metadata / Import Tests
 # ---------------------------------------------------------------------------
 
 
 class TestRegistration:
-    """Test that polymer affinity types are registered properly."""
+    """Test polymer affinity plugin metadata and imports."""
 
     def test_results_module_importable(self):
         from polyzymd.analyses.polymer_affinity._comparison_results import (
@@ -683,7 +683,11 @@ class TestRegistration:
         assert callable(getattr(polymer_affinity, "_plot_affinity_stacked_bars", None))
         assert callable(getattr(polymer_affinity, "_plot_affinity_group_bars", None))
 
-    def test_plot_settings_registered(self):
-        from polyzymd.compare.registries import PlotSettingsRegistry
+    def test_plot_settings_model_attribute(self):
+        from polyzymd.analyses.discovery import get_analysis
+        from polyzymd.analyses.polymer_affinity._plot_settings import (
+            AffinityPlotSettings,
+        )
 
-        assert PlotSettingsRegistry.is_registered("polymer_affinity")
+        analysis_cls = get_analysis("polymer_affinity")
+        assert analysis_cls.PlotSettingsModel is AffinityPlotSettings

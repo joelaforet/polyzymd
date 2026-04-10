@@ -11,14 +11,15 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence, cast
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-import polyzymd.analyses.sasa._plot_settings as _plot_settings  # noqa: F401
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
+    BasePlotSettings,
     ComparisonContext,
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
 from polyzymd.analyses.sasa._results import SASAAggregatedResult, SASAResult
 from polyzymd.analyses.shared.config_hash import compute_config_hash
 from polyzymd.analyses.shared.multi_run_comparison import (
@@ -144,6 +145,7 @@ class SASAAnalysis(Analysis):
     name: ClassVar[str] = "sasa"
     min_replicates: ClassVar[int] = 1
     Settings: ClassVar[type] = SASASettings
+    PlotSettingsModel: ClassVar[type[BasePlotSettings]] = SASAPlotSettings
     AggregatedResultClass: ClassVar[type | None] = SASAAggregatedResult
     ReplicateResultClass: ClassVar[type | None] = SASAResult
     execution_cost_hint: ClassVar[str] = "high"

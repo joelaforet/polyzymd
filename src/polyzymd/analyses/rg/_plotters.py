@@ -611,7 +611,7 @@ def _load_condition_aggregated(condition_dir: Path) -> dict | None:
 
 
 def _get_plot_settings(ctx: PlotContext) -> RgPlotSettings:
-    """Resolve Rg-specific plot settings from the global plot settings object.
+    """Resolve Rg-specific plot settings from the plot context.
 
     Parameters
     ----------
@@ -623,14 +623,10 @@ def _get_plot_settings(ctx: PlotContext) -> RgPlotSettings:
     RgPlotSettings
         Rg-specific settings model.
     """
-    from polyzymd.compare.registries import PlotSettingsRegistry
-
-    if PlotSettingsRegistry.is_registered("rg"):
-        settings_class = PlotSettingsRegistry.get("rg")
-        settings = getattr(ctx.plot_settings, "rg", settings_class())
+    settings = getattr(ctx.plot_settings, "rg", None)
+    if settings is not None:
         return settings
 
-    logger.warning("Rg plot settings not registered; using defaults")
     from polyzymd.analyses.rg._plot_settings import RgPlotSettings
 
     return RgPlotSettings()

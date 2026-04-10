@@ -55,11 +55,11 @@ from typing import Any, ClassVar, Sequence
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
 
-import polyzymd.analyses.polymer_bridging._plot_settings as _plot_settings  # noqa: F401
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
     ANOVAResult,
+    BasePlotSettings,
     ComparisonResult,
     Condition,
     ConditionSummary,
@@ -68,6 +68,7 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.polymer_bridging._plot_settings import PolymerBridgingPlotSettings
 from polyzymd.analyses.shared import apply_axis_style, get_colors, get_output_path, save_figure
 from polyzymd.analyses.shared.groupings import ProteinAAClassification
 from polyzymd.analyses.shared.inferential_statistics import (
@@ -396,6 +397,7 @@ class PolymerBridgingAnalysis(Analysis):
 
     name: ClassVar[str] = "polymer_bridging"
     Settings: ClassVar[type] = PolymerBridgingSettings
+    PlotSettingsModel: ClassVar[type[BasePlotSettings]] = PolymerBridgingPlotSettings
     AggregatedResultClass: ClassVar[type] = PolymerBridgingAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ("bridging",)
     dependencies: ClassVar[tuple[str, ...]] = ()

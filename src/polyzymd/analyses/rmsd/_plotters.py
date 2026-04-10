@@ -477,7 +477,7 @@ def _load_replicate_timeseries(
 
 
 def _get_plot_settings(ctx: PlotContext) -> RMSDPlotSettings:
-    """Resolve RMSD-specific plot settings from the global plot settings object.
+    """Resolve RMSD-specific plot settings from the plot context.
 
     Parameters
     ----------
@@ -489,14 +489,10 @@ def _get_plot_settings(ctx: PlotContext) -> RMSDPlotSettings:
     RMSDPlotSettings
         RMSD-specific settings model.
     """
-    from polyzymd.compare.registries import PlotSettingsRegistry
-
-    if PlotSettingsRegistry.is_registered("rmsd"):
-        settings_class = PlotSettingsRegistry.get("rmsd")
-        settings = getattr(ctx.plot_settings, "rmsd", settings_class())
+    settings = getattr(ctx.plot_settings, "rmsd", None)
+    if settings is not None:
         return settings
 
-    logger.warning("RMSD plot settings not registered; using defaults")
     from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
 
     return RMSDPlotSettings()

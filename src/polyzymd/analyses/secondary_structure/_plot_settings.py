@@ -1,11 +1,10 @@
-"""Secondary structure plot settings — registered with PlotSettingsRegistry at import time."""
+"""Secondary structure plot settings."""
 
 from __future__ import annotations
 
-from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
+from polyzymd.analyses.base import BasePlotSettings
 
 
-@PlotSettingsRegistry.register("secondary_structure")
 class SSPlotSettings(BasePlotSettings):
     """Secondary structure plot customization.
 

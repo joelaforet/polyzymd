@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from polyzymd.analyses.base import Condition
+from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.rmsd import RMSDAnalysis, RMSDRunSettings, RMSDSettings
 from polyzymd.analyses.rmsd._comparison_results import (
     RMSDComparisonResult,
@@ -27,7 +28,6 @@ from polyzymd.analyses.rmsd._results import (
     RMSDRunAggregatedResult,
     RMSDRunResult,
 )
-from polyzymd.compare.registries import PlotSettingsRegistry
 from tests._support.analysis_testkit import (
     make_aggregate_context,
     make_comparison_context,
@@ -680,10 +680,10 @@ def test_format_json() -> None:
     assert "conditions" in parsed
 
 
-def test_rmsd_plot_settings_registered() -> None:
-    """RMSD plot settings should be registered in the plot settings registry."""
-    assert PlotSettingsRegistry.is_registered("rmsd")
-    assert PlotSettingsRegistry.get("rmsd") is RMSDPlotSettings
+def test_rmsd_plot_settings_model_attribute() -> None:
+    """RMSD analysis should expose its plot settings model attribute."""
+    cls = get_analysis("rmsd")
+    assert cls.PlotSettingsModel is RMSDPlotSettings
 
 
 def test_rmsd_plot_settings_defaults() -> None:

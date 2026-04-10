@@ -1,11 +1,10 @@
-"""Polymer affinity plot settings — registered with PlotSettingsRegistry at import time."""
+"""Polymer affinity plot settings."""
 
 from __future__ import annotations
 
-from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
+from polyzymd.analyses.base import BasePlotSettings
 
 
-@PlotSettingsRegistry.register("polymer_affinity")
 class AffinityPlotSettings(BasePlotSettings):
     """Polymer affinity score plot customization.
 

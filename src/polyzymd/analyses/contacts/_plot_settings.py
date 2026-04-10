@@ -1,13 +1,12 @@
-"""Contacts plot settings — registered with PlotSettingsRegistry at import time."""
+"""Contacts plot settings."""
 
 from __future__ import annotations
 
 from pydantic import Field
 
-from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
+from polyzymd.analyses.base import BasePlotSettings
 
 
-@PlotSettingsRegistry.register("contacts")
 class ContactsPlotSettings(BasePlotSettings):
     """Contacts analysis plot customization.
 

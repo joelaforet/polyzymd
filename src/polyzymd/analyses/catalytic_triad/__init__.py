@@ -23,14 +23,15 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
 
-import polyzymd.analyses.catalytic_triad._plot_settings as _plot_settings  # register plot settings  # noqa: F401
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
+    BasePlotSettings,
     MetricValue,
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.catalytic_triad._plot_settings import TriadPlotSettings
 from polyzymd.analyses.catalytic_triad._plotters import (
     plot_triad_kde_panel_from_data,
     plot_triad_threshold_bars_from_data,
@@ -142,6 +143,7 @@ class CatalyticTriadAnalysis(Analysis):
 
     name: ClassVar[str] = "catalytic_triad"
     Settings: ClassVar[type] = CatalyticTriadSettings
+    PlotSettingsModel: ClassVar[type[BasePlotSettings]] = TriadPlotSettings
     AggregatedResultClass: ClassVar[type] = TriadAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ("triad",)
     dependencies: ClassVar[tuple[str, ...]] = ()

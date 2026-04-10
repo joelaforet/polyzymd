@@ -36,14 +36,15 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-import polyzymd.analyses.distances._plot_settings as _plot_settings  # register plot settings  # noqa: F401
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
+    BasePlotSettings,
     ComparisonContext,
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.distances._plot_settings import DistancesPlotSettings
 from polyzymd.analyses.distances._plotters import (
     _plot_distance_kde,
     _plot_distance_state_bars,
@@ -829,6 +830,7 @@ class DistancesAnalysis(Analysis):
 
     name: ClassVar[str] = "distances"
     Settings: ClassVar[type] = DistancesSettings
+    PlotSettingsModel: ClassVar[type[BasePlotSettings]] = DistancesPlotSettings
     AggregatedResultClass: ClassVar[type] = DistanceAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()

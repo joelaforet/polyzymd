@@ -15,14 +15,15 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-import polyzymd.analyses.rmsd._plot_settings as _plot_settings  # noqa: F401
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
+    BasePlotSettings,
     ComparisonContext,
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
 from polyzymd.analyses.rmsd._results import RMSDAggregatedResult
 from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
 from polyzymd.analyses.shared.config_hash import compute_config_hash
@@ -194,6 +195,7 @@ class RMSDAnalysis(Analysis):
     name: ClassVar[str] = "rmsd"
     min_replicates: ClassVar[int] = 1
     Settings: ClassVar[type] = RMSDSettings
+    PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RMSDPlotSettings
     AggregatedResultClass: ClassVar[type] = RMSDAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()

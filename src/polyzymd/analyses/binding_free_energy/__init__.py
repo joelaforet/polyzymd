@@ -32,14 +32,15 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from pydantic import BaseModel, Field, field_validator
 
-import polyzymd.analyses.binding_free_energy._plot_settings as _plot_settings  # register plot settings  # noqa: F401
 from polyzymd.analyses.base import (
     Analysis,
+    BasePlotSettings,
     ComparisonContext,
     Condition,
     MetricValue,
     PlotContext,
 )
+from polyzymd.analyses.binding_free_energy._plot_settings import BFEPlotSettings
 from polyzymd.analyses.shared.plotting import (
     annotate_cells,
     apply_axis_style,
@@ -184,6 +185,7 @@ class BindingFreeEnergyAnalysis(Analysis):
     name: ClassVar[str] = "binding_free_energy"
     execution_cost_hint: ClassVar[str] = "high"
     Settings: ClassVar[type] = BFESettings
+    PlotSettingsModel: ClassVar[type[BasePlotSettings]] = BFEPlotSettings
     aliases: ClassVar[tuple[str, ...]] = ("bfe",)
     dependencies: ClassVar[tuple[str, ...]] = ("contacts",)
     min_replicates: ClassVar[int] = 1

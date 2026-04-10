@@ -18,15 +18,16 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field, field_validator
 
-import polyzymd.analyses.rmsf._plot_settings as _plot_settings  # register plot settings  # noqa: F401
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
+    BasePlotSettings,
     ComparisonContext,
     MetricValue,
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.rmsf._plot_settings import RMSFPlotSettings
 from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison, _plot_rmsf_profile
 from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
 from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
@@ -145,6 +146,7 @@ class RMSFAnalysis(Analysis):
 
     name: ClassVar[str] = "rmsf"
     Settings: ClassVar[type] = RMSFSettings
+    PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RMSFPlotSettings
     AggregatedResultClass: ClassVar[type] = RMSFAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()

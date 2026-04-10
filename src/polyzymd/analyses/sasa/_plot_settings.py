@@ -1,11 +1,10 @@
-"""SASA plot settings — registered with PlotSettingsRegistry at import time."""
+"""SASA plot settings."""
 
 from __future__ import annotations
 
-from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
+from polyzymd.analyses.base import BasePlotSettings
 
 
-@PlotSettingsRegistry.register("sasa")
 class SASAPlotSettings(BasePlotSettings):
     """SASA analysis plot customization."""
 

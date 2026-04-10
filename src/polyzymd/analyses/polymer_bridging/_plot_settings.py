@@ -1,17 +1,10 @@
-"""Polymer bridging plot settings registration.
-
-Registers ``PolymerBridgingPlotSettings`` with the global
-``PlotSettingsRegistry`` under the key ``"polymer_bridging"``. This makes
-all polymer bridging plot toggles and figure sizes available under
-``plot_settings.polymer_bridging`` in ``comparison.yaml``.
-"""
+"""Polymer bridging plot settings."""
 
 from __future__ import annotations
 
-from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
+from polyzymd.analyses.base import BasePlotSettings
 
 
-@PlotSettingsRegistry.register("polymer_bridging")
 class PolymerBridgingPlotSettings(BasePlotSettings):
     """Plot customization for oligomer bridging analysis.
 

@@ -37,16 +37,17 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-import polyzymd.analyses.contacts._plot_settings as _plot_settings  # register plot settings  # noqa: F401
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
+    BasePlotSettings,
     ComparisonContext,
     Condition,
     PlotContext,
     ReplicateContext,
 )
 from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
+from polyzymd.analyses.contacts._plot_settings import ContactsPlotSettings
 from polyzymd.analyses.contacts._plotters import (
     _plot_binding_preference_bars,
     _plot_binding_preference_heatmap,
@@ -613,6 +614,7 @@ class ContactsAnalysis(Analysis):
     name: ClassVar[str] = "contacts"
     execution_cost_hint: ClassVar[str] = "high"
     Settings: ClassVar[type] = ContactsSettings
+    PlotSettingsModel: ClassVar[type[BasePlotSettings]] = ContactsPlotSettings
     AggregatedResultClass: ClassVar[type] = AggregatedContactResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()

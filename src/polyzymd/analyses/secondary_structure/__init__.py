@@ -18,14 +18,15 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 import numpy as np
 from pydantic import BaseModel, Field
 
-import polyzymd.analyses.secondary_structure._plot_settings as _plot_settings  # register plot settings  # noqa: F401
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
+    BasePlotSettings,
     MetricValue,
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.secondary_structure._plot_settings import SSPlotSettings
 from polyzymd.analyses.secondary_structure._plotters import (
     _plot_ss_content_bars,
     _plot_ss_individual_bars,
@@ -103,6 +104,7 @@ class SecondaryStructureAnalysis(Analysis):
 
     name: ClassVar[str] = "secondary_structure"
     Settings: ClassVar[type] = SecondaryStructureSettings
+    PlotSettingsModel: ClassVar[type[BasePlotSettings]] = SSPlotSettings
     AggregatedResultClass: ClassVar[type] = SecondaryStructureAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ("ss",)
     dependencies: ClassVar[tuple[str, ...]] = ()

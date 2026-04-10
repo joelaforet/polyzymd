@@ -1,13 +1,12 @@
-"""RMSF plot settings — registered with PlotSettingsRegistry at import time."""
+"""RMSF plot settings."""
 
 from __future__ import annotations
 
 from pydantic import Field
 
-from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
+from polyzymd.analyses.base import BasePlotSettings
 
 
-@PlotSettingsRegistry.register("rmsf")
 class RMSFPlotSettings(BasePlotSettings):
     """RMSF-specific plot customization.
 

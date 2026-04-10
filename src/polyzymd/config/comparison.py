@@ -9,8 +9,8 @@ from typing import Any, ClassVar
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from polyzymd.analyses.base import BasePlotSettings
 from polyzymd.analyses.shared.defaults import AnalysisDefaults
-from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
 from polyzymd.core.branding import prepend_file_header
 
 logger = logging.getLogger(__name__)
@@ -134,9 +134,9 @@ class PluginSettingsContainer(BaseModel):
 
 # Per-analysis plot settings classes (RMSFPlotSettings, TriadPlotSettings, etc.)
 # live in their respective plugin packages at analyses/<name>/_plot_settings.py.
-# They register with PlotSettingsRegistry via decorator at import time.
-# PlotSettings.__init__ calls PlotSettingsRegistry.ensure_discovered() to
-# guarantee registrations are active before parsing YAML keys.
+# Each plugin exposes its plot settings model via
+# Analysis.PlotSettingsModel. PlotSettings.__init__ discovers plugins and
+# builds a mapping from analysis name to plot settings model.
 
 
 class PlotTheme(BaseModel):
@@ -307,10 +307,10 @@ class PlotSettings(BaseModel):
     """Global plot settings for comparison.yaml.
 
     Controls plot generation for all analyses. Per-analysis plot settings
-    are discovered via ``PlotSettingsRegistry`` — any key in the YAML that
-    matches a registered analysis type is parsed into the corresponding
-    settings class.  Unrecognised keys that are not global fields raise
-    ``ValueError``.
+    are discovered via analysis plugin metadata — any key in the YAML that
+    matches a discovered analysis name with a ``PlotSettingsModel`` is parsed
+    into the corresponding settings class. Unrecognized keys that are not
+    global fields raise ``ValueError``.
 
     Attributes
     ----------
@@ -330,7 +330,8 @@ class PlotSettings(BaseModel):
 
     Notes
     -----
-    Attribute access for any registered analysis type always succeeds:
+    Attribute access for any discovered analysis type with a
+    ``PlotSettingsModel`` always succeeds:
     if the user did not provide that section in YAML, a default-constructed
     settings instance is returned.  This means ``self.settings.rmsf.show_error``
     is always safe, even when the YAML has no ``rmsf:`` block.
@@ -350,7 +351,7 @@ class PlotSettings(BaseModel):
           rmsf:
             highlight_residues: [77, 133, 156]
 
-          triad:
+          catalytic_triad:
             generate_2d_kde: true
     """
 
@@ -373,7 +374,7 @@ class PlotSettings(BaseModel):
     theme: PlotTheme = Field(default_factory=PlotTheme)
 
     def __init__(self, **data: Any):
-        """Initialize with global fields and registry-discovered per-analysis settings.
+        """Initialize with global fields and plugin-discovered per-analysis settings.
 
         Theme resolution: the ``style`` field selects a preset (publication,
         presentation, or minimal) and then any user-supplied ``theme:``
@@ -384,13 +385,32 @@ class PlotSettings(BaseModel):
         Parameters
         ----------
         **data : Any
-            Plot settings from YAML.  Keys matching registered analysis
+            Plot settings from YAML.  Keys matching discovered analysis
             types are parsed into their settings classes; global keys are
             handled by Pydantic; unknown keys are logged and skipped.
         """
-        # Ensure all plugin packages have been imported so that their
-        # @PlotSettingsRegistry.register decorators have fired.
-        PlotSettingsRegistry.ensure_discovered()
+        from polyzymd.analyses.discovery import list_analyses
+
+        plugin_registry = list_analyses()
+        _plot_models: dict[str, type[BasePlotSettings]] = {}
+        for analysis_name, analysis_cls in plugin_registry.items():
+            if (
+                hasattr(analysis_cls, "PlotSettingsModel")
+                and analysis_cls.PlotSettingsModel is not None
+            ):
+                _plot_models[analysis_name] = analysis_cls.PlotSettingsModel
+
+        # Check for deprecated "triad" key and give helpful warning
+        if "triad" in data and "triad" not in _plot_models:
+            import warnings
+
+            warnings.warn(
+                "plot_settings key 'triad' has been renamed to 'catalytic_triad'. "
+                "Please update your comparison.yaml to use 'catalytic_triad' instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            # Do NOT silently remap — raise the normal unknown-key error below
 
         global_data: dict[str, Any] = {}
         per_analysis: dict[str, BasePlotSettings] = {}
@@ -398,8 +418,8 @@ class PlotSettings(BaseModel):
         for key, value in data.items():
             if key in PlotSettings._GLOBAL_FIELDS:
                 global_data[key] = value
-            elif PlotSettingsRegistry.is_registered(key):
-                settings_class = PlotSettingsRegistry.get(key)
+            elif key in _plot_models:
+                settings_class = _plot_models[key]
                 if isinstance(value, dict):
                     per_analysis[key] = settings_class(**value)
                 elif isinstance(value, BasePlotSettings):
@@ -413,7 +433,7 @@ class PlotSettings(BaseModel):
                 raise ValueError(
                     f"Unknown plot settings key '{key}'. "
                     f"Expected a global field ({sorted(PlotSettings._GLOBAL_FIELDS)}) "
-                    f"or a registered analysis type."
+                    f"or a discovered analysis type with PlotSettingsModel."
                 )
 
         # ── Resolve theme from style preset + user overrides ──
@@ -442,7 +462,7 @@ class PlotSettings(BaseModel):
         super().__init__(**global_data, **per_analysis)
 
     def __getattr__(self, name: str) -> Any:
-        """Fall back to default-constructed settings for registered types.
+        """Fall back to default-constructed settings for discovered types.
 
         This ensures ``self.settings.rmsf.show_error`` works even when
         the user omitted the ``rmsf:`` block from their YAML.
@@ -455,19 +475,26 @@ class PlotSettings(BaseModel):
         Returns
         -------
         BasePlotSettings
-            Default-constructed settings if *name* is a registered type.
+            Default-constructed settings if *name* is a discovered type.
 
         Raises
         ------
         AttributeError
-            If *name* is not a registered plot settings type.
+            If *name* is not a discovered plot settings type.
         """
-        # Ensure plugin packages are imported so their registrations are active.
-        PlotSettingsRegistry.ensure_discovered()
+        from polyzymd.analyses.discovery import get_analysis
 
-        if PlotSettingsRegistry.is_registered(name):
-            settings_class = PlotSettingsRegistry.get(name)
-            return settings_class()
+        try:
+            analysis_cls = get_analysis(name)
+        except KeyError as exc:
+            raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'") from exc
+
+        if (
+            hasattr(analysis_cls, "PlotSettingsModel")
+            and analysis_cls.PlotSettingsModel is not None
+        ):
+            return analysis_cls.PlotSettingsModel()
+
         raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
 
     @field_validator("output_dir", mode="before")
@@ -1028,7 +1055,7 @@ plot_settings:
   #   figsize_profile: [14, 4]     # per-residue profile figure size
   #   figsize_comparison: [8, 6]   # bar comparison figure size
 
-  # triad:
+  # catalytic_triad:
   #   generate_kde_panel: true     # multi-row KDE panel
   #   generate_bars: true          # threshold bar chart
   #   generate_2d_kde: false       # 2D joint KDE (specialized)

@@ -721,7 +721,7 @@ def plot_triad_kde_panel_from_data(
     """
     from polyzymd.analyses.shared.plotting import get_output_path, save_figure
 
-    if not plot_settings.triad.generate_kde_panel:
+    if not plot_settings.catalytic_triad.generate_kde_panel:
         return []
 
     # Pool distances across replicates for each condition
@@ -739,10 +739,10 @@ def plot_triad_kde_panel_from_data(
         pair_labels=pair_labels,
         threshold=threshold,
         color_palette=plot_settings.color_palette,
-        kde_fill_alpha=plot_settings.triad.kde_fill_alpha,
-        threshold_line_color=plot_settings.triad.threshold_line_color,
-        xlim=plot_settings.triad.kde_xlim,
-        figsize=plot_settings.triad.figsize_kde_panel,
+        kde_fill_alpha=plot_settings.catalytic_triad.kde_fill_alpha,
+        threshold_line_color=plot_settings.catalytic_triad.threshold_line_color,
+        xlim=plot_settings.catalytic_triad.kde_xlim,
+        figsize=plot_settings.catalytic_triad.figsize_kde_panel,
         dpi=plot_settings.dpi,
     )
 
@@ -778,7 +778,7 @@ def plot_triad_threshold_bars_from_data(
     """
     from polyzymd.analyses.shared.plotting import get_output_path, save_figure
 
-    if not plot_settings.triad.generate_bars:
+    if not plot_settings.catalytic_triad.generate_bars:
         return []
 
     # Load aggregated results for each condition
@@ -806,7 +806,7 @@ def plot_triad_threshold_bars_from_data(
         results=valid_results,
         labels=valid_labels,
         color_palette=plot_settings.color_palette,
-        figsize=plot_settings.triad.figsize_bars,
+        figsize=plot_settings.catalytic_triad.figsize_bars,
         show_simultaneous=True,
         dpi=plot_settings.dpi,
     )

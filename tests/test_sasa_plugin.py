@@ -32,7 +32,6 @@ from polyzymd.analyses.sasa._results import (
     SASARunAggregatedResult,
     SASARunResult,
 )
-from polyzymd.compare.registries import PlotSettingsRegistry
 from tests._support.analysis_testkit import (
     make_aggregate_context,
     make_comparison_context,
@@ -720,10 +719,12 @@ def test_plot_loader_fallback_tie_breaks_by_filename(tmp_path: Path) -> None:
     assert payloads[0]["source"] == "bbb"
 
 
-def test_plot_settings_registered() -> None:
-    """SASA plot settings should be registered in registry."""
-    assert PlotSettingsRegistry.is_registered("sasa")
-    assert PlotSettingsRegistry.get("sasa") is SASAPlotSettings
+def test_sasa_plot_settings_model_attribute() -> None:
+    """SASA analysis should expose its plot settings model."""
+    from polyzymd.analyses.discovery import get_analysis
+
+    analysis_cls = get_analysis("sasa")
+    assert analysis_cls.PlotSettingsModel is SASAPlotSettings
 
 
 def test_comparison_result_models() -> None:

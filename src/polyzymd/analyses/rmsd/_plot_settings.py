@@ -1,11 +1,10 @@
-"""RMSD plot settings — registered with PlotSettingsRegistry at import time."""
+"""RMSD plot settings."""
 
 from __future__ import annotations
 
-from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
+from polyzymd.analyses.base import BasePlotSettings
 
 
-@PlotSettingsRegistry.register("rmsd")
 class RMSDPlotSettings(BasePlotSettings):
     """RMSD analysis plot customization.
 

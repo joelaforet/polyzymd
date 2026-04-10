@@ -7,9 +7,9 @@ Submodules
 config
     ``ComparisonConfig``, ``ConditionConfig``, ``PlotSettings`` —
     YAML-driven comparison setup and plot configuration.
-registries
-    ``PlotSettingsRegistry``, ``BasePlotSettings`` — registry pattern
-    for per-analysis plot settings (classes live in plugin packages).
+plot settings
+    Per-analysis plot settings are owned by each analysis plugin via
+    ``Analysis.PlotSettingsModel`` and discovered through ``analyses.discovery``.
 io
     Path resolution (``io.paths``) and result loading (``io.results``).
 cli

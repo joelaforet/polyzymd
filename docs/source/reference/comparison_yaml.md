@@ -375,11 +375,7 @@ level as `style`, `dpi`, etc.
 | `figsize_profile` | `[14, 4]` | Per-residue profile figure size |
 | `figsize_comparison` | `[8, 6]` | Bar comparison figure size |
 
-**`plot_settings.triad`:**
-
-```{note}
-The key is `triad`, not `catalytic_triad`.
-```
+**`plot_settings.catalytic_triad`:**
 
 | Field | Default | Description |
 |-------|---------|-------------|

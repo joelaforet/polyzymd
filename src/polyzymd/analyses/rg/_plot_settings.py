@@ -1,11 +1,10 @@
-"""Rg plot settings — registered with PlotSettingsRegistry at import time."""
+"""Rg plot settings."""
 
 from __future__ import annotations
 
-from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
+from polyzymd.analyses.base import BasePlotSettings
 
 
-@PlotSettingsRegistry.register("rg")
 class RgPlotSettings(BasePlotSettings):
     """Rg analysis plot customization.
 

@@ -1,11 +1,10 @@
-"""Distances plot settings — registered with PlotSettingsRegistry at import time."""
+"""Distances plot settings."""
 
 from __future__ import annotations
 
-from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
+from polyzymd.analyses.base import BasePlotSettings
 
 
-@PlotSettingsRegistry.register("distances")
 class DistancesPlotSettings(BasePlotSettings):
     """Distance analysis plot customization.
 

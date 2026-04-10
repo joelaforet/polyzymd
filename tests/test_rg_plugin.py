@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from polyzymd.analyses.base import Condition
+from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.rg import RgAnalysis, RgRunSettings, RgSettings
 from polyzymd.analyses.rg._comparison_results import (
     RgComparisonResult,
@@ -27,7 +28,6 @@ from polyzymd.analyses.rg._results import (
     RgRunAggregatedResult,
     RgRunResult,
 )
-from polyzymd.compare.registries import PlotSettingsRegistry
 from tests._support.analysis_testkit import (
     FakeUniverse,
     make_aggregate_context,
@@ -486,10 +486,10 @@ def test_format_json() -> None:
     assert "conditions" in parsed
 
 
-def test_rg_plot_settings_registered() -> None:
-    """Rg plot settings should be registered in the plot settings registry."""
-    assert PlotSettingsRegistry.is_registered("rg")
-    assert PlotSettingsRegistry.get("rg") is RgPlotSettings
+def test_rg_plot_settings_model_attribute() -> None:
+    """Rg analysis should expose its plot settings model attribute."""
+    cls = get_analysis("rg")
+    assert cls.PlotSettingsModel is RgPlotSettings
 
 
 def test_rg_plot_settings_defaults() -> None:

@@ -20,8 +20,8 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   `compare.io`, `compare.core.base`).  No external downstream consumers exist.
 - **Three dead registries removed.**  `AnalyzerRegistry`,
   `AnalysisSettingsRegistry`, and `ComparisonSettingsRegistry` (plus all 16
-  `@register` decorators) have been deleted from `compare/registries.py`.
-  `PlotSettingsRegistry` is retained (4 active production consumers).
+  `@register` decorators) were deleted from `compare/registries.py` during
+  the initial OCP refactor.
 - **`compare/plotters/` directory removed.**  All per-analysis plotting code has
   been inlined into each plugin's package.  `compare/plotter.py` (plot-all
   orchestrator) has been rewritten to delegate to plugins.

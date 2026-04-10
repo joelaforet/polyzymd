@@ -14,14 +14,15 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Sequence
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-import polyzymd.analyses.rg._plot_settings as _plot_settings  # noqa: F401
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
+    BasePlotSettings,
     ComparisonContext,
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.rg._plot_settings import RgPlotSettings
 from polyzymd.analyses.rg._results import RgAggregatedResult
 from polyzymd.analyses.shared.config_hash import compute_config_hash
 from polyzymd.analyses.shared.loader import (
@@ -138,6 +139,7 @@ class RgAnalysis(Analysis):
     name: ClassVar[str] = "rg"
     min_replicates: ClassVar[int] = 1
     Settings: ClassVar[type] = RgSettings
+    PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RgPlotSettings
     AggregatedResultClass: ClassVar[type] = RgAggregatedResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()

@@ -353,11 +353,8 @@ def _load_condition_result_payloads(condition_dir: Path) -> list[dict]:
 
 def _get_plot_settings(ctx: PlotContext) -> SASAPlotSettings:
     """Resolve SASA-specific plot settings from the global plot settings."""
-    from polyzymd.compare.registries import PlotSettingsRegistry
-
-    if PlotSettingsRegistry.is_registered("sasa"):
-        settings_class = PlotSettingsRegistry.get("sasa")
-        settings = getattr(ctx.plot_settings, "sasa", settings_class())
+    settings = getattr(ctx.plot_settings, "sasa", None)
+    if settings is not None:
         return cast(SASAPlotSettings, settings)
 
     return SASAPlotSettings()

@@ -1,11 +1,10 @@
-"""Binding free energy plot settings — registered with PlotSettingsRegistry at import time."""
+"""Binding free energy plot settings."""
 
 from __future__ import annotations
 
-from polyzymd.compare.registries import BasePlotSettings, PlotSettingsRegistry
+from polyzymd.analyses.base import BasePlotSettings
 
 
-@PlotSettingsRegistry.register("binding_free_energy")
 class BFEPlotSettings(BasePlotSettings):
     """Binding free energy plot customization.
 

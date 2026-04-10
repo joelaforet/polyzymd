@@ -58,6 +58,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger("polyzymd.analyses")
 
 
+class BasePlotSettings(BaseModel):
+    """Base class for per-analysis plot settings.
+
+    Each analysis plugin that supports plot customization should subclass
+    this in its ``_plot_settings.py`` module and set
+    ``PlotSettingsModel = MyPlotSettings`` on its ``Analysis`` subclass.
+
+    The class is intentionally minimal — it exists only so the framework
+    can enforce a common type for all per-analysis plot settings.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Context objects — lightweight carriers for framework-provided data
 # ---------------------------------------------------------------------------
@@ -705,6 +717,11 @@ class Analysis(ABC):
             Unique identifier used in config files and CLI (e.g. ``"rmsf"``).
         Settings : type[BaseModel]
             Pydantic model for this analysis's settings.
+        PlotSettingsModel : type[BasePlotSettings] | None
+            Optional per-analysis plot settings model. When set, the
+            comparison configuration loader parses ``plot_settings.<name>``
+            using this model and provides default-constructed values on
+            attribute access when omitted in YAML. Defaults to ``None``.
         AggregatedResultClass : type[BaseModel] | None
             Optional Pydantic model class for aggregated results.  When set,
             the default :meth:`_deserialize_result` uses this class's
@@ -799,6 +816,7 @@ class Analysis(ABC):
     # --- Class variables (subclasses MUST set name and Settings) ---
     name: ClassVar[str]
     Settings: ClassVar[type]  # type[BaseModel]
+    PlotSettingsModel: ClassVar[type[BasePlotSettings] | None] = None
     AggregatedResultClass: ClassVar[type | None] = None
     ReplicateResultClass: ClassVar[type | None] = None
     # UX-only hint for runtime messaging (warnings/HPC suggestions)

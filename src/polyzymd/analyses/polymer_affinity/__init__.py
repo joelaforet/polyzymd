@@ -54,14 +54,15 @@ from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
 
-import polyzymd.analyses.polymer_affinity._plot_settings as _plot_settings  # register plot settings  # noqa: F401
 from polyzymd.analyses.base import (
     Analysis,
+    BasePlotSettings,
     ComparisonContext,
     Condition,
     MetricValue,
     PlotContext,
 )
+from polyzymd.analyses.polymer_affinity._plot_settings import AffinityPlotSettings
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
@@ -182,6 +183,7 @@ class PolymerAffinityAnalysis(Analysis):
     name: ClassVar[str] = "polymer_affinity"
     execution_cost_hint: ClassVar[str] = "high"
     Settings: ClassVar[type] = PolymerAffinitySettings
+    PlotSettingsModel: ClassVar[type[BasePlotSettings]] = AffinityPlotSettings
     aliases: ClassVar[tuple[str, ...]] = ("pa",)
     dependencies: ClassVar[tuple[str, ...]] = ("contacts",)
     min_replicates: ClassVar[int] = 1
