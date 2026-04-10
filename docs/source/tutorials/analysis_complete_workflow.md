@@ -72,7 +72,7 @@ Start in the control condition:
 
 ```bash
 cd my_enzyme_study
-polyzymd compare init noPoly_enzyme_DMSO
+polyzymd compare init -n noPoly_enzyme_DMSO
 cd noPoly_enzyme_DMSO
 ```
 

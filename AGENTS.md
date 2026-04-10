@@ -65,7 +65,7 @@ src/polyzymd/
 | **Shared compute** | `shared/binding_preference.py`, `shared/surface_exposure.py` | Cross-plugin compute (used by contacts, BFE, polymer_affinity) |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Plugin ABC, auto-discovery, lifecycle runner, default comparison utilities |
 
-New analysis types are added as **packages in `analyses/<name>/`**. All 8
+New analysis types are added as **packages in `analyses/<name>/`**. All 13
 existing plugins are packages (no single-file plugins exist). Established
 plugins extract plotting into `_plotters.py` modules; new plugins can keep
 plotting inline in `plot()` or extract it as complexity grows.
@@ -93,7 +93,7 @@ in `src/polyzymd/analyses/<name>/` and subclass `Analysis`:
 | Shared utilities | `analyses/shared/` | `TrajectoryLoader`, alignment, statistics, autocorrelation |
 | Simplest example | `analyses/catalytic_triad/` | Simplest default-compare lifecycle (but has substantial plotting code) |
 | Stats utilities | `analyses/stats.py` | `default_scalar_comparison()`, `format_scalar_comparison()` |
-| Contributor tutorial | `docs/source/tutorials/extending_analyses.md` | Step-by-step guide with test examples |
+| Contributor tutorial | `docs/source/contributor_guide/extending_analyses.md` | Step-by-step guide with test examples |
 
 Key rules:
 
@@ -163,7 +163,7 @@ def compute_replicate(self, ctx, replicate):
 
 ### When Adding New Features
 
-1. **Read the tutorial**: `docs/source/tutorials/extending_analyses.md`
+1. **Read the tutorial**: `docs/source/contributor_guide/extending_analyses.md`
 2. **Read `analyses/base.py`** — the class docstring defines the full contract
 3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
 4. **Study a matching example**: scaffold output for the simplest lifecycle, `rmsf/` for default compare with plots, `contacts/` for custom compare

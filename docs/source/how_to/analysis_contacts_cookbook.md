@@ -31,7 +31,12 @@ approach that fits your workflow:
 
 `````{tab-set}
 
-````{tab-item} analysis.yaml (per-simulation)
+````{tab-item} analysis.yaml (legacy)
+```{deprecated} v1.3.0
+The `analysis.yaml` per-simulation format is legacy. Use `comparison.yaml`
+with `polyzymd compare` instead — it handles single-condition analysis too.
+```
+
 Configure contacts as part of a simulation's analysis suite. Place `analysis.yaml` 
 in the same directory as your `config.yaml`.
 
@@ -54,7 +59,7 @@ contacts:
 
 **Run with:**
 ```bash
-polyzymd compare init contacts_study
+polyzymd compare init -n contacts_study
 # Edit comparison.yaml with your condition(s) and plugins.contacts
 polyzymd compare run contacts
 ```
@@ -279,7 +284,11 @@ the binding surface characteristics.
 
 `````{tab-set}
 
-````{tab-item} YAML
+````{tab-item} YAML (legacy analysis.yaml)
+```{deprecated} v1.3.0
+Use `comparison.yaml` with `plugins.contacts` instead.
+```
+
 Configure `analysis.yaml` with AA class grouping:
 
 ```yaml
@@ -396,7 +405,11 @@ the protein compared to PEG-like polymers?
 
 `````{tab-set}
 
-````{tab-item} YAML
+````{tab-item} YAML (legacy analysis.yaml)
+```{deprecated} v1.3.0
+Use `comparison.yaml` with `plugins.contacts` instead.
+```
+
 Enable residence time computation in `analysis.yaml`:
 
 ```yaml
@@ -696,7 +709,11 @@ result = analyzer.run()
 Select all protein residues EXCEPT those near the active site:
 
 `````{tab-set}
-````{tab-item} YAML (Recommended)
+````{tab-item} YAML (legacy analysis.yaml)
+```{deprecated} v1.3.0
+Use `comparison.yaml` with `plugins.contacts` instead.
+```
+
 For exclusion-based selections, use MDAnalysis `not` syntax directly:
 
 ```yaml

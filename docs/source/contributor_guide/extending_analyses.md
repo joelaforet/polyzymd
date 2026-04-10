@@ -470,8 +470,8 @@ or discover paths themselves:
 |---------|-----------|----------------|
 | `ReplicateContext` | `compute_replicate()` | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute`, `.equilibration`, `.result_path` |
 | `AggregateContext` | `aggregate()` | `.condition`, `.replicates`, `.output_dir`, `.settings`, `.equilibration`, `.result_path` |
-| `ComparisonContext` | `compare()` | `.conditions`, `.analysis_dirs`, `.results_dir`, `.effective_control`, `.settings`, `.recompute` |
-| `PlotContext` | `plot()` | `.conditions`, `.analysis_dirs`, `.output_dir`, `.settings`, `.plot_settings` |
+| `ComparisonContext` | `compare()` | `.name`, `.conditions`, `.analysis_dirs`, `.results_dir`, `.effective_control`, `.control_label`, `.settings`, `.equilibration`, `.recompute`, `.fdr_alpha`, `.result_path`, `.aggregated_results` |
+| `PlotContext` | `plot()` | `.conditions`, `.analysis_dirs`, `.output_dir`, `.results_dir`, `.settings`, `.plot_settings`, `.comparison_path`, `.control_label` |
 
 (plotcontext-plot-settings)=
 ## `PlotContext.plot_settings`
@@ -997,8 +997,8 @@ def plot(self, ctx: PlotContext) -> list[Path]:
 functions or `__init__.py` exceeds ~500 lines. For simple plugins (like
 `catalytic_triad/`), keeping plotting inline is fine.
 
-**All 5 established plugins have `_plotters.py`:** rmsf, secondary_structure,
-distances, contacts, catalytic_triad.
+**All 6 established plugins have `_plotters.py`:** rmsf, secondary_structure,
+distances, contacts, catalytic_triad, hydrogen_bonds.
 
 ## Anti-Patterns to Avoid
 

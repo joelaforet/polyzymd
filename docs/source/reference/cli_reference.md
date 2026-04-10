@@ -641,10 +641,13 @@ polyzymd compare COMMAND [OPTIONS]
 
 Commands:
   init      Initialize a new comparison project
+  validate  Validate comparison configuration
   run       Run a comparison by analysis type
   run-all   Run all enabled comparisons
-  validate  Validate comparison configuration
   plot-all  Generate comparison plots from a workspace
+  submit    Submit analysis as SLURM job DAG (HPC)
+  status    Show status of submitted SLURM analysis jobs
+  finalize  Run comparison + plotting from aggregated on-disk results
 ```
 
 ### polyzymd compare init
@@ -652,12 +655,10 @@ Commands:
 Create a new comparison project with template configuration.
 
 ```bash
-polyzymd compare init NAME [OPTIONS]
-
-Arguments:
-  NAME                   Project name (creates directory)
+polyzymd compare init -n NAME [OPTIONS]
 
 Options:
+  -n, --name TEXT       Project name (creates directory) [required]
   --eq-time TEXT         Default equilibration time [default: 10ns]
   -o, --output-dir PATH  Parent directory [default: current]
 ```
@@ -665,52 +666,47 @@ Options:
 #### Example
 
 ```bash
-polyzymd compare init polymer_study
+polyzymd compare init -n polymer_study
 cd polymer_study
 # Edit comparison.yaml to add your conditions
 ```
 
-### polyzymd compare run rmsf
+### polyzymd compare run
 
-Run statistical comparison of RMSF across conditions.
+Run a single analysis comparison by type. This is a generic command that works
+with any discovered analysis plugin.
 
 ```bash
-polyzymd compare run rmsf [OPTIONS]
+polyzymd compare run COMPARISON_TYPE [OPTIONS]
+
+Arguments:
+  COMPARISON_TYPE        Analysis plugin name (e.g. rmsf, contacts, distances)
+
+Options:
+  -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
+  --eq-time TEXT          Override equilibration time (e.g. '10ns', '5000ps')
+  --recompute            Force recompute even if cached results exist
+  --format TEXT           Output format: table, markdown, json [default: table]
+  -o, --output PATH      Save formatted output to file
+  -q, --quiet            Suppress INFO messages
+  --debug                Enable DEBUG logging
+  --list                 List available comparison types and exit
 ```
-
-**Requires** a `plugins.rmsf` section in `comparison.yaml`.
-
-#### Options
-
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--file` | `-f` | comparison.yaml | Path to comparison config file |
-| `--eq-time` | - | from config | Override equilibration time |
-| `--override` | - | false | Enable CLI overrides for RMSF settings |
-| `--selection` | - | from config | Override atom selection (requires --override) |
-| `--reference-mode` | - | from config | Override reference mode (requires --override) |
-| `--reference-frame` | - | from config | Override reference frame (requires --override) |
-| `--reference-file` | - | from config | Override external PDB path (requires --override) |
-| `--recompute` | - | false | Force recompute RMSF |
-| `--format` | - | table | Output format: table, markdown, json |
-| `--output` | `-o` | - | Save formatted output to file |
-| `--quiet` | `-q` | false | Suppress INFO messages |
-| `--debug` | - | false | Enable DEBUG logging |
 
 #### Example
 
 ```bash
-# Run comparison with default settings (uses plugins.rmsf from YAML)
+# Run RMSF comparison (uses plugins.rmsf from comparison.yaml)
 polyzymd compare run rmsf
 
 # Override equilibration time
 polyzymd compare run rmsf --eq-time 20ns
 
-# Override RMSF settings (requires --override flag)
-polyzymd compare run rmsf --selection "protein and name CA CB"
+# Run contacts comparison with markdown output
+polyzymd compare run contacts --format markdown -o report.md
 
-# Output as markdown
-polyzymd compare run rmsf --format markdown -o report.md
+# List all available analysis types
+polyzymd compare run --list
 ```
 
 ### polyzymd compare validate
@@ -729,7 +725,7 @@ Options:
 
 - YAML syntax and structure
 - Required fields present
-- At least 2 conditions defined
+- At least 1 condition defined
 - Condition labels are unique
 - Control label matches a condition (if specified)
 - Config files exist for each condition
@@ -797,7 +793,6 @@ Options:
   -f, --file PATH                 Path to comparison.yaml [default: comparison.yaml]
   -o, --output-dir PATH           Override plot output directory
   -a, --analysis TEXT             Plot one analysis type only
-  -p, --plot-type TEXT            Plot one registered plot type only
   --list-available                List registered/available plots and exit
   -q, --quiet                     Suppress INFO messages
   --debug                         Enable DEBUG logging
@@ -816,6 +811,105 @@ polyzymd compare plot-all --list-available
 polyzymd compare plot-all -a rmsf
 ```
 
+### polyzymd compare submit
+
+Submit replicate-level SLURM analysis DAG for one plugin. Each replicate is
+computed as an independent SLURM job, followed by per-condition aggregation
+jobs and a final comparison + plotting job.
+
+```bash
+polyzymd compare submit ANALYSIS [OPTIONS]
+
+Arguments:
+  ANALYSIS               Analysis plugin name (e.g. rmsf, contacts)
+
+Options:
+  -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
+  --partition TEXT        SLURM partition [default: aa100]
+  --qos TEXT             SLURM QoS
+  --account TEXT         SLURM account/allocation
+  --pixi-path TEXT       Path to pixi executable [default: pixi]
+  --ntasks INT           SLURM ntasks [default: 1]
+  --cpus-per-task INT    SLURM cpus-per-task [default: 1]
+  --mem TEXT             SLURM memory request [default: 4G]
+  --time TEXT            SLURM walltime [default: 01:00:00]
+  --max-retries INT      Max retries for failed jobs [default: 3]
+  --mail-user TEXT       Email for failure notifications
+  --recompute            Force recomputation in workers
+  --allow-partial        Allow finalize when some conditions are missing results
+  --equilibration TEXT   Override equilibration time
+  --dry-run              Generate scripts without submitting jobs
+  --job-arrays           Submit one SLURM array job per condition
+```
+
+#### Example
+
+```bash
+# Submit RMSF analysis to SLURM
+polyzymd compare submit rmsf --partition gpu --account my_alloc
+
+# Dry run to inspect generated scripts
+polyzymd compare submit contacts --dry-run
+
+# Use job arrays for efficiency
+polyzymd compare submit rmsf --job-arrays --partition aa100
+```
+
+### polyzymd compare status
+
+Show the status of a submitted SLURM analysis DAG. Reports counts of pending,
+running, succeeded, and failed jobs.
+
+```bash
+polyzymd compare status ANALYSIS [OPTIONS]
+
+Arguments:
+  ANALYSIS               Analysis plugin name
+
+Options:
+  -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
+  --reconcile            Reconcile status files with sacct before reporting
+  --json                 Print machine-readable JSON status
+```
+
+#### Example
+
+```bash
+# Check status of RMSF SLURM jobs
+polyzymd compare status rmsf
+
+# Reconcile with SLURM scheduler and get JSON output
+polyzymd compare status rmsf --reconcile --json
+```
+
+### polyzymd compare finalize
+
+Run comparison and plotting from aggregated on-disk results. Use this after
+SLURM jobs complete, or to re-run comparison/plotting without recomputing
+per-replicate results.
+
+```bash
+polyzymd compare finalize ANALYSIS [OPTIONS]
+
+Arguments:
+  ANALYSIS               Analysis plugin name
+
+Options:
+  -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
+  --recompute            Retained for CLI compatibility (no effect)
+  --allow-partial        Allow finalize when some conditions are missing results
+```
+
+#### Example
+
+```bash
+# Finalize after SLURM jobs complete
+polyzymd compare finalize rmsf
+
+# Allow partial results (some conditions may have failed)
+polyzymd compare finalize contacts --allow-partial
+```
+
 ---
 
 ## Plotting comparisons (`polyzymd compare plot-all`)
@@ -830,7 +924,6 @@ Options:
   -f, --file PATH                 Path to comparison.yaml [default: comparison.yaml]
   -o, --output-dir PATH           Override plot output directory
   -a, --analysis TEXT             Plot one analysis type only
-  -p, --plot-type TEXT            Plot one registered plot type only
   --list-available                List registered/available plots and exit
   -q, --quiet                     Suppress INFO messages
   --debug                         Enable DEBUG logging

@@ -44,7 +44,7 @@ plugins:
 | `name` | string | **yes** | — | Human-readable project name |
 | `description` | string | no | `null` | Description of what is being compared |
 | `control` | string | no | `null` | Label of the control condition. Must match a `label` in `conditions`. Used for relative comparisons (e.g., Δ from control). |
-| `conditions` | list | **yes** | — | List of condition entries (min 2 required at runtime) |
+| `conditions` | list | **yes** | — | List of condition entries (min 1 required) |
 | `defaults` | mapping | no | see below | Default analysis parameters |
 | `plugins` | mapping | no | `{}` | Analysis plugin settings — **what** to compute |
 | `plot_settings` | mapping | no | see below | Plot customization — **how** to visualize |

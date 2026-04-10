@@ -235,11 +235,16 @@ to detect changes. **Known issue:** the hash mismatch warning currently prints
 | `rmsf` | Yes | `mean_rmsf` (lower = more stable) |
 | `catalytic_triad` | Yes | `mean_triad_proximity` (lower = closer) |
 | `secondary_structure` | Yes | `helix_fraction` (higher = more structured) |
+| `rmsd` | No (custom) | Per-run mean RMSD (lower = more stable) |
+| `rg` | No (custom) | Per-run mean Rg (lower = more compact) |
+| `sasa` | No (custom) | Solvent-accessible surface area metrics |
 | `distances` | No (custom) | Multiple distance metrics |
 | `contacts` | No (custom) | Coverage + contact fraction |
 | `exposure` | No (custom) | Exposure dynamics metrics |
+| `hydrogen_bonds` | No (custom) | H-bond occupancy + lifetime |
 | `binding_free_energy` | No (custom) | Per-contact ΔG_sel |
 | `polymer_affinity` | No (custom) | Total interaction score |
+| `polymer_bridging` | No (custom) | Bridging topology metrics |
 
 ## Issue #20 — Remaining TODOs
 

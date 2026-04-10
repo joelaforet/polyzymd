@@ -12,7 +12,7 @@ contact fractions with proper statistical treatment.
 
 ```bash
 # Initialize a comparison workspace
-polyzymd compare init contacts_study
+polyzymd compare init -n contacts_study
 cd contacts_study
 
 # Configure plugins.contacts in comparison.yaml, then run contacts
