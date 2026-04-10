@@ -412,11 +412,31 @@ Replicate SEM:  0.034 Å  ← This is the gold standard uncertainty
 - Stability question → `centroid` or `average`
 - Functional geometry question → `external` with crystal structure
 
+### 8. Treating Automated Convergence as Ground Truth
+
+**Symptom:** Trusting the `converged: true` flag without further inspection.
+
+**Cause:** The sliding-window heuristic is parameter-dependent and can
+miss slow drift, metastable trapping, or convergence issues in observables
+other than RMSD.
+
+**Solution:** Use convergence detection as one input among several. Always
+inspect the RMSD timeseries visually, run multiple independent replicates,
+and check convergence of other relevant observables (Rg, SASA, active site
+distances). See {doc}`/explanation/convergence_detection` for a full
+discussion of limitations.
+
 ## RMSD as an Equilibration Diagnostic
 
 RMSD is the standard diagnostic for determining when equilibration is
 complete. The principle is simple: when RMSD stops increasing and reaches
 a stable plateau, the system is equilibrated.
+
+As of v1.3.0, PolyzyMD also provides **automated convergence detection** — a
+sliding-window slope heuristic that quantifies whether the RMSD timeseries has
+plateaued. This runs automatically alongside every RMSD computation and reports
+convergence status in the result JSON. See
+{doc}`/explanation/convergence_detection` for the full conceptual discussion.
 
 ### Practical Workflow
 
@@ -442,6 +462,32 @@ equilibration, or the conditions may genuinely prevent equilibration (e.g.,
 protein unfolding). Consider extending the simulation or investigating the
 cause.
 ```
+
+### Automated Convergence Detection
+
+```{versionadded} 1.3.0
+```
+
+In addition to the manual workflow above, PolyzyMD automatically runs a
+sliding-window convergence diagnostic on every RMSD timeseries. The algorithm
+divides the timeseries into overlapping windows, computes the slope between
+successive window means, and declares convergence when the slope remains below
+a threshold for a sustained duration.
+
+The convergence result is stored in the per-replicate JSON (`converged`,
+`convergence_time_ns`, `convergence_message`) and aggregated across replicates
+(`n_converged_replicates`, `convergence_fraction`,
+`mean_convergence_time_ns`). Optional convergence diagnostic plots — showing
+the RMSD timeseries alongside the sliding slope trace — can be enabled with
+`show_convergence_plots: true` in `plot_settings.rmsd`.
+
+**This is a diagnostic tool, not a definitive convergence proof.** The
+heuristic can miss slow drift below the slope threshold, and convergence in
+RMSD does not guarantee convergence of other observables. Always use multiple
+replicates and visual inspection alongside automated diagnostics.
+
+For a full conceptual treatment — including the algorithm, parameters, tuning
+guidance, and limitations — see {doc}`/explanation/convergence_detection`.
 
 ## References
 
@@ -478,6 +524,7 @@ Analysis of how protein size affects expected RMSD values.
 ## See Also
 
 - [Quick Start Guide](../how_to/analysis_rmsd_quickstart.md) — Get results fast
+- [Convergence Detection](convergence_detection.md) — Conceptual guide to convergence: algorithm, parameters, and limitations
 - [Statistics Best Practices](analysis_statistics_best_practices.md) — Foundational statistics for MD
 - [RMSF Best Practices](analysis_rmsf_best_practices.md) — Per-residue fluctuation analysis
 - [Reference Structure Selection](analysis_reference_selection.md) — Choose alignment reference

@@ -13,6 +13,7 @@ to interpret outputs, and what assumptions or tradeoffs matter.
 
 - [Statistical Best Practices for Analysis](analysis_statistics_best_practices.md)
 - [RMSD Best Practices](analysis_rmsd_best_practices.md)
+- [Establishing Convergence in MD Simulations](convergence_detection.md) — Conceptual guide to convergence detection: what it means, how PolyzyMD's sliding-window heuristic works, and when to tune parameters.
 - [Rg Best Practices](analysis_rg_best_practices.md)
 - [RMSF Best Practices](analysis_rmsf_best_practices.md)
 - [RMSF Reference Selection](analysis_reference_selection.md)
@@ -43,6 +44,7 @@ Residue Assignment and Chain Conventions <residue_assignment>
 Colored Logging <colored_logging>
 Statistical Best Practices for Analysis <analysis_statistics_best_practices>
 RMSD Best Practices <analysis_rmsd_best_practices>
+Convergence Detection <convergence_detection>
 Rg Best Practices <analysis_rg_best_practices>
 RMSF Best Practices <analysis_rmsf_best_practices>
 RMSF Reference Selection <analysis_reference_selection>

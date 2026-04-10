@@ -55,6 +55,7 @@ The RMSD analysis module computes:
 | **Final RMSD** | Last-frame RMSD (convergence diagnostic) |
 | **Timeseries** | Full per-frame RMSD saved as NPZ sidecar |
 | **Multi-run** | Multiple named selections in a single analysis |
+| **Convergence Detection** | Sliding-window slope diagnostic; detects when RMSD has plateaued |
 
 ```{tip}
 **RMSD vs RMSF vs Distances — when to use which:**
@@ -271,6 +272,10 @@ All fields for `RMSDRunSettings`:
 | `reference_frame` | `int` | `0` | 0-indexed frame for `reference_mode: frame` |
 | `reference_file` | `str \| None` | `null` | Path to external PDB for `reference_mode: external` |
 | `centroid_selection` | `str \| None` | `null` | Selection for centroid finding; defaults to `alignment_selection` |
+| `convergence_window_size_ns` | `float` | `15.0` | Sliding window size for convergence detection (ns) |
+| `convergence_step_size_ns` | `float` | `5.0` | Step between successive windows (ns) |
+| `convergence_slope_threshold` | `float` | `0.0005` | Max absolute slope to qualify as "flat" (Å/ns) |
+| `convergence_sustained_for_ns` | `float` | `15.0` | Required sustained duration below threshold (ns) |
 
 Top-level `RMSDSettings` contains a single field:
 
@@ -344,7 +349,11 @@ Per-replicate result (`RMSDResult`):
             "n_frames_used": 9000,
             "npz_path": ".../rmsd_Protein Backbone_timeseries.npz",
             "time_unit": "ns",
-            "timestep_ps": 10.0
+            "timestep_ps": 10.0,
+            "converged": true,
+            "convergence_assessable": true,
+            "convergence_time_ns": 12.5,
+            "convergence_message": "Converged at 12.500 ns"
         }
     ]
 }
@@ -365,7 +374,11 @@ Aggregated result (`RMSDAggregatedResult`):
             "overall_median": 1.823,
             "per_replicate_means": [1.823, 1.891, 1.854],
             "per_replicate_stds": [0.312, 0.298, 0.324],
-            "per_replicate_medians": [1.791, 1.862, 1.816]
+            "per_replicate_medians": [1.791, 1.862, 1.816],
+            "n_converged_replicates": 3,
+            "convergence_fraction": 1.0,
+            "mean_convergence_time_ns": 13.2,
+            "median_convergence_time_ns": 12.5
         }
     ]
 }
@@ -410,6 +423,7 @@ The RMSD plugin generates figures through `polyzymd compare plot-all`:
 |-------------|-------------|
 | `rmsd_timeseries_<run>.png` | Mean RMSD vs time with SEM shading, one per run |
 | `rmsd_comparison_<run>.png` | Grouped bar chart of mean RMSD across conditions, one per run |
+| `rmsd_convergence_<condition>_<run>.png` | Dual-axis plot: RMSD timeseries with sliding-window slope and convergence marker (requires `show_convergence_plots: true`) |
 
 **Timeseries plot features:**
 - Mean RMSD curve per condition with SEM shading
@@ -426,7 +440,21 @@ plot_settings:
     show_per_replicate: false    # Overlay individual replicate traces
     figsize: [10, 6]             # Default figure size (bar charts)
     timeseries_figsize: [12, 5]  # Timeseries figure size (wider)
+    show_convergence_plots: false  # Generate per-replicate convergence diagnostics
+    convergence_figsize: [12, 5]   # Convergence panel figure size
 ```
+
+## Convergence Detection
+
+Convergence detection is always on — every RMSD run automatically applies a
+sliding-window slope heuristic to determine whether the RMSD timeseries has
+plateaued. This is a purely additive diagnostic: it does not affect ranking,
+statistical tests, or any other comparison output. Convergence results appear
+as additional fields in per-replicate and aggregated JSON files, and optional
+convergence plots can be enabled via `show_convergence_plots: true`.
+
+For a conceptual explanation of the algorithm, its parameters, and its
+limitations, see {doc}`/explanation/convergence_detection`.
 
 ## Common Options
 
