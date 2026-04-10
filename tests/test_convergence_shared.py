@@ -82,3 +82,42 @@ def test_find_convergence_time_edge_cases() -> None:
     single_result = find_convergence_time(single_time, single_rmsd)
     assert single_result.assessable is False
     assert single_result.converged is False
+
+
+def test_nan_in_values_raises() -> None:
+    """NaN in values should raise ValueError."""
+    time_ns = np.arange(0.0, 20.0, 1.0)
+    values = np.ones_like(time_ns)
+    values[3] = np.nan
+
+    with pytest.raises(ValueError, match="must contain only finite values"):
+        find_convergence_time(time_ns, values)
+
+
+def test_inf_in_values_raises() -> None:
+    """Inf in values should raise ValueError."""
+    time_ns = np.arange(0.0, 20.0, 1.0)
+    values = np.ones_like(time_ns)
+    values[5] = np.inf
+
+    with pytest.raises(ValueError, match="must contain only finite values"):
+        find_convergence_time(time_ns, values)
+
+
+def test_nan_in_time_raises() -> None:
+    """NaN in time_ns should raise ValueError."""
+    time_ns = np.arange(0.0, 20.0, 1.0)
+    time_ns[7] = np.nan
+    values = np.ones_like(time_ns)
+
+    with pytest.raises(ValueError, match="must contain only finite values"):
+        find_convergence_time(time_ns, values)
+
+
+def test_nan_parameter_raises() -> None:
+    """NaN scalar parameters should raise ValueError."""
+    time_ns = np.arange(0.0, 20.0, 1.0)
+    values = np.ones_like(time_ns)
+
+    with pytest.raises(ValueError, match="window_size_ns must be finite"):
+        find_convergence_time(time_ns, values, window_size_ns=np.nan)

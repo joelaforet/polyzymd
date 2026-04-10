@@ -6,6 +6,7 @@ collaborator notebook used for RMSD equilibration checks.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -105,6 +106,9 @@ def find_convergence_time(
 
     time_arr = np.asarray(time_ns, dtype=np.float64)
     value_arr = np.asarray(values, dtype=np.float64)
+
+    if not np.all(np.isfinite(time_arr)) or not np.all(np.isfinite(value_arr)):
+        raise ValueError("time_ns and values must contain only finite values (no NaN or inf)")
 
     if time_arr.ndim != 1 or value_arr.ndim != 1:
         raise ValueError("time_ns and values must be 1D arrays")
@@ -249,6 +253,16 @@ def _validate_parameters(
     sustained_for_ns : float
         Required sustained converged duration.
     """
+    scalar_params = {
+        "window_size_ns": window_size_ns,
+        "step_size_ns": step_size_ns,
+        "slope_threshold": slope_threshold,
+        "sustained_for_ns": sustained_for_ns,
+    }
+    for param_name, param in scalar_params.items():
+        if not math.isfinite(param):
+            raise ValueError(f"{param_name} must be finite, got {param}")
+
     if window_size_ns <= 0:
         raise ValueError("window_size_ns must be > 0")
     if step_size_ns <= 0:
