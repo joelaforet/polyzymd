@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from polyzymd.analyses.rmsd._comparison_results import RMSDComparisonResult
+from polyzymd.analyses.rmsd._comparison_results import RMSDComparisonResult, RMSDRunSummary
 from polyzymd.analyses.stats import format_pct
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,7 @@ def _format_rmsd_table(result: RMSDComparisonResult) -> str:
                 f"{condition.label:<18} {run_summary.mean_rmsd:<15.2f} "
                 f"{run_summary.sem_rmsd:<8.2f} {rank:<4}"
             )
+            lines.append(_format_convergence_line(run_summary))
 
         lines.append("")
         lines.extend(_format_pairwise_line(run_label, result))
@@ -118,6 +119,7 @@ def _format_rmsd_markdown(result: RMSDComparisonResult) -> str:
                 f"| {condition.label} | {run_summary.mean_rmsd:.2f} | "
                 f"{run_summary.sem_rmsd:.2f} | {rank} |"
             )
+            lines.append(f"  - {_format_convergence_line(run_summary)}")
 
         comparisons = result.get_comparisons_for_run(run_label)
         if comparisons:
@@ -175,3 +177,30 @@ def format_rmsd_comparison(result: RMSDComparisonResult, fmt: str = "table") -> 
 
     logger.error("Unknown RMSD format '%s'", fmt)
     raise ValueError(f"Unknown format: {fmt}. Use 'table', 'markdown', or 'json'.")
+
+
+def _format_convergence_line(run_summary: RMSDRunSummary) -> str:
+    """Build compact convergence text for one run summary.
+
+    Parameters
+    ----------
+    run_summary : RMSDRunSummary
+        Run summary containing convergence aggregate fields.
+
+    Returns
+    -------
+    str
+        One-line convergence summary.
+    """
+    median_time = run_summary.median_convergence_time_ns
+    if median_time is None:
+        median_text = "n/a"
+    else:
+        median_text = f"{median_time:.1f} ns"
+
+    return (
+        "Convergence: "
+        f"{run_summary.n_converged_replicates}/{len(run_summary.per_replicate_means)} "
+        f"replicates converged ({run_summary.n_assessable_replicates} assessable), "
+        f"median t_conv = {median_text}"
+    )

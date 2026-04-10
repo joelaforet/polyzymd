@@ -329,6 +329,26 @@ class RMSDAnalysis(Analysis):
             per_means = [entry.mean_rmsd for entry in run_entries]
             per_stds = [entry.std_rmsd for entry in run_entries]
             per_medians = [entry.median_rmsd for entry in run_entries]
+            per_convergence_times = [entry.convergence_time_ns for entry in run_entries]
+            per_assessable = [entry.convergence_assessable for entry in run_entries]
+
+            n_converged = sum(time is not None for time in per_convergence_times)
+            n_assessable = sum(per_assessable)
+            convergence_fraction = (
+                float(n_converged) / float(n_assessable) if n_assessable > 0 else 0.0
+            )
+            all_converged = n_assessable > 0 and n_converged == n_assessable
+            finite_convergence_times = [time for time in per_convergence_times if time is not None]
+            mean_convergence_time_ns = (
+                float(np.mean(np.asarray(finite_convergence_times, dtype=np.float64)))
+                if finite_convergence_times
+                else None
+            )
+            median_convergence_time_ns = (
+                float(np.median(np.asarray(finite_convergence_times, dtype=np.float64)))
+                if finite_convergence_times
+                else None
+            )
 
             mean_stats = compute_sem(per_means)
             overall_median = float(np.mean(np.asarray(per_medians, dtype=np.float64)))
@@ -353,6 +373,14 @@ class RMSDAnalysis(Analysis):
                     per_replicate_means=per_means,
                     per_replicate_stds=per_stds,
                     per_replicate_medians=per_medians,
+                    per_replicate_convergence_times_ns=per_convergence_times,
+                    per_replicate_convergence_assessable=per_assessable,
+                    n_converged_replicates=n_converged,
+                    n_assessable_replicates=n_assessable,
+                    convergence_fraction=convergence_fraction,
+                    all_converged=all_converged,
+                    mean_convergence_time_ns=mean_convergence_time_ns,
+                    median_convergence_time_ns=median_convergence_time_ns,
                 )
             )
 
@@ -427,6 +455,12 @@ class RMSDAnalysis(Analysis):
                     mean_rmsd=run_result.overall_mean,
                     sem_rmsd=run_result.overall_sem,
                     per_replicate_means=run_result.per_replicate_means,
+                    n_converged_replicates=run_result.n_converged_replicates,
+                    n_assessable_replicates=run_result.n_assessable_replicates,
+                    convergence_fraction=run_result.convergence_fraction,
+                    all_converged=run_result.all_converged,
+                    mean_convergence_time_ns=run_result.mean_convergence_time_ns,
+                    median_convergence_time_ns=run_result.median_convergence_time_ns,
                 )
                 for run_result in agg_result.run_results
             ]
@@ -538,6 +572,7 @@ class RMSDAnalysis(Analysis):
         try:
             from polyzymd.analyses.rmsd._plotters import (
                 plot_rmsd_comparison_bars,
+                plot_rmsd_convergence_diagnostics,
                 plot_rmsd_timeseries,
             )
         except ImportError as exc:
@@ -547,6 +582,7 @@ class RMSDAnalysis(Analysis):
         plots: list[Path] = []
         plots.extend(plot_rmsd_timeseries(ctx, comparison_result))
         plots.extend(plot_rmsd_comparison_bars(ctx, comparison_result))
+        plots.extend(plot_rmsd_convergence_diagnostics(ctx, comparison_result))
         return plots
 
     def format(self, result: Any, output_format: str = "text") -> str:
@@ -699,6 +735,15 @@ class RMSDAnalysis(Analysis):
                 dtype=np.float64,
             ),
             convergence_slope=np.asarray(convergence_result.slopes, dtype=np.float64),
+            convergence_converged=np.asarray(convergence_result.converged, dtype=np.bool_),
+            convergence_time_ns=np.asarray(
+                (
+                    np.nan
+                    if convergence_result.convergence_time_ns is None
+                    else convergence_result.convergence_time_ns
+                ),
+                dtype=np.float64,
+            ),
         )
 
         return RMSDRunResult(

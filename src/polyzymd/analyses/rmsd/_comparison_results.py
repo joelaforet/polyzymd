@@ -37,6 +37,18 @@ class RMSDRunSummary(BaseModel):
         SEM of RMSD across replicates.
     per_replicate_means : list[float]
         Mean RMSD from each replicate (for statistical tests).
+    n_converged_replicates : int
+        Number of replicates that met convergence criteria.
+    n_assessable_replicates : int
+        Number of replicates with sufficient data for convergence assessment.
+    convergence_fraction : float
+        Fraction of assessable replicates that converged.
+    all_converged : bool
+        True when all assessable replicates converged.
+    mean_convergence_time_ns : float | None
+        Mean convergence time across converged replicates.
+    median_convergence_time_ns : float | None
+        Median convergence time across converged replicates.
     """
 
     label: str
@@ -44,6 +56,12 @@ class RMSDRunSummary(BaseModel):
     mean_rmsd: float
     sem_rmsd: float
     per_replicate_means: list[float] = Field(default_factory=list)
+    n_converged_replicates: int = 0
+    n_assessable_replicates: int = 0
+    convergence_fraction: float = 0.0
+    all_converged: bool = False
+    mean_convergence_time_ns: float | None = None
+    median_convergence_time_ns: float | None = None
 
 
 class RMSDConditionSummary(BaseConditionSummary):
