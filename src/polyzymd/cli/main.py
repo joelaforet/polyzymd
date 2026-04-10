@@ -874,7 +874,7 @@ def run(
         colored_echo(f"Validation error: {e}", err=True, level=logging.ERROR)
         sys.exit(1)
 
-    except Exception as e:
+    except (RuntimeError, OSError) as e:
         colored_echo(f"Unexpected error: {e}", err=True, level=logging.ERROR)
         colored_echo(
             "This may be a bug. Re-run with --verbose for details.",
@@ -1254,7 +1254,7 @@ def submit(
             colored_echo("\nJob submission complete!", phase="workflow")
             colored_echo("Monitor with: squeue -u $USER", phase="workflow")
 
-    except Exception as e:
+    except (FileNotFoundError, ValueError, RuntimeError, OSError) as e:
         colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
         if LOGGER.level == logging.DEBUG:
             import traceback

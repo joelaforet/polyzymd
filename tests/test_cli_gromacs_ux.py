@@ -353,6 +353,88 @@ class TestBuildDryRunEndToEnd:
         message = f"{result.output}\n{stderr}".lower()
         assert "positive" in message or "must be" in message
 
+
+class TestCliExceptionHandlingNarrowing:
+    """Regression tests for narrowed run/submit exception handling."""
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.cli.main._run_openmm_impl")
+    def test_run_catches_runtime_error(
+        self,
+        mock_run_openmm,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """run should catch RuntimeError and exit cleanly."""
+        mock_from_yaml.return_value = _make_dry_run_config()
+        mock_run_openmm.side_effect = RuntimeError("boom")
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["run", "-c", str(config_path), "--engine", "openmm"],
+        )
+
+        assert result.exit_code != 0
+        assert "Unexpected error: boom" in result.output
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.cli.main._run_openmm_impl")
+    def test_run_does_not_catch_type_error(
+        self,
+        mock_run_openmm,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """run should not catch TypeError programmer errors."""
+        mock_from_yaml.return_value = _make_dry_run_config()
+        mock_run_openmm.side_effect = TypeError("programmer bug")
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        runner = CliRunner()
+        with pytest.raises(TypeError, match="programmer bug"):
+            runner.invoke(
+                cli,
+                ["run", "-c", str(config_path), "--engine", "openmm"],
+                catch_exceptions=False,
+            )
+
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_submit_catches_runtime_error(self, mock_submit_daisy_chain, tmp_path: Path) -> None:
+        """submit should catch RuntimeError and exit cleanly."""
+        mock_submit_daisy_chain.side_effect = RuntimeError("submission blew up")
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["submit", "-c", str(config_path)],
+        )
+
+        assert result.exit_code != 0
+        assert "Submission failed: submission blew up" in result.output
+
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_submit_does_not_catch_type_error(
+        self, mock_submit_daisy_chain, tmp_path: Path
+    ) -> None:
+        """submit should not catch TypeError programmer errors."""
+        mock_submit_daisy_chain.side_effect = TypeError("submit programmer bug")
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        runner = CliRunner()
+        with pytest.raises(TypeError, match="submit programmer bug"):
+            runner.invoke(
+                cli,
+                ["submit", "-c", str(config_path)],
+                catch_exceptions=False,
+            )
+
     def test_build_with_replicate_negative_fails(self, tmp_path: Path) -> None:
         """Negative replicate should fail with positive-integer guidance."""
         config_path = tmp_path / "fake.yaml"
