@@ -269,6 +269,8 @@ def build(
         - The .mdp file is a stub for single-point energy; modify for production
         - Topology is split into .itp files for cleaner multi-component systems
     """
+    from pydantic import ValidationError as PydanticValidationError
+
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
 
@@ -578,11 +580,32 @@ def build(
                     "Use 'polyzymd run --skip-build' to run without rebuilding.", phase="build"
                 )
 
-    except FileNotFoundError as e:
-        colored_echo(f"Error: {e}", err=True, level=logging.ERROR)
+    except PydanticValidationError as e:
+        colored_echo("Configuration error:", err=True, level=logging.ERROR)
+        for error in e.errors():
+            loc = " → ".join(str(x) for x in error["loc"])
+            colored_echo(f"  {loc}: {error['msg']}", err=True, level=logging.ERROR)
         sys.exit(1)
+
+    except FileNotFoundError as e:
+        colored_echo(f"File not found: {e}", err=True, level=logging.ERROR)
+        sys.exit(1)
+
+    except ValueError as e:
+        colored_echo(f"Validation error: {e}", err=True, level=logging.ERROR)
+        sys.exit(1)
+
+    except NotImplementedError as e:
+        colored_echo(f"Not yet supported: {e}", err=True, level=logging.ERROR)
+        sys.exit(1)
+
     except Exception as e:
-        colored_echo(f"Build failed: {e}", err=True, level=logging.ERROR)
+        colored_echo(f"Unexpected error: {e}", err=True, level=logging.ERROR)
+        colored_echo(
+            "This may be a bug. Re-run with --verbose for details.",
+            err=True,
+            level=logging.ERROR,
+        )
         if LOGGER.level == logging.DEBUG:
             import traceback
 
@@ -660,6 +683,8 @@ def run_gromacs(
         - Use --gmx-path to specify a custom GROMACS executable
         - Use --dry-run to export files without running the simulation
     """
+    from pydantic import ValidationError as PydanticValidationError
+
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
 
@@ -694,8 +719,28 @@ def run_gromacs(
         if len(replicate_list) > 1:
             colored_echo(f"\nAll {succeeded} replicate(s) completed successfully.", phase="export")
 
+    except PydanticValidationError as e:
+        colored_echo("Configuration error:", err=True, level=logging.ERROR)
+        for error in e.errors():
+            loc = " → ".join(str(x) for x in error["loc"])
+            colored_echo(f"  {loc}: {error['msg']}", err=True, level=logging.ERROR)
+        sys.exit(1)
+
+    except FileNotFoundError as e:
+        colored_echo(f"File not found: {e}", err=True, level=logging.ERROR)
+        sys.exit(1)
+
+    except ValueError as e:
+        colored_echo(f"Validation error: {e}", err=True, level=logging.ERROR)
+        sys.exit(1)
+
     except Exception as e:
-        colored_echo(f"Simulation failed: {e}", err=True, level=logging.ERROR)
+        colored_echo(f"Unexpected error: {e}", err=True, level=logging.ERROR)
+        colored_echo(
+            "This may be a bug. Re-run with --verbose for details.",
+            err=True,
+            level=logging.ERROR,
+        )
         if LOGGER.level == logging.DEBUG:
             import traceback
 
