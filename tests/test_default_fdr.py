@@ -8,7 +8,7 @@ import pytest
 
 from polyzymd.analyses.base import ComparisonResult, ConditionSummary, MetricValue, PairwiseResult
 from polyzymd.analyses.stats import format_scalar_comparison, pairwise_comparisons
-from polyzymd.compare.statistics import EffectSize, TTestResult
+from polyzymd.analyses.shared.inferential_statistics import EffectSize, TTestResult
 
 
 def _metric(mean: float, values: list[float]) -> MetricValue:
@@ -33,8 +33,11 @@ def test_pairwise_comparisons_applies_bh_and_sets_adjusted_significance(monkeypa
     def _fake_effect(_group1, _group2):
         return EffectSize(cohens_d=0.5, interpretation="medium", direction="higher")
 
-    monkeypatch.setattr("polyzymd.compare.statistics.independent_ttest", _fake_ttest)
-    monkeypatch.setattr("polyzymd.compare.statistics.cohens_d", _fake_effect)
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.inferential_statistics.independent_ttest",
+        _fake_ttest,
+    )
+    monkeypatch.setattr("polyzymd.analyses.shared.inferential_statistics.cohens_d", _fake_effect)
 
     metrics = {
         "A": _metric(1.0, [1.0, 1.1, 0.9]),

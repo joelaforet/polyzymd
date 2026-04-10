@@ -502,7 +502,7 @@ class SASAAnalysis(Analysis):
             SASARunPairwiseComparison,
             SASARunSummary,
         )
-        from polyzymd.compare.statistics import (
+        from polyzymd.analyses.shared.inferential_statistics import (
             cohens_d,
             independent_ttest,
             one_way_anova,

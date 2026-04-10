@@ -477,7 +477,7 @@ class RgAnalysis(Analysis):
             RgRunPairwiseComparison,
             RgRunSummary,
         )
-        from polyzymd.compare.statistics import (
+        from polyzymd.analyses.shared.inferential_statistics import (
             cohens_d,
             independent_ttest,
             one_way_anova,
@@ -911,8 +911,12 @@ class RgAnalysis(Analysis):
             Pairwise statistics and direction for this run.
         """
         from polyzymd.analyses.rg._comparison_results import RgRunPairwiseComparison
+        from polyzymd.analyses.shared.inferential_statistics import (
+            cohens_d,
+            independent_ttest,
+            percent_change,
+        )
         from polyzymd.analyses.stats import interpret_direction
-        from polyzymd.compare.statistics import cohens_d, independent_ttest, percent_change
 
         t_result = independent_ttest(run_a.per_replicate_means, run_b.per_replicate_means)
         d_result = cohens_d(run_a.per_replicate_means, run_b.per_replicate_means)

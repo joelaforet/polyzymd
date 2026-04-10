@@ -16,8 +16,8 @@ need.
 
 See Also
 --------
-polyzymd.compare.statistics : Lower-level statistical primitives (t-test,
-    Cohen's d, ANOVA) that this module wraps.
+polyzymd.analyses.shared.inferential_statistics : Lower-level statistical
+    primitives (t-test, Cohen's d, ANOVA) that this module wraps.
 """
 
 from __future__ import annotations
@@ -147,7 +147,7 @@ def pairwise_comparisons(
         The ``significant`` field is based on adjusted p-value when
         available, otherwise on raw p-value.
     """
-    from polyzymd.compare.statistics import (
+    from polyzymd.analyses.shared.inferential_statistics import (
         benjamini_hochberg,
         cohens_d,
         independent_ttest,
@@ -227,7 +227,7 @@ def anova_test(
     if len(metrics_by_condition) < 3:
         return None
 
-    from polyzymd.compare.statistics import one_way_anova
+    from polyzymd.analyses.shared.inferential_statistics import one_way_anova
 
     groups = [mv.replicate_values for mv in metrics_by_condition.values()]
     result = one_way_anova(*groups)
@@ -650,7 +650,7 @@ def _format_scalar_text(
             lines.append(f"Best: {top_label} ({metric_label} = {top_val:.4f}{unit_str})")
 
         if result.control_label and top_label != result.control_label:
-            from polyzymd.compare.statistics import percent_change
+            from polyzymd.analyses.shared.inferential_statistics import percent_change
 
             ctrl = _get_cond(result.control_label)
             ctrl_val = _get_mean(ctrl)
@@ -792,7 +792,7 @@ def _format_scalar_markdown(
                 f"1. **Best condition:** {top_label} ({metric_label} = {top_val:.4f}{unit_str})"
             )
         if result.control_label and top_label != result.control_label:
-            from polyzymd.compare.statistics import percent_change
+            from polyzymd.analyses.shared.inferential_statistics import percent_change
 
             ctrl = _get_cond(result.control_label)
             ctrl_val = _get_mean(ctrl)

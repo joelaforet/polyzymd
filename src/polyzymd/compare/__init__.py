@@ -7,9 +7,6 @@ Submodules
 config
     ``ComparisonConfig``, ``ConditionConfig``, ``PlotSettings`` —
     YAML-driven comparison setup and plot configuration.
-statistics
-    ``independent_ttest``, ``cohens_d``, ``one_way_anova``,
-    ``percent_change`` — statistical tests and effect sizes.
 registries
     ``PlotSettingsRegistry``, ``BasePlotSettings`` — registry pattern
     for per-analysis plot settings (classes live in plugin packages).
@@ -23,5 +20,4 @@ cli_utils
 All symbols are imported from their canonical submodule, e.g.::
 
     from polyzymd.compare.config import ComparisonConfig
-    from polyzymd.compare.statistics import cohens_d
 """

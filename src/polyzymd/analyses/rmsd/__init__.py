@@ -459,7 +459,7 @@ class RMSDAnalysis(Analysis):
             RMSDRunPairwiseComparison,
             RMSDRunSummary,
         )
-        from polyzymd.compare.statistics import (
+        from polyzymd.analyses.shared.inferential_statistics import (
             cohens_d,
             independent_ttest,
             one_way_anova,
@@ -928,8 +928,12 @@ class RMSDAnalysis(Analysis):
     ) -> Any:
         """Compare a single RMSD run between two conditions."""
         from polyzymd.analyses.rmsd._comparison_results import RMSDRunPairwiseComparison
+        from polyzymd.analyses.shared.inferential_statistics import (
+            cohens_d,
+            independent_ttest,
+            percent_change,
+        )
         from polyzymd.analyses.stats import interpret_direction
-        from polyzymd.compare.statistics import cohens_d, independent_ttest, percent_change
 
         run_a_values = run_a.per_replicate_means
         run_b_values = run_b.per_replicate_means

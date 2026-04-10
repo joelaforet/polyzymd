@@ -192,13 +192,13 @@ class ExposureAnalysis(Analysis):
             ExposureComparisonResult,
             ExposureConditionSummary,
         )
-        from polyzymd.analyses.shared.statistics import compute_sem
-        from polyzymd.compare.statistics import (
+        from polyzymd.analyses.shared.inferential_statistics import (
             cohens_d,
             independent_ttest,
             one_way_anova,
             percent_change,
         )
+        from polyzymd.analyses.shared.statistics import compute_sem
 
         settings = ctx.settings
 
@@ -764,12 +764,12 @@ class ExposureAnalysis(Analysis):
         PairwiseResult
         """
         from polyzymd.analyses.base import PairwiseResult
-        from polyzymd.analyses.stats import interpret_direction
-        from polyzymd.compare.statistics import (
+        from polyzymd.analyses.shared.inferential_statistics import (
             cohens_d,
             independent_ttest,
             percent_change,
         )
+        from polyzymd.analyses.stats import interpret_direction
 
         values_a = cond_a.replicate_values
         values_b = cond_b.replicate_values

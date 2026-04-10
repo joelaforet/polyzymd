@@ -1,4 +1,4 @@
-"""Tests for Benjamini-Hochberg FDR correction in compare/statistics.py."""
+"""Tests for Benjamini-Hochberg FDR correction in inferential statistics."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from polyzymd.compare.statistics import benjamini_hochberg
+from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 
 
 def test_bh_all_significant() -> None:

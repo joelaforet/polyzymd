@@ -828,7 +828,7 @@ class BindingFreeEnergyAnalysis(Analysis):
         from polyzymd.analyses.binding_free_energy._comparison_results import (
             FreeEnergyPairwiseEntry,
         )
-        from polyzymd.compare.statistics import independent_ttest
+        from polyzymd.analyses.shared.inferential_statistics import independent_ttest
 
         cross_temperature = not math.isclose(
             summary_a.temperature_K, summary_b.temperature_K, rel_tol=1e-3
@@ -894,7 +894,7 @@ class BindingFreeEnergyAnalysis(Analysis):
         Same-temperature pairs form one hypothesis family per temperature
         Cross-temperature pairs are skipped
         """
-        from polyzymd.compare.statistics import benjamini_hochberg
+        from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 
         same_temp = [p for p in pairwise if not p.cross_temperature and p.p_value is not None]
         if not same_temp:

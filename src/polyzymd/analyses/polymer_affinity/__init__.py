@@ -1094,7 +1094,7 @@ class PolymerAffinityAnalysis(Analysis):
         from polyzymd.analyses.polymer_affinity._comparison_results import (
             AffinityScorePairwiseEntry,
         )
-        from polyzymd.compare.statistics import independent_ttest
+        from polyzymd.analyses.shared.inferential_statistics import independent_ttest
 
         cross_temperature = not math.isclose(
             summary_a.temperature_K, summary_b.temperature_K, rel_tol=1e-3
@@ -1138,7 +1138,7 @@ class PolymerAffinityAnalysis(Analysis):
         fdr_alpha: float,
     ) -> None:
         """Apply BH correction to pairwise p-values per temperature group."""
-        from polyzymd.compare.statistics import benjamini_hochberg
+        from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 
         same_temp = [p for p in pairwise if not p.cross_temperature and p.p_value is not None]
         if not same_temp:

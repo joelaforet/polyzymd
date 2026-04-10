@@ -70,7 +70,12 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.shared import apply_axis_style, get_colors, get_output_path, save_figure
 from polyzymd.analyses.shared.groupings import ProteinAAClassification
-from polyzymd.compare.statistics import cohens_d, independent_ttest, one_way_anova, percent_change
+from polyzymd.analyses.shared.inferential_statistics import (
+    cohens_d,
+    independent_ttest,
+    one_way_anova,
+    percent_change,
+)
 from polyzymd.core.experimental import prefix_experimental_output
 
 logger = logging.getLogger("polyzymd.analyses.polymer_bridging")
@@ -636,7 +641,7 @@ class PolymerBridgingAnalysis(Analysis):
         # Apply Benjamini-Hochberg FDR correction across all pairwise tests
         fdr_alpha = getattr(ctx, "fdr_alpha", 0.05)
         if all_pairwise:
-            from polyzymd.compare.statistics import benjamini_hochberg
+            from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 
             raw_p = [pw.p_value for pw in all_pairwise]
             bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
@@ -645,7 +650,7 @@ class PolymerBridgingAnalysis(Analysis):
                 pw.significant = bh.significant
 
         if all_anova:
-            from polyzymd.compare.statistics import benjamini_hochberg
+            from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 
             raw_p = [a.p_value for a in all_anova]
             bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)

@@ -143,7 +143,7 @@ def apply_fdr_correction(
         Callback applying BH output to each result object. Defaults to setting
         ``.p_value_adjusted`` (when available) and ``.significant``.
     """
-    from polyzymd.compare.statistics import benjamini_hochberg
+    from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 
     def _default_get_p_value(result: Any) -> float | None:
         return getattr(result, "p_value", None)

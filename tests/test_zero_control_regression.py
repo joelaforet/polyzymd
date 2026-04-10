@@ -37,7 +37,7 @@ from polyzymd.analyses.stats import (
     interpret_direction,
     pairwise_comparisons,
 )
-from polyzymd.compare.statistics import percent_change
+from polyzymd.analyses.shared.inferential_statistics import percent_change
 
 
 def test_percent_change_zero_to_zero_is_zero() -> None:

@@ -1015,7 +1015,7 @@ class DistancesAnalysis(Analysis):
             DistancePairSummary,
             DistancePairwiseComparison,
         )
-        from polyzymd.compare.statistics import (
+        from polyzymd.analyses.shared.inferential_statistics import (
             cohens_d,
             independent_ttest,
             one_way_anova,
@@ -1294,12 +1294,12 @@ class DistancesAnalysis(Analysis):
             Statistical comparison result.
         """
         from polyzymd.analyses.distances._comparison_results import DistancePairwiseComparison
-        from polyzymd.analyses.stats import interpret_direction
-        from polyzymd.compare.statistics import (
+        from polyzymd.analyses.shared.inferential_statistics import (
             cohens_d,
             independent_ttest,
             percent_change,
         )
+        from polyzymd.analyses.stats import interpret_direction
 
         # Distance metric comparison
         values_a = pair_a.per_replicate_means

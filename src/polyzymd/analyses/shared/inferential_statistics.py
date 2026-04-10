@@ -1,7 +1,10 @@
-"""Statistical tests for comparing simulation conditions.
+"""Inferential statistical tests shared across analysis comparisons.
 
 This module provides statistical functions for comparing analysis results
 across multiple conditions, including t-tests, ANOVA, and effect sizes.
+
+It is the canonical home for inferential statistics used by analysis plugins
+and comparison utilities.
 
 All functions use SciPy for statistical calculations.
 """

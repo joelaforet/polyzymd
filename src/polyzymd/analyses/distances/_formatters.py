@@ -19,8 +19,8 @@ For each pair:
 from __future__ import annotations
 
 from polyzymd.analyses.distances._comparison_results import DistanceComparisonResult
+from polyzymd.analyses.shared.inferential_statistics import percent_change
 from polyzymd.analyses.stats import format_pct, interpret_direction
-from polyzymd.compare.statistics import percent_change
 
 
 def format_distances_console_table(

@@ -1279,12 +1279,12 @@ class ContactsAnalysis(Analysis):
             AggregateComparisonResult,
             ContactsPairwiseComparison,
         )
-        from polyzymd.analyses.stats import interpret_direction
-        from polyzymd.compare.statistics import (
+        from polyzymd.analyses.shared.inferential_statistics import (
             cohens_d,
             independent_ttest,
             percent_change,
         )
+        from polyzymd.analyses.stats import interpret_direction
 
         aggregate_comps = []
 
@@ -1383,7 +1383,7 @@ class ContactsAnalysis(Analysis):
             ANOVA results for coverage and mean_contact_fraction.
         """
         from polyzymd.analyses.contacts._comparison_results import ContactsANOVASummary
-        from polyzymd.compare.statistics import one_way_anova
+        from polyzymd.analyses.shared.inferential_statistics import one_way_anova
 
         results = []
 
@@ -1424,7 +1424,7 @@ class ContactsAnalysis(Analysis):
         Treats all pairwise aggregate comparisons as one family and ANOVA p-values
         as a separate family
         """
-        from polyzymd.compare.statistics import benjamini_hochberg
+        from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 
         all_pairwise_agg = []
         for comp in comparisons:
@@ -1696,7 +1696,7 @@ class ContactsAnalysis(Analysis):
             BindingPreferenceResult,
             PartitionBindingResult,
         )
-        from polyzymd.compare.statistics import independent_ttest
+        from polyzymd.analyses.shared.inferential_statistics import independent_ttest
 
         # Collect all polymer types and AA classes
         all_polymer_types: set[str] = set()
@@ -1813,7 +1813,7 @@ class ContactsAnalysis(Analysis):
         dict[str, float]
             Mapping of "condA_vs_condB" to p-value.
         """
-        from polyzymd.compare.statistics import independent_ttest
+        from polyzymd.analyses.shared.inferential_statistics import independent_ttest
 
         if len(per_replicate_data) < 2:
             return {}
