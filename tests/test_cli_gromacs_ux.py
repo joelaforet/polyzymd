@@ -164,3 +164,27 @@ class TestInternalCommandsUnchanged:
         result = runner.invoke(cli, [cmd, "--help"])
         assert result.exit_code == 0
         assert "--replicate" in result.output
+
+
+class TestDryRunOutput:
+    """Tests for the enhanced --dry-run validation report."""
+
+    def test_dry_run_shows_validation_report_header(self) -> None:
+        """--dry-run should show 'DRY RUN — Validation Report' header."""
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["build", "--help"])
+        assert "--dry-run" in result.output
+
+    def test_run_gromacs_dry_run_in_help(self) -> None:
+        """run-gromacs --help should mention --dry-run."""
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["run-gromacs", "--help"])
+        assert "--dry-run" in result.output

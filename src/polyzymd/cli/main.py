@@ -301,36 +301,148 @@ def build(
             sim_config.output.projects_directory = Path(projects_dir)
 
         if dry_run:
-            colored_echo("Dry run - configuration is valid", phase="build")
-            colored_echo(f"  Replicates: {replicate_list}", phase="build")
-            colored_echo(f"  Enzyme: {sim_config.enzyme.name}", phase="build")
+            colored_echo("=" * 60, phase="build")
+            colored_echo("DRY RUN — Validation Report", phase="build")
+            colored_echo("=" * 60, phase="build")
+            colored_echo(phase="build")
+
+            colored_echo("Configuration Summary:", phase="build")
+            colored_echo(f"  Name: {sim_config.name}", phase="build")
+            if sim_config.description:
+                colored_echo(f"  Description: {sim_config.description}", phase="build")
+            colored_echo(f"  Config file: {config}", phase="build")
+            colored_echo(phase="build")
+
+            colored_echo("Replicates:", phase="build")
+            colored_echo(f"  Count: {len(replicate_list)}", phase="build")
+            colored_echo(f"  IDs: {replicate_list}", phase="build")
+            colored_echo(f"  Polymer seeds: {replicate_list} (one per replicate)", phase="build")
+            colored_echo(phase="build")
+
+            colored_echo("System Components:", phase="build")
+            colored_echo(f"  Chain A (Protein): {sim_config.enzyme.name}", phase="build")
+            colored_echo(f"    PDB: {sim_config.enzyme.pdb_file}", phase="build")
             if sim_config.substrate:
-                colored_echo(f"  Substrate: {sim_config.substrate.name}", phase="build")
+                colored_echo(f"  Chain B (Substrate): {sim_config.substrate.name}", phase="build")
+                colored_echo(f"    SDF: {sim_config.substrate.sdf_file}", phase="build")
+            else:
+                colored_echo("  Chain B (Substrate): none (apo system)", phase="build")
             if sim_config.polymers and sim_config.polymers.enabled:
-                colored_echo(f"  Polymers: {sim_config.polymers.type_prefix}", phase="build")
-                colored_echo(f"  Polymer count: {sim_config.polymers.count}", phase="build")
-            colored_echo(f"  Temperature: {sim_config.thermodynamics.temperature} K", phase="build")
+                colored_echo(
+                    f"  Chain C (Polymer): {sim_config.polymers.type_prefix}", phase="build"
+                )
+                colored_echo(f"    Count: {sim_config.polymers.count}", phase="build")
+                colored_echo(f"    Length: {sim_config.polymers.length} monomers", phase="build")
+                for monomer in sim_config.polymers.monomers:
+                    colored_echo(
+                        f"    Monomer: {monomer.label} ({monomer.probability * 100:.0f}%)",
+                        phase="build",
+                    )
+            else:
+                colored_echo("  Chain C (Polymer): none (no polymer)", phase="build")
+            colored_echo(f"  Chain D+ (Solvent): {sim_config.solvent.model}", phase="build")
+            colored_echo(f"    Box padding: {sim_config.solvent.box_padding} nm", phase="build")
             colored_echo(
-                f"  Production time: {sim_config.simulation_phases.production.duration} ns",
+                f"    Ionic strength: {sim_config.solvent.ionic_strength} M", phase="build"
+            )
+            colored_echo(phase="build")
+
+            colored_echo("Parameterization Plan:", phase="build")
+            colored_echo(f"  Protein FF: {sim_config.force_field.protein}", phase="build")
+            colored_echo(
+                f"  Small molecule FF: {sim_config.force_field.small_molecule}", phase="build"
+            )
+            colored_echo(f"  Water model: {sim_config.solvent.model}", phase="build")
+            colored_echo(phase="build")
+
+            colored_echo("Thermodynamics:", phase="build")
+            colored_echo(f"  Temperature: {sim_config.thermodynamics.temperature} K", phase="build")
+            pressure = sim_config.thermodynamics.pressure
+            if pressure is not None:
+                colored_echo(f"  Pressure: {pressure} atm", phase="build")
+            colored_echo(phase="build")
+
+            colored_echo("Simulation Phases:", phase="build")
+            eq_stages = sim_config.simulation_phases.equilibration
+            if eq_stages:
+                colored_echo(f"  Equilibration: {len(eq_stages)} stage(s)", phase="build")
+                for i, stage in enumerate(eq_stages, 1):
+                    colored_echo(
+                        f"    Stage {i}: {stage.duration} ns, {stage.ensemble}",
+                        phase="build",
+                    )
+            colored_echo(
+                f"  Production: {sim_config.simulation_phases.production.duration} ns",
+                phase="build",
+            )
+            colored_echo(
+                f"  Samples: {sim_config.simulation_phases.production.samples}",
                 phase="build",
             )
             colored_echo(phase="build")
+
             colored_echo("Directories:", phase="build")
             colored_echo(f"  Projects: {sim_config.output.projects_directory}", phase="build")
             colored_echo(
                 f"  Scratch: {sim_config.output.effective_scratch_directory}", phase="build"
             )
+            colored_echo(phase="build")
+
+            colored_echo("Per-Replicate Output:", phase="build")
+            for rep in replicate_list:
+                working_dir = sim_config.get_working_directory(rep)
+                colored_echo(f"  Replicate {rep}:", phase="build")
+                colored_echo(f"    Working dir: {working_dir}", phase="build")
+                if export_format:
+                    export_dir = (
+                        sim_config.output.projects_directory / f"replicate_{rep}" / export_format
+                    )
+                    colored_echo(f"    Export dir:  {export_dir}", phase="build")
+            colored_echo(phase="build")
+
             if export_format:
-                colored_echo(phase="build")
-                colored_echo(f"{export_format.upper()} export enabled:", phase="build")
-                for rep in replicate_list:
+                colored_echo(f"Files to Generate ({export_format.upper()}):", phase="build")
+                colored_echo("  Per replicate:", phase="build")
+                if export_format == "gromacs":
+                    colored_echo("    - *.gro (coordinates)", phase="build")
+                    colored_echo("    - *.top (topology)", phase="build")
+                    colored_echo("    - *.itp (molecule parameters)", phase="build")
+                    colored_echo("    - em.mdp (energy minimization)", phase="build")
+                    if eq_stages:
+                        for i, stage in enumerate(eq_stages, 1):
+                            colored_echo(
+                                (f"    - eq_stage{i}_{stage.ensemble.lower()}.mdp (equilibration)"),
+                                phase="build",
+                            )
+                    colored_echo("    - prod.mdp (production)", phase="build")
+                    colored_echo("    - posres_*.itp (position restraints)", phase="build")
+                    colored_echo("    - run_gromacs.sh (run script)", phase="build")
+                elif export_format in ("lammps", "amber"):
                     colored_echo(
-                        (
-                            f"  Output: {sim_config.output.projects_directory}/"
-                            f"replicate_{rep}/{export_format}/"
-                        ),
+                        f"    ({export_format.upper()} export planned for v1.4.0)",
                         phase="build",
                     )
+            else:
+                colored_echo("Files to Generate (OpenMM):", phase="build")
+                colored_echo("  Per replicate:", phase="build")
+                colored_echo("    - solvated_system.pdb (topology + positions)", phase="build")
+                colored_echo("    - system.xml (OpenMM system with restraints)", phase="build")
+            colored_echo(phase="build")
+
+            if sim_config.restraints:
+                colored_echo("Restraints:", phase="build")
+                for r in sim_config.restraints:
+                    status = "ENABLED" if r.enabled else "DISABLED"
+                    colored_echo(
+                        f"  - {r.name}: {r.type.value}, d={r.distance} Å, "
+                        f"k={r.force_constant} kJ/mol/nm², {status}",
+                        phase="build",
+                    )
+                colored_echo(phase="build")
+
+            colored_echo("=" * 60, phase="build")
+            colored_echo("Validation passed. Ready to build.", phase="build")
+            colored_echo("=" * 60, phase="build")
             return
 
         for rep in replicate_list:
@@ -565,14 +677,22 @@ def run_gromacs(
         if projects_dir:
             sim_config.output.projects_directory = Path(projects_dir)
 
+        succeeded = 0
         for rep in replicate_list:
-            colored_echo(f"\n--- Replicate {rep} ---", phase="export")
+            colored_echo(
+                f"\n--- Replicate {rep} ({succeeded + 1}/{len(replicate_list)}) ---",
+                phase="export",
+            )
             _run_gromacs_impl(
                 sim_config=sim_config,
                 replicate=rep,
                 gmx_path=gmx_path,
                 dry_run=dry_run,
             )
+            succeeded += 1
+
+        if len(replicate_list) > 1:
+            colored_echo(f"\nAll {succeeded} replicate(s) completed successfully.", phase="export")
 
     except Exception as e:
         colored_echo(f"Simulation failed: {e}", err=True, level=logging.ERROR)
