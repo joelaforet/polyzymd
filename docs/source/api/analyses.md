@@ -43,6 +43,8 @@ adding new analysis types to PolyzyMD.
 - `PairwiseResult` — pairwise t-test result
 - `ANOVAResult` — ANOVA result
 - `MetricValue` — scalar metric descriptor for default comparison
+- `BaseComparisonResult` — abstract base for custom plugin comparison results
+- `BaseConditionSummary` — abstract base for per-condition summaries
 
 ## Available Plugins
 
@@ -78,6 +80,32 @@ detecting sustained convergence in timeseries data (e.g., RMSD traces).
    :undoc-members:
    :show-inheritance:
    :no-index:
+```
+
+### Multi-Run Comparison Orchestration
+
+The `multi_run_comparison` module provides helpers for plugins that compare
+multiple named runs (e.g., per-chain RMSD, per-domain Rg) across conditions.
+Used by the RMSD, Rg, and SASA plugins.
+
+```{eval-rst}
+.. automodule:: polyzymd.analyses.shared.multi_run_comparison
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+### Multi-Run Formatting
+
+The `multi_run_formatting` module provides text and markdown formatting helpers
+for multi-run analysis CLI output — ranked tables, pairwise lines, and ANOVA
+summaries.
+
+```{eval-rst}
+.. automodule:: polyzymd.analyses.shared.multi_run_formatting
+   :members:
+   :undoc-members:
+   :show-inheritance:
 ```
 
 ## Related Documentation

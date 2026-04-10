@@ -861,6 +861,31 @@ plotting logic in your plugin's `plot()` method and your formatting in
 plotting functions into a `_plotters.py` module within the package (see
 {ref}`plotters-extraction` below).
 
+### Canonical comparison base classes
+
+If your plugin needs a custom comparison result (Path B), import base classes
+from `analyses.base` — this is the **only** canonical import path:
+
+```python
+from polyzymd.analyses.base import (
+    ANOVAResult,
+    BaseComparisonResult,
+    BaseConditionSummary,
+    PairwiseResult,
+)
+```
+
+| Class | Purpose |
+|-------|---------|
+| `BaseComparisonResult` | Abstract base for custom plugin comparison results (generic over summary/pairwise types) |
+| `BaseConditionSummary` | Abstract base for per-condition summaries (requires `primary_metric_value` / `primary_metric_sem` properties) |
+| `PairwiseResult` | Standard pairwise t-test result with FDR fields |
+| `ANOVAResult` | Standard ANOVA result |
+
+These classes provide `.save()` / `.load()` helpers, FDR-adjusted p-value
+fields, and serialization with `NaN`/`Inf` handling. The RMSD, Rg, and SASA
+plugins all subclass them for their multi-run comparison results.
+
 (shared-utilities)=
 ## Shared Utilities (`analyses/shared/`)
 
@@ -919,6 +944,86 @@ if result.converged:
     print(f"Converged at {result.convergence_time_ns:.1f} ns")
 ```
 
+#### Multi-run comparison helpers
+
+Some plugins track multiple named runs per condition — for example, per-chain
+RMSD, per-domain Rg, or per-target SASA. These plugins share a common
+compare loop: filter conditions → build pairs → run pairwise t-tests → run
+ANOVA → apply FDR correction. The `multi_run_comparison` module extracts that
+orchestration logic so plugins do not reimplement it.
+
+```python
+from polyzymd.analyses.shared.multi_run_comparison import (
+    apply_fdr_correction,
+    build_condition_pairs,
+    filter_summaries_with_run,
+)
+```
+
+| Function | Purpose |
+|----------|---------|
+| `filter_summaries_with_run()` | Keep only conditions that contain a specific named run |
+| `build_condition_pairs()` | Build control-vs-all or all-vs-all condition pairs |
+| `apply_fdr_correction()` | Benjamini-Hochberg FDR correction across pairwise and ANOVA results |
+
+Usage sketch inside a custom `compare()` override:
+
+```python
+def compare(self, ctx):
+    summaries = self._load_all_summaries(ctx)
+    for run_label in run_labels:
+        # Keep only conditions that have this run
+        filtered = filter_summaries_with_run(summaries, run_label, get_run_fn)
+        # Build pairwise pairs (control-vs-all or all-vs-all)
+        pairs = build_condition_pairs(
+            list(filtered.keys()), ctx.control_label
+        )
+        # ... run t-tests, ANOVA ...
+    # Correct p-values across all runs
+    apply_fdr_correction(all_pairwise, all_anova, fdr_alpha=ctx.fdr_alpha)
+```
+
+The RMSD, Rg, and SASA plugins all use this pattern. Study
+`src/polyzymd/analyses/rmsd/__init__.py` for a complete example.
+
+#### Multi-run formatting helpers
+
+After computing multi-run statistics, you need to format them for the CLI.
+The `multi_run_formatting` module provides reusable building blocks for
+ranked tables, pairwise comparison lines, and ANOVA summaries:
+
+```python
+from polyzymd.analyses.shared.multi_run_formatting import (
+    format_anova_line,
+    format_pairwise_line,
+    make_ranked_table_header,
+    make_section_title,
+)
+```
+
+| Function | Purpose |
+|----------|---------|
+| `make_ranked_table_header()` | Build a ranked-table header with separator |
+| `format_pairwise_line()` | Format one pairwise comparison as a text line |
+| `format_anova_line()` | Format ANOVA results as a text line |
+| `make_section_title()` | Build a section title with separator |
+| `make_ranked_rows()` | Build `(label, mean, sem, rank)` tuples for table rows |
+| `make_ranked_markdown_header()` | Build ranked-table headers for markdown output |
+
+These helpers keep CLI output visually consistent across multi-run plugins.
+See `src/polyzymd/analyses/rmsd/_formatters.py` for a complete formatting
+example.
+
+```{tip}
+If your plugin tracks multiple named runs (like per-chain or per-domain
+metrics), use the shared `multi_run_comparison` and `multi_run_formatting`
+helpers instead of reimplementing the compare → rank → pairwise → ANOVA → FDR
+loop. This keeps the statistical pipeline consistent and avoids subtle bugs
+in p-value correction.
+```
+
+#### Other submodules
+
 Other submodules (`selections`, `aggregation`, `diagnostics`, `aa_classification`,
 `logging_utils`) are available via direct import but are not re-exported from
 the package root:
@@ -960,6 +1065,7 @@ When creating a new analysis plugin:
 - [ ] Choose comparison path:
   - [ ] Default: implement `extract_metrics()`
   - [ ] Custom: override `compare()` returning a model with `.save()`
+  - [ ] Multi-run custom: use `multi_run_comparison` + `multi_run_formatting` shared helpers
 - [ ] `plot()` — use `_build_plot_data()` + shared plotting helpers (`get_theme`, `apply_axis_style`, `save_figure`, `get_colors`)
 - [ ] (Optional) `format()` — CLI display via `format_scalar_comparison()`
 - [ ] (Optional) Use `_check_cache()` in `compute_replicate()` for result caching
@@ -1071,7 +1177,11 @@ methods.
 
 ### Do not create files in `compare/`
 
-New plugins should keep all logic in the plugin package.
+New plugins should keep all logic in the plugin package. Use the canonical
+base classes from `analyses.base` (`BaseComparisonResult`,
+`BaseConditionSummary`, `PairwiseResult`, `ANOVAResult`) for custom comparison
+results, and the shared helpers from `analyses/shared/` for multi-run
+orchestration and formatting.
 
 ## Existing Plugins to Study
 
@@ -1080,6 +1190,8 @@ New plugins should keep all logic in the plugin package.
 | `catalytic_triad/` | Default (`extract_metrics`) | Simplest lifecycle — minimal compute logic with `_plotters.py` for KDE/bar plots |
 | `rmsf/` | Default (`extract_metrics`) | Default scalar comparison with `_plotters.py` extraction |
 | `secondary_structure/` | Default (`extract_metrics`) | Wrapping existing calculators with `_plotters.py` and typed result classes |
+| `rmsd/` | Custom (multi-run) | Multi-run comparison with `multi_run_comparison` + `multi_run_formatting` shared helpers |
+| `rg/` | Custom (multi-run) | Same multi-run pattern as RMSD, applied to radius of gyration |
 | `contacts/` | Custom (`compare` override) | Multi-metric comparison, condition filtering, large `_plotters.py` |
 | `distances/` | Custom (`compare` override) | Entry-table style comparison with `_plotters.py` extraction |
 
