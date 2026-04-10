@@ -17,6 +17,7 @@ from polyzymd.exporters.gromacs import (
     PositionRestraintGenerator,
     RunScriptGenerator,
 )
+from polyzymd.exporters.interchange import ExportFormat, export_system, get_supported_formats
 
 __all__ = [
     "GromacsExporter",
@@ -25,4 +26,7 @@ __all__ = [
     "MDPGenerator",
     "PositionRestraintGenerator",
     "RunScriptGenerator",
+    "ExportFormat",
+    "export_system",
+    "get_supported_formats",
 ]

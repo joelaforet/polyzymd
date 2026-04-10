@@ -226,9 +226,17 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     help="Validate config without building",
 )
 @click.option(
+    "--format",
+    "export_format",
+    default=None,
+    type=click.Choice(["gromacs", "lammps", "amber"], case_sensitive=False),
+    help="Export format: gromacs, lammps, amber. Default: OpenMM (no export).",
+)
+@click.option(
     "--gromacs",
     is_flag=True,
-    help="Export to GROMACS format (.gro, .top, .mdp) instead of preparing for OpenMM",
+    hidden=True,
+    help="[Deprecated] Use --format gromacs instead.",
 )
 def build(
     config: str,
@@ -238,6 +246,7 @@ def build(
     scratch_dir: Optional[str],
     projects_dir: Optional[str],
     dry_run: bool,
+    export_format: str | None,
     gromacs: bool,
 ) -> None:
     """Build a simulation system from configuration.
@@ -245,21 +254,36 @@ def build(
     Loads the YAML configuration, constructs the molecular system
     (enzyme, substrate, polymers, solvent), and prepares it for simulation.
 
-    By default, prepares the system for OpenMM simulation. Use --gromacs to
-    export GROMACS-compatible files instead (.gro, .top, .mdp).
+    By default, prepares the system for OpenMM simulation. Use ``--format`` to
+    export engine-compatible files (currently GROMACS is implemented).
 
     The ``--replicates`` option accepts range syntax (for example ``1-3`` or
     ``1,3,5``). Each replicate is built independently with a different polymer
     random seed.
 
-    GROMACS Export Notes:
-        - Output files are placed in {projects_dir}/{replicate}/gromacs/
+    Export Notes:
+        - Output files are placed in {projects_dir}/{replicate}/{format}/
         - Filenames are derived from config: {enzyme_name}_{polymer_prefix}.*
         - The .mdp file is a stub for single-point energy; modify for production
         - Topology is split into .itp files for cleaner multi-component systems
     """
+    import warnings
+
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
+
+    # Resolve export format: --format takes priority, --gromacs is deprecated alias
+    if gromacs and export_format is not None:
+        raise click.UsageError(
+            "Cannot use both --gromacs and --format. Use --format gromacs instead."
+        )
+    if gromacs:
+        warnings.warn(
+            "--gromacs is deprecated, use --format gromacs instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        export_format = "gromacs"
 
     replicate_list = _resolve_replicates_option(replicates, replicate, "build")
 
@@ -296,14 +320,14 @@ def build(
             colored_echo(
                 f"  Scratch: {sim_config.output.effective_scratch_directory}", phase="build"
             )
-            if gromacs:
+            if export_format:
                 colored_echo(phase="build")
-                colored_echo("GROMACS export enabled:", phase="build")
+                colored_echo(f"{export_format.upper()} export enabled:", phase="build")
                 for rep in replicate_list:
                     colored_echo(
                         (
                             f"  Output: {sim_config.output.projects_directory}/"
-                            f"replicate_{rep}/gromacs/"
+                            f"replicate_{rep}/{export_format}/"
                         ),
                         phase="build",
                     )
@@ -320,14 +344,24 @@ def build(
             )
 
             # Branch based on export format
-            if gromacs:
-                # Export to GROMACS format
-                colored_echo("Exporting to GROMACS format...", phase="export")
-                gromacs_dir = sim_config.output.projects_directory / f"replicate_{rep}" / "gromacs"
-                export_result = builder.export_to_gromacs(gromacs_dir)
+            if export_format:
+                # Export to requested engine format
+                from polyzymd.exporters.interchange import export_system
 
-                colored_echo("GROMACS export successful!", phase="export")
-                colored_echo(f"Output directory: {gromacs_dir}", phase="export")
+                colored_echo(f"Exporting to {export_format.upper()} format...", phase="export")
+                export_dir = (
+                    sim_config.output.projects_directory / f"replicate_{rep}" / export_format
+                )
+                export_result = export_system(
+                    interchange=interchange,
+                    config=sim_config,
+                    output_dir=export_dir,
+                    fmt=export_format,
+                    component_info=builder.get_component_info(),
+                )
+
+                colored_echo(f"{export_format.upper()} export successful!", phase="export")
+                colored_echo(f"Output directory: {export_dir}", phase="export")
                 colored_echo("Files generated:", phase="export")
                 colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
                 colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
@@ -344,7 +378,7 @@ def build(
                 colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
                 colored_echo(phase="export")
                 colored_echo(
-                    f"To run: cd {gromacs_dir} && ./{export_result['run_script'].name}",
+                    f"To run: cd {export_dir} && ./{export_result['run_script'].name}",
                     phase="export",
                 )
 
