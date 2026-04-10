@@ -184,7 +184,14 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
 # =============================================================================
 
 
-@cli.command()
+@cli.command(
+    help=(
+        "Build input files only; no simulation is executed. Engine-agnostic: "
+        "prepare default OpenMM inputs or export with --format gromacs. "
+        "Use run-gromacs for build+run GROMACS workflows, or submit for "
+        "OpenMM SLURM jobs."
+    )
+)
 @click.option(
     "-c",
     "--config",
@@ -256,22 +263,29 @@ def build(
     export_format: str | None,
     gromacs: bool,
 ) -> None:
-    """Build a simulation system from configuration.
+    """Build simulation input files from configuration.
 
     Loads the YAML configuration, constructs the molecular system
-    (enzyme, substrate, polymers, solvent), and prepares it for simulation.
+    (enzyme, substrate, polymers, solvent), and writes engine-ready input
+    artifacts for one or more replicates. No simulation is executed.
 
-    By default, prepares the system for OpenMM simulation. Use ``--format`` to
-    export engine-compatible files (currently GROMACS is implemented).
+    By default, this prepares OpenMM inputs in the working directory. Use
+    ``--format gromacs`` to export GROMACS files (``.gro``, ``.top``,
+    ``.itp``, ``.mdp``). AMBER and LAMMPS export are planned for v1.4.0.
+
+    Use ``run-gromacs`` if you want PolyzyMD to build and then execute the
+    full local GROMACS workflow. Use ``submit`` for OpenMM self-resubmitting
+    SLURM workflows.
 
     The ``--replicates`` option accepts range syntax (for example ``1-3`` or
     ``1,3,5``). Each replicate is built independently with a different polymer
     random seed.
 
+    \b
     Export Notes:
-        - Output files are placed in {projects_dir}/{replicate}/{format}/
+        - Output files are placed in replicate_<n>/<format>/
         - Filenames are derived from config: {enzyme_name}_{polymer_prefix}.*
-        - The .mdp file is a stub for single-point energy; modify for production
+        - MDP files include energy minimization, equilibration, and production stages
         - Topology is split into .itp files for cleaner multi-component systems
     """
     from pydantic import ValidationError as PydanticValidationError
@@ -638,7 +652,15 @@ def build(
 # =============================================================================
 
 
-@cli.command("run-gromacs")
+@cli.command(
+    "run-gromacs",
+    help=(
+        "Build the system and run the full local GROMACS workflow "
+        "(EM -> equilibration -> production). Use --dry-run to export files "
+        "without execution. For export-only use build --format gromacs. "
+        "Integrated GROMACS SLURM submission is planned for v1.4.0."
+    ),
+)
 @click.option(
     "-c",
     "--config",
@@ -691,11 +713,17 @@ def run_gromacs(
     gmx_path: str,
     dry_run: bool,
 ) -> None:
-    """Run a simulation using GROMACS.
+    """Build and run a simulation using GROMACS.
 
-    Builds the system, exports to GROMACS format (.gro, .top, .mdp),
-    and executes the full GROMACS workflow locally (EM, equilibration,
-    production, and trajectory post-processing).
+    For each replicate, this command builds the system, exports GROMACS input
+    files (``.gro``, ``.top``, ``.itp``, ``.mdp``), and executes the full local
+    workflow: energy minimization, equilibration, production, and trajectory
+    post-processing.
+
+    Use ``--dry-run`` to stop after file generation. If you only need exported
+    inputs without execution, use ``build --format gromacs`` instead. Integrated
+    SLURM submission for GROMACS is planned for v1.4.0; for now, cluster
+    submission is manual.
 
     \b
     Notes:
@@ -884,7 +912,14 @@ def _run_gromacs_impl(
 # =============================================================================
 
 
-@cli.command()
+@cli.command(
+    help=(
+        "Submit OpenMM self-resubmitting SLURM jobs. This command is "
+        "OpenMM-only; GROMACS users should use run-gromacs locally "
+        "or build --format gromacs for manual cluster submission. "
+        "Integrated GROMACS SLURM submission is planned for v1.4.0."
+    )
+)
 @click.option(
     "-c",
     "--config",
@@ -1001,15 +1036,21 @@ def submit(
     pixi_env: Optional[str],
     force: bool,
 ) -> None:
-    """Submit simulation jobs to SLURM.
+    """Submit OpenMM simulation jobs to SLURM.
 
-    Creates and submits self-resubmitting jobs (one per replicate)
-    that automatically checkpoint and resume until the full
+    Creates and optionally submits one self-resubmitting OpenMM job per
+    replicate. These jobs checkpoint and resume automatically until the full
     production duration is complete.
 
+    This command does not yet support GROMACS as a simulation engine. GROMACS
+    users should use ``run-gromacs`` for local execution or
+    ``build --format gromacs`` to export files for manual SLURM submission.
+    Integrated GROMACS SLURM submission is planned for v1.4.0.
+
+    \b
     Directory structure:
-    - projects_dir: Where job scripts and SLURM logs are stored (long-term storage)
-    - scratch_dir: Where simulation data is written (high-performance storage)
+        - projects_dir: Where job scripts and SLURM logs are stored (long-term storage)
+        - scratch_dir: Where simulation data is written (high-performance storage)
     """
     from polyzymd.workflow.daisy_chain import submit_daisy_chain
     from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV

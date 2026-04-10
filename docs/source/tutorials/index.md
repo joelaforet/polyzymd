@@ -41,6 +41,7 @@ backbone. -->
 :hidden:
 :maxdepth: 1
 
+Run Your First PolyzyMD Simulation <quickstart>
 Run Your First Analysis <first_analysis>
 Analyze a Multi-Condition Study <analysis_complete_workflow>
 Measure Surface Accessibility with SASA <sasa_analysis>

@@ -174,6 +174,14 @@ pixi run -e build polyzymd build -c config.yaml --format gromacs
 This builds the solvated system and exports `.gro`, `.top`, `.itp`, `.mdp`, and
 a run script to `replicate_1/gromacs/`.
 
+```{tip}
+For the full GROMACS workflow, see {doc}`../how_to/gromacs_export`.
+`polyzymd submit` is OpenMM-only for now.
+Use `polyzymd build --format gromacs` when you only want input files,
+or `polyzymd run-gromacs` when you want PolyzyMD to build and run locally.
+Integrated GROMACS SLURM submission is planned for v1.4.0.
+```
+
 For multiple replicates (each with an independently built system):
 
 ```bash
@@ -205,17 +213,14 @@ matches your cluster.
 ````
 
 ````{tab-item} GROMACS — local
-Run the full GROMACS workflow locally:
+Run the full GROMACS workflow locally (build + EM + equilibration + production):
 
 ```bash
 pixi run -e build polyzymd run-gromacs -c config.yaml --replicates 1
 ```
 
-Or just export files for manual execution:
-
-```bash
-pixi run -e build polyzymd run-gromacs -c config.yaml --replicates 1 --dry-run
-```
+If you only need the input files without running GROMACS, use
+`build --format gromacs` instead (see Step 5 above).
 ````
 
 ````{tab-item} GROMACS — HPC
