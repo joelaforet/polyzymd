@@ -222,6 +222,7 @@ When using `--format gromacs`, files are created in `{projects_dir}/replicate_{N
 gromacs/
 ├── {system}.gro              # Initial coordinates
 ├── {system}.top              # Topology (includes all molecule types)
+├── *.itp                     # Molecule parameters (one per component)
 │
 ├── em.mdp                    # Energy minimization parameters
 ├── eq_01_heating.mdp         # Heating stage

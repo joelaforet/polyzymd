@@ -218,10 +218,11 @@ The build command creates:
 With `--format gromacs`, the build command creates in `{projects_dir}/replicate_{N}/gromacs/`:
 - `{system}.gro` - GROMACS coordinate file
 - `{system}.top` - GROMACS topology file
+- `*.itp` - Molecule parameter files (one per component)
 - `em.mdp` - Energy minimization parameters
 - `eq_XX_name.mdp` - Equilibration stage parameters
 - `prod.mdp` - Production parameters
-- Position restraints appended as `#ifdef POSRES` blocks in molecule `.itp` files (if configured)
+- Position restraints (`#ifdef POSRES_PROTEIN`, etc.) appended into molecule `.itp` files
 - `run_{system}_gromacs.sh` - Shell script to run the workflow
 
 ---
@@ -299,6 +300,7 @@ Files are created in `{projects_dir}/replicate_{N}/gromacs/`:
 gromacs/
 ├── {system}.gro              # Initial coordinates
 ├── {system}.top              # Topology
+├── *.itp                     # Molecule parameters (one per component)
 ├── em.mdp                    # Energy minimization parameters
 ├── eq_01_nvt.mdp             # Equilibration stage 1 (NVT)
 ├── eq_02_npt.mdp             # Equilibration stage 2 (NPT)
