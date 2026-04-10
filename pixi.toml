@@ -182,7 +182,7 @@ clean-pdb     = { cmd = "polyzymd clean-pdb" }
 [feature.cuda-12-6.tasks]
 submit         = { cmd = "polyzymd submit",         description = "Submit SLURM jobs (OpenMM 8.4, CUDA 12.6)" }
 run-segment    = { cmd = "polyzymd run-segment",    description = "Run next simulation segment" }
-run-gromacs    = { cmd = "polyzymd run-gromacs",     description = "Run GROMACS simulation" }
+run            = { cmd = "polyzymd run --engine gromacs", description = "Run local simulation (select engine)" }
 recover        = { cmd = "polyzymd recover",         description = "Resume stalled simulation" }
 check-progress = { cmd = "polyzymd check-progress", description = "Check simulation progress" }
 
@@ -190,6 +190,6 @@ check-progress = { cmd = "polyzymd check-progress", description = "Check simulat
 [feature.cuda-12-4.tasks]
 submit         = { cmd = "polyzymd submit",         description = "Submit SLURM jobs (OpenMM 8.1, CUDA 12.4)" }
 run-segment    = { cmd = "polyzymd run-segment",    description = "Run next simulation segment" }
-run-gromacs    = { cmd = "polyzymd run-gromacs",     description = "Run GROMACS simulation" }
+run            = { cmd = "polyzymd run --engine gromacs", description = "Run local simulation (select engine)" }
 recover        = { cmd = "polyzymd recover",         description = "Resume stalled simulation" }
 check-progress = { cmd = "polyzymd check-progress", description = "Check simulation progress" }

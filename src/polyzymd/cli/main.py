@@ -7,9 +7,9 @@ for argument parsing and command organization.
 Usage:
     polyzymd --help
     polyzymd build --config simulation.yaml --replicates 1-3
+    polyzymd run --config simulation.yaml --replicates 1-3 --engine openmm
     polyzymd submit --config simulation.yaml --replicates 1-5
     polyzymd run-segment --config simulation.yaml --replicate 1
-    polyzymd run-gromacs --config simulation.yaml --replicates 1-3
 """
 
 from __future__ import annotations
@@ -188,7 +188,8 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     help=(
         "Build simulation input files (OpenMM, GROMACS, LAMMPS, AMBER) without "
         "running. Use --format to select the output engine. "
-        "Use run-gromacs to also execute locally, or submit for OpenMM SLURM jobs."
+        "Use run --engine <gromacs|openmm> to execute locally, or submit for "
+        "OpenMM SLURM jobs."
     )
 )
 @click.option(
@@ -272,9 +273,10 @@ def build(
     ``--format gromacs`` to export GROMACS files (``.gro``, ``.top``,
     ``.itp``, ``.mdp``). AMBER and LAMMPS export are planned for v1.4.0.
 
-    Use ``run-gromacs`` if you want PolyzyMD to build and then execute the
-    full local GROMACS workflow. Use ``submit`` for OpenMM self-resubmitting
-    SLURM workflows.
+    Use ``run --engine gromacs`` if you want PolyzyMD to build and then
+    execute the full local GROMACS workflow. Use ``run --engine openmm`` for
+    local OpenMM execution, or ``submit`` for OpenMM self-resubmitting SLURM
+    workflows.
 
     The ``--replicates`` option accepts range syntax (for example ``1-3`` or
     ``1,3,5``). Each replicate is built independently with a different polymer
@@ -647,18 +649,80 @@ def build(
 
 
 # =============================================================================
-# Run-GROMACS Command
+# Run Command
 # =============================================================================
 
 
+def _print_run_dry_run_report(
+    sim_config: "SimulationConfig",
+    config_path: str,
+    replicate_list: list[int],
+    engine: str,
+    gmx_path: str | None,
+) -> None:
+    """Print a preview report for ``run --dry-run``.
+
+    Parameters
+    ----------
+    sim_config : SimulationConfig
+        Validated simulation configuration.
+    config_path : str
+        Path to the YAML configuration file.
+    replicate_list : list[int]
+        Replicates that would be run.
+    engine : str
+        Execution engine (``"gromacs"`` or ``"openmm"``).
+    gmx_path : str or None
+        Optional GROMACS executable path.
+    """
+    phase = "simulation"
+    colored_echo("=" * 60, phase=phase)
+    colored_echo("DRY RUN — Run Command Preview", phase=phase)
+    colored_echo("=" * 60, phase=phase)
+    colored_echo(phase=phase)
+
+    colored_echo("Configuration Summary:", phase=phase)
+    colored_echo(f"  Name: {sim_config.name}", phase=phase)
+    if sim_config.description:
+        colored_echo(f"  Description: {sim_config.description}", phase=phase)
+    colored_echo(f"  Config file: {config_path}", phase=phase)
+    colored_echo(f"  Engine: {engine}", phase=phase)
+    if engine == "gromacs":
+        colored_echo(f"  GROMACS executable: {gmx_path or 'gmx'}", phase=phase)
+    colored_echo(phase=phase)
+
+    colored_echo("Replicates:", phase=phase)
+    colored_echo(f"  Count: {len(replicate_list)}", phase=phase)
+    colored_echo(f"  IDs: {replicate_list}", phase=phase)
+    colored_echo(phase=phase)
+
+    colored_echo("Planned output:", phase=phase)
+    for rep in replicate_list:
+        working_dir = sim_config.get_working_directory(rep)
+        colored_echo(f"  Replicate {rep}:", phase=phase)
+        colored_echo(f"    Working dir: {working_dir}", phase=phase)
+        if engine == "gromacs":
+            gromacs_dir = sim_config.output.projects_directory / f"replicate_{rep}" / "gromacs"
+            colored_echo(f"    GROMACS dir: {gromacs_dir}", phase=phase)
+        else:
+            colored_echo(
+                "    Workflow: build -> minimize -> equilibrate -> production", phase=phase
+            )
+            colored_echo(
+                "    Outputs: solvated_system.pdb, system.xml, production_0/*", phase=phase
+            )
+
+    colored_echo(phase=phase)
+    colored_echo("Dry run complete. No files were written.", phase=phase)
+    colored_echo("=" * 60, phase=phase)
+
+
 @cli.command(
-    "run-gromacs",
     help=(
-        "Build the system and run the full local GROMACS workflow "
-        "(EM -> equilibration -> production). Use --dry-run to validate the "
-        "configuration without building or running. For export-only use "
-        "build --format gromacs. Integrated GROMACS SLURM submission is "
-        "planned for v1.4.0."
+        "Build and run simulations locally with a selected engine. "
+        "Use --engine gromacs for full local GROMACS workflow, or "
+        "--engine openmm for local OpenMM execution. Use --dry-run for "
+        "preview-only validation without writing files."
     ),
 )
 @click.option(
@@ -696,54 +760,60 @@ def build(
 )
 @click.option(
     "--gmx-path",
-    default="gmx",
-    help="Path to GROMACS executable (default: gmx)",
+    default=None,
+    help="Path to GROMACS executable (only valid with --engine gromacs)",
+)
+@click.option(
+    "--engine",
+    required=True,
+    type=click.Choice(["gromacs", "openmm"], case_sensitive=False),
+    help="Simulation engine to run locally",
 )
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Validate config and show planned output without building",
+    help="Validate config and preview planned execution without writing files",
 )
-def run_gromacs(
+def run(
     config: str,
     replicates: str | None,
     replicate: int | None,
     scratch_dir: Optional[str],
     projects_dir: Optional[str],
-    gmx_path: str,
+    gmx_path: str | None,
+    engine: str,
     dry_run: bool,
 ) -> None:
-    """Build and run a simulation using GROMACS.
+    """Build and run a simulation locally.
 
-    For each replicate, this command builds the system, exports GROMACS input
-    files (``.gro``, ``.top``, ``.itp``, ``.mdp``), and executes the full local
-    workflow: energy minimization, equilibration, production, and trajectory
-    post-processing.
+    For each replicate, this command builds the system and executes the full
+    local simulation workflow using the selected engine.
 
     Use ``--dry-run`` to validate the configuration and preview planned output
-    without building or running. If you only need exported inputs without
-    execution, use ``build --format gromacs`` instead. Integrated SLURM
-    submission for GROMACS is planned for v1.4.0; for now, cluster submission
-    is manual.
+    without building or running.
 
     \b
     Notes:
-        - Requires GROMACS to be installed and accessible
-        - Use --gmx-path to specify a custom GROMACS executable
-        - Use --dry-run to validate without building or running
+        - ``--engine gromacs`` requires GROMACS to be installed and accessible
+        - ``--gmx-path`` is valid only with ``--engine gromacs``
+        - ``--dry-run`` validates and previews without writing files
     """
     from pydantic import ValidationError as PydanticValidationError
 
-    from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
 
-    replicate_list = _resolve_replicates_option(replicates, replicate, "run-gromacs")
+    engine = engine.lower()
+    if engine == "openmm" and gmx_path is not None:
+        raise click.UsageError("--gmx-path can only be used with --engine gromacs")
 
-    colored_echo(f"Loading configuration from: {config}", phase="export")
+    replicate_list = _resolve_replicates_option(replicates, replicate, "run")
+
+    colored_echo(f"Loading configuration from: {config}", phase="simulation")
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-        colored_echo(f"Running GROMACS simulation: {sim_config.name}", phase="export")
+        colored_echo(f"Running local simulation: {sim_config.name}", phase="simulation")
+        colored_echo(f"Engine: {engine}", phase="simulation")
 
         # Override directories if provided via CLI
         if scratch_dir:
@@ -751,22 +821,43 @@ def run_gromacs(
         if projects_dir:
             sim_config.output.projects_directory = Path(projects_dir)
 
+        if dry_run:
+            _print_run_dry_run_report(
+                sim_config=sim_config,
+                config_path=config,
+                replicate_list=replicate_list,
+                engine=engine,
+                gmx_path=gmx_path,
+            )
+            return
+
+        resolved_gmx_path = gmx_path or "gmx"
+
         succeeded = 0
         for rep in replicate_list:
             colored_echo(
                 f"\n--- Replicate {rep} ({succeeded + 1}/{len(replicate_list)}) ---",
-                phase="export",
+                phase="simulation",
             )
-            _run_gromacs_impl(
-                sim_config=sim_config,
-                replicate=rep,
-                gmx_path=gmx_path,
-                dry_run=dry_run,
-            )
+
+            if engine == "gromacs":
+                _run_gromacs_impl(
+                    sim_config=sim_config,
+                    replicate=rep,
+                    gmx_path=resolved_gmx_path,
+                )
+            else:
+                _run_openmm_impl(
+                    sim_config=sim_config,
+                    replicate=rep,
+                )
+
             succeeded += 1
 
         if len(replicate_list) > 1:
-            colored_echo(f"\nAll {succeeded} replicate(s) completed successfully.", phase="export")
+            colored_echo(
+                f"\nAll {succeeded} replicate(s) completed successfully.", phase="simulation"
+            )
 
     except PydanticValidationError as e:
         colored_echo("Configuration error:", err=True, level=logging.ERROR)
@@ -801,7 +892,6 @@ def _run_gromacs_impl(
     sim_config: "SimulationConfig",
     replicate: int,
     gmx_path: str,
-    dry_run: bool,
 ) -> None:
     """Run simulation using GROMACS.
 
@@ -813,8 +903,6 @@ def _run_gromacs_impl(
         Replicate number.
     gmx_path : str
         Path to GROMACS executable.
-    dry_run : bool
-        If True, validate configuration without building or running.
     """
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
@@ -822,52 +910,6 @@ def _run_gromacs_impl(
     # Determine output directory for GROMACS files
     gromacs_dir = sim_config.output.projects_directory / f"replicate_{replicate}" / "gromacs"
     working_dir = sim_config.get_working_directory(replicate)
-
-    if dry_run:
-        colored_echo("=" * 60, phase="export")
-        colored_echo("DRY RUN — GROMACS Validation Report", phase="export")
-        colored_echo("=" * 60, phase="export")
-        colored_echo(phase="export")
-
-        colored_echo(f"Replicate: {replicate}", phase="export")
-        colored_echo("System Components:", phase="export")
-        colored_echo(f"  Chain A (Protein): {sim_config.enzyme.name}", phase="export")
-        if sim_config.substrate:
-            colored_echo(f"  Chain B (Substrate): {sim_config.substrate.name}", phase="export")
-        else:
-            colored_echo("  Chain B (Substrate): none (apo system)", phase="export")
-        if sim_config.polymers and sim_config.polymers.enabled:
-            colored_echo(f"  Chain C (Polymer): {sim_config.polymers.type_prefix}", phase="export")
-            colored_echo(f"    Count: {sim_config.polymers.count}", phase="export")
-            colored_echo(f"    Length: {sim_config.polymers.length} monomers", phase="export")
-        else:
-            colored_echo("  Chain C (Polymer): none (no polymer)", phase="export")
-        colored_echo(f"  Chain D+ (Solvent): {sim_config.solvent.primary.model}", phase="export")
-        colored_echo(phase="export")
-
-        colored_echo("Planned output:", phase="export")
-        colored_echo(f"  Working directory: {working_dir}", phase="export")
-        colored_echo(f"  GROMACS directory: {gromacs_dir}", phase="export")
-        colored_echo("Files that would be generated:", phase="export")
-        colored_echo("  - *.gro (coordinates)", phase="export")
-        colored_echo("  - *.top (topology)", phase="export")
-        colored_echo("  - *.itp (molecule parameters)", phase="export")
-        colored_echo("  - em.mdp (energy minimization)", phase="export")
-        eq_stages = sim_config.simulation_phases.equilibration_stages
-        if eq_stages:
-            for i, stage in enumerate(eq_stages, 1):
-                colored_echo(f"  - eq_{i:02d}_{stage.name}.mdp (equilibration)", phase="export")
-        colored_echo("  - prod.mdp (production)", phase="export")
-        colored_echo("  - run_*_gromacs.sh (run script)", phase="export")
-        colored_echo(phase="export")
-
-        colored_echo(
-            "Dry run complete. Use 'build --format gromacs' to generate files, or remove "
-            "--dry-run to build and run.",
-            phase="export",
-        )
-        colored_echo("=" * 60, phase="export")
-        return
 
     click.echo(f"Building system for replicate {replicate}...")
     builder = SystemBuilder.from_config(sim_config)
@@ -944,6 +986,36 @@ def _run_gromacs_impl(
         sys.exit(1)
 
 
+def _run_openmm_impl(
+    sim_config: "SimulationConfig",
+    replicate: int,
+) -> None:
+    """Build and run a full local OpenMM simulation.
+
+    Parameters
+    ----------
+    sim_config : SimulationConfig
+        Validated simulation configuration.
+    replicate : int
+        Replicate number.
+    """
+    production = sim_config.simulation_phases.production
+    working_dir = sim_config.get_working_directory(replicate)
+
+    colored_echo(f"Building and running OpenMM in {working_dir}", phase="simulation")
+    _run_initial_segment(
+        sim_config=sim_config,
+        working_dir=working_dir,
+        replicate=replicate,
+        skip_build=False,
+        duration_ns=production.duration,
+        num_samples=production.samples,
+        timestep_fs=production.time_step,
+    )
+    colored_echo("OpenMM simulation completed successfully.", phase="simulation")
+    colored_echo(f"Output directory: {working_dir}", phase="simulation")
+
+
 # =============================================================================
 # Submit Command (SLURM)
 # =============================================================================
@@ -952,7 +1024,7 @@ def _run_gromacs_impl(
 @cli.command(
     help=(
         "Submit OpenMM self-resubmitting SLURM jobs. This command is "
-        "OpenMM-only; GROMACS users should use run-gromacs locally "
+        "OpenMM-only; GROMACS users should use run --engine gromacs locally "
         "or build --format gromacs for manual cluster submission. "
         "Integrated GROMACS SLURM submission is planned for v1.4.0."
     )
@@ -996,7 +1068,12 @@ def _run_gromacs_impl(
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Generate scripts without submitting",
+    help="Preview submission plan only (no files written, no submission)",
+)
+@click.option(
+    "--generate-only",
+    is_flag=True,
+    help="Generate job scripts without submitting to SLURM",
 )
 @click.option(
     "--output-dir",
@@ -1063,6 +1140,7 @@ def submit(
     preset: str,
     email: str,
     dry_run: bool,
+    generate_only: bool,
     output_dir: Optional[str],
     time_limit: Optional[str],
     memory: Optional[str],
@@ -1080,7 +1158,7 @@ def submit(
     production duration is complete.
 
     This command does not yet support GROMACS as a simulation engine. GROMACS
-    users should use ``run-gromacs`` for local execution or
+    users should use ``run --engine gromacs`` for local execution or
     ``build --format gromacs`` to export files for manual SLURM submission.
     Integrated GROMACS SLURM submission is planned for v1.4.0.
 
@@ -1091,6 +1169,9 @@ def submit(
     """
     from polyzymd.workflow.daisy_chain import submit_daisy_chain
     from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV
+
+    if dry_run and generate_only:
+        raise click.UsageError("Cannot use both --dry-run and --generate-only")
 
     # Resolve pixi environment: explicit flag > preset default
     resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "cuda-12-4")
@@ -1114,15 +1195,48 @@ def submit(
         colored_echo("Skip-build mode: using pre-built systems", phase="workflow")
 
     if dry_run:
-        colored_echo("DRY RUN MODE - scripts will be created but not submitted", phase="workflow")
+        from polyzymd.config.schema import SimulationConfig
+
+        replicate_list = _resolve_replicates_option(replicates, None, "submit")
+        sim_config = SimulationConfig.from_yaml(config)
+        if scratch_dir:
+            sim_config.output.scratch_directory = Path(scratch_dir)
+        if projects_dir:
+            sim_config.output.projects_directory = Path(projects_dir)
+
+        script_dir = (
+            Path(output_dir) if output_dir else sim_config.output.get_job_scripts_directory()
+        )
+
+        colored_echo("=" * 60, phase="workflow")
+        colored_echo("DRY RUN — Submission Preview", phase="workflow")
+        colored_echo("=" * 60, phase="workflow")
+        colored_echo(f"Simulation: {sim_config.name}", phase="workflow")
+        colored_echo(f"Preset: {preset}", phase="workflow")
+        colored_echo(f"Pixi environment: {resolved_pixi_env}", phase="workflow")
+        colored_echo(f"Replicates: {replicate_list}", phase="workflow")
+        colored_echo(f"Script output directory: {script_dir}", phase="workflow")
+        colored_echo(
+            "Planned action: generate one self-resubmitting script per replicate and submit with sbatch",
+            phase="workflow",
+        )
+        colored_echo("Dry run complete. No files were written.", phase="workflow")
+        colored_echo("=" * 60, phase="workflow")
+        return
+
+    if generate_only:
+        colored_echo(
+            "GENERATE-ONLY MODE - scripts will be created but not submitted", phase="workflow"
+        )
 
     try:
-        results = submit_daisy_chain(
+        submit_daisy_chain(
             config_path=config,
             slurm_preset=preset,
             replicates=replicates,
             email=email,
             dry_run=dry_run,
+            generate_only=generate_only,
             force=force,
             pixi_env=resolved_pixi_env,
             output_dir=output_dir,
@@ -1136,7 +1250,7 @@ def submit(
             skip_build=skip_build,
         )
 
-        if not dry_run:
+        if not generate_only:
             colored_echo("\nJob submission complete!", phase="workflow")
             colored_echo("Monitor with: squeue -u $USER", phase="workflow")
 

@@ -146,6 +146,8 @@ class DaisyChainConfig:
     replicates : list of int
         Replicate numbers to run.
     dry_run : bool
+        If True, preview only. No scripts are written and no jobs are submitted.
+    generate_only : bool
         If True, create scripts but don't submit.
     force : bool
         If True, skip the squeue duplicate-job check and submit even if
@@ -162,6 +164,7 @@ class DaisyChainConfig:
     equilibration_time_ns: float = 0.5
     replicates: List[int] = field(default_factory=lambda: [1])
     dry_run: bool = False
+    generate_only: bool = False
     force: bool = False
     output_script_dir: Path = Path("daisy_chain_scripts")
     config_path: str = "config.yaml"
@@ -173,6 +176,7 @@ class DaisyChainConfig:
         slurm_config: SlurmConfig,
         replicates: Union[str, List[int]] = "1",
         dry_run: bool = False,
+        generate_only: bool = False,
         force: bool = False,
         output_script_dir: Union[str, Path] = "daisy_chain_scripts",
         config_path: str = "config.yaml",
@@ -188,7 +192,9 @@ class DaisyChainConfig:
         replicates : str or list of int
             Replicate range string (e.g. ``"1-5"``) or list of ints.
         dry_run : bool
-            If True, don't submit jobs.
+            If True, preview only and write no files.
+        generate_only : bool
+            If True, create scripts without submitting.
         force : bool
             If True, skip duplicate-job check.
         output_script_dir : str or Path
@@ -215,6 +221,7 @@ class DaisyChainConfig:
             equilibration_time_ns=sim_config.simulation_phases.total_equilibration_duration,
             replicates=replicate_list,
             dry_run=dry_run,
+            generate_only=generate_only,
             force=force,
             output_script_dir=Path(output_script_dir),
             config_path=config_path,
@@ -415,9 +422,20 @@ class DaisyChainSubmitter:
         SubmissionResult
             Submission result with job information.
         """
+        if self._dc_config.generate_only:
+            job_id = f"GENERATED_{replicate}"
+            LOGGER.info(f"[GENERATE ONLY] Script generated: {script_path}")
+            return SubmissionResult(
+                job_id=job_id,
+                script_path=script_path,
+                segment_index=0,
+                replicate=replicate,
+                is_dry_run=True,
+            )
+
         if self._dc_config.dry_run:
             job_id = f"DRY_RUN_{replicate}"
-            LOGGER.info(f"[DRY RUN] Would submit {script_path}")
+            LOGGER.info(f"[DRY RUN] Would generate and submit {script_path}")
             return SubmissionResult(
                 job_id=job_id,
                 script_path=script_path,
@@ -480,8 +498,12 @@ class DaisyChainSubmitter:
         """
         job_name = self._create_job_name(replicate)
 
-        # Best-effort duplicate guard (skipped for dry runs)
-        if not self._dc_config.dry_run and not self._dc_config.force:
+        # Best-effort duplicate guard (only when actually submitting)
+        if (
+            not self._dc_config.dry_run
+            and not self._dc_config.generate_only
+            and not self._dc_config.force
+        ):
             existing = check_existing_slurm_jobs(job_name)
             if existing:
                 ids = ", ".join(existing)
@@ -492,6 +514,20 @@ class DaisyChainSubmitter:
                 )
 
         LOGGER.info(f"Submitting self-resubmitting job for replicate {replicate}")
+
+        if self._dc_config.dry_run:
+            script_path = self._dc_config.output_script_dir / f"run_rep{replicate}.sh"
+            result = SubmissionResult(
+                job_id=f"DRY_RUN_{replicate}",
+                script_path=script_path,
+                segment_index=0,
+                replicate=replicate,
+                is_dry_run=True,
+            )
+            self._job_chains[replicate] = [result]
+            LOGGER.info(f"[DRY RUN] Would generate script: {script_path}")
+            LOGGER.info(f"[DRY RUN] Would submit replicate {replicate} with sbatch")
+            return result
 
         script_content = self.generate_job_script(replicate)
         filename = f"run_rep{replicate}.sh"
@@ -548,7 +584,10 @@ class DaisyChainSubmitter:
         LOGGER.info("")
 
         if config.dry_run:
-            LOGGER.info("*** DRY RUN MODE - Scripts will be created but not submitted ***")
+            LOGGER.info("*** DRY RUN MODE - Preview only, no files will be written ***")
+            LOGGER.info("")
+        elif config.generate_only:
+            LOGGER.info("*** GENERATE-ONLY MODE - Scripts will be created but not submitted ***")
             LOGGER.info("")
 
     def _print_completion_summary(self) -> None:
@@ -557,9 +596,12 @@ class DaisyChainSubmitter:
         total_jobs = sum(len(chain) for chain in self._job_chains.values())
 
         if config.dry_run:
-            LOGGER.info(f"\nDry run completed. {total_jobs} job script(s) created.")
+            LOGGER.info(f"\nDry run completed. {total_jobs} replicate(s) previewed.")
+            LOGGER.info("No files were written and no jobs were submitted.")
+        elif config.generate_only:
+            LOGGER.info(f"\nScript generation complete. {total_jobs} job script(s) created.")
             LOGGER.info(f"Scripts saved to: {config.output_script_dir}")
-            LOGGER.info("Review the scripts and run without --dry-run to submit them.")
+            LOGGER.info("Review the scripts and run without --generate-only to submit them.")
         else:
             LOGGER.info(f"\nAll {total_jobs} job(s) submitted successfully!")
             LOGGER.info("\nSubmitted jobs:")
@@ -581,6 +623,7 @@ def submit_daisy_chain(
     replicates: str = "1",
     email: str = "",
     dry_run: bool = False,
+    generate_only: bool = False,
     force: bool = False,
     pixi_env: str = "cuda-12-4",
     output_dir: Optional[Union[str, Path]] = None,
@@ -610,7 +653,9 @@ def submit_daisy_chain(
     email : str
         Email for job notifications.
     dry_run : bool
-        If True, don't submit jobs.
+        If True, preview only and write no files.
+    generate_only : bool
+        If True, create scripts without submitting.
     force : bool
         If True, skip the squeue duplicate-job check.
     pixi_env : str
@@ -643,7 +688,7 @@ def submit_daisy_chain(
     ------
     ValueError
         If the SLURM account is empty on a preset that requires one
-        and ``dry_run`` is False.
+        and neither ``dry_run`` nor ``generate_only`` is set.
     """
     # Load simulation config
     sim_config = SimulationConfig.from_yaml(config_path)
@@ -684,7 +729,7 @@ def submit_daisy_chain(
             f"SLURM account is required but was not set for preset '{slurm_preset}'. "
             "Pass your allocation ID with --account <id>."
         )
-        if dry_run:
+        if dry_run or generate_only:
             LOGGER.warning(msg)
         else:
             raise ValueError(msg)
@@ -695,6 +740,7 @@ def submit_daisy_chain(
         slurm_config=slurm_config,
         replicates=replicates,
         dry_run=dry_run,
+        generate_only=generate_only,
         force=force,
         output_script_dir=script_output_dir,
         config_path=str(Path(config_path).resolve()),

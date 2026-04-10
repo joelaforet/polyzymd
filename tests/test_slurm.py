@@ -538,6 +538,7 @@ class TestDuplicateJobGuardIntegration:
 
         dc_config = MagicMock(spec=DaisyChainConfig)
         dc_config.dry_run = dry_run
+        dc_config.generate_only = False
         dc_config.force = force
         dc_config.slurm_config = MagicMock()
         dc_config.slurm_config.exclude = ""

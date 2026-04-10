@@ -44,7 +44,7 @@ By default, PolyzyMD suppresses verbose log messages from OpenFF Interchange and
 
 ```bash
 polyzymd --openff-logs build -c config.yaml
-polyzymd --openff-logs run-gromacs -c config.yaml
+polyzymd --openff-logs run -c config.yaml --engine gromacs
 ```
 
 **OpenFF logs:** OpenFF Interchange and Toolkit libraries are suppressed by default (they generate per-atom INFO messages during system building). Use `--openff-logs` to enable them for debugging force field issues.
@@ -226,18 +226,19 @@ With `--format gromacs`, the build command creates in `{projects_dir}/replicate_
 
 ---
 
-## polyzymd run-gromacs
+## polyzymd run
 
-Build and run a complete simulation using GROMACS.
+Build and run a complete local simulation with OpenMM or GROMACS.
 
-Builds the system, exports to GROMACS format (.gro, .top, .mdp), and
-executes the full GROMACS workflow locally (energy minimization,
-equilibration, production, and trajectory post-processing).
+Builds the system and executes the selected local engine workflow:
+
+- `--engine gromacs` exports GROMACS files and runs the full GROMACS workflow
+- `--engine openmm` builds and runs the OpenMM simulation locally
 
 ```bash
-polyzymd run-gromacs -c <path> [options]
-polyzymd run-gromacs -c <path> --gmx-path /usr/local/gromacs/bin/gmx
-polyzymd run-gromacs -c <path> --dry-run
+polyzymd run -c <path> --engine <gromacs|openmm> [options]
+polyzymd run -c <path> --engine gromacs --gmx-path /usr/local/gromacs/bin/gmx
+polyzymd run -c <path> --engine openmm --dry-run
 ```
 
 ### Options
@@ -246,10 +247,11 @@ polyzymd run-gromacs -c <path> --dry-run
 |--------|-------|----------|---------|-------------|
 | `--config` | `-c` | Yes | - | Path to YAML configuration file |
 | `--replicates` | `-r` | No | "1" | Replicate range (for example "1", "1-3", "1,3,5") |
+| `--engine` | - | Yes | - | Local engine to run: `gromacs` or `openmm` |
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
-| `--gmx-path` | - | No | "gmx" | Path to GROMACS executable |
-| `--dry-run` | - | No | false | Export files but don't run simulation |
+| `--gmx-path` | - | No | unset | Path to GROMACS executable (gromacs engine only) |
+| `--dry-run` | - | No | false | Validate and preview actions only (writes nothing) |
 
 > **Note:** `--replicate` is retained as a hidden deprecated alias.
 
@@ -257,33 +259,33 @@ polyzymd run-gromacs -c <path> --dry-run
 
 ```bash
 # Run full GROMACS workflow locally
-polyzymd run-gromacs -c config.yaml -r 1-3
+polyzymd run -c config.yaml -r 1-3 --engine gromacs
 
 # Use custom GROMACS installation
-polyzymd run-gromacs -c config.yaml --gmx-path /usr/local/gromacs/bin/gmx
+polyzymd run -c config.yaml --engine gromacs --gmx-path /usr/local/gromacs/bin/gmx
 
-# Export files only (for manual execution or HPC)
-polyzymd run-gromacs -c config.yaml -r 1-3 --dry-run
+# Run a full OpenMM simulation locally
+polyzymd run -c config.yaml -r 1 --engine openmm
+
+# Preview without writing files
+polyzymd run -c config.yaml -r 1-3 --engine gromacs --dry-run
 ```
 
 ### Workflow
 
 1. Load and validate configuration
 2. Build system (enzyme + substrate + polymers + solvent)
-3. Export to GROMACS format (.gro, .top, .mdp files)
-4. Run energy minimization (grompp + mdrun)
-5. Run equilibration stages (grompp + mdrun for each stage)
-6. Run production MD (grompp + mdrun)
-7. Post-process trajectory (trjconv for PBC handling)
+3. Run selected engine workflow:
+   - GROMACS: export `.gro/.top/.mdp` then run EM/equilibration/production/post-processing
+   - OpenMM: run minimization/equilibration/production locally
 
-All GROMACS output is streamed in real-time for familiar user experience.
-On any failure, execution stops immediately and all intermediate files are
-preserved for debugging.
+GROMACS output is streamed in real-time for familiar user experience.
+On any failure, execution stops immediately and intermediate files are preserved.
 
 ### Notes
 
-- Requires GROMACS to be installed and accessible via PATH
-- Use `--gmx-path` to specify a custom GROMACS executable location
+- Requires GROMACS only when `--engine gromacs` is selected
+- Use `--gmx-path` only with `--engine gromacs`
 - MDP parameters are generated from your config.yaml to match OpenMM settings
 - OpenFF force field defaults are used (rcoulomb=0.9, rvdw=0.9, PME) for 1:1 parity with OpenMM
 - Position restraints are automatically generated for equilibration stages

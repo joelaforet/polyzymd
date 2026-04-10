@@ -55,10 +55,10 @@ Alternatively, prefix each command with `pixi run -e build`.
 
 ```bash
 # Full workflow: build system + run GROMACS simulation
-polyzymd run-gromacs -c config.yaml --replicates 1
+polyzymd run -c config.yaml --engine gromacs --replicates 1
 
-# Export files only (for manual execution or HPC submission)
-polyzymd run-gromacs -c config.yaml --replicates 1 --dry-run
+# Preview the workflow without writing files
+polyzymd run -c config.yaml --engine gromacs --replicates 1 --dry-run
 
 # Build only (export GROMACS files, no simulation)
 polyzymd build -c config.yaml --format gromacs
@@ -68,11 +68,11 @@ polyzymd build -c config.yaml --format gromacs
 
 ```bash
 # Specify custom GROMACS path
-polyzymd run-gromacs -c config.yaml --gmx-path /usr/local/gromacs/bin/gmx
+polyzymd run -c config.yaml --engine gromacs --gmx-path /usr/local/gromacs/bin/gmx
 
 # Or with module system
 module load gromacs/2023.3
-polyzymd run-gromacs -c config.yaml --gmx-path $(which gmx)
+polyzymd run -c config.yaml --engine gromacs --gmx-path $(which gmx)
 ```
 
 ---
@@ -191,10 +191,10 @@ polyzymd validate -c config_gromacs.yaml
 
 ```bash
 # Full workflow (build + run)
-polyzymd run-gromacs -c config_gromacs.yaml --replicates 1
+polyzymd run -c config_gromacs.yaml --engine gromacs --replicates 1
 
 # Or dry-run to validate without building or running
-polyzymd run-gromacs -c config_gromacs.yaml --replicates 1 --dry-run
+polyzymd run -c config_gromacs.yaml --engine gromacs --replicates 1 --dry-run
 
 # To export files without running, use build instead:
 polyzymd build -c config_gromacs.yaml --format gromacs --replicates 1
@@ -212,7 +212,7 @@ random seed:
 polyzymd build -c config_gromacs.yaml --format gromacs --replicates 1-3
 
 # Run all 3 with GROMACS
-polyzymd run-gromacs -c config_gromacs.yaml --replicates 1-3
+polyzymd run -c config_gromacs.yaml --engine gromacs --replicates 1-3
 ```
 
 Output structure:
@@ -400,7 +400,7 @@ $GMX mdrun -deffnm prod -v -nb gpu -pme gpu -bonded gpu
 module load gromacs
 
 # Option 2: Specify path explicitly
-polyzymd run-gromacs -c config.yaml --gmx-path /opt/gromacs/bin/gmx
+polyzymd run -c config.yaml --engine gromacs --gmx-path /opt/gromacs/bin/gmx
 
 # Option 3: Add to PATH
 export PATH=$PATH:/opt/gromacs/bin
@@ -419,7 +419,7 @@ export PATH=$PATH:/opt/gromacs/bin
 **Solution**: Rebuild from scratch:
 ```bash
 rm -rf replicate_*/gromacs/
-polyzymd run-gromacs -c config.yaml --replicates 1
+polyzymd run -c config.yaml --engine gromacs --replicates 1
 ```
 
 ### "Simulation crashes during equilibration"

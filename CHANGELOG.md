@@ -529,7 +529,7 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 - Rewrote installation guide for pixi (replaces conda/mamba instructions).
 - Removed phantom `polyzymd run` and `polyzymd continue` CLI references
   (these commands never existed in the code).
-- Added `polyzymd run-gromacs` section to CLI reference.
+- Added `polyzymd run` section to CLI reference.
 - Updated HPC guide with pixi shell-hook activation examples.
 - Fixed stale `polymerist-env` environment name references.
 - Updated troubleshooting guide for pixi workflow.

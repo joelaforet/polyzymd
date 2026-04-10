@@ -1,7 +1,7 @@
-"""Tests for CLI replicate flag unification (Phase 2, v1.3.0).
+"""Tests for CLI replicate flag handling and run/submit UX.
 
 Tests the _resolve_replicates_option() helper and the updated
---replicates / --replicate flags on `build` and `run-gromacs`.
+--replicates / --replicate flags on `build` and `run`.
 """
 
 from __future__ import annotations
@@ -142,37 +142,69 @@ class TestBuildCommandReplicateFlags:
                 pytest.fail(f"Deprecated --replicate visible in help: {line}")
 
 
-class TestRunGromacsCommandReplicateFlags:
-    """Test that the run-gromacs command accepts the new flags."""
+class TestRunCommandReplicateFlags:
+    """Test that the run command accepts replicate flags."""
 
-    def test_run_gromacs_help_shows_replicates(self) -> None:
-        """'polyzymd run-gromacs --help' should show --replicates option."""
+    def test_run_help_shows_replicates(self) -> None:
+        """'polyzymd run --help' should show --replicates option."""
         from click.testing import CliRunner
 
         from polyzymd.cli.main import cli
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["run-gromacs", "--help"])
+        result = runner.invoke(cli, ["run", "--help"])
         assert result.exit_code == 0
         assert "--replicates" in result.output
 
-    def test_run_gromacs_help_hides_replicate(self) -> None:
-        """'polyzymd run-gromacs --help' should NOT show deprecated --replicate."""
+    def test_run_help_hides_replicate(self) -> None:
+        """'polyzymd run --help' should NOT show deprecated --replicate."""
         from click.testing import CliRunner
 
         from polyzymd.cli.main import cli
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["run-gromacs", "--help"])
+        result = runner.invoke(cli, ["run", "--help"])
         assert result.exit_code == 0
         lines = result.output.split("\n")
         for line in lines:
             if "--replicate" in line and "--replicates" not in line:
                 pytest.fail(f"Deprecated --replicate visible in help: {line}")
 
+    def test_run_help_shows_engine_flag(self) -> None:
+        """'polyzymd run --help' should include required --engine option."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["run", "--help"])
+        assert result.exit_code == 0
+        assert "--engine" in result.output
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_run_openmm_rejects_gmx_path(self, mock_from_yaml, tmp_path: Path) -> None:
+        """--gmx-path with --engine openmm should raise UsageError."""
+        mock_from_yaml.return_value = _make_dry_run_config()
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "-c",
+                str(config_path),
+                "--engine",
+                "openmm",
+                "--gmx-path",
+                "gmx",
+                "--dry-run",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "--gmx-path can only be used with --engine gromacs" in result.output
+
 
 class TestSubmitCommandUnchanged:
-    """Verify submit command is unchanged."""
+    """Verify submit command options."""
 
     def test_submit_still_has_replicates(self) -> None:
         """'polyzymd submit --help' should still show --replicates."""
@@ -184,6 +216,33 @@ class TestSubmitCommandUnchanged:
         result = runner.invoke(cli, ["submit", "--help"])
         assert result.exit_code == 0
         assert "--replicates" in result.output
+
+    def test_submit_help_shows_generate_only(self) -> None:
+        """'polyzymd submit --help' should show --generate-only."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["submit", "--help"])
+        assert result.exit_code == 0
+        assert "--generate-only" in result.output
+
+    def test_submit_dry_run_and_generate_only_conflict(self, tmp_path: Path) -> None:
+        """submit should reject --dry-run with --generate-only."""
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            [
+                "submit",
+                "-c",
+                str(config_path),
+                "--dry-run",
+                "--generate-only",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "Cannot use both --dry-run and --generate-only" in result.output
 
 
 class TestInternalCommandsUnchanged:
@@ -215,14 +274,14 @@ class TestDryRunOutput:
         result = runner.invoke(cli, ["build", "--help"])
         assert "--dry-run" in result.output
 
-    def test_run_gromacs_help_shows_dry_run_flag(self) -> None:
-        """'polyzymd run-gromacs --help' should include the --dry-run flag."""
+    def test_run_help_shows_dry_run_flag(self) -> None:
+        """'polyzymd run --help' should include the --dry-run flag."""
         from click.testing import CliRunner
 
         from polyzymd.cli.main import cli
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["run-gromacs", "--help"])
+        result = runner.invoke(cli, ["run", "--help"])
         assert "--dry-run" in result.output
 
 
