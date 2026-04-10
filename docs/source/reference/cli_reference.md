@@ -7,16 +7,22 @@ Complete reference for all PolyzyMD command-line interface commands.
 All commands support these global options (placed **before** the subcommand name):
 
 ```bash
-polyzymd --version <command>      # Show version and exit
+polyzymd --version                # Show version and exit
+polyzymd --help                   # Show top-level help
+polyzymd <command> --help         # Show subcommand help
 polyzymd -v <command>             # Enable verbose output
-polyzymd --openff-logs <command>  # Enable verbose OpenFF logs
+polyzymd --openff-logs <command>  # Show OpenFF toolkit logging
 polyzymd --no-color <command>     # Disable colored output
-polyzymd --help <command>         # Show help and exit
 ```
 
 > **Note:** Global options must appear *before* the subcommand.
 > For example: `polyzymd --no-color check-progress -c config.yaml`
 > (not `polyzymd check-progress --no-color -c config.yaml`).
+> `--version` prints the installed version and exits immediately.
+> `--help` shows top-level help; use `polyzymd <command> --help` for subcommand help.
+> `--verbose`/`-v` enables verbose output.
+> `--openff-logs` enables OpenFF toolkit logging.
+> `--no-color` disables colored output.
 
 ### Colored Output
 
