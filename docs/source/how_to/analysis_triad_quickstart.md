@@ -224,7 +224,7 @@ workflows:
 ```python
 from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.orchestrator import run_comparison
-from polyzymd.compare.config import ComparisonConfig
+from polyzymd.config.comparison import ComparisonConfig
 
 # Load comparison configuration
 comp_config = ComparisonConfig.from_yaml("comparison.yaml")
@@ -378,7 +378,7 @@ Use the analysis orchestrator for programmatic comparison:
 ```python
 from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.orchestrator import run_comparison
-from polyzymd.compare.config import ComparisonConfig
+from polyzymd.config.comparison import ComparisonConfig
 
 # Load comparison configuration (must have plugins.catalytic_triad section)
 config = ComparisonConfig.from_yaml("comparison.yaml")

@@ -477,7 +477,7 @@ or discover paths themselves:
 ## `PlotContext.plot_settings`
 
 `PlotContext.plot_settings` carries global plotting configuration from
-`polyzymd.compare.config.PlotSettings`. Use this object instead of hard-coding
+`polyzymd.config.comparison.PlotSettings`. Use this object instead of hard-coding
 figure style, DPI, or output behavior.
 
 ### Type and global fields
@@ -850,12 +850,15 @@ deserialization fails.
 `result.get("key", default)` checks, duplicating key strings, or needing to
 store large NumPy arrays alongside JSON, migrate to Pydantic models.
 
-## A Note on the `compare/` Package
+## A Note on Comparison Infrastructure
 
-The `compare/` package provides shared infrastructure such as config models,
-statistics, IO helpers, and CLI wiring.
+Shared comparison infrastructure now lives across the core packages:
 
-**You do NOT need to create files in `compare/` for a new plugin.** Keep your
+- `polyzymd.config.comparison` for comparison config and plot settings
+- `polyzymd.cli.compare` for `polyzymd compare` commands
+- `polyzymd.analyses.shared` for inferential statistics and result/path helpers
+
+**You do NOT need to create new top-level comparison modules for a plugin.** Keep your
 plotting logic in your plugin's `plot()` method and your formatting in
 `format()`. Start with all logic in `__init__.py`; as your plugin grows, extract
 plotting functions into a `_plotters.py` module within the package (see
@@ -1175,7 +1178,7 @@ they are always available and patchable in tests. Only heavy third-party
 dependencies (MDAnalysis, mdtraj, matplotlib) should be imported inside
 methods.
 
-### Do not create files in `compare/`
+### Do not create top-level comparison packages
 
 New plugins should keep all logic in the plugin package. Use the canonical
 base classes from `analyses.base` (`BaseComparisonResult`,

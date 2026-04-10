@@ -42,12 +42,14 @@ Package Structure
     │   ├── distances/    # Distance analysis plugin package
     │   ├── secondary_structure/  # Secondary structure plugin package
     │   └── ...           # One sub-package per analysis type
-    ├── compare/          # Shared comparison infrastructure
-    │   ├── statistics.py # t-tests, ANOVA, Cohen's d
-    │   ├── config.py     # ComparisonConfig, plot settings
-    │   ├── settings.py   # Legacy analysis settings (being migrated)
-    │   ├── core/         # Base comparison classes
-    │   └── io/           # Result I/O utilities
+    ├── config/
+    │   └── comparison.py # ComparisonConfig, PlotSettings, condition models
+    ├── analyses/shared/
+    │   ├── inferential_statistics.py # t-tests, ANOVA, effect sizes
+    │   ├── result_io.py  # Comparison result discovery/loading
+    │   └── paths.py      # sanitize_label() and path helpers
+    ├── cli/
+    │   └── compare.py    # `polyzymd compare` subcommands
     └── cli/              # Command-line interface
         └── main.py       # Click CLI
 

@@ -605,7 +605,7 @@ system should be equilibrated before triad analysis.
 ```python
 from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.orchestrator import run_comparison
-from polyzymd.compare.config import ComparisonConfig
+from polyzymd.config.comparison import ComparisonConfig
 
 # Load comparison config
 comp_config = ComparisonConfig.from_yaml("comparison.yaml")

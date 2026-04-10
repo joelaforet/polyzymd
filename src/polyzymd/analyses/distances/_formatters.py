@@ -10,10 +10,9 @@ For each pair:
 - Primary: Mean distance (lower = closer = better)
 - Secondary: Fraction below threshold (higher = more contact = better)
 
-.. versionchanged:: 1.3.0
-    Migrated from ``polyzymd.compare.distances_formatters`` into the
-    distances analysis package so that contributors find all distances-related
-    code in one place.
+.. note::
+    Originally part of the compare package and consolidated into the
+    distances plugin package in v1.3.0.
 """
 
 from __future__ import annotations

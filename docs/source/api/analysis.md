@@ -18,7 +18,6 @@ For the unified analysis lifecycle, see the [Analyses Plugin API](analyses.md).
 
 - [Analyses Plugin API](analyses.md)
 - [Configuration API](config.md)
-- [Compare API](compare.md)
 - [API Overview](overview.rst)
 - [Extending the Analysis Framework](../contributor_guide/extending_analyses.md)
 

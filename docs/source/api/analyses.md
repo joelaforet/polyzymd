@@ -22,7 +22,7 @@ adding new analysis types to PolyzyMD.
 - `run_comparison(analysis: Analysis, config: ComparisonConfig, recompute: bool = False, equilibration: str | None = None)` — run full lifecycle (compute + aggregate + compare + plot)
 - `run_all_comparisons(config: ComparisonConfig, analysis_names: list[str] | None = None, recompute: bool = False, equilibration: str | None = None)` — run multiple analyses from one comparison config
 
-`ComparisonConfig` is defined in `polyzymd.compare.config`.
+`ComparisonConfig` is defined in `polyzymd.config.comparison`.
 
 ### Base Class
 
@@ -112,5 +112,4 @@ summaries.
 
 - [Extending the Analysis Framework](../contributor_guide/extending_analyses.md) — tutorial
 - [Analysis Calculator API](analysis.md) — underlying compute layer
-- [Compare API](compare.md) — statistics and formatting
 - [API Overview](overview.rst)

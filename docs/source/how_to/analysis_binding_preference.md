@@ -1096,7 +1096,8 @@ plot_settings:
 
 ````{tab-item} Python
 ```python
-from polyzymd.compare.config import PlotSettings, ContactsPlotSettings
+from polyzymd.analyses.contacts._plot_settings import ContactsPlotSettings
+from polyzymd.config.comparison import PlotSettings
 
 plot_settings = PlotSettings(
     output_dir="figures/",

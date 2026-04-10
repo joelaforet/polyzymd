@@ -170,7 +170,7 @@ For programmatic access to results:
 ```python
 from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.orchestrator import run_comparison
-from polyzymd.compare.config import ComparisonConfig
+from polyzymd.config.comparison import ComparisonConfig
 
 config = ComparisonConfig.from_yaml("comparison.yaml")
 analysis = get_analysis("rmsd")()

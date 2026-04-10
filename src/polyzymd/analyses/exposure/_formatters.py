@@ -3,10 +3,9 @@
 This module provides functions to format ExposureComparisonResult objects
 for different output formats: console tables, Markdown, and JSON.
 
-.. versionchanged:: 1.3.0
-    Migrated from ``polyzymd.compare.exposure_formatters`` into the
-    exposure analysis package so that contributors find all exposure-related
-    code in one place.
+.. note::
+    Originally part of the compare package and consolidated into the
+    exposure plugin package in v1.3.0.
 """
 
 from __future__ import annotations

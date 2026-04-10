@@ -25,7 +25,7 @@ src/polyzymd/
 |- workflow/
 |- analysis/     # per-condition calculators (compute layer)
 |- analyses/     # ★ plugin system — unified analysis lifecycle
-|- compare/      # statistics, formatters, config, IO
+|- config/comparison.py  # comparison config and plot settings
 |- exporters/
 |- core/
 `- utils/
@@ -75,12 +75,19 @@ To add a new analysis, create a package in `analyses/<name>/` that subclasses
 `Analysis`, or use `polyzymd new-analysis <name>` to scaffold one automatically.
 See {doc}`../contributor_guide/extending_analyses` for the full guide.
 
-### `compare/`
+### Comparison infrastructure (distributed)
 
-Provides shared comparison infrastructure: statistics (t-tests, ANOVA,
-Cohen's d), formatters, and configuration. Established analysis plugins
-delegate plotting to `_plotters.py` modules within their package; the
-`plot()` method in `__init__.py` orchestrates what to plot.
+Comparison functionality is split across focused modules:
+
+- `config/comparison.py` for comparison config and plotting settings
+- `cli/compare.py` for `polyzymd compare` subcommands
+- `analyses/shared/inferential_statistics.py` for t-tests, ANOVA, and effect sizes
+- `analyses/shared/result_io.py` for result discovery and loading
+- `analyses/shared/paths.py` for label/path helpers such as `sanitize_label()`
+
+Established analysis plugins delegate plotting to `_plotters.py` modules
+within their package; the `plot()` method in `__init__.py` orchestrates what
+to plot.
 
 ### `core/` and `utils/`
 
@@ -129,8 +136,9 @@ scaffold the package structure automatically.
 ### Separation between per-condition and cross-condition work
 
 The `analysis/` package answers questions about one simulation condition. The
-`compare/` package answers questions across multiple conditions. Keeping those
-roles separate helps maintain both code clarity and scientific interpretation.
+comparison workflow answers questions across multiple conditions using the
+distributed modules listed above. Keeping those roles separate helps maintain
+both code clarity and scientific interpretation.
 
 ## Where contributors usually need to look
 
@@ -140,7 +148,7 @@ roles separate helps maintain both code clarity and scientific interpretation.
 | change build behavior | `src/polyzymd/builders/` |
 | change run or restart behavior | `src/polyzymd/simulation/` and `src/polyzymd/workflow/` |
 | add an analysis type | `src/polyzymd/analyses/` (plugin package — subclass `Analysis` and implement `compute_replicate()` / `aggregate()`) |
-| add comparison statistics | `src/polyzymd/compare/` |
+| add comparison statistics | `src/polyzymd/analyses/shared/inferential_statistics.py` |
 | add or change CLI commands | `src/polyzymd/cli/` |
 
 ## A practical mental model
@@ -151,7 +159,7 @@ If you are new to the codebase, it helps to think in layers:
 - `builders` and `simulation` make it happen for one system
 - `workflow` makes it practical on clusters
 - `analysis` measures what happened
-- `compare` interprets differences across studies
+- comparison workflows interpret differences across studies
 
 That mental model is usually enough to find the right subsystem before you dive
 into module-level details or API reference pages.
@@ -164,5 +172,5 @@ into module-level details or API reference pages.
 - API details: {doc}`../api/overview`
 
 <!-- IMAGE OPPORTUNITY: Add a left-to-right architecture diagram showing
-`config -> builders -> simulation/workflow -> analysis -> analyses -> compare -> plots`,
+`config -> builders -> simulation/workflow -> analysis -> analyses -> comparison workflows -> plots`,
 with extension points called out at `analyses` and `workflow`. -->

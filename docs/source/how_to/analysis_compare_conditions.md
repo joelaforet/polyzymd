@@ -236,7 +236,7 @@ from pathlib import Path
 
 from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.orchestrator import run_comparison
-from polyzymd.compare.config import ComparisonConfig
+from polyzymd.config.comparison import ComparisonConfig
 
 config = ComparisonConfig.from_yaml(Path("comparison.yaml"))
 analysis = get_analysis("rmsf")()

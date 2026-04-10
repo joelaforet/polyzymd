@@ -5,8 +5,8 @@ specifies which simulation conditions to compare, which analysis plugins to
 run, and how to visualize results. Create one with `polyzymd compare init -n
 <name>` and place it at the root of your comparison project directory.
 
-Source of truth: {func}`polyzymd.compare.config.ComparisonConfig` in
-`src/polyzymd/compare/config.py`.
+Source of truth: {func}`polyzymd.config.comparison.ComparisonConfig` in
+`src/polyzymd/config/comparison.py`.
 
 For CLI commands that consume this file, see
 {doc}`analysis_comparison_reference`. For directory layout and data

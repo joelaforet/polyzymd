@@ -22,7 +22,6 @@ configuration fields, API signatures, defaults, or benchmark data.
 - [Core API](../api/core.md)
 - [Analysis API](../api/analysis.md)
 - [Analyses Plugin API](../api/analyses.md)
-- [Compare API](../api/compare.md)
 
 ## When Not to Use This Section
 
@@ -30,7 +29,7 @@ If you need a guided path, go to [Tutorials](../tutorials/index.md).
 If you need a concrete task solution, go to [How-To Guides](../how_to/index.md).
 
 <!-- IMAGE OPPORTUNITY: Add a compact module map that groups config, builders,
-simulation, workflow, analysis, and compare as a reference navigation aid. -->
+simulation, workflow, and analysis as a reference navigation aid. -->
 
 ```{toctree}
 :hidden:
@@ -50,5 +49,4 @@ Workflow API <../api/workflow>
 Core API <../api/core>
 Analysis API <../api/analysis>
 Analyses Plugin API <../api/analyses>
-Compare API <../api/compare>
 ```

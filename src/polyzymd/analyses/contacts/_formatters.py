@@ -8,10 +8,9 @@ Note:
     (explains WHY stability changes), not an observable. Per-residue
     contact-RMSF correlations are computed in ``polyzymd compare report``.
 
-.. versionchanged:: 1.3.0
-    Migrated from ``polyzymd.compare.contacts_formatters`` into the contacts
-    analysis package so that contributors find all contacts-related code in
-    one place.
+.. note::
+    Originally part of the compare package and consolidated into the
+    contacts plugin package in v1.3.0.
 """
 
 from __future__ import annotations

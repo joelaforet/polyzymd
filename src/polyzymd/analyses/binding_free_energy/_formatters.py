@@ -1,8 +1,8 @@
 """Output formatters for binding free energy comparison results.
 
-.. versionchanged:: 1.3.0
-    Moved from ``polyzymd.compare.binding_free_energy_formatters`` to
-    ``polyzymd.analyses.binding_free_energy._formatters``.
+.. note::
+    Originally part of the compare package and consolidated into the
+    binding free energy plugin package in v1.3.0.
 
 Provides console table, Markdown, and JSON output for BindingFreeEnergyResult.
 """

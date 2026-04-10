@@ -609,7 +609,7 @@ import json
 
 from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.orchestrator import run_comparison
-from polyzymd.compare.config import ComparisonConfig
+from polyzymd.config.comparison import ComparisonConfig
 
 # Programmatic access goes through the RMSFAnalysis plugin
 config = ComparisonConfig.from_yaml("comparison.yaml")

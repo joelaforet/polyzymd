@@ -1,8 +1,8 @@
 """Output formatters for polymer affinity score comparison results.
 
-.. versionchanged:: 1.3.0
-    Moved from ``polyzymd.compare.polymer_affinity_formatters`` to
-    ``polyzymd.analyses.polymer_affinity._formatters``.
+.. note::
+    Originally part of the compare package and consolidated into the
+    polymer affinity plugin package in v1.3.0.
 
 Provides console table, Markdown, and JSON output for PolymerAffinityScoreResult.
 """
