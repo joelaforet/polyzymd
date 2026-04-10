@@ -228,7 +228,7 @@ pixi run -e build polyzymd build -c config.yaml --format gromacs --replicates 1-
 ```{note}
 `polyzymd submit` does not yet support GROMACS as a simulation engine.
 Export files with `build --format gromacs` and submit manually via SLURM.
-Integrated GROMACS submission (`submit --engine gromacs`) is planned for v1.4.0.
+Integrated GROMACS submission support is planned for v1.4.0.
 ```
 
 See {doc}`../how_to/gromacs_export` for the full GROMACS HPC workflow.

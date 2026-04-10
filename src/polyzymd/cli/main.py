@@ -413,12 +413,12 @@ def build(
                     if eq_stages:
                         for i, stage in enumerate(eq_stages, 1):
                             colored_echo(
-                                (f"    - eq_stage{i}_{stage.ensemble.lower()}.mdp (equilibration)"),
+                                f"    - eq_{i:02d}_{stage.name}.mdp (equilibration)",
                                 phase="build",
                             )
                     colored_echo("    - prod.mdp (production)", phase="build")
-                    colored_echo("    - posres_*.itp (position restraints)", phase="build")
-                    colored_echo("    - run_gromacs.sh (run script)", phase="build")
+                    colored_echo("    - posre_*.itp (position restraints)", phase="build")
+                    colored_echo("    - run_*_gromacs.sh (run script)", phase="build")
                 elif export_format in ("lammps", "amber"):
                     colored_echo(
                         f"    ({export_format.upper()} export planned for v1.4.0)",
@@ -577,7 +577,12 @@ def build(
                 colored_echo("  - solvated_system.pdb (topology + positions)", phase="build")
                 colored_echo("  - system.xml (OpenMM system with restraints)", phase="build")
                 colored_echo(
-                    "Use 'polyzymd run --skip-build' to run without rebuilding.", phase="build"
+                    "Use 'polyzymd submit' to submit for HPC execution,",
+                    phase="build",
+                )
+                colored_echo(
+                    "or 'polyzymd run-segment' to run a single segment locally.",
+                    phase="build",
                 )
 
     except PydanticValidationError as e:
