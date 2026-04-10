@@ -896,7 +896,7 @@ class TestPlot:
     def test_delegates_to_three_plotters(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.distances import DistancesAnalysis
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = DistancesAnalysis()
 
@@ -935,7 +935,7 @@ class TestPlot:
     def test_plot_handles_failure(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.distances import DistancesAnalysis
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = DistancesAnalysis()
 
@@ -974,7 +974,7 @@ class TestPlot:
     def test_plot_empty_conditions(self, tmp_path):
         from polyzymd.analyses.base import PlotContext
         from polyzymd.analyses.distances import DistancesAnalysis
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = DistancesAnalysis()
 
@@ -994,7 +994,7 @@ class TestPlot:
         """Orchestrator guarantees non-None plot_settings; plugin passes it through."""
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.distances import DistancesAnalysis
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = DistancesAnalysis()
 

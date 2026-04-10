@@ -22,7 +22,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ===========================================================================
 # Discovery
 # ===========================================================================
@@ -692,7 +691,7 @@ class TestPlot:
             BFESettings,
             BindingFreeEnergyAnalysis,
         )
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = BindingFreeEnergyAnalysis()
         mock_sim = MagicMock()
@@ -737,7 +736,7 @@ class TestPlot:
             BFESettings,
             BindingFreeEnergyAnalysis,
         )
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = BindingFreeEnergyAnalysis()
         mock_sim = MagicMock()
@@ -779,7 +778,7 @@ class TestPlot:
             BFESettings,
             BindingFreeEnergyAnalysis,
         )
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = BindingFreeEnergyAnalysis()
         mock_sim = MagicMock()
@@ -825,7 +824,7 @@ class TestPlot:
             BFESettings,
             BindingFreeEnergyAnalysis,
         )
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = BindingFreeEnergyAnalysis()
         mock_sim = MagicMock()

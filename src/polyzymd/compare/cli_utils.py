@@ -84,7 +84,7 @@ def load_comparison_config(config_file: Path) -> ComparisonConfig:
     ComparisonConfig
         The loaded configuration object.
     """
-    from polyzymd.compare.config import ComparisonConfig
+    from polyzymd.config.comparison import ComparisonConfig
 
     config_file = Path(config_file).resolve()
     if not config_file.exists():

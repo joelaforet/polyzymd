@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-importlib.import_module("polyzymd.compare.config")
+importlib.import_module("polyzymd.config.comparison")
 
 # ---------------------------------------------------------------------------
 # Helpers

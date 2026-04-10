@@ -594,7 +594,7 @@ class TestPlot:
     """Test RMSFAnalysis.plot calls inlined private plotting functions."""
 
     def test_plot_returns_empty_on_no_conditions(self, rmsf_analysis, tmp_path):
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         ctx = PlotContext(
             conditions=[],
@@ -618,7 +618,7 @@ class TestPlot:
         condition,
         tmp_path,
     ):
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         # Setup mock returns
         mock_comp_plot.return_value = [tmp_path / "figures" / "rmsf_comparison.png"]
@@ -636,7 +636,7 @@ class TestPlot:
             plot_settings=PlotSettings(),
         )
 
-        with patch("polyzymd.compare.config.PlotSettings") as MockPlotSettings:
+        with patch("polyzymd.config.comparison.PlotSettings") as MockPlotSettings:
             MockPlotSettings.return_value = MagicMock()
             plots = rmsf_analysis.plot(ctx)
 
@@ -655,7 +655,7 @@ class TestPlot:
         tmp_path,
     ):
         """Plotting failures should be caught, not crash the pipeline."""
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis_dir = tmp_path / "analysis" / "no_polymer" / "rmsf"
         analysis_dir.mkdir(parents=True)
@@ -669,7 +669,7 @@ class TestPlot:
             plot_settings=PlotSettings(),
         )
 
-        with patch("polyzymd.compare.config.PlotSettings") as MockPlotSettings:
+        with patch("polyzymd.config.comparison.PlotSettings") as MockPlotSettings:
             MockPlotSettings.return_value = MagicMock()
             plots = rmsf_analysis.plot(ctx)
 

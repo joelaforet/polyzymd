@@ -52,7 +52,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, Sequence, TypeVa
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
-    from polyzymd.compare.config import ComparisonConfig, ConditionConfig, PlotSettings
+    from polyzymd.config.comparison import ComparisonConfig, ConditionConfig, PlotSettings
     from polyzymd.config.schema import SimulationConfig
 
 logger = logging.getLogger("polyzymd.analyses")

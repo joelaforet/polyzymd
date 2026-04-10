@@ -1087,7 +1087,7 @@ class TestPlot:
             PolymerAffinityAnalysis,
             PolymerAffinitySettings,
         )
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = PolymerAffinityAnalysis()
         mock_sim = MagicMock()
@@ -1131,7 +1131,7 @@ class TestPlot:
             PolymerAffinityAnalysis,
             PolymerAffinitySettings,
         )
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = PolymerAffinityAnalysis()
         mock_sim = MagicMock()
@@ -1174,7 +1174,7 @@ class TestPlot:
             PolymerAffinityAnalysis,
             PolymerAffinitySettings,
         )
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = PolymerAffinityAnalysis()
 
@@ -1196,7 +1196,7 @@ class TestPlot:
             PolymerAffinityAnalysis,
             PolymerAffinitySettings,
         )
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = PolymerAffinityAnalysis()
         mock_sim = MagicMock()
@@ -1243,7 +1243,7 @@ class TestPlot:
             PolymerAffinityAnalysis,
             PolymerAffinitySettings,
         )
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = PolymerAffinityAnalysis()
         mock_sim = MagicMock()

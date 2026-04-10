@@ -526,7 +526,7 @@ class TestPlot:
     def test_plot_creates_output_dir(self, mock_chaperone_fn, mock_heatmap_fn, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.exposure import ExposureAnalysis, ExposureSettings
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = ExposureAnalysis()
         mock_chaperone_fn.return_value = []
@@ -567,7 +567,7 @@ class TestPlot:
     def test_plot_catches_exceptions(self, mock_chaperone_fn, mock_heatmap_fn, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.exposure import ExposureAnalysis, ExposureSettings
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = ExposureAnalysis()
 

@@ -1,4 +1,4 @@
-"""Configuration schema for comparison projects."""
+"""Comparison configuration schema in ``polyzymd.config``."""
 
 from __future__ import annotations
 

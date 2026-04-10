@@ -19,5 +19,5 @@ cli_utils
 
 All symbols are imported from their canonical submodule, e.g.::
 
-    from polyzymd.compare.config import ComparisonConfig
+    from polyzymd.config.comparison import ComparisonConfig
 """

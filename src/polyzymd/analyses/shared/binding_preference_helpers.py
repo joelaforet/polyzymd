@@ -31,7 +31,7 @@ if TYPE_CHECKING:
         AggregatedBindingPreferenceResult,
         BindingPreferenceResult,
     )
-    from polyzymd.compare.config import ConditionConfig
+    from polyzymd.config.comparison import ConditionConfig
 
 logger = logging.getLogger("polyzymd.analyses")
 

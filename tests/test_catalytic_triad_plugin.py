@@ -687,7 +687,7 @@ class TestPlot:
     """Test CatalyticTriadAnalysis.plot delegates to inlined plotting helpers."""
 
     def test_plot_returns_empty_on_no_conditions(self, triad_analysis, tmp_path, default_settings):
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         ctx = PlotContext(
             conditions=[],
@@ -712,7 +712,7 @@ class TestPlot:
         tmp_path,
         default_settings,
     ):
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         # Setup mock return values
         mock_kde_fn.return_value = [tmp_path / "figures" / "triad_kde_panel.png"]
@@ -730,7 +730,7 @@ class TestPlot:
             plot_settings=PlotSettings(),
         )
 
-        with patch("polyzymd.compare.config.PlotSettings") as MockPlotSettings:
+        with patch("polyzymd.config.comparison.PlotSettings") as MockPlotSettings:
             MockPlotSettings.return_value = MagicMock()
             plots = triad_analysis.plot(ctx)
 
@@ -762,7 +762,7 @@ class TestPlot:
         default_settings,
     ):
         """Plotter failures should be caught, not crash the pipeline."""
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis_dir = tmp_path / "analysis" / "no_polymer" / "catalytic_triad"
         analysis_dir.mkdir(parents=True)
@@ -776,7 +776,7 @@ class TestPlot:
             plot_settings=PlotSettings(),
         )
 
-        with patch("polyzymd.compare.config.PlotSettings") as MockPlotSettings:
+        with patch("polyzymd.config.comparison.PlotSettings") as MockPlotSettings:
             MockPlotSettings.return_value = MagicMock()
             plots = triad_analysis.plot(ctx)
 

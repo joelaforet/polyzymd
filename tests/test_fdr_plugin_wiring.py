@@ -767,7 +767,7 @@ class TestYAMLToSettingsWiring:
 
     def test_contacts_settings_from_comparison_yaml(self, tmp_path: Path) -> None:
         """ComparisonConfig.from_yaml should preserve non-default contacts settings."""
-        from polyzymd.compare.config import ComparisonConfig
+        from polyzymd.config.comparison import ComparisonConfig
 
         cfg_path = tmp_path / "comparison.yaml"
         cfg_path.write_text(

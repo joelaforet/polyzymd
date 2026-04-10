@@ -7,7 +7,7 @@ elements (grouped bars, heatmap annotations, etc.) without inheriting from
 a base class.
 
 All functions accept a ``PlotSettings`` object (from
-``polyzymd.compare.config``) so that user-configured themes, palettes,
+``polyzymd.config.comparison``) so that user-configured themes, palettes,
 and DPI settings are respected automatically.
 
 Examples
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
-    from polyzymd.compare.config import PlotSettings, PlotTheme
+    from polyzymd.config.comparison import PlotSettings, PlotTheme
 
 logger = logging.getLogger(__name__)
 

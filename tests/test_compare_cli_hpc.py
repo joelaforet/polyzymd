@@ -41,7 +41,7 @@ def test_submit_dry_run_prints_summary(monkeypatch, tmp_path: Path) -> None:
     )
 
     monkeypatch.setattr(
-        "polyzymd.compare.config.ComparisonConfig.from_yaml",
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
         lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
     )
     monkeypatch.setattr(
@@ -96,7 +96,7 @@ def test_submit_dry_run_with_job_arrays_prints_array_summary(monkeypatch, tmp_pa
     )
 
     monkeypatch.setattr(
-        "polyzymd.compare.config.ComparisonConfig.from_yaml",
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
         lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
     )
     monkeypatch.setattr(
@@ -153,7 +153,7 @@ def test_submit_allow_partial_sets_manifest_policy(monkeypatch, tmp_path: Path) 
     captured: dict[str, Any] = {}
 
     monkeypatch.setattr(
-        "polyzymd.compare.config.ComparisonConfig.from_yaml",
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
         lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
     )
     monkeypatch.setattr(
@@ -202,7 +202,7 @@ def test_status_json_output(monkeypatch, tmp_path: Path) -> None:
     runner = CliRunner()
 
     monkeypatch.setattr(
-        "polyzymd.compare.config.ComparisonConfig.from_yaml",
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
         lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
     )
     monkeypatch.setattr(
@@ -229,7 +229,7 @@ def test_status_human_output_includes_unknown_and_warnings(monkeypatch, tmp_path
     runner = CliRunner()
 
     monkeypatch.setattr(
-        "polyzymd.compare.config.ComparisonConfig.from_yaml",
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
         lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
     )
     monkeypatch.setattr(
@@ -265,7 +265,7 @@ def test_status_reconcile_prints_summary(monkeypatch, tmp_path: Path) -> None:
     runner = CliRunner()
 
     monkeypatch.setattr(
-        "polyzymd.compare.config.ComparisonConfig.from_yaml",
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
         lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
     )
     monkeypatch.setattr(
@@ -353,7 +353,9 @@ def test_finalize_command_loads_aggregated_and_runs(monkeypatch, tmp_path: Path)
         ),
     )
 
-    monkeypatch.setattr("polyzymd.compare.config.ComparisonConfig.from_yaml", lambda path: config)
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml", lambda path: config
+    )
     monkeypatch.setattr(
         "polyzymd.analyses.discovery.get_analysis", lambda name: lambda: _Analysis()
     )
@@ -420,7 +422,7 @@ def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
         "polyzymd.workflow.analysis_slurm.AnalysisJobManifest.load", lambda path: manifest
     )
     monkeypatch.setattr(
-        "polyzymd.compare.config.ComparisonConfig.from_yaml",
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
         lambda path: SimpleNamespace(
             source_path=tmp_path / "comparison.yaml",
             control=None,
@@ -516,7 +518,9 @@ def test_finalize_with_missing_conditions(monkeypatch, tmp_path: Path) -> None:
         ),
     )
 
-    monkeypatch.setattr("polyzymd.compare.config.ComparisonConfig.from_yaml", lambda path: config)
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml", lambda path: config
+    )
     monkeypatch.setattr(
         "polyzymd.analyses.discovery.get_analysis", lambda name: lambda: _Analysis()
     )
@@ -584,7 +588,7 @@ def test_manifest_config_drift_detection(monkeypatch, tmp_path: Path) -> None:
         "polyzymd.workflow.analysis_slurm.AnalysisJobManifest.load", lambda path: manifest
     )
     monkeypatch.setattr(
-        "polyzymd.compare.config.ComparisonConfig.from_yaml",
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
         lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
     )
     monkeypatch.setattr(

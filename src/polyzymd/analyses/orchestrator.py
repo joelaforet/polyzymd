@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from polyzymd.analyses.base import Analysis
-    from polyzymd.compare.config import ComparisonConfig
+    from polyzymd.config.comparison import ComparisonConfig
 
 logger = logging.getLogger("polyzymd.analyses")
 
@@ -730,7 +730,7 @@ def finalize_comparison_from_disk(
 
     raw_plot_settings = getattr(config, "plot_settings", None)
     if raw_plot_settings is None:
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         raw_plot_settings = PlotSettings()
 
@@ -921,7 +921,7 @@ def run_comparison(
     # to guard against it.
     raw_plot_settings = getattr(config, "plot_settings", None)
     if raw_plot_settings is None:
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         raw_plot_settings = PlotSettings()
 

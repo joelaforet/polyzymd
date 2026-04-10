@@ -46,7 +46,7 @@ from polyzymd.analyses.stats import (
     interpret_direction,
     rank_conditions,
 )
-from polyzymd.compare.config import PlotSettings
+from polyzymd.config.comparison import PlotSettings
 
 
 class _MockAtom:

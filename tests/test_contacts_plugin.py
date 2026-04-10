@@ -16,7 +16,6 @@ import numpy as np
 import pytest
 from pydantic import BaseModel
 
-
 # ---------------------------------------------------------------------------
 # Discovery
 # ---------------------------------------------------------------------------
@@ -1033,7 +1032,7 @@ class TestPlot:
     def test_plot_creates_output_dir(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = ContactsAnalysis()
 
@@ -1076,7 +1075,7 @@ class TestPlot:
     def test_plot_returns_combined_paths(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = ContactsAnalysis()
 
@@ -1131,7 +1130,7 @@ class TestPlot:
     def test_plot_catches_plotter_exceptions(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = ContactsAnalysis()
 
@@ -1176,7 +1175,7 @@ class TestPlot:
     def test_plot_passes_plot_settings(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         analysis = ContactsAnalysis()
         ps = PlotSettings()

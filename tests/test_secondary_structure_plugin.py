@@ -592,7 +592,7 @@ class TestPlot:
 
     def _make_plot_ctx(self, tmp_path, conditions=None):
         """Helper to build a PlotContext."""
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         if conditions is None:
             conditions = [
@@ -711,7 +711,7 @@ class TestPlot:
             ss_analysis.plot(ctx)
 
             # Check that PlotSettings was created and passed as 4th arg
-            from polyzymd.compare.config import PlotSettings
+            from polyzymd.config.comparison import PlotSettings
 
             for mock_fn in [MockTimeline, MockContent, MockIndividual, MockPersistence]:
                 assert mock_fn.called

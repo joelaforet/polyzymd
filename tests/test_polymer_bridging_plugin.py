@@ -357,7 +357,7 @@ class TestLifecycle:
                 "valency_probabilities_mean": {"1": 0.3, "2": 0.5, "3+": 0.2},
             }
         ).save(analysis_dir_b / "result.json")
-        from polyzymd.compare.config import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
         ctx = PlotContext(
             conditions=[cond_a, cond_b],
@@ -518,7 +518,7 @@ class TestConfigCompatibility:
             "    min_ca_distance_angstrom: 12.0\n"
         )
 
-        from polyzymd.compare.config import ComparisonConfig
+        from polyzymd.config.comparison import ComparisonConfig
 
         cfg = ComparisonConfig.from_yaml(yaml_path)
 

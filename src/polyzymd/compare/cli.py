@@ -22,7 +22,7 @@ from polyzymd.compare.cli_utils import (
     load_comparison_config,
     validate_and_report,
 )
-from polyzymd.compare.config import (
+from polyzymd.config.comparison import (
     ComparisonConfig,
     generate_comparison_template,
 )
