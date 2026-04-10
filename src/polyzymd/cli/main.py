@@ -6,10 +6,10 @@ for argument parsing and command organization.
 
 Usage:
     polyzymd --help
-    polyzymd build --config simulation.yaml
+    polyzymd build --config simulation.yaml --replicates 1-3
     polyzymd submit --config simulation.yaml --replicates 1-5
     polyzymd run-segment --config simulation.yaml --replicate 1
-    polyzymd run-gromacs --config simulation.yaml --replicate 1
+    polyzymd run-gromacs --config simulation.yaml --replicates 1-3
 """
 
 from __future__ import annotations
@@ -96,6 +96,57 @@ def enable_openff_logs() -> None:
 suppress_openff_logs()
 
 
+def _resolve_replicates_option(
+    replicates: str | None,
+    replicate: int | None,
+    command_name: str,
+) -> list[int]:
+    """Resolve --replicates / --replicate into a list of replicate numbers.
+
+    Parameters
+    ----------
+    replicates : str or None
+        Value from ``--replicates`` (range syntax, e.g. ``"1-3"``)
+    replicate : int or None
+        Value from deprecated ``--replicate`` (single integer)
+    command_name : str
+        Name of the CLI command (for error messages)
+
+    Returns
+    -------
+    list[int]
+        Sorted, deduplicated list of replicate numbers
+
+    Raises
+    ------
+    click.UsageError
+        If both ``--replicates`` and ``--replicate`` are given
+    """
+    import warnings
+
+    from polyzymd.utils.replicates import parse_replicate_range
+
+    if replicates is not None and replicate is not None:
+        raise click.UsageError(
+            f"Cannot use both --replicates and --replicate in '{command_name}'. "
+            "Use --replicates (e.g., --replicates 1-3)."
+        )
+
+    if replicate is not None:
+        warnings.warn(
+            f"--replicate is deprecated in '{command_name}', use --replicates instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return [replicate]
+
+    if replicates is not None:
+        return parse_replicate_range(replicates)
+
+    # Default to a single replicate
+    return [1]
+
+
 @click.group()
 @click.version_option(prog_name="polyzymd")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
@@ -138,10 +189,17 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
 )
 @click.option(
     "-r",
+    "--replicates",
+    default=None,
+    type=str,
+    help="Replicate range (e.g., '1', '1-3', '1,3,5'). Default: 1",
+)
+@click.option(
     "--replicate",
-    default=1,
+    default=None,
     type=int,
-    help="Replicate number (default: 1)",
+    hidden=True,
+    help="[Deprecated] Use --replicates instead.",
 )
 @click.option(
     "-o",
@@ -174,7 +232,8 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
 )
 def build(
     config: str,
-    replicate: int,
+    replicates: str | None,
+    replicate: int | None,
     output_dir: Optional[str],
     scratch_dir: Optional[str],
     projects_dir: Optional[str],
@@ -189,6 +248,10 @@ def build(
     By default, prepares the system for OpenMM simulation. Use --gromacs to
     export GROMACS-compatible files instead (.gro, .top, .mdp).
 
+    The ``--replicates`` option accepts range syntax (for example ``1-3`` or
+    ``1,3,5``). Each replicate is built independently with a different polymer
+    random seed.
+
     GROMACS Export Notes:
         - Output files are placed in {projects_dir}/{replicate}/gromacs/
         - Filenames are derived from config: {enzyme_name}_{polymer_prefix}.*
@@ -197,6 +260,8 @@ def build(
     """
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
+
+    replicate_list = _resolve_replicates_option(replicates, replicate, "build")
 
     colored_echo(f"Loading configuration from: {config}", phase="build")
 
@@ -213,6 +278,7 @@ def build(
 
         if dry_run:
             colored_echo("Dry run - configuration is valid", phase="build")
+            colored_echo(f"  Replicates: {replicate_list}", phase="build")
             colored_echo(f"  Enzyme: {sim_config.enzyme.name}", phase="build")
             if sim_config.substrate:
                 colored_echo(f"  Substrate: {sim_config.substrate.name}", phase="build")
@@ -233,133 +299,138 @@ def build(
             if gromacs:
                 colored_echo(phase="build")
                 colored_echo("GROMACS export enabled:", phase="build")
-                colored_echo(
-                    f"  Output: {sim_config.output.projects_directory}/{replicate}/gromacs/",
-                    phase="build",
-                )
+                for rep in replicate_list:
+                    colored_echo(
+                        (
+                            f"  Output: {sim_config.output.projects_directory}/"
+                            f"replicate_{rep}/gromacs/"
+                        ),
+                        phase="build",
+                    )
             return
 
-        colored_echo(f"Building system for replicate {replicate}...", phase="build")
-        working_dir = sim_config.get_working_directory(replicate)
-        builder = SystemBuilder.from_config(sim_config)
-        interchange = builder.build_from_config(
-            config=sim_config,
-            working_dir=working_dir,
-            polymer_seed=replicate,
-        )
-
-        # Branch based on export format
-        if gromacs:
-            # Export to GROMACS format
-            colored_echo("Exporting to GROMACS format...", phase="export")
-            gromacs_dir = (
-                sim_config.output.projects_directory / f"replicate_{replicate}" / "gromacs"
-            )
-            export_result = builder.export_to_gromacs(gromacs_dir)
-
-            colored_echo("GROMACS export successful!", phase="export")
-            colored_echo(f"Output directory: {gromacs_dir}", phase="export")
-            colored_echo("Files generated:", phase="export")
-            colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
-            colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
-            colored_echo(
-                f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export"
-            )
-            for eq_mdp in export_result.get("eq_mdps", []):
-                colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
-            colored_echo(f"  - {export_result['prod_mdp'].name} (production)", phase="export")
-            if export_result.get("posres_defines"):
-                colored_echo("Position restraints added to molecule ITP files:", phase="export")
-                for component, define in export_result["posres_defines"].items():
-                    colored_echo(f"  - {component}: #ifdef {define}", phase="export")
-            colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
-            colored_echo(phase="export")
-            colored_echo(
-                f"To run: cd {gromacs_dir} && ./{export_result['run_script'].name}", phase="export"
+        for rep in replicate_list:
+            colored_echo(f"Building system for replicate {rep}...", phase="build")
+            working_dir = sim_config.get_working_directory(rep)
+            builder = SystemBuilder.from_config(sim_config)
+            interchange = builder.build_from_config(
+                config=sim_config,
+                working_dir=working_dir,
+                polymer_seed=rep,
             )
 
-        else:
-            # Default: prepare for OpenMM simulation
-            colored_echo("Extracting OpenMM components...", phase="build")
-            omm_topology, omm_system, omm_positions = builder.get_openmm_components()
+            # Branch based on export format
+            if gromacs:
+                # Export to GROMACS format
+                colored_echo("Exporting to GROMACS format...", phase="export")
+                gromacs_dir = sim_config.output.projects_directory / f"replicate_{rep}" / "gromacs"
+                export_result = builder.export_to_gromacs(gromacs_dir)
 
-            # Apply restraints if configured
-            if sim_config.restraints:
-                from polyzymd.core.restraints import RestraintFactory, apply_restraints
-
+                colored_echo("GROMACS export successful!", phase="export")
+                colored_echo(f"Output directory: {gromacs_dir}", phase="export")
+                colored_echo("Files generated:", phase="export")
+                colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
+                colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
                 colored_echo(
-                    f"Applying {len(sim_config.restraints)} restraint(s)...", phase="build"
+                    f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export"
                 )
-                restraint_defs = []
-                for r in sim_config.restraints:
-                    if not r.enabled:
-                        colored_echo(f"  - {r.name}: DISABLED (skipping)", phase="build")
-                        continue
+                for eq_mdp in export_result.get("eq_mdps", []):
+                    colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
+                colored_echo(f"  - {export_result['prod_mdp'].name} (production)", phase="export")
+                if export_result.get("posres_defines"):
+                    colored_echo("Position restraints added to molecule ITP files:", phase="export")
+                    for component, define in export_result["posres_defines"].items():
+                        colored_echo(f"  - {component}: #ifdef {define}", phase="export")
+                colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
+                colored_echo(phase="export")
+                colored_echo(
+                    f"To run: cd {gromacs_dir} && ./{export_result['run_script'].name}",
+                    phase="export",
+                )
 
-                    # Create restraint definition from config
-                    restraint_def = RestraintFactory.from_config(r.model_dump())
+            else:
+                # Default: prepare for OpenMM simulation
+                colored_echo("Extracting OpenMM components...", phase="build")
+                omm_topology, omm_system, omm_positions = builder.get_openmm_components()
 
-                    # Validate the selection resolves to exactly one atom each
-                    try:
-                        indices1 = restraint_def.atom1.resolve(omm_topology)
-                        indices2 = restraint_def.atom2.resolve(omm_topology)
+                # Apply restraints if configured
+                if sim_config.restraints:
+                    from polyzymd.core.restraints import RestraintFactory, apply_restraints
 
-                        if len(indices1) != 1:
+                    colored_echo(
+                        f"Applying {len(sim_config.restraints)} restraint(s)...", phase="build"
+                    )
+                    restraint_defs = []
+                    for r in sim_config.restraints:
+                        if not r.enabled:
+                            colored_echo(f"  - {r.name}: DISABLED (skipping)", phase="build")
+                            continue
+
+                        # Create restraint definition from config
+                        restraint_def = RestraintFactory.from_config(r.model_dump())
+
+                        # Validate the selection resolves to exactly one atom each
+                        try:
+                            indices1 = restraint_def.atom1.resolve(omm_topology)
+                            indices2 = restraint_def.atom2.resolve(omm_topology)
+
+                            if len(indices1) != 1:
+                                colored_echo(
+                                    f"Error: Restraint '{r.name}' atom1 selection matched "
+                                    f"{len(indices1)} atoms (need exactly 1)",
+                                    err=True,
+                                    level=logging.ERROR,
+                                )
+                                sys.exit(1)
+                            if len(indices2) != 1:
+                                colored_echo(
+                                    f"Error: Restraint '{r.name}' atom2 selection matched "
+                                    f"{len(indices2)} atoms (need exactly 1)",
+                                    err=True,
+                                    level=logging.ERROR,
+                                )
+                                sys.exit(1)
+
                             colored_echo(
-                                f"Error: Restraint '{r.name}' atom1 selection matched "
-                                f"{len(indices1)} atoms (need exactly 1)",
+                                f"  - {r.name}: atom {indices1[0]} <-> atom {indices2[0]} "
+                                f"(type={r.type.value}, d={r.distance} A, "
+                                f"k={r.force_constant} kJ/mol/nm^2)",
+                                phase="build",
+                            )
+                            restraint_defs.append(restraint_def)
+
+                        except ValueError as e:
+                            colored_echo(
+                                f"Error: Restraint '{r.name}' invalid: {e}",
                                 err=True,
                                 level=logging.ERROR,
                             )
                             sys.exit(1)
-                        if len(indices2) != 1:
-                            colored_echo(
-                                f"Error: Restraint '{r.name}' atom2 selection matched "
-                                f"{len(indices2)} atoms (need exactly 1)",
-                                err=True,
-                                level=logging.ERROR,
-                            )
-                            sys.exit(1)
 
+                    # Apply all validated restraints to the system
+                    if restraint_defs:
+                        apply_restraints(restraint_defs, omm_topology, omm_system)
                         colored_echo(
-                            f"  - {r.name}: atom {indices1[0]} <-> atom {indices2[0]} "
-                            f"(type={r.type.value}, d={r.distance} A, "
-                            f"k={r.force_constant} kJ/mol/nm^2)",
+                            f"Successfully applied {len(restraint_defs)} restraint(s)",
                             phase="build",
                         )
-                        restraint_defs.append(restraint_def)
 
-                    except ValueError as e:
-                        colored_echo(
-                            f"Error: Restraint '{r.name}' invalid: {e}",
-                            err=True,
-                            level=logging.ERROR,
-                        )
-                        sys.exit(1)
+                # Save OpenMM system to XML for --skip-build support
+                from openmm import XmlSerializer
 
-                # Apply all validated restraints to the system
-                if restraint_defs:
-                    apply_restraints(restraint_defs, omm_topology, omm_system)
-                    colored_echo(
-                        f"Successfully applied {len(restraint_defs)} restraint(s)", phase="build"
-                    )
+                system_xml_path = working_dir / "system.xml"
+                colored_echo(f"Saving OpenMM system to {system_xml_path}...", phase="build")
+                with open(system_xml_path, "w") as f:
+                    f.write(XmlSerializer.serialize(omm_system))
 
-            # Save OpenMM system to XML for --skip-build support
-            from openmm import XmlSerializer
-
-            system_xml_path = working_dir / "system.xml"
-            colored_echo(f"Saving OpenMM system to {system_xml_path}...", phase="build")
-            with open(system_xml_path, "w") as f:
-                f.write(XmlSerializer.serialize(omm_system))
-
-            colored_echo("System built successfully!", phase="build")
-            colored_echo(f"Output directory: {working_dir}", phase="build")
-            colored_echo("Files saved:", phase="build")
-            colored_echo("  - solvated_system.pdb (topology + positions)", phase="build")
-            colored_echo("  - system.xml (OpenMM system with restraints)", phase="build")
-            colored_echo(
-                "Use 'polyzymd run --skip-build' to run without rebuilding.", phase="build"
-            )
+                colored_echo("System built successfully!", phase="build")
+                colored_echo(f"Output directory: {working_dir}", phase="build")
+                colored_echo("Files saved:", phase="build")
+                colored_echo("  - solvated_system.pdb (topology + positions)", phase="build")
+                colored_echo("  - system.xml (OpenMM system with restraints)", phase="build")
+                colored_echo(
+                    "Use 'polyzymd run --skip-build' to run without rebuilding.", phase="build"
+                )
 
     except FileNotFoundError as e:
         colored_echo(f"Error: {e}", err=True, level=logging.ERROR)
@@ -388,10 +459,17 @@ def build(
 )
 @click.option(
     "-r",
+    "--replicates",
+    default=None,
+    type=str,
+    help="Replicate range (e.g., '1', '1-3', '1,3,5'). Default: 1",
+)
+@click.option(
     "--replicate",
-    default=1,
+    default=None,
     type=int,
-    help="Replicate number (default: 1)",
+    hidden=True,
+    help="[Deprecated] Use --replicates instead.",
 )
 @click.option(
     "--scratch-dir",
@@ -417,7 +495,8 @@ def build(
 )
 def run_gromacs(
     config: str,
-    replicate: int,
+    replicates: str | None,
+    replicate: int | None,
     scratch_dir: Optional[str],
     projects_dir: Optional[str],
     gmx_path: str,
@@ -438,6 +517,8 @@ def run_gromacs(
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
 
+    replicate_list = _resolve_replicates_option(replicates, replicate, "run-gromacs")
+
     colored_echo(f"Loading configuration from: {config}", phase="export")
 
     try:
@@ -450,12 +531,14 @@ def run_gromacs(
         if projects_dir:
             sim_config.output.projects_directory = Path(projects_dir)
 
-        _run_gromacs_impl(
-            sim_config=sim_config,
-            replicate=replicate,
-            gmx_path=gmx_path,
-            dry_run=dry_run,
-        )
+        for rep in replicate_list:
+            colored_echo(f"\n--- Replicate {rep} ---", phase="export")
+            _run_gromacs_impl(
+                sim_config=sim_config,
+                replicate=rep,
+                gmx_path=gmx_path,
+                dry_run=dry_run,
+            )
 
     except Exception as e:
         colored_echo(f"Simulation failed: {e}", err=True, level=logging.ERROR)
