@@ -32,6 +32,11 @@ from polyzymd.analyses.shared.loader import (
     parse_time_string,
     time_to_frame,
 )
+from polyzymd.analyses.shared.multi_run_comparison import (
+    apply_fdr_correction,
+    build_condition_pairs,
+    filter_summaries_with_run,
+)
 from polyzymd.analyses.shared.statistics import compute_sem
 
 if TYPE_CHECKING:
@@ -507,40 +512,32 @@ class RMSDAnalysis(Analysis):
             return None
 
         effective_control = ctx.effective_control
+        summaries_by_label = {summary.label: summary for summary in summaries}
 
         ranking_by_run: dict[str, list[str]] = {}
         for run_label in run_labels:
-            summaries_with_run = []
-            for summary in summaries:
-                try:
-                    run_summary = summary.get_run(run_label)
-                except KeyError:
-                    logger.warning(
-                        "Run '%s' missing for condition '%s'; excluding from ranking",
-                        run_label,
-                        summary.label,
-                    )
-                    continue
-                summaries_with_run.append((summary, run_summary))
+            summaries_with_run = filter_summaries_with_run(
+                summaries_by_label,
+                run_label,
+                lambda summary, label: summary.get_run(label),
+                logger=logger,
+            )
 
-            ranked = sorted(summaries_with_run, key=lambda entry: entry[1].mean_rmsd)
-            ranking_by_run[run_label] = [summary.label for summary, _ in ranked]
+            ranked_labels = sorted(
+                summaries_with_run,
+                key=lambda label: summaries_with_run[label].get_run(run_label).mean_rmsd,
+            )
+            ranking_by_run[run_label] = ranked_labels
 
         pairwise_comparisons: list[RMSDRunPairwiseComparison] = []
         if len(summaries) >= 2:
             for run_label in run_labels:
-                summaries_with_run = []
-                for summary in summaries:
-                    try:
-                        run_summary = summary.get_run(run_label)
-                    except KeyError:
-                        logger.warning(
-                            "Run '%s' missing for condition '%s'; excluding from pairwise comparison",
-                            run_label,
-                            summary.label,
-                        )
-                        continue
-                    summaries_with_run.append((summary, run_summary))
+                summaries_with_run = filter_summaries_with_run(
+                    summaries_by_label,
+                    run_label,
+                    lambda summary, label: summary.get_run(label),
+                    logger=logger,
+                )
 
                 if len(summaries_with_run) < 2:
                     logger.warning(
@@ -549,65 +546,38 @@ class RMSDAnalysis(Analysis):
                     )
                     continue
 
-                if effective_control:
-                    control_entry = next(
-                        (
-                            (summary, run_summary)
-                            for summary, run_summary in summaries_with_run
-                            if summary.label == effective_control
-                        ),
-                        None,
-                    )
-                    if control_entry is None:
-                        logger.warning(
-                            "Run '%s' missing in control condition '%s'; skipping run comparisons",
-                            run_label,
-                            effective_control,
-                        )
-                        continue
+                condition_pairs = build_condition_pairs(
+                    list(summaries_with_run.keys()),
+                    effective_control,
+                    on_control_missing="skip",
+                    logger=logger,
+                )
 
-                    control_summary, control_run = control_entry
-                    for summary, run_summary in summaries_with_run:
-                        if summary.label == control_summary.label:
-                            continue
-                        pairwise_comparisons.append(
-                            self._compare_run(
-                                run_label=run_label,
-                                condition_a=control_summary.label,
-                                condition_b=summary.label,
-                                run_a=control_run,
-                                run_b=run_summary,
-                            )
+                for condition_a, condition_b in condition_pairs:
+                    pairwise_comparisons.append(
+                        self._compare_run(
+                            run_label=run_label,
+                            condition_a=condition_a,
+                            condition_b=condition_b,
+                            run_a=summaries_with_run[condition_a].get_run(run_label),
+                            run_b=summaries_with_run[condition_b].get_run(run_label),
                         )
-                else:
-                    for i, (summary_a, run_a) in enumerate(summaries_with_run):
-                        for summary_b, run_b in summaries_with_run[i + 1 :]:
-                            pairwise_comparisons.append(
-                                self._compare_run(
-                                    run_label=run_label,
-                                    condition_a=summary_a.label,
-                                    condition_b=summary_b.label,
-                                    run_a=run_a,
-                                    run_b=run_b,
-                                )
-                            )
+                    )
 
         anova_by_run: list[RMSDRunANOVA] | None = None
         if len(summaries) >= 3:
             anova_by_run = []
             for run_label in run_labels:
-                groups = []
-                for summary in summaries:
-                    try:
-                        run_summary = summary.get_run(run_label)
-                    except KeyError:
-                        logger.warning(
-                            "Run '%s' missing for condition '%s'; excluding from ANOVA",
-                            run_label,
-                            summary.label,
-                        )
-                        continue
-                    groups.append(run_summary.per_replicate_means)
+                summaries_with_run = filter_summaries_with_run(
+                    summaries_by_label,
+                    run_label,
+                    lambda summary, label: summary.get_run(label),
+                    logger=logger,
+                )
+                groups = [
+                    summary.get_run(run_label).per_replicate_means
+                    for summary in summaries_with_run.values()
+                ]
 
                 if len(groups) < 3 or any(len(group) < 2 for group in groups):
                     anova_by_run.append(
@@ -1020,20 +990,19 @@ class RMSDAnalysis(Analysis):
         fdr_alpha : float
             FDR significance threshold.
         """
-        from polyzymd.compare.statistics import benjamini_hochberg
 
-        if pairwise:
-            raw_p = [comp.p_value if comp.testable else None for comp in pairwise]
-            bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
-            for comp, bh in zip(pairwise, bh_results, strict=False):
-                comp.p_value_adjusted = bh.adjusted_p_value
-                comp.significant = bh.significant
+        def _set_corrected(result: Any, bh_result: Any) -> None:
+            if hasattr(result, "p_value_adjusted"):
+                result.p_value_adjusted = bh_result.adjusted_p_value
+            result.significant = bh_result.significant
 
-        if anova_by_run:
-            raw_p = [a.p_value if a.testable else None for a in anova_by_run]
-            bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
-            for a, bh in zip(anova_by_run, bh_results, strict=False):
-                a.significant = bh.significant
+        apply_fdr_correction(
+            pairwise,
+            anova_by_run,
+            fdr_alpha,
+            get_p_value=lambda result: result.p_value if result.testable else None,
+            set_corrected=lambda result, bh: _set_corrected(result, bh),
+        )
 
     @staticmethod
     def _make_aggregated_filename(

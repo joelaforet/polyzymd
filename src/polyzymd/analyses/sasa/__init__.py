@@ -21,6 +21,11 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.sasa._results import SASAAggregatedResult, SASAResult
 from polyzymd.analyses.shared.config_hash import compute_config_hash
+from polyzymd.analyses.shared.multi_run_comparison import (
+    apply_fdr_correction,
+    build_condition_pairs,
+    filter_summaries_with_run,
+)
 from polyzymd.analyses.shared.sasa import compute_sasa, save_sasa_artifacts
 from polyzymd.analyses.shared.statistics import compute_sem
 
@@ -543,6 +548,8 @@ class SASAAnalysis(Analysis):
             LOGGER.warning("SASA comparison skipped because no conditions have results")
             return None
 
+        summaries_by_label = {summary.label: summary for summary in summaries}
+
         run_labels: list[str] = []
         ranking_by_run: dict[str, list[str]] = {}
         pairwise: list[SASARunPairwiseComparison] = []
@@ -550,14 +557,17 @@ class SASAAnalysis(Analysis):
         effective_control = ctx.effective_control
 
         for run_label in run_labels_configured:
-            available = [
-                summary for summary in summaries if self._has_run_summary(summary, run_label)
-            ]
+            available = filter_summaries_with_run(
+                summaries_by_label,
+                run_label,
+                lambda summary, label: summary.get_run(label),
+                logger=LOGGER,
+            )
             if not available:
                 continue
 
             comparable = []
-            for summary in available:
+            for summary in available.values():
                 run_summary = summary.get_run(run_label)
                 finite_values = [
                     value for value in run_summary.per_replicate_means if self._is_finite(value)
@@ -583,60 +593,26 @@ class SASAAnalysis(Analysis):
             ranking_by_run[run_label] = [summary.label for summary in ranked]
 
             if len(comparable) >= 2:
-                if effective_control:
-                    control_summary = next(
-                        (summary for summary in comparable if summary.label == effective_control),
-                        None,
+                comparable_by_label = {summary.label: summary for summary in comparable}
+                condition_pairs = build_condition_pairs(
+                    list(comparable_by_label.keys()),
+                    effective_control,
+                    on_control_missing="all_pairs",
+                    logger=LOGGER,
+                )
+                for condition_a, condition_b in condition_pairs:
+                    candidate = self._compare_run(
+                        run_label=run_label,
+                        condition_a=condition_a,
+                        condition_b=condition_b,
+                        run_a=comparable_by_label[condition_a].get_run(run_label),
+                        run_b=comparable_by_label[condition_b].get_run(run_label),
+                        independent_ttest=independent_ttest,
+                        cohens_d=cohens_d,
+                        percent_change=percent_change,
                     )
-                    if control_summary is not None:
-                        control_run = control_summary.get_run(run_label)
-                        for summary in comparable:
-                            if summary.label == effective_control:
-                                continue
-                            candidate = self._compare_run(
-                                run_label=run_label,
-                                condition_a=control_summary.label,
-                                condition_b=summary.label,
-                                run_a=control_run,
-                                run_b=summary.get_run(run_label),
-                                independent_ttest=independent_ttest,
-                                cohens_d=cohens_d,
-                                percent_change=percent_change,
-                            )
-                            if candidate is not None:
-                                pairwise.append(candidate)
-                    else:
-                        for i, summary_a in enumerate(comparable):
-                            run_a = summary_a.get_run(run_label)
-                            for summary_b in comparable[i + 1 :]:
-                                candidate = self._compare_run(
-                                    run_label=run_label,
-                                    condition_a=summary_a.label,
-                                    condition_b=summary_b.label,
-                                    run_a=run_a,
-                                    run_b=summary_b.get_run(run_label),
-                                    independent_ttest=independent_ttest,
-                                    cohens_d=cohens_d,
-                                    percent_change=percent_change,
-                                )
-                                if candidate is not None:
-                                    pairwise.append(candidate)
-                else:
-                    for i, summary_a in enumerate(comparable):
-                        run_a = summary_a.get_run(run_label)
-                        for summary_b in comparable[i + 1 :]:
-                            candidate = self._compare_run(
-                                run_label=run_label,
-                                condition_a=summary_a.label,
-                                condition_b=summary_b.label,
-                                run_a=run_a,
-                                run_b=summary_b.get_run(run_label),
-                                independent_ttest=independent_ttest,
-                                cohens_d=cohens_d,
-                                percent_change=percent_change,
-                            )
-                            if candidate is not None:
-                                pairwise.append(candidate)
+                    if candidate is not None:
+                        pairwise.append(candidate)
 
             if len(comparable) >= 3:
                 groups = []
@@ -805,20 +781,7 @@ class SASAAnalysis(Analysis):
         fdr_alpha : float
             FDR significance threshold.
         """
-        from polyzymd.compare.statistics import benjamini_hochberg
-
-        if pairwise:
-            raw_p = [comp.p_value for comp in pairwise]
-            bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
-            for comp, bh in zip(pairwise, bh_results, strict=False):
-                comp.p_value_adjusted = bh.adjusted_p_value
-                comp.significant = bh.significant
-
-        if anova_by_run:
-            raw_p = [a.p_value for a in anova_by_run]
-            bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
-            for a, bh in zip(anova_by_run, bh_results, strict=False):
-                a.significant = bh.significant
+        apply_fdr_correction(pairwise, anova_by_run, fdr_alpha)
 
     @staticmethod
     def _has_run_summary(summary: Any, run_label: str) -> bool:
