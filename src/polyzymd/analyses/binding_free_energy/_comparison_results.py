@@ -1,9 +1,5 @@
 """Binding free energy comparison result models.
 
-.. versionchanged:: 1.3.0
-    Moved from ``polyzymd.compare.results.binding_free_energy`` to
-    ``polyzymd.analyses.binding_free_energy._comparison_results``.
-
 Physics background
 ------------------
 In the NPT ensemble (constant pressure, as used in all polyzymd simulations)

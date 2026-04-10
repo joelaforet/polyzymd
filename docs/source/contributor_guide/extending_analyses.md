@@ -852,9 +852,8 @@ store large NumPy arrays alongside JSON, migrate to Pydantic models.
 
 ## A Note on the `compare/` Package
 
-You may notice a `compare/` package with `compare/results/` and
-`compare/settings.py`. Existing plugins reference these because they were
-designed in an earlier architecture stage.
+The `compare/` package provides shared infrastructure such as config models,
+statistics, IO helpers, and CLI wiring.
 
 **You do NOT need to create files in `compare/` for a new plugin.** Keep your
 plotting logic in your plugin's `plot()` method and your formatting in
@@ -1072,9 +1071,7 @@ methods.
 
 ### Do not create files in `compare/`
 
-New plugins should keep all logic in the plugin package. The `compare/results/`
-directory is primarily used by existing plugins designed under older
-architecture constraints.
+New plugins should keep all logic in the plugin package.
 
 ## Existing Plugins to Study
 

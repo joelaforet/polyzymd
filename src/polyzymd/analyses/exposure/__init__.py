@@ -187,7 +187,7 @@ class ExposureAnalysis(Analysis):
             Comparison result, or ``None`` when no valid conditions are available.
         """
         from polyzymd import __version__
-        from polyzymd.analyses.base import ANOVASummary, PairwiseComparison
+        from polyzymd.analyses.base import ANOVAResult, PairwiseResult
         from polyzymd.analyses.exposure._comparison_results import (
             ExposureComparisonResult,
             ExposureConditionSummary,
@@ -229,7 +229,7 @@ class ExposureAnalysis(Analysis):
         effective_control = ctx.effective_control
 
         # Step 3: Pairwise comparisons on chaperone_fraction
-        comparisons: list[PairwiseComparison] = []
+        comparisons: list[PairwiseResult] = []
         if len(summaries) >= 2:
             if effective_control:
                 control_summary = next((s for s in summaries if s.label == effective_control), None)
@@ -245,11 +245,11 @@ class ExposureAnalysis(Analysis):
                         comparisons.append(comp)
 
         # Step 4: ANOVA if 3+ conditions
-        anova: ANOVASummary | None = None
+        anova: ANOVAResult | None = None
         if len(summaries) >= 3:
             all_groups = [s.replicate_values for s in summaries]
             result = one_way_anova(*all_groups)
-            anova = ANOVASummary(
+            anova = ANOVAResult(
                 metric="chaperone_fraction",
                 f_statistic=result.f_statistic,
                 p_value=result.p_value,
@@ -761,9 +761,9 @@ class ExposureAnalysis(Analysis):
 
         Returns
         -------
-        PairwiseComparison
+        PairwiseResult
         """
-        from polyzymd.analyses.base import PairwiseComparison
+        from polyzymd.analyses.base import PairwiseResult
         from polyzymd.analyses.stats import interpret_direction
         from polyzymd.compare.statistics import (
             cohens_d,
@@ -787,7 +787,7 @@ class ExposureAnalysis(Analysis):
             threshold=5.0,
         )
 
-        return PairwiseComparison(
+        return PairwiseResult(
             condition_a=cond_a.label,
             condition_b=cond_b.label,
             metric="chaperone_fraction",

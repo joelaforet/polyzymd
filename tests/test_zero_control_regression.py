@@ -14,7 +14,6 @@ from polyzymd.analyses.base import (
     ComparisonResult,
     ConditionSummary,
     MetricValue,
-    PairwiseComparison,
     PairwiseResult,
 )
 from polyzymd.analyses.contacts._comparison_results import AggregateComparisonResult
@@ -439,7 +438,7 @@ def test_exposure_pairwise_comparison_zero_control_direction() -> None:
     )
 
     comp = ExposureAnalysis._compare_pair(cond_a, cond_b)
-    assert isinstance(comp, PairwiseComparison)
+    assert isinstance(comp, PairwiseResult)
     assert math.isinf(comp.percent_change)
     assert comp.percent_change > 0
     assert comp.direction == "increased"

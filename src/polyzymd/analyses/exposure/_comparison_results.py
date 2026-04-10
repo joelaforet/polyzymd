@@ -1,12 +1,7 @@
 """Exposure dynamics condition summary and comparison result models.
 
-These classes inherit from the base classes in compare/core/ and add
+These classes inherit from the base classes in ``polyzymd.analyses.base`` and add
 exposure-dynamics-specific fields for chaperone event analysis.
-
-.. versionchanged:: 1.3.0
-    Migrated from ``polyzymd.compare.results.exposure`` into the exposure
-    analysis package so that contributors find all exposure-related code in
-    one place.
 """
 
 from __future__ import annotations
@@ -18,10 +13,10 @@ from pydantic import Field
 
 from polyzymd import __version__
 from polyzymd.analyses.base import (
-    ANOVASummary,
+    ANOVAResult,
     BaseComparisonResult,
     BaseConditionSummary,
-    PairwiseComparison,
+    PairwiseResult,
 )
 
 # ---------------------------------------------------------------------------
@@ -104,7 +99,7 @@ class ExposureConditionSummary(BaseConditionSummary):
 # ---------------------------------------------------------------------------
 
 
-class ExposureComparisonResult(BaseComparisonResult[ExposureConditionSummary, PairwiseComparison]):
+class ExposureComparisonResult(BaseComparisonResult[ExposureConditionSummary, PairwiseResult]):
     """Complete exposure dynamics comparison result.
 
     This is the main output from ``ExposureAnalysis.compare()``.
@@ -121,9 +116,9 @@ class ExposureComparisonResult(BaseComparisonResult[ExposureConditionSummary, Pa
         Label of the control condition.
     conditions : list[ExposureConditionSummary]
         Summary for each condition.
-    pairwise_comparisons : list[PairwiseComparison]
+    pairwise_comparisons : list[PairwiseResult]
         Pairwise t-tests on chaperone_fraction.
-    anova : ANOVASummary, optional
+    anova : ANOVAResult, optional
         One-way ANOVA across all conditions.
     ranking : list[str]
         Condition labels sorted by chaperone_fraction (highest first).
@@ -143,7 +138,7 @@ class ExposureComparisonResult(BaseComparisonResult[ExposureConditionSummary, Pa
 
     metric: str = "chaperone_fraction"
     conditions: list[ExposureConditionSummary] = Field(default_factory=list)
-    pairwise_comparisons: list[PairwiseComparison] = Field(default_factory=list)
+    pairwise_comparisons: list[PairwiseResult] = Field(default_factory=list)
     ranking_by_transient_fraction: list[str] = Field(
         default_factory=list,
         description="Conditions ranked by transient fraction (highest first)",

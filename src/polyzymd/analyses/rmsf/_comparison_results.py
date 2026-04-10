@@ -1,12 +1,7 @@
 """RMSF condition summary and comparison result models.
 
-These classes inherit from the base classes in compare/core/ and add
+These classes inherit from the base classes in ``polyzymd.analyses.base`` and add
 RMSF-specific fields.
-
-.. versionchanged:: 1.3.0
-    Migrated from ``polyzymd.compare.results.rmsf`` into the RMSF
-    analysis package so that contributors find all RMSF-related code in
-    one place.
 """
 
 from __future__ import annotations
@@ -16,10 +11,10 @@ from typing import ClassVar, Literal
 from pydantic import Field
 
 from polyzymd.analyses.base import (
-    ANOVASummary,
+    ANOVAResult,
     BaseComparisonResult,
     BaseConditionSummary,
-    PairwiseComparison,
+    PairwiseResult,
 )
 
 
@@ -56,7 +51,7 @@ class RMSFConditionSummary(BaseConditionSummary):
         return self.sem_rmsf
 
 
-class RMSFComparisonResult(BaseComparisonResult[RMSFConditionSummary, PairwiseComparison]):
+class RMSFComparisonResult(BaseComparisonResult[RMSFConditionSummary, PairwiseResult]):
     """Complete RMSF comparison analysis result.
 
     This is the main output from ``RMSFAnalysis.compare()``.
@@ -73,9 +68,9 @@ class RMSFComparisonResult(BaseComparisonResult[RMSFConditionSummary, PairwiseCo
         Label of the control condition.
     conditions : list[RMSFConditionSummary]
         Summary for each condition.
-    pairwise_comparisons : list[PairwiseComparison]
+    pairwise_comparisons : list[PairwiseResult]
         Statistical comparisons (all vs control, or all pairs).
-    anova : ANOVASummary, optional
+    anova : ANOVAResult, optional
         ANOVA result if 3+ conditions.
     ranking : list[str]
         Labels sorted by RMSF (ascending = lowest first = most stable).
@@ -96,8 +91,8 @@ class RMSFComparisonResult(BaseComparisonResult[RMSFConditionSummary, PairwiseCo
 
     # Override with specific types
     conditions: list[RMSFConditionSummary]
-    pairwise_comparisons: list[PairwiseComparison]
-    anova: ANOVASummary | None = None
+    pairwise_comparisons: list[PairwiseResult]
+    anova: ANOVAResult | None = None
 
     # RMSF-specific field
     selection: str = Field(..., description="Atom selection used for RMSF")

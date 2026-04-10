@@ -1,9 +1,5 @@
 """Polymer affinity score comparison result models.
 
-.. versionchanged:: 1.3.0
-    Moved from ``polyzymd.compare.results.polymer_affinity`` to
-    ``polyzymd.analyses.polymer_affinity._comparison_results``.
-
 The polymer affinity score is a comparative metric that quantifies the total
 strength of polymer-protein interactions by summing per-contact free energy
 contributions weighted by the number of simultaneous contacts.

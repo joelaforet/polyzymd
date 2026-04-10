@@ -15,10 +15,6 @@ Note:
     observable. Per-residue contact-RMSF correlations are computed in
     ``polyzymd compare report`` which integrates contacts with RMSF data.
 
-.. versionchanged:: 1.3.0
-    Migrated from ``polyzymd.compare.results.contacts`` into the contacts
-    analysis package so that contributors find all contacts-related code in
-    one place.
 """
 
 from __future__ import annotations

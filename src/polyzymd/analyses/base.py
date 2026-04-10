@@ -687,11 +687,6 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseR
         return None
 
 
-# Backward-compatible aliases for legacy comparison framework names
-PairwiseComparison = PairwiseResult
-ANOVASummary = ANOVAResult
-
-
 # ---------------------------------------------------------------------------
 # Analysis ABC
 # ---------------------------------------------------------------------------

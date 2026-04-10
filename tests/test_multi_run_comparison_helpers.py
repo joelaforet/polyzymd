@@ -9,27 +9,14 @@ from types import SimpleNamespace
 import pytest
 
 from polyzymd.analyses.base import (
-    ANOVASummary as CanonicalANOVASummary,
-)
-from polyzymd.analyses.base import (
-    BaseComparisonResult as CanonicalBaseComparisonResult,
-)
-from polyzymd.analyses.base import (
-    BaseConditionSummary as CanonicalBaseConditionSummary,
-)
-from polyzymd.analyses.base import (
-    PairwiseComparison as CanonicalPairwiseComparison,
+    BaseComparisonResult,
+    BaseConditionSummary,
+    PairwiseResult,
 )
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
     filter_summaries_with_run,
-)
-from polyzymd.compare.core.base import (
-    ANOVASummary,
-    BaseComparisonResult,
-    BaseConditionSummary,
-    PairwiseComparison,
 )
 
 
@@ -43,16 +30,8 @@ class _ConditionSummary(BaseConditionSummary):
         return 0.0
 
 
-class _ComparisonResult(BaseComparisonResult[_ConditionSummary, PairwiseComparison]):
+class _ComparisonResult(BaseComparisonResult[_ConditionSummary, PairwiseResult]):
     pass
-
-
-def test_compare_core_base_exports_canonical_classes() -> None:
-    """Legacy compare.core.base imports should alias canonical analysis classes."""
-    assert PairwiseComparison is CanonicalPairwiseComparison
-    assert ANOVASummary is CanonicalANOVASummary
-    assert BaseConditionSummary is CanonicalBaseConditionSummary
-    assert BaseComparisonResult is CanonicalBaseComparisonResult
 
 
 def test_base_comparison_get_comparison_prefers_pair_lookup() -> None:
@@ -82,7 +61,7 @@ def test_base_comparison_get_comparison_prefers_pair_lookup() -> None:
             ),
         ],
         pairwise_comparisons=[
-            PairwiseComparison(
+            PairwiseResult(
                 condition_a="A",
                 condition_b="C",
                 t_statistic=1.0,
@@ -93,7 +72,7 @@ def test_base_comparison_get_comparison_prefers_pair_lookup() -> None:
                 significant=False,
                 percent_change=5.0,
             ),
-            PairwiseComparison(
+            PairwiseResult(
                 condition_a="B",
                 condition_b="C",
                 t_statistic=2.0,
@@ -137,7 +116,7 @@ def test_base_comparison_get_comparison_supports_legacy_condition_b_lookup() -> 
             ),
         ],
         pairwise_comparisons=[
-            PairwiseComparison(
+            PairwiseResult(
                 condition_a="Control",
                 condition_b="Treatment",
                 t_statistic=3.0,
@@ -181,7 +160,7 @@ def test_base_comparison_get_comparison_tuple_falls_back_to_condition_b_lookup()
             ),
         ],
         pairwise_comparisons=[
-            PairwiseComparison(
+            PairwiseResult(
                 condition_a="Control",
                 condition_b="Treatment",
                 t_statistic=3.0,

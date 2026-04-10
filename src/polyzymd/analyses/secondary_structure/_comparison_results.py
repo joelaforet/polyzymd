@@ -1,16 +1,12 @@
 """Secondary structure condition summary and comparison result models.
 
 These classes follow the RMSF comparison result pattern, inheriting from
-the base classes in ``compare/core/``.
+the base classes in ``polyzymd.analyses.base``.
 
 The primary ranking metric is **helix fraction** (most relevant for
 thermal stability studies -- helix loss is a hallmark of unfolding).
 Strand and coil fractions are included as additional fields.
 
-.. versionchanged:: 1.3.0
-    Migrated from ``polyzymd.compare.results.secondary_structure`` into the
-    secondary structure analysis package so that contributors find all
-    secondary-structure-related code in one place.
 """
 
 from __future__ import annotations
@@ -20,10 +16,10 @@ from typing import ClassVar, Literal
 from pydantic import Field
 
 from polyzymd.analyses.base import (
-    ANOVASummary,
+    ANOVAResult,
     BaseComparisonResult,
     BaseConditionSummary,
-    PairwiseComparison,
+    PairwiseResult,
 )
 
 
@@ -83,7 +79,7 @@ class SSConditionSummary(BaseConditionSummary):
         return self.sem_helix
 
 
-class SSComparisonResult(BaseComparisonResult[SSConditionSummary, PairwiseComparison]):
+class SSComparisonResult(BaseComparisonResult[SSConditionSummary, PairwiseResult]):
     """Complete secondary structure comparison analysis result.
 
     This is the main output from ``SecondaryStructureAnalysis.compare()``.
@@ -105,9 +101,9 @@ class SSComparisonResult(BaseComparisonResult[SSConditionSummary, PairwiseCompar
         Label of the control condition.
     conditions : list[SSConditionSummary]
         Summary for each condition.
-    pairwise_comparisons : list[PairwiseComparison]
+    pairwise_comparisons : list[PairwiseResult]
         Statistical comparisons (on helix fraction).
-    anova : ANOVASummary, optional
+    anova : ANOVAResult, optional
         ANOVA result if 3+ conditions.
     ranking : list[str]
         Labels sorted by helix fraction (descending = most helix first).
@@ -126,5 +122,5 @@ class SSComparisonResult(BaseComparisonResult[SSConditionSummary, PairwiseCompar
 
     # Override with specific types
     conditions: list[SSConditionSummary]
-    pairwise_comparisons: list[PairwiseComparison]
-    anova: ANOVASummary | None = None
+    pairwise_comparisons: list[PairwiseResult]
+    anova: ANOVAResult | None = None

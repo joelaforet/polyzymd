@@ -11,10 +11,6 @@ For each pair:
 - Primary ranking: mean distance (lower = closer = better)
 - Secondary ranking: fraction below threshold (higher = more contact = better)
 
-.. versionchanged:: 1.3.0
-    Migrated from ``polyzymd.compare.results.distances`` into the distances
-    analysis package so that contributors find all distances-related code in
-    one place.
 """
 
 from __future__ import annotations
