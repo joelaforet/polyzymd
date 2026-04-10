@@ -2138,7 +2138,7 @@ def init(name: str) -> None:
         (project_dir / "slurm_logs").mkdir()
 
         # Copy template configuration
-        template_path = resources.files("polyzymd.configs.templates").joinpath(
+        template_path = resources.files("polyzymd.templates.templates").joinpath(
             "config_template.yaml"
         )
         config_dest = project_dir / "config.yaml"
@@ -2653,7 +2653,7 @@ def info() -> None:
         colored_echo("  Pydantic: NOT INSTALLED", phase="cli")
 
     colored_echo("", phase="cli")
-    colored_echo("Example configs: polyzymd/configs/examples/", phase="cli")
+    colored_echo("Example configs: polyzymd/templates/examples/", phase="cli")
 
 
 # =============================================================================

@@ -133,7 +133,6 @@ packages = ["src/polyzymd"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/src",
-    "/configs",
     "/README.md",
     "/LICENSE",
 ]

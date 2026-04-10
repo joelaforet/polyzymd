@@ -684,7 +684,7 @@ For more details on this behavior, see the OpenFF Interchange documentation:
 
 ## Complete Example
 
-See the example configurations in `src/polyzymd/configs/examples/`:
+See the example configurations in `src/polyzymd/templates/examples/`:
 
 - `enzyme_only.yaml` - Enzyme + substrate, no polymers
 - `enzyme_polymer.yaml` - Full enzyme + polymer simulation

@@ -48,11 +48,11 @@ src/polyzymd/
 ├── analyses/     # ★ Plugin system — unified analysis lifecycle (primary extension point)
 │   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
 │   └── <name>/   #   One package per analysis type (all plugins are packages)
-├── compare/      # Shared comparison infrastructure (statistics, config, IO, CLI)
+├── compare/      # [DISSOLVED in v1.3.0 — see config/, cli/, analyses/shared/]
 ├── exporters/    # GROMACS/other format exporters
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
-└── configs/      # Default YAML configs
+└── templates/    # Example YAML configs and project templates
 ```
 
 ### Inside `analyses/`

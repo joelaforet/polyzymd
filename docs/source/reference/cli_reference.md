@@ -621,7 +621,7 @@ Dependencies:
   OpenFF Interchange: 0.3.25
   Pydantic: 2.7.1
 
-Example configs: polyzymd/configs/examples/
+Example configs: polyzymd/templates/examples/
 ```
 
 ### Use Cases
