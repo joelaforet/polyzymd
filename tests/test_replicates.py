@@ -106,6 +106,18 @@ class TestValidateReplicateRange:
         """Whitespace around separators should be accepted."""
         assert validate_replicate_range("1, 2, 3") is True
         assert validate_replicate_range("1 - 3") is True
+        assert validate_replicate_range("1 - 10 : 2") is True
+
+    def test_embedded_digit_whitespace_rejected(self) -> None:
+        """Whitespace between digits (not around separators) must be rejected.
+
+        Regression test: a prior implementation stripped all whitespace,
+        causing ``"1 2"`` to validate as ``"12"`` while the parser would fail.
+        """
+        with pytest.raises(ValueError):
+            validate_replicate_range("1 2")
+        with pytest.raises(ValueError):
+            validate_replicate_range("1 23, 4")
 
     def test_invalid_format_raises(self) -> None:
         """Reject malformed range syntax."""

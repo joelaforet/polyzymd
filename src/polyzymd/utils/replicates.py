@@ -85,12 +85,16 @@ def validate_replicate_range(replicate_range: str) -> bool:
     ValueError
         If the range string format is invalid.
     """
-    # Strip whitespace so validation aligns with parse_replicate_range behavior
-    stripped_range = "".join(replicate_range.split())
+    # Allow optional whitespace around separators (,  -  :) to align with
+    # parse_replicate_range(), which strips each comma-separated part.
+    # Do NOT blindly remove all whitespace — "1 2" must remain invalid.
+    stripped_range = replicate_range.strip()
     if not stripped_range:
         raise ValueError("Replicate range cannot be empty")
 
-    pattern = r"^(\d+(-\d+(:\d+)?)?)(,\d+(-\d+(:\d+)?)?)*$"
+    ws = r"\s*"  # optional whitespace around separators
+    segment = rf"\d+({ws}-{ws}\d+({ws}:{ws}\d+)?)?"
+    pattern = rf"^{segment}({ws},{ws}{segment})*$"
     if re.fullmatch(pattern, stripped_range) is None:
         raise ValueError(f"Invalid replicate range format: {replicate_range}")
     return True

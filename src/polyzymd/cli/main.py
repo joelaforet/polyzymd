@@ -451,7 +451,13 @@ def build(
                 colored_echo(phase="build")
 
             colored_echo("=" * 60, phase="build")
-            colored_echo("Validation passed. Ready to build.", phase="build")
+            if export_format in ("lammps", "amber"):
+                colored_echo(
+                    f"Validation passed. {export_format.upper()} export is not yet implemented.",
+                    phase="build",
+                )
+            else:
+                colored_echo("Validation passed. Ready to build.", phase="build")
             colored_echo("=" * 60, phase="build")
             return
 
