@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from polyzymd.analyses.base import AggregateContext, ComparisonContext, Condition
+from polyzymd.analyses.base import AggregateContext, ComparisonContext, Condition, ReplicateContext
 from polyzymd.analyses.rmsd import RMSDAnalysis, RMSDRunSettings, RMSDSettings
 from polyzymd.analyses.rmsd._comparison_results import (
     RMSDComparisonResult,
@@ -261,6 +261,59 @@ def test_rmsd_settings_single_run() -> None:
     settings = RMSDSettings(runs=[RMSDRunSettings(label="single")])
     assert len(settings.runs) == 1
     assert settings.runs[0].label == "single"
+
+
+def test_settings_cache_tag_changes_with_settings() -> None:
+    """Settings cache tag should change when run settings change."""
+    analysis = RMSDAnalysis()
+    settings_a = RMSDSettings(
+        runs=[RMSDRunSettings(label="run_a", selection="protein and name CA")]
+    )
+    settings_b = RMSDSettings(runs=[RMSDRunSettings(label="run_a", selection="protein")])
+
+    tag_a = analysis._make_settings_cache_tag(settings_a, "10ns")
+    tag_b = analysis._make_settings_cache_tag(settings_b, "10ns")
+
+    assert tag_a != tag_b
+
+
+def test_compute_replicate_cache_filename_includes_settings_tag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """compute_replicate should include settings tag in cache filename."""
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(runs=[RMSDRunSettings(label="run_a")])
+    sim_config = MagicMock()
+    condition = Condition(
+        label="Control",
+        config_path=Path("/fake/control.yaml"),
+        replicates=(1,),
+        sim_config=sim_config,
+    )
+    ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=sim_config,
+        output_dir=tmp_path / "run_1",
+        equilibration="10ns",
+        recompute=False,
+        settings=settings,
+    )
+    ctx.output_dir.mkdir(parents=True, exist_ok=True)
+
+    captured: dict[str, Path] = {}
+
+    def fake_check_cache(result_class, result_path, recompute, sim_config):
+        captured["result_path"] = result_path
+        return {"cached": True}
+
+    monkeypatch.setattr(analysis, "_check_cache", fake_check_cache)
+
+    result = analysis.compute_replicate(ctx, replicate=1)
+
+    expected_tag = analysis._make_settings_cache_tag(settings, "10ns")
+    assert result == {"cached": True}
+    assert captured["result_path"].name == f"rmsd_eq10.00ns_{expected_tag}.json"
 
 
 def test_rmsd_external_reference_requires_file() -> None:

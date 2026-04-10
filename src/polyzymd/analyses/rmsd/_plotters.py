@@ -415,15 +415,14 @@ def _load_replicate_timeseries(
     traces: list[np.ndarray] = []
 
     for replicate in replicates:
-        npz_path = condition_dir / f"run_{replicate}" / f"rmsd_{run_label}_timeseries.npz"
-        if not npz_path.exists():
-            logger.warning("Missing RMSD NPZ sidecar: %s", npz_path)
+        npz_path = _resolve_npz_sidecar_path(condition_dir, run_label, replicate)
+        if npz_path is None:
             continue
 
         try:
-            payload = np.load(npz_path)
-            rmsd_values = np.asarray(payload["rmsd_values"], dtype=np.float64)
-            time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
+            with np.load(npz_path) as payload:
+                rmsd_values = np.asarray(payload["rmsd_values"], dtype=np.float64)
+                time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
         except Exception as exc:
             logger.warning("Failed to load RMSD NPZ sidecar %s: %s", npz_path, exc)
             continue
@@ -528,38 +527,37 @@ def _load_replicate_convergence_payload(
     """
     import numpy as np
 
-    npz_path = condition_dir / f"run_{replicate}" / f"rmsd_{run_label}_timeseries.npz"
-    if not npz_path.exists():
-        logger.warning("Missing RMSD NPZ sidecar: %s", npz_path)
+    npz_path = _resolve_npz_sidecar_path(condition_dir, run_label, replicate)
+    if npz_path is None:
         return None
 
     try:
-        payload = np.load(npz_path)
-        time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
-        rmsd_values = np.asarray(payload["rmsd_values"], dtype=np.float64)
-        window_start_times_ns = np.asarray(
-            payload.get("convergence_window_start_ns", np.array([], dtype=np.float64)),
-            dtype=np.float64,
-        )
-        window_mean_values = np.asarray(
-            payload.get("convergence_window_mean_rmsd", np.array([], dtype=np.float64)),
-            dtype=np.float64,
-        )
-        slope_times_ns = np.asarray(
-            payload.get("convergence_slope_time_ns", np.array([], dtype=np.float64)),
-            dtype=np.float64,
-        )
-        slopes = np.asarray(
-            payload.get("convergence_slope", np.array([], dtype=np.float64)),
-            dtype=np.float64,
-        )
-        converged = bool(payload.get("convergence_converged", np.asarray(False)).item())
-        convergence_time_raw = payload.get("convergence_time_ns")
-        convergence_time_ns = None
-        if convergence_time_raw is not None:
-            value = float(np.asarray(convergence_time_raw).item())
-            if np.isfinite(value):
-                convergence_time_ns = value
+        with np.load(npz_path) as payload:
+            time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
+            rmsd_values = np.asarray(payload["rmsd_values"], dtype=np.float64)
+            window_start_times_ns = np.asarray(
+                payload.get("convergence_window_start_ns", np.array([], dtype=np.float64)),
+                dtype=np.float64,
+            )
+            window_mean_values = np.asarray(
+                payload.get("convergence_window_mean_rmsd", np.array([], dtype=np.float64)),
+                dtype=np.float64,
+            )
+            slope_times_ns = np.asarray(
+                payload.get("convergence_slope_time_ns", np.array([], dtype=np.float64)),
+                dtype=np.float64,
+            )
+            slopes = np.asarray(
+                payload.get("convergence_slope", np.array([], dtype=np.float64)),
+                dtype=np.float64,
+            )
+            converged = bool(payload.get("convergence_converged", np.asarray(False)).item())
+            convergence_time_raw = payload.get("convergence_time_ns")
+            convergence_time_ns = None
+            if convergence_time_raw is not None:
+                value = float(np.asarray(convergence_time_raw).item())
+                if np.isfinite(value):
+                    convergence_time_ns = value
     except Exception as exc:
         logger.warning("Failed to load RMSD NPZ sidecar %s: %s", npz_path, exc)
         return None
@@ -579,3 +577,74 @@ def _load_replicate_convergence_payload(
         "converged": converged,
         "convergence_time_ns": convergence_time_ns,
     }
+
+
+def _resolve_npz_sidecar_path(condition_dir: Path, run_label: str, replicate: int) -> Path | None:
+    """Resolve a run NPZ sidecar via per-replicate result metadata.
+
+    Parameters
+    ----------
+    condition_dir : Path
+        Condition analysis directory.
+    run_label : str
+        RMSD run label.
+    replicate : int
+        Replicate index.
+
+    Returns
+    -------
+    Path | None
+        NPZ sidecar path from metadata, or ``None`` when unavailable.
+    """
+    from polyzymd.analyses.rmsd._results import RMSDResult
+
+    run_dir = condition_dir / f"run_{replicate}"
+    if not run_dir.exists():
+        logger.warning("Missing RMSD run directory: %s", run_dir)
+        return None
+
+    result_paths = sorted(
+        run_dir.glob("rmsd_*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+    )
+    if not result_paths:
+        logger.warning("Missing RMSD per-replicate result JSON in %s", run_dir)
+        return None
+
+    if len(result_paths) > 1:
+        logger.warning(
+            "Multiple RMSD per-replicate result JSON files in %s; using latest %s",
+            run_dir,
+            result_paths[0].name,
+        )
+
+    try:
+        result = RMSDResult.load(result_paths[0])
+    except Exception as exc:
+        logger.warning("Failed to load RMSD result JSON %s: %s", result_paths[0], exc)
+        return None
+
+    run_result = next((entry for entry in result.run_results if entry.run_label == run_label), None)
+    if run_result is None:
+        logger.warning(
+            "Run '%s' not found in RMSD result JSON %s",
+            run_label,
+            result_paths[0],
+        )
+        return None
+
+    if run_result.npz_path is None:
+        logger.warning(
+            "Missing npz_path metadata for run '%s' in %s",
+            run_label,
+            result_paths[0],
+        )
+        return None
+
+    npz_path = Path(run_result.npz_path)
+    if not npz_path.is_absolute():
+        npz_path = (run_dir / npz_path).resolve()
+    if not npz_path.exists():
+        logger.warning("Missing RMSD NPZ sidecar from metadata path: %s", npz_path)
+        return None
+
+    return npz_path

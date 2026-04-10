@@ -7,6 +7,7 @@ and exposes plotting/formatting hooks.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -192,6 +193,25 @@ class RMSDAnalysis(Analysis):
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
 
+    @staticmethod
+    def _make_settings_cache_tag(settings: BaseModel, equilibration: str) -> str:
+        """Build a short cache tag for settings and equilibration.
+
+        Parameters
+        ----------
+        settings : BaseModel
+            Analysis settings model.
+        equilibration : str
+            Equilibration string from analysis context.
+
+        Returns
+        -------
+        str
+            First 8 hex characters of the MD5 fingerprint.
+        """
+        payload = f"{settings.model_dump_json()}|{equilibration}".encode("utf-8")
+        return hashlib.md5(payload).hexdigest()[:8]
+
     def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
         """Compute RMSD for all configured runs for a single replicate.
 
@@ -217,7 +237,8 @@ class RMSDAnalysis(Analysis):
 
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
         eq_str = f"eq{eq_value:.2f}{eq_unit}"
-        result_file = ctx.output_dir / f"rmsd_{eq_str}.json"
+        settings_tag = self._make_settings_cache_tag(settings, ctx.equilibration)
+        result_file = ctx.output_dir / f"rmsd_{eq_str}_{settings_tag}.json"
 
         cached = self._check_cache(
             RMSDResult,
@@ -256,6 +277,8 @@ class RMSDAnalysis(Analysis):
                 config_hash=config_hash,
                 eq_value=eq_value,
                 eq_unit=eq_unit,
+                eq_str=eq_str,
+                settings_tag=settings_tag,
                 start_frame=start_frame,
                 n_frames_total=n_frames_total,
                 n_frames_used=n_frames_used,
@@ -605,6 +628,8 @@ class RMSDAnalysis(Analysis):
         config_hash: str,
         eq_value: float,
         eq_unit: str,
+        eq_str: str,
+        settings_tag: str,
         start_frame: int,
         n_frames_total: int,
         n_frames_used: int,
@@ -715,7 +740,7 @@ class RMSDAnalysis(Analysis):
             sustained_for_ns=run.convergence_sustained_for_ns,
         )
 
-        npz_filename = f"rmsd_{run.label}_timeseries.npz"
+        npz_filename = f"rmsd_{run.label}_{eq_str}_{settings_tag}_timeseries.npz"
         npz_path = ctx.output_dir / npz_filename
         np.savez_compressed(
             npz_path,
