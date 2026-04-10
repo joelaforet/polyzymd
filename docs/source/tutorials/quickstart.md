@@ -171,7 +171,7 @@ Build the system and export GROMACS input files:
 pixi run -e build polyzymd build -c config.yaml --format gromacs
 ```
 
-This builds the solvated system and exports `.gro`, `.top`, `.mdp`, and
+This builds the solvated system and exports `.gro`, `.top`, `.itp`, `.mdp`, and
 a run script to `replicate_1/gromacs/`.
 
 For multiple replicates (each with an independently built system):

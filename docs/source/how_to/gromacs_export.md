@@ -357,7 +357,7 @@ cd /path/to/replicate_1/gromacs
 export GMX=$(which gmx)
 
 # Run the generated script
-bash run_LipA_SBMA-EGPMA_gromacs_run1.sh
+bash run_LipA_SBMA-EGPMA_gromacs.sh
 ```
 
 ### Using GPU Acceleration

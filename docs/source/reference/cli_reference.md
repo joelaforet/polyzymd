@@ -7,12 +7,11 @@ Complete reference for all PolyzyMD command-line interface commands.
 All commands support these global options (placed **before** the subcommand name):
 
 ```bash
-polyzymd --version        # Show version
-polyzymd --help           # Show help
-polyzymd -q <command>     # Quiet mode (suppress INFO, show warnings/errors only)
-polyzymd --debug <command>  # Debug mode (show DEBUG logging for troubleshooting)
+polyzymd --version <command>      # Show version and exit
+polyzymd -v <command>             # Enable verbose output
 polyzymd --openff-logs <command>  # Enable verbose OpenFF logs
 polyzymd --no-color <command>     # Disable colored output
+polyzymd --help <command>         # Show help and exit
 ```
 
 > **Note:** Global options must appear *before* the subcommand.
@@ -41,10 +40,6 @@ By default, PolyzyMD suppresses verbose log messages from OpenFF Interchange and
 polyzymd --openff-logs build -c config.yaml
 polyzymd --openff-logs run-gromacs -c config.yaml
 ```
-
-**Quiet mode (`-q` / `--quiet`):** Suppress INFO messages, show only WARNING and ERROR with minimal format (timestamp + message only). Useful for scripting or reducing output clutter.
-
-**Debug mode (`--debug`):** Show DEBUG-level messages with full format. Useful for troubleshooting issues.
 
 **OpenFF logs:** OpenFF Interchange and Toolkit libraries are suppressed by default (they generate per-atom INFO messages during system building). Use `--openff-logs` to enable them for debugging force field issues.
 - Investigating charge assignment problems
@@ -209,9 +204,7 @@ polyzymd build -c config.yaml -r 1 --format gromacs
 
 The build command creates:
 - `solvated_system.pdb` - Complete system with water and ions
-- `system.xml` - OpenMM serialized system
-- `topology.json` - Topology information
-- `build.log` - Build process log
+- `system.xml` - OpenMM serialized system with restraints
 
 ### Output Files (GROMACS)
 
@@ -302,8 +295,8 @@ gromacs/
 ├── {system}.top              # Topology
 ├── *.itp                     # Molecule parameters (one per component)
 ├── em.mdp                    # Energy minimization parameters
-├── eq_01_nvt.mdp             # Equilibration stage 1 (NVT)
-├── eq_02_npt.mdp             # Equilibration stage 2 (NPT)
+├── eq_01_heating.mdp         # Equilibration stage 1
+├── eq_02_free_equilibration.mdp  # Equilibration stage 2
 ├── prod.mdp                  # Production parameters
 ├── run_{system}_gromacs.sh   # Generated run script
 ├── em.tpr, em.gro, em.edr    # Energy minimization outputs
