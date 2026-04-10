@@ -228,9 +228,6 @@ gromacs/
 ├── eq_02_free_equilibration.mdp
 ├── prod.mdp                  # Production MD parameters
 │
-├── posre_Protein.itp         # Position restraints for protein
-├── posre_*.itp               # Position restraints for other molecules
-│
 ├── run_{system}_gromacs.sh   # Generated shell script to run everything
 │
 ├── em.tpr                    # Energy minimization run input
@@ -250,6 +247,11 @@ gromacs/
 ├── prod_nojump.xtc           # Trajectory with PBC jumps removed
 └── prod_centered.xtc         # Centered trajectory for visualization
 ```
+
+Position restraints are appended as `#ifdef POSRES_*` blocks inside the
+molecule `.itp` files (not as separate `posre_*.itp` files). The MDP files
+use `-DPOSRES_PROTEIN`, `-DPOSRES_POLYMER`, etc. to activate them during
+equilibration stages.
 
 ---
 

@@ -417,7 +417,10 @@ def build(
                                 phase="build",
                             )
                     colored_echo("    - prod.mdp (production)", phase="build")
-                    colored_echo("    - posre_*.itp (position restraints)", phase="build")
+                    colored_echo(
+                        "    - Position restraints appended to molecule *.itp files",
+                        phase="build",
+                    )
                     colored_echo("    - run_*_gromacs.sh (run script)", phase="build")
                 elif export_format in ("lammps", "amber"):
                     colored_echo(

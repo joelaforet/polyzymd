@@ -221,7 +221,7 @@ With `--format gromacs`, the build command creates in `{projects_dir}/replicate_
 - `em.mdp` - Energy minimization parameters
 - `eq_XX_name.mdp` - Equilibration stage parameters
 - `prod.mdp` - Production parameters
-- `posre_*.itp` - Position restraint files (if configured)
+- Position restraints appended as `#ifdef POSRES` blocks in molecule `.itp` files (if configured)
 - `run_{system}_gromacs.sh` - Shell script to run the workflow
 
 ---
@@ -303,7 +303,6 @@ gromacs/
 ├── eq_01_nvt.mdp             # Equilibration stage 1 (NVT)
 ├── eq_02_npt.mdp             # Equilibration stage 2 (NPT)
 ├── prod.mdp                  # Production parameters
-├── posre_*.itp               # Position restraint files
 ├── run_{system}_gromacs.sh   # Generated run script
 ├── em.tpr, em.gro, em.edr    # Energy minimization outputs
 ├── eq_01.*, eq_02.*          # Equilibration outputs
