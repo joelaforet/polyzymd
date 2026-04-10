@@ -45,13 +45,13 @@ The GROMACS export maintains **1:1 parity** with OpenMM simulations using OpenFF
 
 ```bash
 # Full workflow: build system + run GROMACS simulation
-polyzymd run-gromacs -c config.yaml -r 1
+polyzymd run-gromacs -c config.yaml --replicates 1
 
 # Export files only (for manual execution or HPC submission)
-polyzymd run-gromacs -c config.yaml -r 1 --dry-run
+polyzymd run-gromacs -c config.yaml --replicates 1 --dry-run
 
 # Build only (export GROMACS files, no simulation)
-polyzymd build -c config.yaml -r 1 --gromacs
+polyzymd build -c config.yaml --format gromacs
 ```
 
 ### Using a Custom GROMACS Installation
@@ -181,17 +181,42 @@ polyzymd validate -c config_gromacs.yaml
 
 ```bash
 # Full workflow (build + run)
-polyzymd run-gromacs -c config_gromacs.yaml -r 1
+polyzymd run-gromacs -c config_gromacs.yaml --replicates 1
 
 # Or dry-run to just export files
-polyzymd run-gromacs -c config_gromacs.yaml -r 1 --dry-run
+polyzymd run-gromacs -c config_gromacs.yaml --replicates 1 --dry-run
 ```
+
+---
+
+### Multi-Replicate Builds
+
+Each replicate gets an independently built system with a different polymer
+random seed:
+
+```bash
+# Build 3 independent replicates for GROMACS
+polyzymd build -c config_gromacs.yaml --format gromacs --replicates 1-3
+
+# Run all 3 with GROMACS
+polyzymd run-gromacs -c config_gromacs.yaml --replicates 1-3
+```
+
+Output structure:
+
+```text
+replicate_1/gromacs/
+replicate_2/gromacs/
+replicate_3/gromacs/
+```
+
+Each replicate has its own coordinates, topology, and run script.
 
 ---
 
 ## GROMACS Output Files
 
-When using `--gromacs`, files are created in `{projects_dir}/replicate_{N}/gromacs/`:
+When using `--format gromacs`, files are created in `{projects_dir}/replicate_{N}/gromacs/`:
 
 ```
 gromacs/
@@ -372,7 +397,7 @@ export PATH=$PATH:/opt/gromacs/bin
 **Solution**: Rebuild from scratch:
 ```bash
 rm -rf replicate_*/gromacs/
-polyzymd run-gromacs -c config.yaml
+polyzymd run-gromacs -c config.yaml --replicates 1
 ```
 
 ### "Simulation crashes during equilibration"

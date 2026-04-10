@@ -143,29 +143,57 @@ If validation fails, fix the reported paths or field values before continuing.
 
 ## Step 5: Check that the system can build
 
-Start with a dry run:
+Start with a dry run to see the full validation report:
 
 ```bash
 pixi run -e build polyzymd build -c config.yaml --dry-run
 ```
 
-If that succeeds, run the actual build:
+If that succeeds, run the actual build. The commands differ depending on
+which simulation engine you plan to use:
+
+`````{tab-set}
+````{tab-item} OpenMM (default)
+Build the system for OpenMM simulation:
 
 ```bash
 pixi run -e build polyzymd build -c config.yaml
 ```
 
-This prepares the solvated system and runs the configured equilibration before
-production starts in later execution steps.
+This prepares the solvated system (PDB + OpenMM XML) for the configured
+equilibration and production phases.
+````
+
+````{tab-item} GROMACS
+Build the system and export GROMACS input files:
+
+```bash
+pixi run -e build polyzymd build -c config.yaml --format gromacs
+```
+
+This builds the solvated system and exports `.gro`, `.top`, `.mdp`, and
+a run script to `replicate_1/gromacs/`.
+
+For multiple replicates (each with an independently built system):
+
+```bash
+pixi run -e build polyzymd build -c config.yaml --format gromacs --replicates 1-3
+```
+````
+`````
 
 ## Step 6: Decide how you want to run production
 
+`````{tab-set}
+````{tab-item} OpenMM — local
 For a local smoke test on a GPU-enabled workstation, you can run one segment:
 
 ```bash
 pixi run -e cuda-12-4 polyzymd run-segment -c config.yaml -r 1
 ```
+````
 
+````{tab-item} OpenMM — HPC
 For an HPC workflow, generate job scripts first:
 
 ```bash
@@ -174,6 +202,32 @@ pixi run -e cuda-12-4 polyzymd submit -c config.yaml --preset aa100 --replicates
 
 If the dry run looks right, submit for real with the CUDA environment that
 matches your cluster.
+````
+
+````{tab-item} GROMACS — local
+Run the full GROMACS workflow locally:
+
+```bash
+pixi run -e build polyzymd run-gromacs -c config.yaml --replicates 1
+```
+
+Or just export files for manual execution:
+
+```bash
+pixi run -e build polyzymd run-gromacs -c config.yaml --replicates 1 --dry-run
+```
+````
+
+````{tab-item} GROMACS — HPC
+Export GROMACS files and submit manually with your cluster's SLURM scripts:
+
+```bash
+pixi run -e build polyzymd build -c config.yaml --format gromacs --replicates 1-3
+```
+
+See {doc}`../how_to/gromacs_export` for the full GROMACS HPC workflow.
+````
+`````
 
 ## What you should have now
 
@@ -187,6 +241,7 @@ At this point you should have:
 ## Where to go next
 
 - Add a substrate or polymers: {doc}`../reference/configuration`
+- Export to GROMACS: {doc}`../how_to/gromacs_export`
 - Add distance restraints: {doc}`../how_to/restraints`
 - Tune staged equilibration: {doc}`../how_to/equilibration`
 - Run on a cluster: {doc}`../how_to/hpc_slurm`
