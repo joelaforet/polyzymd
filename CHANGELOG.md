@@ -59,6 +59,26 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 - **`cohens_d()` default corrected.**  `rmsf_mode` default changed from `True`
   to `False` in `compare/statistics.py` so the general-purpose function is not
   biased toward one analysis type.
+- **Unified `run` command.**  `polyzymd run --engine gromacs|openmm` replaces the
+  old `run-gromacs` command.  OpenMM engine runs simulations locally using the
+  existing runner infrastructure.  (`cli/main.py`)
+- **`submit --generate-only` flag.**  Generates SLURM scripts without submitting,
+  replacing the previous `--dry-run` behavior for script generation.
+  (`cli/main.py`, `workflow/daisy_chain.py`)
+- **RMSD convergence detection.**  Always-on sliding-window slope diagnostic
+  integrated into the RMSD analysis plugin.  Detects when RMSD timeseries have
+  plateaued.  Configurable via `convergence_window_size_ns`,
+  `convergence_step_size_ns`, `convergence_slope_threshold`, and
+  `convergence_sustained_for_ns` settings.  (`analyses/rmsd/`)
+- **Shared convergence utility.**  `analyses/shared/convergence.py` provides
+  `find_convergence_time()` for any timeseries — reusable across plugins.
+  (`analyses/shared/convergence.py`)
+- **Convergence diagnostic plots.**  Dual-axis panels showing RMSD timeseries
+  with sliding slope and convergence markers.  Controlled via
+  `show_convergence_plots` plot setting.  (`analyses/rmsd/_plotters.py`)
+- **"Establishing Convergence" documentation.**  New Explanation page covering
+  convergence concepts, the sliding-window algorithm, parameter tuning, and
+  limitations.  (`docs/source/explanation/convergence.md`)
 
 ### Changed
 
@@ -73,6 +93,34 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 - **`compare/` is now shared infrastructure only.**  Contains statistics,
   ComparisonConfig/PlotSettings/PlotTheme, IO helpers, CLI commands, and
   base result classes — no analysis-specific code.
+- **`submit --dry-run` is now preview-only.**  Validates configuration and
+  previews the submission plan without writing any files.  Use `--generate-only`
+  for script generation.  (`cli/main.py`, `workflow/daisy_chain.py`)
+- **RMSD cache identity.**  Per-replicate and aggregated cache filenames now
+  include a settings fingerprint, preventing stale results when analysis
+  parameters change.  (`analyses/rmsd/`)
+- **RMSD `overall_median` computation.**  Fixed to use `np.median()` instead of
+  `np.mean()` for correctness.  (`analyses/rmsd/`)
+- **RMSD comparison statistics.**  t-test and ANOVA are now guarded for
+  insufficient replicates (n < 2), reporting "not testable" instead of NaN
+  statistics.  (`analyses/rmsd/`)
+- **RMSD comparison resilience.**  Comparison now gracefully handles missing
+  run-condition combinations instead of raising `KeyError`.  (`analyses/rmsd/`)
+- **Convergence input validation.**  `find_convergence_time()` rejects NaN/inf
+  inputs with clear `ValueError` messages.  (`analyses/shared/convergence.py`)
+- **Job naming consistency.**  `create_job_name()` now uses rounding (matching
+  directory naming) instead of truncation for polymer percentages.
+  (`workflow/slurm.py`)
+- **`SubmissionResult` state model.**  Added `is_generated_only` field to
+  distinguish generate-only from dry-run submissions.
+  (`workflow/daisy_chain.py`)
+- **CLI exception handling.**  `run` and `submit` commands now catch specific
+  operational exceptions instead of broad `except Exception`.  (`cli/main.py`)
+
+### Removed
+
+- **`run-gromacs` command.**  Replaced by `polyzymd run --engine gromacs`.  All
+  references updated across CLI, docs, and configuration.  (`cli/main.py`)
 
 ### Fixed
 
@@ -91,6 +139,11 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   directory, stale `__pycache__/` files.
 - **`validate_name()` exception handling narrowed.**  `except Exception:` changed
   to `except ImportError:` in the scaffold's collision-check path.
+- **NPZ sidecar lookup.**  RMSD plotters now load NPZ paths from result metadata
+  instead of reconstructing filenames, preventing stale sidecar binding.
+  (`analyses/rmsd/_plotters.py`)
+- **File descriptor leaks.**  NPZ file loading in RMSD plotters now uses context
+  managers.  (`analyses/rmsd/_plotters.py`)
 
 ### Documentation
 
