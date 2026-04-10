@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from polyzymd.analyses.base import AggregateContext, ComparisonContext, Condition, ReplicateContext
+from polyzymd.analyses.base import Condition
 from polyzymd.analyses.rmsd import RMSDAnalysis, RMSDRunSettings, RMSDSettings
 from polyzymd.analyses.rmsd._comparison_results import (
     RMSDComparisonResult,
@@ -19,8 +19,8 @@ from polyzymd.analyses.rmsd._comparison_results import (
     RMSDRunSummary,
 )
 from polyzymd.analyses.rmsd._formatters import format_rmsd_comparison
-from polyzymd.analyses.rmsd._plotters import _resolve_npz_sidecar_path
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
+from polyzymd.analyses.rmsd._plotters import _resolve_npz_sidecar_path
 from polyzymd.analyses.rmsd._results import (
     RMSDAggregatedResult,
     RMSDResult,
@@ -28,6 +28,12 @@ from polyzymd.analyses.rmsd._results import (
     RMSDRunResult,
 )
 from polyzymd.compare.registries import PlotSettingsRegistry
+from tests._support.analysis_testkit import (
+    make_aggregate_context,
+    make_comparison_context,
+    make_condition,
+    make_replicate_context,
+)
 
 
 def _make_run_settings() -> list[RMSDRunSettings]:
@@ -285,20 +291,14 @@ def test_compute_replicate_cache_filename_includes_settings_tag(
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=[RMSDRunSettings(label="run_a")])
     sim_config = MagicMock()
-    condition = Condition(
-        label="Control",
-        config_path=Path("/fake/control.yaml"),
-        replicates=(1,),
-        sim_config=sim_config,
-    )
-    ctx = ReplicateContext(
+    condition = make_condition(label="Control", replicates=(1,), sim_config=sim_config)
+    ctx = make_replicate_context(
         condition=condition,
         replicate=1,
-        sim_config=sim_config,
         output_dir=tmp_path / "run_1",
+        settings=settings,
         equilibration="10ns",
         recompute=False,
-        settings=settings,
     )
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -570,12 +570,12 @@ def test_aggregate_single_replicate(
     """aggregate should handle a single replicate and log SEM warning."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=_make_run_settings())
-    ctx = AggregateContext(
+    ctx = make_aggregate_context(
         condition=condition,
         replicates=(1,),
         output_dir=tmp_path / "aggregated",
-        equilibration="10ns",
         settings=settings,
+        equilibration="10ns",
     )
     result = RMSDResult(
         config_hash="hash123",
@@ -605,12 +605,12 @@ def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> 
     """aggregate should compute expected means and preserve run structure."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=_make_run_settings())
-    ctx = AggregateContext(
+    ctx = make_aggregate_context(
         condition=condition,
         replicates=(1, 2, 3),
         output_dir=tmp_path / "aggregated",
-        equilibration="10ns",
         settings=settings,
+        equilibration="10ns",
     )
     results = [
         RMSDResult(
@@ -660,12 +660,12 @@ def test_aggregate_overall_median_uses_median(condition: Condition, tmp_path: Pa
     """aggregate should compute overall_median using np.median."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
-    ctx = AggregateContext(
+    ctx = make_aggregate_context(
         condition=condition,
         replicates=(1, 2, 3),
         output_dir=tmp_path / "aggregated",
-        equilibration="10ns",
         settings=settings,
+        equilibration="10ns",
     )
 
     results = [
@@ -726,8 +726,8 @@ def test_compare_two_conditions(tmp_path: Path) -> None:
     """compare with two conditions should produce pairwise results without ANOVA."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=_make_run_settings())
-    control = Condition("Control", Path("/fake/control.yaml"), (1, 2, 3), MagicMock())
-    treated = Condition("Treated", Path("/fake/treated.yaml"), (1, 2, 3), MagicMock())
+    control = make_condition(label="Control")
+    treated = make_condition(label="Treated")
 
     control_agg = RMSDAggregatedResult(
         config_hash="hash123",
@@ -760,15 +760,14 @@ def test_compare_two_conditions(tmp_path: Path) -> None:
         source_result_files=[],
     )
 
-    ctx = ComparisonContext(
+    ctx = make_comparison_context(
         name="rmsd_compare",
         conditions=[control, treated],
-        excluded_conditions=[],
-        control_label="Control",
         analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
         results_dir=tmp_path / "comparison",
-        equilibration="10ns",
         settings=settings,
+        control_label="Control",
+        equilibration="10ns",
         recompute=False,
         aggregated_results={"Control": control_agg, "Treated": treated_agg},
     )
@@ -785,9 +784,9 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=_make_run_settings())
     conditions = [
-        Condition("Control", Path("/fake/control.yaml"), (1, 2, 3), MagicMock()),
-        Condition("A", Path("/fake/a.yaml"), (1, 2, 3), MagicMock()),
-        Condition("B", Path("/fake/b.yaml"), (1, 2, 3), MagicMock()),
+        make_condition(label="Control"),
+        make_condition(label="A"),
+        make_condition(label="B"),
     ]
 
     aggregated_results = {
@@ -838,15 +837,14 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
         ),
     }
 
-    ctx = ComparisonContext(
+    ctx = make_comparison_context(
         name="rmsd_compare",
         conditions=conditions,
-        excluded_conditions=[],
-        control_label="Control",
         analysis_dirs={c.label: tmp_path / c.label for c in conditions},
         results_dir=tmp_path / "comparison",
-        equilibration="10ns",
         settings=settings,
+        control_label="Control",
+        equilibration="10ns",
         recompute=False,
         aggregated_results=aggregated_results,
     )
@@ -863,9 +861,9 @@ def test_compare_single_replicate_not_testable(tmp_path: Path) -> None:
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
     conditions = [
-        Condition("Control", Path("/fake/control.yaml"), (1,), MagicMock()),
-        Condition("A", Path("/fake/a.yaml"), (1,), MagicMock()),
-        Condition("B", Path("/fake/b.yaml"), (1,), MagicMock()),
+        make_condition(label="Control", replicates=(1,)),
+        make_condition(label="A", replicates=(1,)),
+        make_condition(label="B", replicates=(1,)),
     ]
 
     aggregated_results = {
@@ -913,15 +911,14 @@ def test_compare_single_replicate_not_testable(tmp_path: Path) -> None:
         ),
     }
 
-    ctx = ComparisonContext(
+    ctx = make_comparison_context(
         name="rmsd_compare",
         conditions=conditions,
-        excluded_conditions=[],
-        control_label="Control",
         analysis_dirs={c.label: tmp_path / c.label for c in conditions},
         results_dir=tmp_path / "comparison",
-        equilibration="10ns",
         settings=settings,
+        control_label="Control",
+        equilibration="10ns",
         recompute=False,
         aggregated_results=aggregated_results,
     )
@@ -941,8 +938,8 @@ def test_compare_missing_run_logs_warning_and_skips(
     """Missing runs in one condition should not crash compare."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=_make_run_settings())
-    control = Condition("Control", Path("/fake/control.yaml"), (1, 2, 3), MagicMock())
-    treated = Condition("Treated", Path("/fake/treated.yaml"), (1, 2, 3), MagicMock())
+    control = make_condition(label="Control")
+    treated = make_condition(label="Treated")
 
     control_agg = RMSDAggregatedResult(
         config_hash="hash123",
@@ -974,15 +971,14 @@ def test_compare_missing_run_logs_warning_and_skips(
         source_result_files=[],
     )
 
-    ctx = ComparisonContext(
+    ctx = make_comparison_context(
         name="rmsd_compare",
         conditions=[control, treated],
-        excluded_conditions=[],
-        control_label="Control",
         analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
         results_dir=tmp_path / "comparison",
-        equilibration="10ns",
         settings=settings,
+        control_label="Control",
+        equilibration="10ns",
         recompute=False,
         aggregated_results={"Control": control_agg, "Treated": treated_agg},
     )

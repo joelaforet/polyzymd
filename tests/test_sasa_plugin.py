@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from polyzymd.analyses.base import AggregateContext, ComparisonContext, Condition
+from polyzymd.analyses.base import Condition
 from polyzymd.analyses.sasa import SASAAnalysis, SASARunSettings, SASASettings
 from polyzymd.analyses.sasa._comparison_results import (
     SASAComparisonResult,
@@ -33,11 +33,18 @@ from polyzymd.analyses.sasa._results import (
     SASARunResult,
 )
 from polyzymd.compare.registries import PlotSettingsRegistry
-from tests._support.analysis_testkit import make_replicate_context
+from tests._support.analysis_testkit import (
+    make_aggregate_context,
+    make_comparison_context,
+    make_condition,
+    make_replicate_context,
+)
 
 
 def _make_condition(label: str) -> Condition:
-    return Condition(label, Path(f"/fake/{label}.yaml"), (1, 2, 3), MagicMock())
+    return make_condition(
+        label=label, config_path=Path(f"/fake/{label}.yaml"), sim_config=MagicMock()
+    )
 
 
 def _make_run_result(replicate: int, label: str, mean: float) -> SASARunResult:
@@ -345,12 +352,12 @@ def test_aggregate_nan_handling(tmp_path: Path) -> None:
     analysis = SASAAnalysis()
     settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
     condition = _make_condition("cond")
-    ctx = AggregateContext(
+    ctx = make_aggregate_context(
         condition=condition,
         replicates=(1, 2),
         output_dir=tmp_path / "aggregated",
-        equilibration="10ns",
         settings=settings,
+        equilibration="10ns",
     )
 
     results = [
@@ -420,15 +427,14 @@ def test_compare_and_format(tmp_path: Path) -> None:
         ),
     }
 
-    ctx = ComparisonContext(
+    ctx = make_comparison_context(
         name="sasa_compare",
         conditions=[control, treated],
-        excluded_conditions=[],
-        control_label="control",
         analysis_dirs={"control": tmp_path / "control", "treated": tmp_path / "treated"},
         results_dir=tmp_path / "comparison",
-        equilibration="10ns",
         settings=settings,
+        control_label="control",
+        equilibration="10ns",
         recompute=False,
         aggregated_results=aggregated_results,
     )
@@ -476,15 +482,14 @@ def test_compare_skips_all_nan_runs(tmp_path: Path) -> None:
         ),
     }
 
-    ctx = ComparisonContext(
+    ctx = make_comparison_context(
         name="sasa_compare_nan",
         conditions=[control, treated],
-        excluded_conditions=[],
-        control_label="control",
         analysis_dirs={"control": tmp_path / "control", "treated": tmp_path / "treated"},
         results_dir=tmp_path / "comparison",
-        equilibration="10ns",
         settings=settings,
+        control_label="control",
+        equilibration="10ns",
         recompute=False,
         aggregated_results=aggregated_results,
     )

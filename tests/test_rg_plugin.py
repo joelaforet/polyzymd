@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from polyzymd.analyses.base import AggregateContext, ComparisonContext, Condition
+from polyzymd.analyses.base import Condition
 from polyzymd.analyses.rg import RgAnalysis, RgRunSettings, RgSettings
 from polyzymd.analyses.rg._comparison_results import (
     RgComparisonResult,
@@ -29,8 +29,11 @@ from polyzymd.analyses.rg._results import (
 from polyzymd.compare.registries import PlotSettingsRegistry
 from tests._support.analysis_testkit import (
     FakeUniverse,
-    make_mock_trajectory_loader,
+    make_aggregate_context,
+    make_comparison_context,
+    make_condition,
     make_replicate_context,
+    patch_trajectory_loader,
 )
 
 
@@ -452,8 +455,7 @@ def test_compute_replicate_skips_none_runs(
     )
 
     fake_universe = FakeUniverse(n_atoms=50, n_frames=100, n_residues=10)
-    loader = make_mock_trajectory_loader(fake_universe)
-    monkeypatch.setattr(rg_module, "TrajectoryLoader", lambda _sim_config: loader)
+    loader = patch_trajectory_loader(monkeypatch, "polyzymd.analyses.rg", fake_universe)
     monkeypatch.setattr(rg_module, "compute_config_hash", lambda _sim_config: "hash123")
     monkeypatch.setattr(analysis, "_check_cache", lambda *args, **kwargs: None)
 
@@ -478,12 +480,12 @@ def test_aggregate_handles_missing_run(
     """aggregate should skip runs with no replicate entries."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
-    ctx = AggregateContext(
+    ctx = make_aggregate_context(
         condition=condition,
         replicates=(1, 2),
         output_dir=tmp_path / "aggregated",
-        equilibration="10ns",
         settings=settings,
+        equilibration="10ns",
     )
     results = [
         RgResult(
@@ -515,12 +517,12 @@ def test_aggregate_single_replicate(
     """aggregate should handle a single replicate and log SEM warning."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
-    ctx = AggregateContext(
+    ctx = make_aggregate_context(
         condition=condition,
         replicates=(1,),
         output_dir=tmp_path / "aggregated",
-        equilibration="10ns",
         settings=settings,
+        equilibration="10ns",
     )
     result = RgResult(
         config_hash="hash123",
@@ -550,12 +552,12 @@ def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> 
     """aggregate should compute expected means and preserve run structure."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
-    ctx = AggregateContext(
+    ctx = make_aggregate_context(
         condition=condition,
         replicates=(1, 2, 3),
         output_dir=tmp_path / "aggregated",
-        equilibration="10ns",
         settings=settings,
+        equilibration="10ns",
     )
     results = [
         RgResult(
@@ -588,8 +590,8 @@ def test_compare_two_conditions(tmp_path: Path) -> None:
     """compare with two conditions should produce pairwise results without ANOVA."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
-    control = Condition("Control", Path("/fake/control.yaml"), (1, 2, 3), MagicMock())
-    treated = Condition("Treated", Path("/fake/treated.yaml"), (1, 2, 3), MagicMock())
+    control = make_condition(label="Control")
+    treated = make_condition(label="Treated")
 
     control_agg = RgAggregatedResult(
         config_hash="hash123",
@@ -622,15 +624,14 @@ def test_compare_two_conditions(tmp_path: Path) -> None:
         source_result_files=[],
     )
 
-    ctx = ComparisonContext(
+    ctx = make_comparison_context(
         name="rg_compare",
         conditions=[control, treated],
-        excluded_conditions=[],
-        control_label="Control",
         analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
         results_dir=tmp_path / "comparison",
-        equilibration="10ns",
         settings=settings,
+        control_label="Control",
+        equilibration="10ns",
         recompute=False,
         aggregated_results={"Control": control_agg, "Treated": treated_agg},
     )
@@ -647,9 +648,9 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
     conditions = [
-        Condition("Control", Path("/fake/control.yaml"), (1, 2, 3), MagicMock()),
-        Condition("A", Path("/fake/a.yaml"), (1, 2, 3), MagicMock()),
-        Condition("B", Path("/fake/b.yaml"), (1, 2, 3), MagicMock()),
+        make_condition(label="Control"),
+        make_condition(label="A"),
+        make_condition(label="B"),
     ]
 
     aggregated_results = {
@@ -700,15 +701,14 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
         ),
     }
 
-    ctx = ComparisonContext(
+    ctx = make_comparison_context(
         name="rg_compare",
         conditions=conditions,
-        excluded_conditions=[],
-        control_label="Control",
         analysis_dirs={c.label: tmp_path / c.label for c in conditions},
         results_dir=tmp_path / "comparison",
-        equilibration="10ns",
         settings=settings,
+        control_label="Control",
+        equilibration="10ns",
         recompute=False,
         aggregated_results=aggregated_results,
     )
@@ -724,8 +724,8 @@ def test_compare_skips_run_missing_in_some_conditions(tmp_path: Path) -> None:
     """compare should keep rankings for partially available runs."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
-    control = Condition("Control", Path("/fake/control.yaml"), (1, 2, 3), MagicMock())
-    treated = Condition("Treated", Path("/fake/treated.yaml"), (1, 2, 3), MagicMock())
+    control = make_condition(label="Control")
+    treated = make_condition(label="Treated")
 
     control_agg = RgAggregatedResult(
         config_hash="hash123",
@@ -757,15 +757,14 @@ def test_compare_skips_run_missing_in_some_conditions(tmp_path: Path) -> None:
         source_result_files=[],
     )
 
-    ctx = ComparisonContext(
+    ctx = make_comparison_context(
         name="rg_compare",
         conditions=[control, treated],
-        excluded_conditions=[],
-        control_label="Control",
         analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
         results_dir=tmp_path / "comparison",
-        equilibration="10ns",
         settings=settings,
+        control_label="Control",
+        equilibration="10ns",
         recompute=False,
         aggregated_results={"Control": control_agg, "Treated": treated_agg},
     )
@@ -1032,8 +1031,8 @@ def test_compare_passes_fragment_metadata_to_summaries(tmp_path: Path) -> None:
             RgRunSettings(label="polymer_frags", selection="segid C", calculation_mode="fragments")
         ]
     )
-    control = Condition("Control", Path("/fake/control.yaml"), (1, 2, 3), MagicMock())
-    treated = Condition("Treatment", Path("/fake/treatment.yaml"), (1, 2, 3), MagicMock())
+    control = make_condition(label="Control")
+    treated = make_condition(label="Treatment")
 
     control_agg = RgAggregatedResult(
         config_hash="hash123",
@@ -1060,15 +1059,14 @@ def test_compare_passes_fragment_metadata_to_summaries(tmp_path: Path) -> None:
         source_result_files=[],
     )
 
-    ctx = ComparisonContext(
+    ctx = make_comparison_context(
         name="rg_fragment_compare",
         conditions=[control, treated],
-        excluded_conditions=[],
-        control_label="Control",
         analysis_dirs={"Control": tmp_path / "control", "Treatment": tmp_path / "treated"},
         results_dir=tmp_path / "comparison",
-        equilibration="10ns",
         settings=settings,
+        control_label="Control",
+        equilibration="10ns",
         recompute=False,
         aggregated_results={"Control": control_agg, "Treatment": treated_agg},
     )
@@ -1146,12 +1144,12 @@ def test_aggregate_fragment_mode_builds_histograms(condition: Condition, tmp_pat
     settings = RgSettings(
         runs=[RgRunSettings(label=run_label, selection="segid C", calculation_mode="fragments")]
     )
-    ctx = AggregateContext(
+    ctx = make_aggregate_context(
         condition=condition,
         replicates=(1, 2),
         output_dir=tmp_path / "aggregated",
-        equilibration="10ns",
         settings=settings,
+        equilibration="10ns",
     )
 
     aggregated = analysis.aggregate(ctx, results)
@@ -1352,12 +1350,12 @@ def test_aggregate_selection_mode_builds_reduced_histograms(
     ]
 
     settings = RgSettings(runs=[RgRunSettings(label=run_label, selection="protein and name CA")])
-    ctx = AggregateContext(
+    ctx = make_aggregate_context(
         condition=condition,
         replicates=(1, 2),
         output_dir=tmp_path / "aggregated",
-        equilibration="10ns",
         settings=settings,
+        equilibration="10ns",
     )
 
     aggregated = analysis.aggregate(ctx, results)

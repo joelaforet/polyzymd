@@ -23,6 +23,7 @@ wrap these factories.
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 from typing import Any, Sequence
 from unittest.mock import MagicMock
@@ -36,7 +37,6 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fake MDAnalysis objects
@@ -199,6 +199,34 @@ def make_mock_trajectory_loader(
     loader.get_trajectory_info.return_value = traj_info
     loader.get_timestep.return_value = universe.trajectory.dt
 
+    return loader
+
+
+def patch_trajectory_loader(
+    monkeypatch: Any,
+    module_path: str,
+    universe: FakeUniverse | None = None,
+) -> MagicMock:
+    """Patch a module-level ``TrajectoryLoader`` symbol with a mock instance.
+
+    Parameters
+    ----------
+    monkeypatch : Any
+        ``pytest`` monkeypatch fixture instance.
+    module_path : str
+        Fully-qualified module path where ``TrajectoryLoader`` is imported.
+    universe : FakeUniverse | None, optional
+        Universe returned by the patched loader. A default ``FakeUniverse`` is
+        used when omitted.
+
+    Returns
+    -------
+    MagicMock
+        Mock loader configured by :func:`make_mock_trajectory_loader`.
+    """
+    loader = make_mock_trajectory_loader(universe=universe)
+    module = importlib.import_module(module_path)
+    monkeypatch.setattr(module, "TrajectoryLoader", lambda _sim_config: loader)
     return loader
 
 
