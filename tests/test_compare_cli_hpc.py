@@ -366,7 +366,7 @@ def test_finalize_command_loads_aggregated_and_runs(monkeypatch, tmp_path: Path)
             tmp_path / "analysis",
         ),
     )
-    monkeypatch.setattr("polyzymd.compare.io.paths.sanitize_label", lambda label: label)
+    monkeypatch.setattr("polyzymd.analyses.shared.paths.sanitize_label", lambda label: label)
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator._resolve_settings",
         lambda plugin, config: SimpleNamespace(),
@@ -441,7 +441,7 @@ def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
         "polyzymd.workflow.analysis_slurm.validate_manifest_snapshot",
         lambda manifest, plugin, config: ([condition], "10ns", tmp_path / "analysis"),
     )
-    monkeypatch.setattr("polyzymd.compare.io.paths.sanitize_label", lambda label: label)
+    monkeypatch.setattr("polyzymd.analyses.shared.paths.sanitize_label", lambda label: label)
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.run_replicate_once",
         lambda *args, **kwargs: called.__setitem__("rep", called["rep"] + 1) or {"ok": True},
@@ -529,7 +529,7 @@ def test_finalize_with_missing_conditions(monkeypatch, tmp_path: Path) -> None:
             tmp_path / "analysis",
         ),
     )
-    monkeypatch.setattr("polyzymd.compare.io.paths.sanitize_label", lambda label: label)
+    monkeypatch.setattr("polyzymd.analyses.shared.paths.sanitize_label", lambda label: label)
 
     blocked = runner.invoke(
         compare,
@@ -594,7 +594,7 @@ def test_manifest_config_drift_detection(monkeypatch, tmp_path: Path) -> None:
         "polyzymd.workflow.analysis_slurm.validate_manifest_snapshot",
         lambda manifest, plugin, config: (_ for _ in ()).throw(RuntimeError("drift")),
     )
-    monkeypatch.setattr("polyzymd.compare.io.paths.sanitize_label", lambda label: label)
+    monkeypatch.setattr("polyzymd.analyses.shared.paths.sanitize_label", lambda label: label)
 
     result = runner.invoke(
         compare,

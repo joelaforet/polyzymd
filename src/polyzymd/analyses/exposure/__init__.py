@@ -820,7 +820,7 @@ def _find_exposure_comparison_result(
         Loaded comparison result if found
     """
     from polyzymd.analyses.exposure._comparison_results import ExposureComparisonResult
-    from polyzymd.compare.io.results import find_comparison_result
+    from polyzymd.analyses.shared.result_io import find_comparison_result
 
     return find_comparison_result(
         data,

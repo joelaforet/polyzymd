@@ -848,7 +848,7 @@ def run_comparison(
     dict[str, Any]
         Dictionary with ``"aggregated"``, ``"comparison"``, ``"plots"`` keys.
     """
-    from polyzymd.compare.io.paths import sanitize_label
+    from polyzymd.analyses.shared.paths import sanitize_label
 
     valid_conditions, settings, equilibration, analysis_root = prepare_comparison_run(
         analysis,

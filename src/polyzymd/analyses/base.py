@@ -1354,7 +1354,7 @@ class Analysis(ABC):
         Path
             ``<analysis_root>/<sanitized_label>/<analysis_name>``
         """
-        from polyzymd.compare.io.paths import sanitize_label
+        from polyzymd.analyses.shared.paths import sanitize_label
 
         return analysis_root / sanitize_label(condition_label) / self.name
 

@@ -946,7 +946,7 @@ def _unit_label_mpl(units: str) -> str:
 def _find_bfe_result(data: dict[str, Any], labels: Sequence[str]) -> Any | None:
     """Find and load BindingFreeEnergyResult from the comparison cache."""
     from polyzymd.analyses.binding_free_energy._comparison_results import BindingFreeEnergyResult
-    from polyzymd.compare.io.results import find_comparison_result
+    from polyzymd.analyses.shared.result_io import find_comparison_result
 
     return find_comparison_result(
         data,

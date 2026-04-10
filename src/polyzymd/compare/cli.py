@@ -536,7 +536,7 @@ def _generate_analysis_plots(
     from polyzymd.analyses.base import Condition, PlotContext
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.analyses.orchestrator import _resolve_settings
-    from polyzymd.compare.io.paths import sanitize_label
+    from polyzymd.analyses.shared.paths import sanitize_label
 
     if analysis_names is None:
         analysis_names = config.plugins.get_enabled_plugins()
@@ -1177,7 +1177,7 @@ def finalize_analysis_hpc(
         finalize_comparison_from_disk,
         prepare_comparison_run,
     )
-    from polyzymd.compare.io.paths import sanitize_label
+    from polyzymd.analyses.shared.paths import sanitize_label
 
     config = ComparisonConfig.from_yaml(config_file)
     analysis_cls = get_analysis(analysis)
@@ -1254,7 +1254,7 @@ def worker_replicate(
     """Internal worker command for one replicate compute task."""
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.analyses.orchestrator import run_replicate_once
-    from polyzymd.compare.io.paths import sanitize_label
+    from polyzymd.analyses.shared.paths import sanitize_label
     from polyzymd.workflow.analysis_slurm import AnalysisJobManifest, validate_manifest_snapshot
 
     manifest = AnalysisJobManifest.load(manifest_path)
@@ -1300,7 +1300,7 @@ def worker_aggregate(manifest_path: Path, condition_index: int):
     """Internal worker command for one condition aggregation task."""
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.analyses.orchestrator import aggregate_condition_from_disk
-    from polyzymd.compare.io.paths import sanitize_label
+    from polyzymd.analyses.shared.paths import sanitize_label
     from polyzymd.workflow.analysis_slurm import AnalysisJobManifest, validate_manifest_snapshot
 
     manifest = AnalysisJobManifest.load(manifest_path)
@@ -1336,7 +1336,7 @@ def worker_finalize(manifest_path: Path):
     """Internal worker command for comparison finalization."""
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.analyses.orchestrator import finalize_comparison_from_disk
-    from polyzymd.compare.io.paths import sanitize_label
+    from polyzymd.analyses.shared.paths import sanitize_label
     from polyzymd.workflow.analysis_slurm import AnalysisJobManifest, validate_manifest_snapshot
 
     manifest = AnalysisJobManifest.load(manifest_path)

@@ -1,7 +1,7 @@
-"""Unit tests for ``polyzymd.compare.io`` helpers.
+"""Unit tests for result and path helpers.
 
-This module validates path resolution and comparison-result discovery behavior
-without requiring simulation dependencies.
+This module validates comparison-result discovery behavior and label
+sanitization without requiring simulation dependencies.
 """
 
 from __future__ import annotations
@@ -13,13 +13,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from polyzymd.compare.io import (
+from polyzymd.analyses.shared.paths import sanitize_label
+from polyzymd.analyses.shared.result_io import (
     canonical_comparison_result_path,
     find_comparison_result,
-    resolve_aggregated_dir,
-    resolve_analysis_dir,
-    resolve_condition_output_dir,
-    sanitize_label,
 )
 
 
@@ -54,128 +51,6 @@ class TestSanitizeLabel:
             Expected sanitized output.
         """
         assert sanitize_label(label) == expected
-
-
-class TestPathResolution:
-    """Tests for path resolution helpers in ``compare.io.paths``.
-
-    Parameters
-    ----------
-    None
-        This class uses temporary directories to validate fallback chains.
-    """
-
-    def test_resolve_condition_output_dir_none_source_path(self) -> None:
-        """Return ``None`` when source path is not provided.
-
-        Parameters
-        ----------
-        None
-            This test has no runtime parameters.
-        """
-        resolved = resolve_condition_output_dir(None, "SBMA-EGMA 25%", "contacts")
-        assert resolved is None
-
-    def test_resolve_condition_output_dir_with_source_path(self, tmp_path: Path) -> None:
-        """Build comparison-mode output path with sanitized label.
-
-        Parameters
-        ----------
-        tmp_path : Path
-            Pytest-provided temporary root directory.
-        """
-        source_path = tmp_path / "compare.yaml"
-        expected = tmp_path / "analysis" / "SBMA-EGMA_25pct" / "contacts"
-
-        resolved = resolve_condition_output_dir(source_path, "SBMA-EGMA 25%", "contacts")
-        assert resolved == expected
-
-    def test_resolve_analysis_dir_primary_exists(self, tmp_path: Path) -> None:
-        """Prefer primary path when it exists.
-
-        Parameters
-        ----------
-        tmp_path : Path
-            Pytest-provided temporary root directory.
-        """
-        projects_dir = tmp_path / "project"
-        primary = projects_dir / "contacts"
-        primary.mkdir(parents=True)
-
-        resolved = resolve_analysis_dir(projects_dir, "contacts")
-        assert resolved == primary
-
-    def test_resolve_analysis_dir_fallback_exists(self, tmp_path: Path) -> None:
-        """Use config-parent fallback when primary does not exist.
-
-        Parameters
-        ----------
-        tmp_path : Path
-            Pytest-provided temporary root directory.
-        """
-        projects_dir = tmp_path / "project"
-        cond_config_path = tmp_path / "condition" / "condition.yaml"
-        fallback = cond_config_path.parent / "contacts"
-        fallback.mkdir(parents=True)
-
-        resolved = resolve_analysis_dir(
-            projects_dir,
-            "contacts",
-            cond_config_path=cond_config_path,
-        )
-        assert resolved == fallback
-
-    def test_resolve_analysis_dir_returns_primary_when_none_exist(self, tmp_path: Path) -> None:
-        """Return primary path for error messaging when no path exists.
-
-        Parameters
-        ----------
-        tmp_path : Path
-            Pytest-provided temporary root directory.
-        """
-        projects_dir = tmp_path / "project"
-        cond_config_path = tmp_path / "condition" / "condition.yaml"
-        expected = projects_dir / "contacts"
-
-        resolved = resolve_analysis_dir(
-            projects_dir,
-            "contacts",
-            cond_config_path=cond_config_path,
-        )
-        assert resolved == expected
-
-    def test_resolve_analysis_dir_uses_comparison_mode_dir(self, tmp_path: Path) -> None:
-        """Prefer comparison per-condition directory when it exists.
-
-        Parameters
-        ----------
-        tmp_path : Path
-            Pytest-provided temporary root directory.
-        """
-        projects_dir = tmp_path / "project"
-        source_path = tmp_path / "comparison" / "compare.yaml"
-        label = "No Polymer (Control)"
-        expected = source_path.parent / "analysis" / "No_Polymer_Control" / "contacts"
-        expected.mkdir(parents=True)
-
-        resolved = resolve_analysis_dir(
-            projects_dir,
-            "contacts",
-            source_path=source_path,
-            label=label,
-        )
-        assert resolved == expected
-
-    def test_resolve_aggregated_dir(self, tmp_path: Path) -> None:
-        """Append ``aggregated`` to analysis directory.
-
-        Parameters
-        ----------
-        tmp_path : Path
-            Pytest-provided temporary root directory.
-        """
-        analysis_dir = tmp_path / "analysis" / "contacts"
-        assert resolve_aggregated_dir(analysis_dir) == analysis_dir / "aggregated"
 
 
 class TestFindComparisonResult:

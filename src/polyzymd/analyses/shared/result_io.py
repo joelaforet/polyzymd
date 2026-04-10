@@ -1,3 +1,5 @@
+"""Result discovery helpers for analysis plugin comparison outputs."""
+
 from __future__ import annotations
 
 import logging

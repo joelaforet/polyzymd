@@ -34,8 +34,8 @@ from pydantic import BaseModel, Field, model_validator
 
 from polyzymd.analyses.base import Analysis
 from polyzymd.analyses.orchestrator import prepare_comparison_run
+from polyzymd.analyses.shared.paths import sanitize_label
 from polyzymd.compare.config import ComparisonConfig
-from polyzymd.compare.io.paths import sanitize_label
 
 LOGGER = logging.getLogger(__name__)
 

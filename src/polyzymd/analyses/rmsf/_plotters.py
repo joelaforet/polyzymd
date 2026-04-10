@@ -151,7 +151,7 @@ def _find_rmsf_comparison_result(
 ) -> Any | None:
     """Try to find a pre-computed RMSF comparison result."""
     from polyzymd.analyses.rmsf._comparison_results import RMSFComparisonResult
-    from polyzymd.compare.io.results import find_comparison_result
+    from polyzymd.analyses.shared.result_io import find_comparison_result
 
     def _try_load(path: Path) -> Any | None:
         try:

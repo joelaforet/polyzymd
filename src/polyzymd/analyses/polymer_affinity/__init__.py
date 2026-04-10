@@ -1276,7 +1276,7 @@ def _find_affinity_result(data: dict[str, Any], labels: Sequence[str]) -> Any | 
     PolymerAffinityScoreResult or None
     """
     from polyzymd.analyses.polymer_affinity._comparison_results import PolymerAffinityScoreResult
-    from polyzymd.compare.io.results import find_comparison_result
+    from polyzymd.analyses.shared.result_io import find_comparison_result
 
     return find_comparison_result(
         data,

@@ -112,7 +112,7 @@ def _plot_ss_timeline_heatmap(
 
         plt.tight_layout()
 
-        from polyzymd.compare.io.paths import sanitize_label
+        from polyzymd.analyses.shared.paths import sanitize_label
 
         safe_label = sanitize_label(label)
         output_path = get_output_path(output_dir, f"ss_timeline_{safe_label}", plot_settings)
@@ -505,7 +505,7 @@ def _find_ss_comparison_result(
 ) -> Any | None:
     """Try to locate a saved SSComparisonResult JSON."""
     from polyzymd.analyses.secondary_structure._comparison_results import SSComparisonResult
-    from polyzymd.compare.io.results import find_comparison_result
+    from polyzymd.analyses.shared.result_io import find_comparison_result
 
     return find_comparison_result(
         data,
