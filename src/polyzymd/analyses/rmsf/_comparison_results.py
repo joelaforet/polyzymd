@@ -15,7 +15,7 @@ from typing import ClassVar, Literal
 
 from pydantic import Field
 
-from polyzymd.compare.core.base import (
+from polyzymd.analyses.base import (
     ANOVASummary,
     BaseComparisonResult,
     BaseConditionSummary,

@@ -10,7 +10,13 @@ import math
 from datetime import datetime
 from types import SimpleNamespace
 
-from polyzymd.analyses.base import ComparisonResult, ConditionSummary, MetricValue, PairwiseResult
+from polyzymd.analyses.base import (
+    ComparisonResult,
+    ConditionSummary,
+    MetricValue,
+    PairwiseComparison,
+    PairwiseResult,
+)
 from polyzymd.analyses.contacts._comparison_results import AggregateComparisonResult
 from polyzymd.analyses.distances._comparison_results import (
     DistanceComparisonResult,
@@ -32,7 +38,6 @@ from polyzymd.analyses.stats import (
     interpret_direction,
     pairwise_comparisons,
 )
-from polyzymd.compare.core.base import PairwiseComparison
 from polyzymd.compare.statistics import percent_change
 
 

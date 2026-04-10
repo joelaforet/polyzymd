@@ -187,12 +187,12 @@ class ExposureAnalysis(Analysis):
             Comparison result, or ``None`` when no valid conditions are available.
         """
         from polyzymd import __version__
+        from polyzymd.analyses.base import ANOVASummary, PairwiseComparison
         from polyzymd.analyses.exposure._comparison_results import (
             ExposureComparisonResult,
             ExposureConditionSummary,
         )
         from polyzymd.analyses.shared.statistics import compute_sem
-        from polyzymd.compare.core.base import ANOVASummary, PairwiseComparison
         from polyzymd.compare.statistics import (
             cohens_d,
             independent_ttest,
@@ -763,8 +763,8 @@ class ExposureAnalysis(Analysis):
         -------
         PairwiseComparison
         """
+        from polyzymd.analyses.base import PairwiseComparison
         from polyzymd.analyses.stats import interpret_direction
-        from polyzymd.compare.core.base import PairwiseComparison
         from polyzymd.compare.statistics import (
             cohens_d,
             independent_ttest,

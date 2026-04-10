@@ -43,10 +43,11 @@ from __future__ import annotations
 
 import json
 import logging
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, Sequence, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -512,6 +513,165 @@ class ComparisonResult(BaseModel):
         """
         path = Path(path)
         return cls.model_validate_json(path.read_text())
+
+
+class BaseConditionSummary(BaseModel, ABC):
+    """Abstract base class for condition-level custom comparison summaries.
+
+    Attributes
+    ----------
+    label : str
+        Display name for this condition
+    config_path : str
+        Path to the simulation config file
+    n_replicates : int
+        Number of replicates included
+    replicate_values : list[float]
+        Per-replicate values of the primary metric
+    """
+
+    label: str
+    config_path: str
+    n_replicates: int
+    replicate_values: list[float]
+
+    @property
+    @abstractmethod
+    def primary_metric_value(self) -> float:
+        """Return the primary metric value for ranking and comparison."""
+
+    @property
+    @abstractmethod
+    def primary_metric_sem(self) -> float:
+        """Return the SEM of the primary metric."""
+
+
+TConditionSummary = TypeVar("TConditionSummary", bound=BaseConditionSummary)
+TPairwiseResult = TypeVar("TPairwiseResult", bound=PairwiseResult)
+
+
+class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseResult]):
+    """Abstract base class for custom plugin comparison results.
+
+    Attributes
+    ----------
+    metric : str
+        The primary metric being compared
+    name : str
+        Name of the comparison project
+    control_label : str | None
+        Label of the control condition
+    conditions : list[Any]
+        Condition summaries
+    pairwise_comparisons : list[Any]
+        Pairwise statistical comparisons
+    anova : ANOVAResult | list[ANOVAResult] | None
+        ANOVA result(s)
+    ranking : list[str]
+        Condition labels ranked by primary metric
+    equilibration_time : str
+        Equilibration time used
+    created_at : datetime
+        Timestamp for result generation
+    polyzymd_version : str
+        PolyzyMD version used
+    """
+
+    model_config = ConfigDict(ser_json_inf_nan="strings")
+
+    comparison_type: ClassVar[str] = "base"
+
+    metric: str
+    name: str
+    control_label: str | None = None
+    conditions: list[Any]
+    pairwise_comparisons: list[Any]
+    anova: ANOVAResult | list[ANOVAResult] | None = None
+    ranking: list[str]
+    equilibration_time: str
+    created_at: datetime
+    polyzymd_version: str
+
+    def save(self, path: Path | str) -> Path:
+        """Save result to JSON file.
+
+        Parameters
+        ----------
+        path : Path | str
+            Output path
+
+        Returns
+        -------
+        Path
+            Path to saved file
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self.model_dump_json(indent=2))
+        return path
+
+    @classmethod
+    def load(cls, path: Path | str) -> Self:
+        """Load result from JSON file.
+
+        Parameters
+        ----------
+        path : Path | str
+            Path to JSON file
+
+        Returns
+        -------
+        Self
+            Loaded result
+        """
+        path = Path(path)
+        return cls.model_validate_json(path.read_text())
+
+    def get_condition(self, label: str) -> Any:
+        """Get a condition by label.
+
+        Parameters
+        ----------
+        label : str
+            Condition label
+
+        Returns
+        -------
+        Any
+            The matching condition summary
+
+        Raises
+        ------
+        KeyError
+            If condition not found
+        """
+        for condition in self.conditions:
+            if condition.label == label:
+                return condition
+        raise KeyError(f"Condition '{label}' not found")
+
+    def get_comparison(self, label: str) -> Any | None:
+        """Get pairwise comparison for a condition vs control.
+
+        Parameters
+        ----------
+        label : str
+            Treatment condition label
+
+        Returns
+        -------
+        Any | None
+            The comparison, or None if not found
+        """
+        for comparison in self.pairwise_comparisons:
+            if comparison.condition_b == label:
+                return comparison
+        return None
+
+
+# Backward-compatible aliases for legacy comparison framework names
+PairwiseComparison = PairwiseResult
+ANOVASummary = ANOVAResult
 
 
 # ---------------------------------------------------------------------------

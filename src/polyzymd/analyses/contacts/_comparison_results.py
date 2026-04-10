@@ -276,7 +276,7 @@ class ContactsComparisonResult(BaseModel):
     .. note::
 
         This class does **not** inherit from
-        :class:`~polyzymd.compare.core.base.BaseComparisonResult` because the
+        :class:`~polyzymd.analyses.base.BaseComparisonResult` because the
         contacts plugin uses a dual-metric structure (coverage **and** mean
         contact fraction) with separate rankings, ANOVA lists, and optional
         binding-preference data.  That structure does not map to the

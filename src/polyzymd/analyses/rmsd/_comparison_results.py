@@ -19,7 +19,7 @@ from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from polyzymd.compare.core.base import BaseComparisonResult, BaseConditionSummary
+from polyzymd.analyses.base import BaseComparisonResult, BaseConditionSummary
 
 
 class RMSDRunSummary(BaseModel):

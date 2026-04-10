@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from polyzymd.compare.core.base import BaseComparisonResult, BaseConditionSummary
+from polyzymd.analyses.base import BaseComparisonResult, BaseConditionSummary
 
 
 class DistancePairSummary(BaseModel):

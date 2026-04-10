@@ -15,15 +15,19 @@ BaseComparisonResult
 """
 
 from polyzymd.compare.core.base import (
+    ANOVAResult,
     ANOVASummary,
     BaseComparisonResult,
     BaseConditionSummary,
     PairwiseComparison,
+    PairwiseResult,
 )
 
 __all__ = [
     "ANOVASummary",
+    "ANOVAResult",
     "BaseComparisonResult",
     "BaseConditionSummary",
     "PairwiseComparison",
+    "PairwiseResult",
 ]
