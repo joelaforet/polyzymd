@@ -1,5 +1,6 @@
 """Workflow management for HPC clusters and job submission."""
 
+from polyzymd.utils.replicates import parse_replicate_range, validate_replicate_range
 from polyzymd.workflow.analysis_slurm import (
     AnalysisJobManifest,
     AnalysisSlurmResources,
@@ -26,8 +27,6 @@ from polyzymd.workflow.slurm import (
     JobContext,
     SlurmConfig,
     SlurmScriptGenerator,
-    parse_replicate_range,
-    validate_replicate_range,
 )
 
 __all__ = [

@@ -23,12 +23,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from polyzymd.config.schema import SimulationConfig
+from polyzymd.utils.replicates import parse_replicate_range, validate_replicate_range
 from polyzymd.workflow.slurm import (
     JobContext,
     SlurmConfig,
     SlurmScriptGenerator,
-    parse_replicate_range,
-    validate_replicate_range,
 )
 
 LOGGER = logging.getLogger(__name__)

@@ -23,6 +23,7 @@ from polyzymd.utils.charging import (
     get_charger,
 )
 from polyzymd.utils.forcegroups import impose_unique_force_groups
+from polyzymd.utils.replicates import parse_replicate_range, validate_replicate_range
 from polyzymd.utils.topology import get_largest_offmol, topology_from_sdf
 from polyzymd.utils.units import openff_to_openmm, openmm_to_openff
 
@@ -46,4 +47,7 @@ __all__ = [
     # Units
     "openff_to_openmm",
     "openmm_to_openff",
+    # Replicates
+    "parse_replicate_range",
+    "validate_replicate_range",
 ]

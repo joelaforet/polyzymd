@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union
 
 from polyzymd.core.branding import FULL_CREDIT_LINE
+from polyzymd.utils.replicates import parse_replicate_range, validate_replicate_range  # noqa: F401
 
 LOGGER = logging.getLogger(__name__)
 
@@ -582,62 +583,3 @@ exit 0
 
         LOGGER.info(f"Saved script to {output_path}")
         return output_path
-
-
-def parse_replicate_range(replicate_range: str) -> List[int]:
-    """Parse a SLURM array range into a list of replicate numbers.
-
-    Args:
-        replicate_range: SLURM array format (e.g., "1-5", "1,3,5", "1-10:2").
-
-    Returns:
-        List of replicate numbers.
-
-    Example:
-        >>> parse_replicate_range("1-5")
-        [1, 2, 3, 4, 5]
-        >>> parse_replicate_range("1,3,5")
-        [1, 3, 5]
-        >>> parse_replicate_range("1-10:2")
-        [1, 3, 5, 7, 9]
-    """
-    replicates = []
-
-    parts = replicate_range.split(",")
-
-    for part in parts:
-        part = part.strip()
-        if "-" in part:
-            if ":" in part:
-                range_part, step = part.split(":")
-                step = int(step)
-            else:
-                range_part = part
-                step = 1
-
-            start, end = map(int, range_part.split("-"))
-            replicates.extend(range(start, end + 1, step))
-        else:
-            replicates.append(int(part))
-
-    return sorted(list(set(replicates)))
-
-
-def validate_replicate_range(replicate_range: str) -> bool:
-    """Validate that a replicate range is in proper SLURM array format.
-
-    Args:
-        replicate_range: Range string to validate.
-
-    Returns:
-        True if valid.
-
-    Raises:
-        ValueError: If the format is invalid.
-    """
-    import re
-
-    pattern = r"^(\d+(-\d+(:\d+)?)?)(,\d+(-\d+(:\d+)?)?)*$"
-    if not re.match(pattern, replicate_range):
-        raise ValueError(f"Invalid replicate range format: {replicate_range}")
-    return True
