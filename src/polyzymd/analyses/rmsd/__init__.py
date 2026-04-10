@@ -374,7 +374,7 @@ class RMSDAnalysis(Analysis):
             )
 
             mean_stats = compute_sem(per_means)
-            overall_median = float(np.mean(np.asarray(per_medians, dtype=np.float64)))
+            overall_median = float(np.median(np.asarray(per_medians, dtype=np.float64)))
 
             template = run_entries[0]
             aggregated_runs.append(
@@ -505,22 +505,65 @@ class RMSDAnalysis(Analysis):
 
         ranking_by_run: dict[str, list[str]] = {}
         for run_label in run_labels:
-            ranked = sorted(
-                summaries,
-                key=lambda summary: summary.get_run(run_label).mean_rmsd,
-            )
-            ranking_by_run[run_label] = [summary.label for summary in ranked]
+            summaries_with_run = []
+            for summary in summaries:
+                try:
+                    run_summary = summary.get_run(run_label)
+                except KeyError:
+                    logger.warning(
+                        "Run '%s' missing for condition '%s'; excluding from ranking",
+                        run_label,
+                        summary.label,
+                    )
+                    continue
+                summaries_with_run.append((summary, run_summary))
+
+            ranked = sorted(summaries_with_run, key=lambda entry: entry[1].mean_rmsd)
+            ranking_by_run[run_label] = [summary.label for summary, _ in ranked]
 
         pairwise_comparisons: list[RMSDRunPairwiseComparison] = []
         if len(summaries) >= 2:
             for run_label in run_labels:
-                if effective_control:
-                    control_summary = next(
-                        summary for summary in summaries if summary.label == effective_control
+                summaries_with_run = []
+                for summary in summaries:
+                    try:
+                        run_summary = summary.get_run(run_label)
+                    except KeyError:
+                        logger.warning(
+                            "Run '%s' missing for condition '%s'; excluding from pairwise comparison",
+                            run_label,
+                            summary.label,
+                        )
+                        continue
+                    summaries_with_run.append((summary, run_summary))
+
+                if len(summaries_with_run) < 2:
+                    logger.warning(
+                        "Run '%s' has fewer than two conditions with data; skipping pairwise comparison",
+                        run_label,
                     )
-                    control_run = control_summary.get_run(run_label)
-                    for summary in summaries:
-                        if summary.label == effective_control:
+                    continue
+
+                if effective_control:
+                    control_entry = next(
+                        (
+                            (summary, run_summary)
+                            for summary, run_summary in summaries_with_run
+                            if summary.label == effective_control
+                        ),
+                        None,
+                    )
+                    if control_entry is None:
+                        logger.warning(
+                            "Run '%s' missing in control condition '%s'; skipping run comparisons",
+                            run_label,
+                            effective_control,
+                        )
+                        continue
+
+                    control_summary, control_run = control_entry
+                    for summary, run_summary in summaries_with_run:
+                        if summary.label == control_summary.label:
                             continue
                         pairwise_comparisons.append(
                             self._compare_run(
@@ -528,20 +571,19 @@ class RMSDAnalysis(Analysis):
                                 condition_a=control_summary.label,
                                 condition_b=summary.label,
                                 run_a=control_run,
-                                run_b=summary.get_run(run_label),
+                                run_b=run_summary,
                             )
                         )
                 else:
-                    for i, summary_a in enumerate(summaries):
-                        run_a = summary_a.get_run(run_label)
-                        for summary_b in summaries[i + 1 :]:
+                    for i, (summary_a, run_a) in enumerate(summaries_with_run):
+                        for summary_b, run_b in summaries_with_run[i + 1 :]:
                             pairwise_comparisons.append(
                                 self._compare_run(
                                     run_label=run_label,
                                     condition_a=summary_a.label,
                                     condition_b=summary_b.label,
                                     run_a=run_a,
-                                    run_b=summary_b.get_run(run_label),
+                                    run_b=run_b,
                                 )
                             )
 
@@ -549,7 +591,30 @@ class RMSDAnalysis(Analysis):
         if len(summaries) >= 3:
             anova_by_run = []
             for run_label in run_labels:
-                groups = [summary.get_run(run_label).per_replicate_means for summary in summaries]
+                groups = []
+                for summary in summaries:
+                    try:
+                        run_summary = summary.get_run(run_label)
+                    except KeyError:
+                        logger.warning(
+                            "Run '%s' missing for condition '%s'; excluding from ANOVA",
+                            run_label,
+                            summary.label,
+                        )
+                        continue
+                    groups.append(run_summary.per_replicate_means)
+
+                if len(groups) < 3 or any(len(group) < 2 for group in groups):
+                    anova_by_run.append(
+                        RMSDRunANOVA(
+                            run_label=run_label,
+                            significant=False,
+                            testable=False,
+                            note="Insufficient replicates (n < 2) for inferential statistics",
+                        )
+                    )
+                    continue
+
                 anova_result = one_way_anova(*groups)
                 anova_by_run.append(
                     RMSDRunANOVA(
@@ -891,8 +956,8 @@ class RMSDAnalysis(Analysis):
         from polyzymd.analyses.stats import interpret_direction
         from polyzymd.compare.statistics import cohens_d, independent_ttest, percent_change
 
-        t_result = independent_ttest(run_a.per_replicate_means, run_b.per_replicate_means)
-        d_result = cohens_d(run_a.per_replicate_means, run_b.per_replicate_means)
+        run_a_values = run_a.per_replicate_means
+        run_b_values = run_b.per_replicate_means
         pct_change = percent_change(run_a.mean_rmsd, run_b.mean_rmsd)
 
         direction = interpret_direction(
@@ -900,6 +965,22 @@ class RMSDAnalysis(Analysis):
             direction_labels=("stabilizing", "unchanged", "destabilizing"),
             threshold=1.0,
         )
+
+        if len(run_a_values) < 2 or len(run_b_values) < 2:
+            return RMSDRunPairwiseComparison(
+                run_label=run_label,
+                condition_a=condition_a,
+                condition_b=condition_b,
+                effect_interpretation="not_testable",
+                direction=direction,
+                significant=False,
+                percent_change=pct_change,
+                testable=False,
+                note="Insufficient replicates (n < 2) for inferential statistics",
+            )
+
+        t_result = independent_ttest(run_a_values, run_b_values)
+        d_result = cohens_d(run_a_values, run_b_values)
 
         return RMSDRunPairwiseComparison(
             run_label=run_label,
@@ -937,14 +1018,14 @@ class RMSDAnalysis(Analysis):
         from polyzymd.compare.statistics import benjamini_hochberg
 
         if pairwise:
-            raw_p = [comp.p_value for comp in pairwise]
+            raw_p = [comp.p_value if comp.testable else None for comp in pairwise]
             bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
             for comp, bh in zip(pairwise, bh_results, strict=False):
                 comp.p_value_adjusted = bh.adjusted_p_value
                 comp.significant = bh.significant
 
         if anova_by_run:
-            raw_p = [a.p_value for a in anova_by_run]
+            raw_p = [a.p_value if a.testable else None for a in anova_by_run]
             bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
             for a, bh in zip(anova_by_run, bh_results, strict=False):
                 a.significant = bh.significant

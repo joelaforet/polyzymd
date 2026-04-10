@@ -32,6 +32,14 @@ def _format_pairwise_line(run_label: str, result: RMSDComparisonResult) -> list[
     lines: list[str] = []
     comparisons = result.get_comparisons_for_run(run_label)
     for comp in comparisons:
+        if not comp.testable:
+            note = comp.note or "Inferential statistics not computed"
+            lines.append(
+                f"Pairwise: {comp.condition_b} vs {comp.condition_a} — "
+                f"Δ={format_pct(comp.percent_change)}, {comp.direction}; {note}"
+            )
+            continue
+
         sig_marker = "*" if comp.significant else ""
         lines.append(
             f"Pairwise: {comp.condition_b} vs {comp.condition_a} — "
@@ -81,11 +89,15 @@ def _format_rmsd_table(result: RMSDComparisonResult) -> str:
                 (entry for entry in result.anova_by_run if entry.run_label == run_label), None
             )
             if anova is not None:
-                sig_marker = "*" if anova.significant else ""
                 lines.append("")
-                lines.append(
-                    f"ANOVA: F={anova.f_statistic:.2f}, p={anova.p_value:.3f} {sig_marker}"
-                )
+                if not anova.testable:
+                    note = anova.note or "Inferential statistics not computed"
+                    lines.append(f"ANOVA: {note}")
+                else:
+                    sig_marker = "*" if anova.significant else ""
+                    lines.append(
+                        f"ANOVA: F={anova.f_statistic:.2f}, p={anova.p_value:.3f} {sig_marker}"
+                    )
 
     return "\n".join(lines)
 
@@ -125,6 +137,14 @@ def _format_rmsd_markdown(result: RMSDComparisonResult) -> str:
         if comparisons:
             lines.append("")
             for comp in comparisons:
+                if not comp.testable:
+                    note = comp.note or "Inferential statistics not computed"
+                    lines.append(
+                        f"- Pairwise: {comp.condition_b} vs {comp.condition_a} — "
+                        f"Δ={format_pct(comp.percent_change)}, {comp.direction}; {note}"
+                    )
+                    continue
+
                 sig_marker = "*" if comp.significant else ""
                 lines.append(
                     f"- Pairwise: {comp.condition_b} vs {comp.condition_a} — "
@@ -137,11 +157,15 @@ def _format_rmsd_markdown(result: RMSDComparisonResult) -> str:
                 (entry for entry in result.anova_by_run if entry.run_label == run_label), None
             )
             if anova is not None:
-                sig_marker = "*" if anova.significant else ""
                 lines.append("")
-                lines.append(
-                    f"- ANOVA: F={anova.f_statistic:.2f}, p={anova.p_value:.3f} {sig_marker}"
-                )
+                if not anova.testable:
+                    note = anova.note or "Inferential statistics not computed"
+                    lines.append(f"- ANOVA: {note}")
+                else:
+                    sig_marker = "*" if anova.significant else ""
+                    lines.append(
+                        f"- ANOVA: F={anova.f_statistic:.2f}, p={anova.p_value:.3f} {sig_marker}"
+                    )
 
         lines.append("")
 

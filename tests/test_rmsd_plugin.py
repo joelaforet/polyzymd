@@ -576,6 +576,72 @@ def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> 
     assert backbone.median_convergence_time_ns == pytest.approx(35.0)
 
 
+def test_aggregate_overall_median_uses_median(condition: Condition, tmp_path: Path) -> None:
+    """aggregate should compute overall_median using np.median."""
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
+    ctx = AggregateContext(
+        condition=condition,
+        replicates=(1, 2, 3),
+        output_dir=tmp_path / "aggregated",
+        equilibration="10ns",
+        settings=settings,
+    )
+
+    results = [
+        RMSDResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=1,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            run_results=[
+                _make_run_result(1, "protein_backbone", mean_rmsd=2.0),
+            ],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=["/fake/traj.dcd"],
+        ),
+        RMSDResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=2,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            run_results=[
+                _make_run_result(2, "protein_backbone", mean_rmsd=2.0),
+            ],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=["/fake/traj.dcd"],
+        ),
+        RMSDResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=3,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            run_results=[
+                _make_run_result(3, "protein_backbone", mean_rmsd=101.0),
+            ],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=["/fake/traj.dcd"],
+        ),
+    ]
+
+    results[0].run_results[0].median_rmsd = 1.0
+    results[1].run_results[0].median_rmsd = 2.0
+    results[2].run_results[0].median_rmsd = 100.0
+
+    aggregated = analysis.aggregate(ctx, results)
+    backbone = next(run for run in aggregated.run_results if run.run_label == "protein_backbone")
+    assert backbone.overall_median == pytest.approx(2.0)
+
+
 def test_compare_two_conditions(tmp_path: Path) -> None:
     """compare with two conditions should produce pairwise results without ANOVA."""
     analysis = RMSDAnalysis()
@@ -710,3 +776,140 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
     assert comparison is not None
     assert comparison.anova_by_run is not None
     assert len(comparison.anova_by_run) == 2
+
+
+def test_compare_single_replicate_not_testable(tmp_path: Path) -> None:
+    """Pairwise and ANOVA results should be marked not testable for n < 2."""
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
+    conditions = [
+        Condition("Control", Path("/fake/control.yaml"), (1,), MagicMock()),
+        Condition("A", Path("/fake/a.yaml"), (1,), MagicMock()),
+        Condition("B", Path("/fake/b.yaml"), (1,), MagicMock()),
+    ]
+
+    aggregated_results = {
+        "Control": RMSDAggregatedResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            replicates=[1],
+            n_replicates=1,
+            run_results=[
+                _make_aggregated_run("protein_backbone", "protein and name CA", [1.20]),
+            ],
+            source_result_files=[],
+        ),
+        "A": RMSDAggregatedResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            replicates=[1],
+            n_replicates=1,
+            run_results=[
+                _make_aggregated_run("protein_backbone", "protein and name CA", [1.00]),
+            ],
+            source_result_files=[],
+        ),
+        "B": RMSDAggregatedResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            replicates=[1],
+            n_replicates=1,
+            run_results=[
+                _make_aggregated_run("protein_backbone", "protein and name CA", [1.40]),
+            ],
+            source_result_files=[],
+        ),
+    }
+
+    ctx = ComparisonContext(
+        name="rmsd_compare",
+        conditions=conditions,
+        excluded_conditions=[],
+        control_label="Control",
+        analysis_dirs={c.label: tmp_path / c.label for c in conditions},
+        results_dir=tmp_path / "comparison",
+        equilibration="10ns",
+        settings=settings,
+        recompute=False,
+        aggregated_results=aggregated_results,
+    )
+
+    comparison = analysis.compare(ctx)
+
+    assert comparison is not None
+    assert comparison.pairwise_comparisons
+    assert all(not comp.testable for comp in comparison.pairwise_comparisons)
+    assert comparison.anova_by_run is not None
+    assert comparison.anova_by_run[0].testable is False
+
+
+def test_compare_missing_run_logs_warning_and_skips(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Missing runs in one condition should not crash compare."""
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(runs=_make_run_settings())
+    control = Condition("Control", Path("/fake/control.yaml"), (1, 2, 3), MagicMock())
+    treated = Condition("Treated", Path("/fake/treated.yaml"), (1, 2, 3), MagicMock())
+
+    control_agg = RMSDAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA; segid C and backbone",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[
+            _make_aggregated_run("protein_backbone", "protein and name CA", [1.2, 1.25, 1.15]),
+            _make_aggregated_run("polymer_core", "segid C and backbone", [2.0, 2.05, 1.95]),
+        ],
+        source_result_files=[],
+    )
+    treated_agg = RMSDAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[
+            _make_aggregated_run("protein_backbone", "protein and name CA", [1.0, 1.05, 0.95]),
+        ],
+        source_result_files=[],
+    )
+
+    ctx = ComparisonContext(
+        name="rmsd_compare",
+        conditions=[control, treated],
+        excluded_conditions=[],
+        control_label="Control",
+        analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
+        results_dir=tmp_path / "comparison",
+        equilibration="10ns",
+        settings=settings,
+        recompute=False,
+        aggregated_results={"Control": control_agg, "Treated": treated_agg},
+    )
+
+    with caplog.at_level("WARNING"):
+        comparison = analysis.compare(ctx)
+
+    assert comparison is not None
+    assert len(comparison.pairwise_comparisons) == 1
+    assert "missing for condition 'Treated'" in caplog.text
