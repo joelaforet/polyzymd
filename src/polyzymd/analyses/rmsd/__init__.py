@@ -422,7 +422,12 @@ class RMSDAnalysis(Analysis):
 
         target_path = ctx.result_path
         if target_path is None:
-            target_path = ctx.output_dir / self._make_aggregated_filename(ctx.replicates, first)
+            settings_tag = self._make_settings_cache_tag(ctx.settings, ctx.equilibration)
+            target_path = ctx.output_dir / self._make_aggregated_filename(
+                ctx.replicates,
+                first,
+                settings_tag,
+            )
         self.save_result(agg_result, target_path)
         logger.info("Saved aggregated RMSD result to %s", target_path)
 
@@ -1034,11 +1039,12 @@ class RMSDAnalysis(Analysis):
     def _make_aggregated_filename(
         replicates: tuple[int, ...] | Sequence[int],
         first_result: Any,
+        settings_tag: str,
     ) -> str:
         """Generate an aggregated RMSD filename."""
         eq_str = f"eq{first_result.equilibration_time:.2f}{first_result.equilibration_unit}"
         rep_str = Analysis._format_replicate_range(replicates)
-        return f"rmsd_{rep_str}_{eq_str}.json"
+        return f"rmsd_{rep_str}_{eq_str}_{settings_tag}.json"
 
     @staticmethod
     def _deserialize_comparison(path: Path) -> RMSDComparisonResult | None:

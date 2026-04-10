@@ -19,6 +19,7 @@ from polyzymd.analyses.rmsd._comparison_results import (
     RMSDRunSummary,
 )
 from polyzymd.analyses.rmsd._formatters import format_rmsd_comparison
+from polyzymd.analyses.rmsd._plotters import _resolve_npz_sidecar_path
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
 from polyzymd.analyses.rmsd._results import (
     RMSDAggregatedResult,
@@ -314,6 +315,85 @@ def test_compute_replicate_cache_filename_includes_settings_tag(
     expected_tag = analysis._make_settings_cache_tag(settings, "10ns")
     assert result == {"cached": True}
     assert captured["result_path"].name == f"rmsd_eq10.00ns_{expected_tag}.json"
+
+
+def test_aggregated_cache_filename_includes_settings_tag() -> None:
+    """Aggregated cache filename should include settings fingerprint."""
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(runs=[RMSDRunSettings(label="run_a")])
+    settings_tag = analysis._make_settings_cache_tag(settings, "10ns")
+    first_result = MagicMock(equilibration_time=10.0, equilibration_unit="ns")
+
+    filename = analysis._make_aggregated_filename((1, 2, 3), first_result, settings_tag)
+
+    assert filename == f"rmsd_reps1-3_eq10.00ns_{settings_tag}.json"
+
+
+def test_plotter_resolves_npz_with_specific_settings_tag(tmp_path: Path) -> None:
+    """Plotter should resolve the matching tagged JSON, not newest by mtime."""
+    run_dir = tmp_path / "rmsd" / "run_1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    npz_old = run_dir / "old.npz"
+    npz_new = run_dir / "new.npz"
+    npz_old.write_bytes(b"old")
+    npz_new.write_bytes(b"new")
+
+    old_result = RMSDResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=1,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA",
+        run_results=[
+            _make_run_result(replicate=1, run_label="protein_backbone", mean_rmsd=1.2).model_copy(
+                update={"npz_path": str(npz_old)}
+            )
+        ],
+        n_frames_total=100,
+        n_frames_used=90,
+        trajectory_files=["/fake/traj.dcd"],
+    )
+    new_result = RMSDResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=1,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA",
+        run_results=[
+            _make_run_result(replicate=1, run_label="protein_backbone", mean_rmsd=1.2).model_copy(
+                update={"npz_path": str(npz_new)}
+            )
+        ],
+        n_frames_total=100,
+        n_frames_used=90,
+        trajectory_files=["/fake/traj.dcd"],
+    )
+
+    old_json = run_dir / "rmsd_eq10.00ns_oldtag00.json"
+    new_json = run_dir / "rmsd_eq10.00ns_newtag00.json"
+    old_result.save(old_json)
+    new_result.save(new_json)
+
+    old_stat = old_json.stat()
+    new_stat = new_json.stat()
+    old_json.touch()
+    new_json.touch()
+    old_json.touch()
+
+    assert old_json.stat().st_mtime >= new_json.stat().st_mtime
+    assert old_stat.st_size > 0 and new_stat.st_size > 0
+
+    resolved = _resolve_npz_sidecar_path(
+        tmp_path / "rmsd",
+        "protein_backbone",
+        1,
+        "rmsd_eq10.00ns_newtag00.json",
+    )
+
+    assert resolved == npz_new
 
 
 def test_rmsd_external_reference_requires_file() -> None:

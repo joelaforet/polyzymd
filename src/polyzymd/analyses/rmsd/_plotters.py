@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
@@ -48,6 +49,7 @@ def plot_rmsd_timeseries(ctx: PlotContext, comparison_result: RMSDComparisonResu
     import numpy as np
 
     plot_settings = _get_plot_settings(ctx)
+    result_json_name = _make_replicate_result_filename(ctx)
 
     replicates_by_condition = {
         condition.label: list(condition.replicates) for condition in ctx.conditions
@@ -70,7 +72,12 @@ def plot_rmsd_timeseries(ctx: PlotContext, comparison_result: RMSDComparisonResu
                 continue
 
             replicates = replicates_by_condition.get(condition_label, [])
-            time_ns, rmsd_matrix = _load_replicate_timeseries(condition_dir, run_label, replicates)
+            time_ns, rmsd_matrix = _load_replicate_timeseries(
+                condition_dir,
+                run_label,
+                replicates,
+                result_json_name,
+            )
             if rmsd_matrix.size == 0 or time_ns.size == 0:
                 logger.warning(
                     "Skipping condition '%s' for run '%s' due to missing NPZ timeseries",
@@ -260,6 +267,8 @@ def plot_rmsd_convergence_diagnostics(
     if not plot_settings.show_convergence_plots:
         return []
 
+    result_json_name = _make_replicate_result_filename(ctx)
+
     replicates_by_condition = {
         condition.label: list(condition.replicates) for condition in ctx.conditions
     }
@@ -292,7 +301,12 @@ def plot_rmsd_convergence_diagnostics(
 
             for row_idx, replicate in enumerate(replicates):
                 ax = axes[row_idx, 0]
-                payload = _load_replicate_convergence_payload(condition_dir, run_label, replicate)
+                payload = _load_replicate_convergence_payload(
+                    condition_dir,
+                    run_label,
+                    replicate,
+                    result_json_name,
+                )
                 if payload is None:
                     ax.set_visible(False)
                     continue
@@ -390,6 +404,7 @@ def _load_replicate_timeseries(
     condition_dir: Path,
     run_label: str,
     replicates: list[int],
+    result_json_name: str,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Load RMSD NPZ sidecars for one condition and run.
 
@@ -415,7 +430,7 @@ def _load_replicate_timeseries(
     traces: list[np.ndarray] = []
 
     for replicate in replicates:
-        npz_path = _resolve_npz_sidecar_path(condition_dir, run_label, replicate)
+        npz_path = _resolve_npz_sidecar_path(condition_dir, run_label, replicate, result_json_name)
         if npz_path is None:
             continue
 
@@ -508,6 +523,7 @@ def _load_replicate_convergence_payload(
     condition_dir: Path,
     run_label: str,
     replicate: int,
+    result_json_name: str,
 ) -> dict[str, np.ndarray | float | bool | None] | None:
     """Load convergence payload from RMSD NPZ sidecar.
 
@@ -527,7 +543,7 @@ def _load_replicate_convergence_payload(
     """
     import numpy as np
 
-    npz_path = _resolve_npz_sidecar_path(condition_dir, run_label, replicate)
+    npz_path = _resolve_npz_sidecar_path(condition_dir, run_label, replicate, result_json_name)
     if npz_path is None:
         return None
 
@@ -579,7 +595,12 @@ def _load_replicate_convergence_payload(
     }
 
 
-def _resolve_npz_sidecar_path(condition_dir: Path, run_label: str, replicate: int) -> Path | None:
+def _resolve_npz_sidecar_path(
+    condition_dir: Path,
+    run_label: str,
+    replicate: int,
+    result_json_name: str,
+) -> Path | None:
     """Resolve a run NPZ sidecar via per-replicate result metadata.
 
     Parameters
@@ -603,24 +624,15 @@ def _resolve_npz_sidecar_path(condition_dir: Path, run_label: str, replicate: in
         logger.warning("Missing RMSD run directory: %s", run_dir)
         return None
 
-    result_paths = sorted(
-        run_dir.glob("rmsd_*.json"), key=lambda p: p.stat().st_mtime, reverse=True
-    )
-    if not result_paths:
-        logger.warning("Missing RMSD per-replicate result JSON in %s", run_dir)
+    result_path = run_dir / result_json_name
+    if not result_path.exists():
+        logger.warning("Missing RMSD per-replicate result JSON %s", result_path)
         return None
 
-    if len(result_paths) > 1:
-        logger.warning(
-            "Multiple RMSD per-replicate result JSON files in %s; using latest %s",
-            run_dir,
-            result_paths[0].name,
-        )
-
     try:
-        result = RMSDResult.load(result_paths[0])
+        result = RMSDResult.load(result_path)
     except Exception as exc:
-        logger.warning("Failed to load RMSD result JSON %s: %s", result_paths[0], exc)
+        logger.warning("Failed to load RMSD result JSON %s: %s", result_path, exc)
         return None
 
     run_result = next((entry for entry in result.run_results if entry.run_label == run_label), None)
@@ -628,7 +640,7 @@ def _resolve_npz_sidecar_path(condition_dir: Path, run_label: str, replicate: in
         logger.warning(
             "Run '%s' not found in RMSD result JSON %s",
             run_label,
-            result_paths[0],
+            result_path,
         )
         return None
 
@@ -636,7 +648,7 @@ def _resolve_npz_sidecar_path(condition_dir: Path, run_label: str, replicate: in
         logger.warning(
             "Missing npz_path metadata for run '%s' in %s",
             run_label,
-            result_paths[0],
+            result_path,
         )
         return None
 
@@ -648,3 +660,25 @@ def _resolve_npz_sidecar_path(condition_dir: Path, run_label: str, replicate: in
         return None
 
     return npz_path
+
+
+def _make_replicate_result_filename(ctx: PlotContext) -> str:
+    """Build the per-replicate RMSD result filename for this plot request.
+
+    Parameters
+    ----------
+    ctx : PlotContext
+        Framework-provided plot context.
+
+    Returns
+    -------
+    str
+        Expected per-replicate RMSD JSON filename.
+    """
+    import hashlib
+
+    eq_value, eq_unit = parse_time_string(ctx.equilibration)
+    eq_str = f"eq{eq_value:.2f}{eq_unit}"
+    payload = f"{ctx.settings.model_dump_json()}|{ctx.equilibration}".encode("utf-8")
+    settings_tag = hashlib.md5(payload).hexdigest()[:8]
+    return f"rmsd_{eq_str}_{settings_tag}.json"
