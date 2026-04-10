@@ -37,7 +37,13 @@ def _make_run_settings() -> list[RMSDRunSettings]:
     ]
 
 
-def _make_run_result(replicate: int, run_label: str, mean_rmsd: float) -> RMSDRunResult:
+def _make_run_result(
+    replicate: int,
+    run_label: str,
+    mean_rmsd: float,
+    convergence_time_ns: float | None = None,
+    convergence_assessable: bool = True,
+) -> RMSDRunResult:
     """Create a minimal, valid RMSDRunResult for test fixtures."""
     return RMSDRunResult(
         config_hash="hash123",
@@ -58,6 +64,10 @@ def _make_run_result(replicate: int, run_label: str, mean_rmsd: float) -> RMSDRu
         max_rmsd=mean_rmsd + 0.3,
         final_rmsd=mean_rmsd + 0.1,
         sem_rmsd=0.1,
+        converged=convergence_time_ns is not None,
+        convergence_assessable=convergence_assessable,
+        convergence_time_ns=convergence_time_ns,
+        convergence_message="test convergence",
         n_frames_total=100,
         n_frames_used=90,
         npz_path=f"/fake/{run_label}_rep{replicate}.npz",
@@ -109,6 +119,12 @@ def _make_condition_summary(
                 mean_rmsd=backbone_mean,
                 sem_rmsd=0.05,
                 per_replicate_means=[backbone_mean - 0.05, backbone_mean, backbone_mean + 0.05],
+                n_converged_replicates=2,
+                n_assessable_replicates=3,
+                convergence_fraction=2.0 / 3.0,
+                all_converged=False,
+                mean_convergence_time_ns=35.0,
+                median_convergence_time_ns=35.0,
             ),
             RMSDRunSummary(
                 label="polymer_core",
@@ -116,6 +132,12 @@ def _make_condition_summary(
                 mean_rmsd=polymer_mean,
                 sem_rmsd=0.04,
                 per_replicate_means=[polymer_mean - 0.04, polymer_mean, polymer_mean + 0.04],
+                n_converged_replicates=3,
+                n_assessable_replicates=3,
+                convergence_fraction=1.0,
+                all_converged=True,
+                mean_convergence_time_ns=30.0,
+                median_convergence_time_ns=30.0,
             ),
         ],
     )
@@ -195,6 +217,20 @@ def test_rmsd_run_settings_defaults() -> None:
     assert settings.selection == "protein and name CA"
     assert settings.alignment_selection == "protein and name CA"
     assert settings.reference_mode == "centroid"
+    assert settings.convergence_window_size_ns == pytest.approx(15.0)
+    assert settings.convergence_step_size_ns == pytest.approx(5.0)
+    assert settings.convergence_slope_threshold == pytest.approx(0.0005)
+    assert settings.convergence_sustained_for_ns == pytest.approx(15.0)
+
+
+def test_rmsd_run_settings_reject_invalid_convergence_step() -> None:
+    """RMSDRunSettings should reject convergence step larger than window."""
+    with pytest.raises(ValueError, match="convergence_step_size_ns"):
+        RMSDRunSettings(
+            label="protein_backbone",
+            convergence_window_size_ns=10.0,
+            convergence_step_size_ns=15.0,
+        )
 
 
 def test_rmsd_settings_valid() -> None:
@@ -238,6 +274,7 @@ def test_rmsd_run_result_creation() -> None:
     result = _make_run_result(replicate=1, run_label="protein_backbone", mean_rmsd=1.2)
     assert result.run_label == "protein_backbone"
     assert result.mean_rmsd == pytest.approx(1.2)
+    assert result.convergence_assessable is True
 
 
 def test_rmsd_run_result_summary() -> None:
@@ -360,6 +397,7 @@ def test_format_table() -> None:
     text = format_rmsd_comparison(_make_comparison_result(), "table")
     assert "RMSD Comparison: protein_backbone" in text
     assert "Condition" in text
+    assert "Convergence:" in text
 
 
 def test_format_markdown() -> None:
@@ -389,6 +427,8 @@ def test_rmsd_plot_settings_defaults() -> None:
     assert settings.show_per_replicate is False
     assert settings.figsize == (10, 6)
     assert settings.timeseries_figsize == (12, 5)
+    assert settings.show_convergence_plots is False
+    assert settings.convergence_figsize == (12.0, 5.0)
 
 
 def test_aggregate_single_replicate(
@@ -448,8 +488,20 @@ def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> 
             equilibration_unit="ns",
             selection_string="protein and name CA; segid C and backbone",
             run_results=[
-                _make_run_result(rep, "protein_backbone", 1.0 + 0.1 * rep),
-                _make_run_result(rep, "polymer_core", 2.0 + 0.05 * rep),
+                _make_run_result(
+                    rep,
+                    "protein_backbone",
+                    1.0 + 0.1 * rep,
+                    convergence_time_ns=(20.0 + 10.0 * rep) if rep < 3 else None,
+                    convergence_assessable=True,
+                ),
+                _make_run_result(
+                    rep,
+                    "polymer_core",
+                    2.0 + 0.05 * rep,
+                    convergence_time_ns=15.0 + 5.0 * rep,
+                    convergence_assessable=True,
+                ),
             ],
             n_frames_total=100,
             n_frames_used=90,
@@ -464,6 +516,11 @@ def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> 
     backbone = next(run for run in aggregated.run_results if run.run_label == "protein_backbone")
     assert backbone.overall_mean == pytest.approx(1.2)
     assert backbone.per_replicate_means == pytest.approx([1.1, 1.2, 1.3])
+    assert backbone.n_assessable_replicates == 3
+    assert backbone.n_converged_replicates == 2
+    assert backbone.convergence_fraction == pytest.approx(2.0 / 3.0)
+    assert backbone.all_converged is False
+    assert backbone.median_convergence_time_ns == pytest.approx(35.0)
 
 
 def test_compare_two_conditions(tmp_path: Path) -> None:
