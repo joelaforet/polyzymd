@@ -168,8 +168,8 @@ Build the simulation system (parameterize, solvate) without running.
 
 ```bash
 polyzymd build --config <path> [options]
-polyzymd build -c <path> -r <replicate>
-polyzymd build -c <path> --gromacs    # Export for GROMACS
+polyzymd build -c <path> -r <replicates>
+polyzymd build -c <path> --format gromacs    # Export for GROMACS
 ```
 
 ### Options
@@ -177,12 +177,14 @@ polyzymd build -c <path> --gromacs    # Export for GROMACS
 | Option | Short | Required | Default | Description |
 |--------|-------|----------|---------|-------------|
 | `--config` | `-c` | Yes | - | Path to YAML configuration file |
-| `--replicate` | `-r` | No | 1 | Replicate number (affects polymer random seed) |
+| `--replicates` | `-r` | No | "1" | Replicate range (for example "1", "1-3", "1,3,5") |
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--output-dir` | `-o` | No | from config | Alias for --scratch-dir |
 | `--dry-run` | - | No | false | Validate only, don't build |
-| `--gromacs` | - | No | false | Export to GROMACS format instead of OpenMM |
+| `--format` | - | No | OpenMM | Export format (`gromacs`, `lammps`, or `amber`) |
+
+> **Note:** `--replicate` and `--gromacs` are retained as hidden deprecated aliases.
 
 ### Example
 
@@ -190,14 +192,17 @@ polyzymd build -c <path> --gromacs    # Export for GROMACS
 # Build replicate 1 for OpenMM
 polyzymd build -c config.yaml -r 1
 
+# Build replicates 1 through 3 for OpenMM
+polyzymd build -c config.yaml -r 1-3
+
 # Build with custom output directory
-polyzymd build -c config.yaml -r 1 --scratch-dir ./test_output
+polyzymd build -c config.yaml -r 1-3 --scratch-dir ./test_output
 
 # Dry run to check configuration
 polyzymd build -c config.yaml --dry-run
 
 # Export to GROMACS format
-polyzymd build -c config.yaml -r 1 --gromacs
+polyzymd build -c config.yaml -r 1 --format gromacs
 ```
 
 ### Output Files (OpenMM)
@@ -210,7 +215,7 @@ The build command creates:
 
 ### Output Files (GROMACS)
 
-With `--gromacs`, the build command creates in `{projects_dir}/replicate_{N}/gromacs/`:
+With `--format gromacs`, the build command creates in `{projects_dir}/replicate_{N}/gromacs/`:
 - `{system}.gro` - GROMACS coordinate file
 - `{system}.top` - GROMACS topology file
 - `em.mdp` - Energy minimization parameters
@@ -240,23 +245,25 @@ polyzymd run-gromacs -c <path> --dry-run
 | Option | Short | Required | Default | Description |
 |--------|-------|----------|---------|-------------|
 | `--config` | `-c` | Yes | - | Path to YAML configuration file |
-| `--replicate` | `-r` | No | 1 | Replicate number |
+| `--replicates` | `-r` | No | "1" | Replicate range (for example "1", "1-3", "1,3,5") |
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--gmx-path` | - | No | "gmx" | Path to GROMACS executable |
 | `--dry-run` | - | No | false | Export files but don't run simulation |
 
+> **Note:** `--replicate` is retained as a hidden deprecated alias.
+
 ### Example
 
 ```bash
 # Run full GROMACS workflow locally
-polyzymd run-gromacs -c config.yaml -r 1
+polyzymd run-gromacs -c config.yaml -r 1-3
 
 # Use custom GROMACS installation
 polyzymd run-gromacs -c config.yaml --gmx-path /usr/local/gromacs/bin/gmx
 
 # Export files only (for manual execution or HPC)
-polyzymd run-gromacs -c config.yaml --dry-run
+polyzymd run-gromacs -c config.yaml -r 1-3 --dry-run
 ```
 
 ### Workflow

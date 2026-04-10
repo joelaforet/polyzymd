@@ -6,8 +6,6 @@ Tests the _resolve_replicates_option() helper and the updated
 
 from __future__ import annotations
 
-import warnings
-
 import click
 import pytest
 
@@ -34,20 +32,18 @@ class TestResolveReplicatesOption:
         assert _resolve_replicates_option("1-10:2", None, "test") == [1, 3, 5, 7, 9]
 
     def test_deprecated_replicate_single(self) -> None:
-        """--replicate 1 resolves to [1] with deprecation warning."""
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        """--replicate 1 resolves to [1] with stderr warning."""
+        from click.testing import CliRunner
+
+        runner = CliRunner()
+        with runner.isolation() as (_stdin, _stdout, stderr):
             result = _resolve_replicates_option(None, 1, "test")
             assert result == [1]
-            assert len(w) == 1
-            assert issubclass(w[0].category, DeprecationWarning)
-            assert "--replicate is deprecated" in str(w[0].message)
+            assert "--replicate is deprecated" in stderr.getvalue().decode("utf-8")
 
     def test_deprecated_replicate_preserves_value(self) -> None:
         """--replicate 5 resolves to [5]."""
-        with warnings.catch_warnings(record=True):
-            warnings.simplefilter("always")
-            assert _resolve_replicates_option(None, 5, "test") == [5]
+        assert _resolve_replicates_option(None, 5, "test") == [5]
 
     def test_both_flags_raises(self) -> None:
         """Using both --replicates and --replicate raises UsageError."""
@@ -64,13 +60,13 @@ class TestResolveReplicatesOption:
             _resolve_replicates_option("1-3", 1, "build")
 
     def test_invalid_range_raises(self) -> None:
-        """Invalid range string propagates ValueError from parser."""
-        with pytest.raises(ValueError):
+        """Invalid range string is converted to Click BadParameter."""
+        with pytest.raises(click.BadParameter):
             _resolve_replicates_option("abc", None, "test")
 
     def test_empty_range_raises(self) -> None:
-        """Empty string raises ValueError."""
-        with pytest.raises(ValueError):
+        """Empty string is converted to Click BadParameter."""
+        with pytest.raises(click.BadParameter):
             _resolve_replicates_option("", None, "test")
 
 

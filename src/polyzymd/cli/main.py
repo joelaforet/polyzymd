@@ -122,8 +122,6 @@ def _resolve_replicates_option(
     click.UsageError
         If both ``--replicates`` and ``--replicate`` are given
     """
-    import warnings
-
     from polyzymd.utils.replicates import parse_replicate_range
 
     if replicates is not None and replicate is not None:
@@ -133,15 +131,17 @@ def _resolve_replicates_option(
         )
 
     if replicate is not None:
-        warnings.warn(
-            f"--replicate is deprecated in '{command_name}', use --replicates instead.",
-            DeprecationWarning,
-            stacklevel=2,
+        click.echo(
+            f"Warning: --replicate is deprecated in '{command_name}', use --replicates instead.",
+            err=True,
         )
         return [replicate]
 
     if replicates is not None:
-        return parse_replicate_range(replicates)
+        try:
+            return parse_replicate_range(replicates)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint="'--replicates'") from e
 
     # Default to a single replicate
     return [1]
@@ -267,8 +267,6 @@ def build(
         - The .mdp file is a stub for single-point energy; modify for production
         - Topology is split into .itp files for cleaner multi-component systems
     """
-    import warnings
-
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
 
@@ -278,10 +276,9 @@ def build(
             "Cannot use both --gromacs and --format. Use --format gromacs instead."
         )
     if gromacs:
-        warnings.warn(
-            "--gromacs is deprecated, use --format gromacs instead.",
-            DeprecationWarning,
-            stacklevel=2,
+        click.echo(
+            "Warning: --gromacs is deprecated, use --format gromacs instead.",
+            err=True,
         )
         export_format = "gromacs"
 
@@ -321,10 +318,10 @@ def build(
 
             colored_echo("System Components:", phase="build")
             colored_echo(f"  Chain A (Protein): {sim_config.enzyme.name}", phase="build")
-            colored_echo(f"    PDB: {sim_config.enzyme.pdb_file}", phase="build")
+            colored_echo(f"    PDB: {sim_config.enzyme.pdb_path}", phase="build")
             if sim_config.substrate:
                 colored_echo(f"  Chain B (Substrate): {sim_config.substrate.name}", phase="build")
-                colored_echo(f"    SDF: {sim_config.substrate.sdf_file}", phase="build")
+                colored_echo(f"    SDF: {sim_config.substrate.sdf_path}", phase="build")
             else:
                 colored_echo("  Chain B (Substrate): none (apo system)", phase="build")
             if sim_config.polymers and sim_config.polymers.enabled:
@@ -340,10 +337,11 @@ def build(
                     )
             else:
                 colored_echo("  Chain C (Polymer): none (no polymer)", phase="build")
-            colored_echo(f"  Chain D+ (Solvent): {sim_config.solvent.model}", phase="build")
-            colored_echo(f"    Box padding: {sim_config.solvent.box_padding} nm", phase="build")
+            colored_echo(f"  Chain D+ (Solvent): {sim_config.solvent.primary.model}", phase="build")
+            colored_echo(f"    Box padding: {sim_config.solvent.box.padding} nm", phase="build")
             colored_echo(
-                f"    Ionic strength: {sim_config.solvent.ionic_strength} M", phase="build"
+                f"    NaCl concentration: {sim_config.solvent.ions.nacl_concentration} M",
+                phase="build",
             )
             colored_echo(phase="build")
 
@@ -352,7 +350,7 @@ def build(
             colored_echo(
                 f"  Small molecule FF: {sim_config.force_field.small_molecule}", phase="build"
             )
-            colored_echo(f"  Water model: {sim_config.solvent.model}", phase="build")
+            colored_echo(f"  Water model: {sim_config.solvent.primary.model}", phase="build")
             colored_echo(phase="build")
 
             colored_echo("Thermodynamics:", phase="build")
@@ -363,7 +361,7 @@ def build(
             colored_echo(phase="build")
 
             colored_echo("Simulation Phases:", phase="build")
-            eq_stages = sim_config.simulation_phases.equilibration
+            eq_stages = sim_config.simulation_phases.equilibration_stages
             if eq_stages:
                 colored_echo(f"  Equilibration: {len(eq_stages)} stage(s)", phase="build")
                 for i, stage in enumerate(eq_stages, 1):
