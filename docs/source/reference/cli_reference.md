@@ -343,7 +343,14 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--time-limit` | - | No | from preset | Override SLURM time limit (HH:MM:SS) |
 | `--memory` | - | No | 3G | Override SLURM memory allocation |
 | `--openff-logs` | - | No | false | Enable verbose OpenFF logs in job scripts |
-| `--dry-run` | - | No | false | Generate scripts without submitting |
+| `--dry-run` | - | No | false | Preview submission plan only (no files written, no submission) |
+| `--generate-only` | - | No | false | Generate SLURM scripts without submitting (the previous `--dry-run` behavior) |
+
+:::{note}
+`--dry-run` and `--generate-only` are mutually exclusive. Use `--dry-run` to
+preview the submission plan without writing any files. Use `--generate-only` to
+generate SLURM scripts for inspection without submitting them to the scheduler.
+:::
 
 ### SLURM Presets
 
@@ -357,8 +364,11 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 ### Example
 
 ```bash
-# Dry run first to check scripts
+# Preview what would be submitted (no files written)
 polyzymd submit -c config.yaml -r 1-5 --preset aa100 --dry-run
+
+# Generate scripts for inspection without submitting
+polyzymd submit -c config.yaml -r 1-5 --preset aa100 --generate-only
 
 # Submit for real with email notifications
 polyzymd submit -c config.yaml -r 1-5 --preset aa100 --email you@university.edu

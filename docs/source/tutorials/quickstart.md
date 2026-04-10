@@ -205,10 +205,12 @@ pixi run -e cuda-12-4 polyzymd run-segment -c config.yaml -r 1
 For an HPC workflow, generate job scripts first:
 
 ```bash
-pixi run -e cuda-12-4 polyzymd submit -c config.yaml --preset aa100 --replicates 1 --dry-run
+pixi run -e cuda-12-4 polyzymd submit -c config.yaml --preset aa100 --replicates 1 --generate-only
 ```
 
-If the dry run looks right, submit for real with the CUDA environment that
+Use `--dry-run` instead if you only want a preview without creating files.
+
+If the generated scripts look right, submit for real with the CUDA environment that
 matches your cluster.
 ````
 

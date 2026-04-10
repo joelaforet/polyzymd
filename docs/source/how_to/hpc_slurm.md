@@ -22,10 +22,18 @@ From the repository root or a subdirectory under it:
 
 ```bash
 pixi run -e build polyzymd validate -c config.yaml
-pixi run -e cuda-12-4 polyzymd submit -c config.yaml --preset aa100 --replicates 1 --dry-run
+pixi run -e cuda-12-4 polyzymd submit -c config.yaml --preset aa100 --replicates 1 --generate-only
 ```
 
-The dry run should create a script in `job_scripts/` without submitting it.
+The `--generate-only` flag creates a script in `job_scripts/` without submitting it,
+so you can inspect it before launching real jobs.
+
+:::{versionchanged} 1.3.0
+`--dry-run` is now preview-only (no files written, no submission). Use
+`--generate-only` to generate SLURM scripts without submitting — this is
+the behavior that `--dry-run` had in earlier versions. The two flags are
+mutually exclusive.
+:::
 
 ## Step 2: pick a preset
 

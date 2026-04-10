@@ -116,6 +116,13 @@ plot_settings:
 
 ## Step 1: Dry Run
 
+:::{note}
+In this guide, `--dry-run` refers to `polyzymd compare submit --dry-run`,
+which generates scripts without submitting. This is different from
+`polyzymd submit --dry-run` (simulation submission), which in v1.3.0 is
+preview-only and writes nothing. See the {doc}`/reference/cli_reference` for details.
+:::
+
 Before submitting real jobs, generate the scripts without sending them to the
 scheduler. This lets you inspect the generated SLURM scripts and verify
 that paths, partition names, and resource requests are correct.
