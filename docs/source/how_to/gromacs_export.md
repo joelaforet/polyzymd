@@ -333,7 +333,7 @@ manual SLURM submission. Integrated GROMACS submission is planned for v1.4.0.
 
 ### Manual SLURM Submission
 
-After exporting with `--dry-run`, create a SLURM script:
+After exporting with `build --format gromacs`, create a SLURM script:
 
 ```bash
 #!/bin/bash

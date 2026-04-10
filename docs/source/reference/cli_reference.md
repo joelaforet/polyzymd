@@ -182,7 +182,7 @@ polyzymd build -c <path> --format gromacs    # Export for GROMACS
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--output-dir` | `-o` | No | from config | Alias for --scratch-dir |
 | `--dry-run` | - | No | false | Validate only, don't build |
-| `--format` | - | No | OpenMM | Export format (`gromacs`, `lammps`, or `amber`) |
+| `--format` | - | No | OpenMM | Export format (`gromacs`, `lammps` (planned), or `amber` (planned)) |
 
 > **Note:** `--replicate` and `--gromacs` are retained as hidden deprecated aliases.
 

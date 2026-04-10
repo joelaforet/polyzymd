@@ -230,7 +230,9 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     "export_format",
     default=None,
     type=click.Choice(["gromacs", "lammps", "amber"], case_sensitive=False),
-    help="Export format: gromacs, lammps, amber. Default: OpenMM (no export).",
+    help=(
+        "Export format: gromacs, lammps (planned), amber (planned). Default: OpenMM (no export)."
+    ),
 )
 @click.option(
     "--gromacs",
