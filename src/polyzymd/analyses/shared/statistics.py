@@ -286,12 +286,18 @@ def weighted_mean_with_sem(
     if len(sems_arr) != n:
         raise ValueError("means and sems must have same length")
 
-    # Handle zero SEMs (replace with small value to avoid division by zero)
-    sems_safe = np.where(sems_arr > 0, sems_arr, 1e-10)
-
     if weights is None:
+        if np.any(~np.isfinite(sems_arr)):
+            raise ValueError(
+                f"Inverse-variance weighting requires finite SEM values; got {sems_arr.tolist()}"
+            )
+        if np.any(sems_arr <= 0.0):
+            raise ValueError(
+                "Inverse-variance weighting requires SEM values greater than zero; "
+                f"got {sems_arr.tolist()}"
+            )
         # Inverse-variance weighting
-        inv_var = 1.0 / (sems_safe**2)
+        inv_var = 1.0 / (sems_arr**2)
         weights_arr = inv_var
     else:
         weights_arr = np.asarray(weights, dtype=np.float64)
