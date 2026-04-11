@@ -126,13 +126,13 @@ class RgRunPairwiseComparison(BaseModel):
         Label of first condition (typically control).
     condition_b : str
         Label of second condition (typically treatment).
-    t_statistic : float
+    t_statistic : float | None
         T-test statistic for mean Rg.
-    p_value : float
+    p_value : float | None
         Two-tailed p-value.
     p_value_adjusted : float | None
         FDR-adjusted p-value (Benjamini-Hochberg), if correction was applied.
-    cohens_d : float
+    cohens_d : float | None
         Effect size (Cohen's d).
     effect_interpretation : str
         "negligible", "small", "medium", or "large".
@@ -143,6 +143,10 @@ class RgRunPairwiseComparison(BaseModel):
         Whether the comparison is statistically significant (uses adjusted p-value after FDR correction).
     percent_change : float
         Percent change in mean Rg.
+    testable : bool
+        Whether inferential statistics were computed.
+    note : str | None
+        Explanation for non-testable comparisons.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -150,14 +154,16 @@ class RgRunPairwiseComparison(BaseModel):
     run_label: str
     condition_a: str
     condition_b: str
-    t_statistic: float
-    p_value: float
+    t_statistic: float | None = None
+    p_value: float | None = None
     p_value_adjusted: float | None = None
-    cohens_d: float
+    cohens_d: float | None = None
     effect_interpretation: str
     direction: str
     significant: bool
     percent_change: float
+    testable: bool = True
+    note: str | None = None
 
 
 class RgRunANOVA(BaseModel):
@@ -167,18 +173,24 @@ class RgRunANOVA(BaseModel):
     ----------
     run_label : str
         Label of the Rg run.
-    f_statistic : float
+    f_statistic : float | None
         F-statistic for mean Rg.
-    p_value : float
+    p_value : float | None
         P-value for ANOVA.
     significant : bool
         Whether p < 0.05.
+    testable : bool
+        Whether inferential statistics were computed.
+    note : str | None
+        Explanation for non-testable ANOVA comparisons.
     """
 
     run_label: str
-    f_statistic: float
-    p_value: float
+    f_statistic: float | None = None
+    p_value: float | None = None
     significant: bool
+    testable: bool = True
+    note: str | None = None
 
 
 class RgComparisonResult(BaseComparisonResult[RgConditionSummary, RgRunPairwiseComparison]):

@@ -17,6 +17,7 @@ from polyzymd.analyses.shared.multi_run_formatting import (
     make_ranked_table_header,
     make_section_title,
 )
+from polyzymd.analyses.stats import format_pct
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,14 @@ def _format_pairwise_line(run_label: str, result: RgComparisonResult) -> list[st
     lines: list[str] = []
     comparisons = result.get_comparisons_for_run(run_label)
     for comp in comparisons:
+        if not comp.testable:
+            note = comp.note or "Inferential statistics not computed"
+            lines.append(
+                f"Pairwise: {comp.condition_b} vs {comp.condition_a} — "
+                f"Δ={format_pct(comp.percent_change)}, {comp.direction}; {note}"
+            )
+            continue
+
         lines.append(
             format_pairwise_line(
                 condition_a=comp.condition_a,
@@ -125,13 +134,17 @@ def _format_rg_table(result: RgComparisonResult) -> str:
             )
             if anova is not None:
                 lines.append("")
-                lines.append(
-                    format_anova_line(
-                        f_statistic=anova.f_statistic,
-                        p_value=anova.p_value,
-                        significant=anova.significant,
+                if not anova.testable:
+                    note = anova.note or "Inferential statistics not computed"
+                    lines.append(f"ANOVA: {note}")
+                else:
+                    lines.append(
+                        format_anova_line(
+                            f_statistic=anova.f_statistic,
+                            p_value=anova.p_value,
+                            significant=anova.significant,
+                        )
                     )
-                )
 
     return "\n".join(lines)
 
@@ -192,6 +205,14 @@ def _format_rg_markdown(result: RgComparisonResult) -> str:
         if comparisons:
             lines.append("")
             for comp in comparisons:
+                if not comp.testable:
+                    note = comp.note or "Inferential statistics not computed"
+                    lines.append(
+                        f"- Pairwise: {comp.condition_b} vs {comp.condition_a} — "
+                        f"Δ={format_pct(comp.percent_change)}, {comp.direction}; {note}"
+                    )
+                    continue
+
                 lines.append(
                     "- "
                     + format_pairwise_line(
@@ -212,14 +233,18 @@ def _format_rg_markdown(result: RgComparisonResult) -> str:
             )
             if anova is not None:
                 lines.append("")
-                lines.append(
-                    "- "
-                    + format_anova_line(
-                        f_statistic=anova.f_statistic,
-                        p_value=anova.p_value,
-                        significant=anova.significant,
+                if not anova.testable:
+                    note = anova.note or "Inferential statistics not computed"
+                    lines.append(f"- ANOVA: {note}")
+                else:
+                    lines.append(
+                        "- "
+                        + format_anova_line(
+                            f_statistic=anova.f_statistic,
+                            p_value=anova.p_value,
+                            significant=anova.significant,
+                        )
                     )
-                )
 
         lines.append("")
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -436,13 +435,12 @@ def test_format_markdown_regression_includes_non_significant_and_non_testable_li
                 run_label="run_1",
                 condition_a="Control",
                 condition_b="Treatment_B",
-                t_statistic=math.nan,
-                p_value=math.nan,
-                cohens_d=math.nan,
-                effect_interpretation="negligible",
+                effect_interpretation="not_testable",
                 direction="unchanged",
                 significant=False,
-                percent_change=math.nan,
+                percent_change=0.0,
+                testable=False,
+                note="Insufficient replicates (n < 2) for inferential statistics",
             ),
         ],
         anova_by_run=[
@@ -471,8 +469,8 @@ def test_format_markdown_regression_includes_non_significant_and_non_testable_li
         "| Treatment_B | 10.50 | 0.00 | 3 |\n"
         "\n"
         "- Pairwise: Treatment_A vs Control — Δ=+3.0%, p=0.200 , d=0.40 (small), expansion\n"
-        "- Pairwise: Treatment_B vs Control — Δ=undefined, p=nan , d=nan (negligible), "
-        "unchanged\n"
+        "- Pairwise: Treatment_B vs Control — Δ=+0.0%, unchanged; "
+        "Insufficient replicates (n < 2) for inferential statistics\n"
         "\n"
         "- ANOVA: F=1.10, p=0.200 \n"
     )
@@ -871,6 +869,90 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
     assert comparison is not None
     assert comparison.anova_by_run is not None
     assert len(comparison.anova_by_run) == 2
+
+
+def test_compare_marks_untestable_with_single_replicates(tmp_path: Path) -> None:
+    """compare should mark pairwise and ANOVA as untestable for n<2 groups."""
+    analysis = RgAnalysis()
+    settings = RgSettings(
+        runs=[RgRunSettings(label="protein_backbone", selection="protein and name CA")]
+    )
+    conditions = [
+        make_condition(label="Control"),
+        make_condition(label="A"),
+        make_condition(label="B"),
+    ]
+
+    aggregated_results = {
+        "Control": RgAggregatedResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            replicates=[1],
+            n_replicates=1,
+            run_results=[
+                _make_aggregated_run("protein_backbone", "protein and name CA", [15.0]),
+            ],
+            source_result_files=[],
+        ),
+        "A": RgAggregatedResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            replicates=[1],
+            n_replicates=1,
+            run_results=[
+                _make_aggregated_run("protein_backbone", "protein and name CA", [14.0]),
+            ],
+            source_result_files=[],
+        ),
+        "B": RgAggregatedResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=None,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            replicates=[1],
+            n_replicates=1,
+            run_results=[
+                _make_aggregated_run("protein_backbone", "protein and name CA", [16.0]),
+            ],
+            source_result_files=[],
+        ),
+    }
+
+    ctx = make_comparison_context(
+        name="rg_compare",
+        conditions=conditions,
+        analysis_dirs={c.label: tmp_path / c.label for c in conditions},
+        results_dir=tmp_path / "comparison",
+        settings=settings,
+        control_label="Control",
+        equilibration="10ns",
+        recompute=False,
+        aggregated_results=aggregated_results,
+    )
+
+    comparison = analysis.compare(ctx)
+
+    assert comparison is not None
+    assert comparison.anova_by_run is not None
+    assert len(comparison.pairwise_comparisons) == 2
+    for pair in comparison.pairwise_comparisons:
+        assert pair.testable is False
+        assert pair.p_value is None
+        assert pair.cohens_d is None
+
+    for anova in comparison.anova_by_run:
+        assert anova.testable is False
+        assert anova.p_value is None
 
 
 def test_compare_skips_run_missing_in_some_conditions(tmp_path: Path) -> None:

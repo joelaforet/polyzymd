@@ -576,6 +576,17 @@ class RgAnalysis(Analysis):
                     summary.get_run(run_label).per_replicate_means
                     for summary in summaries_with_run.values()
                 ]
+                if any(len(group) < 2 for group in groups):
+                    anova_by_run.append(
+                        RgRunANOVA(
+                            run_label=run_label,
+                            significant=False,
+                            testable=False,
+                            note="Insufficient replicates (n < 2) for inferential statistics",
+                        )
+                    )
+                    continue
+
                 anova_result = one_way_anova(*groups)
                 anova_by_run.append(
                     RgRunANOVA(
@@ -916,8 +927,8 @@ class RgAnalysis(Analysis):
         )
         from polyzymd.analyses.stats import interpret_direction
 
-        t_result = independent_ttest(run_a.per_replicate_means, run_b.per_replicate_means)
-        d_result = cohens_d(run_a.per_replicate_means, run_b.per_replicate_means)
+        run_a_values = run_a.per_replicate_means
+        run_b_values = run_b.per_replicate_means
         pct_change = percent_change(run_a.mean_rg, run_b.mean_rg)
 
         direction = interpret_direction(
@@ -925,6 +936,22 @@ class RgAnalysis(Analysis):
             direction_labels=("compaction", "unchanged", "expansion"),
             threshold=1.0,
         )
+
+        if len(run_a_values) < 2 or len(run_b_values) < 2:
+            return RgRunPairwiseComparison(
+                run_label=run_label,
+                condition_a=condition_a,
+                condition_b=condition_b,
+                effect_interpretation="not_testable",
+                direction=direction,
+                significant=False,
+                percent_change=pct_change,
+                testable=False,
+                note="Insufficient replicates (n < 2) for inferential statistics",
+            )
+
+        t_result = independent_ttest(run_a_values, run_b_values)
+        d_result = cohens_d(run_a_values, run_b_values)
 
         return RgRunPairwiseComparison(
             run_label=run_label,
@@ -959,7 +986,19 @@ class RgAnalysis(Analysis):
         fdr_alpha : float
             FDR significance threshold.
         """
-        apply_fdr_correction(pairwise, anova_by_run, fdr_alpha)
+
+        def _set_corrected(result: Any, bh_result: Any) -> None:
+            if hasattr(result, "p_value_adjusted"):
+                result.p_value_adjusted = bh_result.adjusted_p_value
+            result.significant = bh_result.significant
+
+        apply_fdr_correction(
+            pairwise,
+            anova_by_run,
+            fdr_alpha,
+            get_p_value=lambda result: result.p_value if result.testable else None,
+            set_corrected=lambda result, bh: _set_corrected(result, bh),
+        )
 
     @staticmethod
     def _make_aggregated_filename(
