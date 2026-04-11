@@ -14,6 +14,7 @@ aggregate_distance_pair_stats
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -136,11 +137,8 @@ def collect_replicate_results(
             result = compute_fn(replicate=rep, **call_kwargs)
             results.append(result)
             successful.append(rep)
-        except FileNotFoundError as e:
-            LOGGER.warning(f"Skipping replicate {rep}: trajectory data not found. {e}")
-            failed.append(rep)
-        except Exception as e:
-            LOGGER.warning(f"Skipping replicate {rep}: analysis failed with error: {e}")
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError) as e:
+            LOGGER.warning(f"Skipping replicate {rep}: analysis failed with recoverable error: {e}")
             failed.append(rep)
 
     if len(results) < min_replicates:
