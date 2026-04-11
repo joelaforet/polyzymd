@@ -244,19 +244,17 @@ def test_tukey_hsd_two_groups() -> None:
 
 
 def test_tukey_hsd_insufficient_groups() -> None:
-    """Tukey HSD with < 2 groups should raise ValueError."""
+    """Tukey HSD with < 2 groups should return empty results."""
     from polyzymd.analyses.shared.inferential_statistics import tukey_hsd
 
-    with pytest.raises(ValueError, match="at least 2 groups"):
-        tukey_hsd([1, 2, 3])
+    assert tukey_hsd([1, 2, 3]) == []
 
 
 def test_tukey_hsd_insufficient_observations() -> None:
-    """Tukey HSD with n=1 group should raise ValueError."""
+    """Tukey HSD with n=1 group should return empty results."""
     from polyzymd.analyses.shared.inferential_statistics import tukey_hsd
 
-    with pytest.raises(ValueError, match="at least 2 observations"):
-        tukey_hsd([1], [2, 3])
+    assert tukey_hsd([1], [2, 3]) == []
 
 
 def test_independent_ttest_n1_returns_nan() -> None:

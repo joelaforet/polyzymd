@@ -200,6 +200,8 @@ def pairwise_comparisons(
                 )
             )
     elif posthoc_method == "tukey_hsd":
+        if len(labels) < 2:
+            return results  # Not enough conditions for pairwise Tukey
         group_arrays = [metrics_by_condition[label].replicate_values for label in labels]
         tukey_results = tukey_hsd(*group_arrays)
 
@@ -463,7 +465,19 @@ def default_scalar_comparison(
             extra[f"{metric_name}_mean"] = mv.mean
             extra[f"{metric_name}_sem"] = mv.sem
             extra[f"{metric_name}_replicate_values"] = mv.replicate_values
-        n_reps = len(next(iter(metrics.values())).replicate_values) if metrics else 0
+        if metrics:
+            rep_counts = [len(mv.replicate_values) for mv in metrics.values()]
+            n_reps = min(rep_counts)
+            if len(set(rep_counts)) > 1:
+                logger.warning(
+                    "Condition %r has inconsistent replicate counts across metrics: %s; "
+                    "using minimum (%d)",
+                    label,
+                    dict(zip(metrics.keys(), rep_counts)),
+                    n_reps,
+                )
+        else:
+            n_reps = 0
         condition_summaries.append(ConditionSummary(label=label, n_replicates=n_reps, **extra))
 
     # Use the first metric's ranking as the primary ranking

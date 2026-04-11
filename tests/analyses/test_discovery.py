@@ -92,7 +92,7 @@ class TestDiscovery:
             if name == "polyzymd.analyses.fake_good":
                 return good_mod
             if name == "polyzymd.analyses.fake_broken":
-                raise ImportError("boom")
+                raise ModuleNotFoundError("No module named 'openmm'", name="openmm")
             raise AssertionError(f"Unexpected import: {name}")
 
         with (

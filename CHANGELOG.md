@@ -89,6 +89,18 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 - **Configurable t-test method.**  `ttest_method` in `comparison.yaml` defaults
   selects Student's (`"student"`, default) or Welch's (`"welch"`) t-test for
   pairwise comparisons.  (`analyses/shared/defaults.py`, `analyses/stats.py`)
+- **Tukey's HSD post-hoc testing.**  `posthoc_method` in `comparison.yaml`
+  defaults selects either `"ttest_bh"` (default, pairwise t-tests with
+  Benjamini-Hochberg correction) or `"tukey_hsd"` (Tukey's Honestly
+  Significant Difference).  Tukey HSD uses a single studentized range
+  distribution for FWER control without requiring separate FDR correction.
+  (`analyses/shared/defaults.py`, `analyses/shared/inferential_statistics.py`,
+  `analyses/stats.py`, `analyses/base.py`)
+- **Post-hoc testing reference page.**  New documentation page at
+  `docs/source/reference/posthoc_testing.md` covering both post-hoc methods,
+  configuration, output fields, CLI significance markers, and edge cases.
+  Cross-linked from comparison YAML reference, statistics best practices,
+  comparison tutorial, and analysis comparison reference.
 - **Structured exception hierarchy.**  `AnalysisError`, `ReplicateError`,
   `AggregationError`, `ComparisonError`, `PlotError`, and
   `PluginContractError` in `analyses/exceptions.py` replace generic
@@ -101,6 +113,24 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   modules (`_plotters.py`, `_results.py`, `_comparison_results.py`,
   `_formatters.py`, `_aggregator.py`) as needed.
   Single-file plugins no longer exist.
+- **Plugin contract enforcement hardened.**  `compute_replicate()` returning
+  `None` is now a hard `PluginContractError` (not a soft skip).
+  `PluginContractError` propagates without being wrapped.  `compare()` and
+  `plot()` return values are validated (dict/BaseModel/None for compare;
+  `list[Path]` for plot).  `run_comparison()` fails fast on contract
+  violations.  (`analyses/orchestrator.py`)
+- **Discovery skip logic checks all path components.**  `_should_skip_module()`
+  now checks ALL path components (not just the last one), so
+  `shared.loader`, `shared.binding_preference`, etc. are properly skipped
+  instead of being probed as plugins.  (`analyses/discovery.py`)
+- **Settings fingerprint canonicalized.**  `settings_fingerprint()` now uses
+  `json.dumps(settings.model_dump(mode="json"), sort_keys=True)` for
+  deterministic hashing across Pydantic versions and Python dict ordering.
+  (`analyses/shared/config_hash.py`)
+- **`PlotContext.plot_settings` always materialised.**  `__post_init__`
+  now creates a real `PlotSettings()` when `None` is passed, eliminating
+  null-guard boilerplate in every plugin's `plot()` method.
+  (`analyses/base.py`)
 - **Plugin-specific code co-located.**  Result models, formatters, plotters, and
   settings that were previously scattered across `compare/results/`,
   `compare/formatters.py`, `compare/plotters/`, and `compare/comparators/` now
@@ -164,6 +194,11 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 - **Scaffold test path corrected.**  `new-analysis` now generates test files at
   `tests/analyses/plugins/test_<name>.py` matching the project's test layout.
   (`cli/scaffold.py`)
+- **Cache ambiguity detection.**  `contacts/_paths.py` and
+  `shared/binding_preference_helpers.py` now raise `ValueError` on ambiguous
+  glob matches (>1 file) instead of silently picking the last alphabetical
+  match.  (`analyses/contacts/_paths.py`,
+  `analyses/shared/binding_preference_helpers.py`)
 - **Unused imports removed.**  Cleaned up stale imports across `cli/main.py`,
   `workflow/daisy_chain.py`, and several analysis plugins.
 - **`Optional[X]` → `X | None` migration.**  Updated type annotations in
@@ -171,6 +206,13 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 ### Documentation
 
+- Added `docs/source/reference/posthoc_testing.md` — post-hoc testing methods
+  reference page covering t-test+BH vs Tukey HSD, configuration, output fields,
+  CLI significance markers, and edge cases.
+- Added `posthoc_method` and `ttest_method` fields to `comparison_yaml.md`
+  defaults reference table.
+- Cross-linked post-hoc testing page from `analysis_comparison_reference.md`,
+  `analysis_statistics_best_practices.md`, and `analysis_compare_conditions.md`.
 - Updated `docs/source/contributor_guide/extending_analyses.md` with scaffold
   command as the primary entry point for contributors.
 - Updated `AGENTS.md` and `.opencode/instructions/` for refactored layout.
@@ -178,9 +220,16 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 ### Tests
 
-- 1,490 tests passing (6 skipped), up from 908 at branch start.
+- 1,518 tests passing (6 skipped), up from 908 at branch start.
 - Added scaffold tests (name validation, class-name validation, file
   generation, code quality, CliRunner integration).
+- Added Tukey HSD tests (basic operation, single-condition edge case,
+  insufficient-replicate edge case, format integration).
+- Added plugin contract enforcement tests (`TestContractEnforcement` in
+  `test_orchestrator.py`).
+- Added discovery robustness tests (shared descendant skip, getattr logging).
+- Added cache ambiguity tests (contacts paths, binding preference helpers).
+- Added settings fingerprint canonicalization tests (`test_config_hash.py`).
 - Full test suite reorganized to mirror source layout (`tests/analyses/plugins/`,
   `tests/analyses/shared/`, `tests/cli/`, etc.).
 - Removed obsolete registry and smoke tests.

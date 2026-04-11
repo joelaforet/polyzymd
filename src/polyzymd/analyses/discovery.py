@@ -49,6 +49,23 @@ _SKIP_MODULES = frozenset(
     }
 )
 
+# Heavy optional dependencies that may not be installed in all environments
+# ImportError for these is expected and should be silently skipped
+_OPTIONAL_HEAVY_DEPS = frozenset(
+    {
+        "openmm",
+        "openff",
+        "MDAnalysis",
+        "mdanalysis",
+        "parmed",
+        "pdbfixer",
+        "espaloma_charge",
+        "dgl",
+        "torch",
+        "ambertools",
+    }
+)
+
 
 def _is_concrete_analysis(obj: type) -> bool:
     """Return True if *obj* is a concrete (non-abstract) Analysis subclass."""
@@ -116,8 +133,27 @@ def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
 
         try:
             module = importlib.import_module(modname)
-        except ImportError:
-            logger.warning("Failed to import analysis module %s", modname, exc_info=True)
+        except ImportError as exc:
+            # Distinguish optional-dep failures (skip) from plugin bugs (re-raise)
+            failing_module = getattr(exc, "name", None) or ""
+            is_optional_dep = any(
+                failing_module == dep or failing_module.startswith(dep + ".")
+                for dep in _OPTIONAL_HEAVY_DEPS
+            )
+            if is_optional_dep:
+                logger.info(
+                    "Skipping analysis module %s: optional dependency %r not available",
+                    modname,
+                    failing_module,
+                )
+            else:
+                logger.error(
+                    "Failed to import analysis module %s: %s",
+                    modname,
+                    exc,
+                    exc_info=True,
+                )
+                raise
             continue
 
         for attr_name in dir(module):

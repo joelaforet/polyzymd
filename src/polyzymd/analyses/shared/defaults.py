@@ -3,8 +3,9 @@
 This module provides ``AnalysisDefaults``, a small Pydantic model that
 holds parameters applied to every analysis type (e.g., equilibration time).
 
-Provides shared defaults so that ``compare/`` can import common
-parameters without depending on plugin internals.
+Provides shared defaults so that the comparison pipeline in
+``analyses/stats.py`` and ``analyses/orchestrator.py`` can import
+common parameters without depending on plugin internals.
 """
 
 from __future__ import annotations

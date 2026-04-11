@@ -166,7 +166,13 @@ def _run_replicates(
             result = analysis.compute_replicate(ctx, rep)
             _check_compute_result(result, "compute_replicate", analysis.name)
             if recompute or not result_path.exists():
-                analysis.save_result(result, result_path)
+                try:
+                    analysis.save_result(result, result_path)
+                except OSError as save_err:
+                    raise ReplicateError(
+                        f"{analysis.name}: failed to save replicate result for "
+                        f"condition='{condition.label}' replicate={rep}: {save_err}"
+                    ) from save_err
             results.append(result)
             successful.append(rep)
         except (FileNotFoundError, OSError) as e:
@@ -253,7 +259,13 @@ def run_replicate_once(
             f"condition='{condition.label}' replicate={replicate}: {type(e).__name__}: {e}"
         ) from e
     _check_compute_result(result, "compute_replicate", analysis.name)
-    analysis.save_result(result, result_path)
+    try:
+        analysis.save_result(result, result_path)
+    except OSError as save_err:
+        raise ReplicateError(
+            f"{analysis.name}: failed to save replicate result for "
+            f"condition='{condition.label}' replicate={replicate}: {save_err}"
+        ) from save_err
     return result
 
 
@@ -337,7 +349,13 @@ def aggregate_condition_from_disk(
             f"{type(e).__name__}: {e}"
         ) from e
     _check_compute_result(aggregated, "aggregate", analysis.name)
-    analysis.save_result(aggregated, agg_result_path)
+    try:
+        analysis.save_result(aggregated, agg_result_path)
+    except OSError as save_err:
+        raise AggregationError(
+            f"{analysis.name}: failed to save aggregated result for "
+            f"condition='{condition.label}': {save_err}"
+        ) from save_err
     return aggregated
 
 
@@ -459,7 +477,13 @@ def run_analysis(
         ) from e
     _check_compute_result(aggregated, "aggregate", analysis.name)
     if recompute or not agg_result_path.exists():
-        analysis.save_result(aggregated, agg_result_path)
+        try:
+            analysis.save_result(aggregated, agg_result_path)
+        except OSError as save_err:
+            raise AggregationError(
+                f"{analysis.name}: failed to save aggregated result for "
+                f"condition='{condition.label}': {save_err}"
+            ) from save_err
     logger.info(f"  Aggregated {len(results)} replicates for '{condition.label}'")
 
     return aggregated
@@ -482,11 +506,16 @@ def _prepare_conditions_with_filter(
 
     valid_ids = [id(c) for c in valid_conditions]
     input_ids = {id(c) for c in all_conditions}
-    if not set(valid_ids).issubset(input_ids):
+    foreign_ids = set(valid_ids) - input_ids
+    if foreign_ids:
         logger.warning(
-            "%s: filter_conditions() returned conditions not in the original list",
+            "%s: filter_conditions() returned %d condition(s) not in the original list "
+            "— discarding foreign conditions",
             analysis.name,
+            len(foreign_ids),
         )
+        valid_conditions = [c for c in valid_conditions if id(c) in input_ids]
+        valid_ids = [id(c) for c in valid_conditions]
     if len(set(valid_ids)) != len(valid_ids):
         logger.warning(
             "%s: filter_conditions() returned duplicate conditions — deduplicating",
@@ -715,17 +744,18 @@ def finalize_comparison_from_disk(
     condition_labels = {condition.label for condition in conditions}
     resolved_control = config.control if config.control is not None else effective_control
     if resolved_control is not None and resolved_control not in condition_labels:
+        original_control = resolved_control
         if allow_partial:
             resolved_control = conditions[0].label
             logger.warning(
                 "%s: configured control '%s' was dropped; using '%s' as effective control",
                 analysis.name,
-                effective_control,
+                original_control,
                 resolved_control,
             )
         else:
             raise ValueError(
-                f"{analysis.name}: control condition '{effective_control}' is missing from "
+                f"{analysis.name}: control condition '{original_control}' is missing from "
                 "successful finalized conditions."
             )
 
@@ -769,7 +799,12 @@ def finalize_comparison_from_disk(
     # Validate compare() output — None is allowed (no comparison result to save)
     if comparison_result is not None:
         _check_result_type(comparison_result, "compare", analysis.name)
-        analysis.save_result(comparison_result, comparison_result_path)
+        try:
+            analysis.save_result(comparison_result, comparison_result_path)
+        except OSError as save_err:
+            raise ComparisonError(
+                f"{analysis.name}: failed to save comparison result: {save_err}"
+            ) from save_err
 
     raw_plot_settings = getattr(config, "plot_settings", None)
     if raw_plot_settings is None:
@@ -1080,6 +1115,8 @@ def run_all_comparisons(
             results[analysis.name] = run_comparison(
                 analysis, config, recompute, equilibration=equilibration
             )
+        except PluginContractError:
+            raise
         except (AnalysisError, ValueError, FileNotFoundError, OSError) as e:
             logger.error(f"{analysis.name} comparison failed: {e}")
             results[analysis.name] = {"error": str(e)}

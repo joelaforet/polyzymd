@@ -11,12 +11,15 @@ All functions use SciPy for statistical calculations.
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import Sequence
 
 import numpy as np
 from numpy.typing import ArrayLike
+
+logger = logging.getLogger("polyzymd.analyses")
 
 
 @dataclass
@@ -36,7 +39,14 @@ class TTestResult:
 
     @property
     def significant(self) -> bool:
-        """Whether the result is significant at p < 0.05."""
+        """Whether the result is significant at p < 0.05.
+
+        .. note::
+           This uses a hardcoded alpha=0.05 threshold.  The comparison
+           pipeline overrides significance with configurable thresholds
+           (BH-adjusted or Tukey).  Use this property only as a
+           convenience default.
+        """
         return self.p_value < 0.05
 
     def to_dict(self) -> dict:
@@ -59,7 +69,7 @@ class EffectSize:
     interpretation : str
         Categorical interpretation: "negligible", "small", "medium", "large"
     direction : str
-        "higher" (d > 0) or "lower" (d < 0).
+        "higher" (d > 0), "lower" (d < 0), or "unchanged" (d == 0).
     """
 
     cohens_d: float
@@ -92,7 +102,13 @@ class ANOVAResult:
 
     @property
     def significant(self) -> bool:
-        """Whether the result is significant at p < 0.05."""
+        """Whether the result is significant at p < 0.05.
+
+        .. note::
+           This uses a hardcoded alpha=0.05 threshold.  The comparison
+           pipeline overrides significance with configurable thresholds.
+           Use this property only as a convenience default.
+        """
         return self.p_value < 0.05
 
     def to_dict(self) -> dict:
@@ -351,7 +367,12 @@ def cohens_d(
         interpretation = "large"
 
     # Interpret direction
-    direction = "higher" if d > 0 else "lower"
+    if d > 0:
+        direction = "higher"
+    elif d < 0:
+        direction = "lower"
+    else:
+        direction = "unchanged"
 
     return EffectSize(
         cohens_d=d,
@@ -390,6 +411,10 @@ def one_way_anova(*groups: ArrayLike) -> ANOVAResult:
     from scipy import stats
 
     arrays = [np.asarray(g, dtype=np.float64) for g in groups]
+
+    # Guard: need at least 2 groups for ANOVA
+    if len(arrays) < 2:
+        return ANOVAResult(f_statistic=float("nan"), p_value=float("nan"))
 
     # Guard: need at least 2 observations per group for ANOVA
     if any(len(a) < 2 for a in arrays):
@@ -438,12 +463,8 @@ def tukey_hsd(*groups: ArrayLike) -> list[TukeyHSDResult]:
     -------
     list[TukeyHSDResult]
         One result per unique pair (i < j), ordered by (i, j).
-
-    Raises
-    ------
-    ValueError
-        If fewer than 2 groups are provided or any group has fewer
-        than 2 observations.
+        Returns an empty list if fewer than 2 groups are provided or any
+        group has fewer than 2 observations.
 
     Examples
     --------
@@ -456,12 +477,14 @@ def tukey_hsd(*groups: ArrayLike) -> list[TukeyHSDResult]:
     arrays = [np.asarray(g, dtype=np.float64) for g in groups]
 
     if len(arrays) < 2:
-        raise ValueError("Tukey HSD requires at least 2 groups")
+        return []
     if any(len(a) < 2 for a in arrays):
-        raise ValueError(
+        logger.warning(
             "Tukey HSD requires at least 2 observations per group; "
-            f"got sizes {[len(a) for a in arrays]}"
+            "got sizes %s — returning empty results",
+            [len(a) for a in arrays],
         )
+        return []
 
     result = stats.tukey_hsd(*arrays)
     pairs: list[TukeyHSDResult] = []
