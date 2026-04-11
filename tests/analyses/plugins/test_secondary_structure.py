@@ -245,12 +245,13 @@ class TestComputeReplicate:
         mock_loader_inst.get_trajectory_info.return_value = traj_info
         mock_loader_inst.get_timestep.return_value = 10.0  # 10 ps
 
-        mock_traj, mock_protein_traj = self._make_mock_mdtraj_traj(n_frames=200, n_residues=5)
+        n_frames = 25000
+        mock_traj, mock_protein_traj = self._make_mock_mdtraj_traj(n_frames=n_frames, n_residues=5)
 
         # Create DSSP output: (n_frames, n_residues) of characters
-        dssp_raw = np.array([["H", "E", "C", "H", "C"]] * 200)
+        dssp_raw = np.array([["H", "E", "C", "H", "C"]] * n_frames)
         # Encode: H=1, E=2, C=0
-        ss_matrix = np.zeros((200, 5), dtype=np.int8)
+        ss_matrix = np.zeros((n_frames, 5), dtype=np.int8)
         ss_matrix[:, 0] = 1  # H
         ss_matrix[:, 1] = 2  # E
         ss_matrix[:, 2] = 0  # C
@@ -316,10 +317,11 @@ class TestComputeReplicate:
         mock_loader_inst.get_trajectory_info.return_value = traj_info
         mock_loader_inst.get_timestep.return_value = 10.0
 
-        mock_traj, mock_protein_traj = self._make_mock_mdtraj_traj(n_frames=200, n_residues=5)
+        n_frames = 12000
+        mock_traj, mock_protein_traj = self._make_mock_mdtraj_traj(n_frames=n_frames, n_residues=5)
 
-        dssp_raw = np.array([["C", "C", "C", "C", "C"]] * 200)
-        ss_matrix = np.zeros((200, 5), dtype=np.int8)
+        dssp_raw = np.array([["C", "C", "C", "C", "C"]] * n_frames)
+        ss_matrix = np.zeros((n_frames, 5), dtype=np.int8)
 
         ctx = ReplicateContext(
             condition=condition,
