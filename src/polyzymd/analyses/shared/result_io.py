@@ -199,7 +199,7 @@ def _try_load_from_dir(
     loader: Callable[[Path], T],
     log: logging.Logger,
 ) -> T | None:
-    """Try loading the newest matching result file from a directory.
+    """Try loading matching result files from a directory.
 
     Parameters
     ----------
@@ -215,7 +215,8 @@ def _try_load_from_dir(
     Returns
     -------
     T | None
-        Loaded result object, or None if no loadable candidate exists.
+        Loaded result object from the freshest loadable candidate,
+        or None if no loadable candidate exists.
     """
     if not directory.is_dir():
         return None
@@ -227,12 +228,13 @@ def _try_load_from_dir(
     if not files:
         return None
 
-    result_file = max(files, key=lambda path: path.stat().st_mtime)
-    try:
-        result = loader(result_file)
-        log.debug(f"Loaded result from {result_file}")
-        return result
-    except Exception as exc:  # noqa: BLE001
-        log.debug(f"Could not load {result_file}: {exc}")
+    candidates = sorted(files, key=lambda path: path.stat().st_mtime, reverse=True)
+    for result_file in candidates:
+        try:
+            result = loader(result_file)
+            log.debug(f"Loaded result from {result_file}")
+            return result
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"Could not load {result_file}: {exc}")
 
     return None

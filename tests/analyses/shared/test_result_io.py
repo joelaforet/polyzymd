@@ -262,3 +262,37 @@ class TestFindComparisonResult:
 
         assert result == good_file.name
         assert "Could not load" in caplog.text
+
+    def test_uses_older_file_when_newest_candidate_is_corrupt(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Fallback to older matching file when newest candidate fails to load.
+
+        Parameters
+        ----------
+        tmp_path : Path
+            Pytest-provided temporary root directory.
+        caplog : pytest.LogCaptureFixture
+            Pytest fixture for asserting emitted log messages.
+        """
+        results_dir = tmp_path / "results"
+        older_file = self._touch_json(results_dir / "older_comparison.json", mtime=1_000.0)
+        corrupt_newer_file = self._touch_json(results_dir / "newer_comparison.json", mtime=2_000.0)
+
+        def _loader(path: Path) -> str:
+            if path == corrupt_newer_file:
+                raise ValueError("corrupt JSON")
+            return path.name
+
+        caplog.set_level("DEBUG")
+        result = find_comparison_result(
+            data={"__meta__": {"results_dir": results_dir}},
+            labels=["cond_a"],
+            glob_patterns=["*_comparison.json"],
+            loader=_loader,
+        )
+
+        assert result == older_file.name
+        assert f"Could not load {corrupt_newer_file}" in caplog.text
