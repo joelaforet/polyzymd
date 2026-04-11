@@ -261,9 +261,13 @@ def get_position(
     if mode == SelectionMode.SINGLE:
         if len(atoms) == 1:
             return atoms.positions[0].astype(np.float64)
-        else:
-            # Default to centroid for multiple atoms
-            return atoms.center_of_geometry().astype(np.float64)
+        if len(atoms) > 1:
+            raise ValueError(
+                "SelectionMode.SINGLE requires exactly one atom, "
+                f"but selection matched {len(atoms)} atoms. "
+                "Use SelectionMode.MIDPOINT or SelectionMode.COM for multi-atom selections"
+            )
+        raise ValueError("Cannot compute position for empty atom selection")
 
     elif mode in (SelectionMode.CENTROID, SelectionMode.MIDPOINT):
         return atoms.center_of_geometry().astype(np.float64)
