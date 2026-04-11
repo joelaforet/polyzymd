@@ -197,7 +197,7 @@ def test_finalize_partial_recomputes_control_when_original_missing(
     caplog,
     tmp_path: Path,
 ) -> None:
-    """Partial finalize should replace missing control with a surviving condition."""
+    """Partial finalize should clear control when configured control is dropped."""
     analysis = _WorkerAnalysis()
     cond_a = Condition("A", tmp_path / "a.yaml", (1,), cast(Any, SimpleNamespace()))
     cond_b = Condition("B", tmp_path / "b.yaml", (1,), cast(Any, SimpleNamespace()))
@@ -245,8 +245,8 @@ def test_finalize_partial_recomputes_control_when_original_missing(
         allow_partial=True,
     )
     assert out["comparison"] is not None
-    assert out["comparison"].control_label == "B"
-    assert "using 'B' as effective control" in caplog.text
+    assert out["comparison"].control_label is None
+    assert "comparison will proceed without a designated control (all-vs-all)" in caplog.text
 
 
 def test_finalize_partial_with_one_condition_succeeds(

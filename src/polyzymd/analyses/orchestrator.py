@@ -755,12 +755,12 @@ def finalize_comparison_from_disk(
     if resolved_control is not None and resolved_control not in condition_labels:
         original_control = resolved_control
         if allow_partial:
-            resolved_control = conditions[0].label
+            resolved_control = None
             logger.warning(
-                "%s: configured control '%s' was dropped; using '%s' as effective control",
+                "%s: configured control '%s' was dropped during partial finalization; "
+                "comparison will proceed without a designated control (all-vs-all).",
                 analysis.name,
                 original_control,
-                resolved_control,
             )
         else:
             raise ValueError(
