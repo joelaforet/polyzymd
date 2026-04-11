@@ -14,6 +14,10 @@ class PluginContractError(AnalysisError):
     """Raised when a plugin violates the Analysis contract."""
 
 
+class ReplicateSkippedError(AnalysisError):
+    """Raised when a replicate is skipped for a known recoverable reason."""
+
+
 class ReplicateError(AnalysisError):
     """Raised when per-replicate computation fails unexpectedly."""
 
