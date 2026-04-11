@@ -14,6 +14,13 @@ class SimpleSettings(BaseModel):
     selection: str = "protein"
 
 
+class NestedSettings(BaseModel):
+    """Settings model with nested dict/list structures."""
+
+    grouping: dict[str, list[int]]
+    metadata: dict[str, dict[str, float]]
+
+
 class TestSettingsFingerprint:
     """Tests for settings_fingerprint canonicalization."""
 
@@ -38,3 +45,35 @@ class TestSettingsFingerprint:
         s1 = SimpleSettings(cutoff=4.5, selection="protein")
         s2 = SimpleSettings(selection="protein", cutoff=4.5)
         assert settings_fingerprint(s1) == settings_fingerprint(s2)
+
+    def test_fingerprint_stable_for_nested_structures_across_dict_order(self):
+        """Nested dict/list content order should be canonicalized for fingerprints."""
+        s1 = NestedSettings(
+            grouping={"group_a": [1, 2], "group_b": [3, 4]},
+            metadata={
+                "weights": {"alpha": 0.2, "beta": 0.8},
+                "limits": {"min": 0.0, "max": 1.0},
+            },
+        )
+        s2 = NestedSettings(
+            metadata={
+                "limits": {"max": 1.0, "min": 0.0},
+                "weights": {"beta": 0.8, "alpha": 0.2},
+            },
+            grouping={"group_b": [3, 4], "group_a": [1, 2]},
+        )
+
+        assert settings_fingerprint(s1) == settings_fingerprint(s2)
+
+    def test_fingerprint_changes_when_nested_value_changes(self):
+        """Changing nested values should change the settings fingerprint."""
+        original = NestedSettings(
+            grouping={"group_a": [1, 2], "group_b": [3, 4]},
+            metadata={"weights": {"alpha": 0.2, "beta": 0.8}},
+        )
+        changed = NestedSettings(
+            grouping={"group_a": [1, 2], "group_b": [3, 4]},
+            metadata={"weights": {"alpha": 0.25, "beta": 0.75}},
+        )
+
+        assert settings_fingerprint(original) != settings_fingerprint(changed)

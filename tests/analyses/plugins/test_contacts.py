@@ -1444,3 +1444,16 @@ class TestContactsCacheAmbiguity:
 
         assert result is not None
         assert result.name == "contacts_eq10ns_cut4.5_rep1.json"
+
+    def test_fingerprinted_cache_precedes_legacy_when_settings_fp_provided(self, tmp_path):
+        """Fingerprinted cache should be preferred over legacy naming when settings_fp is set."""
+        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
+
+        legacy = tmp_path / "contacts_eq10ns_cut4.5_rep1.json"
+        fingerprinted = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
+        legacy.write_text("{}")
+        fingerprinted.write_text("{}")
+
+        result = find_contact_result_for_replicate(tmp_path, 1, settings_fp="deadbeef")
+
+        assert result == fingerprinted

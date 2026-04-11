@@ -230,8 +230,11 @@ def test_tukey_hsd_basic() -> None:
 
     results = tukey_hsd([1, 2, 3], [4, 5, 6], [7, 8, 9])
     assert len(results) == 3
+    returned_pairs = {(result.group_i, result.group_j) for result in results}
+    assert returned_pairs == {(0, 1), (0, 2), (1, 2)}
     for result in results:
         assert 0.0 <= result.p_value <= 1.0
+        assert result.p_value < 0.05
 
 
 def test_tukey_hsd_two_groups() -> None:
@@ -240,6 +243,7 @@ def test_tukey_hsd_two_groups() -> None:
 
     results = tukey_hsd([1, 2, 3], [4, 5, 6])
     assert len(results) == 1
+    assert (results[0].group_i, results[0].group_j) == (0, 1)
     assert results[0].p_value < 0.05
 
 

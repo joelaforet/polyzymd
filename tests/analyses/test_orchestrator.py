@@ -605,3 +605,51 @@ class TestContractEnforcement:
 
         with pytest.raises(PluginContractError, match="returned None"):
             run_comparison(analysis, config, recompute=False, equilibration="10ns")
+
+    def test_run_comparison_contract_error_skips_later_conditions(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """A contract error in one condition should stop processing subsequent conditions."""
+        processed_labels: list[str] = []
+
+        class FailsOnFirstCondition(Analysis):
+            name: ClassVar[str] = "contract_stop"
+            Settings: ClassVar[type] = _ParallelSettings
+            min_replicates: ClassVar[int] = 1
+
+            def compute_replicate(self, ctx, replicate):
+                del replicate
+                processed_labels.append(ctx.condition.label)
+                if ctx.condition.label == "A":
+                    raise PluginContractError("contract failure on A")
+                return {"value": 1.0, "replicate": ctx.replicate}
+
+            def aggregate(self, ctx, results):
+                del ctx, results
+                return {
+                    "mean_value": 1.0,
+                    "sem_value": 0.0,
+                    "replicate_values": [1.0],
+                    "n_replicates": 1,
+                }
+
+        analysis = FailsOnFirstCondition()
+        config = _make_config(tmp_path)
+
+        def _from_cond(cond_cfg):
+            return Condition(
+                cond_cfg.label, cond_cfg.config, tuple(cond_cfg.replicates), SimpleNamespace()
+            )
+
+        monkeypatch.setattr(
+            "polyzymd.analyses.orchestrator.Condition.from_condition_config", _from_cond
+        )
+        monkeypatch.setattr(
+            "polyzymd.analyses.orchestrator._resolve_settings",
+            lambda analysis, config: _ParallelSettings(),
+        )
+
+        with pytest.raises(PluginContractError, match="contract failure on A"):
+            run_comparison(analysis, config, recompute=False, equilibration="10ns")
+
+        assert processed_labels == ["A"]

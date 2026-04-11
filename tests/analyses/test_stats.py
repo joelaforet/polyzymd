@@ -314,8 +314,25 @@ def test_format_scalar_comparison_backward_compatible_without_adjusted_pvalues()
     )
 
 
-def test_bh_boundary_inclusive() -> None:
+def test_bh_boundary_inclusive(monkeypatch) -> None:
     """Adjusted p-value exactly equal to fdr_alpha should be significant."""
+
+    def _fake_ttest(_group1, _group2, method="student"):
+        del method
+        return TTestResult(t_statistic=1.0, p_value=0.05)
+
+    def _fake_effect(_group1, _group2):
+        return EffectSize(cohens_d=0.5, interpretation="medium", direction="higher")
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.inferential_statistics.independent_ttest",
+        _fake_ttest,
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.inferential_statistics.cohens_d",
+        _fake_effect,
+    )
+
     metrics_ctrl = {"m": _metric(1.0, [1.0, 1.1, 1.2])}
     metrics_trt = {"m": _metric(2.0, [2.0, 2.1, 2.2])}
 
@@ -324,13 +341,14 @@ def test_bh_boundary_inclusive() -> None:
         project_name="BH inclusive boundary",
         metrics_by_condition={"ctrl": metrics_ctrl, "trt": metrics_trt},
         control_label="ctrl",
-        fdr_alpha=1.0,
+        fdr_alpha=0.05,
         posthoc_method="ttest_bh",
     )
 
-    for pairwise in result.pairwise_comparisons:
-        if pairwise.p_value_adjusted is not None:
-            assert pairwise.significant
+    assert len(result.pairwise_comparisons) == 1
+    pairwise = result.pairwise_comparisons[0]
+    assert pairwise.p_value_adjusted == pytest.approx(0.05)
+    assert pairwise.significant is True
 
 
 def test_default_scalar_comparison_tukey_mode() -> None:
@@ -349,6 +367,10 @@ def test_default_scalar_comparison_tukey_mode() -> None:
     )
 
     assert result.posthoc_method == "tukey_hsd"
+    assert len(result.pairwise_comparisons) == 2
+    pair_identities = {(p.condition_a, p.condition_b) for p in result.pairwise_comparisons}
+    assert pair_identities == {("ctrl", "trt1"), ("ctrl", "trt2")}
+    assert ("trt1", "trt2") not in pair_identities
     for pairwise in result.pairwise_comparisons:
         assert pairwise.posthoc_method == "tukey_hsd"
         assert math.isnan(pairwise.t_statistic)

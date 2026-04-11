@@ -39,7 +39,8 @@ class TestTryLoadCachedBindingPreference:
             try_load_cached_binding_preference,
         )
 
-        (tmp_path / "binding_preference_aggregated_reps1-3.json").write_text("{}")
+        expected_path = tmp_path / "binding_preference_aggregated_reps1-3.json"
+        expected_path.write_text("{}")
 
         mock_result = MagicMock()
         mock_agg_result.load.return_value = mock_result
@@ -47,6 +48,7 @@ class TestTryLoadCachedBindingPreference:
         cond = FakeCondition()
         result = try_load_cached_binding_preference(cond, tmp_path)
         assert result is mock_result
+        mock_agg_result.load.assert_called_once_with(str(expected_path))
 
     @patch("polyzymd.analyses.shared.binding_preference.AggregatedBindingPreferenceResult")
     def test_canonical_aggregated_takes_priority(self, mock_agg_result, tmp_path):
@@ -67,3 +69,23 @@ class TestTryLoadCachedBindingPreference:
         mock_agg_result.load.assert_called_once_with(
             tmp_path / "binding_preference_aggregated.json"
         )
+
+    @patch("polyzymd.analyses.shared.binding_preference.AggregatedBindingPreferenceResult")
+    def test_fingerprinted_aggregated_match_loads_exact_path(self, mock_agg_result, tmp_path):
+        """Fingerprinted aggregated_reps cache should load exact matching path."""
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            try_load_cached_binding_preference,
+        )
+
+        settings_fp = "deadbeef"
+        expected_path = tmp_path / f"binding_preference_aggregated_s{settings_fp}_reps1-3.json"
+        expected_path.write_text("{}")
+
+        mock_result = MagicMock()
+        mock_agg_result.load.return_value = mock_result
+
+        cond = FakeCondition()
+        result = try_load_cached_binding_preference(cond, tmp_path, settings_fp=settings_fp)
+
+        assert result is mock_result
+        mock_agg_result.load.assert_called_once_with(str(expected_path))

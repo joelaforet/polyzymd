@@ -194,3 +194,50 @@ class TestDiscoveryRobustness:
             module_name in record.message and "bad_attr" in record.message
             for record in caplog.records
         )
+
+    def test_discovery_warns_on_optional_heavy_dep_import_error(self, caplog):
+        """Optional heavy dependency import errors should be logged and skipped."""
+        from polyzymd.analyses.discovery import _discover_plugins
+
+        walked = [(None, "polyzymd.analyses.fake_optional_dep", True)]
+
+        def _import_side_effect(name: str):
+            if name == "polyzymd.analyses.fake_optional_dep":
+                raise ModuleNotFoundError("No module named 'openmm'", name="openmm")
+            raise AssertionError(f"Unexpected import: {name}")
+
+        with (
+            patch("pkgutil.walk_packages", return_value=walked),
+            patch("importlib.import_module", side_effect=_import_side_effect),
+            caplog.at_level("INFO", logger="polyzymd.analyses"),
+        ):
+            registry, aliases = _discover_plugins()
+
+        assert registry == {}
+        assert aliases == {}
+        assert any(
+            "Skipping analysis module polyzymd.analyses.fake_optional_dep" in record.message
+            and "openmm" in record.message
+            for record in caplog.records
+        )
+
+    def test_discovery_reraises_unknown_import_error(self):
+        """Unknown import failures should be re-raised during discovery."""
+        from polyzymd.analyses.discovery import _discover_plugins
+
+        walked = [(None, "polyzymd.analyses.fake_unknown_dep", True)]
+
+        def _import_side_effect(name: str):
+            if name == "polyzymd.analyses.fake_unknown_dep":
+                raise ModuleNotFoundError(
+                    "No module named 'totally_missing_pkg'",
+                    name="totally_missing_pkg",
+                )
+            raise AssertionError(f"Unexpected import: {name}")
+
+        with (
+            patch("pkgutil.walk_packages", return_value=walked),
+            patch("importlib.import_module", side_effect=_import_side_effect),
+        ):
+            with pytest.raises(ModuleNotFoundError, match="totally_missing_pkg"):
+                _discover_plugins()

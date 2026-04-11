@@ -37,3 +37,9 @@ def test_analysis_defaults_invalid_posthoc_method() -> None:
     """Invalid post-hoc method should fail validation."""
     with pytest.raises(ValidationError):
         AnalysisDefaults(posthoc_method="bogus")
+
+
+def test_analysis_defaults_accepts_tukey_hsd_posthoc_method() -> None:
+    """Post-hoc method should accept Tukey HSD."""
+    defaults = AnalysisDefaults(posthoc_method="tukey_hsd")
+    assert defaults.posthoc_method == "tukey_hsd"
