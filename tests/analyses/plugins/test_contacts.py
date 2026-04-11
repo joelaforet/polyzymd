@@ -260,6 +260,7 @@ class TestComputeReplicate:
     def test_returns_none_on_missing_trajectory(self, tmp_path):
         from polyzymd.analyses.base import Condition, ReplicateContext
         from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.exceptions import ReplicateSkippedError
 
         analysis = ContactsAnalysis()
         settings = ContactsSettings()
@@ -285,9 +286,8 @@ class TestComputeReplicate:
             MockLoader.return_value.get_trajectory_info.side_effect = FileNotFoundError(
                 "No trajectory"
             )
-            result = analysis.compute_replicate(ctx, 1)
-
-        assert result is None
+            with pytest.raises(ReplicateSkippedError, match="No trajectory data found"):
+                analysis.compute_replicate(ctx, 1)
 
     def test_cache_filename_includes_settings_fingerprint(self, tmp_path):
         from polyzymd.analyses.base import Condition, ReplicateContext

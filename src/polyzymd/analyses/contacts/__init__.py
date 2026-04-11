@@ -61,6 +61,7 @@ from polyzymd.analyses.contacts._plotters import (
     _plot_system_coverage_heatmap,
     _plot_user_partition_bars,
 )
+from polyzymd.analyses.exceptions import ReplicateSkippedError
 
 if TYPE_CHECKING:
     from MDAnalysis.core.groups import AtomGroup, Residue
@@ -663,7 +664,9 @@ class ContactsAnalysis(Analysis):
             traj_info = loader.get_trajectory_info(replicate)
         except FileNotFoundError as e:
             logger.warning(f"  Skipping replicate {replicate}: trajectory data not found. {e}")
-            return None
+            raise ReplicateSkippedError(
+                f"No trajectory data found for replicate {replicate}: {e}"
+            ) from e
 
         try:
             traj_files = [str(p) for p in traj_info.trajectory_files]
@@ -710,7 +713,9 @@ class ContactsAnalysis(Analysis):
         except (FileNotFoundError, ValueError, OSError, IndexError) as e:
             logger.debug("Full traceback:", exc_info=True)
             logger.warning(f"  Skipping replicate {replicate}: analysis failed with error: {e}")
-            return None
+            raise ReplicateSkippedError(
+                f"Contacts analysis failed for replicate {replicate}: {type(e).__name__}: {e}"
+            ) from e
 
     def aggregate(
         self,
