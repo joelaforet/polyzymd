@@ -273,9 +273,13 @@ def _plot_rmsf_comparison_from_aggregated(
         # Look for aggregated RMSF result
         result_file = aggregated_dir / "rmsf_aggregated.json"
         if not result_file.exists():
-            json_files = sorted(aggregated_dir.glob("*.json"))
+            json_files = sorted(aggregated_dir.glob("rmsf_*.json"))
             if json_files:
                 result_file = json_files[0]
+                logger.warning(
+                    f"Expected rmsf_aggregated.json not found in {aggregated_dir}; "
+                    f"falling back to {result_file.name}"
+                )
             else:
                 continue
 
@@ -480,9 +484,13 @@ def _load_rmsf_profile(aggregated_dir: Path) -> dict | None:
 
     result_file = aggregated_dir / "rmsf_aggregated.json"
     if not result_file.exists():
-        json_files = sorted(aggregated_dir.glob("*.json"))
+        json_files = sorted(aggregated_dir.glob("rmsf_*.json"))
         if json_files:
             result_file = json_files[0]
+            logger.warning(
+                f"Expected rmsf_aggregated.json not found in {aggregated_dir}; "
+                f"falling back to {result_file.name}"
+            )
         else:
             return None
 
