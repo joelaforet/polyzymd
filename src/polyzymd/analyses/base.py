@@ -215,8 +215,10 @@ class ComparisonContext:
     settings : BaseModel
         Analysis-specific settings.
     fdr_alpha : float
-        False discovery rate threshold used for Benjamini-Hochberg
-        corrected pairwise significance in the default scalar comparison.
+        Significance threshold for pairwise tests and ANOVA.  Used as
+        the BH false-discovery-rate threshold when ``posthoc_method`` is
+        ``"ttest_bh"`` and as the family-wise significance threshold
+        when ``posthoc_method`` is ``"tukey_hsd"``.
     ttest_method : str
         Two-sample t-test method for default scalar pairwise tests.
         ``"student"`` uses equal variances and ``"welch"`` does not.
@@ -259,6 +261,13 @@ class ComparisonContext:
         return self.control_label if self.control_label in labels else None
 
 
+def _default_plot_settings() -> PlotSettings:
+    """Lazy default factory for PlotContext.plot_settings."""
+    from polyzymd.config.comparison import PlotSettings
+
+    return PlotSettings()
+
+
 @dataclass(frozen=True)
 class PlotContext:
     """Context passed to :meth:`Analysis.plot`.
@@ -276,10 +285,10 @@ class PlotContext:
     settings : BaseModel
         Analysis-specific settings.
     plot_settings : PlotSettings
-        Global plot settings (theme, DPI, format, etc.).  The orchestrator
-        guarantees this is never ``None`` — a default ``PlotSettings()``
-        is provided when the comparison config has no ``plot_settings:``
-        section.
+        Global plot settings (theme, DPI, format, etc.).  The framework
+        guarantees this is never ``None`` — a ``PlotSettings()`` default is
+        provided when the comparison config has no ``plot_settings:``
+        section.  Plugins can access this directly without ``None`` guards.
     comparison_path : Path | None
         Canonical comparison result path for this analysis.
     control_label : str | None
@@ -305,13 +314,13 @@ class PlotContext:
     results_dir: Path
     output_dir: Path
     settings: BaseModel
-    plot_settings: PlotSettings | None = None
+    plot_settings: PlotSettings = field(default_factory=_default_plot_settings)
     comparison_path: Path | None = None
     control_label: str | None = None
 
     def __post_init__(self) -> None:
         """Ensure plot settings is always materialized for plugins."""
-        if self.plot_settings is None:
+        if self.plot_settings is None:  # type: ignore[comparison-overlap]
             from polyzymd.config.comparison import PlotSettings
 
             object.__setattr__(self, "plot_settings", PlotSettings())
@@ -400,7 +409,10 @@ class PairwiseResult(BaseModel):
     p_value : float
         Two-tailed p-value.
     p_value_adjusted : float | None
-        Benjamini-Hochberg adjusted p-value. ``None`` when not available.
+        Multiplicity-corrected p-value.  For ``"ttest_bh"`` this is the
+        Benjamini-Hochberg adjusted value; for ``"tukey_hsd"`` this
+        mirrors the Tukey family-wise p-value (already corrected).
+        ``None`` only for legacy payloads missing this field.
     posthoc_method : str
         Post-hoc method used to generate this pairwise p-value.
     cohens_d : float
@@ -475,8 +487,10 @@ class ComparisonResult(BaseModel):
     control_label : str | None
         Control condition label.
     fdr_alpha : float | None
-        False discovery rate threshold used for Benjamini-Hochberg
-        correction in pairwise tests. ``None`` when unknown.
+        Significance threshold for pairwise tests and ANOVA.  Used as
+        the BH false-discovery-rate threshold (``"ttest_bh"``) or the
+        Tukey family-wise threshold (``"tukey_hsd"``).
+        ``None`` when unknown (legacy payloads).
     ttest_method : str
         Two-sample t-test method used for pairwise tests.
     posthoc_method : str

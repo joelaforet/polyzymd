@@ -127,6 +127,7 @@ def pairwise_comparisons(
     control_label: str | None = None,
     ttest_method: str = "student",
     posthoc_method: str = "ttest_bh",
+    fdr_alpha: float = 0.05,
 ) -> list[PairwiseResult]:
     """Compute pairwise statistical comparisons for a single metric.
 
@@ -143,6 +144,9 @@ def pairwise_comparisons(
     posthoc_method : str, optional
         Pairwise post-hoc method: ``"ttest_bh"`` or ``"tukey_hsd"``, by
         default ``"ttest_bh"``.
+    fdr_alpha : float, optional
+        Significance threshold for Tukey HSD pairwise comparisons,
+        by default 0.05.  Must be in ``(0, 1]``.
 
     Returns
     -------
@@ -155,6 +159,11 @@ def pairwise_comparisons(
         percent_change,
         tukey_hsd,
     )
+
+    # Validate fdr_alpha for all post-hoc methods (BH validates internally,
+    # but Tukey uses it directly for significance — guard here uniformly).
+    if not (0.0 < fdr_alpha <= 1.0) or math.isnan(fdr_alpha):
+        raise ValueError(f"fdr_alpha must be in (0, 1], got {fdr_alpha!r}")
 
     labels = list(metrics_by_condition.keys())
     results: list[PairwiseResult] = []
@@ -229,12 +238,12 @@ def pairwise_comparisons(
                     metric=mv_a.name,
                     t_statistic=float("nan"),
                     p_value=tukey_result.p_value,
-                    p_value_adjusted=None,
+                    p_value_adjusted=tukey_result.p_value,
                     posthoc_method=posthoc_method,
                     cohens_d=effect.cohens_d,
                     effect_size_interpretation=effect.interpretation,
                     direction=direction,
-                    significant=tukey_result.p_value < 0.05,
+                    significant=tukey_result.p_value <= fdr_alpha,
                     percent_change=pct,
                 )
             )
@@ -254,6 +263,7 @@ def pairwise_comparisons(
 def anova_test(
     metrics_by_condition: dict[str, MetricValue],
     metric_name: str = "default",
+    alpha: float = 0.05,
 ) -> ANOVAResult | None:
     """Run one-way ANOVA across conditions for a single metric.
 
@@ -263,6 +273,8 @@ def anova_test(
         Mapping ``condition_label -> MetricValue``.
     metric_name : str
         Label for the metric in the result.
+    alpha : float, optional
+        Significance threshold for the ANOVA test, by default 0.05.
 
     Returns
     -------
@@ -281,7 +293,7 @@ def anova_test(
         metric=metric_name,
         f_statistic=result.f_statistic,
         p_value=result.p_value,
-        significant=result.significant,
+        significant=result.p_value < alpha,
     )
 
 
@@ -370,8 +382,9 @@ def default_scalar_comparison(
     equilibration : str
         Equilibration time string.
     fdr_alpha : float, optional
-        False discovery rate threshold used for BH-adjusted pairwise
-        significance, by default 0.05.
+        Significance threshold for pairwise tests and ANOVA.  Used as
+        the BH false-discovery-rate threshold (``"ttest_bh"``) or the
+        Tukey family-wise threshold (``"tukey_hsd"``), by default 0.05.
     ttest_method : str, optional
         T-test method to use, ``"student"`` or ``"welch"``, by default
         ``"student"``. Only used when ``posthoc_method`` is ``"ttest_bh"``.
@@ -432,12 +445,13 @@ def default_scalar_comparison(
                 control_label,
                 ttest_method=ttest_method,
                 posthoc_method=posthoc_method,
+                fdr_alpha=fdr_alpha,
             )
             all_pairwise.extend(pw)
 
         # ANOVA requires at least 3 conditions
         if len(per_cond) >= 3:
-            anova = anova_test(per_cond, metric_name)
+            anova = anova_test(per_cond, metric_name, alpha=fdr_alpha)
             if anova is not None:
                 all_anova.append(anova)
 
@@ -609,6 +623,8 @@ def _format_scalar_text(
     higher_is_better: bool | None,
 ) -> str:
     """Format as ASCII table (internal)."""
+    alpha = result.fdr_alpha if result.fdr_alpha is not None else 0.05
+
     selected_ranking = result.ranking
     if result.rankings_by_metric and metric_key in result.rankings_by_metric:
         selected_ranking = result.rankings_by_metric[metric_key]
@@ -723,9 +739,9 @@ def _format_scalar_text(
         elif posthoc_method == "ttest_bh" and has_adjusted:
             lines.append("* BH-corrected p_adj significant")
         elif posthoc_method == "ttest_bh":
-            lines.append("* p <= 0.05")
+            lines.append(f"* p <= {alpha:g}")
         elif posthoc_method == "tukey_hsd":
-            lines.append("* Tukey HSD p <= 0.05")
+            lines.append(f"* Tukey HSD p <= {alpha:g}")
         else:
             raise ValueError(f"Unknown posthoc method {posthoc_method!r}")
         lines.append("")
@@ -740,7 +756,7 @@ def _format_scalar_text(
                 lines.append(f"Metric: {a.metric}")
             lines.append(f"F-statistic: {a.f_statistic:.3f}")
             lines.append(f"p-value:     {a.p_value:.4f}")
-            lines.append(f"Significant: {sig} (alpha=0.05)")
+            lines.append(f"Significant: {sig} (alpha={alpha:g})")
         lines.append("")
 
     # Interpretation
@@ -793,6 +809,8 @@ def _format_scalar_markdown(
     higher_is_better: bool | None,
 ) -> str:
     """Format as Markdown (internal)."""
+    alpha = result.fdr_alpha if result.fdr_alpha is not None else 0.05
+
     selected_ranking = result.ranking
     if result.rankings_by_metric and metric_key in result.rankings_by_metric:
         selected_ranking = result.rankings_by_metric[metric_key]
@@ -897,10 +915,10 @@ def _format_scalar_markdown(
             lines.append(f"*Significance uses BH-adjusted p-values: p_adj <= {result.fdr_alpha}.*")
         elif posthoc_method == "ttest_bh" and not has_adjusted:
             lines.append("")
-            lines.append("*Significance uses raw p <= 0.05.*")
+            lines.append(f"*Significance uses raw p <= {alpha:g}.*")
         elif posthoc_method == "tukey_hsd":
             lines.append("")
-            lines.append("*Significance uses Tukey HSD p <= 0.05.*")
+            lines.append(f"*Significance uses Tukey HSD p <= {alpha:g}.*")
         lines.append("")
 
     # ANOVA

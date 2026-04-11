@@ -7,7 +7,13 @@ import math
 
 import pytest
 
-from polyzymd.analyses.base import ComparisonResult, ConditionSummary, MetricValue, PairwiseResult
+from polyzymd.analyses.base import (
+    ANOVAResult,
+    ComparisonResult,
+    ConditionSummary,
+    MetricValue,
+    PairwiseResult,
+)
 from polyzymd.analyses.shared.inferential_statistics import EffectSize, TTestResult
 from polyzymd.analyses.stats import (
     default_scalar_comparison,
@@ -141,9 +147,13 @@ def test_default_scalar_comparison_threads_posthoc_method(monkeypatch) -> None:
     seen_posthoc_methods: list[str] = []
 
     def _fake_pairwise(
-        metrics, control_label=None, ttest_method="student", posthoc_method="ttest_bh"
+        metrics,
+        control_label=None,
+        ttest_method="student",
+        posthoc_method="ttest_bh",
+        fdr_alpha=0.05,
     ):
-        del metrics, control_label, ttest_method
+        del metrics, control_label, ttest_method, fdr_alpha
         seen_posthoc_methods.append(posthoc_method)
         return [
             PairwiseResult(
@@ -342,8 +352,129 @@ def test_default_scalar_comparison_tukey_mode() -> None:
     for pairwise in result.pairwise_comparisons:
         assert pairwise.posthoc_method == "tukey_hsd"
         assert math.isnan(pairwise.t_statistic)
-        assert pairwise.p_value_adjusted is None
+        assert pairwise.p_value_adjusted == pytest.approx(pairwise.p_value)
         assert pairwise.p_value >= 0
+
+
+def test_pairwise_comparisons_tukey_uses_fdr_alpha_boundary(monkeypatch) -> None:
+    """Tukey significance should be inclusive at fdr_alpha boundary."""
+
+    class _FakeTukeyResult:
+        def __init__(self, group_i: int, group_j: int, p_value: float):
+            self.group_i = group_i
+            self.group_j = group_j
+            self.p_value = p_value
+
+    def _fake_tukey_hsd(*_groups):
+        return [_FakeTukeyResult(group_i=0, group_j=1, p_value=0.05)]
+
+    def _fake_effect(_group1, _group2):
+        return EffectSize(cohens_d=0.5, interpretation="medium", direction="higher")
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.inferential_statistics.tukey_hsd", _fake_tukey_hsd
+    )
+    monkeypatch.setattr("polyzymd.analyses.shared.inferential_statistics.cohens_d", _fake_effect)
+
+    metrics = {
+        "ctrl": _metric(1.0, [1.0, 1.1, 1.2]),
+        "trt": _metric(2.0, [2.0, 2.1, 2.2]),
+    }
+    results = pairwise_comparisons(metrics, posthoc_method="tukey_hsd", fdr_alpha=0.05)
+
+    assert len(results) == 1
+    assert results[0].p_value_adjusted == pytest.approx(0.05)
+    assert results[0].significant is True
+
+
+def test_formatter_uses_non_default_fdr_alpha_thresholds() -> None:
+    """Formatter should display custom fdr_alpha thresholds in text and markdown."""
+    result = ComparisonResult(
+        analysis_type="test",
+        name="alpha-format",
+        control_label="A",
+        fdr_alpha=0.01,
+        posthoc_method="ttest_bh",
+        conditions=[
+            ConditionSummary(label="A", n_replicates=3, metric_mean=1.0, metric_sem=0.1),
+            ConditionSummary(label="B", n_replicates=3, metric_mean=1.2, metric_sem=0.1),
+        ],
+        pairwise_comparisons=[
+            PairwiseResult(
+                condition_a="A",
+                condition_b="B",
+                metric="metric",
+                t_statistic=1.0,
+                p_value=0.03,
+                p_value_adjusted=None,
+                posthoc_method="ttest_bh",
+                cohens_d=0.5,
+                effect_size_interpretation="medium",
+                direction="higher",
+                significant=False,
+                percent_change=20.0,
+            )
+        ],
+        anova=[ANOVAResult(metric="metric", f_statistic=3.2, p_value=0.04, significant=False)],
+        ranking=["B", "A"],
+        rankings_by_metric={"metric": ["B", "A"]},
+        equilibration_time="0ns",
+        created_at="2026-01-01T00:00:00",
+        polyzymd_version="test",
+    )
+
+    text_output = format_scalar_comparison(result, output_format="text", metric_key="metric")
+    markdown_output = format_scalar_comparison(
+        result, output_format="markdown", metric_key="metric"
+    )
+
+    assert "* p <= 0.01" in text_output
+    assert "Significant: No (alpha=0.01)" in text_output
+    assert "*Significance uses raw p <= 0.01.*" in markdown_output
+
+
+def test_formatter_uses_non_default_fdr_alpha_for_tukey_note() -> None:
+    """Markdown formatter should display custom threshold for Tukey mode."""
+    result = ComparisonResult(
+        analysis_type="test",
+        name="alpha-format-tukey",
+        control_label="A",
+        fdr_alpha=0.02,
+        posthoc_method="tukey_hsd",
+        conditions=[
+            ConditionSummary(label="A", n_replicates=3, metric_mean=1.0, metric_sem=0.1),
+            ConditionSummary(label="B", n_replicates=3, metric_mean=1.2, metric_sem=0.1),
+        ],
+        pairwise_comparisons=[
+            PairwiseResult(
+                condition_a="A",
+                condition_b="B",
+                metric="metric",
+                t_statistic=float("nan"),
+                p_value=0.02,
+                p_value_adjusted=0.02,
+                posthoc_method="tukey_hsd",
+                cohens_d=0.5,
+                effect_size_interpretation="medium",
+                direction="higher",
+                significant=True,
+                percent_change=20.0,
+            )
+        ],
+        ranking=["B", "A"],
+        rankings_by_metric={"metric": ["B", "A"]},
+        equilibration_time="0ns",
+        created_at="2026-01-01T00:00:00",
+        polyzymd_version="test",
+    )
+
+    text_output = format_scalar_comparison(result, output_format="text", metric_key="metric")
+    markdown_output = format_scalar_comparison(
+        result, output_format="markdown", metric_key="metric"
+    )
+
+    assert "* Tukey HSD p <= 0.02" in text_output
+    assert "*Significance uses Tukey HSD p <= 0.02.*" in markdown_output
 
 
 class TestStats:
@@ -466,3 +597,92 @@ class TestStats:
             "Treatment",
             "Control",
         ]
+
+
+class TestAnovaAlphaThreading:
+    """ANOVA significance should respect fdr_alpha."""
+
+    def test_anova_uses_configured_alpha(self):
+        """ANOVA significant flag should reflect the pipeline's fdr_alpha."""
+        # 3 conditions with clearly different means → p << 0.05
+        metrics_by_condition = {
+            "A": {"m": _metric(1.0, [0.9, 1.0, 1.1])},
+            "B": {"m": _metric(5.0, [4.9, 5.0, 5.1])},
+            "C": {"m": _metric(3.0, [2.9, 3.0, 3.1])},
+        }
+        result = default_scalar_comparison(
+            analysis_name="test",
+            project_name="ANOVA alpha",
+            metrics_by_condition=metrics_by_condition,
+            fdr_alpha=0.05,
+        )
+        assert result.anova is not None
+        assert result.anova[0].significant is True
+
+    def test_anova_not_significant_with_strict_alpha(self):
+        """ANOVA p-value > very strict alpha should be not significant."""
+        # 3 groups with overlapping values: p is typically moderate
+        metrics_by_condition = {
+            "A": {"m": _metric(1.0, [0.5, 1.0, 1.5])},
+            "B": {"m": _metric(1.5, [1.0, 1.5, 2.0])},
+            "C": {"m": _metric(1.2, [0.7, 1.2, 1.7])},
+        }
+        result = default_scalar_comparison(
+            analysis_name="test",
+            project_name="ANOVA strict alpha",
+            metrics_by_condition=metrics_by_condition,
+            fdr_alpha=0.001,  # Very strict
+        )
+        assert result.anova is not None
+        # With these overlapping values, p should be > 0.001
+        assert result.anova[0].significant is False
+
+
+class TestFdrAlphaValidation:
+    """fdr_alpha validation edge cases."""
+
+    def test_fdr_alpha_zero_raises(self):
+        """fdr_alpha=0 should raise ValueError."""
+        metrics = {
+            "A": _metric(1.0, [1.0, 1.1, 1.2]),
+            "B": _metric(2.0, [2.0, 2.1, 2.2]),
+        }
+        with pytest.raises(ValueError, match="fdr_alpha must be in"):
+            pairwise_comparisons(metrics, fdr_alpha=0.0)
+
+    def test_fdr_alpha_negative_raises(self):
+        """fdr_alpha < 0 should raise ValueError."""
+        metrics = {
+            "A": _metric(1.0, [1.0, 1.1, 1.2]),
+            "B": _metric(2.0, [2.0, 2.1, 2.2]),
+        }
+        with pytest.raises(ValueError, match="fdr_alpha must be in"):
+            pairwise_comparisons(metrics, fdr_alpha=-0.05)
+
+    def test_fdr_alpha_nan_raises(self):
+        """fdr_alpha=NaN should raise ValueError."""
+        metrics = {
+            "A": _metric(1.0, [1.0, 1.1, 1.2]),
+            "B": _metric(2.0, [2.0, 2.1, 2.2]),
+        }
+        with pytest.raises(ValueError, match="fdr_alpha must be in"):
+            pairwise_comparisons(metrics, fdr_alpha=float("nan"))
+
+    def test_fdr_alpha_one_accepted(self):
+        """fdr_alpha=1.0 is valid (everything significant)."""
+        metrics = {
+            "A": _metric(1.0, [1.0, 1.1, 1.2]),
+            "B": _metric(2.0, [2.0, 2.1, 2.2]),
+        }
+        results = pairwise_comparisons(metrics, fdr_alpha=1.0)
+        assert len(results) == 1
+        assert results[0].significant is True
+
+    def test_fdr_alpha_greater_than_one_raises(self):
+        """fdr_alpha > 1.0 should raise ValueError."""
+        metrics = {
+            "A": _metric(1.0, [1.0, 1.1, 1.2]),
+            "B": _metric(2.0, [2.0, 2.1, 2.2]),
+        }
+        with pytest.raises(ValueError, match="fdr_alpha must be in"):
+            pairwise_comparisons(metrics, fdr_alpha=1.5)

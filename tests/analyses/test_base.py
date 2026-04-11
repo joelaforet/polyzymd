@@ -323,3 +323,19 @@ def test_plot_context_default_plot_settings() -> None:
         settings=MagicMock(),
     )
     assert isinstance(ctx.plot_settings, PlotSettings)
+
+
+def test_plot_context_materializes_when_none_is_explicitly_passed() -> None:
+    """PlotContext should materialize PlotSettings when None is passed explicitly."""
+    from polyzymd.config.comparison import PlotSettings
+
+    ctx = PlotContext(
+        conditions=[],
+        analysis_dirs={},
+        results_dir=Path("/fake"),
+        output_dir=Path("/fake"),
+        settings=MagicMock(),
+        plot_settings=None,
+    )
+
+    assert isinstance(ctx.plot_settings, PlotSettings)
