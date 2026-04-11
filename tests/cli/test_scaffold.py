@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from click.testing import CliRunner
@@ -371,6 +373,111 @@ class TestGeneratedCodeQuality:
         tf = tmp_path / "tests" / "analyses" / "plugins" / "test_solvent_shell.py"
         source = tf.read_text()
         compile(source, str(tf), "exec")
+
+
+class TestGeneratedPluginEndToEnd:
+    """End-to-end checks for scaffolded plugin discovery and lifecycle."""
+
+    def test_dict_scaffold_is_discoverable_and_comparable(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Generated dict-style plugin should run through discovery and default compare."""
+        analyses_root = tmp_path / "src" / "polyzymd" / "analyses"
+        analyses_root.mkdir(parents=True)
+        (tmp_path / "tests").mkdir()
+
+        plugin_name = "scaffold_e2e"
+        generate_scaffold(plugin_name, tmp_path, style="dict")
+
+        import polyzymd.analyses as analyses_pkg
+        from polyzymd.analyses.base import (
+            AggregateContext,
+            ComparisonContext,
+            Condition,
+            ReplicateContext,
+        )
+        from polyzymd.analyses.discovery import clear_cache, get_analysis, list_analyses
+
+        original_path = list(analyses_pkg.__path__)
+        monkeypatch.setattr(
+            analyses_pkg,
+            "__path__",
+            [*original_path, str(analyses_root)],
+        )
+        clear_cache()
+
+        try:
+            discovered = list_analyses()
+            assert plugin_name in discovered
+
+            analysis_cls = get_analysis(plugin_name)
+            analysis = analysis_cls()
+            settings = analysis_cls.Settings()
+
+            condition = Condition(
+                label="Scaffold Condition",
+                config_path=tmp_path / "config.yaml",
+                replicates=(1, 2),
+                sim_config=MagicMock(),
+            )
+
+            rep_ctx = ReplicateContext(
+                condition=condition,
+                replicate=1,
+                sim_config=condition.sim_config,
+                output_dir=tmp_path / "run_1",
+                equilibration="0ns",
+                recompute=True,
+                settings=settings,
+            )
+            replicate_result = analysis.compute_replicate(rep_ctx, replicate=1)
+            assert isinstance(replicate_result, dict)
+            assert replicate_result["value"] == pytest.approx(1.0)
+
+            agg_ctx = AggregateContext(
+                condition=condition,
+                replicates=(1, 2),
+                output_dir=tmp_path / "aggregated",
+                equilibration="0ns",
+                settings=settings,
+            )
+            aggregated = analysis.aggregate(
+                agg_ctx,
+                results=[
+                    {"value": 1.0, "replicate": 1},
+                    {"value": 3.0, "replicate": 2},
+                ],
+            )
+            assert isinstance(aggregated, dict)
+            assert aggregated["mean_value"] == pytest.approx(2.0)
+
+            metrics = analysis.extract_metrics(aggregated)
+            assert "value" in metrics
+
+            compare_ctx = ComparisonContext(
+                name="scaffold-e2e",
+                conditions=[condition],
+                excluded_conditions=[],
+                control_label=None,
+                analysis_dirs={condition.label: tmp_path / "analysis_dir"},
+                results_dir=tmp_path / "results",
+                equilibration="0ns",
+                settings=settings,
+                recompute=True,
+                aggregated_results={condition.label: aggregated},
+            )
+            comparison = analysis.compare(compare_ctx)
+            assert comparison is not None
+            assert comparison.analysis_type == plugin_name
+            assert len(comparison.conditions) == 1
+            assert comparison.conditions[0].label == condition.label
+        finally:
+            clear_cache()
+            plugin_dir = analyses_root / plugin_name
+            if plugin_dir.exists():
+                shutil.rmtree(plugin_dir)
 
 
 # ---------------------------------------------------------------------------
