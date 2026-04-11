@@ -557,20 +557,12 @@ class CatalyticTriadAnalysis(Analysis):
         plot_settings = ctx.plot_settings
 
         # KDE panel plot
-        try:
-            result = plot_triad_kde_panel_from_data(data, labels, ctx.output_dir, plot_settings)
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"Triad KDE panel plot failed: {exc}")
+        result = plot_triad_kde_panel_from_data(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
         # Threshold bars plot
-        try:
-            result = plot_triad_threshold_bars_from_data(
-                data, labels, ctx.output_dir, plot_settings
-            )
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"Triad threshold bars plot failed: {exc}")
+        result = plot_triad_threshold_bars_from_data(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
         return plots
 

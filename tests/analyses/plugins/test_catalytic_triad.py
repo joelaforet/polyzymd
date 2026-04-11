@@ -747,7 +747,7 @@ class TestPlot:
         "polyzymd.analyses.catalytic_triad.plot_triad_kde_panel_from_data",
         side_effect=Exception("plot error"),
     )
-    def test_plot_catches_exceptions(
+    def test_plot_propagates_exceptions(
         self,
         mock_kde_fn,
         mock_bars_fn,
@@ -756,7 +756,7 @@ class TestPlot:
         tmp_path,
         default_settings,
     ):
-        """Plotter failures should be caught, not crash the pipeline."""
+        """Plotter failures should propagate to orchestrator."""
         from polyzymd.config.comparison import PlotSettings
 
         analysis_dir = tmp_path / "analysis" / "no_polymer" / "catalytic_triad"
@@ -773,9 +773,8 @@ class TestPlot:
 
         with patch("polyzymd.config.comparison.PlotSettings") as MockPlotSettings:
             MockPlotSettings.return_value = MagicMock()
-            plots = triad_analysis.plot(ctx)
-
-        assert plots == []
+            with pytest.raises(Exception, match="plot error"):
+                triad_analysis.plot(ctx)
 
     def test_plot_passes_data_and_labels(self, triad_analysis, tmp_path, default_settings):
         """Verify the data dict passed to helpers has the expected shape."""
