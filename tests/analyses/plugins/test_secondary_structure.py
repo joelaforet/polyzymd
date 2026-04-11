@@ -653,8 +653,8 @@ class TestPlot:
             # Total paths: 4 (one from each plotter)
             assert len(plots) == 4
 
-    def test_plot_handles_plotter_failure(self, ss_analysis, tmp_path):
-        """plot() should catch exceptions from individual plotters."""
+    def test_plot_propagates_plotter_failure(self, ss_analysis, tmp_path):
+        """plot() should propagate exceptions from plotters."""
         ctx = self._make_plot_ctx(tmp_path)
 
         with (
@@ -669,16 +669,14 @@ class TestPlot:
                 "polyzymd.analyses.secondary_structure._plot_ss_persistence_diff_heatmap"
             ) as MockPersistence,
         ):
-            # Timeline raises, others succeed
+            # Timeline raises and should stop plotting
             MockTimeline.side_effect = RuntimeError("boom")
             MockContent.return_value = [tmp_path / "plots" / "bars.png"]
             MockIndividual.return_value = [tmp_path / "plots" / "ind.png"]
             MockPersistence.return_value = [tmp_path / "plots" / "diff.png"]
 
-            plots = ss_analysis.plot(ctx)
-
-            # Should still get 3 paths from the working plotters
-            assert len(plots) == 3
+            with pytest.raises(RuntimeError, match="boom"):
+                ss_analysis.plot(ctx)
 
     def test_plot_empty_conditions(self, ss_analysis, tmp_path):
         """plot() with no conditions should return empty list."""

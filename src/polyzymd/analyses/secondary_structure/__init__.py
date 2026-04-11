@@ -474,29 +474,17 @@ class SecondaryStructureAnalysis(Analysis):
 
         plot_settings = ctx.plot_settings
 
-        try:
-            result = _plot_ss_timeline_heatmap(data, labels, ctx.output_dir, plot_settings)
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"SS timeline heatmap plot failed: {exc}")
+        result = _plot_ss_timeline_heatmap(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
-        try:
-            result = _plot_ss_content_bars(data, labels, ctx.output_dir, plot_settings)
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"SS content bars plot failed: {exc}")
+        result = _plot_ss_content_bars(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
-        try:
-            result = _plot_ss_individual_bars(data, labels, ctx.output_dir, plot_settings)
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"SS individual bars plot failed: {exc}")
+        result = _plot_ss_individual_bars(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
-        try:
-            result = _plot_ss_persistence_diff_heatmap(data, labels, ctx.output_dir, plot_settings)
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"SS persistence diff heatmap plot failed: {exc}")
+        result = _plot_ss_persistence_diff_heatmap(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
         return plots
 
