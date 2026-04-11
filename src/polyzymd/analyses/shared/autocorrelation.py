@@ -86,12 +86,15 @@ class ACFResult:
         Time between frames
     timestep_unit : str
         Unit of timestep (e.g., "ps", "ns")
+    n_samples : int
+        Number of samples in the original timeseries
     """
 
     lags: NDArray[np.float64]
     acf: NDArray[np.float64]
     timestep: float
     timestep_unit: str
+    n_samples: int
 
     def __len__(self) -> int:
         return len(self.lags)
@@ -103,6 +106,7 @@ class ACFResult:
             "acf": self.acf.tolist(),
             "timestep": self.timestep,
             "timestep_unit": self.timestep_unit,
+            "n_samples": self.n_samples,
         }
 
 
@@ -190,6 +194,10 @@ def compute_acf(
     The ACF is normalized so that ACF[0] = 1.
 
     For a stationary process: ACF(τ) = <(x(t) - μ)(x(t+τ) - μ)> / σ²
+
+    For constant or near-constant timeseries (variance below a small epsilon),
+    this function returns a defined degenerate ACF with ACF[0] = 1 and all
+    positive lags set to 0.
     """
     x = np.asarray(timeseries, dtype=np.float64)
     n = len(x)
@@ -203,6 +211,20 @@ def compute_acf(
 
     # Remove mean
     x_centered = x - np.mean(x)
+    variance = float(np.var(x_centered))
+
+    # Define a stable degenerate ACF for near-constant timeseries
+    if variance < 1e-12:
+        acf = np.zeros(max_lag + 1, dtype=np.float64)
+        acf[0] = 1.0
+        lags = np.arange(max_lag + 1, dtype=np.float64) * timestep
+        return ACFResult(
+            lags=lags,
+            acf=acf,
+            timestep=timestep,
+            timestep_unit=timestep_unit,
+            n_samples=n,
+        )
 
     # FFT-based autocorrelation (much faster than direct computation)
     # Pad to next power of 2 for FFT efficiency
@@ -211,7 +233,7 @@ def compute_acf(
     acf_full = np.fft.ifft(fft_x * np.conj(fft_x)).real[:n]
 
     # Normalize by decreasing sample size and variance
-    acf_full = acf_full / (np.arange(n, 0, -1) * np.var(x_centered))
+    acf_full = acf_full / (np.arange(n, 0, -1) * variance)
 
     # Take only up to max_lag
     acf = acf_full[: max_lag + 1]
@@ -222,6 +244,7 @@ def compute_acf(
         acf=acf,
         timestep=timestep,
         timestep_unit=timestep_unit,
+        n_samples=n,
     )
 
 
@@ -278,8 +301,7 @@ def estimate_correlation_time(
         acf = acf_result.acf
         lags = acf_result.lags
         if n_frames is None:
-            # Estimate from ACF length (we computed up to n//4)
-            n_frames = len(acf) * 4
+            n_frames = acf_result.n_samples
     else:
         # Compute ACF from raw timeseries
         acf_result = compute_acf(
@@ -292,6 +314,19 @@ def estimate_correlation_time(
         dt = timestep
         unit = timestep_unit
         n_frames = len(np.asarray(acf_or_timeseries))
+
+    # Handle degenerate constant-series ACF explicitly
+    if len(acf) > 1 and np.isclose(acf[0], 1.0) and np.allclose(acf[1:], 0.0):
+        g = 1.0
+        n_independent = max(1, int(n_frames / g))
+        return CorrelationTimeResult(
+            tau=0.0,
+            tau_unit=unit,
+            method=method,
+            n_independent=n_independent,
+            statistical_inefficiency=g,
+            warning=None,
+        )
 
     # Find first zero crossing
     zero_crossing_idx = _find_first_zero_crossing(acf)
@@ -406,9 +441,9 @@ def get_independent_indices(
 
 def _find_first_zero_crossing(acf: NDArray[np.float64]) -> int | None:
     """Find index of first zero crossing in ACF."""
-    sign_changes = np.where(np.diff(np.sign(acf)))[0]
-    if len(sign_changes) > 0:
-        return int(sign_changes[0])
+    nonpositive = np.where(acf <= 0.0)[0]
+    if len(nonpositive) > 0:
+        return int(nonpositive[0])
     return None
 
 
