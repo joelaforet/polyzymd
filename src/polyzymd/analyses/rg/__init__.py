@@ -480,12 +480,7 @@ class RgAnalysis(Analysis):
             RgRunPairwiseComparison,
             RgRunSummary,
         )
-        from polyzymd.analyses.shared.inferential_statistics import (
-            cohens_d,
-            independent_ttest,
-            one_way_anova,
-            percent_change,
-        )
+        from polyzymd.analyses.shared.inferential_statistics import one_way_anova
 
         configured_run_labels = [run.label for run in ctx.settings.runs]
         summaries: list[RgConditionSummary] = []
