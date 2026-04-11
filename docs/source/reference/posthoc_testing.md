@@ -31,14 +31,14 @@ Set post-hoc options in the `defaults:` block of `comparison.yaml`:
 defaults:
   posthoc_method: "ttest_bh"   # or "tukey_hsd"
   ttest_method: "student"      # or "welch" (only used when posthoc_method is ttest_bh)
-  fdr_alpha: 0.05              # BH threshold (only used when posthoc_method is ttest_bh)
+  fdr_alpha: 0.05              # significance threshold (used by both ttest_bh and tukey_hsd)
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `posthoc_method` | `"ttest_bh"` or `"tukey_hsd"` | `"ttest_bh"` | Selects which post-hoc procedure to use for pairwise comparisons. |
 | `ttest_method` | `"student"` or `"welch"` | `"student"` | Controls the variance assumption for the two-sample t-test. Only used when `posthoc_method` is `"ttest_bh"`. |
-| `fdr_alpha` | float (0, 1] | `0.05` | Significance threshold for Benjamini-Hochberg correction. Also used as the alpha threshold for Tukey's HSD when that method is selected. |
+| `fdr_alpha` | float (0, 1] | `0.05` | Significance threshold for pairwise comparisons and ANOVA. Used as the BH false-discovery-rate threshold when `posthoc_method` is `"ttest_bh"`, and as the family-wise alpha threshold when `posthoc_method` is `"tukey_hsd"`. |
 
 ---
 
@@ -61,7 +61,8 @@ When a `control` label is set in `comparison.yaml`, only control-vs-treatment pa
 
 - Tests all pairs simultaneously using `scipy.stats.tukey_hsd`.
 - Controls the family-wise error rate (FWER) rather than FDR.
-- A pair is significant when the Tukey-adjusted `p_value <= 0.05` (uses `fdr_alpha` as the threshold).
+- A pair is significant when the Tukey-adjusted `p_value <= fdr_alpha`.
+- `p_value_adjusted` mirrors `p_value` for Tukey results (Tukey p-values are already family-wise corrected).
 - Best with balanced designs (equal replicates per condition).
 - Cohen's d is still computed for each pair.
 - The `t_statistic` field is set to `NaN` for Tukey results since the test does not produce a t-statistic.
@@ -76,7 +77,7 @@ A one-way ANOVA (`scipy.stats.f_oneway`) is always run alongside post-hoc tests 
 |-------|------|-------------|
 | `f_statistic` | float | F-statistic from the one-way ANOVA. |
 | `p_value` | float | P-value for the omnibus test. |
-| `significant` | bool | Whether `p_value < 0.05`. |
+| `significant` | bool | Whether `p_value < fdr_alpha` (uses the configured `fdr_alpha` threshold). |
 
 ANOVA does **not** determine which pairs differ -- that is the role of post-hoc tests. ANOVA is skipped when fewer than 3 conditions are present, and returns `NaN` statistics if any group has fewer than 2 observations.
 
@@ -95,7 +96,7 @@ These fields appear in comparison JSON files and are used by the CLI formatter.
 | `metric` | str | Name of the metric being compared. |
 | `t_statistic` | float | T-test statistic. `NaN` for Tukey HSD results. |
 | `p_value` | float | Raw p-value from the pairwise test. |
-| `p_value_adjusted` | float or null | Adjusted p-value (BH for `ttest_bh`; Tukey-adjusted for `tukey_hsd`). `null` when not available. |
+| `p_value_adjusted` | float or null | Adjusted p-value (BH-adjusted for `ttest_bh`; mirrors `p_value` for `tukey_hsd` since Tukey p-values are already family-wise corrected). `null` when not available. |
 | `posthoc_method` | str | `"ttest_bh"` or `"tukey_hsd"`. |
 | `cohens_d` | float | Effect size (positive = `condition_a` mean > `condition_b` mean). |
 | `effect_size_interpretation` | str | `"negligible"`, `"small"`, `"medium"`, or `"large"`. |
@@ -107,7 +108,7 @@ These fields appear in comparison JSON files and are used by the CLI formatter.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `fdr_alpha` | float | The alpha threshold used for BH correction. |
+| `fdr_alpha` | float | The alpha threshold used for significance (BH FDR for `ttest_bh`; FWER for `tukey_hsd`). Also used as the ANOVA significance threshold. |
 | `ttest_method` | str | `"student"` or `"welch"`. |
 | `posthoc_method` | str | `"ttest_bh"` or `"tukey_hsd"`. |
 
@@ -119,7 +120,7 @@ The CLI formatter annotates pairwise rows with significance markers:
 
 | Marker | Meaning |
 |--------|---------|
-| `*` | `p_adj <= 0.05` |
+| `*` | `p_adj <= fdr_alpha` (default 0.05) |
 | `**` | `p_adj <= 0.01` |
 | `***` | `p_adj <= 0.001` |
 
@@ -143,7 +144,7 @@ Some plugins also use:
 | Equal values across all replicates in both groups | p-value = 1.0, Cohen's d = 0.0 (`"negligible"`). |
 | Single condition | No pairwise tests are generated; ANOVA is skipped. |
 | Two conditions | Pairwise tests run normally; ANOVA is skipped (requires >= 3 conditions). |
-| Tukey HSD with fewer than 2 groups or fewer than 2 observations per group | Raises `ValueError`. |
+| Tukey HSD with fewer than 2 groups or fewer than 2 observations per group | Returns empty results (no pairs generated). |
 | Zero control mean | Percent change returns `inf` or `-inf`; `NaN` if both means are non-finite. |
 
 ---

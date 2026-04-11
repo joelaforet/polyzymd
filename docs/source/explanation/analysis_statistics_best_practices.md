@@ -318,9 +318,10 @@ hypothesis is true.
 
 ### Benjamini-Hochberg Procedure
 
-PolyzyMD uses the **Benjamini-Hochberg (BH)** step-up procedure to control the
-**false discovery rate** (FDR) — the expected proportion of false positives
-among rejected hypotheses. The algorithm:
+When `posthoc_method` is `"ttest_bh"` (the default), PolyzyMD uses the
+**Benjamini-Hochberg (BH)** step-up procedure to control the **false discovery
+rate** (FDR) — the expected proportion of false positives among rejected
+hypotheses. The algorithm:
 
 1. Rank all *m* p-values in ascending order: $p_{(1)} \le p_{(2)} \le \dots \le p_{(m)}$.
 2. For each rank *k*, compare $p_{(k)}$ to the threshold $(k / m) \times \alpha$.
@@ -342,17 +343,52 @@ Each plugin defines its own hypothesis family:
 - **Polymer affinity** — Same pattern as binding free energy: one family per
   temperature group.
 
+### Tukey's HSD Alternative
+
+When `posthoc_method` is `"tukey_hsd"`, PolyzyMD uses **Tukey's Honestly
+Significant Difference** test instead of pairwise t-tests. Tukey HSD tests all
+pairs simultaneously using a single studentized range distribution, controlling
+the **family-wise error rate** (FWER) rather than FDR.
+
+Key differences from BH-corrected t-tests:
+
+- Tukey HSD is best suited for balanced designs (equal replicates per condition).
+- It assumes equal variance across conditions.
+- No separate FDR correction is needed — Tukey p-values are already family-wise
+  corrected.
+- The `p_value_adjusted` field mirrors `p_value` for Tukey results.
+- The `t_statistic` field is `NaN` for Tukey results (the test uses the
+  studentized range distribution, not a t-distribution).
+
+Choose Tukey HSD when all conditions are equally important and sample sizes are
+similar. Choose BH-corrected t-tests when you have specific pairs of interest
+or heterogeneous sample sizes.
+
 ### The `fdr_alpha` Parameter
 
-`fdr_alpha` is configured per plugin in `comparison.yaml` under the `plugins:`
-block. The default is 0.05. Lowering the value (e.g., 0.01) makes the
-correction more conservative; raising it allows more discoveries at the cost of
-a higher expected false positive rate.
+`fdr_alpha` is configured in the `defaults:` block of `comparison.yaml`
+(applies to all plugins using the default comparison pipeline) or per plugin
+in the `plugins:` block for plugins with their own `fdr_alpha` setting. The
+default is 0.05.
+
+When `posthoc_method` is `"ttest_bh"`, `fdr_alpha` controls the BH
+false-discovery-rate threshold. When `posthoc_method` is `"tukey_hsd"`,
+`fdr_alpha` is used as the family-wise alpha threshold for determining
+significance. It is also used as the ANOVA significance threshold regardless
+of post-hoc method.
+
+Lowering the value (e.g., 0.01) makes the correction more conservative;
+raising it allows more discoveries at the cost of a higher expected false
+positive rate.
 
 ```yaml
+defaults:
+  fdr_alpha: 0.01  # More conservative than default (applies to all plugins)
+  posthoc_method: "ttest_bh"  # or "tukey_hsd"
+
 plugins:
   contacts:
-    fdr_alpha: 0.01  # More conservative than default
+    fdr_alpha: 0.01  # Per-plugin override (takes precedence for this plugin)
 ```
 
 ### Raw vs Adjusted p-Values
@@ -370,7 +406,7 @@ statistical error:
 | Problem | Scope | PolyzyMD Solution |
 |---------|-------|-------------------|
 | **Autocorrelation** | Within a single trajectory — consecutive frames are not independent | Correct SEM via $N_{\text{eff}}$ or subsample by 2τ (see earlier sections) |
-| **Multiple comparisons** | Across conditions — many hypothesis tests inflate false positives | BH correction on pairwise p-values |
+| **Multiple comparisons** | Across conditions — many hypothesis tests inflate false positives | BH correction on pairwise p-values (`ttest_bh`) or Tukey HSD FWER control (`tukey_hsd`) |
 
 Both corrections are important. Autocorrelation handling ensures that the
 per-condition uncertainty is not artificially small; FDR correction ensures

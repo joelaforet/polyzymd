@@ -71,9 +71,11 @@ plugins:
 
 ### Setting Descriptions
 
-- **`fdr_alpha`** — Significance threshold for the Benjamini-Hochberg (BH)
-  false discovery rate correction applied to pairwise p-values. Lower values
-  are more conservative.
+- **`fdr_alpha`** — Significance threshold for pairwise comparisons. When
+  `posthoc_method` is `"ttest_bh"`, this controls the Benjamini-Hochberg false
+  discovery rate. When `posthoc_method` is `"tukey_hsd"`, this is the
+  family-wise alpha threshold. Also used as the ANOVA significance threshold.
+  Lower values are more conservative.
 - **`min_effect_size`** — Minimum Cohen's d required for practical
   significance. Pairs that meet or exceed this threshold are highlighted with
   "†" in formatted output; all pairs are shown regardless.
@@ -107,8 +109,8 @@ Experimental but still available:
 
 | Plugin | Default compare? | Primary metric | Key feature | Statistical method |
 |--------|-----------------|----------------|-------------|-------------------|
-| `rmsd` | Yes | `mean_rmsd` | Backbone stability over time | FDR-corrected pairwise t-tests + ANOVA |
-| `rg` | Yes | `mean_rg` | Protein compactness | FDR-corrected pairwise t-tests + ANOVA |
+| `rmsd` | No (custom) | `mean_rmsd` | Backbone stability over time | Per-run pairwise t-tests + ANOVA |
+| `rg` | No (custom) | `mean_rg` | Protein compactness | Per-run pairwise t-tests + ANOVA |
 | `rmsf` | Yes | `mean_rmsf` | Per-residue flexibility | FDR-corrected pairwise t-tests + ANOVA |
 | `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests per residue |
 | `distances` | No (custom) | Multiple distance metrics | Named distance pairs | Per-distance t-tests + ANOVA |
@@ -237,7 +239,8 @@ plateau, which may warrant longer production runs or additional replicates.
 - `Benjamini-Hochberg (BH)`: step-up procedure for controlling the false
   discovery rate across multiple hypothesis tests
 - `Adjusted p-value (p_adj)`: p-value corrected for multiple comparisons via
-  the BH procedure
+  the BH procedure (for `ttest_bh`) or family-wise Tukey adjustment (for
+  `tukey_hsd`)
 - `False Discovery Rate (FDR)`: expected proportion of false positives among
   rejected hypotheses
 - `Effect size threshold`: minimum Cohen's d required for a pairwise difference
