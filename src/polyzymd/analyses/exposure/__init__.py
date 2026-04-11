@@ -743,9 +743,9 @@ class ExposureAnalysis(Analysis):
         cond_a: Any,
         cond_b: Any,
         *,
-        fdr_alpha: float,
-        ttest_method: str,
-        posthoc_method: str,
+        fdr_alpha: float = 0.05,
+        ttest_method: str = "student",
+        posthoc_method: str = "ttest_bh",
     ) -> Any:
         """Compare two condition summaries statistically.
 
