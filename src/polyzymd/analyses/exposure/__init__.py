@@ -192,15 +192,12 @@ class ExposureAnalysis(Analysis):
             ExposureComparisonResult,
             ExposureConditionSummary,
         )
-        from polyzymd.analyses.shared.inferential_statistics import (
-            cohens_d,
-            independent_ttest,
-            one_way_anova,
-            percent_change,
-        )
-        from polyzymd.analyses.shared.statistics import compute_sem
+        from polyzymd.analyses.shared.inferential_statistics import one_way_anova
 
         settings = ctx.settings
+        fdr_alpha = ctx.fdr_alpha
+        ttest_method = ctx.ttest_method
+        posthoc_method = ctx.posthoc_method
 
         logger.info("Starting exposure dynamics comparison")
         logger.info(f"  Conditions: {len(ctx.conditions)}")
@@ -236,12 +233,24 @@ class ExposureAnalysis(Analysis):
                 if control_summary:
                     treatments = [s for s in summaries if s.label != effective_control]
                     for treatment in treatments:
-                        comp = self._compare_pair(control_summary, treatment)
+                        comp = self._compare_pair(
+                            control_summary,
+                            treatment,
+                            fdr_alpha=fdr_alpha,
+                            ttest_method=ttest_method,
+                            posthoc_method=posthoc_method,
+                        )
                         comparisons.append(comp)
             else:
                 for i, cond_a in enumerate(summaries):
                     for cond_b in summaries[i + 1 :]:
-                        comp = self._compare_pair(cond_a, cond_b)
+                        comp = self._compare_pair(
+                            cond_a,
+                            cond_b,
+                            fdr_alpha=fdr_alpha,
+                            ttest_method=ttest_method,
+                            posthoc_method=posthoc_method,
+                        )
                         comparisons.append(comp)
 
         # Step 4: ANOVA if 3+ conditions
@@ -253,7 +262,7 @@ class ExposureAnalysis(Analysis):
                 metric="chaperone_fraction",
                 f_statistic=result.f_statistic,
                 p_value=result.p_value,
-                significant=result.significant,
+                significant=result.p_value <= fdr_alpha,
             )
 
         # Step 5: Dual rankings
@@ -267,6 +276,9 @@ class ExposureAnalysis(Analysis):
             name="exposure_comparison",
             metric="chaperone_fraction",
             control_label=effective_control,
+            fdr_alpha=fdr_alpha,
+            ttest_method=ttest_method,
+            posthoc_method=posthoc_method,
             conditions=summaries,
             pairwise_comparisons=comparisons,
             anova=anova,
@@ -749,6 +761,10 @@ class ExposureAnalysis(Analysis):
     def _compare_pair(
         cond_a: Any,
         cond_b: Any,
+        *,
+        fdr_alpha: float,
+        ttest_method: str,
+        posthoc_method: str,
     ) -> Any:
         """Compare two condition summaries statistically.
 
@@ -776,7 +792,7 @@ class ExposureAnalysis(Analysis):
         mean_a = cond_a.mean_chaperone_fraction
         mean_b = cond_b.mean_chaperone_fraction
 
-        ttest = independent_ttest(values_a, values_b)
+        ttest = independent_ttest(values_a, values_b, method=ttest_method)
         effect = cohens_d(values_a, values_b)
         pct = percent_change(mean_a, mean_b)
 
@@ -793,10 +809,11 @@ class ExposureAnalysis(Analysis):
             metric="chaperone_fraction",
             t_statistic=ttest.t_statistic,
             p_value=ttest.p_value,
+            posthoc_method=posthoc_method,
             cohens_d=effect.cohens_d,
             effect_size_interpretation=effect.interpretation,
             direction=direction,
-            significant=ttest.significant,
+            significant=ttest.p_value <= fdr_alpha,
             percent_change=pct,
         )
 

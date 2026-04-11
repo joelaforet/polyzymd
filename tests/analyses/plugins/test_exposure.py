@@ -20,6 +20,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 # ===========================================================================
 # Discovery
@@ -122,19 +123,19 @@ class TestSettings:
     def test_invalid_threshold_zero(self):
         from polyzymd.analyses.exposure import ExposureSettings
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ExposureSettings(exposure_threshold=0.0)
 
     def test_invalid_threshold_one(self):
         from polyzymd.analyses.exposure import ExposureSettings
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ExposureSettings(exposure_threshold=1.0)
 
     def test_invalid_transient_bounds(self):
         from polyzymd.analyses.exposure import ExposureSettings
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ExposureSettings(transient_lower=0.8, transient_upper=0.2)
 
     def test_serialization_roundtrip(self):
@@ -512,6 +513,72 @@ class TestCompare:
             assert "SBMA" in cond_summary.polymer_types
             assert "charged" in cond_summary.aa_groups
             assert "SBMA" in cond_summary.enrichment_by_polymer_type
+
+    def test_compare_respects_context_fdr_alpha_for_pairwise_and_anova(self):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        analysis = ExposureAnalysis()
+        ctx = self._make_context(n_conditions=3, control="A")
+        ctx = type(ctx)(
+            name=ctx.name,
+            conditions=ctx.conditions,
+            excluded_conditions=ctx.excluded_conditions,
+            control_label=ctx.control_label,
+            analysis_dirs=ctx.analysis_dirs,
+            results_dir=ctx.results_dir,
+            equilibration=ctx.equilibration,
+            settings=ctx.settings,
+            recompute=ctx.recompute,
+            fdr_alpha=0.2,
+            ttest_method="welch",
+            posthoc_method="ttest_bh",
+        )
+
+        dynamics = _make_mock_dynamics()
+        enrichment = _make_mock_enrichment()
+
+        class _FakeTTest:
+            t_statistic = 1.23
+            p_value = 0.2
+
+            @property
+            def significant(self):
+                return False
+
+        class _FakeAnova:
+            f_statistic = 4.2
+            p_value = 0.2
+
+            @property
+            def significant(self):
+                return False
+
+        with (
+            patch.object(
+                analysis,
+                "_load_or_compute_replicate",
+                return_value=(dynamics, enrichment),
+            ),
+            patch(
+                "polyzymd.analyses.shared.inferential_statistics.independent_ttest",
+                return_value=_FakeTTest(),
+            ) as mock_ttest,
+            patch(
+                "polyzymd.analyses.shared.inferential_statistics.one_way_anova",
+                return_value=_FakeAnova(),
+            ),
+        ):
+            result = analysis.compare(ctx)
+
+        assert result is not None
+        assert result.fdr_alpha == pytest.approx(0.2)
+        assert result.ttest_method == "welch"
+        assert result.posthoc_method == "ttest_bh"
+        assert result.anova is not None
+        assert result.anova.significant is True
+        assert all(comp.significant is True for comp in result.pairwise_comparisons)
+        assert mock_ttest.call_count == 2
+        assert all(call.kwargs["method"] == "welch" for call in mock_ttest.call_args_list)
 
 
 # ===========================================================================

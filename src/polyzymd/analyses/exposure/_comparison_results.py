@@ -114,6 +114,12 @@ class ExposureComparisonResult(BaseComparisonResult[ExposureConditionSummary, Pa
         Comparison project name.
     control_label : str, optional
         Label of the control condition.
+    fdr_alpha : float
+        Significance threshold used for pairwise tests and ANOVA.
+    ttest_method : str
+        Two-sample t-test method used for pairwise comparisons.
+    posthoc_method : str
+        Post-hoc method label attached to pairwise results.
     conditions : list[ExposureConditionSummary]
         Summary for each condition.
     pairwise_comparisons : list[PairwiseResult]
@@ -137,6 +143,9 @@ class ExposureComparisonResult(BaseComparisonResult[ExposureConditionSummary, Pa
     comparison_type: ClassVar[str] = "exposure"
 
     metric: str = "chaperone_fraction"
+    fdr_alpha: float = 0.05
+    ttest_method: str = "student"
+    posthoc_method: str = "ttest_bh"
     conditions: list[ExposureConditionSummary] = Field(default_factory=list)
     pairwise_comparisons: list[PairwiseResult] = Field(default_factory=list)
     ranking_by_transient_fraction: list[str] = Field(
