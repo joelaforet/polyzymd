@@ -182,6 +182,11 @@ def compute_sasa(
     -------
     SASAComputationResult
         Raw atom-level, residue-level, and total SASA traces in Å².
+
+    Raises
+    ------
+    ValueError
+        If frame bounds or stride/chunk parameters are invalid.
     """
     import mdtraj as md
 
@@ -189,6 +194,19 @@ def compute_sasa(
         raise ValueError("chunk_size must be >= 1")
     if stride <= 0:
         raise ValueError("stride must be >= 1")
+
+    trajectory_length = len(universe.trajectory)
+    if start_frame < 0:
+        raise ValueError(f"start_frame must be >= 0, got {start_frame}")
+    if stop_frame > trajectory_length:
+        raise ValueError(
+            f"stop_frame must be <= trajectory length ({trajectory_length}), got {stop_frame}"
+        )
+    if start_frame >= stop_frame:
+        raise ValueError(
+            "start_frame must be < stop_frame, got "
+            f"start_frame={start_frame}, stop_frame={stop_frame}"
+        )
 
     target_atoms, target_indices = resolve_selection_indices(
         universe,

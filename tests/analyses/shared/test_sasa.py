@@ -57,6 +57,9 @@ class _FakeTrajectory:
     def __init__(self, n_frames: int) -> None:
         self.n_frames = n_frames
 
+    def __len__(self) -> int:
+        return self.n_frames
+
     def __getitem__(self, idx: int):
         return idx
 
@@ -149,6 +152,75 @@ def test_multichain_warning_integration(caplog: pytest.LogCaptureFixture) -> Non
         )
 
     assert "matched atoms from multiple chains" in caplog.text
+
+
+class TestFrameBoundsValidation:
+    """compute_sasa should reject invalid frame bounds early."""
+
+    def _make_universe(self, n_frames: int = 10) -> _FakeUniverse:
+        target = _FakeAtomGroup([_FakeAtom(0, "A", 1, "ALA")])
+        context = _FakeAtomGroup([_FakeAtom(0, "A", 1, "ALA")])
+        return _FakeUniverse({"target": target, "context": context}, n_frames=n_frames)
+
+    def test_negative_start_frame(self) -> None:
+        universe = self._make_universe()
+        with pytest.raises(ValueError, match="start_frame must be >= 0"):
+            compute_sasa(
+                universe,
+                run_label="t",
+                target_selection="target",
+                context_selection="context",
+                probe_radius_nm=0.14,
+                n_sphere_points=960,
+                start_frame=-1,
+                stop_frame=5,
+                timestep_ps=10.0,
+            )
+
+    def test_stop_frame_exceeds_trajectory(self) -> None:
+        universe = self._make_universe(n_frames=5)
+        with pytest.raises(ValueError, match="stop_frame must be <= trajectory length"):
+            compute_sasa(
+                universe,
+                run_label="t",
+                target_selection="target",
+                context_selection="context",
+                probe_radius_nm=0.14,
+                n_sphere_points=960,
+                start_frame=0,
+                stop_frame=10,
+                timestep_ps=10.0,
+            )
+
+    def test_start_equals_stop(self) -> None:
+        universe = self._make_universe()
+        with pytest.raises(ValueError, match="start_frame must be < stop_frame"):
+            compute_sasa(
+                universe,
+                run_label="t",
+                target_selection="target",
+                context_selection="context",
+                probe_radius_nm=0.14,
+                n_sphere_points=960,
+                start_frame=3,
+                stop_frame=3,
+                timestep_ps=10.0,
+            )
+
+    def test_start_greater_than_stop(self) -> None:
+        universe = self._make_universe()
+        with pytest.raises(ValueError, match="start_frame must be < stop_frame"):
+            compute_sasa(
+                universe,
+                run_label="t",
+                target_selection="target",
+                context_selection="context",
+                probe_radius_nm=0.14,
+                n_sphere_points=960,
+                start_frame=5,
+                stop_frame=2,
+                timestep_ps=10.0,
+            )
 
 
 def test_compute_sasa_enforces_subset(monkeypatch: pytest.MonkeyPatch) -> None:
