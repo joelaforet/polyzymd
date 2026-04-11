@@ -23,9 +23,10 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   `AnalysisSettingsRegistry`, and `ComparisonSettingsRegistry` (plus all 16
   `@register` decorators) were deleted from `compare/registries.py` during
   the initial OCP refactor.
-- **`compare/plotters/` directory removed.**  All per-analysis plotting code has
-  been inlined into each plugin's package.  `compare/plotter.py` (plot-all
-  orchestrator) has been rewritten to delegate to plugins.
+- **`compare/plotters/` directory removed.**  All per-analysis plotting code
+  now lives in each plugin's `_plotters.py` module.  The orchestrator
+  (`analyses/orchestrator.py`) delegates plotting to each plugin's `plot()`
+  method.
 - **`compare/formatters.py` removed.**  RMSF-specific formatters moved to
   `analyses/rmsf/`.
 - **`compare/comparators/` directory removed.**  All 11 old comparator files
@@ -59,8 +60,8 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   `aggregated_results` fields.  Orchestrator warns on undeclared plugin
   dependencies.
 - **`cohens_d()` default corrected.**  `rmsf_mode` default changed from `True`
-  to `False` in `compare/statistics.py` so the general-purpose function is not
-  biased toward one analysis type.
+  to `False` in `analyses/shared/inferential_statistics.py` so the
+  general-purpose function is not biased toward one analysis type.
 - **Unified `run` command.**  `polyzymd run --engine gromacs|openmm` replaces the
   old `run-gromacs` command.  OpenMM engine runs simulations locally using the
   existing runner infrastructure.  (`cli/main.py`)
@@ -81,12 +82,24 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 - **"Establishing Convergence" documentation.**  New Explanation page covering
   convergence concepts, the sliding-window algorithm, parameter tuning, and
   limitations.  (`docs/source/explanation/convergence_detection.md`)
+- **Benjamini-Hochberg FDR correction.**  Pairwise t-tests are now corrected
+  for multiple comparisons across the full family of tests.  Configurable via
+  `fdr_alpha` in `comparison.yaml` defaults.  (`analyses/stats.py`,
+  `analyses/shared/inferential_statistics.py`)
+- **Configurable t-test method.**  `ttest_method` in `comparison.yaml` defaults
+  selects Student's (`"student"`, default) or Welch's (`"welch"`) t-test for
+  pairwise comparisons.  (`analyses/shared/defaults.py`, `analyses/stats.py`)
+- **Structured exception hierarchy.**  `AnalysisError`, `ReplicateError`,
+  `AggregationError`, `ComparisonError`, `PlotError`, and
+  `PluginContractError` in `analyses/exceptions.py` replace generic
+  `Exception` raises throughout the orchestrator.
 
 ### Changed
 
 - **All analysis plugins are now packages.**  Each plugin lives in
-  `analyses/<name>/` with `__init__.py` (plugin class), `_comparison_results.py`
-  (result models), and optional `_plotting.py`, `_formatters.py` modules.
+  `analyses/<name>/` with `__init__.py` (plugin class) and optional private
+  modules (`_plotters.py`, `_results.py`, `_comparison_results.py`,
+  `_formatters.py`, `_aggregator.py`) as needed.
   Single-file plugins no longer exist.
 - **Plugin-specific code co-located.**  Result models, formatters, plotters, and
   settings that were previously scattered across `compare/results/`,
@@ -148,17 +161,24 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   (`analyses/rmsd/_plotters.py`)
 - **File descriptor leaks.**  NPZ file loading in RMSD plotters now uses context
   managers.  (`analyses/rmsd/_plotters.py`)
+- **Scaffold test path corrected.**  `new-analysis` now generates test files at
+  `tests/analyses/plugins/test_<name>.py` matching the project's test layout.
+  (`cli/scaffold.py`)
+- **Unused imports removed.**  Cleaned up stale imports across `cli/main.py`,
+  `workflow/daisy_chain.py`, and several analysis plugins.
+- **`Optional[X]` → `X | None` migration.**  Updated type annotations in
+  `cli/main.py` and `workflow/daisy_chain.py` to use Python 3.10+ union syntax.
 
 ### Documentation
 
-- Updated `docs/source/tutorials/extending_analyses.md` with scaffold command
-  as the primary entry point for contributors.
+- Updated `docs/source/contributor_guide/extending_analyses.md` with scaffold
+  command as the primary entry point for contributors.
 - Updated `AGENTS.md` and `.opencode/instructions/` for refactored layout.
-- Updated `docs/source/api/compare.md` to remove stale module references.
+- Removed stale `api/compare.md` API page (module no longer exists).
 
 ### Tests
 
-- 1,484 tests passing (6 skipped), up from 908 at branch start.
+- 1,490 tests passing (6 skipped), up from 908 at branch start.
 - Added scaffold tests (name validation, class-name validation, file
   generation, code quality, CliRunner integration).
 - Full test suite reorganized to mirror source layout (`tests/analyses/plugins/`,
@@ -169,6 +189,9 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 - **Config hash mismatch warning prints 66+ times.**  The warning should print
   once per analysis run but currently fires per-frame.  Does not affect results.
+- **Contact criteria cutoff not included in cache key.**  Changing the contacts
+  cutoff (e.g. 4.0 Å → 4.5 Å) does not invalidate cached results.  Clear the
+  analysis output directory manually when changing cutoff values.
 
 ## [1.2.1] - 2026-04-01
 

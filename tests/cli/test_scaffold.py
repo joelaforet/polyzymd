@@ -592,3 +592,18 @@ class TestNewAnalysisCLI:
             ["solvent_shell", "--project-root", str(self.root), "--force"],
         )
         assert result.exit_code == 0, result.output
+
+    def test_help_shows_correct_test_path(self, runner: CliRunner, cli):
+        """Help text should reference the nested test layout."""
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        assert "tests/analyses/plugins/test_<NAME>.py" in result.output
+
+    def test_success_message_shows_correct_test_path(self, runner: CliRunner, cli):
+        """Success message should reference the correct pytest command."""
+        result = runner.invoke(
+            cli,
+            ["solvent_shell", "--project-root", str(self.root)],
+        )
+        assert result.exit_code == 0, result.output
+        assert "tests/analyses/plugins/test_solvent_shell.py" in result.output

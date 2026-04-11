@@ -2707,7 +2707,7 @@ def new_analysis(
 
     \b
       src/polyzymd/analyses/<NAME>/__init__.py    — plugin class
-      tests/test_<NAME>_plugin.py                 — smoke tests
+      tests/analyses/plugins/test_<NAME>.py       — smoke tests
 
     Styles:
 
@@ -2718,7 +2718,7 @@ def new_analysis(
     Run the generated tests with:
 
     \b
-      pixi run -e build pytest tests/test_<NAME>_plugin.py -v
+      pixi run -e build pytest tests/analyses/plugins/test_<NAME>.py -v
     """
     from polyzymd.cli.scaffold import generate_scaffold, validate_class_name, validate_name
 
@@ -2771,7 +2771,7 @@ def new_analysis(
     if not dry_run:
         colored_echo(f"\nPlugin '{name}' scaffolded successfully!", phase="cli")
         colored_echo(
-            f"Run tests: pixi run -e build pytest tests/test_{name}_plugin.py -v",
+            f"Run tests: pixi run -e build pytest tests/analyses/plugins/test_{name}.py -v",
             phase="cli",
         )
 
