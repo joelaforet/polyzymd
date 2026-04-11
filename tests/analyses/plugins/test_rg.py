@@ -698,6 +698,47 @@ def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> 
     assert backbone.per_replicate_means == pytest.approx([14.5, 15.0, 15.5])
 
 
+def test_aggregate_uses_median_for_overall_median(condition: Condition, tmp_path: Path) -> None:
+    """aggregate should use median of replicate medians for overall_median."""
+    analysis = RgAnalysis()
+    settings = RgSettings(
+        runs=[RgRunSettings(label="protein_backbone", selection="protein and name CA")]
+    )
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2, 3),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+    replicate_medians = [1.0, 2.0, 100.0]
+    results = [
+        RgResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=rep,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            run_results=[
+                _make_run_result(rep, "protein_backbone", 10.0 + float(rep)).model_copy(
+                    update={"median_rg": median}
+                )
+            ],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=["/fake/traj.dcd"],
+        )
+        for rep, median in zip((1, 2, 3), replicate_medians)
+    ]
+
+    aggregated = analysis.aggregate(ctx, results)
+
+    backbone = next(run for run in aggregated.run_results if run.run_label == "protein_backbone")
+    assert backbone.per_replicate_medians == pytest.approx(replicate_medians)
+    assert backbone.overall_median == pytest.approx(2.0)
+
+
 def test_compare_two_conditions(tmp_path: Path) -> None:
     """compare with two conditions should produce pairwise results without ANOVA."""
     analysis = RgAnalysis()

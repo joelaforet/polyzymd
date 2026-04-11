@@ -287,7 +287,7 @@ class RgAnalysis(Analysis):
             per_medians = [entry.median_rg for entry in run_entries]
 
             mean_stats = compute_sem(per_means)
-            overall_median = float(np.mean(np.asarray(per_medians, dtype=np.float64)))
+            overall_median = float(np.median(np.asarray(per_medians, dtype=np.float64)))
 
             template = run_entries[0]
 
