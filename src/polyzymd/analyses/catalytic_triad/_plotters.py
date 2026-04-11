@@ -894,10 +894,13 @@ def _load_and_pool_replicate_distances(
         result_file = rep_dir / "triad_result.json"
 
         if not result_file.exists():
-            # Try alternative naming
-            result_files = list(rep_dir.glob("*.json"))
+            result_files = list(rep_dir.glob("triad_*.json"))
             if result_files:
                 result_file = result_files[0]
+                logger.warning(
+                    f"Expected triad_result.json not found in {rep_dir}; "
+                    f"falling back to {result_file.name}"
+                )
             else:
                 logger.debug(f"No triad result found in {rep_dir}")
                 continue
@@ -923,7 +926,7 @@ def _load_and_pool_replicate_distances(
                             pair_labels.append(pair_label)
                     pooled_by_pair[pair_label].append(np.array(distances))
 
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.warning(f"Failed to load {result_file}: {e}")
             continue
 
@@ -969,10 +972,13 @@ def _load_aggregated_results(
         # Find aggregated result file
         result_file = aggregated_dir / "triad_aggregated.json"
         if not result_file.exists():
-            # Try to find any JSON in aggregated dir
-            json_files = list(aggregated_dir.glob("*.json"))
+            json_files = list(aggregated_dir.glob("triad_*.json"))
             if json_files:
                 result_file = json_files[0]
+                logger.warning(
+                    f"Expected triad_aggregated.json not found in {aggregated_dir}; "
+                    f"falling back to {result_file.name}"
+                )
             else:
                 logger.debug(f"No aggregated triad result in {aggregated_dir}")
                 continue
@@ -980,7 +986,7 @@ def _load_aggregated_results(
         try:
             result = TriadAggregatedResult.load(result_file)
             results[label] = result
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.warning(f"Failed to load aggregated result {result_file}: {e}")
 
     return results

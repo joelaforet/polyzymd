@@ -300,7 +300,7 @@ def _plot_rmsf_comparison_from_aggregated(
                 means.append(mean_val)
                 sems.append(sem_val)
 
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.warning(f"Failed to load aggregated RMSF for {label}: {e}")
 
     if not plot_labels:
@@ -514,6 +514,6 @@ def _load_rmsf_profile(aggregated_dir: Path) -> dict | None:
 
         return None
 
-    except Exception as e:
+    except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
         logger.debug(f"Failed to load RMSF profile from {result_file}: {e}")
         return None

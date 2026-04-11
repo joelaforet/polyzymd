@@ -230,7 +230,7 @@ def _plot_ss_content_bars(
             helix_reps.append(agg.get("per_replicate_helix", []))
             strand_reps.append(agg.get("per_replicate_strand", []))
             coil_reps.append(agg.get("per_replicate_coil", []))
-        except Exception as exc:
+        except (OSError, json_mod.JSONDecodeError, KeyError, ValueError) as exc:
             logger.warning(f"Failed to load aggregated SS for {label}: {exc}")
 
     if not cond_labels:
@@ -351,7 +351,7 @@ def _plot_ss_individual_bars(
             ss_data["coil"]["means"].append(agg.get("mean_overall_coil", 0.0))
             ss_data["coil"]["sems"].append(agg.get("sem_overall_coil", 0.0))
             ss_data["coil"]["reps"].append(agg.get("per_replicate_coil", []))
-        except Exception as exc:
+        except (OSError, json_mod.JSONDecodeError, KeyError, ValueError) as exc:
             logger.warning(f"Failed to load aggregated SS for {label}: {exc}")
 
     if not cond_labels:
@@ -410,7 +410,7 @@ def _plot_ss_persistence_diff_heatmap(
                     "helix": np.array(helix_persist),
                     "residue_ids": residue_ids,
                 }
-        except Exception as exc:
+        except (OSError, json_mod.JSONDecodeError, KeyError, ValueError) as exc:
             logger.warning(f"Failed to load SS persistence for {label}: {exc}")
 
     if len(persistence_data) < 2:
@@ -549,7 +549,8 @@ def _load_ss_timeline_matrix(cond_data: dict[str, Any]) -> tuple[np.ndarray | No
             with json_files[0].open() as handle:
                 result_data = json_mod.load(handle)
             residue_ids = result_data.get("residue_ids", [])
-        except Exception:
+        except (OSError, json_mod.JSONDecodeError, KeyError, ValueError) as exc:
+            logger.debug(f"Failed to load residue IDs from JSON: {exc}")
             residue_ids = []
 
         try:
@@ -558,7 +559,7 @@ def _load_ss_timeline_matrix(cond_data: dict[str, Any]) -> tuple[np.ndarray | No
             if not residue_ids:
                 residue_ids = list(range(1, matrix.shape[1] + 1))
             return matrix, residue_ids
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             logger.debug(f"Failed to load NPZ from {npz_files[0]}: {exc}")
 
     return None, []
