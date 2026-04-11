@@ -14,10 +14,9 @@ Integer encoding
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import numpy as np
 from pydantic import Field

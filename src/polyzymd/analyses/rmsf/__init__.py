@@ -22,7 +22,6 @@ from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
     BasePlotSettings,
-    ComparisonContext,
     MetricValue,
     PlotContext,
     ReplicateContext,
