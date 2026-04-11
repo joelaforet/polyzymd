@@ -2,9 +2,30 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 
-from polyzymd.analyses.stats import format_pct
+
+def _format_pct(pct: float) -> str:
+    """Format percent changes for multi-run output helpers.
+
+    Parameters
+    ----------
+    pct : float
+        Percent change value.
+
+    Returns
+    -------
+    str
+        Human-readable percent text with special handling for infinities and NaN.
+    """
+    pct = pct + 0.0
+
+    if math.isnan(pct):
+        return "undefined"
+    if math.isinf(pct):
+        return "new (baseline=0)" if pct > 0 else "gone (current=0)"
+    return f"{pct:+.1f}%"
 
 
 def make_section_title(title: str, width: int) -> list[str]:
@@ -42,7 +63,7 @@ def format_pairwise_line(
     sig_marker = "*" if significant else ""
     return (
         f"{prefix}: {condition_b} vs {condition_a} — "
-        f"Δ={format_pct(percent_change)}, p={p_value:.3f} {sig_marker}, "
+        f"Δ={_format_pct(percent_change)}, p={p_value:.3f} {sig_marker}, "
         f"d={effect_size:.2f} ({effect_label}), {direction}"
     )
 

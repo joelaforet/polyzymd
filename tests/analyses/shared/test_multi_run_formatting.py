@@ -53,6 +53,21 @@ def test_format_pairwise_line() -> None:
     assert "stabilizing" in line
 
 
+def test_format_pairwise_line_handles_infinite_percent_change() -> None:
+    """Pairwise formatter should use baseline-zero percent-change wording."""
+    line = format_pairwise_line(
+        condition_a="Control",
+        condition_b="Treatment",
+        direction="stabilizing",
+        p_value=0.012,
+        effect_size=0.95,
+        effect_label="large",
+        percent_change=float("inf"),
+        significant=True,
+    )
+    assert "Δ=new (baseline=0)" in line
+
+
 def test_format_anova_and_markdown_bullet() -> None:
     """ANOVA and bullet format helpers should render expected text."""
     anova_line = format_anova_line(f_statistic=5.2, p_value=0.004, significant=True)
