@@ -7,8 +7,9 @@ that can add noise to distance and flexibility measurements.
 
 Reference Modes
 ---------------
-- **centroid**: Align to most populated conformational cluster (K-Means).
-  Best for measuring fluctuations around the equilibrium state.
+- **centroid**: Align to a representative aligned frame (closest to aligned
+  mean structure).
+  Best for measuring fluctuations around a representative equilibrium state.
 - **average**: Align to mathematical average structure.
   Best for pure thermal fluctuation analysis (note: average may have
   unphysical geometry).
@@ -82,7 +83,8 @@ class AlignmentConfig(BaseModel):
         When enabled, the user is notified via INFO-level logging.
     reference_mode : ReferenceMode
         How to select the reference structure:
-        - "centroid": Most populated cluster center (K-Means)
+
+        - "centroid": Representative aligned frame (closest to aligned mean)
         - "average": Mathematical average structure
         - "frame": Specific frame number
     reference_frame : int | None
@@ -93,7 +95,7 @@ class AlignmentConfig(BaseModel):
         this selection are used to compute the optimal rotation/translation.
         Default: "protein and name CA" (backbone alpha-carbons).
     centroid_selection : str
-        Selection for K-Means clustering when mode="centroid".
+        Selection for representative-frame detection when mode="centroid".
         Default: "protein" (all protein atoms for better discrimination).
 
     Examples
@@ -129,7 +131,7 @@ class AlignmentConfig(BaseModel):
     )
     centroid_selection: str = Field(
         default="protein",
-        description="Selection for K-Means clustering (centroid mode only)",
+        description="Selection for representative aligned frame detection (centroid mode only)",
     )
     reference_file: Path | None = Field(
         default=None,
@@ -246,9 +248,9 @@ def align_trajectory(
     ref_frame_idx: int | None = None
 
     if config.reference_mode == "centroid":
-        # Find most populated state via K-Means clustering
+        # Find representative aligned frame
         LOGGER.info(
-            f"Aligning trajectory to centroid (selection: '{config.selection}', "
+            f"Aligning trajectory to representative aligned frame (selection: '{config.selection}', "
             f"frames {start_frame}-{stop_frame})"
         )
 
@@ -259,7 +261,7 @@ def align_trajectory(
             stop_frame=stop_frame,
             verbose=False,  # We handle our own logging
         )
-        LOGGER.info(f"Found centroid at frame {ref_frame_idx} (0-indexed)")
+        LOGGER.info(f"Found representative aligned frame at {ref_frame_idx} (0-indexed)")
 
         # Align to centroid frame
         aligner = align.AlignTraj(
@@ -404,7 +406,10 @@ def get_alignment_description(config: AlignmentConfig) -> str:
         return "Alignment: disabled"
 
     if config.reference_mode == "centroid":
-        return f"Alignment: centroid mode (K-Means clustering), selection='{config.selection}'"
+        return (
+            "Alignment: centroid mode (representative aligned frame), "
+            f"selection='{config.selection}'"
+        )
     elif config.reference_mode == "average":
         return f"Alignment: average structure, selection='{config.selection}'"
     elif config.reference_mode == "frame":

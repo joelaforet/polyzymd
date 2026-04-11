@@ -1,4 +1,4 @@
-"""Centroid/representative frame finding utilities.
+"""Representative frame finding utilities.
 
 This module provides functions to find representative frames from MD trajectories
 using different methods. The representative frame is commonly used as a reference
@@ -6,11 +6,11 @@ for trajectory alignment before RMSF calculations.
 
 Methods
 -------
-centroid (K-Means clustering)
-    Finds the frame closest to the center of the most populated cluster.
+centroid (aligned-mean representative frame)
+    Finds the frame closest to the aligned mean structure.
     Uses all protein atoms by default to capture side chain conformations.
-    Best for: Finding the equilibrium conformation where the protein spends
-    the most time during the simulation.
+    Best for: Finding a representative equilibrium conformation while
+    removing rigid-body translation and rotation effects.
 
 average
     Aligns to an average structure computed from all frames.
@@ -46,6 +46,70 @@ from polyzymd.analyses.shared.alignment import ReferenceMode
 LOGGER = logging.getLogger(__name__)
 
 
+def _kabsch_align_to_reference(
+    coordinates: NDArray[np.float64],
+    reference: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Align coordinates to a reference with Kabsch superposition.
+
+    Parameters
+    ----------
+    coordinates : NDArray[np.float64]
+        Coordinates to align with shape (n_atoms, 3).
+    reference : NDArray[np.float64]
+        Reference coordinates with shape (n_atoms, 3).
+
+    Returns
+    -------
+    NDArray[np.float64]
+        Coordinates aligned to the centered reference.
+    """
+    centered = coordinates - np.mean(coordinates, axis=0)
+    ref_centered = reference - np.mean(reference, axis=0)
+
+    covariance = centered.T @ ref_centered
+    u_matrix, _, v_t = np.linalg.svd(covariance)
+
+    rotation = u_matrix @ v_t
+    if np.linalg.det(rotation) < 0:
+        u_matrix[:, -1] *= -1.0
+        rotation = u_matrix @ v_t
+
+    return centered @ rotation
+
+
+def _find_frame_closest_to_aligned_mean(coordinates: NDArray[np.float64]) -> tuple[int, float]:
+    """Find frame closest to aligned mean coordinates.
+
+    Parameters
+    ----------
+    coordinates : NDArray[np.float64]
+        Raw coordinates with shape (n_frames, n_atoms, 3).
+
+    Returns
+    -------
+    tuple[int, float]
+        Relative index of frame closest to the aligned mean structure and the
+        corresponding RMSD to aligned mean.
+    """
+    if coordinates.ndim != 3:
+        raise ValueError("coordinates must have shape (n_frames, n_atoms, 3)")
+
+    n_frames = coordinates.shape[0]
+    if n_frames == 1:
+        return 0, 0.0
+
+    reference = coordinates[0]
+    aligned = np.empty_like(coordinates)
+    for frame_idx in range(n_frames):
+        aligned[frame_idx] = _kabsch_align_to_reference(coordinates[frame_idx], reference)
+
+    mean_coordinates = np.mean(aligned, axis=0)
+    rmsd_to_mean = np.sqrt(np.mean((aligned - mean_coordinates) ** 2, axis=(1, 2)))
+    relative_idx = int(np.argmin(rmsd_to_mean))
+    return relative_idx, float(rmsd_to_mean[relative_idx])
+
+
 def find_centroid_frame(
     universe: "Universe",
     selection: str = "protein",
@@ -53,23 +117,24 @@ def find_centroid_frame(
     stop_frame: int | None = None,
     verbose: bool = True,
 ) -> int:
-    """Find the most representative frame using K-Means clustering.
+    """Find a representative aligned frame.
 
-    This function identifies the frame that best represents the most populated
-    conformational state in the trajectory. It uses K-Means clustering with
-    a single cluster to find the centroid of all conformations, then returns
-    the actual frame closest to that centroid.
+    This function identifies the frame closest to the aligned mean structure.
+    It first performs rigid-body alignment of each frame to a common reference,
+    computes the mean coordinates in aligned space, then returns the trajectory
+    frame with minimum RMSD to that aligned mean.
 
-    The approach finds where the protein spends most of its time during the
-    simulation, making it suitable as a reference for RMSF calculations when
-    you want to measure flexibility around the equilibrium state.
+    This approach avoids contamination from translation/rotation and provides a
+    scientifically defensible representative frame for downstream alignment and
+    RMSF calculations.
 
     Parameters
     ----------
     universe : MDAnalysis.Universe
         Universe containing the trajectory to analyze.
     selection : str, optional
-        MDAnalysis selection string for atoms to use in clustering.
+        MDAnalysis selection string for atoms used to find the representative
+        frame.
         Default is "protein" (all protein atoms) to capture both backbone
         and side chain conformations.
     start_frame : int, optional
@@ -83,17 +148,14 @@ def find_centroid_frame(
     Returns
     -------
     int
-        Index of the most representative frame (0-indexed, relative to full
-        trajectory, not to start_frame).
+        Index of the representative frame (0-indexed, relative to full
+        trajectory, not to ``start_frame``).
 
     Notes
     -----
-    The algorithm:
-    1. Extract coordinates for selected atoms across all frames in range
-    2. Reshape to 2D array: (n_frames, n_atoms * 3)
-    3. Perform K-Means clustering with k=1 to find the centroid
-    4. Find the frame with minimum Euclidean distance to the centroid
-    5. Return the index of that frame (adjusted for start_frame offset)
+    The algorithm aligns all candidate frames to a common reference frame,
+    computes the aligned mean structure, then selects the frame with minimum
+    RMSD to that mean.
 
     Using all protein atoms (default) rather than just CA atoms captures
     the full conformational state including side chain rotamers.
@@ -104,7 +166,7 @@ def find_centroid_frame(
     >>> u = mda.Universe("topology.pdb", "trajectory.dcd")
     >>> # Find centroid after 100 frames of equilibration
     >>> centroid_idx = find_centroid_frame(u, start_frame=100)
-    >>> print(f"Most representative frame: {centroid_idx}")
+    >>> print(f"Representative aligned frame: {centroid_idx}")
 
     >>> # Use only backbone atoms
     >>> centroid_idx = find_centroid_frame(u, selection="protein and backbone")
@@ -113,15 +175,7 @@ def find_centroid_frame(
     --------
     find_reference_frame : High-level function supporting multiple methods
     """
-    try:
-        from sklearn.cluster import KMeans
-    except ImportError:
-        raise ImportError(
-            "scikit-learn is required for centroid frame finding.\n"
-            "Install with: pip install scikit-learn"
-        )
-
-    # Select atoms for clustering
+    # Select atoms for representative-frame calculation
     atoms = universe.select_atoms(selection)
     if len(atoms) == 0:
         from polyzymd.analyses.shared.diagnostics import get_selection_diagnostics
@@ -130,7 +184,9 @@ def find_centroid_frame(
         raise ValueError(f"Selection '{selection}' matched no atoms.\n\n{diag}")
 
     if verbose:
-        LOGGER.info(f"Finding centroid frame using {len(atoms)} atoms from '{selection}'")
+        LOGGER.info(
+            f"Finding representative aligned frame using {len(atoms)} atoms from '{selection}'"
+        )
 
     # Determine frame range
     n_frames_total = len(universe.trajectory)
@@ -153,41 +209,24 @@ def find_centroid_frame(
         LOGGER.info("Collecting coordinates...")
 
     coordinates = np.empty((n_frames, len(atoms), 3), dtype=np.float64)
-    for i, ts in enumerate(universe.trajectory[start_frame:stop_frame]):
+    for i, _ in enumerate(universe.trajectory[start_frame:stop_frame]):
         coordinates[i] = atoms.positions
 
-    # Reshape to 2D for K-Means: (n_frames, n_atoms * 3)
-    n_atoms = len(atoms)
-    coordinates_reshaped = coordinates.reshape(n_frames, n_atoms * 3)
-
     if verbose:
-        LOGGER.info("Performing K-Means clustering...")
+        LOGGER.info("Aligning frames and selecting representative frame...")
 
-    # K-Means with 1 cluster to find centroid
-    kmeans = KMeans(n_clusters=1, random_state=42, n_init=10)
-    kmeans.fit(coordinates_reshaped)
-
-    # Get cluster center and reshape back
-    cluster_center = kmeans.cluster_centers_[0]
-    cluster_center_reshaped = cluster_center.reshape(n_atoms, 3)
-
-    if verbose:
-        LOGGER.info("Finding frame closest to centroid...")
-
-    # Find frame closest to centroid (Euclidean distance across all atoms)
-    distances = np.linalg.norm(coordinates - cluster_center_reshaped, axis=(1, 2))
-    relative_idx = int(np.argmin(distances))
+    relative_idx, rmsd_to_mean = _find_frame_closest_to_aligned_mean(coordinates)
 
     # Convert to absolute frame index
-    centroid_frame_idx = relative_idx + start_frame
+    representative_frame_idx = relative_idx + start_frame
 
     if verbose:
         LOGGER.info(
-            f"Most representative frame: {centroid_frame_idx} "
-            f"(distance to centroid: {distances[relative_idx]:.3f} Å)"
+            f"Representative aligned frame: {representative_frame_idx} "
+            f"(RMSD to aligned mean: {rmsd_to_mean:.3f} Å)"
         )
 
-    return centroid_frame_idx
+    return representative_frame_idx
 
 
 def find_reference_frame(
@@ -212,8 +251,8 @@ def find_reference_frame(
     mode : {"centroid", "average", "frame", "external"}, optional
         Method for selecting the reference. Default is "centroid".
 
-        - "centroid": K-Means clustering to find most populated state.
-          Returns the frame index closest to the cluster center.
+        - "centroid": Representative aligned frame mode.
+          Returns the frame index closest to the aligned mean structure.
         - "average": Use average structure as reference.
           Returns None (caller should use AverageStructure).
         - "frame": Use a specific frame specified by `specific_frame`.
@@ -248,7 +287,7 @@ def find_reference_frame(
 
     Examples
     --------
-    >>> # Find the most populated state (equilibrium conformation)
+    >>> # Find a representative aligned frame (equilibrium conformation)
     >>> ref_frame = find_reference_frame(u, mode="centroid", start_frame=100)
 
     >>> # Use average structure
@@ -260,7 +299,7 @@ def find_reference_frame(
 
     See Also
     --------
-    find_centroid_frame : Low-level centroid finding with K-Means
+    find_centroid_frame : Low-level representative frame selection
     """
     if mode == "centroid":
         return find_centroid_frame(
@@ -324,8 +363,8 @@ def get_reference_mode_description(mode: ReferenceMode) -> str:
     """
     descriptions = {
         "centroid": (
-            "Most populated state (K-Means centroid) - "
-            "measures flexibility around the equilibrium conformation"
+            "Representative aligned frame (closest to aligned mean) - "
+            "measures flexibility around a representative equilibrium conformation"
         ),
         "average": ("Average structure - pure thermal fluctuations around the mathematical mean"),
         "frame": (
