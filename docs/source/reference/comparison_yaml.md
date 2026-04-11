@@ -253,7 +253,14 @@ Binding free energy decomposition is experimental and under active development.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `units` | string | `"kT"` | Energy units: `"kT"`, `"kcal/mol"`, or `"kJ/mol"` |
+| `compute_binding_preference` | bool | `true` | Recompute binding preference from contacts if no cache is available |
 | `surface_exposure_threshold` | float | `0.2` | Minimum relative SASA for surface-exposed |
+| `enzyme_pdb_for_sasa` | path | `null` | Enzyme PDB for SASA computation |
+| `include_default_aa_groups` | bool | `true` | Include built-in amino acid class groups |
+| `protein_groups` | mapping | `null` | Custom residue groups: `{name: [resid, ...]}` |
+| `protein_partitions` | mapping | `null` | Mutually exclusive protein-group partitions |
+| `polymer_type_selections` | mapping | `null` | Custom MDAnalysis selections per polymer type |
+| `polymer_chain` | string | `"C"` | Chain ID used for polymer auto-detection |
 | `fdr_alpha` | float | `0.05` | FDR threshold |
 
 ### `plugins.polymer_affinity`
@@ -266,11 +273,14 @@ Polymer affinity scoring is experimental and under active development.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `compute_binding_preference` | bool | `true` | Recompute binding preference from contacts if no cache is available |
 | `surface_exposure_threshold` | float | `0.2` | Minimum relative SASA |
 | `enzyme_pdb_for_sasa` | path | `null` | Enzyme PDB for SASA computation |
 | `include_default_aa_groups` | bool | `true` | Use built-in AA groups |
 | `protein_groups` | mapping | `null` | Custom residue groups |
 | `protein_partitions` | mapping | `null` | Mutually exclusive partitions |
+| `polymer_type_selections` | mapping | `null` | Custom MDAnalysis selections per polymer type |
+| `polymer_chain` | string | `"C"` | Chain ID used for polymer auto-detection |
 | `fdr_alpha` | float | `0.05` | FDR threshold |
 
 ### `plugins.polymer_bridging`
