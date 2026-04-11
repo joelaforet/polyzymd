@@ -181,6 +181,15 @@ class TestSettings:
         assert s2.polymer_types == ["SBM", "EGM"]
         assert s2.compute_binding_preference is True
 
+    def test_settings_fingerprint_changes_with_cutoff(self):
+        from polyzymd.analyses.contacts import ContactsSettings
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        low = ContactsSettings(cutoff=4.0)
+        high = ContactsSettings(cutoff=4.5)
+
+        assert settings_fingerprint(low) != settings_fingerprint(high)
+
 
 # ---------------------------------------------------------------------------
 # compute_replicate
@@ -283,6 +292,54 @@ class TestComputeReplicate:
             result = analysis.compute_replicate(ctx, 1)
 
         assert result is None
+
+    def test_cache_filename_includes_settings_fingerprint(self, tmp_path):
+        from polyzymd.analyses.base import Condition, ReplicateContext
+        from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        analysis = ContactsAnalysis()
+        settings = ContactsSettings(cutoff=4.5)
+
+        mock_sim_config = MagicMock()
+        cond = Condition(
+            label="test",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1,),
+            sim_config=mock_sim_config,
+        )
+        ctx = ReplicateContext(
+            condition=cond,
+            replicate=1,
+            sim_config=mock_sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="10ns",
+            recompute=False,
+            settings=settings,
+        )
+
+        mock_result = _make_mock_contact_result(replicate=1)
+        expected_fp = settings_fingerprint(settings)
+
+        with (
+            patch("polyzymd.analyses.contacts.ParallelContactAnalyzer") as MockAnalyzer,
+            patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as MockLoader,
+            patch("MDAnalysis.Universe") as MockUniverse,
+        ):
+            mock_traj_info = MagicMock()
+            mock_traj_info.trajectory_files = [Path("/tmp/traj.xtc")]
+            mock_traj_info.topology_file = Path("/tmp/top.pdb")
+            MockLoader.return_value.get_trajectory_info.return_value = mock_traj_info
+
+            mock_universe = MagicMock()
+            mock_universe.trajectory.dt = 10.0
+            MockUniverse.return_value = mock_universe
+            MockAnalyzer.return_value.run.return_value = mock_result
+
+            analysis.compute_replicate(ctx, 1)
+
+        save_path = mock_result.save.call_args[0][0]
+        assert f"_s{expected_fp}_" in str(save_path)
 
 
 # ---------------------------------------------------------------------------

@@ -41,6 +41,14 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.exceptions import (
+    AggregationError,
+    AnalysisError,
+    ComparisonError,
+    PlotError,
+    PluginContractError,
+    ReplicateError,
+)
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -54,11 +62,11 @@ _ACCEPTABLE_RESULT_TYPES = (dict,)  # BaseModel checked separately (lazy import)
 
 
 def _check_result_type(result: Any, method: str, analysis_name: str) -> None:
-    """Warn if a plugin returns an unexpected type from a lifecycle method.
+    """Validate plugin return type for lifecycle methods.
 
-    Accepted types: ``dict``, ``pydantic.BaseModel`` subclass.  Anything
-    else still works (the framework serialises via ``json.dumps``), but
-    gets a one-time warning so plugin authors catch it early.
+    Accepted types are ``dict``, ``pydantic.BaseModel`` subclass, or ``None``.
+    Invalid returns violate the plugin contract and raise
+    :class:`PluginContractError`.
     """
     if result is None:
         return
@@ -72,10 +80,9 @@ def _check_result_type(result: Any, method: str, analysis_name: str) -> None:
             return
     except ImportError:
         pass
-    logger.warning(
-        f"{analysis_name}.{method}() returned {type(result).__name__} — "
-        f"expected dict or pydantic BaseModel.  The result will still be "
-        f"serialised, but typed results are strongly recommended."
+    raise PluginContractError(
+        f"{analysis_name}.{method}() returned {type(result).__name__}; "
+        "expected dict, pydantic BaseModel, or None"
     )
 
 
@@ -153,13 +160,14 @@ def _run_replicates(
                 analysis.save_result(result, result_path)
             results.append(result)
             successful.append(rep)
-        except FileNotFoundError as e:
+        except (FileNotFoundError, OSError) as e:
             logger.warning(f"  Skipping {condition.label} rep {rep}: data not found — {e}")
             failed.append(rep)
         except Exception as e:
-            logger.debug("Traceback for failed operation:", exc_info=True)
-            logger.warning(f"  Skipping {condition.label} rep {rep}: {type(e).__name__} — {e}")
-            failed.append(rep)
+            raise ReplicateError(
+                f"{analysis.name}: compute_replicate failed for "
+                f"condition='{condition.label}' replicate={rep}: {type(e).__name__}: {e}"
+            ) from e
 
     if len(results) < analysis.min_replicates:
         raise ValueError(
@@ -222,7 +230,15 @@ def run_replicate_once(
         settings=settings,
         result_path=result_path,
     )
-    result = analysis.compute_replicate(ctx, replicate)
+    try:
+        result = analysis.compute_replicate(ctx, replicate)
+    except (FileNotFoundError, OSError):
+        raise
+    except Exception as e:
+        raise ReplicateError(
+            f"{analysis.name}: compute_replicate failed for "
+            f"condition='{condition.label}' replicate={replicate}: {type(e).__name__}: {e}"
+        ) from e
     if result is None:
         return None
     _check_result_type(result, "compute_replicate", analysis.name)
@@ -298,7 +314,15 @@ def aggregate_condition_from_disk(
         settings=settings,
         result_path=agg_result_path,
     )
-    aggregated = analysis.aggregate(agg_ctx, loaded_results)
+    try:
+        aggregated = analysis.aggregate(agg_ctx, loaded_results)
+    except (FileNotFoundError, OSError):
+        raise
+    except Exception as e:
+        raise AggregationError(
+            f"{analysis.name}: aggregate failed for condition='{condition.label}': "
+            f"{type(e).__name__}: {e}"
+        ) from e
     _check_result_type(aggregated, "aggregate", analysis.name)
     if aggregated is not None:
         analysis.save_result(aggregated, agg_result_path)
@@ -378,19 +402,11 @@ def run_analysis(
                 continue
             results.append(result)
             successful.append(rep)
-        except FileNotFoundError as e:
+        except (FileNotFoundError, OSError) as e:
             logger.warning("  Skipping %s rep %d: data not found — %s", condition.label, rep, e)
             failed.append(rep)
-        except Exception as e:
-            logger.debug("Traceback for failed operation:", exc_info=True)
-            logger.warning(
-                "  Skipping %s rep %d: %s — %s",
-                condition.label,
-                rep,
-                type(e).__name__,
-                e,
-            )
-            failed.append(rep)
+        except ReplicateError:
+            raise
 
     if len(results) < analysis.min_replicates:
         raise ValueError(
@@ -426,7 +442,15 @@ def run_analysis(
         result_path=agg_result_path,
     )
 
-    aggregated = analysis.aggregate(agg_ctx, results)
+    try:
+        aggregated = analysis.aggregate(agg_ctx, results)
+    except (FileNotFoundError, OSError):
+        raise
+    except Exception as e:
+        raise AggregationError(
+            f"{analysis.name}: aggregate failed for condition='{condition.label}': "
+            f"{type(e).__name__}: {e}"
+        ) from e
     _check_result_type(aggregated, "aggregate", analysis.name)
     if aggregated is not None and (recompute or not agg_result_path.exists()):
         analysis.save_result(aggregated, agg_result_path)
@@ -724,7 +748,13 @@ def finalize_comparison_from_disk(
         aggregated_results=valid_aggregated_results,
     )
 
-    comparison_result = analysis.compare(comp_ctx)
+    try:
+        comparison_result = analysis.compare(comp_ctx)
+    except Exception as e:
+        raise ComparisonError(
+            f"{analysis.name}: compare failed for comparison='{config.name}': "
+            f"{type(e).__name__}: {e}"
+        ) from e
     if comparison_result is not None:
         analysis.save_result(comparison_result, comparison_result_path)
 
@@ -745,7 +775,12 @@ def finalize_comparison_from_disk(
         comparison_path=comparison_result_path,
         control_label=resolved_control,
     )
-    plots = analysis.plot(plot_ctx)
+    try:
+        plots = analysis.plot(plot_ctx)
+    except Exception as e:
+        raise PlotError(
+            f"{analysis.name}: plot failed for comparison='{config.name}': {type(e).__name__}: {e}"
+        ) from e
     return {
         "comparison": comparison_result,
         "comparison_path": comparison_result_path,
@@ -894,8 +929,7 @@ def run_comparison(
                 # Compare-only or compute-only plugin — None is expected
                 analysis_dirs[cond.label] = cond_dir
             # else: compare-only plugin — None is expected, not a failure
-        except Exception as e:
-            logger.debug("Traceback for failed operation:", exc_info=True)
+        except (AnalysisError, ValueError, FileNotFoundError, OSError) as e:
             logger.error(f"  {cond.label}: {type(e).__name__} — {e}")
             failed_conditions.append(cond)
 
@@ -1017,8 +1051,7 @@ def run_all_comparisons(
             results[analysis.name] = run_comparison(
                 analysis, config, recompute, equilibration=equilibration
             )
-        except Exception as e:
-            logger.debug("Traceback for failed operation:", exc_info=True)
+        except (AnalysisError, ValueError, FileNotFoundError, OSError) as e:
             logger.error(f"{analysis.name} comparison failed: {e}")
             results[analysis.name] = {"error": str(e)}
 

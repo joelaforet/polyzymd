@@ -18,6 +18,7 @@ from polyzymd.analyses.base import (
     MetricValue,
     ReplicateContext,
 )
+from polyzymd.analyses.exceptions import PluginContractError, ReplicateError
 from polyzymd.analyses.orchestrator import (
     aggregate_condition_from_disk,
     prepare_comparison_run,
@@ -333,7 +334,7 @@ class TestOrchestrator:
             min_replicates: ClassVar[int] = 2
 
             def compute_replicate(self, ctx, replicate):
-                raise RuntimeError("Always fails")
+                raise FileNotFoundError("Missing trajectory")
 
             def aggregate(self, ctx, results):
                 return None
@@ -345,6 +346,78 @@ class TestOrchestrator:
                 AlwaysFailAnalysis(),
                 toy_condition,
                 toy_settings,
+                equilibration="0ns",
+                output_dir=tmp_path,
+            )
+
+    def test_run_replicates_unexpected_failure_raises_replicate_error(
+        self, toy_condition, toy_settings, tmp_path
+    ):
+        """Unexpected compute failures should raise structured ReplicateError."""
+
+        class ExplodingAnalysis(Analysis):
+            name: ClassVar[str] = "exploding"
+            Settings: ClassVar[type] = ToySettings
+
+            def compute_replicate(self, ctx, replicate):
+                raise RuntimeError("boom")
+
+            def aggregate(self, ctx, results):
+                return None
+
+        from polyzymd.analyses.orchestrator import _run_replicates
+
+        with pytest.raises(ReplicateError, match="condition='Test Condition' replicate=1"):
+            _run_replicates(
+                ExplodingAnalysis(),
+                toy_condition,
+                toy_settings,
+                equilibration="0ns",
+                output_dir=tmp_path,
+            )
+
+    def test_run_analysis_rejects_invalid_compute_return_type(self, toy_condition, tmp_path):
+        """Invalid compute return types should fail plugin contract validation."""
+
+        class InvalidComputeAnalysis(Analysis):
+            name: ClassVar[str] = "invalid_compute"
+            Settings: ClassVar[type] = ToySettings
+            min_replicates: ClassVar[int] = 1
+
+            def compute_replicate(self, ctx, replicate):
+                return ["not", "valid"]
+
+            def aggregate(self, ctx, results):
+                return {"ok": True}
+
+        with pytest.raises(PluginContractError, match="invalid_compute.compute_replicate"):
+            run_analysis(
+                InvalidComputeAnalysis(),
+                toy_condition,
+                ToySettings(),
+                equilibration="0ns",
+                output_dir=tmp_path,
+            )
+
+    def test_run_analysis_rejects_invalid_aggregate_return_type(self, toy_condition, tmp_path):
+        """Invalid aggregate return types should fail plugin contract validation."""
+
+        class InvalidAggregateAnalysis(Analysis):
+            name: ClassVar[str] = "invalid_aggregate"
+            Settings: ClassVar[type] = ToySettings
+            min_replicates: ClassVar[int] = 1
+
+            def compute_replicate(self, ctx, replicate):
+                return {"replicate": replicate}
+
+            def aggregate(self, ctx, results):
+                return "not-a-dict-or-basemodel"
+
+        with pytest.raises(PluginContractError, match="invalid_aggregate.aggregate"):
+            run_analysis(
+                InvalidAggregateAnalysis(),
+                toy_condition,
+                ToySettings(),
                 equilibration="0ns",
                 output_dir=tmp_path,
             )

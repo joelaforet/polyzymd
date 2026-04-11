@@ -3540,7 +3540,7 @@ def resolve_protein_group_selections(
             logger.debug(
                 f"Resolved protein group '{group_name}': {len(resids)} residues ({selection})"
             )
-        except Exception as e:
+        except (ValueError, AttributeError, TypeError) as e:
             logger.warning(
                 f"Failed to resolve protein group '{group_name}' with selection '{selection}': {e}"
             )
@@ -3695,7 +3695,7 @@ def resolve_polymer_type_selections(
                     logger.warning(
                         f"Polymer type '{type_name}' selection matched no atoms: {selection}"
                     )
-            except Exception as e:
+            except (ValueError, AttributeError, TypeError) as e:
                 logger.warning(f"Invalid selection for polymer type '{type_name}': {e}")
         return valid_types
 
@@ -3711,7 +3711,7 @@ def resolve_polymer_type_selections(
         logger.debug(f"Auto-detected polymer types from chain {polymer_chain}: {resnames}")
         return sorted(resnames)
 
-    except Exception as e:
+    except (ValueError, AttributeError, TypeError) as e:
         logger.warning(f"Failed to auto-detect polymer types: {e}")
         return []
 
@@ -3792,7 +3792,7 @@ def extract_polymer_composition(
                 try:
                     heavy_atoms = atoms.select_atoms("not element H")
                     n_heavy = len(heavy_atoms)
-                except Exception:
+                except (AttributeError, ValueError, TypeError):
                     # Fallback: count atoms with mass > 1.1 (heavier than H)
                     n_heavy = sum(1 for a in atoms if a.mass > 1.1)
 
@@ -3802,7 +3802,7 @@ def extract_polymer_composition(
                     f"Polymer type '{type_name}': {n_residues} residues, {n_heavy} heavy atoms"
                 )
 
-            except Exception as e:
+            except (ValueError, AttributeError, TypeError) as e:
                 logger.warning(f"Failed to extract composition for '{type_name}': {e}")
 
     else:
@@ -3828,7 +3828,7 @@ def extract_polymer_composition(
                 try:
                     heavy_atoms = type_atoms.select_atoms("not element H")
                     n_heavy = len(heavy_atoms)
-                except Exception:
+                except (AttributeError, ValueError, TypeError):
                     # Fallback: count atoms with mass > 1.1
                     n_heavy = sum(1 for a in type_atoms if a.mass > 1.1)
 
@@ -3839,7 +3839,7 @@ def extract_polymer_composition(
                     f"{n_heavy} heavy atoms"
                 )
 
-        except Exception as e:
+        except (ValueError, AttributeError, TypeError) as e:
             logger.warning(f"Failed to extract polymer composition: {e}")
             return PolymerComposition()
 

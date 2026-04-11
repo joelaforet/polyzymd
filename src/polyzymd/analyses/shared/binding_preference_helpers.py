@@ -20,6 +20,7 @@ Public functions
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
@@ -206,7 +207,7 @@ def compute_condition_binding_preference(
             f"Computed surface exposure for {cond.label}: "
             f"{surface_exposure.exposed_count}/{surface_exposure.total_count} residues exposed"
         )
-    except Exception as e:
+    except (FileNotFoundError, ValueError, OSError, ImportError) as e:
         logger.warning(f"Failed to compute surface exposure for {cond.label}: {e}")
         return None
 
@@ -251,7 +252,7 @@ def compute_condition_binding_preference(
                 f"{polymer_composition.total_residues} residues, "
                 f"{polymer_composition.total_heavy_atoms} heavy atoms"
             )
-        except Exception as e:
+        except (ValueError, OSError, AttributeError) as e:
             logger.warning(f"Failed to extract polymer composition for {cond.label}: {e}")
 
     if polymer_composition is None:
@@ -284,7 +285,13 @@ def compute_condition_binding_preference(
             bp_result.save(rep_bp_path)
             logger.debug(f"Computed and saved binding preference for {cond.label} rep{rep}")
 
-        except Exception as e:
+        except (
+            FileNotFoundError,
+            json.JSONDecodeError,
+            ValueError,
+            KeyError,
+            OSError,
+        ) as e:
             logger.warning(f"Failed to compute binding preference for {cond.label} rep{rep}: {e}")
             continue
 

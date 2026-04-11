@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar, cast
@@ -11,6 +10,7 @@ import pytest
 from pydantic import BaseModel
 
 from polyzymd.analyses.base import Analysis, Condition, MetricValue
+from polyzymd.analyses.exceptions import ReplicateError
 from polyzymd.analyses.orchestrator import (
     aggregate_condition_from_disk,
     finalize_comparison_from_disk,
@@ -84,18 +84,13 @@ def test_run_replicate_once_saves_canonical_result(tmp_path: Path) -> None:
     assert (run_dir / "result.json").exists()
 
 
-def test_run_analysis_logs_warning_and_debug_traceback_on_worker_exception(
-    caplog,
-    tmp_path: Path,
-) -> None:
-    """run_analysis should log concise warning plus debug traceback on failure."""
+def test_run_analysis_raises_structured_replicate_error_on_worker_exception(tmp_path: Path) -> None:
+    """run_analysis should raise ReplicateError on unexpected worker failures."""
     analysis = _FailingWorkerAnalysis()
     condition = Condition("Cond", tmp_path / "cfg.yaml", (1,), cast(Any, SimpleNamespace()))
     settings = _WorkerSettings(scale=1.0)
 
-    caplog.set_level(logging.DEBUG, logger="polyzymd.analyses")
-
-    with pytest.raises(ValueError, match="need at least"):
+    with pytest.raises(ReplicateError, match="compute_replicate failed"):
         run_analysis(
             analysis=analysis,
             condition=condition,
@@ -104,19 +99,6 @@ def test_run_analysis_logs_warning_and_debug_traceback_on_worker_exception(
             output_dir=tmp_path / "analysis" / "cond" / "worker_toy",
             recompute=False,
         )
-
-    warning_messages = [
-        record.getMessage() for record in caplog.records if record.levelno == logging.WARNING
-    ]
-    debug_messages = [
-        record.getMessage() for record in caplog.records if record.levelno == logging.DEBUG
-    ]
-
-    assert any(
-        "Skipping Cond rep 1: RuntimeError — test error" in message for message in warning_messages
-    )
-    assert any("Traceback for failed operation:" in message for message in debug_messages)
-    assert "RuntimeError: test error" in caplog.text
 
 
 def test_aggregate_condition_from_disk_loads_replicates(tmp_path: Path) -> None:

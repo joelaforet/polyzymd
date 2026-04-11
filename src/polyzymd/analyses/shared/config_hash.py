@@ -19,6 +19,8 @@ import json
 import warnings
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel
+
 if TYPE_CHECKING:
     from polyzymd.config.schema import SimulationConfig
 
@@ -98,6 +100,29 @@ def compute_config_hash(config: "SimulationConfig") -> str:
 
     # Return first 16 chars for brevity
     return hash_obj.hexdigest()[:16]
+
+
+def settings_fingerprint(settings: BaseModel) -> str:
+    """Compute a short deterministic fingerprint for analysis settings.
+
+    The fingerprint is derived from the settings model JSON emitted by
+    :meth:`pydantic.BaseModel.model_dump_json`, then hashed with SHA-256.
+    It is intended for cache identity, so changing settings (for example
+    contacts cutoff) naturally changes cache filenames.
+
+    Parameters
+    ----------
+    settings : BaseModel
+        Analysis plugin settings model.
+
+    Returns
+    -------
+    str
+        First 8 hexadecimal characters of the SHA-256 digest.
+    """
+    serialized = settings.model_dump_json()
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    return digest[:8]
 
 
 def validate_config_hash(

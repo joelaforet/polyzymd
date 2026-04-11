@@ -646,6 +646,7 @@ class ContactsAnalysis(Analysis):
         """
         import MDAnalysis as mda
 
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
         from polyzymd.analyses.shared.loader import (
             TrajectoryLoader,
             convert_time,
@@ -696,7 +697,10 @@ class ContactsAnalysis(Analysis):
             ctx.output_dir.mkdir(parents=True, exist_ok=True)
             eq_str = f"eq{eq_value:.2f}{eq_unit}"
             cut_str = f"cut{settings.cutoff:.1f}"
-            output_file = ctx.output_dir / f"contacts_{eq_str}_{cut_str}_rep{replicate}.json"
+            settings_fp = settings_fingerprint(settings)
+            output_file = (
+                ctx.output_dir / f"contacts_{eq_str}_{cut_str}_s{settings_fp}_rep{replicate}.json"
+            )
             result.save(output_file)
             if ctx.result_path is not None:
                 self.save_result(result, ctx.result_path)
@@ -730,6 +734,7 @@ class ContactsAnalysis(Analysis):
             Aggregated result with per-residue statistics.
         """
         from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
         from polyzymd.analyses.shared.loader import parse_time_string
 
         logger.info(f"  Aggregating {len(results)} replicates...")
@@ -742,7 +747,11 @@ class ContactsAnalysis(Analysis):
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
         eq_str = f"eq{eq_value:.2f}{eq_unit}"
         cut_str = f"cut{ctx.settings.cutoff:.1f}"
-        agg_file = ctx.output_dir / f"contacts_aggregated_{eq_str}_{cut_str}_reps{rep_range}.json"
+        settings_fp = settings_fingerprint(ctx.settings)
+        agg_file = (
+            ctx.output_dir
+            / f"contacts_aggregated_{eq_str}_{cut_str}_s{settings_fp}_reps{rep_range}.json"
+        )
         agg_result.save(agg_file)
         if ctx.result_path is not None:
             self.save_result(agg_result, ctx.result_path)
