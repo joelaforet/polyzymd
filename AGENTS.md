@@ -48,7 +48,6 @@ src/polyzymd/
 ├── analyses/     # ★ Plugin system — unified analysis lifecycle (primary extension point)
 │   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
 │   └── <name>/   #   One package per analysis type (all plugins are packages)
-├── compare/      # [DISSOLVED in v1.3.0 — see config/, cli/, analyses/shared/]
 ├── exporters/    # GROMACS/other format exporters
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
@@ -104,7 +103,7 @@ Key rules:
 - **Custom compare path**: Override `compare()` entirely for multi-metric or entry-table analyses
 - **Auto-discovery**: Drop a package in `analyses/<name>/` — no imports, no registries, no bootstrap
 - **Result saving**: Existing plugins save results explicitly; the orchestrator has a fallback auto-save if the plugin doesn't
-- **No `compare/` files needed**: New plugins keep all logic inline; `compare/results/` are used by existing plugins for historical result models
+- **No `compare/` files needed**: Keep comparison and formatting logic in plugin packages, with shared helpers in `analyses/stats.py` and `analyses/shared/inferential_statistics.py`
 
 ### Planned MetricType classification (future)
 

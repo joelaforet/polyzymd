@@ -127,9 +127,10 @@ contributor tutorial.
 
 ### Adding comparison statistics or formatters
 
-The `compare/` package provides shared statistical infrastructure. New plugins
-should NOT create files in `compare/` — keep formatting inline in the plugin's
-`format()` method. Established plugins extract plotting into `_plotters.py`
-modules within their package; new plugins can start with plotting inline in
-`plot()` and extract later as complexity grows. The `compare/results/`
-directory is used by existing plugins for historical result models only.
+Comparison statistics now live in the analyses framework itself. Use
+`analyses/stats.py` for default scalar comparisons and
+`analyses/shared/inferential_statistics.py` for reusable inferential helpers.
+New plugins should keep formatting inline in the plugin's `format()` method.
+Established plugins extract plotting into `_plotters.py` modules within each
+plugin package; new plugins can start with plotting inline in `plot()` and
+extract later as complexity grows.
