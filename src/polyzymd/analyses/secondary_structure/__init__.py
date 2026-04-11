@@ -186,11 +186,10 @@ class SecondaryStructureAnalysis(Analysis):
         chain_idx = _chain_letter_to_index(chain_id)
         protein_indices = traj.topology.select(f"chainid {chain_idx}")
         if len(protein_indices) == 0:
-            # Fallback: try selecting all protein atoms
-            protein_indices = traj.topology.select("protein")
-            logger.warning(
-                f"Chain '{chain_id}' not found; falling back to "
-                f"'protein' selection ({len(protein_indices)} atoms)"
+            raise ValueError(
+                f"Chain '{chain_id}' (index {chain_idx}) not found in topology. "
+                f"Available chains: {[c.index for c in traj.topology.chains]}. "
+                "Check your Settings.chain_id configuration."
             )
 
         protein_traj = traj.atom_slice(protein_indices)

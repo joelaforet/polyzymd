@@ -976,3 +976,55 @@ class TestFilterConditions:
         assert len(result) == 2
         assert result[0].label == "A"
         assert result[1].label == "B"
+
+
+class TestChainSelectionValidation:
+    """Tests for chain selection error handling."""
+
+    def test_missing_chain_raises_value_error(self):
+        """Missing chain should raise ValueError, not silently fall back."""
+        from polyzymd.analyses import get_analysis
+
+        cls = get_analysis("secondary_structure")
+        analysis = cls()
+        settings = cls.Settings(chain_id="Z")
+
+        mock_traj = MagicMock()
+        mock_traj.topology.select.return_value = np.array([])
+        mock_chains = [MagicMock(index=0), MagicMock(index=1)]
+        mock_traj.topology.chains = mock_chains
+        mock_traj.n_frames = 100
+        mock_traj.n_atoms = 500
+
+        with (
+            patch("mdtraj.load") as mock_load,
+            patch("polyzymd.analyses.secondary_structure.TrajectoryLoader") as MockLoader,
+        ):
+            mock_load.return_value = mock_traj
+
+            mock_loader = MagicMock()
+            MockLoader.return_value = mock_loader
+            mock_loader.get_trajectory_info.return_value = MagicMock(
+                trajectory_files=[Path("/fake/traj.xtc")],
+                topology_file=Path("/fake/top.pdb"),
+            )
+            mock_loader.get_timestep.return_value = 10.0
+
+            condition = Condition(
+                label="Test",
+                config_path=Path("/fake/config.yaml"),
+                replicates=(1,),
+                sim_config=MagicMock(),
+            )
+            ctx = ReplicateContext(
+                condition=condition,
+                replicate=1,
+                sim_config=condition.sim_config,
+                output_dir=Path("/fake/output"),
+                equilibration="0ns",
+                recompute=True,
+                settings=settings,
+            )
+
+            with pytest.raises(ValueError, match="Chain 'Z'.*not found"):
+                analysis.compute_replicate(ctx, replicate=1)
