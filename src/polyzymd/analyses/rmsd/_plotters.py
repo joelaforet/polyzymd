@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
@@ -622,6 +623,15 @@ def _resolve_npz_sidecar_path(
 
     result_path = run_dir / result_json_name
     if not result_path.exists():
+        prefix = result_json_name.rsplit("_", maxsplit=1)[0] + "_"
+        legacy_matches = sorted(path for path in run_dir.glob(f"{prefix}*.json") if path.exists())
+        if legacy_matches:
+            logger.warning(
+                "Found RMSD cache files with legacy/non-canonical tags (%s) but expected %s; "
+                "recompute RMSD to refresh cache naming",
+                ", ".join(str(path.name) for path in legacy_matches),
+                result_path.name,
+            )
         logger.warning("Missing RMSD per-replicate result JSON %s", result_path)
         return None
 
@@ -671,10 +681,7 @@ def _make_replicate_result_filename(ctx: PlotContext) -> str:
     str
         Expected per-replicate RMSD JSON filename.
     """
-    import hashlib
-
     eq_value, eq_unit = parse_time_string(ctx.equilibration)
     eq_str = f"eq{eq_value:.2f}{eq_unit}"
-    payload = f"{ctx.settings.model_dump_json()}|{ctx.equilibration}".encode("utf-8")
-    settings_tag = hashlib.md5(payload).hexdigest()[:8]
+    settings_tag = settings_fingerprint(ctx.settings)
     return f"rmsd_{eq_str}_{settings_tag}.json"

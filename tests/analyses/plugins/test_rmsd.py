@@ -278,8 +278,8 @@ def test_settings_cache_tag_changes_with_settings() -> None:
     )
     settings_b = RMSDSettings(runs=[RMSDRunSettings(label="run_a", selection="protein")])
 
-    tag_a = analysis._make_settings_cache_tag(settings_a, "10ns")
-    tag_b = analysis._make_settings_cache_tag(settings_b, "10ns")
+    tag_a = analysis._make_settings_cache_tag(settings_a)
+    tag_b = analysis._make_settings_cache_tag(settings_b)
 
     assert tag_a != tag_b
 
@@ -312,7 +312,7 @@ def test_compute_replicate_cache_filename_includes_settings_tag(
 
     result = analysis.compute_replicate(ctx, replicate=1)
 
-    expected_tag = analysis._make_settings_cache_tag(settings, "10ns")
+    expected_tag = analysis._make_settings_cache_tag(settings)
     assert result == {"cached": True}
     assert captured["result_path"].name == f"rmsd_eq10.00ns_{expected_tag}.json"
 
@@ -321,7 +321,7 @@ def test_aggregated_cache_filename_includes_settings_tag() -> None:
     """Aggregated cache filename should include settings fingerprint."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=[RMSDRunSettings(label="run_a")])
-    settings_tag = analysis._make_settings_cache_tag(settings, "10ns")
+    settings_tag = analysis._make_settings_cache_tag(settings)
     first_result = MagicMock(equilibration_time=10.0, equilibration_unit="ns")
 
     filename = analysis._make_aggregated_filename((1, 2, 3), first_result, settings_tag)
