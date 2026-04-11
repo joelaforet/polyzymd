@@ -1125,7 +1125,7 @@ class TestPlot:
 
         assert output_dir.exists()
 
-    def test_plot_catches_exceptions(self, tmp_path):
+    def test_plot_propagates_exceptions(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.polymer_affinity import (
             PolymerAffinityAnalysis,
@@ -1164,9 +1164,8 @@ class TestPlot:
                 side_effect=RuntimeError("boom"),
             ),
         ):
-            result = analysis.plot(ctx)
-
-        assert result == []
+            with pytest.raises(RuntimeError, match="boom"):
+                analysis.plot(ctx)
 
     def test_plot_empty_labels(self, tmp_path):
         from polyzymd.analyses.base import PlotContext

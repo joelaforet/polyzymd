@@ -326,17 +326,11 @@ class PolymerAffinityAnalysis(Analysis):
 
         plot_settings = ctx.plot_settings
 
-        try:
-            result = _plot_affinity_stacked_bars(data, labels, ctx.output_dir, plot_settings)
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"Affinity stacked bars plot failed: {exc}")
+        result = _plot_affinity_stacked_bars(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
-        try:
-            result = _plot_affinity_group_bars(data, labels, ctx.output_dir, plot_settings)
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"Affinity group bars plot failed: {exc}")
+        result = _plot_affinity_group_bars(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
         return plots
 
