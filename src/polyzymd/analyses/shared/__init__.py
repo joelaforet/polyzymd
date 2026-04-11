@@ -1,7 +1,15 @@
 """Shared infrastructure for analysis plugins.
 
-This package provides reusable utilities for analysis plugins.
-All analysis plugins should import shared infrastructure from here.
+This package provides a curated set of commonly used shared utilities.
+For advanced or less common helpers, import directly from the relevant
+shared submodules.
+
+In particular, selectors, custom selections, and result I/O helpers are not
+re-exported from this package root and should be imported from:
+
+- ``polyzymd.analyses.shared.selectors``
+- ``polyzymd.analyses.shared.selections``
+- ``polyzymd.analyses.shared.result_io``
 
 Sub-modules
 -----------
