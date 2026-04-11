@@ -1721,3 +1721,53 @@ def test_load_condition_aggregated_canonical_result_json(tmp_path: Path) -> None
     assert loaded is not None
     assert "run_results" in loaded
     assert loaded["run_results"][0]["run_label"] == "protein_rg"
+
+
+def test_load_condition_aggregated_current_rg_filename(tmp_path: Path) -> None:
+    """Condition aggregated loader should read current native Rg aggregated filename."""
+    from polyzymd.analyses.rg._plotters import _load_condition_aggregated
+
+    payload = {
+        "run_results": [
+            {
+                "run_label": "protein_rg",
+                "calculation_mode": "selection",
+                "reduced_histogram_edges": [14.0, 14.5, 15.0, 15.5],
+                "reduced_histogram_density_mean": [0.1, 0.6, 0.3],
+                "reduced_histogram_density_sem": [0.01, 0.06, 0.03],
+            }
+        ]
+    }
+    json_path = tmp_path / "aggregated" / "rg_reps1-3_eq10.00ns.json"
+    json_path.parent.mkdir(parents=True)
+    json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = _load_condition_aggregated(tmp_path)
+
+    assert loaded is not None
+    assert loaded["run_results"][0]["run_label"] == "protein_rg"
+
+
+def test_load_condition_aggregated_tagged_rg_filename(tmp_path: Path) -> None:
+    """Condition aggregated loader should read tagged native Rg aggregated filename."""
+    from polyzymd.analyses.rg._plotters import _load_condition_aggregated
+
+    payload = {
+        "run_results": [
+            {
+                "run_label": "protein_rg",
+                "calculation_mode": "selection",
+                "reduced_histogram_edges": [14.0, 14.5, 15.0, 15.5],
+                "reduced_histogram_density_mean": [0.1, 0.6, 0.3],
+                "reduced_histogram_density_sem": [0.01, 0.06, 0.03],
+            }
+        ]
+    }
+    json_path = tmp_path / "aggregated" / "rg_reps1-3_eq10.00ns_abcd1234.json"
+    json_path.parent.mkdir(parents=True)
+    json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = _load_condition_aggregated(tmp_path)
+
+    assert loaded is not None
+    assert loaded["run_results"][0]["run_label"] == "protein_rg"

@@ -702,18 +702,29 @@ def _load_condition_aggregated(condition_dir: Path) -> dict | None:
             logger.warning("Failed to load aggregated Rg JSON %s: %s", canonical, exc)
             return None
 
-    # Fallback: legacy naming patterns
-    json_files = sorted(agg_dir.glob("rg_aggregated_*.json"))
-    if not json_files:
-        json_files = sorted(agg_dir.glob("rg_result_aggregated_*.json"))
-    if not json_files:
-        return None
+    # Fallback search priority:
+    # 1) current native filenames (tagged and untagged)
+    # 2) legacy rg_aggregated_*.json
+    # 3) legacy rg_result_aggregated_*.json
+    pattern_families = [
+        "rg_reps*_eq*.json",
+        "rg_aggregated_*.json",
+        "rg_result_aggregated_*.json",
+    ]
 
-    try:
-        return json.loads(json_files[-1].read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
-        logger.warning("Failed to load aggregated Rg JSON %s: %s", json_files[-1], exc)
-        return None
+    for pattern in pattern_families:
+        matches = [path for path in agg_dir.glob(pattern) if path.is_file()]
+        if not matches:
+            continue
+
+        newest = max(matches, key=lambda path: path.stat().st_mtime)
+        try:
+            return json.loads(newest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
+            logger.warning("Failed to load aggregated Rg JSON %s: %s", newest, exc)
+            return None
+
+    return None
 
 
 def _get_plot_settings(ctx: PlotContext) -> RgPlotSettings:
