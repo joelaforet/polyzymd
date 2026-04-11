@@ -16,6 +16,7 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.shared.inferential_statistics import EffectSize, TTestResult
 from polyzymd.analyses.stats import (
+    anova_test,
     default_scalar_comparison,
     format_scalar_comparison,
     pairwise_comparisons,
@@ -658,6 +659,34 @@ class TestAnovaAlphaThreading:
         assert result.anova is not None
         # With these overlapping values, p should be > 0.001
         assert result.anova[0].significant is False
+
+
+def test_anova_boundary_inclusive(monkeypatch) -> None:
+    """ANOVA should be significant when p-value equals alpha exactly."""
+
+    class _FakeAnovaResult:
+        def __init__(self, f_statistic: float, p_value: float):
+            self.f_statistic = f_statistic
+            self.p_value = p_value
+
+    def _fake_one_way_anova(*_groups):
+        return _FakeAnovaResult(f_statistic=4.2, p_value=0.05)
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.inferential_statistics.one_way_anova",
+        _fake_one_way_anova,
+    )
+
+    metrics = {
+        "A": _metric(1.0, [0.9, 1.0, 1.1]),
+        "B": _metric(2.0, [1.9, 2.0, 2.1]),
+        "C": _metric(3.0, [2.9, 3.0, 3.1]),
+    }
+    result = anova_test(metrics, metric_name="m", alpha=0.05)
+
+    assert result is not None
+    assert result.p_value == pytest.approx(0.05)
+    assert result.significant is True
 
 
 class TestFdrAlphaValidation:

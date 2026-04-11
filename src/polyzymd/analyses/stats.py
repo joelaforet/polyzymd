@@ -274,7 +274,8 @@ def anova_test(
     metric_name : str
         Label for the metric in the result.
     alpha : float, optional
-        Significance threshold for the ANOVA test, by default 0.05.
+        Inclusive significance threshold for the ANOVA test (``p <= alpha``),
+        by default 0.05.
 
     Returns
     -------
@@ -293,7 +294,7 @@ def anova_test(
         metric=metric_name,
         f_statistic=result.f_statistic,
         p_value=result.p_value,
-        significant=result.p_value < alpha,
+        significant=result.p_value <= alpha,
     )
 
 
