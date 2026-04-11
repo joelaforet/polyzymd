@@ -8,7 +8,11 @@ import pytest
 
 from polyzymd.analyses.base import ComparisonResult, ConditionSummary, MetricValue, PairwiseResult
 from polyzymd.analyses.shared.inferential_statistics import EffectSize, TTestResult
-from polyzymd.analyses.stats import format_scalar_comparison, pairwise_comparisons
+from polyzymd.analyses.stats import (
+    default_scalar_comparison,
+    format_scalar_comparison,
+    pairwise_comparisons,
+)
 
 
 def _metric(mean: float, values: list[float]) -> MetricValue:
@@ -23,11 +27,12 @@ def _metric(mean: float, values: list[float]) -> MetricValue:
     )
 
 
-def test_pairwise_comparisons_applies_bh_and_sets_adjusted_significance(monkeypatch) -> None:
-    """Pairwise results should include BH-adjusted p-values and adjusted significance."""
+def test_pairwise_comparisons_returns_raw_pvalues_only(monkeypatch) -> None:
+    """Pairwise results should keep raw p-values without BH adjustment."""
     p_values = [0.01, 0.03, 0.04]
 
-    def _fake_ttest(_group1, _group2):
+    def _fake_ttest(_group1, _group2, method="student"):
+        del method
         return TTestResult(t_statistic=1.0, p_value=p_values.pop(0))
 
     def _fake_effect(_group1, _group2):
@@ -45,13 +50,119 @@ def test_pairwise_comparisons_applies_bh_and_sets_adjusted_significance(monkeypa
         "C": _metric(1.4, [1.3, 1.4, 1.5]),
     }
 
-    results = pairwise_comparisons(metrics, fdr_alpha=0.035)
+    results = pairwise_comparisons(metrics)
 
     assert len(results) == 3
-    assert all(r.p_value_adjusted is not None for r in results)
-    assert any(r.p_value_adjusted != r.p_value for r in results)
-    # BH-adjusted p-values are [0.03, 0.04, 0.04] for raw [0.01, 0.03, 0.04]
-    assert [r.significant for r in results] == [True, False, False]
+    assert all(r.p_value_adjusted is None for r in results)
+    assert [r.significant for r in results] == [True, True, True]
+
+
+def test_default_scalar_comparison_applies_bh_across_full_family(monkeypatch) -> None:
+    """BH should run once across all metric pairwise tests."""
+    p_values = [0.01, 0.02, 0.03, 0.04]
+
+    def _fake_ttest(_group1, _group2, method="student"):
+        del method
+        return TTestResult(t_statistic=1.0, p_value=p_values.pop(0))
+
+    def _fake_effect(_group1, _group2):
+        return EffectSize(cohens_d=0.5, interpretation="medium", direction="higher")
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.inferential_statistics.independent_ttest",
+        _fake_ttest,
+    )
+    monkeypatch.setattr("polyzymd.analyses.shared.inferential_statistics.cohens_d", _fake_effect)
+
+    metrics_by_condition = {
+        "Control": {
+            "metric_a": _metric(1.0, [1.0, 1.1, 0.9]),
+            "metric_b": _metric(2.0, [1.9, 2.0, 2.1]),
+        },
+        "Treatment 1": {
+            "metric_a": _metric(1.2, [1.1, 1.2, 1.3]),
+            "metric_b": _metric(2.2, [2.1, 2.2, 2.3]),
+        },
+        "Treatment 2": {
+            "metric_a": _metric(1.3, [1.2, 1.3, 1.4]),
+            "metric_b": _metric(2.3, [2.2, 2.3, 2.4]),
+        },
+    }
+
+    result = default_scalar_comparison(
+        analysis_name="test",
+        project_name="Full Family BH",
+        metrics_by_condition=metrics_by_condition,
+        control_label="Control",
+        fdr_alpha=0.035,
+    )
+
+    adjusted = [r.p_value_adjusted for r in result.pairwise_comparisons]
+    assert adjusted == pytest.approx([0.04, 0.04, 0.04, 0.04])
+    assert [r.significant for r in result.pairwise_comparisons] == [False, False, False, False]
+
+
+def test_default_scalar_comparison_threads_ttest_method(monkeypatch) -> None:
+    """default_scalar_comparison should pass ttest_method to pairwise tests."""
+    seen_methods: list[str] = []
+
+    def _fake_ttest(_group1, _group2, method="student"):
+        seen_methods.append(method)
+        return TTestResult(t_statistic=1.0, p_value=0.5)
+
+    def _fake_effect(_group1, _group2):
+        return EffectSize(cohens_d=0.1, interpretation="small", direction="higher")
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.inferential_statistics.independent_ttest",
+        _fake_ttest,
+    )
+    monkeypatch.setattr("polyzymd.analyses.shared.inferential_statistics.cohens_d", _fake_effect)
+
+    metrics_by_condition = {
+        "Control": {"metric_a": _metric(1.0, [1.0, 1.1, 0.9])},
+        "Treatment": {"metric_a": _metric(1.2, [1.1, 1.2, 1.3])},
+    }
+    result = default_scalar_comparison(
+        analysis_name="test",
+        project_name="Method threading",
+        metrics_by_condition=metrics_by_condition,
+        control_label="Control",
+        ttest_method="welch",
+    )
+
+    assert seen_methods == ["welch"]
+    assert result.ttest_method == "welch"
+
+
+def test_default_scalar_comparison_threads_anova_method(monkeypatch) -> None:
+    """default_scalar_comparison should pass anova_method to ANOVA tests."""
+    seen_methods: list[str] = []
+
+    def _fake_one_way_anova(*groups, method="classical"):
+        del groups
+        seen_methods.append(method)
+        return type("_Result", (), {"f_statistic": 1.5, "p_value": 0.2, "significant": False})()
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.inferential_statistics.one_way_anova",
+        _fake_one_way_anova,
+    )
+
+    metrics_by_condition = {
+        "Control": {"metric_a": _metric(1.0, [1.0, 1.1, 0.9])},
+        "Treatment 1": {"metric_a": _metric(1.2, [1.1, 1.2, 1.3])},
+        "Treatment 2": {"metric_a": _metric(1.3, [1.2, 1.3, 1.4])},
+    }
+    result = default_scalar_comparison(
+        analysis_name="test",
+        project_name="ANOVA threading",
+        metrics_by_condition=metrics_by_condition,
+        anova_method="welch",
+    )
+
+    assert seen_methods == ["welch"]
+    assert result.anova_method == "welch"
 
 
 def test_comparison_result_round_trip_preserves_adjusted_pvalue() -> None:

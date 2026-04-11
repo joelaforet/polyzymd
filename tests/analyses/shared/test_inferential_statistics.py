@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import math
+import sys
 
 import pytest
 
-from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
+from polyzymd.analyses.shared.inferential_statistics import (
+    benjamini_hochberg,
+    independent_ttest,
+    one_way_anova,
+)
 
 
 def test_bh_all_significant() -> None:
@@ -116,6 +121,100 @@ def test_mixed_nan_and_none() -> None:
 def test_bh_empty_input() -> None:
     """Empty p-value family should return an empty list."""
     assert benjamini_hochberg([], alpha=0.05) == []
+
+
+def test_independent_ttest_student_method(monkeypatch) -> None:
+    """Student method should call scipy ttest_ind with equal_var=True."""
+
+    class _Stats:
+        def ttest_ind(self, group1, group2, equal_var):
+            del group1, group2
+            assert equal_var is True
+            return (2.0, 0.01)
+
+    class _Scipy:
+        stats = _Stats()
+
+    monkeypatch.setitem(sys.modules, "scipy", _Scipy())
+    result = independent_ttest([1.0, 2.0], [1.5, 2.5], method="student")
+    assert result.t_statistic == pytest.approx(2.0)
+    assert result.p_value == pytest.approx(0.01)
+
+
+def test_independent_ttest_welch_method(monkeypatch) -> None:
+    """Welch method should call scipy ttest_ind with equal_var=False."""
+
+    class _Stats:
+        def ttest_ind(self, group1, group2, equal_var):
+            del group1, group2
+            assert equal_var is False
+            return (1.0, 0.20)
+
+    class _Scipy:
+        stats = _Stats()
+
+    monkeypatch.setitem(sys.modules, "scipy", _Scipy())
+    result = independent_ttest([1.0, 2.0], [1.5, 2.5], method="welch")
+    assert result.t_statistic == pytest.approx(1.0)
+    assert result.p_value == pytest.approx(0.20)
+
+
+def test_independent_ttest_invalid_method() -> None:
+    """Unknown t-test method should raise ValueError."""
+    with pytest.raises(ValueError, match="Unknown t-test method"):
+        independent_ttest([1.0, 2.0], [1.5, 2.5], method="bogus")
+
+
+def test_one_way_anova_classical_method(monkeypatch) -> None:
+    """Classical ANOVA should use scipy f_oneway."""
+
+    class _Stats:
+        def f_oneway(self, *groups):
+            del groups
+            return (3.0, 0.02)
+
+        def alexandergovern(self, *groups):
+            del groups
+            raise AssertionError("alexandergovern should not be called")
+
+    class _Scipy:
+        stats = _Stats()
+
+    monkeypatch.setitem(sys.modules, "scipy", _Scipy())
+    result = one_way_anova([1.0, 2.0], [1.5, 2.5], [2.0, 3.0], method="classical")
+    assert result.f_statistic == pytest.approx(3.0)
+    assert result.p_value == pytest.approx(0.02)
+
+
+def test_one_way_anova_welch_method(monkeypatch) -> None:
+    """Welch ANOVA path should use scipy alexandergovern."""
+
+    class _AGResult:
+        statistic = 4.0
+        pvalue = 0.03
+
+    class _Stats:
+        def f_oneway(self, *groups):
+            del groups
+            raise AssertionError("f_oneway should not be called")
+
+        def alexandergovern(self, *groups):
+            del groups
+            return _AGResult()
+
+    class _Scipy:
+        stats = _Stats()
+
+    monkeypatch.setitem(sys.modules, "scipy", _Scipy())
+    result = one_way_anova([1.0, 2.0], [1.5, 2.5], [2.0, 3.0], method="welch")
+    assert result.f_statistic == pytest.approx(4.0)
+    assert result.p_value == pytest.approx(0.03)
+
+
+def test_one_way_anova_invalid_method() -> None:
+    """Unknown ANOVA method should raise ValueError."""
+    with pytest.raises(ValueError, match="Unknown ANOVA method"):
+        one_way_anova([1.0, 2.0], [1.5, 2.5], method="bogus")
 
 
 def test_bh_monotonicity_in_rank_order() -> None:

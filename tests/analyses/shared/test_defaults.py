@@ -13,3 +13,27 @@ def test_fdr_alpha_invalid_values_rejected(invalid: float) -> None:
     """fdr_alpha should reject values outside the interval (0, 1]."""
     with pytest.raises(ValidationError):
         AnalysisDefaults(fdr_alpha=invalid)
+
+
+def test_analysis_defaults_ttest_method_default() -> None:
+    """Analysis defaults should use Student t-test by default."""
+    defaults = AnalysisDefaults()
+    assert defaults.ttest_method == "student"
+
+
+def test_analysis_defaults_anova_method_default() -> None:
+    """Analysis defaults should use classical ANOVA by default."""
+    defaults = AnalysisDefaults()
+    assert defaults.anova_method == "classical"
+
+
+def test_analysis_defaults_invalid_ttest_method() -> None:
+    """Invalid t-test method should fail validation."""
+    with pytest.raises(ValidationError):
+        AnalysisDefaults(ttest_method="bogus")
+
+
+def test_analysis_defaults_invalid_anova_method() -> None:
+    """Invalid ANOVA method should fail validation."""
+    with pytest.raises(ValidationError):
+        AnalysisDefaults(anova_method="bogus")

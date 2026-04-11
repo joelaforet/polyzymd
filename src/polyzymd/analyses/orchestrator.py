@@ -743,6 +743,8 @@ def finalize_comparison_from_disk(
         settings=settings,
         recompute=False,
         fdr_alpha=getattr(config.defaults, "fdr_alpha", 0.05),
+        ttest_method=getattr(config.defaults, "ttest_method", "student"),
+        anova_method=getattr(config.defaults, "anova_method", "classical"),
         result_path=comparison_result_path,
         failed_conditions=failed_conditions,
         aggregated_results=valid_aggregated_results,

@@ -125,7 +125,7 @@ def _format_pct(pct: float) -> str:
 def pairwise_comparisons(
     metrics_by_condition: dict[str, MetricValue],
     control_label: str | None = None,
-    fdr_alpha: float = 0.05,
+    ttest_method: str = "student",
 ) -> list[PairwiseResult]:
     """Compute pairwise statistical comparisons for a single metric.
 
@@ -136,19 +136,18 @@ def pairwise_comparisons(
     control_label : str | None
         If provided, compare all conditions against this control.
         Otherwise, compare all unique pairs.
-    fdr_alpha : float, optional
-        False discovery rate threshold for Benjamini-Hochberg adjustment,
-        by default 0.05.
+    ttest_method : str, optional
+        T-test method to use, ``"student"`` or ``"welch"``, by default
+        ``"student"``.
 
     Returns
     -------
     list[PairwiseResult]
-        Pairwise comparison results with both raw and adjusted p-values.
-        The ``significant`` field is based on adjusted p-value when
-        available, otherwise on raw p-value.
+        Pairwise comparison results with raw p-values only.
+        ``p_value_adjusted`` remains ``None`` and ``significant`` is based
+        on raw p-value < 0.05.
     """
     from polyzymd.analyses.shared.inferential_statistics import (
-        benjamini_hochberg,
         cohens_d,
         independent_ttest,
         percent_change,
@@ -169,7 +168,11 @@ def pairwise_comparisons(
         mv_a = metrics_by_condition[label_a]
         mv_b = metrics_by_condition[label_b]
 
-        ttest = independent_ttest(mv_a.replicate_values, mv_b.replicate_values)
+        ttest = independent_ttest(
+            mv_a.replicate_values,
+            mv_b.replicate_values,
+            method=ttest_method,
+        )
         effect = cohens_d(mv_a.replicate_values, mv_b.replicate_values)
         pct = percent_change(mv_a.mean, mv_b.mean)
         direction = interpret_direction(pct, mv_a.direction_labels)
@@ -189,15 +192,6 @@ def pairwise_comparisons(
             )
         )
 
-    raw_p_values = [result.p_value for result in results]
-    bh_results = benjamini_hochberg(raw_p_values, alpha=fdr_alpha)
-    for result, bh in zip(results, bh_results, strict=False):
-        result.p_value_adjusted = bh.adjusted_p_value
-        p_for_significance = (
-            bh.adjusted_p_value if bh.adjusted_p_value is not None else result.p_value
-        )
-        result.significant = p_for_significance < fdr_alpha
-
     return results
 
 
@@ -209,6 +203,7 @@ def pairwise_comparisons(
 def anova_test(
     metrics_by_condition: dict[str, MetricValue],
     metric_name: str = "default",
+    anova_method: str = "classical",
 ) -> ANOVAResult | None:
     """Run one-way ANOVA across conditions for a single metric.
 
@@ -218,6 +213,9 @@ def anova_test(
         Mapping ``condition_label -> MetricValue``.
     metric_name : str
         Label for the metric in the result.
+    anova_method : str, optional
+        ANOVA method to use, ``"classical"`` or ``"welch"``, by default
+        ``"classical"``.
 
     Returns
     -------
@@ -230,7 +228,7 @@ def anova_test(
     from polyzymd.analyses.shared.inferential_statistics import one_way_anova
 
     groups = [mv.replicate_values for mv in metrics_by_condition.values()]
-    result = one_way_anova(*groups)
+    result = one_way_anova(*groups, method=anova_method)
 
     return ANOVAResult(
         metric=metric_name,
@@ -294,6 +292,8 @@ def default_scalar_comparison(
     control_label: str | None = None,
     equilibration: str = "0ns",
     fdr_alpha: float = 0.05,
+    ttest_method: str = "student",
+    anova_method: str = "classical",
 ) -> ComparisonResult:
     """Run the standard scalar comparison pipeline.
 
@@ -303,11 +303,11 @@ def default_scalar_comparison(
 
     For each metric:
     1. Pairwise t-tests + Cohen's d + percent-change.
-       Pairwise p-values are adjusted with Benjamini-Hochberg (BH)
-       correction, and significance is evaluated against the adjusted
-       p-values at ``fdr_alpha``.
+       Raw pairwise p-values are computed for all pair tests.
     2. ANOVA (if 3+ conditions).
     3. Ranking.
+    4. Benjamini-Hochberg (BH) correction is applied once across the
+       full family of all pairwise tests across all metrics.
 
     Parameters
     ----------
@@ -325,6 +325,12 @@ def default_scalar_comparison(
     fdr_alpha : float, optional
         False discovery rate threshold used for BH-adjusted pairwise
         significance, by default 0.05.
+    ttest_method : str, optional
+        T-test method to use, ``"student"`` or ``"welch"``, by default
+        ``"student"``.
+    anova_method : str, optional
+        ANOVA method to use, ``"classical"`` or ``"welch"``, by default
+        ``"classical"``.
 
     Returns
     -------
@@ -374,17 +380,34 @@ def default_scalar_comparison(
 
         # Pairwise comparisons require at least 2 conditions
         if len(per_cond) >= 2:
-            pw = pairwise_comparisons(per_cond, control_label, fdr_alpha=fdr_alpha)
+            pw = pairwise_comparisons(
+                per_cond,
+                control_label,
+                ttest_method=ttest_method,
+            )
             all_pairwise.extend(pw)
 
         # ANOVA requires at least 3 conditions
         if len(per_cond) >= 3:
-            anova = anova_test(per_cond, metric_name)
+            anova = anova_test(per_cond, metric_name, anova_method=anova_method)
             if anova is not None:
                 all_anova.append(anova)
 
         # Ranking always works when at least 1 condition exists
         all_rankings[metric_name] = rank_conditions(per_cond)
+
+    # Apply BH correction across ALL pairwise results (full family)
+    if all_pairwise:
+        from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
+
+        raw_p_values = [r.p_value for r in all_pairwise]
+        bh_results = benjamini_hochberg(raw_p_values, alpha=fdr_alpha)
+        for result, bh in zip(all_pairwise, bh_results, strict=False):
+            result.p_value_adjusted = bh.adjusted_p_value
+            p_for_significance = (
+                bh.adjusted_p_value if bh.adjusted_p_value is not None else result.p_value
+            )
+            result.significant = p_for_significance < fdr_alpha
 
     # Build condition summaries
     condition_summaries: list[ConditionSummary] = []
@@ -405,6 +428,8 @@ def default_scalar_comparison(
         name=project_name,
         control_label=control_label,
         fdr_alpha=fdr_alpha,
+        ttest_method=ttest_method,
+        anova_method=anova_method,
         conditions=condition_summaries,
         pairwise_comparisons=all_pairwise,
         anova=all_anova if all_anova else None,

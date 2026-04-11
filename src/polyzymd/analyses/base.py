@@ -217,6 +217,13 @@ class ComparisonContext:
     fdr_alpha : float
         False discovery rate threshold used for Benjamini-Hochberg
         corrected pairwise significance in the default scalar comparison.
+    ttest_method : str
+        Two-sample t-test method for default scalar pairwise tests.
+        ``"student"`` uses equal variances and ``"welch"`` does not.
+    anova_method : str
+        One-way ANOVA method for default scalar comparison.
+        ``"classical"`` uses equal-variance ANOVA and ``"welch"`` uses
+        a heteroscedastic alternative.
     recompute : bool
         Whether to force recomputation.
     result_path : Path | None
@@ -237,6 +244,8 @@ class ComparisonContext:
     settings: BaseModel
     recompute: bool
     fdr_alpha: float = 0.05
+    ttest_method: str = "student"
+    anova_method: str = "classical"
     result_path: Path | None = None
     failed_conditions: list[Condition] = field(default_factory=list)
     aggregated_results: dict[str, Any] = field(default_factory=dict)
@@ -458,6 +467,10 @@ class ComparisonResult(BaseModel):
     fdr_alpha : float | None
         False discovery rate threshold used for Benjamini-Hochberg
         correction in pairwise tests. ``None`` when unknown.
+    ttest_method : str
+        Two-sample t-test method used for pairwise tests.
+    anova_method : str
+        One-way ANOVA method used for multi-condition tests.
     conditions : list[ConditionSummary]
         Per-condition summary statistics.
     pairwise_comparisons : list[PairwiseResult]
@@ -482,6 +495,8 @@ class ComparisonResult(BaseModel):
     name: str
     control_label: str | None = None
     fdr_alpha: float | None = None
+    ttest_method: str = "student"
+    anova_method: str = "classical"
     conditions: list[ConditionSummary] = Field(default_factory=list)
     pairwise_comparisons: list[PairwiseResult] = Field(default_factory=list)
     anova: list[ANOVAResult] | None = None
@@ -990,6 +1005,8 @@ class Analysis(ABC):
             control_label=ctx.effective_control,
             equilibration=ctx.equilibration,
             fdr_alpha=ctx.fdr_alpha,
+            ttest_method=ctx.ttest_method,
+            anova_method=ctx.anova_method,
         )
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:

@@ -211,14 +211,22 @@ def benjamini_hochberg(
 def independent_ttest(
     group1: ArrayLike,
     group2: ArrayLike,
+    method: str = "student",
 ) -> TTestResult:
-    """Perform Welch's two-sample independent t-test.
+    """Perform a two-sample independent t-test.
 
     Tests the null hypothesis that two independent samples have
-    identical expected values.  Uses Welch's t-test (``equal_var=False``)
-    which does **not** assume equal population variances.  This is the
-    appropriate default for MD replicate data where the number of
-    replicates and variance may differ between conditions.
+    identical expected values.
+
+    The ``method`` parameter controls the variance assumption:
+
+    - ``"student"`` uses Student's t-test (``equal_var=True``), which assumes
+      equal population variances
+    - ``"welch"`` uses Welch's t-test (``equal_var=False``), which does not
+      assume equal variances
+
+    Use ``"student"`` when homoscedasticity is a reasonable assumption.
+    Use ``"welch"`` when variances may differ across conditions.
 
     Parameters
     ----------
@@ -226,6 +234,9 @@ def independent_ttest(
         First group of values (e.g., control replicate means)
     group2 : array_like
         Second group of values (e.g., treatment replicate means)
+    method : str, optional
+        T-test method to use: ``"student"`` or ``"welch"``, by default
+        ``"student"``.
 
     Returns
     -------
@@ -238,13 +249,25 @@ def independent_ttest(
     >>> treatment = [0.517, 0.586]        # 100% SBMA RMSF
     >>> result = independent_ttest(control, treatment)
     >>> print(f"t = {result.t_statistic:.3f}, p = {result.p_value:.4f}")
+
+    Raises
+    ------
+    ValueError
+        If *method* is not ``"student"`` or ``"welch"``
     """
     from scipy import stats
 
     g1 = np.asarray(group1, dtype=np.float64)
     g2 = np.asarray(group2, dtype=np.float64)
 
-    t, p = stats.ttest_ind(g1, g2, equal_var=False)
+    if method == "student":
+        equal_var = True
+    elif method == "welch":
+        equal_var = False
+    else:
+        raise ValueError(f"Unknown t-test method {method!r}; expected 'student' or 'welch'")
+
+    t, p = stats.ttest_ind(g1, g2, equal_var=equal_var)
 
     return TTestResult(
         t_statistic=float(t),
@@ -322,15 +345,24 @@ def cohens_d(
     )
 
 
-def one_way_anova(*groups: ArrayLike) -> ANOVAResult:
+def one_way_anova(*groups: ArrayLike, method: str = "classical") -> ANOVAResult:
     """Perform one-way ANOVA across multiple groups.
 
     Tests the null hypothesis that all groups have the same mean.
+
+    The ``method`` parameter controls the variance assumption:
+
+    - ``"classical"`` uses ``scipy.stats.f_oneway`` (equal variance assumption)
+    - ``"welch"`` uses ``scipy.stats.alexandergovern`` as a heteroscedastic
+      alternative when group variances may differ
 
     Parameters
     ----------
     *groups : array_like
         Variable number of groups to compare
+    method : str, optional
+        ANOVA method: ``"classical"`` or ``"welch"``, by default
+        ``"classical"``.
 
     Returns
     -------
@@ -344,16 +376,28 @@ def one_way_anova(*groups: ArrayLike) -> ANOVAResult:
     >>> egma = [0.558, 0.738, 0.496]
     >>> result = one_way_anova(no_poly, sbma, egma)
     >>> print(f"F = {result.f_statistic:.3f}, p = {result.p_value:.4f}")
+
+    Raises
+    ------
+    ValueError
+        If *method* is not ``"classical"`` or ``"welch"``
     """
     from scipy import stats
 
     # Convert to numpy arrays
     arrays = [np.asarray(g, dtype=np.float64) for g in groups]
 
-    f, p = stats.f_oneway(*arrays)
+    if method == "classical":
+        stat, p = stats.f_oneway(*arrays)
+    elif method == "welch":
+        ag_result = stats.alexandergovern(*arrays)
+        stat = ag_result.statistic
+        p = ag_result.pvalue
+    else:
+        raise ValueError(f"Unknown ANOVA method {method!r}; expected 'classical' or 'welch'")
 
     return ANOVAResult(
-        f_statistic=float(f),
+        f_statistic=float(stat),
         p_value=float(p),
     )
 
