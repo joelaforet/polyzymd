@@ -621,9 +621,9 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseR
         Name of the comparison project
     control_label : str | None
         Label of the control condition
-    conditions : list[Any]
+    conditions : list[TConditionSummary]
         Condition summaries
-    pairwise_comparisons : list[Any]
+    pairwise_comparisons : list[TPairwiseResult]
         Pairwise statistical comparisons
     anova : ANOVAResult | list[ANOVAResult] | None
         ANOVA result(s)
@@ -644,8 +644,8 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseR
     metric: str
     name: str
     control_label: str | None = None
-    conditions: list[Any]
-    pairwise_comparisons: list[Any]
+    conditions: list[TConditionSummary]
+    pairwise_comparisons: list[TPairwiseResult]
     anova: ANOVAResult | list[ANOVAResult] | None = None
     ranking: list[str]
     equilibration_time: str
@@ -687,7 +687,7 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseR
         path = Path(path)
         return cls.model_validate_json(path.read_text())
 
-    def get_condition(self, label: str) -> Any:
+    def get_condition(self, label: str) -> TConditionSummary:
         """Get a condition by label.
 
         Parameters
@@ -697,7 +697,7 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseR
 
         Returns
         -------
-        Any
+        TConditionSummary
             The matching condition summary
 
         Raises
@@ -710,7 +710,7 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseR
                 return condition
         raise KeyError(f"Condition '{label}' not found")
 
-    def get_comparison(self, label: str | tuple[str, str]) -> Any | None:
+    def get_comparison(self, label: str | tuple[str, str]) -> TPairwiseResult | None:
         """Get a pairwise comparison by condition pair.
 
         Parameters
@@ -723,7 +723,7 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseR
 
         Returns
         -------
-        Any | None
+        TPairwiseResult | None
             The comparison, or None if not found
 
         Notes
@@ -741,10 +741,19 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseR
         else:
             legacy_label = label
 
-        for comparison in self.pairwise_comparisons:
-            if comparison.condition_b == legacy_label:
-                return comparison
-        return None
+        matches = [
+            comparison
+            for comparison in self.pairwise_comparisons
+            if comparison.condition_b == legacy_label
+        ]
+        if not matches:
+            return None
+        if len(matches) > 1:
+            raise ValueError(
+                f"Ambiguous legacy comparison lookup for label '{legacy_label}': "
+                f"found {len(matches)} matches; use tuple lookup (condition_a, condition_b)."
+            )
+        return matches[0]
 
 
 # ---------------------------------------------------------------------------
@@ -1031,6 +1040,18 @@ class Analysis(ABC):
                     continue
 
             extracted = self.extract_metrics(summary)
+            if not isinstance(extracted, dict):
+                raise PluginContractError(
+                    f"Plugin '{self.name}' extract_metrics() must return dict[str, MetricValue] "
+                    f"for condition '{cond.label}', got {type(extracted).__name__}"
+                )
+            for metric_key, metric_value in extracted.items():
+                if not isinstance(metric_value, MetricValue):
+                    raise PluginContractError(
+                        f"Plugin '{self.name}' extract_metrics() returned invalid value for "
+                        f"key '{metric_key}' in condition '{cond.label}': expected MetricValue, "
+                        f"got {type(metric_value).__name__}"
+                    )
             if not extracted:
                 raise PluginContractError(
                     f"Plugin '{self.name}' extract_metrics() returned empty dict for "

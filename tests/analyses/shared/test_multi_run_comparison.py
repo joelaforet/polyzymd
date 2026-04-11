@@ -140,6 +140,66 @@ def test_base_comparison_get_comparison_supports_legacy_condition_b_lookup() -> 
     assert legacy.condition_b == "Treatment"
 
 
+def test_base_comparison_get_comparison_legacy_lookup_raises_on_ambiguity() -> None:
+    """Legacy single-label lookup should raise when multiple matches exist."""
+    result = _ComparisonResult(
+        metric="mean_value",
+        name="test_project",
+        control_label=None,
+        conditions=[
+            _ConditionSummary(
+                label="A",
+                config_path="/fake/a.yaml",
+                n_replicates=2,
+                replicate_values=[1.0, 1.1],
+            ),
+            _ConditionSummary(
+                label="B",
+                config_path="/fake/b.yaml",
+                n_replicates=2,
+                replicate_values=[1.2, 1.3],
+            ),
+            _ConditionSummary(
+                label="C",
+                config_path="/fake/c.yaml",
+                n_replicates=2,
+                replicate_values=[1.4, 1.5],
+            ),
+        ],
+        pairwise_comparisons=[
+            PairwiseResult(
+                condition_a="A",
+                condition_b="C",
+                t_statistic=1.0,
+                p_value=0.20,
+                cohens_d=0.2,
+                effect_size_interpretation="small",
+                direction="increased",
+                significant=False,
+                percent_change=5.0,
+            ),
+            PairwiseResult(
+                condition_a="B",
+                condition_b="C",
+                t_statistic=2.0,
+                p_value=0.01,
+                cohens_d=0.8,
+                effect_size_interpretation="large",
+                direction="decreased",
+                significant=True,
+                percent_change=-5.0,
+            ),
+        ],
+        ranking=["B", "A", "C"],
+        equilibration_time="10ns",
+        created_at=datetime.now(),
+        polyzymd_version="1.2.1",
+    )
+
+    with pytest.raises(ValueError, match="Ambiguous legacy comparison lookup"):
+        result.get_comparison("C")
+
+
 def test_base_comparison_get_comparison_tuple_falls_back_to_condition_b_lookup() -> None:
     """Tuple lookup should fall back to legacy condition_b behavior when needed."""
     result = _ComparisonResult(

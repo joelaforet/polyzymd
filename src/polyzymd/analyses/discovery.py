@@ -159,7 +159,7 @@ def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
         for attr_name in dir(module):
             try:
                 obj = getattr(module, attr_name)
-            except Exception:
+            except AttributeError:
                 logger.debug(
                     "Could not access attribute %s.%s — skipping.",
                     modname,

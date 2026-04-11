@@ -19,12 +19,13 @@ from polyzymd.analyses.base import (
     ReplicateContext,
 )
 from polyzymd.analyses.exceptions import (
+    DependencyError,
     PluginContractError,
     ReplicateError,
     ReplicateSkippedError,
 )
 from polyzymd.analyses.orchestrator import (
-    _run_replicates,
+    _validate_dependencies,
     aggregate_condition_from_disk,
     prepare_comparison_run,
     run_analysis,
@@ -212,11 +213,15 @@ def test_prepare_comparison_run_returns_conditions_settings(monkeypatch, tmp_pat
         lambda analysis, config: _ParallelSettings(factor=2.0),
     )
 
-    conditions, settings, equilibration, analysis_root = prepare_comparison_run(
+    prepared = prepare_comparison_run(
         analysis,
         config,
         "5ns",
     )
+    conditions = prepared["valid_conditions"]
+    settings = prepared["settings"]
+    equilibration = prepared["equilibration"]
+    analysis_root = prepared["analysis_root"]
     assert [condition.label for condition in conditions] == ["A", "B"]
     assert settings.factor == 2.0
     assert equilibration == "5ns"
@@ -284,22 +289,21 @@ def test_run_comparison_still_works_after_refactor(monkeypatch, tmp_path: Path) 
 class TestOrchestrator:
     """Test the orchestrator's replicate running and dependency sorting."""
 
-    def test_run_replicates_success(self, toy_analysis, toy_condition, toy_settings, tmp_path):
-        results, successful, failed = _run_replicates(
+    def test_run_analysis_success(self, toy_analysis, toy_condition, toy_settings, tmp_path):
+        result = run_analysis(
             toy_analysis,
             toy_condition,
             toy_settings,
             equilibration="10ns",
             output_dir=tmp_path,
         )
-        assert len(results) == 3
-        assert successful == [1, 2, 3]
-        assert failed == []
+        assert isinstance(result, ToyAggregatedResult)
+        assert result.n_replicates == 3
         assert (tmp_path / "run_1").exists()
         assert (tmp_path / "run_2").exists()
         assert (tmp_path / "run_3").exists()
 
-    def test_run_replicates_partial_failure(self, toy_condition, toy_settings, tmp_path):
+    def test_run_analysis_partial_failure(self, toy_condition, toy_settings, tmp_path):
         """If some replicates fail but min_replicates is met, continue."""
 
         class FailingAnalysis(Analysis):
@@ -313,21 +317,25 @@ class TestOrchestrator:
                 return ToyResult(value=float(replicate), replicate=replicate)
 
             def aggregate(self, ctx, results):
-                return None
+                return {
+                    "mean_value": float(sum(result.value for result in results) / len(results)),
+                    "sem_value": 0.0,
+                    "replicate_values": [float(result.value) for result in results],
+                    "n_replicates": len(results),
+                }
 
         analysis = FailingAnalysis()
-        results, successful, failed = _run_replicates(
+        result = run_analysis(
             analysis,
             toy_condition,
             toy_settings,
             equilibration="0ns",
             output_dir=tmp_path,
         )
-        assert len(results) == 2
-        assert 2 not in successful
-        assert 2 in failed
+        assert result["n_replicates"] == 2
+        assert sorted(result["replicate_values"]) == [1.0, 3.0]
 
-    def test_run_replicates_skipped_error_is_recoverable(
+    def test_run_analysis_skipped_error_is_recoverable(
         self,
         toy_condition,
         toy_settings,
@@ -347,22 +355,26 @@ class TestOrchestrator:
                 return ToyResult(value=float(replicate), replicate=replicate)
 
             def aggregate(self, ctx, results):
-                return {"ok": True}
+                return {
+                    "mean_value": float(sum(result.value for result in results) / len(results)),
+                    "sem_value": 0.0,
+                    "replicate_values": [float(result.value) for result in results],
+                    "n_replicates": len(results),
+                }
 
         caplog.set_level("WARNING")
-        results, successful, failed = _run_replicates(
+        result = run_analysis(
             SkipReplicateAnalysis(),
             toy_condition,
             toy_settings,
             equilibration="0ns",
             output_dir=tmp_path,
         )
-        assert len(results) == 2
-        assert successful == [1, 3]
-        assert failed == [2]
+        assert result["n_replicates"] == 2
+        assert sorted(result["replicate_values"]) == [1.0, 3.0]
         assert "No trajectory data found for replicate 2" in caplog.text
 
-    def test_run_replicates_below_minimum_raises(self, toy_condition, toy_settings, tmp_path):
+    def test_run_analysis_below_minimum_raises(self, toy_condition, toy_settings, tmp_path):
         """If fewer than min_replicates succeed, raise ValueError."""
 
         class AlwaysFailAnalysis(Analysis):
@@ -377,7 +389,7 @@ class TestOrchestrator:
                 return None
 
         with pytest.raises(ValueError, match="need at least 2"):
-            _run_replicates(
+            run_analysis(
                 AlwaysFailAnalysis(),
                 toy_condition,
                 toy_settings,
@@ -385,7 +397,7 @@ class TestOrchestrator:
                 output_dir=tmp_path,
             )
 
-    def test_run_replicates_all_skipped_fails_minimum(self, toy_condition, toy_settings, tmp_path):
+    def test_run_analysis_all_skipped_fails_minimum(self, toy_condition, toy_settings, tmp_path):
         """When all replicates skip, minimum replicate validation should fail."""
 
         class AllSkippedAnalysis(Analysis):
@@ -400,7 +412,7 @@ class TestOrchestrator:
                 return {"ok": True}
 
         with pytest.raises(ValueError, match="need at least 1"):
-            _run_replicates(
+            run_analysis(
                 AllSkippedAnalysis(),
                 toy_condition,
                 toy_settings,
@@ -408,7 +420,7 @@ class TestOrchestrator:
                 output_dir=tmp_path,
             )
 
-    def test_run_replicates_unexpected_failure_raises_replicate_error(
+    def test_run_analysis_unexpected_failure_raises_replicate_error(
         self, toy_condition, toy_settings, tmp_path
     ):
         """Unexpected compute failures should raise structured ReplicateError."""
@@ -424,7 +436,7 @@ class TestOrchestrator:
                 return None
 
         with pytest.raises(ReplicateError, match="condition='Test Condition' replicate=1"):
-            _run_replicates(
+            run_analysis(
                 ExplodingAnalysis(),
                 toy_condition,
                 toy_settings,
@@ -619,7 +631,7 @@ class TestContractEnforcement:
         )
 
         with pytest.raises(PluginContractError, match="contract boom"):
-            _run_replicates(
+            run_analysis(
                 RaisesContractAnalysis(),
                 condition,
                 ToySettings(),
@@ -707,3 +719,12 @@ class TestContractEnforcement:
             run_comparison(analysis, config, recompute=False, equilibration="10ns")
 
         assert processed_labels == ["A"]
+
+    def test_validate_dependencies_raises_when_dependency_missing(self, monkeypatch) -> None:
+        """Declared dependencies missing from scheduled analyses should fail."""
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.list_all_names",
+            lambda: ["toy", "toy_dependent"],
+        )
+        with pytest.raises(DependencyError, match="not in the current run list"):
+            _validate_dependencies([ToyDependentAnalysis()])

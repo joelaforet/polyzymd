@@ -32,3 +32,7 @@ class ComparisonError(AnalysisError):
 
 class PlotError(AnalysisError):
     """Raised when plot generation fails."""
+
+
+class DependencyError(AnalysisError):
+    """Raised when declared analysis dependencies are invalid or missing."""

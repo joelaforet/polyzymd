@@ -340,6 +340,94 @@ class TestDefaultCompareContract:
         ):
             analysis.compare(ctx)
 
+    def test_compare_raises_when_extract_metrics_returns_non_dict(self, tmp_path: Path) -> None:
+        """extract_metrics must return a dict mapping metric names to MetricValue."""
+
+        class BadTypeAnalysis(Analysis):
+            name: ClassVar[str] = "bad_type"
+            Settings: ClassVar[type] = ToySettings
+
+            def compute_replicate(self, ctx, replicate):
+                return {"replicate": replicate}
+
+            def aggregate(self, ctx, results):
+                return {"dummy": True}
+
+            def extract_metrics(self, summary):
+                del summary
+                return ["not", "a", "dict"]
+
+        analysis = BadTypeAnalysis()
+        condition = Condition(
+            label="A",
+            config_path=tmp_path / "a.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = ComparisonContext(
+            name="proj",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"A": tmp_path / "analysis" / "A" / "bad_type"},
+            results_dir=tmp_path / "comparison" / "bad_type",
+            equilibration="10ns",
+            settings=ToySettings(),
+            recompute=False,
+            aggregated_results={"A": {"dummy": True}},
+        )
+
+        with pytest.raises(
+            PluginContractError,
+            match=r"extract_metrics\(\) must return dict\[str, MetricValue\]",
+        ):
+            analysis.compare(ctx)
+
+    def test_compare_raises_when_extract_metrics_contains_non_metric_value(
+        self, tmp_path: Path
+    ) -> None:
+        """extract_metrics values must be MetricValue instances."""
+
+        class BadValueAnalysis(Analysis):
+            name: ClassVar[str] = "bad_value"
+            Settings: ClassVar[type] = ToySettings
+
+            def compute_replicate(self, ctx, replicate):
+                return {"replicate": replicate}
+
+            def aggregate(self, ctx, results):
+                return {"dummy": True}
+
+            def extract_metrics(self, summary):
+                del summary
+                return {"bad_metric": 123}
+
+        analysis = BadValueAnalysis()
+        condition = Condition(
+            label="A",
+            config_path=tmp_path / "a.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = ComparisonContext(
+            name="proj",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"A": tmp_path / "analysis" / "A" / "bad_value"},
+            results_dir=tmp_path / "comparison" / "bad_value",
+            equilibration="10ns",
+            settings=ToySettings(),
+            recompute=False,
+            aggregated_results={"A": {"dummy": True}},
+        )
+
+        with pytest.raises(
+            PluginContractError,
+            match=r"returned invalid value for key 'bad_metric'.*expected MetricValue",
+        ):
+            analysis.compare(ctx)
+
     def test_compare_skips_missing_result_file_with_warning(self, caplog, tmp_path: Path) -> None:
         """Missing aggregated files should be skipped with warning, not contract error."""
 

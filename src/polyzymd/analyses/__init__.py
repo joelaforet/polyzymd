@@ -8,6 +8,7 @@ Public API
     list_analyses
     list_all_names
     Analysis
+    run_analysis
     run_comparison
     run_all_comparisons
 

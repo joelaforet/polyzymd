@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 from abc import ABC, abstractmethod
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
@@ -169,7 +170,7 @@ class BaseAnalysisResult(BaseModel, ABC):
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
         with open(filepath, "w") as f:
-            json.dump(self.model_dump(mode="json"), f, indent=2, default=str)
+            json.dump(self.model_dump(mode="json"), f, indent=2)
 
         return filepath
 
@@ -246,5 +247,5 @@ def get_polyzymd_version() -> str:
         from importlib.metadata import version
 
         return version("polyzymd")
-    except Exception:
+    except (ImportError, PackageNotFoundError):
         return "unknown"

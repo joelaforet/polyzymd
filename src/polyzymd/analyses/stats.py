@@ -225,6 +225,9 @@ def pairwise_comparisons(
             ):
                 continue
 
+            if control_label and control_label in metrics_by_condition and label_b == control_label:
+                label_a, label_b = label_b, label_a
+
             mv_a = metrics_by_condition[label_a]
             mv_b = metrics_by_condition[label_b]
             effect = cohens_d(mv_a.replicate_values, mv_b.replicate_values)
@@ -325,7 +328,20 @@ def rank_conditions(
     if not metrics_by_condition:
         return []
     # All MetricValues should agree on higher_is_better; use the first
-    first_mv = next(iter(metrics_by_condition.values()))
+    first_label, first_mv = next(iter(metrics_by_condition.items()))
+    mismatches = [
+        (label, mv.higher_is_better)
+        for label, mv in metrics_by_condition.items()
+        if mv.higher_is_better != first_mv.higher_is_better
+    ]
+    if mismatches:
+        mismatch_text = ", ".join(
+            f"{label}={higher_is_better!r}" for label, higher_is_better in mismatches
+        )
+        raise ValueError(
+            "Inconsistent MetricValue.higher_is_better values across conditions: "
+            f"{first_label}={first_mv.higher_is_better!r}; mismatches: {mismatch_text}"
+        )
     if first_mv.higher_is_better is None:
         return sorted(
             metrics_by_condition.keys(),
@@ -403,6 +419,23 @@ def default_scalar_comparison(
 
     if not metrics_by_condition:
         raise ValueError("metrics_by_condition is empty — need at least 1 condition.")
+
+    baseline_label, baseline_metrics = next(iter(metrics_by_condition.items()))
+    baseline_keys = set(baseline_metrics.keys())
+    key_mismatches: list[str] = []
+    for label, condition_metrics in metrics_by_condition.items():
+        metric_keys = set(condition_metrics.keys())
+        missing_keys = sorted(baseline_keys - metric_keys)
+        extra_keys = sorted(metric_keys - baseline_keys)
+        if missing_keys or extra_keys:
+            key_mismatches.append(f"{label}: missing={missing_keys}, extra={extra_keys}")
+    if key_mismatches:
+        mismatch_details = "; ".join(key_mismatches)
+        raise ValueError(
+            "Inconsistent metric keys across conditions. "
+            f"Baseline '{baseline_label}' keys={sorted(baseline_keys)}; "
+            f"differences: {mismatch_details}"
+        )
 
     # Discover metric names from ALL conditions (union), preserving first-seen order
     seen: set[str] = set()

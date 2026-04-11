@@ -45,6 +45,7 @@ from polyzymd.analyses.exceptions import (
     AggregationError,
     AnalysisError,
     ComparisonError,
+    DependencyError,
     PlotError,
     PluginContractError,
     ReplicateError,
@@ -60,6 +61,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("polyzymd.analyses")
 
 _ACCEPTABLE_RESULT_TYPES = (dict,)  # BaseModel checked separately (lazy import)
+_MANY_TASKS_THRESHOLD = 10
 
 
 def _check_result_type(result: Any, method: str, analysis_name: str) -> None:
@@ -100,110 +102,6 @@ def _check_compute_result(result: Any, method: str, analysis_name: str) -> None:
             f"{analysis_name}.{method}() returned None; expected dict or pydantic BaseModel"
         )
     _check_result_type(result, method, analysis_name)
-
-
-# ---------------------------------------------------------------------------
-# Replicate runner
-# ---------------------------------------------------------------------------
-
-
-def _run_replicates(
-    analysis: Analysis,
-    condition: Condition,
-    settings: Any,
-    equilibration: str,
-    output_dir: Path,
-    recompute: bool = False,
-) -> tuple[list[Any], list[int], list[int]]:
-    """Run compute_replicate for each replicate, collecting results.
-
-    Parameters
-    ----------
-    analysis : Analysis
-        The analysis plugin instance.
-    condition : Condition
-        Condition to analyse.
-    settings : BaseModel
-        Analysis-specific settings.
-    equilibration : str
-        Equilibration time string.
-    output_dir : Path
-        Base output directory for this condition + analysis
-        (e.g. ``analysis/<label>/<name>``).
-    recompute : bool
-        Force recomputation.
-
-    Returns
-    -------
-    tuple[list[Any], list[int], list[int]]
-        ``(results, successful_replicates, failed_replicates)``.
-
-    Raises
-    ------
-    ValueError
-        If fewer than ``analysis.min_replicates`` succeed.
-    """
-    results: list[Any] = []
-    successful: list[int] = []
-    failed: list[int] = []
-
-    for rep in condition.replicates:
-        rep_dir = output_dir / f"run_{rep}"
-        rep_dir.mkdir(parents=True, exist_ok=True)
-        result_path = analysis.replicate_result_path(rep_dir)
-
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=rep,
-            sim_config=condition.sim_config,
-            output_dir=rep_dir,
-            equilibration=equilibration,
-            recompute=recompute,
-            settings=settings,
-            result_path=result_path,
-        )
-
-        try:
-            result = analysis.compute_replicate(ctx, rep)
-            _check_compute_result(result, "compute_replicate", analysis.name)
-            if recompute or not result_path.exists():
-                try:
-                    analysis.save_result(result, result_path)
-                except OSError as save_err:
-                    raise ReplicateError(
-                        f"{analysis.name}: failed to save replicate result for "
-                        f"condition='{condition.label}' replicate={rep}: {save_err}"
-                    ) from save_err
-            results.append(result)
-            successful.append(rep)
-        except (FileNotFoundError, OSError) as e:
-            logger.warning(f"  Skipping {condition.label} rep {rep}: data not found — {e}")
-            failed.append(rep)
-        except ReplicateSkippedError as e:
-            logger.warning("  Skipping %s rep %d: %s", condition.label, rep, e)
-            failed.append(rep)
-        except PluginContractError:
-            raise
-        except Exception as e:
-            raise ReplicateError(
-                f"{analysis.name}: compute_replicate failed for "
-                f"condition='{condition.label}' replicate={rep}: {type(e).__name__}: {e}"
-            ) from e
-
-    if len(results) < analysis.min_replicates:
-        raise ValueError(
-            f"{analysis.name}: condition '{condition.label}' has "
-            f"{len(results)} successful replicates, need at least "
-            f"{analysis.min_replicates}.  Failed: {failed}"
-        )
-
-    if failed:
-        logger.warning(
-            f"  {condition.label}: {len(failed)} replicate(s) failed {failed}, "
-            f"using {len(results)} of {len(condition.replicates)}"
-        )
-
-    return results, successful, failed
 
 
 def run_replicate_once(
@@ -502,52 +400,105 @@ def _prepare_conditions_with_filter(
     analysis: Analysis,
     config: ComparisonConfig,
     settings: BaseModel,
-) -> tuple[list[Condition], list[Condition], list[Condition]]:
+) -> tuple[list[Condition], list[Condition], list[Condition], dict[str, Condition]]:
     """Build and filter conditions with validation.
 
     Returns
     -------
-    tuple[list[Condition], list[Condition], list[Condition]]
-        ``(all_conditions, valid_conditions, excluded_conditions)``.
+    tuple[list[Condition], list[Condition], list[Condition], dict[str, Condition]]
+        ``(all_conditions, valid_conditions, excluded_conditions, condition_by_label)``.
     """
     all_conditions = [Condition.from_condition_config(c) for c in config.conditions]
+    condition_by_label: dict[str, Condition] = {
+        condition.label: condition for condition in all_conditions
+    }
     valid_conditions = analysis.filter_conditions(all_conditions, settings=settings)
 
-    valid_ids = [id(c) for c in valid_conditions]
-    input_ids = {id(c) for c in all_conditions}
-    foreign_ids = set(valid_ids) - input_ids
-    if foreign_ids:
+    foreign_labels = [
+        condition.label
+        for condition in valid_conditions
+        if condition.label not in condition_by_label
+    ]
+    if foreign_labels:
         logger.warning(
             "%s: filter_conditions() returned %d condition(s) not in the original list "
             "— discarding foreign conditions",
             analysis.name,
-            len(foreign_ids),
+            len(foreign_labels),
         )
-        valid_conditions = [c for c in valid_conditions if id(c) in input_ids]
-        valid_ids = [id(c) for c in valid_conditions]
-    if len(set(valid_ids)) != len(valid_ids):
+        valid_conditions = [
+            condition for condition in valid_conditions if condition.label in condition_by_label
+        ]
+
+    valid_labels = [condition.label for condition in valid_conditions]
+    if len(set(valid_labels)) != len(valid_labels):
         logger.warning(
             "%s: filter_conditions() returned duplicate conditions — deduplicating",
             analysis.name,
         )
-        seen: set[int] = set()
+        seen_labels: set[str] = set()
         deduped: list[Condition] = []
-        for c in valid_conditions:
-            if id(c) not in seen:
-                seen.add(id(c))
-                deduped.append(c)
+        for condition in valid_conditions:
+            if condition.label not in seen_labels:
+                seen_labels.add(condition.label)
+                deduped.append(condition_by_label[condition.label])
         valid_conditions = deduped
+    else:
+        valid_conditions = [condition_by_label[condition.label] for condition in valid_conditions]
 
-    valid_id_set = {id(c) for c in valid_conditions}
-    excluded = [c for c in all_conditions if id(c) not in valid_id_set]
-    return all_conditions, valid_conditions, excluded
+    valid_labels_set = {condition.label for condition in valid_conditions}
+    excluded = [
+        condition for condition in all_conditions if condition.label not in valid_labels_set
+    ]
+    return all_conditions, valid_conditions, excluded, condition_by_label
+
+
+def _create_prepared_state(
+    analysis: Analysis,
+    config: ComparisonConfig,
+    settings: BaseModel,
+    equilibration: str,
+    analysis_root: Path,
+) -> dict[str, Any]:
+    """Prepare and validate filtered conditions once for a comparison run."""
+    all_conditions, valid_conditions, excluded, condition_by_label = (
+        _prepare_conditions_with_filter(
+            analysis,
+            config,
+            settings,
+        )
+    )
+
+    if excluded:
+        logger.warning(
+            "%s: excluding %d condition(s): %s",
+            analysis.name,
+            len(excluded),
+            [condition.label for condition in excluded],
+        )
+
+    if len(valid_conditions) < 1:
+        raise ValueError(
+            f"{analysis.name}: no valid conditions remain after filtering. "
+            f"Excluded: {[condition.label for condition in excluded]}"
+        )
+
+    return {
+        "all_conditions": all_conditions,
+        "valid_conditions": valid_conditions,
+        "excluded_conditions": excluded,
+        "condition_by_label": condition_by_label,
+        "settings": settings,
+        "equilibration": equilibration,
+        "analysis_root": analysis_root,
+    }
 
 
 def prepare_comparison_run(
     analysis: Analysis,
     config: ComparisonConfig,
     equilibration: str | None,
-) -> tuple[list[Condition], BaseModel, str, Path]:
+) -> dict[str, Any]:
     """Resolve shared comparison state before compute/aggregate/compare.
 
     Parameters
@@ -561,35 +512,21 @@ def prepare_comparison_run(
 
     Returns
     -------
-    tuple[list[Condition], BaseModel, str, Path]
-        ``(valid_conditions, settings, equilibration, analysis_root)``.
+    dict[str, Any]
+        Prepared comparison state including filtered conditions.
     """
     resolved_equilibration = equilibration or config.defaults.equilibration_time
     analysis_root = (
         config.source_path.parent / "analysis" if config.source_path else Path("analysis")
     )
     settings = _resolve_settings(analysis, config)
-    _all_conditions, valid_conditions, excluded = _prepare_conditions_with_filter(
+    return _create_prepared_state(
         analysis,
         config,
         settings,
+        resolved_equilibration,
+        analysis_root,
     )
-
-    if excluded:
-        logger.warning(
-            "%s: excluding %d condition(s): %s",
-            analysis.name,
-            len(excluded),
-            [c.label for c in excluded],
-        )
-
-    if len(valid_conditions) < 1:
-        raise ValueError(
-            f"{analysis.name}: no valid conditions remain after filtering. "
-            f"Excluded: {[c.label for c in excluded]}"
-        )
-
-    return valid_conditions, settings, resolved_equilibration, analysis_root
 
 
 def _print_execution_summary(
@@ -619,7 +556,7 @@ def _print_execution_summary(
     )
 
     is_expensive = getattr(analysis, "execution_cost_hint", "medium") == "high"
-    many_tasks = total_replicates > 10
+    many_tasks = total_replicates > _MANY_TASKS_THRESHOLD
     if not (is_expensive or many_tasks):
         return
 
@@ -648,6 +585,7 @@ def finalize_comparison_from_disk(
     figures_dir: Path,
     settings: BaseModel,
     effective_control: str | None,
+    prepared_state: dict[str, Any] | None = None,
     allow_partial: bool = False,
 ) -> dict[str, Any]:
     """Run compare and plot using already-aggregated condition results.
@@ -679,12 +617,20 @@ def finalize_comparison_from_disk(
     dict[str, Any]
         Dictionary with ``comparison``, ``comparison_path``, and ``plots``.
     """
-    all_conditions, valid_conditions, _excluded_by_filter = _prepare_conditions_with_filter(
-        analysis,
-        config,
-        settings,
-    )
-    condition_by_label = {c.label: c for c in valid_conditions}
+    if prepared_state is None:
+        source_path = getattr(config, "source_path", None)
+        prepared_state = _create_prepared_state(
+            analysis,
+            config,
+            settings,
+            config.defaults.equilibration_time,
+            source_path.parent / "analysis" if source_path else Path("analysis"),
+        )
+    all_conditions = prepared_state["all_conditions"]
+    valid_conditions = prepared_state["valid_conditions"]
+    condition_by_label = prepared_state["condition_by_label"]
+    resolved_equilibration = prepared_state["equilibration"]
+    settings = prepared_state["settings"]
 
     valid_analysis_dirs: dict[str, Path] = {}
     valid_aggregated_results: dict[str, Any] = {}
@@ -784,7 +730,7 @@ def finalize_comparison_from_disk(
         control_label=resolved_control,
         analysis_dirs=valid_analysis_dirs,
         results_dir=results_dir,
-        equilibration=config.defaults.equilibration_time,
+        equilibration=resolved_equilibration,
         settings=settings,
         recompute=False,
         fdr_alpha=getattr(config.defaults, "fdr_alpha", 0.05),
@@ -956,17 +902,18 @@ def run_comparison(
     """
     from polyzymd.analyses.shared.paths import sanitize_label
 
-    valid_conditions, settings, equilibration, analysis_root = prepare_comparison_run(
+    prepared_state = prepare_comparison_run(
         analysis,
         config,
         equilibration,
     )
+    valid_conditions = prepared_state["valid_conditions"]
+    settings = prepared_state["settings"]
+    equilibration = prepared_state["equilibration"]
+    analysis_root = prepared_state["analysis_root"]
+    all_conditions = prepared_state["all_conditions"]
+    excluded = prepared_state["excluded_conditions"]
     _print_execution_summary(analysis, valid_conditions, settings, equilibration)
-    all_conditions, _valid_for_excluded, excluded = _prepare_conditions_with_filter(
-        analysis,
-        config,
-        settings,
-    )
 
     # 3. Compute + aggregate per condition
     analysis_dirs: dict[str, Path] = {}
@@ -1053,6 +1000,7 @@ def run_comparison(
         figures_dir=figures_dir,
         settings=settings,
         effective_control=effective_control,
+        prepared_state=prepared_state,
     )
 
     return {
@@ -1111,7 +1059,7 @@ def run_all_comparisons(
             logger.warning(f"Unknown analysis type {name!r} — skipping.")
 
     # Validate declared dependencies are discoverable
-    _warn_missing_dependencies(analyses)
+    _validate_dependencies(analyses)
 
     sorted_analyses = _topological_sort(analyses)
 
@@ -1138,8 +1086,8 @@ def run_all_comparisons(
 # ---------------------------------------------------------------------------
 
 
-def _warn_missing_dependencies(analyses: list[Analysis]) -> None:
-    """Warn if any analysis declares dependencies that aren't discoverable.
+def _validate_dependencies(analyses: list[Analysis]) -> None:
+    """Validate that declared dependencies are discoverable and scheduled.
 
     This catches configuration errors early — e.g. a plugin declares
     ``dependencies = ("contacts",)`` but ``contacts`` isn't in the run list
@@ -1155,13 +1103,12 @@ def _warn_missing_dependencies(analyses: list[Analysis]) -> None:
     for a in analyses:
         for dep in a.dependencies:
             if dep not in known:
-                logger.warning(
+                raise DependencyError(
                     f"{a.name}: declared dependency {dep!r} is not a discoverable analysis plugin"
                 )
-            elif dep not in scheduled:
-                logger.warning(
-                    f"{a.name}: declared dependency {dep!r} is not in "
-                    f"the current run list — results may be stale"
+            if dep not in scheduled:
+                raise DependencyError(
+                    f"{a.name}: declared dependency {dep!r} is not in the current run list"
                 )
 
 

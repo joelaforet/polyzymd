@@ -89,16 +89,15 @@ def test_execution_summary_printed(monkeypatch: pytest.MonkeyPatch, caplog, tmp_
 
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.prepare_comparison_run",
-        lambda analysis, config, equilibration: (
-            conditions,
-            _HintSettings(),
-            "10ns",
-            tmp_path / "analysis",
-        ),
-    )
-    monkeypatch.setattr(
-        "polyzymd.analyses.orchestrator._prepare_conditions_with_filter",
-        lambda analysis, config, settings: (conditions, conditions, []),
+        lambda analysis, config, equilibration: {
+            "all_conditions": conditions,
+            "valid_conditions": conditions,
+            "excluded_conditions": [],
+            "condition_by_label": {condition.label: condition for condition in conditions},
+            "settings": _HintSettings(),
+            "equilibration": "10ns",
+            "analysis_root": tmp_path / "analysis",
+        },
     )
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.run_analysis",

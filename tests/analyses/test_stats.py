@@ -20,6 +20,7 @@ from polyzymd.analyses.stats import (
     default_scalar_comparison,
     format_scalar_comparison,
     pairwise_comparisons,
+    rank_conditions,
 )
 
 
@@ -408,6 +409,81 @@ def test_pairwise_comparisons_tukey_uses_fdr_alpha_boundary(monkeypatch) -> None
     assert len(results) == 1
     assert results[0].p_value_adjusted == pytest.approx(0.05)
     assert results[0].significant is True
+
+
+def test_pairwise_comparisons_tukey_normalizes_control_orientation(monkeypatch) -> None:
+    """Tukey comparisons should keep control as condition_a baseline."""
+
+    class _FakeTukeyResult:
+        def __init__(self, group_i: int, group_j: int, p_value: float):
+            self.group_i = group_i
+            self.group_j = group_j
+            self.p_value = p_value
+
+    def _fake_tukey_hsd(*_groups):
+        return [_FakeTukeyResult(group_i=0, group_j=1, p_value=0.01)]
+
+    def _fake_effect(_group1, _group2):
+        return EffectSize(cohens_d=0.5, interpretation="medium", direction="higher")
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.shared.inferential_statistics.tukey_hsd", _fake_tukey_hsd
+    )
+    monkeypatch.setattr("polyzymd.analyses.shared.inferential_statistics.cohens_d", _fake_effect)
+
+    metrics = {
+        "Treatment": _metric(2.0, [2.0, 2.1, 2.2]),
+        "Control": _metric(1.0, [1.0, 1.1, 1.2]),
+    }
+    results = pairwise_comparisons(metrics, control_label="Control", posthoc_method="tukey_hsd")
+
+    assert len(results) == 1
+    assert results[0].condition_a == "Control"
+    assert results[0].condition_b == "Treatment"
+
+
+def test_default_scalar_comparison_raises_on_inconsistent_metric_keys() -> None:
+    """Default scalar comparison should reject mismatched metric key sets."""
+    metrics_by_condition = {
+        "Control": {
+            "metric_a": _metric(1.0, [1.0, 1.1, 0.9]),
+            "metric_b": _metric(2.0, [1.9, 2.0, 2.1]),
+        },
+        "Treatment": {
+            "metric_a": _metric(1.2, [1.1, 1.2, 1.3]),
+            "metric_c": _metric(3.2, [3.1, 3.2, 3.3]),
+        },
+    }
+
+    with pytest.raises(ValueError, match="Inconsistent metric keys across conditions"):
+        default_scalar_comparison(
+            analysis_name="test",
+            project_name="Inconsistent keys",
+            metrics_by_condition=metrics_by_condition,
+            control_label="Control",
+        )
+
+
+def test_rank_conditions_raises_on_inconsistent_higher_is_better() -> None:
+    """Ranker should reject conflicting higher_is_better declarations."""
+    metrics = {
+        "A": MetricValue("m", 1.0, 0.1, [1.0], higher_is_better=True),
+        "B": MetricValue("m", 2.0, 0.1, [2.0], higher_is_better=False),
+    }
+
+    with pytest.raises(ValueError, match="Inconsistent MetricValue.higher_is_better"):
+        rank_conditions(metrics)
+
+
+def test_rank_conditions_raises_on_mixed_none_and_bool_higher_is_better() -> None:
+    """Ranker should reject mixed None and bool higher_is_better values."""
+    metrics = {
+        "A": MetricValue("m", 1.0, 0.1, [1.0], higher_is_better=None),
+        "B": MetricValue("m", 2.0, 0.1, [2.0], higher_is_better=True),
+    }
+
+    with pytest.raises(ValueError, match="Inconsistent MetricValue.higher_is_better"):
+        rank_conditions(metrics)
 
 
 def test_formatter_uses_non_default_fdr_alpha_thresholds() -> None:

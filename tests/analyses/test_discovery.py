@@ -165,8 +165,38 @@ class TestDiscoveryRobustness:
         assert "fake_plugin" in registry
         assert aliases == {}
 
-    def test_getattr_failure_logged(self, caplog):
-        """Discovery should log and continue when a module attribute access fails."""
+    def test_getattr_attribute_error_logged(self, caplog):
+        """Discovery should log and continue on AttributeError during getattr."""
+        from polyzymd.analyses.discovery import _discover_plugins
+
+        module_name = "polyzymd.analyses.poisoned"
+
+        class PoisonModule(types.ModuleType):
+            def __dir__(self):
+                return ["good_attr", "bad_attr"]
+
+            def __getattr__(self, name):
+                if name == "bad_attr":
+                    raise AttributeError("missing attribute")
+                return super().__getattribute__(name)
+
+        poison_mod = PoisonModule(module_name)
+        poison_mod.good_attr = object()
+
+        with (
+            patch("pkgutil.walk_packages", return_value=[(None, module_name, True)]),
+            patch("importlib.import_module", return_value=poison_mod),
+            caplog.at_level("DEBUG", logger="polyzymd.analyses"),
+        ):
+            _discover_plugins()
+
+        assert any(
+            module_name in record.message and "bad_attr" in record.message
+            for record in caplog.records
+        )
+
+    def test_getattr_non_attribute_error_propagates(self):
+        """Discovery should propagate non-AttributeError getattr failures."""
         from polyzymd.analyses.discovery import _discover_plugins
 
         module_name = "polyzymd.analyses.poisoned"
@@ -186,14 +216,9 @@ class TestDiscoveryRobustness:
         with (
             patch("pkgutil.walk_packages", return_value=[(None, module_name, True)]),
             patch("importlib.import_module", return_value=poison_mod),
-            caplog.at_level("DEBUG", logger="polyzymd.analyses"),
         ):
-            _discover_plugins()
-
-        assert any(
-            module_name in record.message and "bad_attr" in record.message
-            for record in caplog.records
-        )
+            with pytest.raises(RuntimeError, match="poisoned"):
+                _discover_plugins()
 
     def test_discovery_warns_on_optional_heavy_dep_import_error(self, caplog):
         """Optional heavy dependency import errors should be logged and skipped."""
