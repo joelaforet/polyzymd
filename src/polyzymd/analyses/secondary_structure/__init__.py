@@ -207,7 +207,14 @@ class SecondaryStructureAnalysis(Analysis):
         timestep_ps = loader.get_timestep(replicate)
         eq_time_ps = convert_time(eq_value, eq_unit, "ps")
         start_frame = int(eq_time_ps / timestep_ps) if timestep_ps > 0 else 0
-        start_frame = min(start_frame, n_frames_total - 1)
+        min_frames = 10
+        if start_frame >= n_frames_total - min_frames:
+            raise ValueError(
+                f"Equilibration of {eq_time_ps / 1000:.1f} ns "
+                f"({start_frame} frames) leaves fewer than {min_frames} "
+                f"production frames from {n_frames_total} total. "
+                "Reduce equilibration time or use a longer trajectory."
+            )
 
         if start_frame > 0:
             protein_traj = protein_traj[start_frame:]

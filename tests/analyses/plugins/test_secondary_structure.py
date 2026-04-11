@@ -1028,3 +1028,56 @@ class TestChainSelectionValidation:
 
             with pytest.raises(ValueError, match="Chain 'Z'.*not found"):
                 analysis.compute_replicate(ctx, replicate=1)
+
+
+class TestEquilibrationValidation:
+    """Tests for equilibration frame validation."""
+
+    def test_excessive_equilibration_raises_value_error(self):
+        """Equilibration consuming nearly all frames should raise ValueError."""
+        from polyzymd.analyses import get_analysis
+
+        cls = get_analysis("secondary_structure")
+        analysis = cls()
+        settings = cls.Settings(chain_id="A")
+
+        mock_traj = MagicMock()
+        mock_traj.n_frames = 15
+        mock_traj.n_atoms = 500
+        chain_mock = MagicMock(index=0)
+        mock_traj.topology.chains = [chain_mock]
+        mock_traj.topology.select.return_value = np.arange(100)
+        mock_traj.atom_slice.return_value = mock_traj
+
+        with (
+            patch("mdtraj.load") as mock_load,
+            patch("polyzymd.analyses.secondary_structure.TrajectoryLoader") as MockLoader,
+        ):
+            mock_load.return_value = mock_traj
+
+            mock_loader = MagicMock()
+            MockLoader.return_value = mock_loader
+            mock_loader.get_trajectory_info.return_value = MagicMock(
+                trajectory_files=[Path("/fake/traj.xtc")],
+                topology_file=Path("/fake/top.pdb"),
+            )
+            mock_loader.get_timestep.return_value = 10.0
+
+            condition = Condition(
+                label="Test",
+                config_path=Path("/fake/config.yaml"),
+                replicates=(1,),
+                sim_config=MagicMock(),
+            )
+            ctx = ReplicateContext(
+                condition=condition,
+                replicate=1,
+                sim_config=condition.sim_config,
+                output_dir=Path("/fake/output"),
+                equilibration="10ns",
+                recompute=True,
+                settings=settings,
+            )
+
+            with pytest.raises(ValueError, match="fewer than 10 production frames"):
+                analysis.compute_replicate(ctx, replicate=1)
