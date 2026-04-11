@@ -65,6 +65,11 @@ def find_enzyme_pdb(sim_config: Any) -> Path | None:
     -------
     Path or None
         Path to enzyme PDB, or None if not found.
+
+    Raises
+    ------
+    ValueError
+        If a glob pattern matches multiple candidate enzyme PDB files.
     """
     import glob as glob_module
 
@@ -89,9 +94,9 @@ def find_enzyme_pdb(sim_config: Any) -> Path | None:
         matches = sorted(glob_module.glob(pattern, recursive=True))
         if matches:
             if len(matches) > 1:
-                logger.warning(
-                    f"Multiple enzyme PDB files found for pattern '{pattern}': "
-                    f"{matches}. Using first sorted match: {matches[0]}"
+                raise ValueError(
+                    f"Ambiguous enzyme PDB auto-discovery for pattern '{pattern}': "
+                    f"{len(matches)} matches found: " + ", ".join(matches)
                 )
             return Path(matches[0])
 

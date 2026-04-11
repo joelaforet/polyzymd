@@ -778,6 +778,8 @@ class TestPlot:
 
     def test_plot_passes_data_and_labels(self, triad_analysis, tmp_path, default_settings):
         """Verify the data dict passed to helpers has the expected shape."""
+        from polyzymd.config.comparison import PlotSettings
+
         cond1 = Condition(
             label="No Polymer",
             config_path=Path("/fake/config1.yaml"),
@@ -820,7 +822,7 @@ class TestPlot:
                     results_dir=tmp_path / "comparison",
                     output_dir=tmp_path / "figures",
                     settings=default_settings,
-                    plot_settings=MagicMock(),  # Already provided
+                    plot_settings=PlotSettings(),
                 )
 
                 triad_analysis.plot(ctx)

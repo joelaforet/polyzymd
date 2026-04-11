@@ -412,3 +412,34 @@ def test_plot_context_materializes_when_none_is_explicitly_passed() -> None:
     )
 
     assert isinstance(ctx.plot_settings, PlotSettings)
+
+
+def test_plot_context_keeps_explicit_plot_settings_instance() -> None:
+    """PlotContext should keep a valid PlotSettings instance as-is."""
+    from polyzymd.config.comparison import PlotSettings
+
+    plot_settings = PlotSettings()
+    ctx = PlotContext(
+        conditions=[],
+        analysis_dirs={},
+        results_dir=Path("/fake"),
+        output_dir=Path("/fake"),
+        settings=MagicMock(),
+        plot_settings=plot_settings,
+    )
+
+    assert ctx.plot_settings is plot_settings
+
+
+@pytest.mark.parametrize("invalid_value", [False, object()])
+def test_plot_context_rejects_invalid_plot_settings_type(invalid_value: object) -> None:
+    """PlotContext should raise TypeError for non-PlotSettings values."""
+    with pytest.raises(TypeError, match="plot_settings must be a PlotSettings instance"):
+        PlotContext(
+            conditions=[],
+            analysis_dirs={},
+            results_dir=Path("/fake"),
+            output_dir=Path("/fake"),
+            settings=MagicMock(),
+            plot_settings=invalid_value,
+        )

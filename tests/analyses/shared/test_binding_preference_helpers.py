@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -49,6 +51,41 @@ class TestTryLoadCachedBindingPreference:
         result = try_load_cached_binding_preference(cond, tmp_path)
         assert result is mock_result
         mock_agg_result.load.assert_called_once_with(str(expected_path))
+
+
+class TestFindEnzymePdb:
+    """Tests for find_enzyme_pdb auto-discovery behavior."""
+
+    @staticmethod
+    def _build_sim_config(project_dir: Path) -> SimpleNamespace:
+        return SimpleNamespace(output=SimpleNamespace(projects_directory=project_dir))
+
+    def test_raises_on_ambiguous_glob_match(self, tmp_path):
+        """Multiple *enzyme*.pdb glob matches should raise ValueError."""
+        from polyzymd.analyses.shared.binding_preference_helpers import find_enzyme_pdb
+
+        project_dir = tmp_path / "project" / "runs"
+        project_dir.mkdir(parents=True)
+        (project_dir / "a_enzyme.pdb").write_text("A")
+        (project_dir / "nested").mkdir()
+        (project_dir / "nested" / "b_enzyme.pdb").write_text("B")
+
+        sim_config = self._build_sim_config(project_dir)
+        with pytest.raises(ValueError, match="Ambiguous enzyme PDB auto-discovery"):
+            find_enzyme_pdb(sim_config)
+
+    def test_resolves_single_glob_match(self, tmp_path):
+        """A single *enzyme*.pdb glob match should resolve to that file."""
+        from polyzymd.analyses.shared.binding_preference_helpers import find_enzyme_pdb
+
+        project_dir = tmp_path / "project" / "runs"
+        project_dir.mkdir(parents=True)
+        enzyme_path = project_dir / "unique_enzyme.pdb"
+        enzyme_path.write_text("ATOM")
+
+        sim_config = self._build_sim_config(project_dir)
+        found = find_enzyme_pdb(sim_config)
+        assert found == enzyme_path
 
     @patch("polyzymd.analyses.shared.binding_preference.AggregatedBindingPreferenceResult")
     def test_canonical_aggregated_takes_priority(self, mock_agg_result, tmp_path):

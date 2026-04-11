@@ -203,16 +203,26 @@ Each entry in `runs`:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `groups` | mapping | `{"protein": "chainid A", "polymer": "chainid C"}` | Named atom groups: `{name: "MDAnalysis selection"}` |
+| `summaries` | list or mapping | one default summary (`protein_polymer` between `protein` and `polymer`) | Named H-bond summaries (see below) |
 | `distance_cutoff` | float | `3.0` | H-bond distance cutoff in Angstroms |
 | `angle_cutoff` | float | `150` | H-bond angle cutoff in degrees |
-| `groups` | mapping | **(required)** | Named atom groups: `{name: "MDAnalysis selection"}` |
-| `summaries` | mapping | **(required)** | Named H-bond summaries (see below) |
+| `update_selections` | bool | `true` | Update atom selections every frame |
+| `top_n_pairs` | int | `15` | Number of top residue pairs to report |
+| `allow_empty_groups` | bool | `true` | Warn and skip summaries when a group selection matches no atoms (`false` = raise error) |
+| `allow_overlapping_composition` | bool | `false` | Whether overlapping composition partitions are allowed |
 | `composition` | mapping | `null` | Composition analysis settings |
+| `timestep_ps` | float | `null` | Override trajectory timestep in picoseconds for time-axis plots |
 
-Each entry in `summaries` has one of:
+Each summary entry in `summaries` has:
 
-- `between: [group_a, group_b]` — inter-group H-bonds
-- `within: group_name` — intra-group H-bonds
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Unique summary name |
+| `between` | `[group_a, group_b]` | exactly one of `between` / `within` | Inter-group H-bonds |
+| `within` | `group_name` | exactly one of `between` / `within` | Intra-group H-bonds |
+
+For mapping-form input, keys are treated as `name` values.
 
 `composition` sub-fields:
 
@@ -293,11 +303,10 @@ Polymer bridging detection is experimental and under active development.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `bridge_cutoff` | float | `4.5` | Distance cutoff for bridging contact detection |
-| `min_bridge_duration` | int | `1` | Minimum consecutive frames for a bridge event |
 | `protein_selection` | string | `"protein"` | MDAnalysis selection for protein |
 | `polymer_selection` | string | `"chainID C"` | MDAnalysis selection for polymer |
-| `substrate_selection` | string | `"chainID B"` | MDAnalysis selection for substrate |
+| `cutoff` | float | `4.5` | Contact distance cutoff in Angstroms for oligomer-protein contact detection |
+| `min_ca_distance_angstrom` | float | `0.0` | Minimum frame-wise CA-CA distance to count as multisite (`0.0` disables geometric filtering) |
 
 ---
 

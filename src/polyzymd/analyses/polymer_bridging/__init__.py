@@ -71,12 +71,7 @@ from polyzymd.analyses.base import (
 from polyzymd.analyses.polymer_bridging._plot_settings import PolymerBridgingPlotSettings
 from polyzymd.analyses.shared import apply_axis_style, get_colors, get_output_path, save_figure
 from polyzymd.analyses.shared.groupings import ProteinAAClassification
-from polyzymd.analyses.shared.inferential_statistics import (
-    cohens_d,
-    independent_ttest,
-    one_way_anova,
-    percent_change,
-)
+from polyzymd.analyses.stats import anova_test, pairwise_comparisons
 from polyzymd.core.experimental import prefix_experimental_output
 
 logger = logging.getLogger("polyzymd.analyses.polymer_bridging")
@@ -622,8 +617,16 @@ class PolymerBridgingAnalysis(Analysis):
             if not per_cond:
                 continue
             if len(per_cond) >= 2:
-                all_pairwise.extend(_safe_pairwise_comparisons(per_cond, ctx.effective_control))
-            maybe_anova = _safe_anova(per_cond, metric_name)
+                all_pairwise.extend(
+                    _safe_pairwise_comparisons(
+                        per_cond,
+                        ctx.effective_control,
+                        ttest_method=ctx.ttest_method,
+                        posthoc_method=ctx.posthoc_method,
+                        fdr_alpha=ctx.fdr_alpha,
+                    )
+                )
+            maybe_anova = _safe_anova(per_cond, metric_name, alpha=ctx.fdr_alpha)
             if maybe_anova is not None:
                 all_anova.append(maybe_anova)
             all_rankings[metric_name] = sorted(
@@ -641,23 +644,20 @@ class PolymerBridgingAnalysis(Analysis):
             condition_summaries.append(ConditionSummary(label=label, n_replicates=n_reps, **extra))
 
         # Apply Benjamini-Hochberg FDR correction across all pairwise tests
+        # only when using t-tests
         fdr_alpha = getattr(ctx, "fdr_alpha", 0.05)
-        if all_pairwise:
+        posthoc_method = getattr(ctx, "posthoc_method", "ttest_bh")
+        if all_pairwise and posthoc_method == "ttest_bh":
             from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 
             raw_p = [pw.p_value for pw in all_pairwise]
             bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
             for pw, bh in zip(all_pairwise, bh_results, strict=False):
                 pw.p_value_adjusted = bh.adjusted_p_value
-                pw.significant = bh.significant
-
-        if all_anova:
-            from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
-
-            raw_p = [a.p_value for a in all_anova]
-            bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
-            for a, bh in zip(all_anova, bh_results, strict=False):
-                a.significant = bh.significant
+                p_for_significance = (
+                    bh.adjusted_p_value if bh.adjusted_p_value is not None else pw.p_value
+                )
+                pw.significant = p_for_significance <= fdr_alpha
 
         from datetime import datetime
 
@@ -669,6 +669,8 @@ class PolymerBridgingAnalysis(Analysis):
             name=ctx.name,
             control_label=ctx.effective_control,
             fdr_alpha=fdr_alpha,
+            ttest_method=ctx.ttest_method,
+            posthoc_method=ctx.posthoc_method,
             conditions=condition_summaries,
             pairwise_comparisons=all_pairwise,
             anova=all_anova if all_anova else None,
@@ -1455,69 +1457,48 @@ def _filter_comparison_result(result: ComparisonResult, metric_key: str) -> Comp
 def _safe_pairwise_comparisons(
     metrics_by_condition: dict[str, MetricValue],
     control_label: str | None,
+    *,
+    ttest_method: str = "student",
+    posthoc_method: str = "ttest_bh",
+    fdr_alpha: float = 0.05,
 ) -> list[PairwiseResult]:
-    from polyzymd.analyses.stats import interpret_direction
+    results = pairwise_comparisons(
+        metrics_by_condition,
+        control_label,
+        ttest_method=ttest_method,
+        posthoc_method=posthoc_method,
+        fdr_alpha=fdr_alpha,
+    )
 
-    labels = list(metrics_by_condition.keys())
-    if control_label and control_label in metrics_by_condition:
-        pairs = [(control_label, lb) for lb in labels if lb != control_label]
-    else:
-        pairs = [
-            (labels[i], labels[j]) for i in range(len(labels)) for j in range(i + 1, len(labels))
-        ]
+    for result in results:
+        if not np.isfinite(result.t_statistic):
+            result.t_statistic = 0.0
+        if not np.isfinite(result.p_value):
+            result.p_value = 1.0
+        if not np.isfinite(result.cohens_d):
+            result.cohens_d = 0.0
+        if result.p_value_adjusted is not None and not np.isfinite(result.p_value_adjusted):
+            result.p_value_adjusted = result.p_value
 
-    results: list[PairwiseResult] = []
-    for label_a, label_b in pairs:
-        mv_a = metrics_by_condition[label_a]
-        mv_b = metrics_by_condition[label_b]
-        ttest = independent_ttest(mv_a.replicate_values, mv_b.replicate_values)
-        effect = cohens_d(mv_a.replicate_values, mv_b.replicate_values)
-        pct = percent_change(mv_a.mean, mv_b.mean)
-        t_stat = float(ttest.t_statistic)
-        p_val = float(ttest.p_value)
-        d_val = float(effect.cohens_d)
-        if not np.isfinite(t_stat):
-            t_stat = 0.0
-        if not np.isfinite(p_val):
-            p_val = 1.0
-        if not np.isfinite(d_val):
-            d_val = 0.0
-        direction = interpret_direction(pct, mv_a.direction_labels)
-        results.append(
-            PairwiseResult(
-                condition_a=label_a,
-                condition_b=label_b,
-                metric=mv_a.name,
-                t_statistic=t_stat,
-                p_value=p_val,
-                cohens_d=d_val,
-                effect_size_interpretation=effect.interpretation,
-                direction=direction,
-                significant=p_val < 0.05,
-                percent_change=pct,
-            )
-        )
     return results
 
 
 def _safe_anova(
-    metrics_by_condition: dict[str, MetricValue], metric_name: str
+    metrics_by_condition: dict[str, MetricValue],
+    metric_name: str,
+    *,
+    alpha: float,
 ) -> ANOVAResult | None:
-    if len(metrics_by_condition) < 3:
+    result = anova_test(metrics_by_condition, metric_name=metric_name, alpha=alpha)
+    if result is None:
         return None
-    result = one_way_anova(*[mv.replicate_values for mv in metrics_by_condition.values()])
-    f_stat = float(result.f_statistic)
-    p_val = float(result.p_value)
-    if not np.isfinite(f_stat):
-        f_stat = 0.0
-    if not np.isfinite(p_val):
-        p_val = 1.0
-    return ANOVAResult(
-        metric=metric_name,
-        f_statistic=f_stat,
-        p_value=p_val,
-        significant=p_val < 0.05,
-    )
+
+    if not np.isfinite(result.f_statistic):
+        result.f_statistic = 0.0
+    if not np.isfinite(result.p_value):
+        result.p_value = 1.0
+        result.significant = False
+    return result
 
 
 def _compute_frame_contacts(

@@ -31,6 +31,7 @@ from polyzymd.analyses.orchestrator import (
     run_comparison,
     run_replicate_once,
 )
+from polyzymd.config.comparison import PlotSettings
 
 
 class _ParallelSettings(BaseModel):
@@ -177,7 +178,7 @@ def _make_config(tmp_path: Path):
             _CondCfg("B", tmp_path / "b.yaml", (1, 2)),
         ],
         plugins=SimpleNamespace(get=lambda name: None),
-        plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+        plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
         model_copy=lambda deep=True: SimpleNamespace(
             name="parallel_project",
             source_path=tmp_path / "comparison.yaml",
@@ -188,7 +189,7 @@ def _make_config(tmp_path: Path):
                 _CondCfg("B", tmp_path / "b.yaml", (1, 2)),
             ],
             plugins=SimpleNamespace(get=lambda name: None),
-            plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+            plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
         ),
     )
 

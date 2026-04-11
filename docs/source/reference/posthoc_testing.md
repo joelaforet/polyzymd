@@ -77,7 +77,7 @@ A one-way ANOVA (`scipy.stats.f_oneway`) is always run alongside post-hoc tests 
 |-------|------|-------------|
 | `f_statistic` | float | F-statistic from the one-way ANOVA. |
 | `p_value` | float | P-value for the omnibus test. |
-| `significant` | bool | Whether `p_value < fdr_alpha` (uses the configured `fdr_alpha` threshold). |
+| `significant` | bool | Whether `p_value <= fdr_alpha` (uses the configured `fdr_alpha` threshold). |
 
 ANOVA does **not** determine which pairs differ -- that is the role of post-hoc tests. ANOVA is skipped when fewer than 3 conditions are present, and returns `NaN` statistics if any group has fewer than 2 observations.
 

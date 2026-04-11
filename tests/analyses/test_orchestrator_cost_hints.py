@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from polyzymd.analyses.base import Analysis, Condition, MetricValue
 from polyzymd.analyses.orchestrator import _print_execution_summary, run_comparison
+from polyzymd.config.comparison import PlotSettings
 
 
 class _HintSettings(BaseModel):
@@ -77,11 +78,11 @@ def test_execution_summary_printed(monkeypatch: pytest.MonkeyPatch, caplog, tmp_
 
     config = SimpleNamespace(
         control="A",
-        plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+        plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
         defaults=SimpleNamespace(equilibration_time="10ns"),
         model_copy=lambda deep=True: SimpleNamespace(
             control="A",
-            plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+            plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
             defaults=SimpleNamespace(equilibration_time="10ns"),
         ),
     )

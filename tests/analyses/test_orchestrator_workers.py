@@ -17,6 +17,7 @@ from polyzymd.analyses.orchestrator import (
     run_analysis,
     run_replicate_once,
 )
+from polyzymd.config.comparison import PlotSettings
 
 
 class _WorkerSettings(BaseModel):
@@ -160,7 +161,7 @@ def test_finalize_comparison_from_disk_runs_compare_and_plot(
         control=None,
         conditions=[_CondCfg("A"), _CondCfg("B")],
         defaults=SimpleNamespace(equilibration_time="10ns"),
-        plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+        plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
     )
 
     def _fake_from_cond(cond_cfg):
@@ -212,7 +213,7 @@ def test_finalize_partial_recomputes_control_when_original_missing(
         control="A",
         conditions=[_CondCfg("A"), _CondCfg("B"), _CondCfg("C")],
         defaults=SimpleNamespace(equilibration_time="10ns"),
-        plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+        plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
     )
 
     def _fake_from_cond(cond_cfg):
@@ -267,7 +268,7 @@ def test_finalize_partial_with_one_condition_succeeds(
         control="A",
         conditions=[_CondCfg("A"), _CondCfg("B")],
         defaults=SimpleNamespace(equilibration_time="10ns"),
-        plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+        plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
     )
 
     def _fake_from_cond(cond_cfg):
@@ -317,7 +318,7 @@ def test_finalize_partial_raises_with_zero_successful_conditions(
         control="A",
         conditions=[_CondCfg("A"), _CondCfg("B")],
         defaults=SimpleNamespace(equilibration_time="10ns"),
-        plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+        plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
     )
 
     def _fake_from_cond(cond_cfg):

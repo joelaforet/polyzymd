@@ -322,10 +322,16 @@ class PlotContext:
 
     def __post_init__(self) -> None:
         """Ensure plot settings is always materialized for plugins."""
-        if self.plot_settings is None:  # type: ignore[comparison-overlap]
-            from polyzymd.config.comparison import PlotSettings
+        from polyzymd.config.comparison import PlotSettings
 
+        if self.plot_settings is None:  # type: ignore[comparison-overlap]
             object.__setattr__(self, "plot_settings", PlotSettings())
+            return
+        if not isinstance(self.plot_settings, PlotSettings):
+            raise TypeError(
+                "plot_settings must be a PlotSettings instance or None, "
+                f"got {type(self.plot_settings).__name__}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -458,7 +464,8 @@ class ANOVAResult(BaseModel):
     p_value : float
         P-value for the test.
     significant : bool
-        Whether p < 0.05.
+        Whether ``p_value`` is less than or equal to the configured
+        significance threshold.
     """
 
     metric: str = "default"

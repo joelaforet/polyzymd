@@ -12,6 +12,7 @@ from click.testing import CliRunner
 from pydantic import BaseModel
 
 from polyzymd.cli.compare import compare
+from polyzymd.config.comparison import PlotSettings
 from polyzymd.workflow.analysis_slurm import (
     ConditionTaskSpec,
     ReplicateTaskSpec,
@@ -343,12 +344,12 @@ def test_finalize_command_loads_aggregated_and_runs(monkeypatch, tmp_path: Path)
     config = SimpleNamespace(
         source_path=tmp_path / "comparison.yaml",
         control=None,
-        plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+        plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
         defaults=SimpleNamespace(equilibration_time="10ns"),
         model_copy=lambda deep=True: SimpleNamespace(
             source_path=tmp_path / "comparison.yaml",
             control=None,
-            plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+            plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
             defaults=SimpleNamespace(equilibration_time="10ns"),
         ),
     )
@@ -426,12 +427,12 @@ def test_worker_commands_invoke_helpers(monkeypatch, tmp_path: Path) -> None:
         lambda path: SimpleNamespace(
             source_path=tmp_path / "comparison.yaml",
             control=None,
-            plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+            plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
             defaults=SimpleNamespace(equilibration_time="10ns"),
             model_copy=lambda deep=True: SimpleNamespace(
                 source_path=tmp_path / "comparison.yaml",
                 control=None,
-                plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+                plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
                 defaults=SimpleNamespace(equilibration_time="10ns"),
             ),
         ),
@@ -508,12 +509,12 @@ def test_finalize_with_missing_conditions(monkeypatch, tmp_path: Path) -> None:
     config = SimpleNamespace(
         source_path=tmp_path / "comparison.yaml",
         control=None,
-        plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+        plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
         defaults=SimpleNamespace(equilibration_time="10ns"),
         model_copy=lambda deep=True: SimpleNamespace(
             source_path=tmp_path / "comparison.yaml",
             control=None,
-            plot_settings=SimpleNamespace(output_dir=tmp_path / "figures"),
+            plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
             defaults=SimpleNamespace(equilibration_time="10ns"),
         ),
     )

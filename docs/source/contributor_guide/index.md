@@ -23,7 +23,7 @@ or project maintenance patterns. For command lookup, switch to
 [Reference](../reference/index.md).
 
 <!-- IMAGE OPPORTUNITY: Add a high-level package architecture diagram showing
-config -> builders -> simulation -> workflow -> analysis -> analyses -> compare. -->
+config -> builders -> simulation -> workflow -> analyses. -->
 
 ```{toctree}
 :hidden:

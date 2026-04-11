@@ -500,6 +500,179 @@ class TestLifecycle:
         assert result is not None
         assert all(pair.p_value >= 0.0 for pair in result.pairwise_comparisons)
 
+    def test_compare_passes_welch_method_to_pairwise_helper(self, monkeypatch):
+        analysis = PolymerBridgingAnalysis()
+        condition_a = Condition(
+            label="A",
+            config_path=Path("/tmp/a.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        condition_b = Condition(
+            label="B",
+            config_path=Path("/tmp/b.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        aggregated_a = PolymerBridgingAggregatedResult(
+            n_replicates=2,
+            replicates=[1, 2],
+            min_ca_distance_angstrom=0.0,
+            mean_contacts_per_contacting_oligomer=1.0,
+            mean_contacts_sem=0.1,
+            multisite_fraction=0.4,
+            multisite_fraction_sem=0.05,
+            high_valency_fraction=0.1,
+            high_valency_fraction_sem=0.02,
+            mean_contacts_per_contacting_oligomer_replicates=[0.9, 1.1],
+            multisite_fraction_replicates=[0.35, 0.45],
+            high_valency_fraction_replicates=[0.09, 0.11],
+            valency_probabilities_mean={"1": 0.6, "2": 0.3, "3+": 0.1},
+            valency_probabilities_sem={"1": 0.01, "2": 0.01, "3+": 0.01},
+            valency_probabilities_per_replicate={
+                "1": [0.59, 0.61],
+                "2": [0.31, 0.29],
+                "3+": [0.1, 0.1],
+            },
+        )
+        aggregated_b = aggregated_a.model_copy(
+            update={
+                "mean_contacts_per_contacting_oligomer": 1.4,
+                "mean_contacts_per_contacting_oligomer_replicates": [1.3, 1.5],
+                "multisite_fraction": 0.6,
+                "multisite_fraction_replicates": [0.55, 0.65],
+                "high_valency_fraction": 0.2,
+                "high_valency_fraction_replicates": [0.18, 0.22],
+            }
+        )
+
+        captured: dict[str, object] = {}
+
+        def _fake_pairwise(metrics_by_condition, control_label, **kwargs):
+            captured["ttest_method"] = kwargs.get("ttest_method")
+            captured["posthoc_method"] = kwargs.get("posthoc_method")
+            captured["fdr_alpha"] = kwargs.get("fdr_alpha")
+            return []
+
+        monkeypatch.setattr(
+            "polyzymd.analyses.polymer_bridging.pairwise_comparisons",
+            _fake_pairwise,
+        )
+
+        from polyzymd.analyses.base import ComparisonContext
+
+        ctx = ComparisonContext(
+            name="Test",
+            conditions=[condition_a, condition_b],
+            excluded_conditions=[],
+            control_label="A",
+            analysis_dirs={"A": Path("/tmp/a"), "B": Path("/tmp/b")},
+            results_dir=Path("/tmp/results"),
+            equilibration="0ns",
+            settings=PolymerBridgingSettings(),
+            recompute=False,
+            aggregated_results={"A": aggregated_a, "B": aggregated_b},
+            ttest_method="welch",
+            posthoc_method="ttest_bh",
+            fdr_alpha=0.1,
+        )
+
+        result = analysis.compare(ctx)
+
+        assert result is not None
+        assert captured["ttest_method"] == "welch"
+        assert captured["posthoc_method"] == "ttest_bh"
+        assert captured["fdr_alpha"] == pytest.approx(0.1)
+        assert result.ttest_method == "welch"
+
+    def test_compare_honors_tukey_hsd_posthoc_method(self):
+        analysis = PolymerBridgingAnalysis()
+        condition_a = Condition(
+            label="A",
+            config_path=Path("/tmp/a.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        condition_b = Condition(
+            label="B",
+            config_path=Path("/tmp/b.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        condition_c = Condition(
+            label="C",
+            config_path=Path("/tmp/c.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        aggregated_a = PolymerBridgingAggregatedResult(
+            n_replicates=3,
+            replicates=[1, 2, 3],
+            min_ca_distance_angstrom=0.0,
+            mean_contacts_per_contacting_oligomer=1.0,
+            mean_contacts_sem=0.1,
+            multisite_fraction=0.2,
+            multisite_fraction_sem=0.02,
+            high_valency_fraction=0.1,
+            high_valency_fraction_sem=0.01,
+            mean_contacts_per_contacting_oligomer_replicates=[0.9, 1.0, 1.1],
+            multisite_fraction_replicates=[0.18, 0.2, 0.22],
+            high_valency_fraction_replicates=[0.08, 0.1, 0.12],
+            valency_probabilities_mean={"1": 0.7, "2": 0.2, "3+": 0.1},
+            valency_probabilities_sem={"1": 0.01, "2": 0.01, "3+": 0.01},
+            valency_probabilities_per_replicate={
+                "1": [0.7, 0.69, 0.71],
+                "2": [0.2, 0.21, 0.19],
+                "3+": [0.1, 0.1, 0.1],
+            },
+        )
+        aggregated_b = aggregated_a.model_copy(
+            update={
+                "mean_contacts_per_contacting_oligomer": 1.4,
+                "mean_contacts_per_contacting_oligomer_replicates": [1.3, 1.4, 1.5],
+                "multisite_fraction": 0.5,
+                "multisite_fraction_replicates": [0.48, 0.5, 0.52],
+                "high_valency_fraction": 0.2,
+                "high_valency_fraction_replicates": [0.18, 0.2, 0.22],
+            }
+        )
+        aggregated_c = aggregated_a.model_copy(
+            update={
+                "mean_contacts_per_contacting_oligomer": 1.8,
+                "mean_contacts_per_contacting_oligomer_replicates": [1.7, 1.8, 1.9],
+                "multisite_fraction": 0.8,
+                "multisite_fraction_replicates": [0.78, 0.8, 0.82],
+                "high_valency_fraction": 0.4,
+                "high_valency_fraction_replicates": [0.38, 0.4, 0.42],
+            }
+        )
+
+        from polyzymd.analyses.base import ComparisonContext
+
+        ctx = ComparisonContext(
+            name="Test",
+            conditions=[condition_a, condition_b, condition_c],
+            excluded_conditions=[],
+            control_label="A",
+            analysis_dirs={"A": Path("/tmp/a"), "B": Path("/tmp/b"), "C": Path("/tmp/c")},
+            results_dir=Path("/tmp/results"),
+            equilibration="0ns",
+            settings=PolymerBridgingSettings(),
+            recompute=False,
+            aggregated_results={"A": aggregated_a, "B": aggregated_b, "C": aggregated_c},
+            ttest_method="welch",
+            posthoc_method="tukey_hsd",
+            fdr_alpha=0.05,
+        )
+
+        result = analysis.compare(ctx)
+
+        assert result is not None
+        assert result.posthoc_method == "tukey_hsd"
+        assert result.ttest_method == "welch"
+        assert result.pairwise_comparisons
+        assert all(pair.posthoc_method == "tukey_hsd" for pair in result.pairwise_comparisons)
+
 
 class TestConfigCompatibility:
     def test_legacy_analysis_settings_promoted_to_plugins(self, tmp_path):
