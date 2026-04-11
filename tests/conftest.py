@@ -9,8 +9,6 @@ This module exposes a focused subset of reusable fixtures used across tests:
 
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 

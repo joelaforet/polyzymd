@@ -13,15 +13,13 @@ Covers:
 import signal
 import threading
 from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 from polyzymd.simulation.signals import (
     EXIT_CODE_INTERRUPTED,
     GracefulExit,
     _handler,
-    _interrupted,
     get_interrupt_signal,
     install_handlers,
     is_interrupted,

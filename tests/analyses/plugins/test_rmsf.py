@@ -9,17 +9,13 @@ Heavy dependencies (MDAnalysis, trajectories) are mocked.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pydantic import BaseModel
 
 from polyzymd.analyses.base import (
     AggregateContext,
-    ComparisonContext,
     Condition,
     MetricValue,
     PlotContext,
@@ -83,7 +79,7 @@ class TestRMSFDiscovery:
     """Test that RMSFAnalysis is auto-discovered by the plugin system."""
 
     def test_discovery_finds_rmsf(self):
-        from polyzymd.analyses.discovery import clear_cache, get_analysis, list_analyses
+        from polyzymd.analyses.discovery import clear_cache, list_analyses
 
         clear_cache()
         analyses = list_analyses()

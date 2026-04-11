@@ -16,9 +16,7 @@ E. Real-data sanity – intermediate arrays from real cached SASA stay in [0, 1]
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
-from typing import Any
-from unittest.mock import MagicMock
+from dataclasses import dataclass
 
 import numpy as np
 import pytest
@@ -27,9 +25,6 @@ import pytest
 sys.path.insert(0, "src")
 
 from polyzymd.analyses.exposure._enrichment import (
-    _EPS,
-    ChaperoneEnrichmentResult,
-    GroupEnrichmentEntry,
     compute_chaperone_enrichment,
 )
 

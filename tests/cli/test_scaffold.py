@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -110,7 +108,7 @@ class TestGenerateScaffold:
         names = {p.name for p in created}
 
         assert "__init__.py" in names
-        assert "test_solvent_shell_plugin.py" in names
+        assert "test_solvent_shell.py" in names
 
     def test_plugin_init_content(self, tmp_path: Path):
         (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
@@ -123,7 +121,7 @@ class TestGenerateScaffold:
         # Dict-style: class exists, has name, Settings, lifecycle methods
         assert "class SolventShellAnalysis(Analysis):" in text
         assert 'name: ClassVar[str] = "solvent_shell"' in text
-        assert "class SolventShellSettings(BaseModel):" in text
+        assert "class Settings(BaseModel):" in text
         assert "def compute_replicate(" in text
         assert "def aggregate(" in text
         assert "def extract_metrics(" in text
@@ -152,7 +150,7 @@ class TestGenerateScaffold:
         (tmp_path / "tests").mkdir()
 
         generate_scaffold("solvent_shell", tmp_path)
-        tf = tmp_path / "tests" / "test_solvent_shell_plugin.py"
+        tf = tmp_path / "tests" / "analyses" / "plugins" / "test_solvent_shell.py"
         text = tf.read_text()
 
         assert "class TestDiscovery:" in text
@@ -170,7 +168,7 @@ class TestGenerateScaffold:
         text = init.read_text()
 
         assert "class MassDensityAnalysis(Analysis):" in text
-        assert "class MassDensitySettings(BaseModel):" in text
+        assert "class Settings(BaseModel):" in text
 
     def test_refuses_overwrite_without_force(self, tmp_path: Path):
         (tmp_path / "src" / "polyzymd" / "analyses").mkdir(parents=True)
@@ -264,7 +262,7 @@ class TestGenerateScaffoldPydantic:
         (tmp_path / "tests").mkdir()
 
         generate_scaffold("solvent_shell", tmp_path, style="pydantic")
-        tf = tmp_path / "tests" / "test_solvent_shell_plugin.py"
+        tf = tmp_path / "tests" / "analyses" / "plugins" / "test_solvent_shell.py"
         text = tf.read_text()
 
         assert "class TestDiscovery:" in text
@@ -340,7 +338,7 @@ class TestGeneratedCodeQuality:
         (tmp_path / "tests").mkdir()
 
         generate_scaffold("solvent_shell", tmp_path)
-        tf = tmp_path / "tests" / "test_solvent_shell_plugin.py"
+        tf = tmp_path / "tests" / "analyses" / "plugins" / "test_solvent_shell.py"
         source = tf.read_text()
         compile(source, str(tf), "exec")
 
@@ -370,7 +368,7 @@ class TestGeneratedCodeQuality:
         (tmp_path / "tests").mkdir()
 
         generate_scaffold("solvent_shell", tmp_path, style="pydantic")
-        tf = tmp_path / "tests" / "test_solvent_shell_plugin.py"
+        tf = tmp_path / "tests" / "analyses" / "plugins" / "test_solvent_shell.py"
         source = tf.read_text()
         compile(source, str(tf), "exec")
 

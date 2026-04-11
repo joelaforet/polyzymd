@@ -14,7 +14,6 @@ Covers:
 
 from pathlib import Path
 
-import pytest
 
 from polyzymd.exporters.gromacs import GromacsExporter, PositionRestraintGenerator
 

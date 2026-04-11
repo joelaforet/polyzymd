@@ -3,8 +3,8 @@
 Creates the minimal file set needed for a new analysis plugin:
 - ``src/polyzymd/analyses/<name>/__init__.py``  — plugin class with compute,
   aggregate, comparison, and plotting methods
-- ``tests/test_<name>_plugin.py``  — smoke tests covering discovery, compute,
-  aggregate, metrics, and plotting
+- ``tests/analyses/plugins/test_<name>.py``  — smoke tests covering discovery,
+  compute, aggregate, metrics, and plotting
 
 Two styles are available via the ``--style`` flag:
 
@@ -144,24 +144,6 @@ from polyzymd.analyses.base import (
 from polyzymd.analyses.stats import format_scalar_comparison
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Settings
-# ---------------------------------------------------------------------------
-
-
-class {cls}Settings(BaseModel):
-    """Settings for the {name} analysis.
-
-    Add analysis-specific fields here.  These are resolved from the
-    ``comparison.yaml`` plugins section.
-    """
-
-    example_parameter: str = Field(
-        default="dummy",
-        description="Replace with real settings for your analysis.",
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -1042,7 +1024,7 @@ def generate_scaffold(
 
     files: dict[Path, str] = {
         analyses_dir / "__init__.py": plugin_template(name, cls),
-        tests_dir / f"test_{name}_plugin.py": test_template(name, cls),
+        tests_dir / "analyses" / "plugins" / f"test_{name}.py": test_template(name, cls),
     }
 
     created: list[Path] = []

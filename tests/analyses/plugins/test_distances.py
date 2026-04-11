@@ -6,14 +6,10 @@ plot delegation, AggregatedResultClass, _make_aggregated_filename, and lifecycle
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
-from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
 # Discovery
@@ -1077,7 +1073,6 @@ class TestLifecycle:
         """Verify the full lifecycle flow works end-to-end with mocks."""
         from polyzymd.analyses.base import (
             AggregateContext,
-            ComparisonContext,
             Condition,
             ReplicateContext,
         )

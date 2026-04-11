@@ -10,13 +10,11 @@ Covers:
 - Pixi environment activation in generated scripts
 """
 
-from pathlib import Path
 
 import pytest
 
 from polyzymd.workflow.slurm import (
     BRIDGES2_GPU_TYPES,
-    PRESET_DEFAULT_PIXI_ENV,
     SlurmConfig,
     SlurmScriptGenerator,
 )

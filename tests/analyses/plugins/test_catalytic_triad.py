@@ -10,17 +10,13 @@ Heavy dependencies (MDAnalysis, trajectories) are mocked.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pydantic import BaseModel
 
 from polyzymd.analyses.base import (
     AggregateContext,
-    ComparisonContext,
     Condition,
     MetricValue,
     PlotContext,
@@ -323,7 +319,6 @@ class TestComputeReplicate:
         default_settings,
     ):
         """compute_replicate should use DistanceCalculator and compute simultaneous contact."""
-        import numpy as np
 
         # Mock TrajectoryLoader
         mock_loader_inst = MagicMock()
