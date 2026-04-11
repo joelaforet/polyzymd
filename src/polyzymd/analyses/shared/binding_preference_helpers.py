@@ -354,10 +354,15 @@ def try_load_cached_binding_preference(
     # Try aggregated result with rep range in name (e.g., _reps1-3.json)
     agg_pattern = str(analysis_dir / "binding_preference_aggregated_reps*.json")
     agg_matches = sorted(glob_module.glob(agg_pattern))
-    if agg_matches:
-        result = AggregatedBindingPreferenceResult.load(agg_matches[-1])
+    if len(agg_matches) == 1:
+        result = AggregatedBindingPreferenceResult.load(agg_matches[0])
         logger.debug(f"Loaded aggregated binding preference for {cond.label}")
         return result
+    if len(agg_matches) > 1:
+        raise ValueError(
+            f"Ambiguous binding preference cache for {cond.label}: "
+            f"found {len(agg_matches)} files: " + ", ".join(agg_matches)
+        )
 
     # Try single replicate result
     single_path = analysis_dir / "binding_preference.json"

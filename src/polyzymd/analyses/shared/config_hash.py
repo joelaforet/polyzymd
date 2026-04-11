@@ -105,10 +105,10 @@ def compute_config_hash(config: "SimulationConfig") -> str:
 def settings_fingerprint(settings: BaseModel) -> str:
     """Compute a short deterministic fingerprint for analysis settings.
 
-    The fingerprint is derived from the settings model JSON emitted by
-    :meth:`pydantic.BaseModel.model_dump_json`, then hashed with SHA-256.
-    It is intended for cache identity, so changing settings (for example
-    contacts cutoff) naturally changes cache filenames.
+    The fingerprint is derived from canonical JSON produced with
+    ``json.dumps(settings.model_dump(mode="json"), sort_keys=True)``, then
+    hashed with SHA-256. It is intended for cache identity, so changing
+    settings (for example contacts cutoff) naturally changes cache filenames.
 
     Parameters
     ----------
@@ -120,7 +120,7 @@ def settings_fingerprint(settings: BaseModel) -> str:
     str
         First 8 hexadecimal characters of the SHA-256 digest.
     """
-    serialized = settings.model_dump_json()
+    serialized = json.dumps(settings.model_dump(mode="json"), sort_keys=True)
     digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
     return digest[:8]
 

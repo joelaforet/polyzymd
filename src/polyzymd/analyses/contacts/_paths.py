@@ -38,14 +38,26 @@ def find_contact_result_for_replicate(analysis_dir: Path, replicate: int) -> Pat
         return canonical
 
     matches = sorted(analysis_dir.glob(f"contacts_eq*_cut*_rep{replicate}.json"))
-    if matches:
-        return matches[-1]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(
+            f"Ambiguous contacts cache for replicate {replicate}: "
+            f"found {len(matches)} files in {analysis_dir}: "
+            + ", ".join(str(m.name) for m in matches)
+        )
 
     matches = sorted(
         (analysis_dir / f"run_{replicate}").glob(f"contacts_eq*_cut*_rep{replicate}.json")
     )
-    if matches:
-        return matches[-1]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(
+            f"Ambiguous contacts cache for replicate {replicate}: "
+            f"found {len(matches)} files in {analysis_dir / f'run_{replicate}'}: "
+            + ", ".join(str(m.name) for m in matches)
+        )
 
     legacy = analysis_dir / f"contacts_rep{replicate}.json"
     if legacy.exists():

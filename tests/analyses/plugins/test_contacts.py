@@ -1408,3 +1408,39 @@ class TestLifecycle:
         assert callable(analysis.compare)
         assert callable(analysis.plot)
         assert callable(analysis.filter_conditions)
+
+
+class TestContactsCacheAmbiguity:
+    """Tests for ambiguous cache file detection in contacts path resolution."""
+
+    def test_raises_on_ambiguous_top_level_glob(self, tmp_path):
+        """Multiple contacts_eq*_cut*_rep1.json files should raise ValueError."""
+        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
+
+        (tmp_path / "contacts_eq10ns_cut4.0_rep1.json").write_text("{}")
+        (tmp_path / "contacts_eq10ns_cut4.5_rep1.json").write_text("{}")
+
+        with pytest.raises(ValueError, match="Ambiguous contacts cache"):
+            find_contact_result_for_replicate(tmp_path, 1)
+
+    def test_raises_on_ambiguous_run_subdir_glob(self, tmp_path):
+        """Multiple matches in run_{rep}/ subdir should raise ValueError."""
+        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
+
+        run_dir = tmp_path / "run_1"
+        run_dir.mkdir()
+        (run_dir / "contacts_eq5ns_cut4.0_rep1.json").write_text("{}")
+        (run_dir / "contacts_eq10ns_cut4.5_rep1.json").write_text("{}")
+
+        with pytest.raises(ValueError, match="Ambiguous contacts cache"):
+            find_contact_result_for_replicate(tmp_path, 1)
+
+    def test_single_glob_match_succeeds(self, tmp_path):
+        """A single glob match should return that file without error."""
+        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
+
+        (tmp_path / "contacts_eq10ns_cut4.5_rep1.json").write_text("{}")
+        result = find_contact_result_for_replicate(tmp_path, 1)
+
+        assert result is not None
+        assert result.name == "contacts_eq10ns_cut4.5_rep1.json"

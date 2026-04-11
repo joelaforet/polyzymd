@@ -103,3 +103,94 @@ class TestDiscovery:
 
         assert "fake_good" in registry
         assert aliases == {}
+
+
+class TestDiscoveryRobustness:
+    """Additional robustness tests for module skip and introspection behavior."""
+
+    def test_should_skip_shared_descendants(self):
+        """Shared descendants should be skipped while plugins should not."""
+        from polyzymd.analyses.discovery import _should_skip_module
+
+        package_prefix = "polyzymd.analyses."
+        assert _should_skip_module("polyzymd.analyses.shared.loader", package_prefix) is True
+        assert (
+            _should_skip_module("polyzymd.analyses.shared.binding_preference", package_prefix)
+            is True
+        )
+        assert (
+            _should_skip_module("polyzymd.analyses.shared.surface_exposure", package_prefix) is True
+        )
+
+        assert _should_skip_module("polyzymd.analyses.rmsf", package_prefix) is False
+        assert _should_skip_module("polyzymd.analyses.contacts", package_prefix) is False
+
+    def test_discovery_skips_shared_descendants_end_to_end(self):
+        """Discovery should never import skipped shared descendants."""
+        from polyzymd.analyses.discovery import _discover_plugins
+
+        good_mod = types.ModuleType("polyzymd.analyses.fake_plugin")
+
+        class FakePlugin(Analysis):
+            name: ClassVar[str] = "fake_plugin"
+            Settings: ClassVar[type] = ToySettings
+
+            def compute_replicate(self, ctx, replicate):
+                return {"replicate": replicate}
+
+            def aggregate(self, ctx, results):
+                return {"count": len(results)}
+
+        good_mod.FakePlugin = FakePlugin
+
+        walked = [
+            (None, "polyzymd.analyses.shared.loader", True),
+            (None, "polyzymd.analyses.fake_plugin", True),
+        ]
+
+        def _import_side_effect(name: str):
+            if name == "polyzymd.analyses.fake_plugin":
+                return good_mod
+            raise AssertionError(f"Unexpected import: {name}")
+
+        with (
+            patch("pkgutil.walk_packages", return_value=walked),
+            patch("importlib.import_module", side_effect=_import_side_effect) as mock_import,
+        ):
+            registry, aliases = _discover_plugins()
+
+        imported_modules = [call.args[0] for call in mock_import.call_args_list]
+        assert "polyzymd.analyses.shared.loader" not in imported_modules
+        assert "polyzymd.analyses.fake_plugin" in imported_modules
+        assert "fake_plugin" in registry
+        assert aliases == {}
+
+    def test_getattr_failure_logged(self, caplog):
+        """Discovery should log and continue when a module attribute access fails."""
+        from polyzymd.analyses.discovery import _discover_plugins
+
+        module_name = "polyzymd.analyses.poisoned"
+
+        class PoisonModule(types.ModuleType):
+            def __dir__(self):
+                return ["good_attr", "bad_attr"]
+
+            def __getattr__(self, name):
+                if name == "bad_attr":
+                    raise RuntimeError("poisoned!")
+                return super().__getattribute__(name)
+
+        poison_mod = PoisonModule(module_name)
+        poison_mod.good_attr = object()
+
+        with (
+            patch("pkgutil.walk_packages", return_value=[(None, module_name, True)]),
+            patch("importlib.import_module", return_value=poison_mod),
+            caplog.at_level("DEBUG", logger="polyzymd.analyses"),
+        ):
+            _discover_plugins()
+
+        assert any(
+            module_name in record.message and "bad_attr" in record.message
+            for record in caplog.records
+        )

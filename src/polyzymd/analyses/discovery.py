@@ -62,6 +62,30 @@ def _is_concrete_analysis(obj: type) -> bool:
     )
 
 
+def _should_skip_module(modname: str, package_prefix: str) -> bool:
+    """Return True when module path includes skipped components.
+
+    Parameters
+    ----------
+    modname : str
+        Fully qualified module name discovered by ``pkgutil``.
+    package_prefix : str
+        Base package prefix including trailing dot, for example
+        ``"polyzymd.analyses."``.
+
+    Returns
+    -------
+    bool
+        True if any path component is private (starts with ``"_"``)
+        or listed in ``_SKIP_MODULES``.
+    """
+    relative_name = modname
+    if modname.startswith(package_prefix):
+        relative_name = modname[len(package_prefix) :]
+    components = relative_name.split(".")
+    return any(component.startswith("_") or component in _SKIP_MODULES for component in components)
+
+
 def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
     """Import all analysis modules and collect concrete Analysis subclasses.
 
@@ -85,10 +109,9 @@ def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
     package_path = analyses_pkg.__path__
     package_prefix = analyses_pkg.__name__ + "."
 
-    for importer, modname, ispkg in pkgutil.walk_packages(package_path, prefix=package_prefix):
+    for _, modname, _ in pkgutil.walk_packages(package_path, prefix=package_prefix):
         # Skip infrastructure modules
-        short_name = modname.rsplit(".", 1)[-1]
-        if short_name.startswith("_") or short_name in _SKIP_MODULES:
+        if _should_skip_module(modname, package_prefix):
             continue
 
         try:
@@ -96,14 +119,16 @@ def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
         except ImportError:
             logger.warning("Failed to import analysis module %s", modname, exc_info=True)
             continue
-        except Exception:
-            logger.warning("Failed to import analysis module %s", modname, exc_info=True)
-            continue
 
         for attr_name in dir(module):
             try:
                 obj = getattr(module, attr_name)
             except Exception:
+                logger.debug(
+                    "Could not access attribute %s.%s — skipping.",
+                    modname,
+                    attr_name,
+                )
                 continue  # Module __getattr__ raised; skip this attribute
             if not _is_concrete_analysis(obj):
                 continue
