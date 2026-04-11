@@ -12,6 +12,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
+from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
@@ -49,6 +53,7 @@ def plot_rg_timeseries(ctx: PlotContext, comparison_result: RgComparisonResult) 
     import numpy as np
 
     plot_settings = _get_plot_settings(ctx)
+    result_json_name = _make_replicate_result_filename(ctx)
 
     replicates_by_condition = {
         condition.label: list(condition.replicates) for condition in ctx.conditions
@@ -71,7 +76,12 @@ def plot_rg_timeseries(ctx: PlotContext, comparison_result: RgComparisonResult) 
                 continue
 
             replicates = replicates_by_condition.get(condition_label, [])
-            time_ns, rg_matrix = _load_replicate_timeseries(condition_dir, run_label, replicates)
+            time_ns, rg_matrix = _load_replicate_timeseries(
+                condition_dir,
+                run_label,
+                replicates,
+                result_json_name,
+            )
             if rg_matrix.size == 0 or time_ns.size == 0:
                 logger.warning(
                     "Skipping condition '%s' for run '%s' due to missing NPZ timeseries",
@@ -497,6 +507,7 @@ def _load_replicate_timeseries(
     condition_dir: Path,
     run_label: str,
     replicates: list[int],
+    result_json_name: str,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Load Rg NPZ sidecars for one condition and run.
 
@@ -522,15 +533,14 @@ def _load_replicate_timeseries(
     traces: list[np.ndarray] = []
 
     for replicate in replicates:
-        npz_path = condition_dir / f"run_{replicate}" / f"rg_{run_label}_timeseries.npz"
-        if not npz_path.exists():
-            logger.warning("Missing Rg NPZ sidecar: %s", npz_path)
+        npz_path = _resolve_npz_sidecar_path(condition_dir, run_label, replicate, result_json_name)
+        if npz_path is None:
             continue
 
         try:
-            payload = np.load(npz_path)
-            rg_values = np.asarray(payload["rg_values"], dtype=np.float64)
-            time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
+            with np.load(npz_path) as payload:
+                rg_values = np.asarray(payload["rg_values"], dtype=np.float64)
+                time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
         except (OSError, ValueError, KeyError) as exc:
             logger.warning("Failed to load Rg NPZ sidecar %s: %s", npz_path, exc)
             continue
@@ -567,6 +577,103 @@ def _load_replicate_timeseries(
 
     rg_matrix = np.vstack(aligned_traces)
     return reference_time, rg_matrix
+
+
+def _resolve_npz_sidecar_path(
+    condition_dir: Path,
+    run_label: str,
+    replicate: int,
+    result_json_name: str,
+) -> Path | None:
+    """Resolve a run NPZ sidecar via per-replicate result metadata.
+
+    Parameters
+    ----------
+    condition_dir : Path
+        Condition analysis directory.
+    run_label : str
+        Rg run label.
+    replicate : int
+        Replicate index.
+    result_json_name : str
+        Expected per-replicate Rg result JSON filename.
+
+    Returns
+    -------
+    Path | None
+        NPZ sidecar path from metadata, or ``None`` when unavailable.
+    """
+    from polyzymd.analyses.rg._results import RgResult
+
+    run_dir = condition_dir / f"run_{replicate}"
+    if not run_dir.exists():
+        logger.warning("Missing Rg run directory: %s", run_dir)
+        return None
+
+    result_path = run_dir / result_json_name
+    if not result_path.exists():
+        prefix = result_json_name.rsplit("_", maxsplit=1)[0] + "_"
+        legacy_matches = sorted(path for path in run_dir.glob(f"{prefix}*.json") if path.exists())
+        if legacy_matches:
+            logger.warning(
+                "Found Rg cache files with legacy/non-canonical tags (%s) but expected %s; "
+                "recompute Rg to refresh cache naming",
+                ", ".join(str(path.name) for path in legacy_matches),
+                result_path.name,
+            )
+        logger.warning("Missing Rg per-replicate result JSON %s", result_path)
+        return None
+
+    try:
+        result = RgResult.load(result_path)
+    except (OSError, ValueError, ValidationError) as exc:
+        logger.warning("Failed to load Rg result JSON %s: %s", result_path, exc)
+        return None
+
+    run_result = next((entry for entry in result.run_results if entry.run_label == run_label), None)
+    if run_result is None:
+        logger.warning(
+            "Run '%s' not found in Rg result JSON %s",
+            run_label,
+            result_path,
+        )
+        return None
+
+    if run_result.npz_path is None:
+        logger.warning(
+            "Missing npz_path metadata for run '%s' in %s",
+            run_label,
+            result_path,
+        )
+        return None
+
+    npz_path = Path(run_result.npz_path)
+    if not npz_path.is_absolute():
+        npz_path = (run_dir / npz_path).resolve()
+    if not npz_path.exists():
+        logger.warning("Missing Rg NPZ sidecar from metadata path: %s", npz_path)
+        return None
+
+    return npz_path
+
+
+def _make_replicate_result_filename(ctx: PlotContext) -> str:
+    """Build the per-replicate Rg result filename for this plot request.
+
+    Parameters
+    ----------
+    ctx : PlotContext
+        Framework-provided plot context.
+
+    Returns
+    -------
+    str
+        Expected per-replicate Rg JSON filename.
+    """
+    eq_value, eq_unit = parse_time_string(ctx.equilibration)
+    eq_str = f"eq{eq_value:.2f}{eq_unit}"
+    settings_tag = settings_fingerprint(ctx.settings)
+    return f"rg_{eq_str}_{settings_tag}.json"
 
 
 def _load_condition_aggregated(condition_dir: Path) -> dict | None:

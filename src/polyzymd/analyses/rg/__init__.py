@@ -24,7 +24,7 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.rg._plot_settings import RgPlotSettings
 from polyzymd.analyses.rg._results import RgAggregatedResult
-from polyzymd.analyses.shared.config_hash import compute_config_hash
+from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
 from polyzymd.analyses.shared.loader import (
     TrajectoryLoader,
     convert_time,
@@ -144,6 +144,22 @@ class RgAnalysis(Analysis):
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
 
+    @staticmethod
+    def _make_settings_cache_tag(settings: BaseModel) -> str:
+        """Build a short cache tag from analysis settings.
+
+        Parameters
+        ----------
+        settings : BaseModel
+            Analysis settings model.
+
+        Returns
+        -------
+        str
+            First 8 hex characters from shared settings fingerprinting.
+        """
+        return settings_fingerprint(settings)
+
     def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
         """Compute Rg for all configured runs for a single replicate.
 
@@ -167,7 +183,8 @@ class RgAnalysis(Analysis):
 
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
         eq_str = f"eq{eq_value:.2f}{eq_unit}"
-        result_file = ctx.output_dir / f"rg_{eq_str}.json"
+        settings_tag = self._make_settings_cache_tag(settings)
+        result_file = ctx.output_dir / f"rg_{eq_str}_{settings_tag}.json"
 
         cached = self._check_cache(
             RgResult,
@@ -207,6 +224,8 @@ class RgAnalysis(Analysis):
                 config_hash=config_hash,
                 eq_value=eq_value,
                 eq_unit=eq_unit,
+                eq_str=eq_str,
+                settings_tag=settings_tag,
                 start_frame=start_frame,
                 n_frames_total=n_frames_total,
                 n_frames_used=n_frames_used,
@@ -453,7 +472,12 @@ class RgAnalysis(Analysis):
 
         target_path = ctx.result_path
         if target_path is None:
-            target_path = ctx.output_dir / self._make_aggregated_filename(ctx.replicates, first)
+            settings_tag = self._make_settings_cache_tag(ctx.settings)
+            target_path = ctx.output_dir / self._make_aggregated_filename(
+                ctx.replicates,
+                first,
+                settings_tag,
+            )
         self.save_result(agg_result, target_path)
         logger.info("Saved aggregated Rg result to %s", target_path)
 
@@ -670,6 +694,8 @@ class RgAnalysis(Analysis):
         config_hash: str,
         eq_value: float,
         eq_unit: str,
+        eq_str: str,
+        settings_tag: str,
         start_frame: int,
         n_frames_total: int,
         n_frames_used: int,
@@ -820,7 +846,7 @@ class RgAnalysis(Analysis):
             if n_independent_frames > 0:
                 sem_rg = float(std_rg / np.sqrt(float(n_independent_frames)))
 
-        npz_filename = f"rg_{run.label}_timeseries.npz"
+        npz_filename = f"rg_{run.label}_{eq_str}_{settings_tag}_timeseries.npz"
         npz_path = ctx.output_dir / npz_filename
         npz_data: dict[str, np.ndarray] = {
             "rg_values": rg_values,
@@ -1004,11 +1030,12 @@ class RgAnalysis(Analysis):
     def _make_aggregated_filename(
         replicates: tuple[int, ...] | Sequence[int],
         first_result: Any,
+        settings_tag: str,
     ) -> str:
         """Generate an aggregated Rg filename."""
         eq_str = f"eq{first_result.equilibration_time:.2f}{first_result.equilibration_unit}"
         rep_str = Analysis._format_replicate_range(replicates)
-        return f"rg_{rep_str}_{eq_str}.json"
+        return f"rg_{rep_str}_{eq_str}_{settings_tag}.json"
 
     @staticmethod
     def _deserialize_comparison(path: Path) -> RgComparisonResult | None:

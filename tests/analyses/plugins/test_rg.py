@@ -531,6 +531,8 @@ def test_compute_single_run_zero_atoms_returns_none(
             config_hash="hash123",
             eq_value=10.0,
             eq_unit="ns",
+            eq_str="eq10.00ns",
+            settings_tag="abcd1234",
             start_frame=0,
             n_frames_total=10,
             n_frames_used=10,
@@ -580,6 +582,49 @@ def test_compute_replicate_skips_none_runs(
 
     assert len(result.run_results) == 1
     assert result.run_results[0].run_label == "protein_rg"
+
+
+def test_settings_cache_tag_changes_with_settings() -> None:
+    """_make_settings_cache_tag should differ when settings differ."""
+    analysis = RgAnalysis()
+    settings_a = RgSettings(runs=[RgRunSettings(label="run1", selection="protein and name CA")])
+    settings_b = RgSettings(runs=[RgRunSettings(label="run1", selection="segid C")])
+
+    tag_a = analysis._make_settings_cache_tag(settings_a)
+    tag_b = analysis._make_settings_cache_tag(settings_b)
+
+    assert tag_a != tag_b
+
+
+def test_compute_replicate_cache_includes_settings_tag(
+    condition: Condition, tmp_path: Path, monkeypatch
+) -> None:
+    """compute_replicate cache filename should include settings fingerprint tag."""
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein and name CA")])
+    ctx = make_replicate_context(
+        condition=condition,
+        replicate=1,
+        output_dir=tmp_path / "run_1",
+        settings=settings,
+        equilibration="10ns",
+    )
+
+    observed_path: Path | None = None
+
+    def _mock_check_cache(*args, **kwargs):
+        nonlocal observed_path
+        observed_path = args[1]
+        return {"cached": True}
+
+    monkeypatch.setattr(analysis, "_check_cache", _mock_check_cache)
+
+    result = analysis.compute_replicate(ctx, 1)
+
+    expected_tag = analysis._make_settings_cache_tag(settings)
+    assert observed_path is not None
+    assert observed_path.name == f"rg_eq10.00ns_{expected_tag}.json"
+    assert result == {"cached": True}
 
 
 def test_aggregate_handles_missing_run(
