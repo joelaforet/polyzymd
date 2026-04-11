@@ -21,18 +21,20 @@ class AnalysisDefaults(BaseModel):
         Time to skip for equilibration (e.g., "10ns", "5000ps")
     fdr_alpha : float
         False discovery rate threshold for Benjamini-Hochberg correction
-        in default scalar pairwise comparisons.
+        in default scalar pairwise comparisons.  Only used when
+        ``posthoc_method`` is ``"ttest_bh"``.
     ttest_method : str
         Two-sample t-test method used by the default scalar comparison.
         ``"student"`` assumes equal variances and ``"welch"`` relaxes that
-        assumption.
-    anova_method : str
-        One-way ANOVA method used by the default scalar comparison.
-        ``"classical"`` uses equal-variance ANOVA and ``"welch"`` uses
-        a heteroscedastic alternative.
+        assumption.  Only used when ``posthoc_method`` is ``"ttest_bh"``.
+    posthoc_method : str
+        Post-hoc testing method for pairwise comparisons.
+        ``"ttest_bh"`` (default) runs pairwise t-tests with
+        Benjamini-Hochberg FDR correction.  ``"tukey_hsd"`` runs
+        Tukey's Honestly Significant Difference test across all groups.
     """
 
     equilibration_time: str = "10ns"
     fdr_alpha: float = Field(default=0.05, gt=0.0, le=1.0)
     ttest_method: str = Field(default="student", pattern="^(welch|student)$")
-    anova_method: str = Field(default="classical", pattern="^(classical|welch)$")
+    posthoc_method: str = Field(default="ttest_bh", pattern="^(ttest_bh|tukey_hsd)$")

@@ -126,6 +126,7 @@ def pairwise_comparisons(
     metrics_by_condition: dict[str, MetricValue],
     control_label: str | None = None,
     ttest_method: str = "student",
+    posthoc_method: str = "ttest_bh",
 ) -> list[PairwiseResult]:
     """Compute pairwise statistical comparisons for a single metric.
 
@@ -138,58 +139,106 @@ def pairwise_comparisons(
         Otherwise, compare all unique pairs.
     ttest_method : str, optional
         T-test method to use, ``"student"`` or ``"welch"``, by default
-        ``"student"``.
+        ``"student"``. Only used when ``posthoc_method`` is ``"ttest_bh"``.
+    posthoc_method : str, optional
+        Pairwise post-hoc method: ``"ttest_bh"`` or ``"tukey_hsd"``, by
+        default ``"ttest_bh"``.
 
     Returns
     -------
     list[PairwiseResult]
-        Pairwise comparison results with raw p-values only.
-        ``p_value_adjusted`` remains ``None`` and ``significant`` is based
-        on raw p-value < 0.05.
+        Pairwise comparison results.
     """
     from polyzymd.analyses.shared.inferential_statistics import (
         cohens_d,
         independent_ttest,
         percent_change,
+        tukey_hsd,
     )
 
     labels = list(metrics_by_condition.keys())
     results: list[PairwiseResult] = []
 
-    pairs: list[tuple[str, str]]
-    if control_label and control_label in metrics_by_condition:
-        pairs = [(control_label, lb) for lb in labels if lb != control_label]
-    else:
-        pairs = [
-            (labels[i], labels[j]) for i in range(len(labels)) for j in range(i + 1, len(labels))
-        ]
+    if posthoc_method == "ttest_bh":
+        pairs: list[tuple[str, str]]
+        if control_label and control_label in metrics_by_condition:
+            pairs = [(control_label, lb) for lb in labels if lb != control_label]
+        else:
+            pairs = [
+                (labels[i], labels[j])
+                for i in range(len(labels))
+                for j in range(i + 1, len(labels))
+            ]
 
-    for label_a, label_b in pairs:
-        mv_a = metrics_by_condition[label_a]
-        mv_b = metrics_by_condition[label_b]
+        for label_a, label_b in pairs:
+            mv_a = metrics_by_condition[label_a]
+            mv_b = metrics_by_condition[label_b]
 
-        ttest = independent_ttest(
-            mv_a.replicate_values,
-            mv_b.replicate_values,
-            method=ttest_method,
-        )
-        effect = cohens_d(mv_a.replicate_values, mv_b.replicate_values)
-        pct = percent_change(mv_a.mean, mv_b.mean)
-        direction = interpret_direction(pct, mv_a.direction_labels)
-
-        results.append(
-            PairwiseResult(
-                condition_a=label_a,
-                condition_b=label_b,
-                metric=mv_a.name,
-                t_statistic=ttest.t_statistic,
-                p_value=ttest.p_value,
-                cohens_d=effect.cohens_d,
-                effect_size_interpretation=effect.interpretation,
-                direction=direction,
-                significant=ttest.significant,
-                percent_change=pct,
+            ttest = independent_ttest(
+                mv_a.replicate_values,
+                mv_b.replicate_values,
+                method=ttest_method,
             )
+            effect = cohens_d(mv_a.replicate_values, mv_b.replicate_values)
+            pct = percent_change(mv_a.mean, mv_b.mean)
+            direction = interpret_direction(pct, mv_a.direction_labels)
+
+            results.append(
+                PairwiseResult(
+                    condition_a=label_a,
+                    condition_b=label_b,
+                    metric=mv_a.name,
+                    t_statistic=ttest.t_statistic,
+                    p_value=ttest.p_value,
+                    p_value_adjusted=None,
+                    posthoc_method=posthoc_method,
+                    cohens_d=effect.cohens_d,
+                    effect_size_interpretation=effect.interpretation,
+                    direction=direction,
+                    significant=ttest.significant,
+                    percent_change=pct,
+                )
+            )
+    elif posthoc_method == "tukey_hsd":
+        group_arrays = [metrics_by_condition[label].replicate_values for label in labels]
+        tukey_results = tukey_hsd(*group_arrays)
+
+        for tukey_result in tukey_results:
+            label_a = labels[tukey_result.group_i]
+            label_b = labels[tukey_result.group_j]
+
+            if (
+                control_label
+                and control_label in metrics_by_condition
+                and control_label not in (label_a, label_b)
+            ):
+                continue
+
+            mv_a = metrics_by_condition[label_a]
+            mv_b = metrics_by_condition[label_b]
+            effect = cohens_d(mv_a.replicate_values, mv_b.replicate_values)
+            pct = percent_change(mv_a.mean, mv_b.mean)
+            direction = interpret_direction(pct, mv_a.direction_labels)
+
+            results.append(
+                PairwiseResult(
+                    condition_a=label_a,
+                    condition_b=label_b,
+                    metric=mv_a.name,
+                    t_statistic=float("nan"),
+                    p_value=tukey_result.p_value,
+                    p_value_adjusted=None,
+                    posthoc_method=posthoc_method,
+                    cohens_d=effect.cohens_d,
+                    effect_size_interpretation=effect.interpretation,
+                    direction=direction,
+                    significant=tukey_result.p_value < 0.05,
+                    percent_change=pct,
+                )
+            )
+    else:
+        raise ValueError(
+            f"Unknown posthoc method {posthoc_method!r}; expected 'ttest_bh' or 'tukey_hsd'"
         )
 
     return results
@@ -203,7 +252,6 @@ def pairwise_comparisons(
 def anova_test(
     metrics_by_condition: dict[str, MetricValue],
     metric_name: str = "default",
-    anova_method: str = "classical",
 ) -> ANOVAResult | None:
     """Run one-way ANOVA across conditions for a single metric.
 
@@ -213,9 +261,6 @@ def anova_test(
         Mapping ``condition_label -> MetricValue``.
     metric_name : str
         Label for the metric in the result.
-    anova_method : str, optional
-        ANOVA method to use, ``"classical"`` or ``"welch"``, by default
-        ``"classical"``.
 
     Returns
     -------
@@ -228,7 +273,7 @@ def anova_test(
     from polyzymd.analyses.shared.inferential_statistics import one_way_anova
 
     groups = [mv.replicate_values for mv in metrics_by_condition.values()]
-    result = one_way_anova(*groups, method=anova_method)
+    result = one_way_anova(*groups)
 
     return ANOVAResult(
         metric=metric_name,
@@ -293,7 +338,7 @@ def default_scalar_comparison(
     equilibration: str = "0ns",
     fdr_alpha: float = 0.05,
     ttest_method: str = "student",
-    anova_method: str = "classical",
+    posthoc_method: str = "ttest_bh",
 ) -> ComparisonResult:
     """Run the standard scalar comparison pipeline.
 
@@ -327,10 +372,10 @@ def default_scalar_comparison(
         significance, by default 0.05.
     ttest_method : str, optional
         T-test method to use, ``"student"`` or ``"welch"``, by default
-        ``"student"``.
-    anova_method : str, optional
-        ANOVA method to use, ``"classical"`` or ``"welch"``, by default
-        ``"classical"``.
+        ``"student"``. Only used when ``posthoc_method`` is ``"ttest_bh"``.
+    posthoc_method : str, optional
+        Pairwise post-hoc method: ``"ttest_bh"`` (pairwise t-tests + BH)
+        or ``"tukey_hsd"`` (Tukey HSD), by default ``"ttest_bh"``.
 
     Returns
     -------
@@ -384,12 +429,13 @@ def default_scalar_comparison(
                 per_cond,
                 control_label,
                 ttest_method=ttest_method,
+                posthoc_method=posthoc_method,
             )
             all_pairwise.extend(pw)
 
         # ANOVA requires at least 3 conditions
         if len(per_cond) >= 3:
-            anova = anova_test(per_cond, metric_name, anova_method=anova_method)
+            anova = anova_test(per_cond, metric_name)
             if anova is not None:
                 all_anova.append(anova)
 
@@ -397,7 +443,7 @@ def default_scalar_comparison(
         all_rankings[metric_name] = rank_conditions(per_cond)
 
     # Apply BH correction across ALL pairwise results (full family)
-    if all_pairwise:
+    if all_pairwise and posthoc_method == "ttest_bh":
         from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 
         raw_p_values = [r.p_value for r in all_pairwise]
@@ -407,7 +453,7 @@ def default_scalar_comparison(
             p_for_significance = (
                 bh.adjusted_p_value if bh.adjusted_p_value is not None else result.p_value
             )
-            result.significant = p_for_significance < fdr_alpha
+            result.significant = p_for_significance <= fdr_alpha
 
     # Build condition summaries
     condition_summaries: list[ConditionSummary] = []
@@ -429,7 +475,7 @@ def default_scalar_comparison(
         control_label=control_label,
         fdr_alpha=fdr_alpha,
         ttest_method=ttest_method,
-        anova_method=anova_method,
+        posthoc_method=posthoc_method,
         conditions=condition_summaries,
         pairwise_comparisons=all_pairwise,
         anova=all_anova if all_anova else None,
@@ -605,46 +651,69 @@ def _format_scalar_text(
         lines.append("Pairwise Comparisons")
         lines.append("-" * 80)
         cohens_label = "Cohen's d"
+        posthoc_method = selected_pairwise[0].posthoc_method if selected_pairwise else "ttest_bh"
         has_adjusted = any(c.p_value_adjusted is not None for c in selected_pairwise)
-        if has_adjusted:
+        if posthoc_method == "ttest_bh":
+            if has_adjusted:
+                header = (
+                    f"{'Comparison':<30} {'% Change':<10} {'t-stat':<10} {'p-value':<12} "
+                    f"{'p (adj)':<12} {cohens_label:<10} {'Effect':<12}"
+                )
+            else:
+                header = (
+                    f"{'Comparison':<30} {'% Change':<10} {'t-stat':<10} {'p-value':<12} "
+                    f"{cohens_label:<10} {'Effect':<12}"
+                )
+        elif posthoc_method == "tukey_hsd":
             header = (
-                f"{'Comparison':<30} {'% Change':<10} {'p-value':<12} {'p (adj)':<12} "
+                f"{'Comparison':<30} {'% Change':<10} {'Tukey p':<12} "
                 f"{cohens_label:<10} {'Effect':<12}"
             )
         else:
-            header = (
-                f"{'Comparison':<30} {'% Change':<10} {'p-value':<12} "
-                f"{cohens_label:<10} {'Effect':<12}"
-            )
+            raise ValueError(f"Unknown posthoc method {posthoc_method!r}")
         lines.append(header)
         lines.append("-" * 80)
 
         for comp in selected_pairwise:
             name = f"{comp.condition_b} vs {comp.condition_a}"
             sig_marker = "*" if comp.significant else ""
-            p_str = f"{comp.p_value:.4f}{sig_marker}"
             pct_str = format_pct(comp.percent_change)
             d_str = f"{comp.cohens_d:.2f}"
-            if has_adjusted:
+            if comp.posthoc_method == "ttest_bh":
+                p_str = f"{comp.p_value:.4f}{sig_marker}"
                 p_adj = comp.p_value_adjusted
                 p_adj_str = "n/a" if p_adj is None else f"{p_adj:.4f}{sig_marker}"
-                lines.append(
-                    f"{name:<30} {pct_str:<10} {p_str:<12} {p_adj_str:<12} "
-                    f"{d_str:<10} {comp.effect_size_interpretation:<12}"
-                )
-            else:
+                t_str = f"{comp.t_statistic:.3f}" if not math.isnan(comp.t_statistic) else "nan"
+                if has_adjusted:
+                    lines.append(
+                        f"{name:<30} {pct_str:<10} {t_str:<10} {p_str:<12} {p_adj_str:<12} "
+                        f"{d_str:<10} {comp.effect_size_interpretation:<12}"
+                    )
+                else:
+                    lines.append(
+                        f"{name:<30} {pct_str:<10} {t_str:<10} {p_str:<12} "
+                        f"{d_str:<10} {comp.effect_size_interpretation:<12}"
+                    )
+            elif comp.posthoc_method == "tukey_hsd":
+                p_str = f"{comp.p_value:.4f}{sig_marker}"
                 lines.append(
                     f"{name:<30} {pct_str:<10} {p_str:<12} "
                     f"{d_str:<10} {comp.effect_size_interpretation:<12}"
                 )
+            else:
+                raise ValueError(f"Unknown posthoc method {comp.posthoc_method!r}")
 
         lines.append("-" * 80)
-        if has_adjusted and result.fdr_alpha is not None:
-            lines.append(f"* p_adj < {result.fdr_alpha} (BH-corrected)")
-        elif has_adjusted:
+        if posthoc_method == "ttest_bh" and has_adjusted and result.fdr_alpha is not None:
+            lines.append(f"* p_adj <= {result.fdr_alpha} (BH-corrected)")
+        elif posthoc_method == "ttest_bh" and has_adjusted:
             lines.append("* BH-corrected p_adj significant")
+        elif posthoc_method == "ttest_bh":
+            lines.append("* p <= 0.05")
+        elif posthoc_method == "tukey_hsd":
+            lines.append("* Tukey HSD p <= 0.05")
         else:
-            lines.append("* p < 0.05")
+            raise ValueError(f"Unknown posthoc method {posthoc_method!r}")
         lines.append("")
 
     # ANOVA
@@ -761,32 +830,63 @@ def _format_scalar_markdown(
     if selected_pairwise:
         lines.append("## Statistical Comparisons")
         lines.append("")
+        posthoc_method = selected_pairwise[0].posthoc_method if selected_pairwise else "ttest_bh"
         has_adjusted = any(c.p_value_adjusted is not None for c in selected_pairwise)
-        if has_adjusted:
-            lines.append("| Comparison | % Change | p-value | p (adj) | Cohen's d | Effect | Sig |")
-            lines.append("|------------|----------|---------|---------|-----------|--------|-----|")
-        else:
-            lines.append("| Comparison | % Change | p-value | Cohen's d | Effect | Sig |")
+        if posthoc_method == "ttest_bh":
+            if has_adjusted:
+                lines.append(
+                    "| Comparison | % Change | t-stat | p-value | p (adj) | Cohen's d | Effect | Sig |"
+                )
+                lines.append(
+                    "|------------|----------|--------|---------|---------|-----------|--------|-----|"
+                )
+            else:
+                lines.append(
+                    "| Comparison | % Change | t-stat | p-value | Cohen's d | Effect | Sig |"
+                )
+                lines.append(
+                    "|------------|----------|--------|---------|-----------|--------|-----|"
+                )
+        elif posthoc_method == "tukey_hsd":
+            lines.append("| Comparison | % Change | Tukey p | Cohen's d | Effect | Sig |")
             lines.append("|------------|----------|---------|-----------|--------|-----|")
+        else:
+            raise ValueError(f"Unknown posthoc method {posthoc_method!r}")
         for comp in selected_pairwise:
             name = f"{comp.condition_b} vs {comp.condition_a}"
             sig = "Yes" if comp.significant else "No"
-            if has_adjusted:
+            if comp.posthoc_method == "ttest_bh":
                 p_adj = "n/a" if comp.p_value_adjusted is None else f"{comp.p_value_adjusted:.4f}"
-                lines.append(
-                    f"| {name} | {format_pct(comp.percent_change)} | "
-                    f"{comp.p_value:.4f} | {p_adj} | {comp.cohens_d:.2f} | "
-                    f"{comp.effect_size_interpretation} | {sig} |"
-                )
-            else:
+                t_str = f"{comp.t_statistic:.3f}" if not math.isnan(comp.t_statistic) else "nan"
+                if has_adjusted:
+                    lines.append(
+                        f"| {name} | {format_pct(comp.percent_change)} | "
+                        f"{t_str} | {comp.p_value:.4f} | {p_adj} | {comp.cohens_d:.2f} | "
+                        f"{comp.effect_size_interpretation} | {sig} |"
+                    )
+                else:
+                    lines.append(
+                        f"| {name} | {format_pct(comp.percent_change)} | "
+                        f"{t_str} | {comp.p_value:.4f} | {comp.cohens_d:.2f} | "
+                        f"{comp.effect_size_interpretation} | {sig} |"
+                    )
+            elif comp.posthoc_method == "tukey_hsd":
                 lines.append(
                     f"| {name} | {format_pct(comp.percent_change)} | "
                     f"{comp.p_value:.4f} | {comp.cohens_d:.2f} | "
                     f"{comp.effect_size_interpretation} | {sig} |"
                 )
-        if has_adjusted and result.fdr_alpha is not None:
+            else:
+                raise ValueError(f"Unknown posthoc method {comp.posthoc_method!r}")
+        if posthoc_method == "ttest_bh" and has_adjusted and result.fdr_alpha is not None:
             lines.append("")
-            lines.append(f"*Significance uses BH-adjusted p-values at α={result.fdr_alpha}.*")
+            lines.append(f"*Significance uses BH-adjusted p-values: p_adj <= {result.fdr_alpha}.*")
+        elif posthoc_method == "ttest_bh" and not has_adjusted:
+            lines.append("")
+            lines.append("*Significance uses raw p <= 0.05.*")
+        elif posthoc_method == "tukey_hsd":
+            lines.append("")
+            lines.append("*Significance uses Tukey HSD p <= 0.05.*")
         lines.append("")
 
     # ANOVA

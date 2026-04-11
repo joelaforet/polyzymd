@@ -220,10 +220,10 @@ class ComparisonContext:
     ttest_method : str
         Two-sample t-test method for default scalar pairwise tests.
         ``"student"`` uses equal variances and ``"welch"`` does not.
-    anova_method : str
-        One-way ANOVA method for default scalar comparison.
-        ``"classical"`` uses equal-variance ANOVA and ``"welch"`` uses
-        a heteroscedastic alternative.
+    posthoc_method : str
+        Post-hoc testing method for default scalar pairwise tests.
+        ``"ttest_bh"`` applies pairwise t-tests with BH correction and
+        ``"tukey_hsd"`` applies Tukey HSD across all groups.
     recompute : bool
         Whether to force recomputation.
     result_path : Path | None
@@ -245,7 +245,7 @@ class ComparisonContext:
     recompute: bool
     fdr_alpha: float = 0.05
     ttest_method: str = "student"
-    anova_method: str = "classical"
+    posthoc_method: str = "ttest_bh"
     result_path: Path | None = None
     failed_conditions: list[Condition] = field(default_factory=list)
     aggregated_results: dict[str, Any] = field(default_factory=dict)
@@ -305,9 +305,16 @@ class PlotContext:
     results_dir: Path
     output_dir: Path
     settings: BaseModel
-    plot_settings: PlotSettings = None  # type: ignore[assignment]  # Guaranteed non-None by orchestrator; default kept for dataclass ordering
+    plot_settings: PlotSettings | None = None
     comparison_path: Path | None = None
     control_label: str | None = None
+
+    def __post_init__(self) -> None:
+        """Ensure plot settings is always materialized for plugins."""
+        if self.plot_settings is None:
+            from polyzymd.config.comparison import PlotSettings
+
+            object.__setattr__(self, "plot_settings", PlotSettings())
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +401,8 @@ class PairwiseResult(BaseModel):
         Two-tailed p-value.
     p_value_adjusted : float | None
         Benjamini-Hochberg adjusted p-value. ``None`` when not available.
+    posthoc_method : str
+        Post-hoc method used to generate this pairwise p-value.
     cohens_d : float
         Effect size (Cohen's d).
     effect_size_interpretation : str
@@ -415,6 +424,7 @@ class PairwiseResult(BaseModel):
     t_statistic: float
     p_value: float
     p_value_adjusted: float | None = None
+    posthoc_method: str = "ttest_bh"
     cohens_d: float
     effect_size_interpretation: str
     direction: str
@@ -469,8 +479,8 @@ class ComparisonResult(BaseModel):
         correction in pairwise tests. ``None`` when unknown.
     ttest_method : str
         Two-sample t-test method used for pairwise tests.
-    anova_method : str
-        One-way ANOVA method used for multi-condition tests.
+    posthoc_method : str
+        Post-hoc testing method used for pairwise tests.
     conditions : list[ConditionSummary]
         Per-condition summary statistics.
     pairwise_comparisons : list[PairwiseResult]
@@ -496,7 +506,7 @@ class ComparisonResult(BaseModel):
     control_label: str | None = None
     fdr_alpha: float | None = None
     ttest_method: str = "student"
-    anova_method: str = "classical"
+    posthoc_method: str = "ttest_bh"
     conditions: list[ConditionSummary] = Field(default_factory=list)
     pairwise_comparisons: list[PairwiseResult] = Field(default_factory=list)
     anova: list[ANOVAResult] | None = None
@@ -811,10 +821,10 @@ class Analysis(ABC):
     ``AggregatedResultClass`` to have the framework deserialize into
     that model automatically instead of returning a plain dict::
 
-        class RgAnalysis(Analysis):
-            name = "rg"
-            AggregatedResultClass = RgAggregatedResult  # has .load(path) or model_validate_json
-            ...
+        class MyAnalysis(Analysis):
+            name = "my_analysis"
+            AggregatedResultClass = MyAggregatedResult  # your Pydantic model
+            ...  # framework auto-deserializes via .load() or model_validate_json()
 
     **Custom compare plugin** — override ``compare()`` entirely for
     multi-metric or entry-table analyses.  See ``analyses/contacts/``
@@ -825,7 +835,7 @@ class Analysis(ABC):
     analyses.stats : ``default_scalar_comparison()``, ``format_scalar_comparison()``
     analyses.discovery : How the framework discovers plugins automatically.
     analyses.orchestrator : How the framework runs the lifecycle.
-    tutorials/extending_analyses.md : Step-by-step contributor guide.
+    contributor_guide/extending_analyses.md : Step-by-step contributor guide.
     """
 
     # --- Class variables (subclasses MUST set name and Settings) ---
@@ -1006,7 +1016,7 @@ class Analysis(ABC):
             equilibration=ctx.equilibration,
             fdr_alpha=ctx.fdr_alpha,
             ttest_method=ctx.ttest_method,
-            anova_method=ctx.anova_method,
+            posthoc_method=ctx.posthoc_method,
         )
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:

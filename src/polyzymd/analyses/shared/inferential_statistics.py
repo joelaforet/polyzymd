@@ -260,6 +260,10 @@ def independent_ttest(
     g1 = np.asarray(group1, dtype=np.float64)
     g2 = np.asarray(group2, dtype=np.float64)
 
+    # Guard: need at least 2 observations per group for a t-test
+    if len(g1) < 2 or len(g2) < 2:
+        return TTestResult(t_statistic=float("nan"), p_value=float("nan"))
+
     if method == "student":
         equal_var = True
     elif method == "welch":
@@ -310,8 +314,12 @@ def cohens_d(
     n1, n2 = len(g1), len(g2)
 
     if n1 < 2 or n2 < 2:
-        # Can't compute pooled std with < 2 samples
-        d = 0.0
+        # Undefined: can't compute pooled std with < 2 samples
+        return EffectSize(
+            cohens_d=float("nan"),
+            interpretation="undefined",
+            direction="undetermined",
+        )
     else:
         var1 = np.var(g1, ddof=1)
         var2 = np.var(g2, ddof=1)
@@ -322,6 +330,13 @@ def cohens_d(
         if pooled_std > 0:
             d = float((np.mean(g1) - np.mean(g2)) / pooled_std)
         else:
+            # Zero pooled SD with different means is undefined
+            if np.mean(g1) != np.mean(g2):
+                return EffectSize(
+                    cohens_d=float("nan"),
+                    interpretation="undefined",
+                    direction="undetermined",
+                )
             d = 0.0
 
     # Interpret magnitude
@@ -345,29 +360,24 @@ def cohens_d(
     )
 
 
-def one_way_anova(*groups: ArrayLike, method: str = "classical") -> ANOVAResult:
-    """Perform one-way ANOVA across multiple groups.
+def one_way_anova(*groups: ArrayLike) -> ANOVAResult:
+    """Perform classical one-way ANOVA across multiple groups.
 
-    Tests the null hypothesis that all groups have the same mean.
-
-    The ``method`` parameter controls the variance assumption:
-
-    - ``"classical"`` uses ``scipy.stats.f_oneway`` (equal variance assumption)
-    - ``"welch"`` uses ``scipy.stats.alexandergovern`` as a heteroscedastic
-      alternative when group variances may differ
+    Tests the null hypothesis that all groups have the same mean
+    using ``scipy.stats.f_oneway`` (equal variance assumption).
 
     Parameters
     ----------
     *groups : array_like
-        Variable number of groups to compare
-    method : str, optional
-        ANOVA method: ``"classical"`` or ``"welch"``, by default
-        ``"classical"``.
+        Variable number of groups to compare.  Each group must have
+        at least 2 observations; groups with fewer observations cause
+        the function to return NaN statistics.
 
     Returns
     -------
     ANOVAResult
-        Result containing F-statistic and p-value
+        Result containing F-statistic and p-value.  Both are NaN if
+        any group has fewer than 2 observations.
 
     Examples
     --------
@@ -376,30 +386,97 @@ def one_way_anova(*groups: ArrayLike, method: str = "classical") -> ANOVAResult:
     >>> egma = [0.558, 0.738, 0.496]
     >>> result = one_way_anova(no_poly, sbma, egma)
     >>> print(f"F = {result.f_statistic:.3f}, p = {result.p_value:.4f}")
+    """
+    from scipy import stats
+
+    arrays = [np.asarray(g, dtype=np.float64) for g in groups]
+
+    # Guard: need at least 2 observations per group for ANOVA
+    if any(len(a) < 2 for a in arrays):
+        return ANOVAResult(f_statistic=float("nan"), p_value=float("nan"))
+
+    stat, p = stats.f_oneway(*arrays)
+
+    return ANOVAResult(f_statistic=float(stat), p_value=float(p))
+
+
+@dataclass
+class TukeyHSDResult:
+    """Result of Tukey's HSD test for one pair of groups.
+
+    Attributes
+    ----------
+    group_i : int
+        Index of the first group.
+    group_j : int
+        Index of the second group.
+    statistic : float
+        Mean difference (group_j - group_i).
+    p_value : float
+        Tukey-adjusted p-value for this pair.
+    """
+
+    group_i: int
+    group_j: int
+    statistic: float
+    p_value: float
+
+
+def tukey_hsd(*groups: ArrayLike) -> list[TukeyHSDResult]:
+    """Run Tukey's Honestly Significant Difference test.
+
+    Computes family-wise-adjusted p-values for all pairwise group
+    comparisons using ``scipy.stats.tukey_hsd``.
+
+    Parameters
+    ----------
+    *groups : array_like
+        Variable number of groups to compare.  Each group must have
+        at least 2 observations.
+
+    Returns
+    -------
+    list[TukeyHSDResult]
+        One result per unique pair (i < j), ordered by (i, j).
 
     Raises
     ------
     ValueError
-        If *method* is not ``"classical"`` or ``"welch"``
+        If fewer than 2 groups are provided or any group has fewer
+        than 2 observations.
+
+    Examples
+    --------
+    >>> results = tukey_hsd([1, 2, 3], [4, 5, 6], [7, 8, 9])
+    >>> for r in results:
+    ...     print(f"({r.group_i}, {r.group_j}): p={r.p_value:.4f}")
     """
     from scipy import stats
 
-    # Convert to numpy arrays
     arrays = [np.asarray(g, dtype=np.float64) for g in groups]
 
-    if method == "classical":
-        stat, p = stats.f_oneway(*arrays)
-    elif method == "welch":
-        ag_result = stats.alexandergovern(*arrays)
-        stat = ag_result.statistic
-        p = ag_result.pvalue
-    else:
-        raise ValueError(f"Unknown ANOVA method {method!r}; expected 'classical' or 'welch'")
+    if len(arrays) < 2:
+        raise ValueError("Tukey HSD requires at least 2 groups")
+    if any(len(a) < 2 for a in arrays):
+        raise ValueError(
+            "Tukey HSD requires at least 2 observations per group; "
+            f"got sizes {[len(a) for a in arrays]}"
+        )
 
-    return ANOVAResult(
-        f_statistic=float(stat),
-        p_value=float(p),
-    )
+    result = stats.tukey_hsd(*arrays)
+    pairs: list[TukeyHSDResult] = []
+    n = len(arrays)
+    for i in range(n):
+        for j in range(i + 1, n):
+            pairs.append(
+                TukeyHSDResult(
+                    group_i=i,
+                    group_j=j,
+                    statistic=float(result.statistic[j, i]),
+                    p_value=float(result.pvalue[i, j]),
+                )
+            )
+    return pairs
 
 
 def percent_change(control_mean: float, treatment_mean: float) -> float:

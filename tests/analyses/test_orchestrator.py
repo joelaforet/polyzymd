@@ -501,3 +501,107 @@ class TestOrchestrator:
 
         assert result is None
         assert not (tmp_path / "aggregated").exists()
+
+
+class TestContractEnforcement:
+    """Tests for plugin contract violation detection."""
+
+    def test_compute_replicate_none_raises_contract_error(self, tmp_path: Path) -> None:
+        """compute_replicate() returning None should raise PluginContractError."""
+
+        class NoneComputeAnalysis(Analysis):
+            name: ClassVar[str] = "none_compute"
+            Settings: ClassVar[type] = ToySettings
+
+            def compute_replicate(self, ctx, replicate):
+                return None
+
+            def aggregate(self, ctx, results):
+                return {"ok": True}
+
+        analysis = NoneComputeAnalysis()
+        condition = Condition(
+            label="Cond",
+            config_path=tmp_path / "cfg.yaml",
+            replicates=(1,),
+            sim_config=SimpleNamespace(),
+        )
+
+        with pytest.raises(
+            PluginContractError,
+            match=r"none_compute.compute_replicate\(\) returned None",
+        ):
+            run_replicate_once(
+                analysis,
+                condition,
+                ToySettings(),
+                equilibration="0ns",
+                output_dir=tmp_path / "run_1",
+                replicate=1,
+                recompute=False,
+            )
+
+    def test_contract_error_not_wrapped_as_replicate_error(self, tmp_path: Path) -> None:
+        """PluginContractError should propagate, not be wrapped as ReplicateError."""
+
+        class RaisesContractAnalysis(Analysis):
+            name: ClassVar[str] = "raises_contract"
+            Settings: ClassVar[type] = ToySettings
+            min_replicates: ClassVar[int] = 1
+
+            def compute_replicate(self, ctx, replicate):
+                raise PluginContractError("contract boom")
+
+            def aggregate(self, ctx, results):
+                return {"ok": True}
+
+        from polyzymd.analyses.orchestrator import _run_replicates
+
+        condition = Condition(
+            label="Cond",
+            config_path=tmp_path / "cfg.yaml",
+            replicates=(1,),
+            sim_config=SimpleNamespace(),
+        )
+
+        with pytest.raises(PluginContractError, match="contract boom"):
+            _run_replicates(
+                RaisesContractAnalysis(),
+                condition,
+                ToySettings(),
+                equilibration="0ns",
+                output_dir=tmp_path / "analysis",
+            )
+
+    def test_run_comparison_fails_fast_on_contract_error(self, monkeypatch, tmp_path: Path) -> None:
+        """Contract violations should abort the comparison, not drop a condition."""
+
+        class NoneComputeAnalysis(Analysis):
+            name: ClassVar[str] = "none_compute_comparison"
+            Settings: ClassVar[type] = _ParallelSettings
+            min_replicates: ClassVar[int] = 1
+
+            def compute_replicate(self, ctx, replicate):
+                return None
+
+            def aggregate(self, ctx, results):
+                return {"mean_value": 0.0, "sem_value": 0.0, "replicate_values": [0.0]}
+
+        analysis = NoneComputeAnalysis()
+        config = _make_config(tmp_path)
+
+        def _from_cond(cond_cfg):
+            return Condition(
+                cond_cfg.label, cond_cfg.config, tuple(cond_cfg.replicates), SimpleNamespace()
+            )
+
+        monkeypatch.setattr(
+            "polyzymd.analyses.orchestrator.Condition.from_condition_config", _from_cond
+        )
+        monkeypatch.setattr(
+            "polyzymd.analyses.orchestrator._resolve_settings",
+            lambda analysis, config: _ParallelSettings(),
+        )
+
+        with pytest.raises(PluginContractError, match="returned None"):
+            run_comparison(analysis, config, recompute=False, equilibration="10ns")

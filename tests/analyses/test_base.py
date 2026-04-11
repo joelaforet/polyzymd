@@ -309,3 +309,17 @@ class TestResolveOutputDir:
         result = toy_analysis.resolve_output_dir(tmp_path / "analysis", "100% SBMA")
         assert "100pct_SBMA" in str(result)
         assert result.name == "toy"
+
+
+def test_plot_context_default_plot_settings() -> None:
+    """PlotContext without explicit plot_settings should get a real PlotSettings."""
+    from polyzymd.config.comparison import PlotSettings
+
+    ctx = PlotContext(
+        conditions=[],
+        analysis_dirs={},
+        results_dir=Path("/fake"),
+        output_dir=Path("/fake"),
+        settings=MagicMock(),
+    )
+    assert isinstance(ctx.plot_settings, PlotSettings)

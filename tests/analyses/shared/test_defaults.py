@@ -21,10 +21,10 @@ def test_analysis_defaults_ttest_method_default() -> None:
     assert defaults.ttest_method == "student"
 
 
-def test_analysis_defaults_anova_method_default() -> None:
-    """Analysis defaults should use classical ANOVA by default."""
+def test_analysis_defaults_posthoc_method_default() -> None:
+    """Analysis defaults should use t-test + BH post-hoc by default."""
     defaults = AnalysisDefaults()
-    assert defaults.anova_method == "classical"
+    assert defaults.posthoc_method == "ttest_bh"
 
 
 def test_analysis_defaults_invalid_ttest_method() -> None:
@@ -33,7 +33,7 @@ def test_analysis_defaults_invalid_ttest_method() -> None:
         AnalysisDefaults(ttest_method="bogus")
 
 
-def test_analysis_defaults_invalid_anova_method() -> None:
-    """Invalid ANOVA method should fail validation."""
+def test_analysis_defaults_invalid_posthoc_method() -> None:
+    """Invalid post-hoc method should fail validation."""
     with pytest.raises(ValidationError):
-        AnalysisDefaults(anova_method="bogus")
+        AnalysisDefaults(posthoc_method="bogus")

@@ -173,48 +173,13 @@ def test_one_way_anova_classical_method(monkeypatch) -> None:
             del groups
             return (3.0, 0.02)
 
-        def alexandergovern(self, *groups):
-            del groups
-            raise AssertionError("alexandergovern should not be called")
-
     class _Scipy:
         stats = _Stats()
 
     monkeypatch.setitem(sys.modules, "scipy", _Scipy())
-    result = one_way_anova([1.0, 2.0], [1.5, 2.5], [2.0, 3.0], method="classical")
+    result = one_way_anova([1.0, 2.0], [1.5, 2.5], [2.0, 3.0])
     assert result.f_statistic == pytest.approx(3.0)
     assert result.p_value == pytest.approx(0.02)
-
-
-def test_one_way_anova_welch_method(monkeypatch) -> None:
-    """Welch ANOVA path should use scipy alexandergovern."""
-
-    class _AGResult:
-        statistic = 4.0
-        pvalue = 0.03
-
-    class _Stats:
-        def f_oneway(self, *groups):
-            del groups
-            raise AssertionError("f_oneway should not be called")
-
-        def alexandergovern(self, *groups):
-            del groups
-            return _AGResult()
-
-    class _Scipy:
-        stats = _Stats()
-
-    monkeypatch.setitem(sys.modules, "scipy", _Scipy())
-    result = one_way_anova([1.0, 2.0], [1.5, 2.5], [2.0, 3.0], method="welch")
-    assert result.f_statistic == pytest.approx(4.0)
-    assert result.p_value == pytest.approx(0.03)
-
-
-def test_one_way_anova_invalid_method() -> None:
-    """Unknown ANOVA method should raise ValueError."""
-    with pytest.raises(ValueError, match="Unknown ANOVA method"):
-        one_way_anova([1.0, 2.0], [1.5, 2.5], method="bogus")
 
 
 def test_bh_monotonicity_in_rank_order() -> None:
@@ -257,3 +222,80 @@ def test_bh_alpha_must_be_between_zero_and_one(alpha: float) -> None:
     """Alpha outside valid range should raise a ValueError."""
     with pytest.raises(ValueError, match="alpha"):
         benjamini_hochberg([0.01, 0.02], alpha=alpha)
+
+
+def test_tukey_hsd_basic() -> None:
+    """Tukey HSD should return pairwise results for 3 groups."""
+    from polyzymd.analyses.shared.inferential_statistics import tukey_hsd
+
+    results = tukey_hsd([1, 2, 3], [4, 5, 6], [7, 8, 9])
+    assert len(results) == 3
+    for result in results:
+        assert 0.0 <= result.p_value <= 1.0
+
+
+def test_tukey_hsd_two_groups() -> None:
+    """Tukey HSD should work with exactly 2 groups."""
+    from polyzymd.analyses.shared.inferential_statistics import tukey_hsd
+
+    results = tukey_hsd([1, 2, 3], [4, 5, 6])
+    assert len(results) == 1
+    assert results[0].p_value < 0.05
+
+
+def test_tukey_hsd_insufficient_groups() -> None:
+    """Tukey HSD with < 2 groups should raise ValueError."""
+    from polyzymd.analyses.shared.inferential_statistics import tukey_hsd
+
+    with pytest.raises(ValueError, match="at least 2 groups"):
+        tukey_hsd([1, 2, 3])
+
+
+def test_tukey_hsd_insufficient_observations() -> None:
+    """Tukey HSD with n=1 group should raise ValueError."""
+    from polyzymd.analyses.shared.inferential_statistics import tukey_hsd
+
+    with pytest.raises(ValueError, match="at least 2 observations"):
+        tukey_hsd([1], [2, 3])
+
+
+def test_independent_ttest_n1_returns_nan() -> None:
+    """t-test with n=1 group should return NaN statistics."""
+    result = independent_ttest([1.0], [2.0, 3.0])
+    assert math.isnan(result.t_statistic)
+    assert math.isnan(result.p_value)
+
+
+def test_cohens_d_n1_returns_undefined() -> None:
+    """Cohen's d with n=1 should return NaN with undefined interpretation."""
+    from polyzymd.analyses.shared.inferential_statistics import cohens_d
+
+    result = cohens_d([1.0], [2.0, 3.0])
+    assert math.isnan(result.cohens_d)
+    assert result.interpretation == "undefined"
+
+
+def test_cohens_d_zero_variance_equal_means() -> None:
+    """Cohen's d with zero pooled SD and equal means should return 0."""
+    from polyzymd.analyses.shared.inferential_statistics import cohens_d
+
+    result = cohens_d([5.0, 5.0], [5.0, 5.0])
+    assert result.cohens_d == 0.0
+
+
+def test_one_way_anova_n1_returns_nan() -> None:
+    """ANOVA with a group of n=1 should return NaN."""
+    result = one_way_anova([1.0], [2.0, 3.0], [4.0, 5.0])
+    assert math.isnan(result.f_statistic)
+    assert math.isnan(result.p_value)
+
+
+def test_one_way_anova_numerical_regression() -> None:
+    """Classical ANOVA against known values."""
+    from scipy.stats import f_oneway
+
+    g1, g2, g3 = [0.715, 0.693, 0.696], [0.517, 0.586], [0.558, 0.738, 0.496]
+    result = one_way_anova(g1, g2, g3)
+    expected = f_oneway(g1, g2, g3)
+    assert abs(result.f_statistic - expected.statistic) < 1e-10
+    assert abs(result.p_value - expected.pvalue) < 1e-10

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 
@@ -135,19 +136,33 @@ def test_default_scalar_comparison_threads_ttest_method(monkeypatch) -> None:
     assert result.ttest_method == "welch"
 
 
-def test_default_scalar_comparison_threads_anova_method(monkeypatch) -> None:
-    """default_scalar_comparison should pass anova_method to ANOVA tests."""
-    seen_methods: list[str] = []
+def test_default_scalar_comparison_threads_posthoc_method(monkeypatch) -> None:
+    """default_scalar_comparison should pass posthoc_method to pairwise tests."""
+    seen_posthoc_methods: list[str] = []
 
-    def _fake_one_way_anova(*groups, method="classical"):
-        del groups
-        seen_methods.append(method)
-        return type("_Result", (), {"f_statistic": 1.5, "p_value": 0.2, "significant": False})()
+    def _fake_pairwise(
+        metrics, control_label=None, ttest_method="student", posthoc_method="ttest_bh"
+    ):
+        del metrics, control_label, ttest_method
+        seen_posthoc_methods.append(posthoc_method)
+        return [
+            PairwiseResult(
+                condition_a="Control",
+                condition_b="Treatment 1",
+                metric="metric_a",
+                t_statistic=float("nan"),
+                p_value=0.03,
+                p_value_adjusted=None,
+                posthoc_method=posthoc_method,
+                cohens_d=0.5,
+                effect_size_interpretation="medium",
+                direction="higher",
+                significant=True,
+                percent_change=20.0,
+            )
+        ]
 
-    monkeypatch.setattr(
-        "polyzymd.analyses.shared.inferential_statistics.one_way_anova",
-        _fake_one_way_anova,
-    )
+    monkeypatch.setattr("polyzymd.analyses.stats.pairwise_comparisons", _fake_pairwise)
 
     metrics_by_condition = {
         "Control": {"metric_a": _metric(1.0, [1.0, 1.1, 0.9])},
@@ -156,13 +171,13 @@ def test_default_scalar_comparison_threads_anova_method(monkeypatch) -> None:
     }
     result = default_scalar_comparison(
         analysis_name="test",
-        project_name="ANOVA threading",
+        project_name="Posthoc threading",
         metrics_by_condition=metrics_by_condition,
-        anova_method="welch",
+        posthoc_method="tukey_hsd",
     )
 
-    assert seen_methods == ["welch"]
-    assert result.anova_method == "welch"
+    assert seen_posthoc_methods == ["tukey_hsd"]
+    assert result.posthoc_method == "tukey_hsd"
 
 
 def test_comparison_result_round_trip_preserves_adjusted_pvalue() -> None:
@@ -283,7 +298,52 @@ def test_format_scalar_comparison_backward_compatible_without_adjusted_pvalues()
     assert "p (adj)" not in text_output
     assert "p (adj)" not in markdown_output
     assert "p-value" in text_output
-    assert "| Comparison | % Change | p-value |" in markdown_output
+    assert "* p <= 0.05" in text_output
+    assert (
+        "| Comparison | % Change | t-stat | p-value | Cohen's d | Effect | Sig |" in markdown_output
+    )
+
+
+def test_bh_boundary_inclusive() -> None:
+    """Adjusted p-value exactly equal to fdr_alpha should be significant."""
+    metrics_ctrl = {"m": _metric(1.0, [1.0, 1.1, 1.2])}
+    metrics_trt = {"m": _metric(2.0, [2.0, 2.1, 2.2])}
+
+    result = default_scalar_comparison(
+        analysis_name="test",
+        project_name="BH inclusive boundary",
+        metrics_by_condition={"ctrl": metrics_ctrl, "trt": metrics_trt},
+        control_label="ctrl",
+        fdr_alpha=1.0,
+        posthoc_method="ttest_bh",
+    )
+
+    for pairwise in result.pairwise_comparisons:
+        if pairwise.p_value_adjusted is not None:
+            assert pairwise.significant
+
+
+def test_default_scalar_comparison_tukey_mode() -> None:
+    """Tukey HSD mode should produce results with NaN t-statistics."""
+    metrics = {
+        "ctrl": {"m": _metric(1.0, [1.0, 1.1, 1.2])},
+        "trt1": {"m": _metric(2.0, [2.0, 2.1, 2.2])},
+        "trt2": {"m": _metric(3.0, [3.0, 3.1, 3.2])},
+    }
+    result = default_scalar_comparison(
+        analysis_name="test",
+        project_name="Tukey mode",
+        metrics_by_condition=metrics,
+        control_label="ctrl",
+        posthoc_method="tukey_hsd",
+    )
+
+    assert result.posthoc_method == "tukey_hsd"
+    for pairwise in result.pairwise_comparisons:
+        assert pairwise.posthoc_method == "tukey_hsd"
+        assert math.isnan(pairwise.t_statistic)
+        assert pairwise.p_value_adjusted is None
+        assert pairwise.p_value >= 0
 
 
 class TestStats:
