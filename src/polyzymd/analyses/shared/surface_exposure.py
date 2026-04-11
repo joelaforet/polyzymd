@@ -58,7 +58,7 @@ class ResidueExposure:
     relative_sasa : float
         Ratio of actual to maximum SASA (0.0 to ~1.0+)
     is_exposed : bool
-        True if relative_sasa > threshold
+        True if relative_sasa >= threshold
     aa_class : str
         Amino acid classification (aromatic, polar, etc.)
     """
@@ -237,14 +237,14 @@ class SurfaceExposureFilter:
     """Compute surface exposure from initial PDB structure.
 
     Uses `rust_sasa_python` for fast SASA calculation. Residues are classified
-    as "exposed" if their relative SASA (actual/max theoretical) exceeds
+    as "exposed" if their relative SASA (actual/max theoretical) meets or exceeds
     the threshold.
 
     Parameters
     ----------
     threshold : float
         Relative SASA threshold (0-1). Residues with
-        SASA/maxSASA > threshold are considered exposed.
+        SASA/maxSASA >= threshold are considered exposed.
         Default 0.2 (20% of max theoretical).
     probe_radius : float
         Probe radius for SASA calculation in Angstroms.
@@ -308,7 +308,8 @@ class SurfaceExposureFilter:
         except ImportError as e:
             raise ImportError(
                 "rust_sasa_python is required for surface exposure analysis. "
-                "Install with: pip install rust-sasa-python"
+                "Ensure rust_sasa_python is available in the PolyzyMD pixi "
+                'environment (for example: pixi run -e build python -c "import rust_sasa_python").'
             ) from e
 
         pdb_path = Path(pdb_path)
@@ -339,7 +340,7 @@ class SurfaceExposureFilter:
             relative_sasa = sasa_value / max_sasa if max_sasa > 0 else 0.0
 
             # Determine if exposed
-            is_exposed = relative_sasa > self.threshold
+            is_exposed = relative_sasa >= self.threshold
 
             exposures.append(
                 ResidueExposure(
@@ -364,7 +365,7 @@ class SurfaceExposureFilter:
 
         logger.info(
             f"SASA analysis complete: {result.exposed_count}/{result.total_count} "
-            f"residues are surface-exposed (>{self.threshold * 100:.0f}% relative SASA)"
+            f"residues are surface-exposed (>={self.threshold * 100:.0f}% relative SASA)"
         )
 
         return result

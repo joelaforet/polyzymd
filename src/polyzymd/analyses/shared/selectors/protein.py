@@ -218,43 +218,49 @@ class ProteinResiduesNearReference(MolecularSelector):
 
     def select(self, universe: "Universe") -> SelectionResult:
         """Select protein residues near the reference atoms."""
-        # Go to the specified frame
-        universe.trajectory[self.frame]
+        original_frame = universe.trajectory.frame
+        try:
+            # Go to the specified frame
+            universe.trajectory[self.frame]
 
-        # Select reference atoms
-        ref_atoms = universe.select_atoms(self.reference_selection)
-        if len(ref_atoms) == 0:
-            raise ValueError(f"Reference selection '{self.reference_selection}' matched no atoms")
+            # Select reference atoms
+            ref_atoms = universe.select_atoms(self.reference_selection)
+            if len(ref_atoms) == 0:
+                raise ValueError(
+                    f"Reference selection '{self.reference_selection}' matched no atoms"
+                )
 
-        # Select protein atoms within cutoff of reference
-        # MDAnalysis "around" selection finds atoms within cutoff
-        nearby_selection = f"protein and around {self.cutoff} ({self.reference_selection})"
-        nearby_atoms = universe.select_atoms(nearby_selection)
+            # Select protein atoms within cutoff of reference
+            # MDAnalysis "around" selection finds atoms within cutoff
+            nearby_selection = f"protein and around {self.cutoff} ({self.reference_selection})"
+            nearby_atoms = universe.select_atoms(nearby_selection)
 
-        if self.include_reference:
-            # Include reference residues if they are protein
-            ref_protein = universe.select_atoms(
-                f"protein and same residue as ({self.reference_selection})"
+            if self.include_reference:
+                # Include reference residues if they are protein
+                ref_protein = universe.select_atoms(
+                    f"protein and same residue as ({self.reference_selection})"
+                )
+                nearby_atoms = nearby_atoms | ref_protein
+
+            if len(nearby_atoms) == 0:
+                raise ValueError(
+                    f"No protein atoms found within {self.cutoff}A of '{self.reference_selection}'"
+                )
+
+            return SelectionResult(
+                atoms=nearby_atoms,
+                residues=nearby_atoms.residues,
+                label=self.label,
+                metadata={
+                    "reference_selection": self.reference_selection,
+                    "cutoff": self.cutoff,
+                    "include_reference": self.include_reference,
+                    "frame": self.frame,
+                    "n_reference_atoms": len(ref_atoms),
+                },
             )
-            nearby_atoms = nearby_atoms | ref_protein
-
-        if len(nearby_atoms) == 0:
-            raise ValueError(
-                f"No protein atoms found within {self.cutoff}A of '{self.reference_selection}'"
-            )
-
-        return SelectionResult(
-            atoms=nearby_atoms,
-            residues=nearby_atoms.residues,
-            label=self.label,
-            metadata={
-                "reference_selection": self.reference_selection,
-                "cutoff": self.cutoff,
-                "include_reference": self.include_reference,
-                "frame": self.frame,
-                "n_reference_atoms": len(ref_atoms),
-            },
-        )
+        finally:
+            universe.trajectory[original_frame]
 
     @property
     def label(self) -> str:
