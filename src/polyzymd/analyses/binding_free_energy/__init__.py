@@ -467,8 +467,8 @@ class BindingFreeEnergyAnalysis(Analysis):
         """
         from polyzymd.analyses.contacts._paths import find_contact_results_for_replicates
         from polyzymd.analyses.contacts._results import ContactResult
+        from polyzymd.analyses.shared.binding_preference import compute_condition_binding_preference
         from polyzymd.analyses.shared.binding_preference_helpers import (
-            compute_condition_binding_preference,
             resolve_enzyme_pdb,
             try_load_cached_binding_preference,
         )

@@ -943,7 +943,7 @@ class TestLoadBindingPreference:
                 return_value={1: tmp_path / "contacts_rep1.json"},
             ),
             patch(
-                "polyzymd.analyses.shared.binding_preference_helpers.compute_condition_binding_preference",
+                "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
                 return_value=expected,
             ) as mock_compute,
         ):
