@@ -7,6 +7,7 @@ All functions are called exclusively from ``RgAnalysis.plot()``.
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -530,7 +531,7 @@ def _load_replicate_timeseries(
             payload = np.load(npz_path)
             rg_values = np.asarray(payload["rg_values"], dtype=np.float64)
             time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
-        except Exception as exc:
+        except (OSError, ValueError, KeyError) as exc:
             logger.warning("Failed to load Rg NPZ sidecar %s: %s", npz_path, exc)
             continue
 
@@ -581,8 +582,6 @@ def _load_condition_aggregated(condition_dir: Path) -> dict | None:
     dict | None
         Parsed JSON payload, or ``None`` when no aggregated file is available.
     """
-    import json
-
     agg_dir = condition_dir / "aggregated"
     if not agg_dir.exists():
         return None
@@ -592,7 +591,7 @@ def _load_condition_aggregated(condition_dir: Path) -> dict | None:
     if canonical.exists():
         try:
             return json.loads(canonical.read_text(encoding="utf-8"))
-        except Exception as exc:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
             logger.warning("Failed to load aggregated Rg JSON %s: %s", canonical, exc)
             return None
 
@@ -605,7 +604,7 @@ def _load_condition_aggregated(condition_dir: Path) -> dict | None:
 
     try:
         return json.loads(json_files[-1].read_text(encoding="utf-8"))
-    except Exception as exc:
+    except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
         logger.warning("Failed to load aggregated Rg JSON %s: %s", json_files[-1], exc)
         return None
 

@@ -11,6 +11,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.plotting import (
@@ -439,7 +441,7 @@ def _load_replicate_timeseries(
             with np.load(npz_path) as payload:
                 rmsd_values = np.asarray(payload["rmsd_values"], dtype=np.float64)
                 time_ns = np.asarray(payload["time_ns"], dtype=np.float64)
-        except Exception as exc:
+        except (OSError, ValueError, KeyError) as exc:
             logger.warning("Failed to load RMSD NPZ sidecar %s: %s", npz_path, exc)
             continue
 
@@ -571,7 +573,7 @@ def _load_replicate_convergence_payload(
                 value = float(np.asarray(convergence_time_raw).item())
                 if np.isfinite(value):
                     convergence_time_ns = value
-    except Exception as exc:
+    except (OSError, ValueError, KeyError) as exc:
         logger.warning("Failed to load RMSD NPZ sidecar %s: %s", npz_path, exc)
         return None
 
@@ -637,7 +639,7 @@ def _resolve_npz_sidecar_path(
 
     try:
         result = RMSDResult.load(result_path)
-    except Exception as exc:
+    except (OSError, ValueError, ValidationError) as exc:
         logger.warning("Failed to load RMSD result JSON %s: %s", result_path, exc)
         return None
 
