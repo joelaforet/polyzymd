@@ -722,110 +722,110 @@ class BaseComparisonResult(BaseModel, ABC, Generic[TConditionSummary, TPairwiseR
 class Analysis(ABC):
     """Base class for all PolyzyMD analyses.
 
-        Subclasses represent a complete analysis lifecycle: per-replicate
-        computation, aggregation across replicates, cross-condition comparison,
-        plotting, and CLI formatting.
+    Subclasses represent a complete analysis lifecycle: per-replicate
+    computation, aggregation across replicates, cross-condition comparison,
+    plotting, and CLI formatting.
 
-        Class Variables
-        ---------------
-        name : str
-            Unique identifier used in config files and CLI (e.g. ``"rmsf"``).
-        Settings : type[BaseModel]
-            Pydantic model for this analysis's settings.
-        PlotSettingsModel : type[BasePlotSettings] | None
-            Optional per-analysis plot settings model. When set, the
-            comparison configuration loader parses ``plot_settings.<name>``
-            using this model and provides default-constructed values on
-            attribute access when omitted in YAML. Defaults to ``None``.
-        AggregatedResultClass : type[BaseModel] | None
-            Optional Pydantic model class for aggregated results.  When set,
-            the default :meth:`_deserialize_result` uses this class's
-            ``.load(path)`` method (if available) or
-            ``.model_validate_json()`` to load aggregated results from disk.
-            When ``None`` (the default), aggregated results are loaded as
-            plain dicts via ``json.loads()``.
+    Class Variables
+    ---------------
+    name : str
+        Unique identifier used in config files and CLI (e.g. ``"rmsf"``).
+    Settings : type[BaseModel]
+        Pydantic model for this analysis's settings.
+    PlotSettingsModel : type[BasePlotSettings] | None
+        Optional per-analysis plot settings model. When set, the
+        comparison configuration loader parses ``plot_settings.<name>``
+        using this model and provides default-constructed values on
+        attribute access when omitted in YAML. Defaults to ``None``.
+    AggregatedResultClass : type[BaseModel] | None
+        Optional Pydantic model class for aggregated results.  When set,
+        the default :meth:`_deserialize_result` uses this class's
+        ``.load(path)`` method (if available) or
+        ``.model_validate_json()`` to load aggregated results from disk.
+        When ``None`` (the default), aggregated results are loaded as
+        plain dicts via ``json.loads()``.
 
-            Setting this class variable replaces the need to override
-            :meth:`_deserialize_result` in most cases.
+        Setting this class variable replaces the need to override
+        :meth:`_deserialize_result` in most cases.
 
-            Example::
+        Example::
 
-                from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
+            from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
 
-                class RMSFAnalysis(Analysis):
-                    name = "rmsf"
-                    AggregatedResultClass = RMSFAggregatedResult
-                    ...
-        aliases : tuple[str, ...]
-            Alternative CLI names (e.g. ``("triad",)`` for ``catalytic_triad``).
-        dependencies : tuple[str, ...]
-            Names of analyses that must run before this one (topological sort).
-        min_replicates : int
-            Minimum successful replicates required for aggregation.
-        has_compute_stage : bool
-            Whether the framework should run ``compute_replicate()``.
-        has_aggregate_stage : bool
-            Whether the framework should run ``aggregate()``.
-
-        Examples
-        --------
-        **Simple plugin** using the default comparison pipeline (t-tests,
-        ANOVA, ranking).  Implement ``extract_metrics()`` — the framework
-        deserializes aggregated results automatically via ``json.loads()``::
-
-            from polyzymd.analyses.base import (
-                AggregateContext, Analysis, MetricValue, ReplicateContext,
-            )
-    from pydantic import BaseModel
-
-            class RgAnalysis(Analysis):
-                name = "rg"
-
-                class Settings(BaseModel):
-                    selection: str = "protein and name CA"
-
-                def compute_replicate(self, ctx, replicate):
-                    import MDAnalysis as mda
-                    import numpy as np
-                    # Use ctx.sim_config, ctx.settings — never load configs yourself
-                    ...
-                    return {"mean_rg": float(np.mean(rg_values)), "replicate": replicate}
-
-                def aggregate(self, ctx, results):
-                    import numpy as np
-                    values = [r["mean_rg"] for r in results]
-                    return {"mean_rg": float(np.mean(values)),
-                            "sem_rg": float(np.std(values, ddof=1) / np.sqrt(len(values))),
-                            "replicate_values": values}
-
-                def extract_metrics(self, summary):
-                    return {"mean_rg": MetricValue(
-                        name="mean_rg", mean=summary["mean_rg"],
-                        sem=summary["sem_rg"],
-                        replicate_values=summary["replicate_values"],
-                        higher_is_better=False,
-                        direction_labels=("compacting", "unchanged", "expanding"),
-                    )}
-
-        If your aggregated results use a typed Pydantic model, set
-        ``AggregatedResultClass`` to have the framework deserialize into
-        that model automatically instead of returning a plain dict::
-
-            class RgAnalysis(Analysis):
-                name = "rg"
-                AggregatedResultClass = RgAggregatedResult  # has .load(path) or model_validate_json
+            class RMSFAnalysis(Analysis):
+                name = "rmsf"
+                AggregatedResultClass = RMSFAggregatedResult
                 ...
+    aliases : tuple[str, ...]
+        Alternative CLI names (e.g. ``("triad",)`` for ``catalytic_triad``).
+    dependencies : tuple[str, ...]
+        Names of analyses that must run before this one (topological sort).
+    min_replicates : int
+        Minimum successful replicates required for aggregation.
+    has_compute_stage : bool
+        Whether the framework should run ``compute_replicate()``.
+    has_aggregate_stage : bool
+        Whether the framework should run ``aggregate()``.
 
-        **Custom compare plugin** — override ``compare()`` entirely for
-        multi-metric or entry-table analyses.  See ``analyses/contacts/``
-        or ``analyses/distances/`` for full examples.
+    Examples
+    --------
+    **Simple plugin** using the default comparison pipeline (t-tests,
+    ANOVA, ranking).  Implement ``extract_metrics()`` — the framework
+    deserializes aggregated results automatically via ``json.loads()``::
 
-        See Also
-        --------
-        analyses.stats : ``default_scalar_comparison()``, ``format_scalar_comparison()``
-        analyses.discovery : How the framework discovers plugins automatically.
-        analyses.orchestrator : How the framework runs the lifecycle.
-        tutorials/extending_analyses.md : Step-by-step contributor guide.
+        from polyzymd.analyses.base import (
+            AggregateContext, Analysis, MetricValue, ReplicateContext,
+        )
+        from pydantic import BaseModel
+
+        class RgAnalysis(Analysis):
+            name = "rg"
+
+            class Settings(BaseModel):
+                selection: str = "protein and name CA"
+
+            def compute_replicate(self, ctx, replicate):
+                import MDAnalysis as mda
+                import numpy as np
+                # Use ctx.sim_config, ctx.settings — never load configs yourself
+                ...
+                return {"mean_rg": float(np.mean(rg_values)), "replicate": replicate}
+
+            def aggregate(self, ctx, results):
+                import numpy as np
+                values = [r["mean_rg"] for r in results]
+                return {"mean_rg": float(np.mean(values)),
+                        "sem_rg": float(np.std(values, ddof=1) / np.sqrt(len(values))),
+                        "replicate_values": values}
+
+            def extract_metrics(self, summary):
+                return {"mean_rg": MetricValue(
+                    name="mean_rg", mean=summary["mean_rg"],
+                    sem=summary["sem_rg"],
+                    replicate_values=summary["replicate_values"],
+                    higher_is_better=False,
+                    direction_labels=("compacting", "unchanged", "expanding"),
+                )}
+
+    If your aggregated results use a typed Pydantic model, set
+    ``AggregatedResultClass`` to have the framework deserialize into
+    that model automatically instead of returning a plain dict::
+
+        class RgAnalysis(Analysis):
+            name = "rg"
+            AggregatedResultClass = RgAggregatedResult  # has .load(path) or model_validate_json
+            ...
+
+    **Custom compare plugin** — override ``compare()`` entirely for
+    multi-metric or entry-table analyses.  See ``analyses/contacts/``
+    or ``analyses/distances/`` for full examples.
+
+    See Also
+    --------
+    analyses.stats : ``default_scalar_comparison()``, ``format_scalar_comparison()``
+    analyses.discovery : How the framework discovers plugins automatically.
+    analyses.orchestrator : How the framework runs the lifecycle.
+    tutorials/extending_analyses.md : Step-by-step contributor guide.
     """
 
     # --- Class variables (subclasses MUST set name and Settings) ---

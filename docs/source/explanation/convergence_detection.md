@@ -84,6 +84,19 @@ from momentary pauses in an otherwise drifting trajectory.
 | `convergence_slope_threshold` | 0.0005 | Maximum absolute slope (Å/ns) to qualify as "flat" |
 | `convergence_sustained_for_ns` | 15.0 | Required duration below threshold to declare convergence (ns) |
 
+```{important}
+The slope threshold is an **absolute** value in Å/ns.  It is calibrated for
+protein backbone RMSD, where typical plateau values are 1–5 Å and a slope of
+0.0005 Å/ns represents ~0.05 Å drift over 100 ns — well below the noise
+floor for most systems.
+
+For observables on a different scale (e.g. radius of gyration in nm, SASA in
+Å², or unitless order parameters), you **must** rescale the threshold to match
+the magnitude and natural variability of your signal. A threshold that is
+appropriate for RMSD in Ångströms will be far too stringent for SASA (hundreds
+of Å²) or far too permissive for a normalised order parameter (0–1).
+```
+
 **Guidance for tuning:**
 
 - **Very long simulations (> 500 ns):** Increase `convergence_window_size_ns`
@@ -118,6 +131,11 @@ proof of convergence. Important limitations include:
   slope threshold, sustained duration) introduce subjective choices. Different
   parameter values can yield different convergence conclusions for the same
   trajectory.
+
+- **Scale-dependent threshold.** The default slope threshold (0.0005 Å/ns) is
+  calibrated for protein backbone RMSD in Ångströms. Applying it to observables
+  with different units or magnitudes without adjustment will produce incorrect
+  convergence calls.
 
 - **Single-observable limitation.** Convergence in RMSD does not imply
   convergence in other observables (e.g., hydrogen bond occupancy, active site

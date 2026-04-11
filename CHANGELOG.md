@@ -78,7 +78,7 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   `show_convergence_plots` plot setting.  (`analyses/rmsd/_plotters.py`)
 - **"Establishing Convergence" documentation.**  New Explanation page covering
   convergence concepts, the sliding-window algorithm, parameter tuning, and
-  limitations.  (`docs/source/explanation/convergence.md`)
+  limitations.  (`docs/source/explanation/convergence_detection.md`)
 
 ### Changed
 
