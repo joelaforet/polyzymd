@@ -153,10 +153,44 @@ def apply_fdr_correction(
             result.p_value_adjusted = bh_result.adjusted_p_value
         result.significant = bh_result.significant
 
+    def _validate_default_setter_targets(results: Sequence[Any], label: str) -> None:
+        for idx, result in enumerate(results):
+            if not hasattr(result, "significant"):
+                result_type = type(result).__name__
+                raise TypeError(
+                    "apply_fdr_correction() default setter requires results with a "
+                    f"'significant' attribute. {label}[{idx}] has type {result_type}. "
+                    "Provide set_corrected=... for custom result objects."
+                )
+
+            result_type = type(result).__name__
+            original_significant = result.significant
+            try:
+                result.significant = original_significant
+            except (AttributeError, TypeError) as exc:
+                raise TypeError(
+                    "apply_fdr_correction() default setter requires a mutable "
+                    f"'significant' attribute. {label}[{idx}] has type {result_type}. "
+                    "Provide set_corrected=... for custom result objects."
+                ) from exc
+
+            if hasattr(result, "p_value_adjusted"):
+                original_adjusted = result.p_value_adjusted
+                try:
+                    result.p_value_adjusted = original_adjusted
+                except (AttributeError, TypeError) as exc:
+                    raise TypeError(
+                        "apply_fdr_correction() default setter requires a mutable "
+                        f"'p_value_adjusted' attribute when present. {label}[{idx}] has type "
+                        f"{result_type}. Provide set_corrected=... for custom result objects."
+                    ) from exc
+
     p_getter = get_p_value or _default_get_p_value
     corrected_setter = set_corrected or _default_set_corrected
 
     if pairwise_results:
+        if set_corrected is None:
+            _validate_default_setter_targets(pairwise_results, "pairwise_results")
         pairwise_p_values = [p_getter(result) for result in pairwise_results]
         pairwise_bh = benjamini_hochberg(pairwise_p_values, alpha=fdr_alpha)
         for result, bh_result in zip(pairwise_results, pairwise_bh, strict=False):
@@ -164,6 +198,8 @@ def apply_fdr_correction(
 
     anova_items = _coerce_result_sequence(anova_by_run)
     if anova_items:
+        if set_corrected is None:
+            _validate_default_setter_targets(anova_items, "anova_by_run")
         anova_p_values = [p_getter(result) for result in anova_items]
         anova_bh = benjamini_hochberg(anova_p_values, alpha=fdr_alpha)
         for result, bh_result in zip(anova_items, anova_bh, strict=False):

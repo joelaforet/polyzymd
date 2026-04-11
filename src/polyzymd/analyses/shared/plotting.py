@@ -231,6 +231,7 @@ def save_figure(
     plot_settings: "PlotSettings",
     *,
     experimental_features: Sequence[str] | None = None,
+    close: bool = True,
 ) -> Path:
     """Save figure with DPI, watermark, and optional experimental stamp.
 
@@ -244,6 +245,9 @@ def save_figure(
         Global plot settings (carries ``dpi`` and ``theme``).
     experimental_features : sequence of str or None, optional
         Experimental feature ids to stamp onto the figure.
+    close : bool, optional
+        If True, close the figure after saving. Set False when the caller
+        needs to keep using the figure object.
 
     Returns
     -------
@@ -282,7 +286,8 @@ def save_figure(
             edgecolor="none",
         )
     finally:
-        plt.close(fig)
+        if close:
+            plt.close(fig)
     logger.info(f"Saved plot: {output_path}")
     return output_path
 
