@@ -139,7 +139,9 @@ settings in the `plugins:` block. For example, contacts supports `fdr_alpha`,
 `min_effect_size`, and `top_residues`; binding free energy and polymer affinity
 support `fdr_alpha`. See the
 [Comparison Reference](../reference/analysis_comparison_reference.md#per-plugin-statistical-settings)
-for the full settings table.
+for the full settings table. For post-hoc method details (BH t-tests, Tukey
+HSD, Cohen's d, and significance markers), see the
+[Post-Hoc Testing Reference](../reference/posthoc_testing.md).
 :::
 
 ## Step 3: Validate the Config

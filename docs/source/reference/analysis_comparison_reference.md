@@ -247,6 +247,7 @@ For interpretation guidance rather than lookup, see:
 
 - [Statistical Best Practices for Analysis](../explanation/analysis_statistics_best_practices.md)
 - [How to Compare Simulation Conditions](../how_to/analysis_compare_conditions.md)
+- [Post-Hoc Testing Reference](posthoc_testing.md) — full post-hoc method details, output fields, and edge cases
 
 :::{admonition} Version 1.3.0 migration
 :class: note

@@ -377,6 +377,10 @@ per-condition uncertainty is not artificially small; FDR correction ensures
 that the cross-condition significance claims are not inflated by the number of
 tests performed.
 
+For the full field-level reference of post-hoc output (methods, configuration
+keys, output JSON fields, and edge cases), see
+{doc}`/reference/posthoc_testing`.
+
 ---
 
 ## LiveCoMS References

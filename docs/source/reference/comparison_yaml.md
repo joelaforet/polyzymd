@@ -73,6 +73,8 @@ Each entry describes one simulation condition to include in the comparison.
 |-------|------|---------|-------------|
 | `equilibration_time` | string | `"10ns"` | Time to discard as equilibration (e.g., `"10ns"`, `"5000ps"`) |
 | `fdr_alpha` | float (0, 1] | `0.05` | False discovery rate threshold for Benjamini-Hochberg correction in default scalar comparisons |
+| `posthoc_method` | `"ttest_bh"` or `"tukey_hsd"` | `"ttest_bh"` | Post-hoc pairwise comparison method. See {doc}`posthoc_testing` for details. |
+| `ttest_method` | `"student"` or `"welch"` | `"student"` | Two-sample t-test variance assumption. Only used when `posthoc_method` is `"ttest_bh"`. |
 
 ---
 
