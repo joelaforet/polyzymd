@@ -304,7 +304,8 @@ def test_compute_replicate_cache_filename_includes_settings_tag(
 
     captured: dict[str, Path] = {}
 
-    def fake_check_cache(result_class, result_path, recompute, sim_config):
+    def fake_check_cache(result_class, result_path, recompute, sim_config, settings=None):
+        del result_class, recompute, sim_config, settings
         captured["result_path"] = result_path
         return {"cached": True}
 

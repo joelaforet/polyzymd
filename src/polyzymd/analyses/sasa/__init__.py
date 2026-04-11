@@ -180,6 +180,7 @@ class SASAAnalysis(Analysis):
             result_file,
             recompute=ctx.recompute,
             sim_config=sim_config,
+            settings=ctx.settings,
         )
         if cached is not None:
             return cached

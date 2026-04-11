@@ -1278,6 +1278,7 @@ class Analysis(ABC):
         *,
         recompute: bool,
         sim_config: SimulationConfig | None = None,
+        settings: BaseModel | None = None,
     ) -> Any | None:
         """Load a cached result from disk if valid, otherwise return ``None``.
 
@@ -1302,6 +1303,10 @@ class Analysis(ABC):
         sim_config : SimulationConfig, optional
             If provided, :func:`validate_config_hash` is called on
             the loaded result's ``config_hash`` attribute.
+        settings : BaseModel, optional
+            If provided, cached settings identity is validated via
+            :func:`validate_settings_fingerprint` using metadata when present
+            and cache filename fallback otherwise.
 
         Returns
         -------
@@ -1323,6 +1328,25 @@ class Analysis(ABC):
             from polyzymd.analyses.shared.config_hash import validate_config_hash
 
             validate_config_hash(result.config_hash, sim_config)
+
+        if settings is not None:
+            from polyzymd.analyses.shared.config_hash import (
+                extract_settings_fingerprint_from_path,
+                validate_settings_fingerprint,
+            )
+
+            stored_fingerprint = getattr(result, "settings_fingerprint", None)
+            if stored_fingerprint is None:
+                stored_fingerprint = getattr(result, "settings_fp", None)
+            if stored_fingerprint is None:
+                stored_fingerprint = extract_settings_fingerprint_from_path(cache_path)
+
+            if not validate_settings_fingerprint(
+                stored_fingerprint,
+                settings,
+                source=cache_path,
+            ):
+                return None
 
         return result
 
