@@ -13,11 +13,12 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 ### Breaking Changes
 
-- **`compare/` public API removed.**  The lazy-export facade in
-  `compare/__init__.py` (44 symbols) and the re-export layer in
-  `compare/results/__init__.py` (8 classes) have been deleted.  All consumers
-  must import from concrete submodules (`compare.statistics`, `compare.config`,
-  `compare.io`, `compare.core.base`).  No external downstream consumers exist.
+- **`compare/` package removed.**  The entire `compare/` package (lazy-export
+  facade, re-export layer, registries, plotters, formatters, comparators) has
+  been deleted.  Analysis-specific code now lives in each plugin's package under
+  `analyses/<name>/`.  Shared statistics live in `analyses/stats.py` and
+  `analyses/shared/inferential_statistics.py`.  No external downstream consumers
+  existed.
 - **Three dead registries removed.**  `AnalyzerRegistry`,
   `AnalysisSettingsRegistry`, and `ComparisonSettingsRegistry` (plus all 16
   `@register` decorators) were deleted from `compare/registries.py` during
@@ -36,12 +37,13 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 ### Added
 
 - **`polyzymd new-analysis <name>` scaffold CLI command.**  Generates a complete
-  plugin package (`__init__.py`, `_comparison_results.py`) and test file
-  (`test_<name>_plugin.py`) with working discovery, compute, aggregate, and
-  extract_metrics implementations.  Supports `--class-name`, `--force`,
-  `--dry-run`, and `--project-root` options.  Validates plugin names
-  (snake_case, no collisions) and class names (PascalCase, valid identifiers).
-  (`cli/scaffold.py`, `cli/main.py`)
+  plugin package (`__init__.py`) and test file
+  (`tests/analyses/plugins/test_<name>.py`) with working discovery, compute,
+  aggregate, extract_metrics, format, and plot implementations.  Supports
+  `--class-name`, `--force`, `--dry-run`, `--style` (dict or pydantic), and
+  `--project-root` options.  Validates plugin names (snake_case, no collisions)
+  and class names (PascalCase, valid identifiers).  (`cli/scaffold.py`,
+  `cli/main.py`)
 - **Analysis plugin framework.**  `Analysis` ABC (`analyses/base.py`),
   `pkgutil`-based auto-discovery (`analyses/discovery.py`), lifecycle
   orchestrator (`analyses/orchestrator.py`), and default scalar comparison
@@ -90,9 +92,11 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   settings that were previously scattered across `compare/results/`,
   `compare/formatters.py`, `compare/plotters/`, and `compare/comparators/` now
   live inside each plugin's package.
-- **`compare/` is now shared infrastructure only.**  Contains statistics,
-  ComparisonConfig/PlotSettings/PlotTheme, IO helpers, CLI commands, and
-  base result classes — no analysis-specific code.
+- **`compare/` package dissolved.**  Statistics moved to `analyses/stats.py` and
+  `analyses/shared/inferential_statistics.py`.  ComparisonConfig/PlotSettings/
+  PlotTheme moved to `config/comparison.py`.  CLI commands remain in `cli/`.
+  Per-analysis result models, formatters, and plotters now live in each plugin's
+  package.
 - **`submit --dry-run` is now preview-only.**  Validates configuration and
   previews the submission plan without writing any files.  Use `--generate-only`
   for script generation.  (`cli/main.py`, `workflow/daisy_chain.py`)
@@ -154,17 +158,17 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 ### Tests
 
-- 940 tests passing (6 skipped), up from 908 at branch start.
-- Added 44 scaffold tests (name validation, class-name validation, file
+- 1,484 tests passing (6 skipped), up from 908 at branch start.
+- Added scaffold tests (name validation, class-name validation, file
   generation, code quality, CliRunner integration).
-- Removed 12 obsolete registry and smoke tests.
+- Full test suite reorganized to mirror source layout (`tests/analyses/plugins/`,
+  `tests/analyses/shared/`, `tests/cli/`, etc.).
+- Removed obsolete registry and smoke tests.
 
 ### Known Limitations
 
-- **Contacts cache hash does not include analysis parameters such as cutoff.**
-  Cached contact results may be reused across runs with different cutoff values
-  (e.g., 4.0A vs 4.5A). Until cache-key hashing is expanded, clear the contacts
-  analysis cache when changing contact criteria.
+- **Config hash mismatch warning prints 66+ times.**  The warning should print
+  once per analysis run but currently fires per-frame.  Does not affect results.
 
 ## [1.2.1] - 2026-04-01
 

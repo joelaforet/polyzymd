@@ -20,7 +20,7 @@ import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Union
 
 from polyzymd.config.schema import SimulationConfig
 from polyzymd.utils.replicates import parse_replicate_range, validate_replicate_range
@@ -633,13 +633,13 @@ def submit_daisy_chain(
     generate_only: bool = False,
     force: bool = False,
     pixi_env: str = "cuda-12-4",
-    output_dir: Optional[Union[str, Path]] = None,
-    scratch_dir: Optional[Union[str, Path]] = None,
-    projects_dir: Optional[Union[str, Path]] = None,
-    time_limit: Optional[str] = None,
-    memory: Optional[str] = None,
-    account: Optional[str] = None,
-    gpu_type: Optional[str] = None,
+    output_dir: str | Path | None = None,
+    scratch_dir: str | Path | None = None,
+    projects_dir: str | Path | None = None,
+    time_limit: str | None = None,
+    memory: str | None = None,
+    account: str | None = None,
+    gpu_type: str | None = None,
     openff_logs: bool = False,
     skip_build: bool = False,
 ) -> Dict[int, List[SubmissionResult]]:

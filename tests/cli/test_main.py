@@ -447,3 +447,147 @@ class TestCliExceptionHandlingNarrowing:
         stderr = getattr(result, "stderr", "")
         message = f"{result.output}\n{stderr}".lower()
         assert "positive" in message or "must be" in message
+
+
+class TestRunEngineGromacs:
+    """Regression tests for ``run --engine gromacs``."""
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_run_gromacs_dry_run_succeeds(self, mock_from_yaml, tmp_path: Path) -> None:
+        """run --engine gromacs --dry-run should exit successfully."""
+        mock_from_yaml.return_value = _make_dry_run_config()
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            ["run", "-c", str(config_path), "--engine", "gromacs", "--dry-run"],
+        )
+
+        assert result.exit_code == 0
+        assert "DRY RUN" in result.output
+        assert "gromacs" in result.output.lower()
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.cli.main._run_gromacs_impl")
+    def test_run_gromacs_delegates_to_impl(
+        self,
+        mock_run_gromacs,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """run --engine gromacs should delegate to _run_gromacs_impl."""
+        mock_from_yaml.return_value = _make_dry_run_config()
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            ["run", "-c", str(config_path), "--engine", "gromacs"],
+        )
+
+        assert result.exit_code == 0
+        mock_run_gromacs.assert_called_once()
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.cli.main._run_gromacs_impl")
+    def test_run_gromacs_passes_gmx_path(
+        self,
+        mock_run_gromacs,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """--gmx-path should be forwarded to _run_gromacs_impl."""
+        mock_from_yaml.return_value = _make_dry_run_config()
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "-c",
+                str(config_path),
+                "--engine",
+                "gromacs",
+                "--gmx-path",
+                "/usr/local/bin/gmx_mpi",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert mock_run_gromacs.call_args is not None
+        assert mock_run_gromacs.call_args.kwargs["gmx_path"] == "/usr/local/bin/gmx_mpi"
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.cli.main._run_gromacs_impl")
+    def test_run_gromacs_catches_runtime_error(
+        self,
+        mock_run_gromacs,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """run --engine gromacs should catch RuntimeError and exit cleanly."""
+        mock_from_yaml.return_value = _make_dry_run_config()
+        mock_run_gromacs.side_effect = RuntimeError("GROMACS not found")
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            ["run", "-c", str(config_path), "--engine", "gromacs"],
+        )
+
+        assert result.exit_code != 0
+        assert "GROMACS not found" in result.output
+
+
+class TestSubmitDryRunVsGenerateOnly:
+    """Side-effect tests for submit --dry-run vs --generate-only."""
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_dry_run_writes_no_files(self, mock_from_yaml, tmp_path: Path) -> None:
+        """submit --dry-run should not create any files."""
+        mock_from_yaml.return_value = _make_dry_run_config()
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        output_dir = tmp_path / "output"
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "submit",
+                "-c",
+                str(config_path),
+                "--dry-run",
+                "--output-dir",
+                str(output_dir),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "DRY RUN" in result.output
+        assert not output_dir.exists()
+
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_generate_only_calls_submit_with_flag(self, mock_submit, tmp_path: Path) -> None:
+        """submit --generate-only should pass generate_only=True to the backend."""
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["submit", "-c", str(config_path), "--generate-only"],
+        )
+
+        assert result.exit_code == 0
+        mock_submit.assert_called_once()
+        call_kwargs = mock_submit.call_args.kwargs
+        assert call_kwargs["generate_only"] is True
+        assert call_kwargs["dry_run"] is False

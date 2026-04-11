@@ -17,7 +17,6 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 
@@ -256,9 +255,9 @@ def build(
     config: str,
     replicates: str | None,
     replicate: int | None,
-    output_dir: Optional[str],
-    scratch_dir: Optional[str],
-    projects_dir: Optional[str],
+    output_dir: str | None,
+    scratch_dir: str | None,
+    projects_dir: str | None,
     dry_run: bool,
     export_format: str | None,
     gromacs: bool,
@@ -778,8 +777,8 @@ def run(
     config: str,
     replicates: str | None,
     replicate: int | None,
-    scratch_dir: Optional[str],
-    projects_dir: Optional[str],
+    scratch_dir: str | None,
+    projects_dir: str | None,
     gmx_path: str | None,
     engine: str,
     dry_run: bool,
@@ -1135,20 +1134,20 @@ def _run_openmm_impl(
 def submit(
     config: str,
     replicates: str,
-    scratch_dir: Optional[str],
-    projects_dir: Optional[str],
+    scratch_dir: str | None,
+    projects_dir: str | None,
     preset: str,
     email: str,
     dry_run: bool,
     generate_only: bool,
-    output_dir: Optional[str],
-    time_limit: Optional[str],
-    memory: Optional[str],
-    account: Optional[str],
-    gpu_type: Optional[str],
+    output_dir: str | None,
+    time_limit: str | None,
+    memory: str | None,
+    account: str | None,
+    gpu_type: str | None,
     submit_openff_logs: bool,
     skip_build: bool,
-    pixi_env: Optional[str],
+    pixi_env: str | None,
     force: bool,
 ) -> None:
     """Submit OpenMM simulation jobs to SLURM.
@@ -1297,7 +1296,7 @@ def submit(
 def run_segment(
     config: str,
     replicate: int,
-    scratch_dir: Optional[str],
+    scratch_dir: str | None,
     skip_build: bool,
 ) -> None:
     """Run the next simulation segment (self-resubmitting job entry point).
@@ -1798,7 +1797,7 @@ def _run_continuation_segment(
 def check_progress(
     config: str,
     replicate: int,
-    scratch_dir: Optional[str],
+    scratch_dir: str | None,
 ) -> None:
     """Check whether a simulation is complete.
 
@@ -2368,12 +2367,12 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 def recover(
     config: str,
     replicate: int,
-    scratch_dir: Optional[str],
+    scratch_dir: str | None,
     preset: str,
     submit: bool,
     dry_run: bool,
-    memory: Optional[str],
-    pixi_env: Optional[str],
+    memory: str | None,
+    pixi_env: str | None,
     force: bool,
 ) -> None:
     """Resume a stalled or interrupted simulation.
