@@ -18,8 +18,13 @@ from polyzymd.analyses.base import (
     MetricValue,
     ReplicateContext,
 )
-from polyzymd.analyses.exceptions import PluginContractError, ReplicateError
+from polyzymd.analyses.exceptions import (
+    PluginContractError,
+    ReplicateError,
+    ReplicateSkippedError,
+)
 from polyzymd.analyses.orchestrator import (
+    _run_replicates,
     aggregate_condition_from_disk,
     prepare_comparison_run,
     run_analysis,
@@ -279,8 +284,6 @@ class TestOrchestrator:
     """Test the orchestrator's replicate running and dependency sorting."""
 
     def test_run_replicates_success(self, toy_analysis, toy_condition, toy_settings, tmp_path):
-        from polyzymd.analyses.orchestrator import _run_replicates
-
         results, successful, failed = _run_replicates(
             toy_analysis,
             toy_condition,
@@ -311,8 +314,6 @@ class TestOrchestrator:
             def aggregate(self, ctx, results):
                 return None
 
-        from polyzymd.analyses.orchestrator import _run_replicates
-
         analysis = FailingAnalysis()
         results, successful, failed = _run_replicates(
             analysis,
@@ -324,6 +325,41 @@ class TestOrchestrator:
         assert len(results) == 2
         assert 2 not in successful
         assert 2 in failed
+
+    def test_run_replicates_skipped_error_is_recoverable(
+        self,
+        toy_condition,
+        toy_settings,
+        tmp_path,
+        caplog,
+    ):
+        """ReplicateSkippedError should skip replicate without aborting condition."""
+
+        class SkipReplicateAnalysis(Analysis):
+            name: ClassVar[str] = "skip_replicate"
+            Settings: ClassVar[type] = ToySettings
+            min_replicates: ClassVar[int] = 1
+
+            def compute_replicate(self, ctx, replicate):
+                if replicate == 2:
+                    raise ReplicateSkippedError("No trajectory data found for replicate 2")
+                return ToyResult(value=float(replicate), replicate=replicate)
+
+            def aggregate(self, ctx, results):
+                return {"ok": True}
+
+        caplog.set_level("WARNING")
+        results, successful, failed = _run_replicates(
+            SkipReplicateAnalysis(),
+            toy_condition,
+            toy_settings,
+            equilibration="0ns",
+            output_dir=tmp_path,
+        )
+        assert len(results) == 2
+        assert successful == [1, 3]
+        assert failed == [2]
+        assert "No trajectory data found for replicate 2" in caplog.text
 
     def test_run_replicates_below_minimum_raises(self, toy_condition, toy_settings, tmp_path):
         """If fewer than min_replicates succeed, raise ValueError."""
@@ -339,11 +375,32 @@ class TestOrchestrator:
             def aggregate(self, ctx, results):
                 return None
 
-        from polyzymd.analyses.orchestrator import _run_replicates
-
         with pytest.raises(ValueError, match="need at least 2"):
             _run_replicates(
                 AlwaysFailAnalysis(),
+                toy_condition,
+                toy_settings,
+                equilibration="0ns",
+                output_dir=tmp_path,
+            )
+
+    def test_run_replicates_all_skipped_fails_minimum(self, toy_condition, toy_settings, tmp_path):
+        """When all replicates skip, minimum replicate validation should fail."""
+
+        class AllSkippedAnalysis(Analysis):
+            name: ClassVar[str] = "all_skipped"
+            Settings: ClassVar[type] = ToySettings
+            min_replicates: ClassVar[int] = 1
+
+            def compute_replicate(self, ctx, replicate):
+                raise ReplicateSkippedError(f"No trajectory data found for replicate {replicate}")
+
+            def aggregate(self, ctx, results):
+                return {"ok": True}
+
+        with pytest.raises(ValueError, match="need at least 1"):
+            _run_replicates(
+                AllSkippedAnalysis(),
                 toy_condition,
                 toy_settings,
                 equilibration="0ns",
@@ -364,8 +421,6 @@ class TestOrchestrator:
 
             def aggregate(self, ctx, results):
                 return None
-
-        from polyzymd.analyses.orchestrator import _run_replicates
 
         with pytest.raises(ReplicateError, match="condition='Test Condition' replicate=1"):
             _run_replicates(
@@ -554,8 +609,6 @@ class TestContractEnforcement:
 
             def aggregate(self, ctx, results):
                 return {"ok": True}
-
-        from polyzymd.analyses.orchestrator import _run_replicates
 
         condition = Condition(
             label="Cond",
