@@ -642,7 +642,7 @@ class TestPlot:
 
     @patch("polyzymd.analyses.rmsf._plot_rmsf_profile", side_effect=Exception("plot error"))
     @patch("polyzymd.analyses.rmsf._plot_rmsf_comparison", side_effect=Exception("plot error"))
-    def test_plot_catches_exceptions(
+    def test_plot_propagates_exceptions(
         self,
         mock_comp_plot,
         mock_prof_plot,
@@ -650,7 +650,7 @@ class TestPlot:
         condition,
         tmp_path,
     ):
-        """Plotting failures should be caught, not crash the pipeline."""
+        """Plotting failures should propagate to orchestrator."""
         from polyzymd.config.comparison import PlotSettings
 
         analysis_dir = tmp_path / "analysis" / "no_polymer" / "rmsf"
@@ -667,10 +667,8 @@ class TestPlot:
 
         with patch("polyzymd.config.comparison.PlotSettings") as MockPlotSettings:
             MockPlotSettings.return_value = MagicMock()
-            plots = rmsf_analysis.plot(ctx)
-
-        # Should not crash, just return empty
-        assert plots == []
+            with pytest.raises(Exception, match="plot error"):
+                rmsf_analysis.plot(ctx)
 
 
 # ============================================================================

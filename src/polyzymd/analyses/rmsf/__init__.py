@@ -542,17 +542,11 @@ class RMSFAnalysis(Analysis):
 
         plot_settings = ctx.plot_settings
 
-        try:
-            result = _plot_rmsf_comparison(data, labels, ctx.output_dir, plot_settings)
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"RMSF comparison plot failed: {exc}")
+        result = _plot_rmsf_comparison(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
-        try:
-            result = _plot_rmsf_profile(data, labels, ctx.output_dir, plot_settings)
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"RMSF profile plot failed: {exc}")
+        result = _plot_rmsf_profile(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
         return plots
 
