@@ -691,49 +691,30 @@ class ExposureAnalysis(Analysis):
         Path or None
         """
 
-        def _pick_latest(matches: list[Path], pattern: str) -> Path | None:
-            if not matches:
-                return None
+        if contacts_dir is None:
+            return None
+
+        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
+
+        resolved = find_contact_result_for_replicate(contacts_dir, replicate)
+        if resolved is not None:
+            return resolved
+
+        run_dir = contacts_dir / f"run_{replicate}"
+        fallback_patterns = (
+            (contacts_dir, f"contacts*rep{replicate}.json"),
+            (run_dir, f"contacts*rep{replicate}.json"),
+        )
+        for search_dir, pattern in fallback_patterns:
+            matches = sorted(p for p in search_dir.glob(pattern) if p.is_file())
+            if len(matches) == 1:
+                return matches[0]
             if len(matches) > 1:
-                logger.debug(
-                    "Multiple contact result matches for replicate %d using pattern '%s': %s",
-                    replicate,
-                    pattern,
-                    [str(p) for p in matches],
+                raise ValueError(
+                    f"Ambiguous contacts cache for replicate {replicate}: "
+                    f"found {len(matches)} files matching '{pattern}' in {search_dir}: "
+                    + ", ".join(str(match.name) for match in matches)
                 )
-            return max(matches, key=lambda p: p.stat().st_mtime)
-
-        result_filename = f"contacts_rep{replicate}.json"
-
-        if contacts_dir is not None:
-            # Exact matches first
-            cond_path = contacts_dir / result_filename
-            if cond_path.exists():
-                return cond_path
-
-            run_dir = contacts_dir / f"run_{replicate}"
-            run_path = run_dir / result_filename
-            if run_path.exists():
-                return run_path
-
-            run_result_path = run_dir / "result.json"
-            if run_result_path.exists():
-                return run_result_path
-
-            # Parameterized filename fallbacks
-            cond_glob = _pick_latest(
-                [p for p in contacts_dir.glob(f"contacts*rep{replicate}.json") if p.is_file()],
-                f"contacts*rep{replicate}.json",
-            )
-            if cond_glob is not None:
-                return cond_glob
-
-            run_glob = _pick_latest(
-                [p for p in run_dir.glob(f"contacts*rep{replicate}.json") if p.is_file()],
-                f"run_{replicate}/contacts*rep{replicate}.json",
-            )
-            if run_glob is not None:
-                return run_glob
 
         return None
 

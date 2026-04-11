@@ -742,6 +742,17 @@ class TestFindContactResult:
         result = ExposureAnalysis._find_contact_result(None, 1)
         assert result is None
 
+    def test_raises_on_ambiguous_parameterized_matches(self, tmp_path):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        contacts_dir = tmp_path / "contacts"
+        contacts_dir.mkdir()
+        (contacts_dir / "contacts_eq10ns_cut4.0_rep1.json").write_text("{}")
+        (contacts_dir / "contacts_eq20ns_cut4.5_rep1.json").write_text("{}")
+
+        with pytest.raises(ValueError, match="Ambiguous contacts cache"):
+            ExposureAnalysis._find_contact_result(contacts_dir, 1)
+
 
 # ===========================================================================
 # _condition_has_polymer
