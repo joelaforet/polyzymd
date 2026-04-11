@@ -666,9 +666,12 @@ def _aggregate_per_residue(
     n_residues = len(residues)
     per_residue = np.zeros(n_residues, dtype=np.float64)
 
+    atom_indices_set = set(atoms.indices)
     for i, res in enumerate(residues):
-        res_atoms = atoms.select_atoms(f"resid {res.resid}")
-        mask = np.isin(atoms.indices, res_atoms.indices)
-        per_residue[i] = np.mean(atom_rmsf[mask])
+        # Keep residue grouping chain-aware when resid values repeat across chains
+        res_atom_indices = [idx for idx in res.atoms.indices if idx in atom_indices_set]
+        if res_atom_indices:
+            mask = np.isin(atoms.indices, res_atom_indices)
+            per_residue[i] = np.mean(atom_rmsf[mask])
 
     return per_residue

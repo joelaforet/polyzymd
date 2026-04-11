@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from polyzymd.analyses.base import (
@@ -818,3 +819,31 @@ class TestRMSFLifecycle:
         assert len(result.pairwise_comparisons) >= 1
         # Ranking: lower RMSF first (100% SBMA should rank before No Polymer)
         assert result.ranking[0] == "100% SBMA"
+
+
+class TestAggregatePerResidue:
+    """Tests for _aggregate_per_residue cross-chain correctness."""
+
+    def test_duplicate_resid_across_chains_not_merged(self):
+        """Residues with same resid in different chains must stay separate."""
+        from polyzymd.analyses.rmsf import _aggregate_per_residue
+
+        mock_atoms = MagicMock()
+        mock_atoms.indices = np.array([0, 1, 2, 3])
+
+        res_a = MagicMock()
+        res_a.resid = 1
+        res_a.atoms.indices = np.array([0, 1])
+
+        res_b = MagicMock()
+        res_b.resid = 1
+        res_b.atoms.indices = np.array([2, 3])
+
+        mock_atoms.residues = [res_a, res_b]
+
+        atom_rmsf = np.array([1.0, 2.0, 10.0, 20.0])
+
+        result = _aggregate_per_residue(mock_atoms, atom_rmsf)
+        assert len(result) == 2
+        np.testing.assert_allclose(result[0], 1.5)
+        np.testing.assert_allclose(result[1], 15.0)
