@@ -478,6 +478,9 @@ class BindingFreeEnergyAnalysis(Analysis):
             resolve_enzyme_pdb,
             try_load_cached_binding_preference,
         )
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        settings_fp = settings_fingerprint(settings)
 
         # Resolve contacts analysis dir (sibling of BFE analysis dir)
         bfe_analysis_dir = ctx.analysis_dirs.get(cond.label)
@@ -487,7 +490,11 @@ class BindingFreeEnergyAnalysis(Analysis):
 
         # Try cached first
         if not ctx.recompute and contacts_analysis_dir is not None:
-            bp = try_load_cached_binding_preference(cond, contacts_analysis_dir)
+            bp = try_load_cached_binding_preference(
+                cond,
+                contacts_analysis_dir,
+                settings_fp=settings_fp,
+            )
             if bp is not None:
                 logger.info(f"    Loaded cached binding preference for {cond.label}")
                 return bp
@@ -532,6 +539,7 @@ class BindingFreeEnergyAnalysis(Analysis):
             contact_results_by_replicate=find_contact_results_for_replicates(
                 contacts_analysis_dir,
                 cond.replicates,
+                settings_fp=settings_fp,
             ),
             load_contact_result=ContactResult.load,
             threshold=settings.surface_exposure_threshold,
@@ -540,6 +548,7 @@ class BindingFreeEnergyAnalysis(Analysis):
             protein_partitions=settings.protein_partitions,
             polymer_type_selections=settings.polymer_type_selections,
             polymer_chain=settings.polymer_chain,
+            settings_fp=settings_fp,
         )
 
         if bp is not None:

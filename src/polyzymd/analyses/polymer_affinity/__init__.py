@@ -389,6 +389,7 @@ class PolymerAffinityAnalysis(Analysis):
         from polyzymd.analyses.polymer_affinity._comparison_results import (
             AffinityScoreConditionSummary,
         )
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
         logger.info(f"  Processing condition: {cond.label}")
 
@@ -410,7 +411,12 @@ class PolymerAffinityAnalysis(Analysis):
             )
 
         # Try to load per-replicate binding preference files
-        per_rep_data = self._load_per_replicate_entries(cond, ctx)
+        settings_fp = settings_fingerprint(settings)
+        per_rep_data = self._load_per_replicate_entries(
+            cond,
+            ctx,
+            settings_fp=settings_fp,
+        )
 
         # Compute affinity score entries
         entries = self._compute_affinity_entries(bp_result, temperature_K, per_rep_data)
@@ -494,6 +500,9 @@ class PolymerAffinityAnalysis(Analysis):
             resolve_enzyme_pdb,
             try_load_cached_binding_preference,
         )
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        settings_fp = settings_fingerprint(settings)
 
         # Resolve contacts analysis dir (sibling of polymer_affinity analysis dir)
         pa_analysis_dir = ctx.analysis_dirs.get(cond.label)
@@ -503,7 +512,11 @@ class PolymerAffinityAnalysis(Analysis):
 
         # Try cached first
         if not ctx.recompute and contacts_analysis_dir is not None:
-            bp = try_load_cached_binding_preference(cond, contacts_analysis_dir)
+            bp = try_load_cached_binding_preference(
+                cond,
+                contacts_analysis_dir,
+                settings_fp=settings_fp,
+            )
             if bp is not None:
                 logger.info(f"    Loaded cached binding preference for {cond.label}")
                 return bp
@@ -548,6 +561,7 @@ class PolymerAffinityAnalysis(Analysis):
             contact_results_by_replicate=find_contact_results_for_replicates(
                 contacts_analysis_dir,
                 cond.replicates,
+                settings_fp=settings_fp,
             ),
             load_contact_result=ContactResult.load,
             threshold=settings.surface_exposure_threshold,
@@ -556,6 +570,7 @@ class PolymerAffinityAnalysis(Analysis):
             protein_partitions=settings.protein_partitions,
             polymer_type_selections=settings.polymer_type_selections,
             polymer_chain=settings.polymer_chain,
+            settings_fp=settings_fp,
         )
 
         if bp is not None:
@@ -569,6 +584,8 @@ class PolymerAffinityAnalysis(Analysis):
         self,
         cond: Condition,
         ctx: ComparisonContext,
+        *,
+        settings_fp: str | None = None,
     ) -> dict[int, list[Any]] | None:
         """Load per-replicate BindingPreferenceEntry objects.
 
@@ -581,6 +598,9 @@ class PolymerAffinityAnalysis(Analysis):
             Condition being processed.
         ctx : ComparisonContext
             Comparison context with analysis_dirs.
+        settings_fp : str or None, optional
+            Settings fingerprint used for fingerprinted per-replicate cache
+            lookup before legacy filenames.
 
         Returns
         -------
@@ -603,7 +623,14 @@ class PolymerAffinityAnalysis(Analysis):
         per_rep: dict[int, list[Any]] = {}
 
         for rep in cond.replicates:
-            rep_path = contacts_analysis_dir / f"binding_preference_rep{rep}.json"
+            if settings_fp is not None:
+                rep_path = (
+                    contacts_analysis_dir / f"binding_preference_s{settings_fp}_rep{rep}.json"
+                )
+                if not rep_path.exists():
+                    rep_path = contacts_analysis_dir / f"binding_preference_rep{rep}.json"
+            else:
+                rep_path = contacts_analysis_dir / f"binding_preference_rep{rep}.json"
             if rep_path.exists():
                 try:
                     rep_result = BindingPreferenceResult.load(rep_path)

@@ -1606,8 +1606,10 @@ class ContactsAnalysis(Analysis):
             resolve_enzyme_pdb,
             try_load_cached_binding_preference,
         )
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
         settings = ctx.settings
+        settings_fp = settings_fingerprint(settings)
         compute_enabled = getattr(settings, "compute_binding_preference", False)
         recompute = ctx.recompute
 
@@ -1622,7 +1624,11 @@ class ContactsAnalysis(Analysis):
 
                 # Try cached first
                 if not recompute:
-                    cached = try_load_cached_binding_preference(cond, analysis_dir)
+                    cached = try_load_cached_binding_preference(
+                        cond,
+                        analysis_dir,
+                        settings_fp=settings_fp,
+                    )
                     if cached is not None:
                         condition_results[cond.label] = cached
                         if surface_threshold is None:
@@ -1653,6 +1659,7 @@ class ContactsAnalysis(Analysis):
                         contact_results_by_replicate=find_contact_results_for_replicates(
                             analysis_dir,
                             cond.replicates,
+                            settings_fp=settings_fp,
                         ),
                         load_contact_result=ContactResult.load,
                         threshold=getattr(settings, "surface_exposure_threshold", 0.2),
@@ -1663,6 +1670,7 @@ class ContactsAnalysis(Analysis):
                         protein_partitions=getattr(settings, "protein_partitions", None),
                         polymer_type_selections=getattr(settings, "polymer_type_selections", None),
                         polymer_chain=getattr(settings, "polymer_chain", "C"),
+                        settings_fp=settings_fp,
                     )
                     if computed is not None:
                         condition_results[cond.label] = computed

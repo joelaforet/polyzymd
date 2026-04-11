@@ -86,8 +86,13 @@ def find_enzyme_pdb(sim_config: Any) -> Path | None:
         str(project_dir.parent / "*enzyme*.pdb"),
     ]
     for pattern in patterns:
-        matches = glob_module.glob(pattern, recursive=True)
+        matches = sorted(glob_module.glob(pattern, recursive=True))
         if matches:
+            if len(matches) > 1:
+                logger.warning(
+                    f"Multiple enzyme PDB files found for pattern '{pattern}': "
+                    f"{matches}. Using first sorted match: {matches[0]}"
+                )
             return Path(matches[0])
 
     return None
@@ -143,6 +148,7 @@ def compute_condition_binding_preference(
     protein_partitions: dict[str, list[str]] | None = None,
     polymer_type_selections: dict[str, str] | None = None,
     polymer_chain: str = "C",
+    settings_fp: str | None = None,
 ) -> "AggregatedBindingPreferenceResult | None":
     """Compute binding preference for a condition from contacts data.
 
@@ -182,6 +188,9 @@ def compute_condition_binding_preference(
     polymer_chain : str, optional
         Chain ID for polymer auto-detection when *polymer_type_selections*
         is None. Defaults to ``"C"`` (PolyzyMD chain convention).
+    settings_fp : str or None, optional
+        Settings fingerprint used in cache filenames. When None, legacy
+        filenames are used.
 
     Returns
     -------
@@ -281,7 +290,10 @@ def compute_condition_binding_preference(
             rep_results.append(bp_result)
 
             # Save per-replicate result
-            rep_bp_path = analysis_dir / f"binding_preference_rep{rep}.json"
+            if settings_fp is not None:
+                rep_bp_path = analysis_dir / f"binding_preference_s{settings_fp}_rep{rep}.json"
+            else:
+                rep_bp_path = analysis_dir / f"binding_preference_rep{rep}.json"
             bp_result.save(rep_bp_path)
             logger.debug(f"Computed and saved binding preference for {cond.label} rep{rep}")
 
@@ -302,7 +314,12 @@ def compute_condition_binding_preference(
     # --- Step 5: Aggregate and save ---
     agg_result = aggregate_binding_preference(rep_results)
     rep_range = f"{min(cond.replicates)}-{max(cond.replicates)}"
-    agg_path = analysis_dir / f"binding_preference_aggregated_reps{rep_range}.json"
+    if settings_fp is not None:
+        agg_path = (
+            analysis_dir / f"binding_preference_aggregated_s{settings_fp}_reps{rep_range}.json"
+        )
+    else:
+        agg_path = analysis_dir / f"binding_preference_aggregated_reps{rep_range}.json"
     agg_result.save(agg_path)
     logger.info(
         f"Computed binding preference for {cond.label}: "
@@ -315,6 +332,8 @@ def compute_condition_binding_preference(
 def try_load_cached_binding_preference(
     cond: ConditionLike,
     analysis_dir: Path,
+    *,
+    settings_fp: str | None = None,
 ) -> "AggregatedBindingPreferenceResult | BindingPreferenceResult | None":
     """Try to load cached binding preference results for a condition.
 
@@ -330,6 +349,9 @@ def try_load_cached_binding_preference(
         Condition to load.
     analysis_dir : Path
         Analysis directory for this condition.
+    settings_fp : str or None, optional
+        Settings fingerprint for cache lookup. When provided, fingerprinted
+        cache files are searched first, then legacy filenames.
 
     Returns
     -------
@@ -343,6 +365,48 @@ def try_load_cached_binding_preference(
         BindingPreferenceResult,
         aggregate_binding_preference,
     )
+
+    if settings_fp is not None:
+        fp_agg_path = analysis_dir / f"binding_preference_aggregated_s{settings_fp}.json"
+        if fp_agg_path.exists():
+            result = AggregatedBindingPreferenceResult.load(fp_agg_path)
+            logger.debug(f"Loaded aggregated binding preference for {cond.label}")
+            return result
+
+        fp_agg_pattern = str(
+            analysis_dir / f"binding_preference_aggregated_s{settings_fp}_reps*.json"
+        )
+        fp_agg_matches = sorted(glob_module.glob(fp_agg_pattern))
+        if len(fp_agg_matches) == 1:
+            result = AggregatedBindingPreferenceResult.load(fp_agg_matches[0])
+            logger.debug(f"Loaded aggregated binding preference for {cond.label}")
+            return result
+        if len(fp_agg_matches) > 1:
+            raise ValueError(
+                f"Ambiguous binding preference cache for {cond.label}: "
+                f"found {len(fp_agg_matches)} files matching '{fp_agg_pattern}': "
+                + ", ".join(fp_agg_matches)
+            )
+
+        fp_single_path = analysis_dir / f"binding_preference_s{settings_fp}.json"
+        if fp_single_path.exists():
+            result = BindingPreferenceResult.load(fp_single_path)
+            logger.debug(f"Loaded single binding preference for {cond.label}")
+            return result
+
+        fp_rep_results = []
+        for rep in cond.replicates:
+            fp_rep_path = analysis_dir / f"binding_preference_s{settings_fp}_rep{rep}.json"
+            if fp_rep_path.exists():
+                fp_rep_results.append(BindingPreferenceResult.load(fp_rep_path))
+
+        if fp_rep_results:
+            agg_result = aggregate_binding_preference(fp_rep_results)
+            logger.debug(
+                f"Aggregated {len(fp_rep_results)} replicate binding preference results "
+                f"for {cond.label}"
+            )
+            return agg_result
 
     # Try aggregated result first (multi-replicate)
     agg_path = analysis_dir / "binding_preference_aggregated.json"
