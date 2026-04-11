@@ -630,7 +630,7 @@ class TestPlot:
         "polyzymd.analyses.exposure._plot_chaperone_fraction",
         side_effect=Exception("plot error"),
     )
-    def test_plot_catches_exceptions(self, mock_chaperone_fn, mock_heatmap_fn, tmp_path):
+    def test_plot_propagates_exceptions(self, mock_chaperone_fn, mock_heatmap_fn, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.exposure import ExposureAnalysis, ExposureSettings
         from polyzymd.config.comparison import PlotSettings
@@ -656,9 +656,8 @@ class TestPlot:
             plot_settings=PlotSettings(),
         )
 
-        result = analysis.plot(ctx)
-
-        assert result == []
+        with pytest.raises(Exception, match="plot error"):
+            analysis.plot(ctx)
 
 
 # ===========================================================================

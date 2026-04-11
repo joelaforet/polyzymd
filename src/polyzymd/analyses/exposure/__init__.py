@@ -354,17 +354,11 @@ class ExposureAnalysis(Analysis):
 
         plot_settings = ctx.plot_settings
 
-        try:
-            result = _plot_chaperone_fraction(data, labels, ctx.output_dir, plot_settings)
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"Chaperone fraction plot failed: {exc}")
+        result = _plot_chaperone_fraction(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
-        try:
-            result = _plot_enrichment_heatmap(data, labels, ctx.output_dir, plot_settings)
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"Enrichment heatmap plot failed: {exc}")
+        result = _plot_enrichment_heatmap(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
         return plots
 
