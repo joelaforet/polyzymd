@@ -90,7 +90,8 @@ in `src/polyzymd/analyses/<name>/` and subclass `Analysis`:
 | Plugin discovery | `analyses/discovery.py` | How auto-discovery works, naming rules |
 | Orchestrator | `analyses/orchestrator.py` | How the framework runs your plugin |
 | Shared utilities | `analyses/shared/` | `TrajectoryLoader`, alignment, statistics, autocorrelation |
-| Simplest example | `analyses/catalytic_triad/` | Simplest default-compare lifecycle (but has substantial plotting code) |
+| Scaffold output | `polyzymd new-analysis <name>` | Simplest working plugin — start here |
+| Richer example | `analyses/catalytic_triad/` | Default-compare lifecycle with DistanceCalculator + complex plotting |
 | Stats utilities | `analyses/stats.py` | `default_scalar_comparison()`, `format_scalar_comparison()` |
 | Contributor tutorial | `docs/source/contributor_guide/extending_analyses.md` | Step-by-step guide with test examples |
 
@@ -165,7 +166,7 @@ def compute_replicate(self, ctx, replicate):
 1. **Read the tutorial**: `docs/source/contributor_guide/extending_analyses.md`
 2. **Read `analyses/base.py`** — the class docstring defines the full contract
 3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
-4. **Study a matching example**: scaffold output for the simplest lifecycle, `rmsf/` for default compare with plots, `contacts/` for custom compare
+4. **Study a matching example**: start with scaffold output (`polyzymd new-analysis <name>`), then use `rmsf/` for default compare with plots or `contacts/` for custom compare
 5. **Write your plugin** in `analyses/<name>/` — start with all logic in `__init__.py`; extract plotting to `_plotters.py` as complexity grows
 6. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
 
