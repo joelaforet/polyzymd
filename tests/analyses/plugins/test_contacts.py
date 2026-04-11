@@ -121,20 +121,20 @@ class TestSettings:
     def test_invalid_grouping(self):
         from polyzymd.analyses.contacts import ContactsSettings
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             ContactsSettings(grouping="invalid")
 
     def test_invalid_fdr_alpha(self):
         from polyzymd.analyses.contacts import ContactsSettings
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             ContactsSettings(fdr_alpha=1.5)
 
     def test_protein_partitions_validation(self):
         from polyzymd.analyses.contacts import ContactsSettings
 
         # Requires protein_groups to be defined
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             ContactsSettings(
                 protein_partitions={"part1": ["group1"]},
                 # protein_groups not defined
@@ -143,7 +143,7 @@ class TestSettings:
     def test_protein_partitions_undefined_group(self):
         from polyzymd.analyses.contacts import ContactsSettings
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             ContactsSettings(
                 protein_groups={"existing": [1, 2]},
                 protein_partitions={"part1": ["nonexistent"]},
@@ -152,7 +152,7 @@ class TestSettings:
     def test_protein_partitions_overlapping_groups(self):
         from polyzymd.analyses.contacts import ContactsSettings
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             ContactsSettings(
                 protein_groups={"g1": [1, 2, 3], "g2": [3, 4, 5]},
                 protein_partitions={"part1": ["g1", "g2"]},  # resid 3 overlaps

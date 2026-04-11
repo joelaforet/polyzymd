@@ -1590,6 +1590,8 @@ class ContactsAnalysis(Analysis):
         BindingPreferenceComparisonSummary or None
             Cross-condition comparison summary, or None if unavailable.
         """
+        from polyzymd.analyses.contacts._paths import find_contact_results_for_replicates
+        from polyzymd.analyses.contacts._results import ContactResult
         from polyzymd.analyses.shared.binding_preference_helpers import (
             compute_condition_binding_preference,
             resolve_enzyme_pdb,
@@ -1639,6 +1641,11 @@ class ContactsAnalysis(Analysis):
                         sim_config=cond.sim_config,
                         analysis_dir=analysis_dir,
                         enzyme_pdb=enzyme_pdb,
+                        contact_results_by_replicate=find_contact_results_for_replicates(
+                            analysis_dir,
+                            cond.replicates,
+                        ),
+                        load_contact_result=ContactResult.load,
                         threshold=getattr(settings, "surface_exposure_threshold", 0.2),
                         include_default_aa_groups=getattr(
                             settings, "include_default_aa_groups", True

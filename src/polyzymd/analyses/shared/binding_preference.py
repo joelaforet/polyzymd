@@ -92,8 +92,6 @@ from polyzymd.analyses.shared.aa_classification import DEFAULT_AA_CLASS_SELECTIO
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
-    from polyzymd.analyses.contacts import ContactsSettings
-    from polyzymd.analyses.contacts._results import ContactResult
     from polyzymd.analyses.shared.surface_exposure import SurfaceExposureResult
 
 logger = logging.getLogger(__name__)
@@ -1368,7 +1366,7 @@ def _compute_system_coverage(
 
 
 def compute_binding_preference(
-    contact_result: "ContactResult",
+    contact_result: Any,
     surface_exposure: "SurfaceExposureResult",
     protein_groups: dict[str, set[int]],
     polymer_composition: PolymerComposition,
@@ -1390,7 +1388,7 @@ def compute_binding_preference(
 
     Parameters
     ----------
-    contact_result : ContactResult
+    contact_result : Any
         Raw contact analysis results from trajectory
     surface_exposure : SurfaceExposureResult
         Surface exposure data for filtering buried residues
@@ -3859,10 +3857,10 @@ def extract_polymer_composition(
 
 
 def compute_binding_preference_from_config(
-    contact_result: "ContactResult",
+    contact_result: Any,
     universe: "Universe",
     enzyme_pdb_path: Path | str,
-    config: "ContactsSettings",
+    config: Any,
 ) -> BindingPreferenceResult:
     """Compute binding preference using contacts plugin settings.
 
@@ -3875,14 +3873,14 @@ def compute_binding_preference_from_config(
 
     Parameters
     ----------
-    contact_result : ContactResult
+    contact_result : Any
         Contact analysis results from trajectory
     universe : Universe
         MDAnalysis Universe (used for resolving selections)
     enzyme_pdb_path : Path or str
         Path to enzyme PDB file for SASA calculation
-    config : ContactsSettings
-        Contacts plugin settings with binding preference configuration
+    config : Any
+        Settings object with binding preference fields
 
     Returns
     -------

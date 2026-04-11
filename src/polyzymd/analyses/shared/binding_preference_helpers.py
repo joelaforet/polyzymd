@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 
 from polyzymd.analyses.shared.constants import DEFAULT_SURFACE_EXPOSURE_THRESHOLD
 
@@ -31,92 +31,23 @@ if TYPE_CHECKING:
         AggregatedBindingPreferenceResult,
         BindingPreferenceResult,
     )
-    from polyzymd.config.comparison import ConditionConfig
 
 logger = logging.getLogger("polyzymd.analyses")
 
 
-# ---------------------------------------------------------------------------
-# Minimal proxy for ConditionConfig API
-# ---------------------------------------------------------------------------
+class ConditionLike(Protocol):
+    """Minimal condition protocol required by BP helper functions.
 
-
-class CondProxy:
-    """Minimal proxy satisfying the ``ConditionConfig`` interface.
-
-    Used by :func:`try_load_cached_binding_preference` and
-    :func:`compute_condition_binding_preference` so that analysis plugins
-    can pass lightweight ``Condition`` dataclass fields without importing
-    the full ``ConditionConfig``.
-
-    Parameters
+    Attributes
     ----------
     label : str
-        Condition label.
-    config : str
-        Path to simulation config YAML.
+        Condition label
+    replicates : Sequence[int]
+        Replicate IDs associated with this condition
     """
 
-    def __init__(self, label: str, config: str) -> None:
-        self.label = label
-        self.config = config
-
-
-def _find_contact_result(analysis_dir: Path, rep: int) -> Path | None:
-    """Locate the per-replicate contacts JSON for binding preference.
-
-    ``compute_replicate`` saves contacts with a parameterised filename
-    (``contacts_eq<X>_cut<Y>_rep<N>.json``) and also mirrors the result
-    to the orchestrator's canonical path (``run_<N>/result.json``).  This
-    helper searches for all known naming conventions so that downstream
-    BP code works regardless of how the contacts were produced.
-
-    Search order (first hit wins):
-
-    1. ``run_{rep}/result.json`` — orchestrator canonical path
-    2. ``contacts_eq*_cut*_rep{rep}.json`` — parameterised filename
-    3. ``run_{rep}/contacts_eq*_cut*_rep{rep}.json`` — param inside run dir
-    4. ``contacts_rep{rep}.json`` — legacy / simplified filename
-    5. ``run_{rep}/contacts_rep{rep}.json`` — legacy inside run dir
-
-    Parameters
-    ----------
-    analysis_dir : Path
-        Analysis directory for this condition (contains ``run_N/``).
-    rep : int
-        Replicate number.
-
-    Returns
-    -------
-    Path or None
-        Path to the contacts result file, or ``None`` if not found.
-    """
-    # 1. Orchestrator canonical
-    canonical = analysis_dir / f"run_{rep}" / "result.json"
-    if canonical.exists():
-        return canonical
-
-    # 2. Parameterised name in analysis_dir
-    matches = sorted(analysis_dir.glob(f"contacts_eq*_cut*_rep{rep}.json"))
-    if matches:
-        return matches[-1]
-
-    # 3. Parameterised name inside run dir
-    matches = sorted((analysis_dir / f"run_{rep}").glob(f"contacts_eq*_cut*_rep{rep}.json"))
-    if matches:
-        return matches[-1]
-
-    # 4. Legacy name in analysis_dir
-    legacy = analysis_dir / f"contacts_rep{rep}.json"
-    if legacy.exists():
-        return legacy
-
-    # 5. Legacy name inside run dir
-    legacy_run = analysis_dir / f"run_{rep}" / f"contacts_rep{rep}.json"
-    if legacy_run.exists():
-        return legacy_run
-
-    return None
+    label: str
+    replicates: Sequence[int]
 
 
 def find_enzyme_pdb(sim_config: Any) -> Path | None:
@@ -198,11 +129,13 @@ def resolve_enzyme_pdb(
 
 
 def compute_condition_binding_preference(
-    cond: "ConditionConfig",
+    cond: ConditionLike,
     sim_config: Any,
     analysis_dir: Path,
     *,
     enzyme_pdb: Path,
+    contact_results_by_replicate: Mapping[int, Path],
+    load_contact_result: Callable[[Path], Any],
     threshold: float = DEFAULT_SURFACE_EXPOSURE_THRESHOLD,
     include_default_aa_groups: bool = True,
     custom_protein_groups: dict[str, list[int]] | None = None,
@@ -222,7 +155,7 @@ def compute_condition_binding_preference(
 
     Parameters
     ----------
-    cond : ConditionConfig
+    cond : ConditionLike
         Condition to compute (provides label and replicate list).
     sim_config : Any
         Simulation configuration (provides working directory for topology).
@@ -231,6 +164,10 @@ def compute_condition_binding_preference(
         files and where output will be saved.
     enzyme_pdb : Path
         Path to enzyme PDB for SASA calculation.
+    contact_results_by_replicate : Mapping[int, Path]
+        Mapping of replicate index to contact result path prepared by the caller.
+    load_contact_result : callable
+        Callable that deserializes a contact result from a path.
     threshold : float, optional
         Relative SASA threshold for surface-exposed residues. Default 0.2.
     include_default_aa_groups : bool, optional
@@ -252,7 +189,6 @@ def compute_condition_binding_preference(
     """
     import MDAnalysis as mda
 
-    from polyzymd.analyses.contacts._results import ContactResult
     from polyzymd.analyses.shared.binding_preference import (
         PolymerComposition,
         aggregate_binding_preference,
@@ -327,13 +263,13 @@ def compute_condition_binding_preference(
     # --- Step 4: Compute binding preference per replicate ---
     rep_results = []
     for rep in cond.replicates:
-        contact_path = _find_contact_result(analysis_dir, rep)
+        contact_path = contact_results_by_replicate.get(rep)
         if contact_path is None:
             logger.warning(f"Contacts file not found for {cond.label} rep{rep} in {analysis_dir}")
             continue
 
         try:
-            contact_result = ContactResult.load(contact_path)
+            contact_result = load_contact_result(contact_path)
             bp_result = compute_binding_preference(
                 contact_result=contact_result,
                 surface_exposure=surface_exposure,
@@ -370,7 +306,7 @@ def compute_condition_binding_preference(
 
 
 def try_load_cached_binding_preference(
-    cond: "ConditionConfig",
+    cond: ConditionLike,
     analysis_dir: Path,
 ) -> "AggregatedBindingPreferenceResult | BindingPreferenceResult | None":
     """Try to load cached binding preference results for a condition.
@@ -383,7 +319,7 @@ def try_load_cached_binding_preference(
 
     Parameters
     ----------
-    cond : ConditionConfig
+    cond : ConditionLike
         Condition to load.
     analysis_dir : Path
         Analysis directory for this condition.

@@ -487,8 +487,9 @@ class PolymerAffinityAnalysis(Analysis):
         -------
         AggregatedBindingPreferenceResult | BindingPreferenceResult | None
         """
+        from polyzymd.analyses.contacts._paths import find_contact_results_for_replicates
+        from polyzymd.analyses.contacts._results import ContactResult
         from polyzymd.analyses.shared.binding_preference_helpers import (
-            CondProxy,
             compute_condition_binding_preference,
             resolve_enzyme_pdb,
             try_load_cached_binding_preference,
@@ -500,12 +501,9 @@ class PolymerAffinityAnalysis(Analysis):
         if pa_analysis_dir is not None:
             contacts_analysis_dir = pa_analysis_dir.parent / "contacts"
 
-        # Build a minimal cond-like object for the helpers
-        cond_proxy = CondProxy(label=cond.label, config=str(cond.config_path))
-
         # Try cached first
         if not ctx.recompute and contacts_analysis_dir is not None:
-            bp = try_load_cached_binding_preference(cond_proxy, contacts_analysis_dir)
+            bp = try_load_cached_binding_preference(cond, contacts_analysis_dir)
             if bp is not None:
                 logger.info(f"    Loaded cached binding preference for {cond.label}")
                 return bp
@@ -543,10 +541,15 @@ class PolymerAffinityAnalysis(Analysis):
             return None
 
         bp = compute_condition_binding_preference(
-            cond=cond_proxy,
+            cond=cond,
             sim_config=sim_config,
             analysis_dir=contacts_analysis_dir,
             enzyme_pdb=enzyme_pdb,
+            contact_results_by_replicate=find_contact_results_for_replicates(
+                contacts_analysis_dir,
+                cond.replicates,
+            ),
+            load_contact_result=ContactResult.load,
             threshold=settings.surface_exposure_threshold,
             include_default_aa_groups=settings.include_default_aa_groups,
             custom_protein_groups=settings.protein_groups,

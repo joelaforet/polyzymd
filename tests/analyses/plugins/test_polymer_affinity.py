@@ -14,12 +14,12 @@ Coverage:
 - plot delegation
 - extract_metrics (empty)
 - lifecycle
-- _CondProxy
 """
 
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1334,17 +1334,46 @@ class TestLifecycle:
 
 
 # ===========================================================================
-# CondProxy (shared helper — main test in test_bfe_plugin.py)
+# Binding preference loading
 # ===========================================================================
 
 
-class TestCondProxy:
-    def test_cond_proxy_attributes(self):
-        from polyzymd.analyses.shared.binding_preference_helpers import CondProxy
+class TestLoadBindingPreference:
+    def test_non_cached_path_uses_real_condition(self, tmp_path):
+        """Non-cached compute path should pass the full Condition object."""
+        from polyzymd.analyses.polymer_affinity import (
+            PolymerAffinityAnalysis,
+            PolymerAffinitySettings,
+        )
 
-        proxy = CondProxy(label="A", config="/tmp/a.yaml")
-        assert proxy.label == "A"
-        assert proxy.config == "/tmp/a.yaml"
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1)
+        cond = ctx.conditions[0]
+        ctx = replace(ctx, recompute=True)
+
+        settings = PolymerAffinitySettings(compute_binding_preference=True)
+        enzyme_pdb = tmp_path / "enzyme.pdb"
+        enzyme_pdb.write_text("ATOM\n")
+        expected = object()
+
+        with (
+            patch(
+                "polyzymd.analyses.shared.binding_preference_helpers.resolve_enzyme_pdb",
+                return_value=enzyme_pdb,
+            ),
+            patch(
+                "polyzymd.analyses.contacts._paths.find_contact_results_for_replicates",
+                return_value={1: tmp_path / "contacts_rep1.json"},
+            ),
+            patch(
+                "polyzymd.analyses.shared.binding_preference_helpers.compute_condition_binding_preference",
+                return_value=expected,
+            ) as mock_compute,
+        ):
+            loaded = analysis._load_binding_preference(cond, ctx, settings)
+
+        assert loaded is expected
+        assert mock_compute.call_args.kwargs["cond"] is cond
 
 
 # ===========================================================================

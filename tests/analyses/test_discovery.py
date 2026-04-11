@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import types
 from typing import ClassVar
+from unittest.mock import patch
 
 import pytest
 from pydantic import BaseModel
@@ -54,3 +56,50 @@ class TestDiscovery:
         assert _is_concrete_analysis(Analysis) is False
         assert _is_concrete_analysis(str) is False
         assert _is_concrete_analysis(42) is False
+
+    def test_shared_not_listed_as_plugin(self):
+        """Infrastructure package names should never be discovered as plugins."""
+        from polyzymd.analyses.discovery import clear_cache, list_analyses
+
+        clear_cache()
+        analyses = list_analyses()
+        assert "shared" not in analyses
+
+    def test_broken_plugin_import_does_not_crash_discovery(self):
+        """One bad plugin import should not block discovery of healthy plugins."""
+        from polyzymd.analyses.discovery import _discover_plugins
+
+        good_mod = types.ModuleType("polyzymd.analyses.fake_good")
+
+        class GoodAnalysis(Analysis):
+            name: ClassVar[str] = "fake_good"
+            Settings: ClassVar[type] = ToySettings
+
+            def compute_replicate(self, ctx, replicate):
+                return {"replicate": replicate}
+
+            def aggregate(self, ctx, results):
+                return {"count": len(results)}
+
+        good_mod.GoodAnalysis = GoodAnalysis
+
+        walked = [
+            (None, "polyzymd.analyses.fake_good", True),
+            (None, "polyzymd.analyses.fake_broken", True),
+        ]
+
+        def _import_side_effect(name: str):
+            if name == "polyzymd.analyses.fake_good":
+                return good_mod
+            if name == "polyzymd.analyses.fake_broken":
+                raise ImportError("boom")
+            raise AssertionError(f"Unexpected import: {name}")
+
+        with (
+            patch("pkgutil.walk_packages", return_value=walked),
+            patch("importlib.import_module", side_effect=_import_side_effect),
+        ):
+            registry, aliases = _discover_plugins()
+
+        assert "fake_good" in registry
+        assert aliases == {}

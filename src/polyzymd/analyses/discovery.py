@@ -37,10 +37,13 @@ logger = logging.getLogger("polyzymd.analyses")
 # Modules that are infrastructure, not plugins
 _SKIP_MODULES = frozenset(
     {
+        "shared",
         "base",
         "stats",
         "discovery",
         "orchestrator",
+        "exceptions",
+        "_results_base",
         "runner",
         "config",
     }
@@ -90,9 +93,10 @@ def _discover_plugins() -> tuple[dict[str, type["Analysis"]], dict[str, str]]:
 
         try:
             module = importlib.import_module(modname)
+        except ImportError:
+            logger.warning("Failed to import analysis module %s", modname, exc_info=True)
+            continue
         except Exception:
-            if modname.startswith(package_prefix):
-                raise
             logger.warning("Failed to import analysis module %s", modname, exc_info=True)
             continue
 
