@@ -731,7 +731,7 @@ class TestPlot:
         assert mock_heatmap.called
         assert mock_bars.called
 
-    def test_plot_catches_exceptions(self, tmp_path):
+    def test_plot_propagates_exceptions(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
         from polyzymd.analyses.binding_free_energy import (
             BFESettings,
@@ -769,9 +769,8 @@ class TestPlot:
                 side_effect=RuntimeError("boom"),
             ),
         ):
-            result = analysis.plot(ctx)
-
-        assert result == []
+            with pytest.raises(RuntimeError, match="boom"):
+                analysis.plot(ctx)
 
     def test_plot_collects_paths(self, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext

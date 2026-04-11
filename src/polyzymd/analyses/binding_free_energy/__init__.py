@@ -328,17 +328,11 @@ class BindingFreeEnergyAnalysis(Analysis):
 
         plot_settings = ctx.plot_settings
 
-        try:
-            result = _plot_bfe_heatmap(data, labels, ctx.output_dir, plot_settings)
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"BFE heatmap plot failed: {exc}")
+        result = _plot_bfe_heatmap(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
-        try:
-            result = _plot_bfe_bars(data, labels, ctx.output_dir, plot_settings)
-            plots.extend(result)
-        except Exception as exc:
-            logger.warning(f"BFE bar chart plot failed: {exc}")
+        result = _plot_bfe_bars(data, labels, ctx.output_dir, plot_settings)
+        plots.extend(result)
 
         return plots
 
