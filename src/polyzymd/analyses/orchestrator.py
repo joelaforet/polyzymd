@@ -48,6 +48,7 @@ from polyzymd.analyses.exceptions import (
     PlotError,
     PluginContractError,
     ReplicateError,
+    ReplicateSkippedError,
 )
 
 if TYPE_CHECKING:
@@ -178,6 +179,9 @@ def _run_replicates(
         except (FileNotFoundError, OSError) as e:
             logger.warning(f"  Skipping {condition.label} rep {rep}: data not found — {e}")
             failed.append(rep)
+        except ReplicateSkippedError as e:
+            logger.warning("  Skipping %s rep %d: %s", condition.label, rep, e)
+            failed.append(rep)
         except PluginContractError:
             raise
         except Exception as e:
@@ -250,6 +254,8 @@ def run_replicate_once(
     try:
         result = analysis.compute_replicate(ctx, replicate)
     except (FileNotFoundError, OSError):
+        raise
+    except ReplicateSkippedError:
         raise
     except PluginContractError:
         raise
@@ -426,6 +432,9 @@ def run_analysis(
             successful.append(rep)
         except (FileNotFoundError, OSError) as e:
             logger.warning("  Skipping %s rep %d: data not found — %s", condition.label, rep, e)
+            failed.append(rep)
+        except ReplicateSkippedError as e:
+            logger.warning("  Skipping %s rep %d: %s", condition.label, rep, e)
             failed.append(rep)
         except ReplicateError:
             raise
