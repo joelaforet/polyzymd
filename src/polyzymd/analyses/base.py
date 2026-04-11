@@ -51,6 +51,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, Sequence, TypeVa
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from polyzymd.analyses.exceptions import PluginContractError
+
 if TYPE_CHECKING:
     from polyzymd.config.comparison import ComparisonConfig, ConditionConfig, PlotSettings
     from polyzymd.config.schema import SimulationConfig
@@ -1013,10 +1015,21 @@ class Analysis(ABC):
                     continue
                 agg_dir = agg_dir_parent / "aggregated"
                 summary = self._load_aggregated_result(agg_dir)
-            if summary is not None:
-                extracted = self.extract_metrics(summary)
-                if extracted:
-                    metrics_by_condition[cond.label] = extracted
+                if summary is None:
+                    logger.warning(
+                        "%s: missing aggregated result for condition %r — skipping.",
+                        self.name,
+                        cond.label,
+                    )
+                    continue
+
+            extracted = self.extract_metrics(summary)
+            if not extracted:
+                raise PluginContractError(
+                    f"Plugin '{self.name}' extract_metrics() returned empty dict for "
+                    f"condition '{cond.label}' — implement extract_metrics() or override compare()"
+                )
+            metrics_by_condition[cond.label] = extracted
 
         if not metrics_by_condition:
             logger.warning(f"{self.name}: no conditions have metrics — skipping comparison.")

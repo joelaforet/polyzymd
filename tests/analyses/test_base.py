@@ -22,6 +22,7 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.exceptions import PluginContractError
 
 # ============================================================================
 # Fixtures: Toy analysis implementations for testing
@@ -295,6 +296,78 @@ class TestMetricExtraction:
         assert mv.sem == 0.3
         assert mv.higher_is_better is False
         assert mv.direction_labels[0] == "stabilizing"
+
+
+class TestDefaultCompareContract:
+    """Test default compare() contract enforcement behavior."""
+
+    def test_compare_raises_on_empty_extract_metrics(self, tmp_path: Path) -> None:
+        """Empty metric extraction should raise PluginContractError."""
+
+        class EmptyMetricsAnalysis(Analysis):
+            name: ClassVar[str] = "empty_metrics"
+            Settings: ClassVar[type] = ToySettings
+
+            def compute_replicate(self, ctx, replicate):
+                return {"replicate": replicate}
+
+            def aggregate(self, ctx, results):
+                return {"dummy": True}
+
+        analysis = EmptyMetricsAnalysis()
+        condition = Condition(
+            label="A",
+            config_path=tmp_path / "a.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = ComparisonContext(
+            name="proj",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"A": tmp_path / "analysis" / "A" / "empty_metrics"},
+            results_dir=tmp_path / "comparison" / "empty_metrics",
+            equilibration="10ns",
+            settings=ToySettings(),
+            recompute=False,
+            aggregated_results={"A": {"dummy": True}},
+        )
+
+        with pytest.raises(
+            PluginContractError,
+            match=r"extract_metrics\(\) returned empty dict for condition 'A'",
+        ):
+            analysis.compare(ctx)
+
+    def test_compare_skips_missing_result_file_with_warning(self, caplog, tmp_path: Path) -> None:
+        """Missing aggregated files should be skipped with warning, not contract error."""
+
+        analysis = ToyAnalysis()
+        condition = Condition(
+            label="A",
+            config_path=tmp_path / "a.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = ComparisonContext(
+            name="proj",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"A": tmp_path / "analysis" / "A" / "toy"},
+            results_dir=tmp_path / "comparison" / "toy",
+            equilibration="10ns",
+            settings=ToySettings(),
+            recompute=False,
+            aggregated_results={},
+        )
+
+        caplog.set_level("WARNING")
+        result = analysis.compare(ctx)
+
+        assert result is None
+        assert "missing aggregated result for condition 'A'" in caplog.text
 
 
 # ============================================================================
