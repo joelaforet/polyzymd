@@ -21,7 +21,7 @@ from pathlib import Path
 import click
 
 from polyzymd.cli.colors import colored_echo, echo_logo, setup_colored_logging
-from polyzymd.core.branding import SHORT_CREDIT_LINE, prepend_file_header
+from polyzymd.core.branding import prepend_file_header
 
 # Bootstrap a minimal root handler so suppress_openff_logs() works at import
 # time.  setup_colored_logging() replaces this handler when the CLI runs.
@@ -32,7 +32,7 @@ logging.basicConfig(
 LOGGER = logging.getLogger("polyzymd")
 
 
-def _echo_branding(phase: str = "cli") -> None:
+def _echo_branding() -> None:
     """Print the PolyzyMD ASCII logo for top-level user-facing commands."""
     echo_logo()
 
@@ -1175,7 +1175,7 @@ def submit(
     # Resolve pixi environment: explicit flag > preset default
     resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "cuda-12-4")
 
-    _echo_branding("workflow")
+    _echo_branding()
     colored_echo(f"Loading configuration from: {config}", phase="workflow")
     colored_echo(f"Submitting jobs with preset: {preset}", phase="workflow")
     colored_echo(f"Pixi environment: {resolved_pixi_env}", phase="workflow")
@@ -1916,9 +1916,6 @@ def status(config: str) -> None:
     # Discover replicate directories
     replicates = sim_config.discover_replicate_dirs()
 
-    # Also include configured replicates that don't exist on disk yet
-    # (they show as "not found")
-    found_nums = {num for num, _ in replicates}
     rep_map: dict[int, Path | None] = dict(replicates)
 
     # If no replicates found on disk, show a message
@@ -1940,7 +1937,7 @@ def status(config: str) -> None:
     click.echo()
 
     # Determine the widest replicate label for alignment
-    max_rep = max(found_nums)
+    max_rep = max(rep_map)
     label_width = len(f"run{max_rep}")
 
     need_attention = 0
@@ -2396,7 +2393,7 @@ def recover(
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.simulation.progress import load_or_scan_progress, save_progress
 
-    _echo_branding("workflow")
+    _echo_branding()
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
