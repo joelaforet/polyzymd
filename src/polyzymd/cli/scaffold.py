@@ -219,6 +219,41 @@ class {cls}Analysis(Analysis):
             "replicate_values": values,
         }}
 
+    # -- condition filtering (uncomment if your analysis requires polymer) --
+    #
+    # from polyzymd.analyses.base import Condition
+    #
+    # def filter_conditions(
+    #     self,
+    #     conditions: list[Condition],
+    #     settings: "BaseModel | None" = None,
+    # ) -> list[Condition]:
+    #     """Exclude conditions where this analysis cannot run.
+    #
+    #     Uncomment and adapt if your analysis requires polymer or other
+    #     molecular groups that may not exist in all conditions.  For example,
+    #     polymer-specific analyses should skip "No Polymer" control conditions.
+    #
+    #     If only SOME sub-computations are inapplicable (not the whole
+    #     analysis), handle empty selections in compute_replicate() instead.
+    #     """
+    #     valid = []
+    #     for cond in conditions:
+    #         try:
+    #             sim_config = cond.sim_config
+    #             has_polymer = (
+    #                 sim_config.polymers is not None
+    #                 and getattr(sim_config.polymers, "enabled", True)
+    #             )
+    #             if not has_polymer:
+    #                 logger.info("Excluding '%s': no polymer configured", cond.label)
+    #                 continue
+    #             valid.append(cond)
+    #         except (AttributeError, ValueError, KeyError, OSError) as exc:
+    #             logger.warning("Error checking '%s': %s — including anyway", cond.label, exc)
+    #             valid.append(cond)  # fail-open
+    #     return valid
+
     # -- comparison ----------------------------------------------------------
 
     def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
@@ -643,6 +678,41 @@ class {cls}Analysis(Analysis):
             sem_value=sem,
             replicate_values=values,
         )
+
+    # -- condition filtering (uncomment if your analysis requires polymer) --
+    #
+    # from polyzymd.analyses.base import Condition
+    #
+    # def filter_conditions(
+    #     self,
+    #     conditions: list[Condition],
+    #     settings: "BaseModel | None" = None,
+    # ) -> list[Condition]:
+    #     """Exclude conditions where this analysis cannot run.
+    #
+    #     Uncomment and adapt if your analysis requires polymer or other
+    #     molecular groups that may not exist in all conditions.  For example,
+    #     polymer-specific analyses should skip "No Polymer" control conditions.
+    #
+    #     If only SOME sub-computations are inapplicable (not the whole
+    #     analysis), handle empty selections in compute_replicate() instead.
+    #     """
+    #     valid = []
+    #     for cond in conditions:
+    #         try:
+    #             sim_config = cond.sim_config
+    #             has_polymer = (
+    #                 sim_config.polymers is not None
+    #                 and getattr(sim_config.polymers, "enabled", True)
+    #             )
+    #             if not has_polymer:
+    #                 logger.info("Excluding '%s': no polymer configured", cond.label)
+    #                 continue
+    #             valid.append(cond)
+    #         except (AttributeError, ValueError, KeyError, OSError) as exc:
+    #             logger.warning("Error checking '%s': %s — including anyway", cond.label, exc)
+    #             valid.append(cond)  # fail-open
+    #     return valid
 
     # -- comparison ----------------------------------------------------------
 
