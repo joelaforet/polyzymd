@@ -82,6 +82,13 @@ Here is what each section does:
 - **`plugins.rmsf`** --- settings for the RMSF analysis plugin. The
   `selection` field is an MDAnalysis atom selection string.
 
+```{tip}
+If you are working with older PolyzyMD projects, you may see
+`analysis_settings:` instead of `plugins:` in existing YAML files. Both keys
+are accepted — `analysis_settings` is a legacy alias that still works but emits
+a deprecation warning.
+```
+
 ```{important}
 The `config` path must point to the simulation project's `config.yaml`. This
 is how PolyzyMD locates your topology and trajectory files on disk. Relative
@@ -97,6 +104,13 @@ Run the analysis with:
 
 ```bash
 pixi run -e build polyzymd compare run rmsf -f comparison.yaml --eq-time 10ns
+```
+
+```{note}
+The `--eq-time` flag overrides `defaults.equilibration_time` from your YAML
+file. If you omit `--eq-time`, the value from `comparison.yaml` is used. This
+is handy for quickly testing different equilibration cutoffs without editing the
+YAML each time.
 ```
 
 You should see output similar to:
