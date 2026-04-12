@@ -7,7 +7,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from polyzymd.exporters.interchange import ExportFormat, export_system, get_supported_formats
+from polyzymd.exporters.interchange import (
+    IMPLEMENTED_FORMATS,
+    PLANNED_FORMATS,
+    ExportFormat,
+    export_system,
+    get_implemented_formats,
+    get_supported_formats,
+)
 
 
 class TestExportFormat:
@@ -38,6 +45,28 @@ class TestGetSupportedFormats:
 
     def test_contains_amber(self) -> None:
         assert "amber" in get_supported_formats()
+
+
+class TestFormatClassification:
+    """C8-M2: API should distinguish implemented vs planned formats."""
+
+    def test_implemented_formats(self) -> None:
+        assert get_implemented_formats() == ("gromacs",)
+
+    def test_supported_includes_all(self) -> None:
+        supported = get_supported_formats()
+        assert "gromacs" in supported
+        assert "lammps" in supported
+        assert "amber" in supported
+
+    def test_implemented_subset_of_supported(self) -> None:
+        impl = set(get_implemented_formats())
+        supp = set(get_supported_formats())
+        assert impl.issubset(supp)
+
+    def test_planned_formats(self) -> None:
+        assert "lammps" in PLANNED_FORMATS
+        assert "amber" in PLANNED_FORMATS
 
 
 class TestExportSystemValidation:

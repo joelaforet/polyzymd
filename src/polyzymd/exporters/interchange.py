@@ -1,7 +1,8 @@
 """Engine-agnostic export dispatch for PolyzyMD systems.
 
 Routes export requests to engine-specific exporters based on format string.
-Supported formats: gromacs (stable), lammps (planned), amber (planned).
+Implemented formats: gromacs.
+Planned formats: lammps, amber (stubs raise NotImplementedError).
 """
 
 from __future__ import annotations
@@ -16,8 +17,14 @@ if TYPE_CHECKING:
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.core.atom_groups import SystemComponentInfo
 
-# Supported export formats
-SUPPORTED_FORMATS = ("gromacs", "lammps", "amber")
+# Formats with working exporters
+IMPLEMENTED_FORMATS = ("gromacs",)
+
+# Formats with stub exporters (raise NotImplementedError)
+PLANNED_FORMATS = ("lammps", "amber")
+
+# All recognized formats (implemented + planned)
+SUPPORTED_FORMATS = IMPLEMENTED_FORMATS + PLANNED_FORMATS
 
 
 class ExportFormat(str, Enum):
@@ -29,15 +36,33 @@ class ExportFormat(str, Enum):
 
 
 def get_supported_formats() -> tuple[str, ...]:
-    """Return the tuple of supported export format names.
+    """Return all recognized export format names, including planned.
 
     Returns
     -------
     tuple[str, ...]
-        Supported export format names in canonical lowercase form
+        All recognized format names in canonical lowercase form.
+        Includes both implemented formats (with working exporters) and
+        planned formats (that raise ``NotImplementedError``).
+        Use :func:`get_implemented_formats` to get only working formats.
     """
 
     return SUPPORTED_FORMATS
+
+
+def get_implemented_formats() -> tuple[str, ...]:
+    """Return formats that have working exporters.
+
+    Returns
+    -------
+    tuple[str, ...]
+        Format names with fully implemented export pipelines.
+        Calling :func:`export_system` with these formats will produce
+        output files. Contrast with :func:`get_supported_formats` which
+        also includes planned formats that raise ``NotImplementedError``.
+    """
+
+    return IMPLEMENTED_FORMATS
 
 
 def export_system(
