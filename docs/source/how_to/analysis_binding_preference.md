@@ -147,7 +147,6 @@ conditions:
 
 plugins:
   contacts:
-    name: "polymer_contacts"
     polymer_selection: "resname SBM EGM"
     protein_selection: "protein"
     cutoff: 4.5
@@ -182,7 +181,7 @@ polyzymd compare run contacts -f comparison.yaml --format markdown
 
 ````{tab-item} Python
 ```python
-from polyzymd.analyses.shared.binding_preference._models import BindingPreferenceResult
+from polyzymd.analyses.shared.binding_preference import BindingPreferenceResult
 
 # Binding preference is computed automatically when:
 # plugins.contacts.compute_binding_preference: true
@@ -191,7 +190,12 @@ from polyzymd.analyses.shared.binding_preference._models import BindingPreferenc
 #   polyzymd compare run contacts -f comparison.yaml
 
 result = BindingPreferenceResult.load(
-    "analysis/<condition>/contacts/aggregated/binding_preference.json"
+    # Filenames include a settings fingerprint and replicate range, e.g.:
+    #   binding_preference_s<fingerprint>_rep1.json          (per-replicate)
+    #   binding_preference_aggregated_s<fingerprint>_reps1-3.json (aggregated)
+    # Use glob to find the aggregated file:
+    #   next(Path("analysis/<condition>/contacts/").glob("binding_preference_aggregated_*.json"))
+    "analysis/<condition>/contacts/binding_preference_aggregated_s<fingerprint>_reps1-3.json"
 )
 
 # Access enrichment values
@@ -362,13 +366,19 @@ project/
 └── condition_name/
     └── analysis/
         └── contacts/
-            ├── contacts_rep1.json
-            ├── contacts_rep2.json
-            ├── contacts_rep3.json
-            ├── binding_preference_rep1.json          # Per-replicate
-            ├── binding_preference_rep2.json
-            ├── binding_preference_rep3.json
-            └── binding_preference_aggregated_reps1-3.json  # Aggregated
+            ├── contacts_eq10.00ns_cut4.5_s<fp>_rep1.json
+            ├── contacts_eq10.00ns_cut4.5_s<fp>_rep2.json
+            ├── contacts_eq10.00ns_cut4.5_s<fp>_rep3.json
+            ├── binding_preference_s<fp>_rep1.json               # Per-replicate
+            ├── binding_preference_s<fp>_rep2.json
+            ├── binding_preference_s<fp>_rep3.json
+            └── binding_preference_aggregated_s<fp>_reps1-3.json # Aggregated
+```
+
+```{note}
+Filenames include a settings fingerprint (`s<fp>`) derived from the analysis
+settings. Use glob patterns (e.g., `binding_preference_aggregated_*.json`) to
+find result files programmatically.
 ```
 
 ### JSON Structure (Schema v5)
@@ -704,12 +714,12 @@ regions into mutually exclusive groups:
 # comparison.yaml
 plugins:
   contacts:
-    # First, define individual protein groups (can overlap)
+    # First, define individual protein groups as residue ID lists
     protein_groups:
-      lid_helix_5: "resid 141:155"
-      lid_helix_10: "resid 281:295"
-      catalytic_triad: "resid 131 163 194"
-      active_site_loop: "resid 75:85"
+      lid_helix_5: [141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155]
+      lid_helix_10: [281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295]
+      catalytic_triad: [131, 163, 194]
+      active_site_loop: [75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85]
       
     # Then, define partitions (must be mutually exclusive within each partition)
     protein_partitions:
@@ -728,10 +738,10 @@ from polyzymd.analyses.contacts import ContactsSettings
 
 settings = ContactsSettings(
     protein_groups={
-        "lid_helix_5": "resid 141:155",
-        "lid_helix_10": "resid 281:295",
-        "catalytic_triad": "resid 131 163 194",
-        "active_site_loop": "resid 75:85",
+        "lid_helix_5": [141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155],
+        "lid_helix_10": [281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295],
+        "catalytic_triad": [131, 163, 194],
+        "active_site_loop": [75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85],
     },
     protein_partitions={
         "lid_helices": ["lid_helix_5", "lid_helix_10"],
