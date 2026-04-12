@@ -808,3 +808,94 @@ class TestConditionHasPolymer:
             sim_config=mock_sim,
         )
         assert analysis._condition_has_polymer(cond) is False
+
+
+# ===========================================================================
+# Formatter enrichment markers
+# ===========================================================================
+
+
+class TestExposureFormatterEnrichmentMarkers:
+    def _make_result_with_enrichment(self, enrichment_value: float):
+        from datetime import datetime
+
+        from polyzymd.analyses.exposure._comparison_results import (
+            ExposureComparisonResult,
+            ExposureConditionSummary,
+        )
+
+        condition = ExposureConditionSummary(
+            label="A",
+            config_path="/tmp/a/config.yaml",
+            n_replicates=3,
+            replicate_values=[0.4, 0.5, 0.6],
+            mean_transient_fraction=0.3,
+            sem_transient_fraction=0.01,
+            mean_chaperone_fraction=0.5,
+            sem_chaperone_fraction=0.02,
+            mean_n_transient=10.0,
+            mean_total_chaperone_events=8.0,
+            mean_total_unassisted_events=2.0,
+            enrichment_by_polymer_type={"SBMA": {"charged": enrichment_value}},
+            polymer_types=["SBMA"],
+            aa_groups=["charged"],
+        )
+        return ExposureComparisonResult(
+            name="test",
+            metric="chaperone_fraction",
+            control_label=None,
+            fdr_alpha=0.05,
+            ttest_method="student",
+            posthoc_method="ttest_bh",
+            conditions=[condition],
+            pairwise_comparisons=[],
+            anova=None,
+            ranking=["A"],
+            ranking_by_transient_fraction=["A"],
+            excluded_conditions=[],
+            equilibration_time="10ns",
+            created_at=datetime.now(),
+            polyzymd_version="test",
+        )
+
+    @pytest.mark.parametrize(
+        ("enrichment_value", "expected_marker"),
+        [(0.5, "+"), (-0.3, "-"), (0.0, "")],
+    )
+    def test_markdown_formatter_uses_zero_centered_markers(
+        self,
+        enrichment_value: float,
+        expected_marker: str,
+    ):
+        from polyzymd.analyses.exposure._formatters import format_exposure_markdown
+
+        result = self._make_result_with_enrichment(enrichment_value)
+        text = format_exposure_markdown(result, show_pairwise=False, show_anova=False)
+
+        assert "> **Key:** + = enriched (>0), - = depleted (<0)" in text
+        if expected_marker:
+            assert f"{enrichment_value:.2f} {expected_marker}" in text
+        else:
+            assert f"{enrichment_value:.2f} +" not in text
+            assert f"{enrichment_value:.2f} -" not in text
+
+    @pytest.mark.parametrize(
+        ("enrichment_value", "expected_marker"),
+        [(0.5, "+"), (-0.3, "-"), (0.0, "")],
+    )
+    def test_console_formatter_uses_zero_centered_markers(
+        self,
+        enrichment_value: float,
+        expected_marker: str,
+    ):
+        from polyzymd.analyses.exposure._formatters import format_exposure_console_table
+
+        result = self._make_result_with_enrichment(enrichment_value)
+        text = format_exposure_console_table(result, show_pairwise=False, show_anova=False)
+
+        assert "+ = enriched (>0), - = depleted (<0)" in text
+        if expected_marker:
+            assert f"{enrichment_value:>10.2f}{expected_marker} " in text
+        else:
+            assert f"{enrichment_value:>10.2f}+ " not in text
+            assert f"{enrichment_value:>10.2f}- " not in text

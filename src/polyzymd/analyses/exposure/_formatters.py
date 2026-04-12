@@ -135,12 +135,12 @@ def format_exposure_console_table(
                     if val is None or (val != val):  # nan check
                         row_parts.append(f"{'--':>12}")
                     else:
-                        marker = "+" if val > 1.0 else "-" if val < 1.0 else " "
+                        marker = "+" if val > 0.0 else "-" if val < 0.0 else " "
                         row_parts.append(f"{val:>10.2f}{marker} ")
                 lines.append("  ".join(row_parts))
 
             lines.append("-" * 80)
-            lines.append("  + = enriched (>1.0), - = depleted (<1.0)")
+            lines.append("  + = enriched (>0), - = depleted (<0)")
             lines.append("")
 
     # Pairwise comparisons
@@ -333,13 +333,13 @@ def format_exposure_markdown(
                     if val is None or (val != val):
                         row += " -- |"
                     else:
-                        marker = "+" if val > 1.0 else "-" if val < 1.0 else ""
+                        marker = "+" if val > 0.0 else "-" if val < 0.0 else ""
                         row += f" {val:.2f} {marker} |"
                 lines.append(row)
 
             lines.append("")
 
-        lines.append("> **Key:** + = enriched (>1.0), - = depleted (<1.0)")
+        lines.append("> **Key:** + = enriched (>0), - = depleted (<0)")
         lines.append("")
 
     # Pairwise comparisons
