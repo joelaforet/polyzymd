@@ -23,7 +23,7 @@ from polyzymd.analyses.base import (
     ReplicateContext,
 )
 from polyzymd.analyses.rg._plot_settings import RgPlotSettings
-from polyzymd.analyses.rg._results import RgAggregatedResult
+from polyzymd.analyses.rg._results import RgAggregatedResult, RgResult
 from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
 from polyzymd.analyses.shared.loader import (
     TrajectoryLoader,
@@ -40,7 +40,7 @@ from polyzymd.analyses.shared.statistics import compute_sem
 
 if TYPE_CHECKING:
     from polyzymd.analyses.rg._comparison_results import RgComparisonResult
-    from polyzymd.analyses.rg._results import RgResult, RgRunResult
+    from polyzymd.analyses.rg._results import RgRunResult
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +141,7 @@ class RgAnalysis(Analysis):
     Settings: ClassVar[type] = RgSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RgPlotSettings
     AggregatedResultClass: ClassVar[type] = RgAggregatedResult
+    ReplicateResultClass: ClassVar[type | None] = RgResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
 

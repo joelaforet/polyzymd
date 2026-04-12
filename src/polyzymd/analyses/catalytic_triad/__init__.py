@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Sequence
+from typing import Any, ClassVar, Sequence
 
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
@@ -36,10 +36,7 @@ from polyzymd.analyses.catalytic_triad._plotters import (
     plot_triad_kde_panel_from_data,
     plot_triad_threshold_bars_from_data,
 )
-from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult
-
-if TYPE_CHECKING:
-    from polyzymd.analyses.catalytic_triad._results import TriadResult
+from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult, TriadResult
 
 logger = logging.getLogger("polyzymd.analyses.catalytic_triad")
 
@@ -145,6 +142,7 @@ class CatalyticTriadAnalysis(Analysis):
     Settings: ClassVar[type] = CatalyticTriadSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = TriadPlotSettings
     AggregatedResultClass: ClassVar[type] = TriadAggregatedResult
+    ReplicateResultClass: ClassVar[type | None] = TriadResult
     aliases: ClassVar[tuple[str, ...]] = ("triad",)
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2

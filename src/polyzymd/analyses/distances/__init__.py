@@ -50,7 +50,7 @@ from polyzymd.analyses.distances._plotters import (
     _plot_distance_state_bars,
     _plot_distance_threshold_bars,
 )
-from polyzymd.analyses.distances._results import DistanceAggregatedResult
+from polyzymd.analyses.distances._results import DistanceAggregatedResult, DistanceResult
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 if TYPE_CHECKING:
@@ -61,7 +61,6 @@ if TYPE_CHECKING:
     )
     from polyzymd.analyses.distances._results import (
         DistancePairResult,
-        DistanceResult,
     )
     from polyzymd.config.schema import SimulationConfig
 
@@ -836,6 +835,7 @@ class DistancesAnalysis(Analysis):
     Settings: ClassVar[type] = DistancesSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = DistancesPlotSettings
     AggregatedResultClass: ClassVar[type] = DistanceAggregatedResult
+    ReplicateResultClass: ClassVar[type | None] = DistanceResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2

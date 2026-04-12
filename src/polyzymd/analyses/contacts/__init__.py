@@ -60,6 +60,7 @@ from polyzymd.analyses.contacts._plotters import (
     _plot_system_coverage_heatmap,
     _plot_user_partition_bars,
 )
+from polyzymd.analyses.contacts._results import ContactResult
 from polyzymd.analyses.exceptions import ReplicateSkippedError
 
 if TYPE_CHECKING:
@@ -68,7 +69,6 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from polyzymd.analyses.contacts._comparison_results import ContactsComparisonResult
-    from polyzymd.analyses.contacts._results import ContactResult
 
 logger = logging.getLogger("polyzymd.analyses.contacts")
 
@@ -638,6 +638,7 @@ class ContactsAnalysis(Analysis):
     Settings: ClassVar[type] = ContactsSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = ContactsPlotSettings
     AggregatedResultClass: ClassVar[type] = AggregatedContactResult
+    ReplicateResultClass: ClassVar[type | None] = ContactResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2

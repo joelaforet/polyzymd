@@ -340,3 +340,121 @@ def test_finalize_partial_raises_with_zero_successful_conditions(
             effective_control="A",
             allow_partial=True,
         )
+
+
+# === Typed replicate result round-trip tests ===
+
+
+class _TypedReplicateResult(BaseModel):
+    """Pydantic replicate result for typed round-trip tests."""
+
+    value: float
+    replicate: int
+
+
+class _TypedAggregatedResult(BaseModel):
+    """Pydantic aggregated result for typed round-trip tests."""
+
+    mean_value: float
+    replicate_values: list[float]
+    n_replicates: int
+
+
+class _TypedWorkerAnalysis(Analysis):
+    """Analysis plugin that uses Pydantic models for replicate results."""
+
+    name: ClassVar[str] = "typed_worker_toy"
+    Settings: ClassVar[type] = _WorkerSettings
+    ReplicateResultClass: ClassVar[type | None] = _TypedReplicateResult
+    AggregatedResultClass: ClassVar[type | None] = _TypedAggregatedResult
+    min_replicates: ClassVar[int] = 1
+
+    def compute_replicate(self, ctx: Any, replicate: int) -> _TypedReplicateResult:
+        return _TypedReplicateResult(
+            value=float(replicate) * float(ctx.settings.scale),
+            replicate=replicate,
+        )
+
+    def aggregate(self, ctx, results) -> _TypedAggregatedResult:
+        # This accesses .value and would fail with dicts
+        values = [result.value for result in results]
+        return _TypedAggregatedResult(
+            mean_value=sum(values) / len(values),
+            replicate_values=values,
+            n_replicates=len(values),
+        )
+
+    def extract_metrics(self, summary):
+        return {}
+
+
+class TestTypedReplicateRoundTrip:
+    """Verify Pydantic model round-trip through disk serialization.
+
+    This is the regression test for the HPC aggregate deserialization bug
+    where replicate results loaded as dicts instead of Pydantic models.
+    """
+
+    def test_aggregate_from_disk_returns_typed_results(self, tmp_path: Path) -> None:
+        """Replicate results loaded from disk should be Pydantic models, not dicts."""
+        analysis = _TypedWorkerAnalysis()
+        condition = Condition("Typed", tmp_path / "cfg.yaml", (1, 2), cast(Any, SimpleNamespace()))
+        settings = _WorkerSettings(scale=3.0)
+        cond_dir = tmp_path / "analysis" / "cond" / "typed_worker_toy"
+
+        # Phase 1: compute and save replicate results to disk
+        run_replicate_once(analysis, condition, settings, "10ns", cond_dir / "run_1", 1, False)
+        run_replicate_once(analysis, condition, settings, "10ns", cond_dir / "run_2", 2, False)
+
+        # Verify JSON files exist
+        assert (cond_dir / "run_1" / "result.json").exists()
+        assert (cond_dir / "run_2" / "result.json").exists()
+
+        # Phase 2: aggregate from disk using the worker aggregate path
+        aggregated = aggregate_condition_from_disk(
+            analysis,
+            condition,
+            settings,
+            "10ns",
+            cond_dir,
+            replicates=(1, 2),
+        )
+
+        # Aggregate should succeed with typed replicate models
+        assert isinstance(aggregated, _TypedAggregatedResult)
+        assert aggregated.n_replicates == 2
+        assert aggregated.mean_value == pytest.approx(4.5)
+        assert aggregated.replicate_values == [3.0, 6.0]
+
+    def test_deserialize_replicate_result_returns_model(self, tmp_path: Path) -> None:
+        """Deserialize should return a model when ReplicateResultClass is set."""
+        analysis = _TypedWorkerAnalysis()
+        result = _TypedReplicateResult(value=42.0, replicate=1)
+
+        result_path = tmp_path / "result.json"
+        result_path.write_text(result.model_dump_json())
+
+        loaded = analysis._deserialize_replicate_result(result_path)
+        assert isinstance(loaded, _TypedReplicateResult)
+        assert loaded.value == 42.0
+        assert loaded.replicate == 1
+
+    def test_dict_analysis_still_works(self, tmp_path: Path) -> None:
+        """Dict-based analyses with no ReplicateResultClass should still work."""
+        analysis = _WorkerAnalysis()
+        condition = Condition("Dict", tmp_path / "cfg.yaml", (1,), cast(Any, SimpleNamespace()))
+        settings = _WorkerSettings(scale=2.0)
+        cond_dir = tmp_path / "analysis" / "cond" / "worker_toy"
+
+        run_replicate_once(analysis, condition, settings, "10ns", cond_dir / "run_1", 1, False)
+
+        aggregated = aggregate_condition_from_disk(
+            analysis,
+            condition,
+            settings,
+            "10ns",
+            cond_dir,
+            replicates=(1,),
+        )
+        assert isinstance(aggregated, dict)
+        assert aggregated["n_replicates"] == 1

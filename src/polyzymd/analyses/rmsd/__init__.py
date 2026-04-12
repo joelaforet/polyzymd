@@ -23,7 +23,7 @@ from polyzymd.analyses.base import (
     ReplicateContext,
 )
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
-from polyzymd.analyses.rmsd._results import RMSDAggregatedResult
+from polyzymd.analyses.rmsd._results import RMSDAggregatedResult, RMSDResult
 from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
 from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
 from polyzymd.analyses.shared.loader import (
@@ -43,7 +43,6 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from polyzymd.analyses.rmsd._comparison_results import RMSDComparisonResult
-    from polyzymd.analyses.rmsd._results import RMSDResult
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +195,7 @@ class RMSDAnalysis(Analysis):
     Settings: ClassVar[type] = RMSDSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RMSDPlotSettings
     AggregatedResultClass: ClassVar[type] = RMSDAggregatedResult
+    ReplicateResultClass: ClassVar[type | None] = RMSDResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
 

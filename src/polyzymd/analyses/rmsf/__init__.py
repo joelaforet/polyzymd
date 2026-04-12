@@ -27,7 +27,7 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.rmsf._plot_settings import RMSFPlotSettings
 from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison, _plot_rmsf_profile
-from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
+from polyzymd.analyses.rmsf._results import RMSFAggregatedResult, RMSFResult
 from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
 from polyzymd.analyses.shared.autocorrelation import (
     compute_acf,
@@ -50,8 +50,6 @@ from polyzymd.analyses.shared.statistics import aggregate_per_residue_stats, com
 
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
-
-    from polyzymd.analyses.rmsf._results import RMSFResult
 
 logger = logging.getLogger("polyzymd.analyses.rmsf")
 
@@ -146,6 +144,7 @@ class RMSFAnalysis(Analysis):
     Settings: ClassVar[type] = RMSFSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RMSFPlotSettings
     AggregatedResultClass: ClassVar[type] = RMSFAggregatedResult
+    ReplicateResultClass: ClassVar[type | None] = RMSFResult
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2

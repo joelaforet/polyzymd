@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Sequence
+from typing import Any, ClassVar, Sequence
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -35,14 +35,10 @@ from polyzymd.analyses.secondary_structure._plotters import (
 )
 from polyzymd.analyses.secondary_structure._results import (
     SecondaryStructureAggregatedResult,
+    SecondaryStructureResult,
 )
 from polyzymd.analyses.shared.config_hash import compute_config_hash
 from polyzymd.analyses.shared.loader import TrajectoryLoader, convert_time, parse_time_string
-
-if TYPE_CHECKING:
-    from polyzymd.analyses.secondary_structure._results import (
-        SecondaryStructureResult,
-    )
 
 logger = logging.getLogger("polyzymd.analyses.secondary_structure")
 
@@ -106,6 +102,7 @@ class SecondaryStructureAnalysis(Analysis):
     Settings: ClassVar[type] = SecondaryStructureSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = SSPlotSettings
     AggregatedResultClass: ClassVar[type] = SecondaryStructureAggregatedResult
+    ReplicateResultClass: ClassVar[type | None] = SecondaryStructureResult
     aliases: ClassVar[tuple[str, ...]] = ("ss",)
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2

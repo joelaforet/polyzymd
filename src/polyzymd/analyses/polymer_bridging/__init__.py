@@ -395,6 +395,7 @@ class PolymerBridgingAnalysis(Analysis):
     Settings: ClassVar[type] = PolymerBridgingSettings
     PlotSettingsModel: ClassVar[type[BasePlotSettings]] = PolymerBridgingPlotSettings
     AggregatedResultClass: ClassVar[type] = PolymerBridgingAggregatedResult
+    ReplicateResultClass: ClassVar[type | None] = PolymerBridgingReplicateResult
     aliases: ClassVar[tuple[str, ...]] = ("bridging",)
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
