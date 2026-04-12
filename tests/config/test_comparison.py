@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from polyzymd.config.comparison import ComparisonConfig
+from polyzymd.config.comparison import ComparisonConfig, ConditionConfig
 
 
 class TestUnknownTopLevelKeys:
@@ -84,3 +84,37 @@ class TestUnknownTopLevelKeys:
 
         config = ComparisonConfig.from_yaml(yaml_path)
         assert config is not None
+
+
+class TestConditionReplicateValidation:
+    """C8-H2: ConditionConfig should reject bad replicate lists."""
+
+    def test_scalar_coerced_to_list(self):
+        """Single int replicate should become [int]."""
+        cond = ConditionConfig(label="A", config=Path("/fake/a.yaml"), replicates=3)
+        assert cond.replicates == [3]
+
+    def test_empty_replicates_raises(self):
+        """Empty replicate list should raise."""
+        with pytest.raises(ValueError, match="must not be empty"):
+            ConditionConfig(label="A", config=Path("/fake/a.yaml"), replicates=[])
+
+    def test_duplicate_replicates_raises(self):
+        """Duplicate replicate numbers should raise."""
+        with pytest.raises(ValueError, match="duplicate"):
+            ConditionConfig(label="A", config=Path("/fake/a.yaml"), replicates=[1, 2, 1])
+
+    def test_zero_replicate_raises(self):
+        """Zero replicate number should raise."""
+        with pytest.raises(ValueError, match="positive"):
+            ConditionConfig(label="A", config=Path("/fake/a.yaml"), replicates=[0, 1])
+
+    def test_negative_replicate_raises(self):
+        """Negative replicate number should raise."""
+        with pytest.raises(ValueError, match="positive"):
+            ConditionConfig(label="A", config=Path("/fake/a.yaml"), replicates=[-1])
+
+    def test_valid_replicates_accepted(self):
+        """Normal replicate list should work."""
+        cond = ConditionConfig(label="A", config=Path("/fake/a.yaml"), replicates=[1, 2, 3])
+        assert cond.replicates == [1, 2, 3]

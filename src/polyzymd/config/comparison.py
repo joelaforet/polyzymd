@@ -52,6 +52,23 @@ class ConditionConfig(BaseModel):
             return [v]
         return list(v)
 
+    @model_validator(mode="after")
+    def _validate_replicates(self) -> "ConditionConfig":
+        """Reject empty, duplicate, or non-positive replicate lists."""
+        if not self.replicates:
+            raise ValueError(f"Condition '{self.label}': replicates list must not be empty")
+        if any(r <= 0 for r in self.replicates):
+            bad = [r for r in self.replicates if r <= 0]
+            raise ValueError(
+                f"Condition '{self.label}': replicate numbers must be positive, got {bad}"
+            )
+        if len(self.replicates) != len(set(self.replicates)):
+            dupes = [r for r in self.replicates if self.replicates.count(r) > 1]
+            raise ValueError(
+                f"Condition '{self.label}': duplicate replicate numbers: {sorted(set(dupes))}"
+            )
+        return self
+
 
 # ============================================================================
 # Dynamic Settings Containers
