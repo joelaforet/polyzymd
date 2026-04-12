@@ -20,6 +20,8 @@ already know your goal and need the shortest practical route to it.
 
 These analyses are production-ready with validated statistics:
 
+- [Which Analysis Should I Run?](analysis_chooser.md) -- pick the right plugins
+  for your research question
 - [Compare Simulation Conditions](analysis_compare_conditions.md) -- set up
   `comparison.yaml` and run cross-condition analysis
 - [Run RMSD Analysis](analysis_rmsd_quickstart.md)
@@ -44,6 +46,10 @@ evolving. Results should be treated as exploratory.
 - [Analyze Polymer Bridging](analysis_polymer_bridging.md)
 - [Analyze Exposure Dynamics](analysis_exposure_dynamics.md)
 
+## Plot Customization
+
+- [Customizing Plots for Publication](publication_plots.md)
+
 ## Recipes and Troubleshooting
 
 - [Contacts Cookbook](analysis_contacts_cookbook.md) -- advanced selection
@@ -62,6 +68,7 @@ Set Up Equilibration Stages <equilibration>
 Export a System to GROMACS <gromacs_export>
 Run Simulations on SLURM Clusters <hpc_slurm>
 Submit Analysis Jobs to SLURM <hpc_execution>
+Which Analysis Should I Run? <analysis_chooser>
 Compare Simulation Conditions <analysis_compare_conditions>
 Run RMSD Analysis <analysis_rmsd_quickstart>
 Run Rg Analysis <analysis_rg_quickstart>
@@ -76,6 +83,7 @@ Analyze Binding Free Energy <analysis_binding_free_energy>
 Analyze Polymer Affinity <analysis_polymer_affinity>
 Analyze Polymer Bridging <analysis_polymer_bridging>
 Analyze Exposure Dynamics <analysis_exposure_dynamics>
+Customizing Plots for Publication <publication_plots>
 Contacts Cookbook <analysis_contacts_cookbook>
 Broken Molecule Debugging <broken_molecules_debugging>
 Troubleshoot Common Problems <troubleshooting>
