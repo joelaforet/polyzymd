@@ -977,23 +977,27 @@ def submit_analysis_hpc(
     replicate_count = sum(len(cond.replicate_specs) for cond in manifest.condition_specs)
     array_count = len(manifest.condition_specs)
     aggregate_count = len(manifest.condition_specs)
+    finalize_only = getattr(manifest, "pipeline_mode", "full") == "finalize_only"
 
     if dry_run:
-        for cond in manifest.condition_specs:
-            if job_arrays:
-                generate_array_script(
-                    cond,
-                    manifest,
-                    resources,
-                    [rep.replicate for rep in cond.replicate_specs],
-                    hpc_dir,
-                )
-            else:
-                for rep in cond.replicate_specs:
-                    generate_replicate_script(manifest, rep, resources, hpc_dir)
-            generate_aggregate_script(manifest, cond, resources, hpc_dir)
+        if not finalize_only:
+            for cond in manifest.condition_specs:
+                if job_arrays:
+                    generate_array_script(
+                        cond,
+                        manifest,
+                        resources,
+                        [rep.replicate for rep in cond.replicate_specs],
+                        hpc_dir,
+                    )
+                else:
+                    for rep in cond.replicate_specs:
+                        generate_replicate_script(manifest, rep, resources, hpc_dir)
+                generate_aggregate_script(manifest, cond, resources, hpc_dir)
         generate_finalize_script(manifest, resources, hpc_dir)
-        if job_arrays:
+        if finalize_only:
+            click.echo("Would submit 1 finalize job (compare-only plugin)")
+        elif job_arrays:
             total = array_count + aggregate_count + 1
             click.echo(
                 "Would submit "
@@ -1009,12 +1013,16 @@ def submit_analysis_hpc(
         click.echo("Dry run only: no jobs were submitted")
         return
 
-    if job_arrays:
+    if finalize_only:
+        graph = submit_analysis_graph(manifest, resources, hpc_dir)
+    elif job_arrays:
         graph = submit_analysis_graph_with_arrays(manifest, resources, hpc_dir)
     else:
         graph = submit_analysis_graph(manifest, resources, hpc_dir)
     graph.save(hpc_dir / "job_graph.json")
-    if job_arrays:
+    if finalize_only:
+        click.echo("Submitted 1 finalize job (compare-only plugin)")
+    elif job_arrays:
         total = array_count + aggregate_count + 1
         click.echo(
             "Submitted "

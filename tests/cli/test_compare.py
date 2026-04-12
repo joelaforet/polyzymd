@@ -198,6 +198,53 @@ def test_submit_allow_partial_sets_manifest_policy(monkeypatch, tmp_path: Path) 
     assert captured["allow_partial"] is True
 
 
+def test_submit_dry_run_finalize_only_prints_summary(monkeypatch, tmp_path: Path) -> None:
+    """compare submit --dry-run should describe finalize-only submissions."""
+    runner = CliRunner()
+
+    class _FakeAnalysis:
+        name = "toy"
+
+    class _Cond:
+        def __init__(self, reps):
+            self.replicate_specs = [SimpleNamespace(replicate=r) for r in reps]
+
+    manifest = SimpleNamespace(
+        condition_specs=[_Cond([1, 2])],
+        pipeline_mode="finalize_only",
+        save=lambda path: Path(path).write_text("{}"),
+    )
+
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
+        lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.discovery.get_analysis", lambda name: lambda: _FakeAnalysis()
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.build_manifest", lambda *args, **kwargs: manifest
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_finalize_script",
+        lambda *args, **kwargs: tmp_path / "fin.sh",
+    )
+
+    result = runner.invoke(
+        compare,
+        [
+            "submit",
+            "toy",
+            "-f",
+            str(tmp_path / "comparison.yaml"),
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Would submit 1 finalize job (compare-only plugin)" in result.output
+
+
 def test_status_json_output(monkeypatch, tmp_path: Path) -> None:
     """compare status --json should emit JSON summary."""
     runner = CliRunner()

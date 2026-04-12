@@ -47,6 +47,13 @@ class _ToyAnalysis(Analysis):
     Settings: ClassVar[type] = _Settings
 
 
+class _CompareOnlyAnalysis(Analysis):
+    name: ClassVar[str] = "compare_only"
+    Settings: ClassVar[type] = _Settings
+    has_compute_stage: ClassVar[bool] = False
+    has_aggregate_stage: ClassVar[bool] = False
+
+
 def _make_manifest(tmp_path: Path) -> AnalysisJobManifest:
     resources = AnalysisSlurmResources()
     return AnalysisJobManifest(
@@ -289,6 +296,34 @@ def test_build_manifest_allow_partial_policy(
     assert manifest.partial_policy == "allow_partial"
 
 
+def test_build_manifest_sets_finalize_only_pipeline_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Comparator-only plugins should emit finalize-only manifests."""
+    analysis = _CompareOnlyAnalysis()
+    resources = AnalysisSlurmResources(partition="gpu")
+    valid_conditions = [
+        Condition("A", tmp_path / "a.yaml", (1, 2), cast(Any, SimpleNamespace())),
+    ]
+
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.prepare_comparison_run",
+        lambda analysis, config, equilibration: {
+            "all_conditions": valid_conditions,
+            "valid_conditions": valid_conditions,
+            "excluded_conditions": [],
+            "condition_by_label": {condition.label: condition for condition in valid_conditions},
+            "settings": _Settings(),
+            "equilibration": "5ns",
+            "analysis_root": tmp_path / "analysis",
+        },
+    )
+    config = cast(Any, SimpleNamespace(source_path=tmp_path / "comparison.yaml"))
+
+    manifest = build_manifest(analysis, config, resources, recompute=True, equilibration=None)
+    assert manifest.pipeline_mode == "finalize_only"
+
+
 def test_submit_analysis_graph_builds_dependencies(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -316,6 +351,86 @@ def test_submit_analysis_graph_builds_dependencies(
 
     loaded_graph = SubmittedJobGraph.load(hpc_dir / "job_graph.json")
     assert loaded_graph.aggregator_jobs[0] == graph.aggregator_jobs[0]
+
+
+def test_submit_analysis_graph_finalize_only_submits_single_job(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Finalize-only mode should submit only the finalizer job."""
+    manifest = _make_manifest(tmp_path)
+    manifest.pipeline_mode = "finalize_only"
+    resources = AnalysisSlurmResources()
+    hpc_dir = tmp_path / "comparison" / "toy_slurm" / "_hpc"
+    calls: list[str | None] = []
+
+    def _fake_submit(script_path: Path, dependency: str | None = None) -> str:
+        del script_path
+        calls.append(dependency)
+        return "9001"
+
+    monkeypatch.setattr("polyzymd.workflow.analysis_slurm._submit_sbatch", _fake_submit)
+    graph = submit_analysis_graph(manifest, resources, hpc_dir)
+
+    assert graph.replicate_jobs == {}
+    assert graph.aggregator_jobs == {}
+    assert graph.finalizer_job_id == "9001"
+    assert calls == [None]
+
+
+def test_submit_analysis_graph_finalize_only_uses_root_dependencies(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Finalize-only mode should attach optional root dependencies."""
+    manifest = _make_manifest(tmp_path)
+    manifest.pipeline_mode = "finalize_only"
+    resources = AnalysisSlurmResources()
+    hpc_dir = tmp_path / "comparison" / "toy_slurm" / "_hpc"
+    calls: list[str | None] = []
+
+    def _fake_submit(script_path: Path, dependency: str | None = None) -> str:
+        del script_path
+        calls.append(dependency)
+        return "9002"
+
+    monkeypatch.setattr("polyzymd.workflow.analysis_slurm._submit_sbatch", _fake_submit)
+    submit_analysis_graph(manifest, resources, hpc_dir, root_dependencies=("101", "102"))
+
+    assert calls == ["afterok:101:102"]
+
+
+def test_manifest_load_defaults_pipeline_mode_for_legacy_json(tmp_path: Path) -> None:
+    """Legacy manifests without pipeline_mode should default to full mode."""
+    legacy_payload = {
+        "analysis_name": "toy_slurm",
+        "comparison_yaml": str(tmp_path / "comparison.yaml"),
+        "condition_specs": [
+            {
+                "condition_index": 0,
+                "condition_label": "Cond A",
+                "condition_slug": "cond_a",
+                "replicate_specs": [
+                    {
+                        "condition_index": 0,
+                        "replicate": 1,
+                        "condition_label": "Cond A",
+                        "condition_slug": "cond_a",
+                    }
+                ],
+            }
+        ],
+        "settings_snapshot": {"threshold": 1.0},
+        "snapshot_hash": "",
+        "partial_policy": "strict",
+        "equilibration": "10ns",
+        "recompute": False,
+        "resources": AnalysisSlurmResources().model_dump(mode="json"),
+        "created_at": "2026-01-01T00:00:00+00:00",
+    }
+    legacy_path = tmp_path / "legacy_manifest.json"
+    legacy_path.write_text(json.dumps(legacy_payload))
+
+    loaded = AnalysisJobManifest.load(legacy_path)
+    assert loaded.pipeline_mode == "full"
 
 
 def test_submit_analysis_graph_with_arrays_builds_dependencies(
