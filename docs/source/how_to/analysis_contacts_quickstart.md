@@ -47,7 +47,7 @@ By default, contacts analysis uses the selections configured in
 
 ## Basic Usage
 
-### Single Replicate Analysis
+### Run Contacts Analysis
 
 `````{tab-set}
 ````{tab-item} YAML (Recommended)
@@ -95,32 +95,41 @@ polyzymd compare run contacts -f comparison.yaml
 # See the YAML tab for the recommended workflow.
 #
 # To load results programmatically after running:
-from polyzymd.analyses.contacts._results import ContactResult
+import json
+from pathlib import Path
 
-result = ContactResult.load("analysis/<condition>/contacts/run_1/contacts.json")
+result = json.loads(Path("analysis/<condition>/contacts/run_1/result.json").read_text())
 
-print(f"Coverage: {result.coverage:.1%}")
+print(f"Coverage: {result['coverage_fraction']:.1%}")
 ```
 ````
 `````
+
+```{note}
+Contacts analysis requires at least 2 replicates for aggregation and
+statistical comparison. Configure `replicates: [1, 2, 3]` (or more) in
+each condition for robust results.
+```
 
 **Output:**
 ```
 Loading configuration from: config.yaml
 Contact Analysis: MyEnzyme_Polymer_Study
-  Replicates: 1
+  Replicates: 3
   Equilibration: 10ns
-  Cutoff: 4.0 Å
-  Polymer selection: segid C
+  Cutoff: 4.5 Å
+  Polymer selection: chainID C
   Protein selection: protein
-  Grouping: residue
+  Grouping: aa_class
   Processing replicate 1... done (134/181 residues contacted, 74.0% coverage, 18.0% mean contact)
+  Processing replicate 2... done (136/181 residues contacted, 75.1% coverage, 18.5% mean contact)
+  Processing replicate 3... done (132/181 residues contacted, 72.9% coverage, 17.6% mean contact)
 
 Contact Analysis Complete
-  Contacted residues: 134/181
+  Contacted residues: 134/181 (mean)
   Coverage: 74.0%
   Mean contact fraction: 18.0%
-  Results saved: /path/to/project/analysis/contacts/contacts_rep1.json
+  Results saved: analysis/<condition>/contacts/run_<N>/result.json
 ```
 
 ### Key Metrics
@@ -196,14 +205,15 @@ polyzymd compare run-all -f comparison.yaml
 # See the YAML tab for the recommended workflow.
 #
 # To load aggregated results programmatically after running:
-from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
+import json
+from pathlib import Path
 
-aggregated = AggregatedContactResult.load(
-    "analysis/<condition>/contacts/aggregated/contacts_aggregated.json"
+aggregated = json.loads(
+    Path("analysis/<condition>/contacts/aggregated/result.json").read_text()
 )
 print(
-    f"Contact fraction: {aggregated.mean_contact_fraction:.1%} "
-    f"± {aggregated.std_contact_fraction:.1%}"
+    f"Contact fraction: {aggregated['mean_contact_fraction']:.1%} "
+    f"± {aggregated['mean_contact_fraction_sem']:.1%}"
 )
 ```
 ````
@@ -213,7 +223,6 @@ print(
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `false` | Whether to run contact analysis |
 | `polymer_selection` | str | `"chainID C"` | MDAnalysis selection for polymer atoms |
 | `protein_selection` | str | `"protein"` | MDAnalysis selection for protein atoms |
 | `cutoff` | float | `4.5` | Distance cutoff in Angstroms |
@@ -260,13 +269,14 @@ polyzymd compare run contacts -f comparison.yaml
 # See the YAML tab for the recommended workflow.
 #
 # To load results programmatically after running:
-from polyzymd.analyses.contacts._results import ContactResult
+import json
+from pathlib import Path
 
-result = ContactResult.load("analysis/<condition>/contacts/run_1/contacts.json")
+result = json.loads(Path("analysis/<condition>/contacts/run_1/result.json").read_text())
 
 # Access residence time data
-for polymer_type, stats in result.residence_times.items():
-    print(f"{polymer_type}: mean={stats.mean:.2f} frames, max={stats.max} frames ({stats.n_events} events)")
+for polymer_type, stats in result["residence_times"].items():
+    print(f"{polymer_type}: mean={stats['mean']:.2f} frames, max={stats['max']} frames ({stats['n_events']} events)")
 ```
 ````
 `````
@@ -321,15 +331,16 @@ polyzymd compare run contacts -f comparison.yaml
 # See the YAML tab for the recommended workflow.
 #
 # To load aggregated results programmatically after running:
-from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
+import json
+from pathlib import Path
 
-aggregated = AggregatedContactResult.load(
-    "analysis/<condition>/contacts/aggregated/contacts_aggregated.json"
+aggregated = json.loads(
+    Path("analysis/<condition>/contacts/aggregated/result.json").read_text()
 )
 
-print(f"Contact fraction: {aggregated.mean_contact_fraction:.1%} ± {aggregated.std_contact_fraction:.1%}")
-for polymer_type, stats in aggregated.residence_times.items():
-    print(f"{polymer_type}: {stats.mean:.2f} ± {stats.std:.2f} frames")
+print(f"Contact fraction: {aggregated['mean_contact_fraction']:.1%} ± {aggregated['mean_contact_fraction_sem']:.1%}")
+for polymer_type, stats in aggregated["residence_time_by_polymer_type"].items():
+    print(f"{polymer_type}: {stats['mean']:.2f} ± {stats['std']:.2f} frames")
 ```
 ````
 `````
@@ -387,9 +398,13 @@ project/
     └── <condition>/
         └── contacts/
             ├── run_1/
-            │   └── contacts.json
+            │   └── result.json
+            ├── run_2/
+            │   └── result.json
+            ├── run_3/
+            │   └── result.json
             └── aggregated/
-                └── contacts_aggregated.json
+                └── result.json
 ```
 
 The JSON file contains per-residue contact data including:
@@ -440,10 +455,11 @@ polyzymd compare run contacts -f comparison.yaml
 # See the YAML tab for the recommended workflow.
 #
 # To load results programmatically after running:
-from polyzymd.analyses.contacts._results import ContactResult
+import json
+from pathlib import Path
 
-result = ContactResult.load("analysis/<condition>/contacts/run_1/contacts.json")
-print(f"Coverage: {result.coverage:.1%}")
+result = json.loads(Path("analysis/<condition>/contacts/run_1/result.json").read_text())
+print(f"Coverage: {result['coverage_fraction']:.1%}")
 ```
 ````
 `````
@@ -488,10 +504,11 @@ polyzymd compare run contacts -f comparison.yaml
 # See the YAML tab for the recommended workflow.
 #
 # To load results programmatically after running:
-from polyzymd.analyses.contacts._results import ContactResult
+import json
+from pathlib import Path
 
-result = ContactResult.load("analysis/<condition>/contacts/run_1/contacts.json")
-print(f"Mean contact fraction: {result.mean_contact_fraction:.1%}")
+result = json.loads(Path("analysis/<condition>/contacts/run_1/result.json").read_text())
+print(f"Mean contact fraction: {result['mean_contact_fraction']:.1%}")
 ```
 ````
 `````
@@ -514,7 +531,7 @@ of polymer type and protein amino acid class:
 ```python
 from polyzymd.analyses.contacts._results import ContactResult
 
-result = ContactResult.load("analysis/<condition>/contacts/run_1/contacts.json")
+result = ContactResult.load("analysis/<condition>/contacts/run_1/result.json")
 
 # Get contact fraction by (polymer_type, protein_AA_class)
 matrix = result.interaction_matrix(metric="contact_fraction")
@@ -522,6 +539,13 @@ matrix = result.interaction_matrix(metric="contact_fraction")
 # Compare polymer types contacting aromatic residues
 print(f"SBMA-aromatic: {matrix['SBM']['aromatic']:.1%}")
 print(f"EGMA-aromatic: {matrix['EGM']['aromatic']:.1%}")
+```
+
+```{note}
+The `interaction_matrix()` and `coverage_by_group()` methods require loading
+results via `ContactResult.load()` (from the private `_results` module)
+rather than plain JSON. This API may change in a future release — prefer
+the CLI workflow for standard comparisons.
 ```
 
 **Example output:**
