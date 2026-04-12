@@ -529,7 +529,7 @@ def run_comparison(
 def _generate_analysis_plots(
     config: ComparisonConfig,
     analysis_names: list[str] | None = None,
-) -> list[Path]:
+) -> tuple[list[Path], list[tuple[str, str]]]:
     """Generate plots for analysis plugins using the plugin system.
 
     Builds :class:`~polyzymd.analyses.base.PlotContext` objects for each
@@ -544,8 +544,9 @@ def _generate_analysis_plots(
 
     Returns
     -------
-    list[Path]
-        Paths to all generated figure files.
+    tuple[list[Path], list[tuple[str, str]]]
+        A tuple of (generated_paths, failures) where failures is a list
+        of (analysis_name, error_message) tuples.
     """
     from polyzymd.analyses.base import Condition, PlotContext
     from polyzymd.analyses.discovery import get_analysis
@@ -581,12 +582,13 @@ def _generate_analysis_plots(
     figures_base = figures_base.resolve()
 
     generated: list[Path] = []
+    failures: list[tuple[str, str]] = []
 
     for name in analysis_names:
         try:
             analysis_cls = get_analysis(name)
         except KeyError:
-            LOGGER.warning(f"Unknown analysis type {name!r} — skipping plots.")
+            failures.append((name, f"Unknown analysis type {name!r}"))
             continue
 
         analysis = analysis_cls()
@@ -624,8 +626,9 @@ def _generate_analysis_plots(
             generated.extend(paths)
         except Exception as e:
             LOGGER.error(f"Failed to generate plots for {name}: {e}")
+            failures.append((name, str(e)))
 
-    return generated
+    return generated, failures
 
 
 @compare.command("plot-all")
@@ -724,6 +727,20 @@ def plot_all(
 
     # Determine which analyses to plot
     if analysis_type:
+        # Validate the requested analysis type exists
+        from polyzymd.analyses.discovery import get_analysis
+
+        try:
+            get_analysis(analysis_type)
+        except KeyError:
+            from polyzymd.analyses.discovery import list_all_names
+
+            available = list_all_names()
+            raise click.BadParameter(
+                f"Unknown analysis type '{analysis_type}'. "
+                f"Available: {', '.join(sorted(available))}",
+                param_hint="'-a' / '--analysis'",
+            )
         target_analyses = [analysis_type]
     else:
         target_analyses = list(enabled)
@@ -760,16 +777,8 @@ def plot_all(
     click.echo()
 
     # Generate plots
-    try:
-        click.echo(f"Generating plots for: {', '.join(target_analyses)}...")
-        generated = _generate_analysis_plots(config, target_analyses)
-    except Exception as e:
-        click.echo(f"Error generating plots: {e}", err=True)
-        if debug:
-            import traceback
-
-            traceback.print_exc()
-        sys.exit(1)
+    click.echo(f"Generating plots for: {', '.join(target_analyses)}...")
+    generated, failures = _generate_analysis_plots(config, target_analyses)
 
     click.echo()
     if generated:
@@ -778,6 +787,13 @@ def plot_all(
             click.echo(f"  - {path}")
     else:
         click.echo("No plots generated. Check that analyses are enabled in config.")
+
+    if failures:
+        click.echo()
+        click.echo(f"Failed ({len(failures)}):", err=True)
+        for name, msg in failures:
+            click.echo(f"  - {name}: {msg}", err=True)
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -916,15 +932,15 @@ def run_all(
         click.echo()
         click.echo("Generating plots ...")
 
-        try:
-            generated = _generate_analysis_plots(config, succeeded)
-            click.echo(f"Generated {len(generated)} plots.")
-        except Exception as e:
-            click.echo(f"Error generating plots: {e}", err=True)
-            if debug:
-                import traceback
-
-                traceback.print_exc()
+        generated, plot_failures = _generate_analysis_plots(config, succeeded)
+        click.echo(f"Generated {len(generated)} plots.")
+        if plot_failures:
+            click.echo(f"Plot failures ({len(plot_failures)}):", err=True)
+            for name, msg in plot_failures:
+                click.echo(f"  - {name}: {msg}", err=True)
+            # Plot failures also trigger non-zero exit
+            if not failed:
+                failed.append(("plot", "some plots failed"))
 
     # Exit with error code if any comparison failed
     if failed:
