@@ -824,7 +824,7 @@ class TestFilterConditions:
 
         mock_sim_config = MagicMock()
         mock_sim_config.output.projects_directory = tmp_path / "projects"
-        mock_sim_config.get_working_directory.side_effect = Exception("boom")
+        mock_sim_config.get_working_directory.side_effect = OSError("boom")
 
         cond = Condition(
             label="ErrorCond",

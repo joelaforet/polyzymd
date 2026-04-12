@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 import numpy as np
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from polyzymd.analyses.base import (
     AggregateContext,
@@ -831,7 +831,7 @@ class ContactsAnalysis(Analysis):
                         f"with selection "
                         f"'{resolved.polymer_selection}'"
                     )
-            except Exception as e:
+            except (AttributeError, ValueError, KeyError, OSError) as e:
                 logger.warning(f"  Error checking condition '{cond.label}': {e} — including anyway")
                 valid.append(cond)
 
@@ -1041,7 +1041,7 @@ class ContactsAnalysis(Analysis):
                 result = plot_fn(data, labels, ctx.output_dir, plot_settings)
                 if result:
                     plots.extend(result)
-            except Exception as exc:
+            except (ValueError, RuntimeError, OSError) as exc:
                 fn_name = getattr(plot_fn, "__name__", repr(plot_fn))
                 logger.warning(f"{fn_name} plot failed: {exc}")
 
@@ -1119,7 +1119,7 @@ class ContactsAnalysis(Analysis):
                     return True
                 else:
                     logger.debug(f"  {cond.label} rep {rep}: 0 polymer atoms")
-            except Exception as e:
+            except (AttributeError, ValueError, KeyError, OSError) as e:
                 logger.warning(f"  Error checking {cond.label} rep {rep}: {e}")
                 continue
 
@@ -1707,7 +1707,7 @@ class ContactsAnalysis(Analysis):
                         logger.info(f"  Computed binding preference for {cond.label}")
                         continue
 
-            except Exception as e:
+            except (FileNotFoundError, ValueError, OSError, ValidationError, KeyError) as e:
                 logger.warning(f"Could not load/compute binding preference for {cond.label}: {e}")
                 continue
 
@@ -1887,7 +1887,7 @@ class ContactsAnalysis(Analysis):
                     ttest_result = independent_ttest(values_a, values_b)
                     key = f"{cond_a}_vs_{cond_b}"
                     pairwise_p_values[key] = ttest_result.p_value
-                except Exception as e:
+                except (ValueError, RuntimeError) as e:
                     logger.warning(f"T-test failed for {cond_a} vs {cond_b}: {e}")
 
         return pairwise_p_values

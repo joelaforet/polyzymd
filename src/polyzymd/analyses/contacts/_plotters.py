@@ -11,11 +11,13 @@ in this module.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
 import numpy as np
+from pydantic import ValidationError
 
 from polyzymd.analyses.shared.aa_classification import CANONICAL_AA_CLASS_ORDER
 from polyzymd.analyses.shared.plotting import (
@@ -223,7 +225,7 @@ def _load_binding_preference_results(
             result = AggregatedBindingPreferenceResult.load(result_file)
             results[label] = result
             logger.debug(f"Loaded binding preference for {label} from {result_file}")
-        except Exception as e:
+        except (OSError, ValueError, ValidationError) as e:
             logger.warning(f"Failed to load binding preference {result_file}: {e}")
 
     return results
@@ -282,7 +284,7 @@ def _load_system_coverage_results(
                 logger.debug(f"Loaded system coverage for {label} from {result_file}")
             else:
                 logger.debug(f"No system coverage in {result_file}")
-        except Exception as e:
+        except (OSError, ValueError, ValidationError) as e:
             logger.warning(f"Failed to load binding preference {result_file}: {e}")
 
     return results
@@ -335,7 +337,7 @@ def _load_aggregated_contact_results(
             result = AggregatedContactResult.load(result_file)
             results[label] = result
             logger.debug(f"Loaded aggregated contacts for {label} from {result_file}")
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, ValidationError) as e:
             logger.warning(f"Failed to load aggregated contacts {result_file}: {e}")
 
     return results

@@ -699,7 +699,7 @@ class DistanceCalculator:
                 kde_peak = float(kde_x_arr[peak_idx])
 
                 logger.debug(f"KDE peak (mode): {kde_peak:.2f} Å")
-            except Exception as e:
+            except (ValueError, np.linalg.LinAlgError, RuntimeError) as e:
                 logger.warning(f"KDE computation failed: {e}")
 
         # ========================================
@@ -736,7 +736,7 @@ class DistanceCalculator:
                     f"{correlation_time_unit}, n_ind={n_independent_frames}, "
                     f"SEM={sem_distance:.3f} Å"
                 )
-            except Exception as e:
+            except (ValueError, np.linalg.LinAlgError, RuntimeError) as e:
                 logger.warning(f"Autocorrelation analysis failed: {e}")
                 sem_distance = float(std_dist / np.sqrt(n_frames_used))
 
@@ -1261,19 +1261,19 @@ class DistancesAnalysis(Analysis):
         try:
             result = _plot_distance_kde(data, labels, ctx.output_dir, plot_settings)
             plots.extend(result)
-        except Exception as exc:
+        except (ValueError, RuntimeError, OSError) as exc:
             logger.warning(f"Distance KDE plot failed: {exc}")
 
         try:
             result = _plot_distance_threshold_bars(data, labels, ctx.output_dir, plot_settings)
             plots.extend(result)
-        except Exception as exc:
+        except (ValueError, RuntimeError, OSError) as exc:
             logger.warning(f"Distance threshold bars plot failed: {exc}")
 
         try:
             result = _plot_distance_state_bars(data, labels, ctx.output_dir, plot_settings)
             plots.extend(result)
-        except Exception as exc:
+        except (ValueError, RuntimeError, OSError) as exc:
             logger.warning(f"Distance state bars plot failed: {exc}")
 
         return plots

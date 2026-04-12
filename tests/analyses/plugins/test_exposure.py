@@ -273,7 +273,7 @@ class TestFilterConditions:
 
         mock_sim = MagicMock()
         # Accessing .polymers raises
-        type(mock_sim).polymers = property(lambda s: (_ for _ in ()).throw(RuntimeError("boom")))
+        type(mock_sim).polymers = property(lambda s: (_ for _ in ()).throw(OSError("boom")))
 
         cond = Condition(
             label="ErrorCond",
@@ -692,11 +692,11 @@ class TestPlot:
 
     @patch(
         "polyzymd.analyses.exposure._plot_enrichment_heatmap",
-        side_effect=Exception("plot error"),
+        side_effect=RuntimeError("plot error"),
     )
     @patch(
         "polyzymd.analyses.exposure._plot_chaperone_fraction",
-        side_effect=Exception("plot error"),
+        side_effect=RuntimeError("plot error"),
     )
     def test_plot_propagates_exceptions(self, mock_chaperone_fn, mock_heatmap_fn, tmp_path):
         from polyzymd.analyses.base import Condition, PlotContext
@@ -724,7 +724,7 @@ class TestPlot:
             plot_settings=PlotSettings(),
         )
 
-        with pytest.raises(Exception, match="plot error"):
+        with pytest.raises(RuntimeError, match="plot error"):
             analysis.plot(ctx)
 
 

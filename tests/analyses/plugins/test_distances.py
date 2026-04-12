@@ -1002,7 +1002,7 @@ class TestPlot:
             patch("polyzymd.analyses.distances._plot_distance_threshold_bars") as MockThreshold,
             patch("polyzymd.analyses.distances._plot_distance_state_bars") as MockState,
         ):
-            MockKDE.side_effect = Exception("KDE failed")
+            MockKDE.side_effect = RuntimeError("KDE failed")
             MockThreshold.return_value = [Path("bars.png")]
             MockState.return_value = [Path("state.png")]
 

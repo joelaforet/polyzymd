@@ -328,7 +328,7 @@ class ExposureAnalysis(Analysis):
                     logger.info(f"  Excluding '{cond.label}': no polymer configured")
                     continue
                 valid.append(cond)
-            except Exception as e:
+            except (AttributeError, ValueError, KeyError, OSError) as e:
                 logger.warning(f"  Error checking condition '{cond.label}': {e}")
                 valid.append(cond)  # fail-open
 

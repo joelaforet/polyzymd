@@ -398,7 +398,7 @@ def _load_pooled_distances(analysis_dir: Path, replicates: list[int]) -> dict[st
                         if threshold is not None and pair_label not in thresholds:
                             thresholds[pair_label] = float(threshold)
 
-            except Exception as exc:
+            except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
                 logger.debug(f"Failed to load {result_file}: {exc}")
 
     result: dict[str, dict[str, Any]] = {}
@@ -461,7 +461,7 @@ def _load_distance_aggregated_results(
         try:
             with result_file.open(encoding="utf-8") as f:
                 results[label] = json.load(f)
-        except Exception as exc:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
             logger.warning(f"Failed to load {result_file}: {exc}")
 
     return results
