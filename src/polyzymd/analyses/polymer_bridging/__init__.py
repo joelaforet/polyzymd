@@ -441,6 +441,7 @@ class PolymerBridgingAnalysis(Analysis):
             polymer_selection=ctx.settings.polymer_selection,
             cutoff=float(ctx.settings.cutoff),
             equilibration=ctx.equilibration,
+            min_ca_distance_angstrom=float(ctx.settings.min_ca_distance_angstrom),
         )
         stats = _compute_bridging_statistics_from_frames(
             frame_contacts,
@@ -1433,15 +1434,6 @@ def _get_nested_summary(summary: Any, field_name: str) -> dict[str, dict[str, fl
     return dict(getattr(summary, field_name, {}))
 
 
-def _estimate_ca_distances_from_resids(resids: Sequence[int]) -> dict[tuple[int, int], float]:
-    """Fallback CA distance estimate from residue-id spacing."""
-    distances: dict[tuple[int, int], float] = {}
-    for i, resid_i in enumerate(resids):
-        for resid_j in resids[i + 1 :]:
-            distances[(resid_i, resid_j)] = 3.8 * abs(resid_j - resid_i)
-    return distances
-
-
 def _sem(values: Sequence[float]) -> float:
     arr = np.asarray(list(values), dtype=float)
     if arr.size <= 1:
@@ -1545,6 +1537,7 @@ def _compute_frame_contacts(
     polymer_selection: str,
     cutoff: float,
     equilibration: str,
+    min_ca_distance_angstrom: float = 0.0,
 ) -> tuple[list[FrameContactObservation], int, float]:
     """Compute per-fragment, per-frame contact observations from a trajectory.
 
@@ -1569,6 +1562,10 @@ def _compute_frame_contacts(
     equilibration : str
         Equilibration time string (e.g., ``"10ns"``). Frames before this
         time are skipped.
+    min_ca_distance_angstrom : float, optional
+        Minimum CA-CA distance threshold used for geometric filtering.
+        If greater than zero and no protein CA atoms are available in the
+        selected topology, analysis fails with ``ValueError``.
 
     Returns
     -------
@@ -1592,8 +1589,6 @@ def _compute_frame_contacts(
 
     protein_atom_to_resid = np.array([int(atom.resid) for atom in protein.atoms], dtype=np.int64)
     protein_atom_to_resname = np.array([str(atom.resname) for atom in protein.atoms], dtype=object)
-    protein_resids = [int(res.resid) for res in protein.residues]
-    fallback_ca_distances = _estimate_ca_distances_from_resids(protein_resids)
     protein_grouping = ProteinAAClassification()
     ca_atom_index_by_resid: dict[int, int] = {}
     for residue in protein.residues:
@@ -1601,6 +1596,11 @@ def _compute_frame_contacts(
         if len(ca) == 0:
             continue
         ca_atom_index_by_resid[int(residue.resid)] = int(ca.indices[0])
+    if min_ca_distance_angstrom > 0.0 and not ca_atom_index_by_resid:
+        raise ValueError(
+            "No CA atoms were found in the selected protein topology while "
+            "min_ca_distance_angstrom > 0; fix topology files to include CA labels"
+        )
 
     eq_value, eq_unit = parse_time_string(equilibration)
     timestep_ps = loader.get_timestep(replicate, unit="ps")
@@ -1659,7 +1659,6 @@ def _compute_frame_contacts(
                         residue_ids,
                         all_positions,
                         ca_atom_index_by_resid,
-                        fallback_ca_distances,
                     ),
                     pair_min_distances=pair_min_distances,
                 )
@@ -1671,7 +1670,6 @@ def _observation_ca_distances(
     residues: set[int],
     all_positions: np.ndarray,
     ca_atom_index_by_resid: dict[int, int],
-    fallback_distances: ResiduePairDistances,
 ) -> ResiduePairDistances:
     """Compute frame-wise CA distances for one contacted residue set."""
     distances: ResiduePairDistances = {}
@@ -1685,8 +1683,6 @@ def _observation_ca_distances(
                 pos_i = all_positions[idx_i]
                 pos_j = all_positions[idx_j]
                 distances[key] = float(np.linalg.norm(pos_i - pos_j))
-            elif key in fallback_distances:
-                distances[key] = fallback_distances[key]
     return distances
 
 

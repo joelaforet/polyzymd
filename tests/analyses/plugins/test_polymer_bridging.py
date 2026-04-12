@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
@@ -116,6 +116,102 @@ class TestCoreComputation:
         assert stats["polymer_anchor_type_probabilities"]["SBM"] == pytest.approx(1.0)
         assert stats["multivalent_protein_group_probabilities"]["nonpolar"] > 0.0
         assert "SBM-EGM-SBM-EGM-SBM" in stats["fragment_signature_probabilities"]
+
+
+class TestCAValidation:
+    """Verify loud failure when CA atoms are missing for distance filtering."""
+
+    def test_no_ca_atoms_with_distance_filter_raises(self):
+        """Raise ValueError when CA filtering is requested but no CA atoms exist."""
+        condition = MagicMock()
+        condition.sim_config = MagicMock()
+
+        mock_loader = MagicMock()
+        mock_universe = MagicMock()
+
+        atom = MagicMock()
+        atom.resid = 1
+        atom.resname = "ALA"
+
+        mock_protein = MagicMock()
+        mock_protein.__len__.return_value = 1
+        mock_protein.atoms = [atom]
+        mock_residue = MagicMock()
+        mock_residue.resid = 1
+        mock_ca_selection = MagicMock()
+        mock_ca_selection.__len__.return_value = 0
+        mock_residue.atoms.select_atoms.return_value = mock_ca_selection
+        mock_protein.residues = [mock_residue]
+
+        mock_polymer = MagicMock()
+        mock_polymer.__len__.return_value = 1
+
+        mock_universe.select_atoms.side_effect = [mock_protein, mock_polymer]
+        mock_loader.load_universe.return_value = mock_universe
+
+        with patch(
+            "polyzymd.analyses.shared.loader.TrajectoryLoader",
+            return_value=mock_loader,
+        ):
+            with pytest.raises(ValueError, match="(?i)no CA atoms"):
+                PolymerBridgingAnalysis._compute_frame_contacts(
+                    condition,
+                    1,
+                    protein_selection="protein",
+                    polymer_selection="chainID C",
+                    cutoff=4.5,
+                    equilibration="0ns",
+                    min_ca_distance_angstrom=8.0,
+                )
+
+    def test_no_ca_atoms_without_distance_filter_succeeds(self):
+        """Allow execution when CA filtering is disabled."""
+        condition = MagicMock()
+        condition.sim_config = MagicMock()
+
+        mock_loader = MagicMock()
+        mock_universe = MagicMock()
+
+        atom = MagicMock()
+        atom.resid = 1
+        atom.resname = "ALA"
+
+        mock_protein = MagicMock()
+        mock_protein.__len__.return_value = 1
+        mock_protein.atoms = [atom]
+        mock_residue = MagicMock()
+        mock_residue.resid = 1
+        mock_ca_selection = MagicMock()
+        mock_ca_selection.__len__.return_value = 0
+        mock_residue.atoms.select_atoms.return_value = mock_ca_selection
+        mock_protein.residues = [mock_residue]
+
+        mock_polymer = MagicMock()
+        mock_polymer.__len__.return_value = 1
+        mock_polymer.fragments = []
+
+        mock_universe.select_atoms.side_effect = [mock_protein, mock_polymer]
+        mock_universe.trajectory = []
+        mock_loader.load_universe.return_value = mock_universe
+        mock_loader.get_timestep.return_value = 10.0
+
+        with patch(
+            "polyzymd.analyses.shared.loader.TrajectoryLoader",
+            return_value=mock_loader,
+        ):
+            observations, n_frames, timestep_ps = PolymerBridgingAnalysis._compute_frame_contacts(
+                condition,
+                1,
+                protein_selection="protein",
+                polymer_selection="chainID C",
+                cutoff=4.5,
+                equilibration="0ns",
+                min_ca_distance_angstrom=0.0,
+            )
+
+        assert observations == []
+        assert n_frames == 0
+        assert timestep_ps == pytest.approx(10.0)
 
 
 class TestLifecycle:
