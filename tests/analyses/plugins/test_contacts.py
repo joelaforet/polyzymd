@@ -1385,6 +1385,66 @@ class TestPlot:
             assert mock_fn.call_args[0][3] is ps, f"{name} did not receive PlotSettings as 4th arg"
 
 
+class TestPartitionDefinitions:
+    """Tests for contacts partition auto-fill behavior."""
+
+    def test_load_partition_definitions_does_not_mutate_settings(self):
+        from polyzymd.analyses.contacts import ContactsSettings
+        from polyzymd.analyses.contacts._plotters import _load_partition_definitions
+
+        settings = ContactsSettings(
+            protein_groups={"nterm": [1, 2], "cterm": [5, 6]},
+            protein_partitions={"left": ["nterm"], "right": ["cterm"]},
+        )
+        original_groups = {k: list(v) for k, v in settings.protein_groups.items()}
+        original_partitions = {k: list(v) for k, v in settings.protein_partitions.items()}
+
+        data = {"__meta__": {"settings": settings}}
+        groups, partitions = _load_partition_definitions(data, all_resids={1, 2, 3, 4, 5, 6})
+
+        assert settings.protein_groups == original_groups
+        assert settings.protein_partitions == original_partitions
+        assert groups is not settings.protein_groups
+        assert partitions is not settings.protein_partitions
+
+    def test_auto_fill_creates_unique_remainder_group_per_partition(self):
+        from polyzymd.analyses.contacts import ContactsSettings
+        from polyzymd.analyses.contacts._plotters import _load_partition_definitions
+
+        settings = ContactsSettings(
+            protein_groups={"nterm": [1, 2], "cterm": [5, 6]},
+            protein_partitions={"left": ["nterm"], "right": ["cterm"]},
+        )
+
+        data = {"__meta__": {"settings": settings}}
+        groups, partitions = _load_partition_definitions(data, all_resids={1, 2, 3, 4, 5, 6})
+
+        left_remainder = partitions["left"][-1]
+        right_remainder = partitions["right"][-1]
+
+        assert left_remainder == "_rest_of_left"
+        assert right_remainder == "_rest_of_right"
+        assert left_remainder != right_remainder
+        assert set(groups[left_remainder]) == {3, 4, 5, 6}
+        assert set(groups[right_remainder]) == {1, 2, 3, 4}
+
+    def test_repeated_calls_are_idempotent(self):
+        from polyzymd.analyses.contacts import ContactsSettings
+        from polyzymd.analyses.contacts._plotters import _load_partition_definitions
+
+        settings = ContactsSettings(
+            protein_groups={"nterm": [1, 2], "cterm": [5, 6]},
+            protein_partitions={"left": ["nterm"], "right": ["cterm"]},
+        )
+        data = {"__meta__": {"settings": settings}}
+
+        groups_1, partitions_1 = _load_partition_definitions(data, all_resids={1, 2, 3, 4, 5, 6})
+        groups_2, partitions_2 = _load_partition_definitions(data, all_resids={1, 2, 3, 4, 5, 6})
+
+        assert groups_1 == groups_2
+        assert partitions_1 == partitions_2
+
+
 # ---------------------------------------------------------------------------
 # Binding preference sub-pipeline
 # ---------------------------------------------------------------------------

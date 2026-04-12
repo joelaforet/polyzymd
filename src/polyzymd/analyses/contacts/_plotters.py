@@ -10,6 +10,7 @@ in this module.
 
 from __future__ import annotations
 
+import copy
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
@@ -385,9 +386,15 @@ def _load_partition_definitions(
     # Access via getattr to avoid LSP errors (the comparison config settings
     # object doesn't declare protein_groups/protein_partitions directly;
     # ContactsSettings does)
-    protein_groups: dict[str, list[int]] = getattr(contacts_settings, "protein_groups", None) or {}
+    protein_groups: dict[str, list[int]] = (
+        copy.deepcopy(getattr(contacts_settings, "protein_groups", None))
+        if getattr(contacts_settings, "protein_groups", None)
+        else {}
+    )
     protein_partitions: dict[str, list[str]] = (
-        getattr(contacts_settings, "protein_partitions", None) or {}
+        copy.deepcopy(getattr(contacts_settings, "protein_partitions", None))
+        if getattr(contacts_settings, "protein_partitions", None)
+        else {}
     )
 
     # Auto-fill incomplete partitions
@@ -399,7 +406,7 @@ def _load_partition_definitions(
                     covered.update(protein_groups[gname])
             remaining = sorted(all_resids - covered)
             if remaining:
-                auto_group = "rest_of_protein"
+                auto_group = f"_rest_of_{partition_name}"
                 protein_groups[auto_group] = remaining
                 protein_partitions[partition_name] = list(group_names) + [auto_group]
                 logger.info(
