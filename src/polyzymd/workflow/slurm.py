@@ -15,6 +15,7 @@ batch scripts for self-resubmitting MD simulation jobs.
 from __future__ import annotations
 
 import logging
+import re as _re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,6 +42,38 @@ PRESET_DEFAULT_PIXI_ENV: Dict[str, str] = {
     "bridges2": "cuda-12-6",
     "testing": "cuda-12-4",
 }
+
+# Pattern allowing alphanumerics, common path chars, and SLURM-safe punctuation
+# Intentionally excludes shell metacharacters: ; | & $ ` ( ) { } < > ' " \ !
+_SAFE_SCRIPT_VALUE = _re.compile(r"^[A-Za-z0-9._/,:\-@%=+ ]+$")
+
+
+def _validate_script_value(value: str, field_name: str) -> str:
+    """Reject values containing shell metacharacters before bash interpolation.
+
+    Parameters
+    ----------
+    value : str
+        The value to validate.
+    field_name : str
+        Name of the field for error messages.
+
+    Returns
+    -------
+    str
+        The validated value unchanged.
+
+    Raises
+    ------
+    ValueError
+        If the value contains unsafe characters.
+    """
+    if not _SAFE_SCRIPT_VALUE.match(value):
+        raise ValueError(
+            f"SLURM script field '{field_name}' contains unsafe characters: {value!r}. "
+            "Only alphanumerics and -_./:,@%=+ are allowed."
+        )
+    return value
 
 
 def _discover_manifest_path() -> str:
@@ -531,6 +564,29 @@ exit 0
 
         # Auto-detect the pixi manifest path from the current installation.
         manifest_path = _discover_manifest_path()
+
+        # Validate all interpolated string values against shell injection
+        _validate_script_value(self._config.partition, "partition")
+        _validate_script_value(job_name, "job_name")
+        _validate_script_value(output_file, "output_file")
+        _validate_script_value(self._config.time_limit, "time_limit")
+        _validate_script_value(self._pixi_env, "pixi_env")
+        _validate_script_value(str(manifest_path), "manifest_path")
+        _validate_script_value(str(config_path), "config_path")
+        _validate_script_value(str(working_dir), "working_dir")
+
+        if self._config.qos:
+            _validate_script_value(self._config.qos, "qos")
+        if self._config.memory:
+            _validate_script_value(self._config.memory, "memory")
+        if self._config.account:
+            _validate_script_value(self._config.account, "account")
+        if self._config.email:
+            _validate_script_value(self._config.email, "email")
+        if self._config.exclude:
+            _validate_script_value(self._config.exclude, "exclude")
+        if self._config.gpu_type:
+            _validate_script_value(self._config.gpu_type, "gpu_type")
 
         return self.JOB_TEMPLATE.format(
             partition=self._config.partition,

@@ -10,7 +10,6 @@ Covers:
 - Pixi environment activation in generated scripts
 """
 
-
 import pytest
 
 from polyzymd.workflow.slurm import (
@@ -307,9 +306,9 @@ class TestJobTemplateExitCodeHandling:
         template = SlurmScriptGenerator.JOB_TEMPLATE
         pos_concurrent = template.index("if [ $RC -eq 2 ]")
         pos_fatal = template.index("if [ $RC -ne 0 ] && [ $RC -ne 99 ]")
-        assert (
-            pos_concurrent < pos_fatal
-        ), "Exit code 2 guard must appear before the generic fatal-error guard"
+        assert pos_concurrent < pos_fatal, (
+            "Exit code 2 guard must appear before the generic fatal-error guard"
+        )
 
     def test_template_fatal_check_excludes_code_2(self):
         """The fatal-error guard checks 'RC -ne 0 && RC -ne 99'.
@@ -319,3 +318,63 @@ class TestJobTemplateExitCodeHandling:
         """
         template = SlurmScriptGenerator.JOB_TEMPLATE
         assert "if [ $RC -ne 0 ] && [ $RC -ne 99 ]" in template
+
+
+class TestScriptValueValidation:
+    """C8-H4: SLURM script values should reject shell metacharacters."""
+
+    def test_semicolon_injection_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value("gpu; rm -rf /", "partition")
+
+    def test_pipe_injection_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value("gpu | cat /etc/passwd", "partition")
+
+    def test_dollar_injection_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value("$HOME", "pixi_env")
+
+    def test_backtick_injection_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value("`whoami`", "job_name")
+
+    def test_newline_injection_rejected(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value("job\n#SBATCH --partition=evil", "job_name")
+
+    def test_valid_partition_accepted(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        assert _validate_script_value("blanca-shirts", "partition") == "blanca-shirts"
+
+    def test_comma_partition_accepted(self):
+        """Comma-separated partitions like 'blanca,blanca-shirts' should work."""
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        assert _validate_script_value("blanca,blanca-shirts", "partition") == "blanca,blanca-shirts"
+
+    def test_valid_path_accepted(self):
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        assert (
+            _validate_script_value("/home/user/project/config.yaml", "config_path")
+            == "/home/user/project/config.yaml"
+        )
+
+    def test_empty_string_rejected(self):
+        """Empty strings should be rejected with the safe pattern."""
+        from polyzymd.workflow.slurm import _validate_script_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_script_value("", "partition")
