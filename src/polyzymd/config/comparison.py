@@ -623,12 +623,10 @@ class ComparisonConfig(BaseModel):
             "plot_settings",
         }
         unknown_keys = sorted(set(data.keys()) - allowed_keys)
-        for key in unknown_keys:
-            logger.warning(
-                "comparison.yaml contains unknown top-level key '%s'; it will be ignored. "
-                "Valid keys: %s",
-                key,
-                ", ".join(sorted(allowed_keys)),
+        if unknown_keys:
+            raise ValueError(
+                f"comparison.yaml contains unknown top-level key(s): {unknown_keys}. "
+                f"Valid keys: {', '.join(sorted(allowed_keys))}"
             )
 
         if "plugins" not in data:
