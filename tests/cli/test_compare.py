@@ -362,12 +362,15 @@ def test_finalize_command_loads_aggregated_and_runs(monkeypatch, tmp_path: Path)
     )
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.prepare_comparison_run",
-        lambda plugin, config, equilibration: (
-            [condition],
-            SimpleNamespace(),
-            "10ns",
-            tmp_path / "analysis",
-        ),
+        lambda plugin, config, equilibration: {
+            "all_conditions": [condition],
+            "valid_conditions": [condition],
+            "excluded_conditions": [],
+            "condition_by_label": {condition.label: condition},
+            "settings": SimpleNamespace(),
+            "equilibration": "10ns",
+            "analysis_root": tmp_path / "analysis",
+        },
     )
     monkeypatch.setattr("polyzymd.analyses.shared.paths.sanitize_label", lambda label: label)
     monkeypatch.setattr(
@@ -527,12 +530,15 @@ def test_finalize_with_missing_conditions(monkeypatch, tmp_path: Path) -> None:
     )
     monkeypatch.setattr(
         "polyzymd.analyses.orchestrator.prepare_comparison_run",
-        lambda plugin, config, equilibration: (
-            [condition],
-            SimpleNamespace(),
-            "10ns",
-            tmp_path / "analysis",
-        ),
+        lambda plugin, config, equilibration: {
+            "all_conditions": [condition],
+            "valid_conditions": [condition],
+            "excluded_conditions": [],
+            "condition_by_label": {condition.label: condition},
+            "settings": SimpleNamespace(),
+            "equilibration": "10ns",
+            "analysis_root": tmp_path / "analysis",
+        },
     )
     monkeypatch.setattr("polyzymd.analyses.shared.paths.sanitize_label", lambda label: label)
 
@@ -683,12 +689,15 @@ def test_validate_manifest_snapshot_detects_real_drift(monkeypatch, tmp_path: Pa
     drifted_settings = _Settings(threshold=2.5)
     monkeypatch.setattr(
         "polyzymd.workflow.analysis_slurm.prepare_comparison_run",
-        lambda analysis, config, equilibration: (
-            submitted_conditions,
-            drifted_settings,
-            "10ns",
-            tmp_path / "analysis",
-        ),
+        lambda analysis, config, equilibration: {
+            "all_conditions": submitted_conditions,
+            "valid_conditions": submitted_conditions,
+            "excluded_conditions": [],
+            "condition_by_label": {c.label: c for c in submitted_conditions},
+            "settings": drifted_settings,
+            "equilibration": "10ns",
+            "analysis_root": tmp_path / "analysis",
+        },
     )
 
     with pytest.raises(RuntimeError, match="Manifest/config drift detected"):
