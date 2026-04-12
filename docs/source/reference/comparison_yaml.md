@@ -51,7 +51,7 @@ plugins:
 
 **Legacy key handling:**
 - `analysis_settings:` is accepted as a backward-compatible alias for `plugins:` (emits deprecation warning).
-- Unknown top-level keys are logged as warnings and ignored.
+- Unknown top-level keys raise a `ValueError` listing the invalid keys and valid alternatives.
 
 ---
 
@@ -92,6 +92,8 @@ defaults.
 | `reference_mode` | string | `"centroid"` | Reference structure: `"centroid"`, `"average"`, `"frame"`, or `"external"` |
 | `reference_frame` | int | `null` | Required when `reference_mode` is `"frame"` |
 | `reference_file` | path | `null` | Path to external PDB reference structure. Required when `reference_mode` is `"external"`. Also used for secondary structure annotation on profile plots. |
+| `alignment_selection` | string | `"protein and name CA"` | MDAnalysis selection used for trajectory alignment before RMSF calculation |
+| `centroid_selection` | string | `"protein"` | MDAnalysis selection used to compute the centroid reference structure when `reference_mode` is `"centroid"` |
 
 ### `plugins.secondary_structure`
 
@@ -122,6 +124,7 @@ Each entry in `runs`:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | string | `"catalytic_triad"` | Display name for the triad analysis |
+| `description` | string | `null` | Optional description of the triad (e.g., `"Ser-His-Asp catalytic triad"`) |
 | `threshold` | float | `3.5` | Distance threshold in Angstroms (H-bond cutoff) |
 | `pairs` | list | **(required)** | List of atom pair definitions |
 
@@ -139,6 +142,11 @@ Each entry in `pairs`:
 |-------|------|---------|-------------|
 | `threshold` | float | `3.5` | Global default threshold in Angstroms |
 | `pairs` | list | **(required)** | List of distance pair definitions |
+| `use_pbc` | bool | `true` | Apply periodic boundary conditions to distance calculations |
+| `align_trajectory` | bool | `true` | Align trajectory before computing distances |
+| `alignment_selection` | string | `"protein and name CA"` | MDAnalysis selection used for trajectory alignment |
+| `alignment_mode` | string | `"centroid"` | Alignment reference mode: `"centroid"` or `"frame"` |
+| `alignment_frame` | int | `null` | Frame index to use as reference when `alignment_mode` is `"frame"` |
 
 Each entry in `pairs`:
 
@@ -166,6 +174,9 @@ Each entry in `pairs`:
 | `include_default_aa_groups` | bool | `true` | Include built-in amino acid groups (aromatic, polar, nonpolar, charged) |
 | `protein_groups` | mapping | `null` | Custom residue groups: `{group_name: [resid, ...]}` |
 | `protein_partitions` | mapping | `null` | Mutually exclusive partitions for coverage plots: `{partition_name: [group_name, ...]}` |
+| `polymer_types` | list of string | `null` | Explicit polymer type labels. If `null`, types are auto-detected from topology. |
+| `polymer_type_selections` | mapping | `null` | Custom MDAnalysis selections per polymer type: `{type_name: "selection string"}` |
+| `polymer_chain` | string | `"C"` | Chain ID used for polymer auto-detection |
 | `fdr_alpha` | float | `0.05` | Per-plugin FDR threshold |
 | `min_effect_size` | float | `0.5` | Minimum Cohen's d for practical significance |
 | `top_residues` | int | `10` | Max residues shown per condition in formatted output |
@@ -181,9 +192,16 @@ Each entry in `runs`:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `label` | string | **(required)** | Name for this RMSD computation (e.g., `"backbone"`) |
-| `selection` | string | **(required)** | MDAnalysis selection |
+| `selection` | string | **(required)** | MDAnalysis selection for RMSD atoms |
 | `alignment_selection` | string | same as `selection` | MDAnalysis selection for alignment |
-| `stride` | int | `1` | Frame stride |
+| `reference_mode` | string | `"centroid"` | Reference structure mode: `"centroid"` or `"frame"` |
+| `reference_frame` | int | `0` | Frame index to use as reference when `reference_mode` is `"frame"` |
+| `reference_file` | path | `null` | Path to external PDB reference structure |
+| `centroid_selection` | string | `null` | MDAnalysis selection for centroid computation. If `null`, uses `alignment_selection`. |
+| `convergence_window_size_ns` | float | `15.0` | Rolling window size in nanoseconds for convergence detection |
+| `convergence_step_size_ns` | float | `5.0` | Step size in nanoseconds between convergence windows |
+| `convergence_slope_threshold` | float | `0.0005` | Maximum slope (Å/ns) for a window to be considered converged |
+| `convergence_sustained_for_ns` | float | `15.0` | Duration in nanoseconds that convergence must be sustained |
 
 ### `plugins.rg`
 
@@ -196,8 +214,11 @@ Each entry in `runs`:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `label` | string | **(required)** | Name for this Rg computation |
-| `selection` | string | **(required)** | MDAnalysis selection |
-| `stride` | int | `1` | Frame stride |
+| `selection` | string | **(required)** | MDAnalysis selection for Rg atoms |
+| `calculation_mode` | string | `"selection"` | Computation mode: `"selection"` (single Rg for the whole selection) or `"fragments"` (per-fragment Rg) |
+| `fragment_weighting` | string | `"equal"` | How to weight fragments when `calculation_mode` is `"fragments"`: `"equal"` or `"mass"` |
+| `save_fragment_distribution` | bool | `true` | Save per-frame fragment Rg distributions |
+| `histogram_bins` | int | `50` | Number of bins for Rg distribution histograms |
 
 ### `plugins.hydrogen_bonds`
 
@@ -209,7 +230,7 @@ Each entry in `runs`:
 | `angle_cutoff` | float | `150` | H-bond angle cutoff in degrees |
 | `update_selections` | bool | `true` | Update atom selections every frame |
 | `top_n_pairs` | int | `15` | Number of top residue pairs to report |
-| `allow_empty_groups` | bool | `true` | Warn and skip summaries when a group selection matches no atoms (`false` = raise error) |
+| `allow_empty_groups` | bool | `false` | Allow empty group selections: `true` = warn and skip summaries when a group matches no atoms; `false` = raise error |
 | `allow_overlapping_composition` | bool | `false` | Whether overlapping composition partitions are allowed |
 | `composition` | mapping | `null` | Composition analysis settings |
 | `timestep_ps` | float | `null` | Override trajectory timestep in picoseconds for time-axis plots |
