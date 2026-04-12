@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from polyzymd.analyses.base import (
     Analysis,
@@ -232,11 +232,22 @@ class BindingFreeEnergyAnalysis(Analysis):
             try:
                 summary = self._build_condition_summary(cond, ctx, settings)
                 condition_summaries.append(summary)
-            except Exception as e:
+            except (
+                FileNotFoundError,
+                OSError,
+                ValueError,
+                TypeError,
+                KeyError,
+                ValidationError,
+            ) as e:
                 logger.warning(f"  Skipping condition '{cond.label}': {e}")
 
         if not condition_summaries:
             logger.warning("No binding preference data found for any condition")
+            return None
+
+        if all(not summary.entries for summary in condition_summaries):
+            logger.warning("All condition summaries are empty - no binding free energy entries")
             return None
 
         # Step 2: Metadata
@@ -870,7 +881,7 @@ class BindingFreeEnergyAnalysis(Analysis):
                         ttest = independent_ttest(reps_a, reps_b)
                         t_stat = ttest.t_statistic
                         p_val = ttest.p_value
-                    except Exception as exc:
+                    except (ValueError, TypeError, RuntimeError) as exc:
                         logger.debug(f"T-test failed for ({polymer_type}, {protein_group}): {exc}")
 
             pairwise.append(

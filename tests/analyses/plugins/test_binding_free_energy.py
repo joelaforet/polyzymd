@@ -420,15 +420,61 @@ class TestCompare:
         with patch.object(analysis, "_load_binding_preference", return_value=None):
             result = analysis.compare(ctx)
 
-        # All conditions got empty entries, so result is still created
-        assert result is not None
-        assert "k_bT" in result.formula
+        # All conditions got empty entries, so compare should return None
+        assert result is None
+
+    def test_compare_returns_none_all_summaries_empty(self):
+        from polyzymd.analyses.binding_free_energy import BindingFreeEnergyAnalysis
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
+            FreeEnergyConditionSummary,
+        )
+
+        analysis = BindingFreeEnergyAnalysis()
+        ctx = _make_context(n_conditions=2)
+        empty_summary = FreeEnergyConditionSummary(
+            label="A",
+            config_path="/tmp/A/config.yaml",
+            temperature_K=300.0,
+            n_replicates=0,
+            units="kT",
+            entries=[],
+            polymer_types=[],
+            protein_groups=[],
+        )
+        empty_summary_2 = empty_summary.model_copy(update={"label": "B"})
+
+        with patch.object(
+            analysis,
+            "_build_condition_summary",
+            side_effect=[empty_summary, empty_summary_2],
+        ):
+            result = analysis.compare(ctx)
+
+        assert result is None
+
+    def test_compare_propagates_unexpected_summary_runtime_error(self):
+        from polyzymd.analyses.binding_free_energy import BindingFreeEnergyAnalysis
+
+        analysis = BindingFreeEnergyAnalysis()
+        ctx = _make_context(n_conditions=1)
+
+        with patch.object(
+            analysis,
+            "_build_condition_summary",
+            side_effect=RuntimeError("unexpected summary failure"),
+        ):
+            with pytest.raises(RuntimeError, match="unexpected summary failure"):
+                analysis.compare(ctx)
 
     def test_compare_mixed_temperatures(self):
         from polyzymd.analyses.base import ComparisonContext, Condition
         from polyzymd.analyses.binding_free_energy import (
             BFESettings,
             BindingFreeEnergyAnalysis,
+        )
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
+            FreeEnergyConditionSummary,
+            FreeEnergyEntry,
         )
 
         analysis = BindingFreeEnergyAnalysis()
@@ -459,7 +505,54 @@ class TestCompare:
             recompute=False,
         )
 
-        with patch.object(analysis, "_load_binding_preference", return_value=None):
+        summary_a = FreeEnergyConditionSummary(
+            label="A",
+            config_path="/tmp/A/config.yaml",
+            temperature_K=300.0,
+            n_replicates=3,
+            units="kT",
+            entries=[
+                FreeEnergyEntry(
+                    polymer_type="SBM",
+                    protein_group="aromatic",
+                    partition_name="aa_class",
+                    contact_share=0.2,
+                    expected_share=0.1,
+                    enrichment_ratio=2.0,
+                    delta_G=-0.5,
+                    delta_G_uncertainty=0.05,
+                    delta_G_per_replicate=[-0.4, -0.5, -0.6],
+                    units="kT",
+                    temperature_K=300.0,
+                    n_replicates=3,
+                    n_exposed_in_group=10,
+                )
+            ],
+            polymer_types=["SBM"],
+            protein_groups=["aromatic"],
+        )
+        summary_b = summary_a.model_copy(
+            update={
+                "label": "B",
+                "config_path": "/tmp/B/config.yaml",
+                "temperature_K": 350.0,
+                "entries": [
+                    summary_a.entries[0].model_copy(
+                        update={
+                            "delta_G": -0.6,
+                            "delta_G_per_replicate": [-0.5, -0.6, -0.7],
+                            "temperature_K": 350.0,
+                        }
+                    )
+                ],
+            }
+        )
+
+        with patch.object(
+            analysis,
+            "_build_condition_summary",
+            side_effect=[summary_a, summary_b],
+        ):
             result = analysis.compare(ctx)
 
         assert result is not None
