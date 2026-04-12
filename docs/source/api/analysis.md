@@ -23,10 +23,11 @@ For the unified analysis lifecycle, see the [Analyses Plugin API](analyses.md).
 
 ## Notes
 
-- Stable analysis workflows: RMSF, contacts, distances, catalytic triad,
-  secondary structure, and SASA.
-- Experimental workflows are documented separately in the user docs and are
-  clearly labeled there.
+- **Stable plugins** (13 total): RMSD, Rg, RMSF, catalytic triad, secondary structure,
+  SASA, distances, contacts, exposure, hydrogen bonds, binding free energy,
+  polymer affinity, and polymer bridging.
+- Polymer bridging is labeled **experimental** — see individual plugin docs
+  for details.
 
 <!-- IMAGE OPPORTUNITY: Add a compact analysis architecture diagram showing
 analyses plugin -> comparison -> plot generation. -->
