@@ -1074,8 +1074,8 @@ When creating a new analysis plugin:
 - [ ] (Optional) Use `_check_cache()` in `compute_replicate()` for result caching
 - [ ] (Optional) Use `_format_replicate_range()` for compact log messages
 - [ ] If using `AggregatedResultClass`, return matching result model instances
-- [ ] Tests: `tests/test_<name>_plugin.py` (scaffold generates plot tests too)
-- [ ] Verify: `pixi run -e build pytest tests/test_<name>_plugin.py -v`
+- [ ] Tests: `tests/analyses/plugins/test_<name>.py` (scaffold generates plot tests too)
+- [ ] Verify: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
 
 ## What a Good Community PR Looks Like
 
@@ -1209,8 +1209,8 @@ plotting), not as maturity rankings.
 
 ### Test file naming
 
-Name your test file `tests/test_<name>_plugin.py` (for example,
-`tests/test_solvent_contacts_plugin.py`).
+Name your test file `tests/analyses/plugins/test_<name>.py` (for example,
+`tests/analyses/plugins/test_solvent_contacts.py`).
 
 ### Testing strategy
 
@@ -1475,7 +1475,7 @@ This avoids backend/display errors and keeps plotting tests deterministic.
 Run tests with:
 
 ```bash
-pixi run -e build pytest tests/test_solvent_contacts_plugin.py -v
+pixi run -e build pytest tests/analyses/plugins/test_solvent_contacts.py -v
 ```
 
 ## See Also
