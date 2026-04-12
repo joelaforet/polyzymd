@@ -1146,11 +1146,15 @@ def finalize_analysis_hpc(
             f"Unknown analysis type '{analysis}'. Available: {', '.join(sorted(available))}"
         )
     plugin = analysis_cls()
-    valid_conditions, settings, equilibration, analysis_root = prepare_comparison_run(
+    prepared = prepare_comparison_run(
         plugin,
         config,
         None,
     )
+    valid_conditions = prepared["valid_conditions"]
+    settings = prepared["settings"]
+    equilibration = prepared["equilibration"]
+    analysis_root = prepared["analysis_root"]
     analysis_dirs: dict[str, Path] = {}
     aggregated_results: dict[str, object] = {}
     for condition in valid_conditions:
