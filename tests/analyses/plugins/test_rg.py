@@ -531,7 +531,7 @@ def test_compute_single_run_zero_atoms_returns_none(
             config_hash="hash123",
             eq_value=10.0,
             eq_unit="ns",
-            eq_str="eq10.00ns",
+            eq_str="eq10ns",
             settings_tag="abcd1234",
             start_frame=0,
             n_frames_total=10,
@@ -623,7 +623,7 @@ def test_compute_replicate_cache_includes_settings_tag(
 
     expected_tag = analysis._make_settings_cache_tag(settings)
     assert observed_path is not None
-    assert observed_path.name == f"rg_eq10.00ns_{expected_tag}.json"
+    assert observed_path.name == f"rg_eq10ns_{expected_tag}.json"
     assert result == {"cached": True}
 
 
@@ -1738,7 +1738,7 @@ def test_load_condition_aggregated_current_rg_filename(tmp_path: Path) -> None:
             }
         ]
     }
-    json_path = tmp_path / "aggregated" / "rg_reps1-3_eq10.00ns.json"
+    json_path = tmp_path / "aggregated" / "rg_reps1-3_eq10ns.json"
     json_path.parent.mkdir(parents=True)
     json_path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -1763,7 +1763,7 @@ def test_load_condition_aggregated_tagged_rg_filename(tmp_path: Path) -> None:
             }
         ]
     }
-    json_path = tmp_path / "aggregated" / "rg_reps1-3_eq10.00ns_abcd1234.json"
+    json_path = tmp_path / "aggregated" / "rg_reps1-3_eq10ns_abcd1234.json"
     json_path.parent.mkdir(parents=True)
     json_path.write_text(json.dumps(payload), encoding="utf-8")
 

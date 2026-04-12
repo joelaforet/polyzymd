@@ -134,7 +134,7 @@ my_first_analysis/
 │   └── My_Simulation/
 │       └── rmsf/
 │           ├── run_1/
-│           │   └── rmsf_eq10.00ns.json       # Per-replicate result
+│           │   └── rmsf_eq10ns.json           # Per-replicate result
 │           └── aggregated/
 │               └── result.json               # Combined result
 ├── comparison/
@@ -146,7 +146,7 @@ my_first_analysis/
 
 The key files are:
 
-- **`rmsf_eq10.00ns.json`** --- per-replicate RMSF values for every residue in
+- **`rmsf_eq10ns.json`** --- per-replicate RMSF values for every residue in
   the selection, computed after discarding the first 10 ns.
 - **`aggregated/result.json`** --- aggregated statistics across replicates (with
   one replicate, this matches the per-replicate file).

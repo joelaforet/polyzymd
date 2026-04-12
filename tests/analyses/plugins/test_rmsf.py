@@ -606,7 +606,7 @@ class TestAggregate:
         # Check that a file was saved
         json_files = list(agg_dir.glob("*.json"))
         assert len(json_files) == 1
-        assert "rmsf_reps1-2_eq10.00ns.json" in json_files[0].name
+        assert "rmsf_reps1-2_eq10ns.json" in json_files[0].name
 
     def test_aggregate_uses_correct_replicate_means(self, rmsf_analysis, condition, tmp_path):
         """Verify that per_replicate_mean_rmsf contains the correct values."""
@@ -726,7 +726,7 @@ class TestMakeAggregatedFilename:
         result.equilibration_unit = "ns"
 
         filename = RMSFAnalysis._make_aggregated_filename((1, 2, 3, 4, 5), result)
-        assert filename == "rmsf_reps1-5_eq10.00ns.json"
+        assert filename == "rmsf_reps1-5_eq10ns.json"
 
     def test_non_contiguous_replicates(self):
         result = MagicMock()
@@ -734,7 +734,7 @@ class TestMakeAggregatedFilename:
         result.equilibration_unit = "ns"
 
         filename = RMSFAnalysis._make_aggregated_filename((1, 3, 5), result)
-        assert filename == "rmsf_reps1_3_5_eq100.00ns.json"
+        assert filename == "rmsf_reps1_3_5_eq100ns.json"
 
     def test_single_pair(self):
         result = MagicMock()
@@ -742,7 +742,7 @@ class TestMakeAggregatedFilename:
         result.equilibration_unit = "ns"
 
         filename = RMSFAnalysis._make_aggregated_filename((1, 2), result)
-        assert filename == "rmsf_reps1-2_eq0.00ns.json"
+        assert filename == "rmsf_reps1-2_eq0ns.json"
 
 
 # ============================================================================

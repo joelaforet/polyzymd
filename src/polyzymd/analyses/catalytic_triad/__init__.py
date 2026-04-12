@@ -575,7 +575,7 @@ class CatalyticTriadAnalysis(Analysis):
         first_result: Any,
     ) -> str:
         """Backward-compatible filename helper retained for tests."""
-        eq_str = f"eq{first_result.equilibration_time:.2f}{first_result.equilibration_unit}"
+        eq_str = f"eq{first_result.equilibration_time:g}{first_result.equilibration_unit}"
         rep_str = Analysis._format_replicate_range(replicates)
         name_safe = first_result.triad_name.replace(" ", "_").replace("/", "-")
         return f"triad_{name_safe}_{rep_str}_{eq_str}.json"
@@ -588,6 +588,6 @@ class CatalyticTriadAnalysis(Analysis):
 
 def _make_result_filename(settings: CatalyticTriadSettings, eq_value: float, eq_unit: str) -> str:
     """Generate filename for single-replicate result JSON."""
-    eq_str = f"eq{eq_value:.2f}{eq_unit}"
+    eq_str = f"eq{eq_value:g}{eq_unit}"
     name_safe = settings.name.replace(" ", "_").replace("/", "-")
     return f"triad_{name_safe}_{eq_str}.json"

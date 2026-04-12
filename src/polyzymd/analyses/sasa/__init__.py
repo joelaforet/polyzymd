@@ -171,7 +171,7 @@ class SASAAnalysis(Analysis):
         sim_config = ctx.sim_config
 
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        eq_str = f"eq{eq_value:.2f}{eq_unit}"
+        eq_str = f"eq{eq_value:g}{eq_unit}"
         settings_token = self._settings_cache_token(settings)
         result_file = ctx.output_dir / f"sasa_{eq_str}_{settings_token}.json"
 
@@ -806,7 +806,7 @@ class SASAAnalysis(Analysis):
         first_result: Any,
     ) -> str:
         """Generate an aggregated SASA filename."""
-        eq_str = f"eq{first_result.equilibration_time:.2f}{first_result.equilibration_unit}"
+        eq_str = f"eq{first_result.equilibration_time:g}{first_result.equilibration_unit}"
         rep_str = Analysis._format_replicate_range(replicates)
         return f"sasa_{rep_str}_{eq_str}.json"
 

@@ -466,7 +466,7 @@ class TestComputeReplicate:
         # Check that result JSON was written
         json_files = list(output_dir.glob("*.json"))
         assert len(json_files) == 1
-        assert "triad_LipA_triad_eq10.00ns.json" in json_files[0].name
+        assert "triad_LipA_triad_eq10ns.json" in json_files[0].name
 
 
 # ============================================================================
@@ -522,7 +522,7 @@ class TestAggregate:
 
         json_files = list(agg_dir.glob("*.json"))
         assert len(json_files) == 1
-        assert "triad_LipA_triad_reps1-2_eq10.00ns.json" in json_files[0].name
+        assert "triad_LipA_triad_reps1-2_eq10ns.json" in json_files[0].name
 
     def test_aggregate_preserves_per_replicate_contact(
         self, triad_analysis, condition, tmp_path, default_settings
@@ -643,7 +643,7 @@ class TestMakeAggregatedFilename:
         result.triad_name = "LipA_triad"
 
         filename = CatalyticTriadAnalysis._make_aggregated_filename((1, 2, 3, 4, 5), result)
-        assert filename == "triad_LipA_triad_reps1-5_eq10.00ns.json"
+        assert filename == "triad_LipA_triad_reps1-5_eq10ns.json"
 
     def test_non_contiguous_replicates(self):
         result = MagicMock()
@@ -652,7 +652,7 @@ class TestMakeAggregatedFilename:
         result.triad_name = "LipA_triad"
 
         filename = CatalyticTriadAnalysis._make_aggregated_filename((1, 3, 5), result)
-        assert filename == "triad_LipA_triad_reps1_3_5_eq100.00ns.json"
+        assert filename == "triad_LipA_triad_reps1_3_5_eq100ns.json"
 
     def test_single_pair(self):
         result = MagicMock()
@@ -661,7 +661,7 @@ class TestMakeAggregatedFilename:
         result.triad_name = "LipA_triad"
 
         filename = CatalyticTriadAnalysis._make_aggregated_filename((1, 2), result)
-        assert filename == "triad_LipA_triad_reps1-2_eq0.00ns.json"
+        assert filename == "triad_LipA_triad_reps1-2_eq0ns.json"
 
     def test_name_sanitization(self):
         result = MagicMock()
@@ -670,7 +670,7 @@ class TestMakeAggregatedFilename:
         result.triad_name = "Ser His/Asp triad"
 
         filename = CatalyticTriadAnalysis._make_aggregated_filename((1, 2, 3), result)
-        assert filename == "triad_Ser_His-Asp_triad_reps1-3_eq10.00ns.json"
+        assert filename == "triad_Ser_His-Asp_triad_reps1-3_eq10ns.json"
 
 
 # ============================================================================

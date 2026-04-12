@@ -684,6 +684,6 @@ def _make_replicate_result_filename(ctx: PlotContext) -> str:
         Expected per-replicate RMSD JSON filename.
     """
     eq_value, eq_unit = parse_time_string(ctx.equilibration)
-    eq_str = f"eq{eq_value:.2f}{eq_unit}"
+    eq_str = f"eq{eq_value:g}{eq_unit}"
     settings_tag = settings_fingerprint(ctx.settings)
     return f"rmsd_{eq_str}_{settings_tag}.json"

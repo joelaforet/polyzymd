@@ -719,7 +719,7 @@ class ContactsAnalysis(Analysis):
 
             # Save result
             ctx.output_dir.mkdir(parents=True, exist_ok=True)
-            eq_str = f"eq{eq_value:.2f}{eq_unit}"
+            eq_str = f"eq{eq_value:g}{eq_unit}"
             cut_str = f"cut{settings.cutoff:.1f}"
             settings_fp = settings_fingerprint(settings)
             output_file = (
@@ -771,7 +771,7 @@ class ContactsAnalysis(Analysis):
         reps = sorted(ctx.replicates)
         rep_range = f"{reps[0]}-{reps[-1]}"
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        eq_str = f"eq{eq_value:.2f}{eq_unit}"
+        eq_str = f"eq{eq_value:g}{eq_unit}"
         cut_str = f"cut{ctx.settings.cutoff:.1f}"
         settings_fp = settings_fingerprint(ctx.settings)
         agg_file = (

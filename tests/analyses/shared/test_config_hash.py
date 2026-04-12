@@ -125,12 +125,12 @@ class TestSettingsFingerprintValidation:
 
     def test_extract_settings_fingerprint_from_path(self):
         """Extract helper should parse embedded settings fingerprints."""
-        path = Path("/tmp/contacts_eq10.00ns_cut4.5_s1a2b3c4d_rep1.json")
+        path = Path("/tmp/contacts_eq10ns_cut4.5_s1a2b3c4d_rep1.json")
         assert extract_settings_fingerprint_from_path(path) == "1a2b3c4d"
 
     def test_extract_settings_fingerprint_from_path_returns_none_when_absent(self):
         """Legacy paths without fingerprint should return None."""
-        path = Path("/tmp/rmsf_eq10.00ns.json")
+        path = Path("/tmp/rmsf_eq10ns.json")
         assert extract_settings_fingerprint_from_path(path) is None
 
     def test_validate_settings_fingerprint_accepts_match(self):

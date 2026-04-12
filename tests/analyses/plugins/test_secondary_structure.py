@@ -560,7 +560,7 @@ class TestMakeAggregatedFilename:
         first.equilibration_unit = "ns"
 
         name = ss_analysis._make_aggregated_filename((1, 2, 3, 4, 5), first)
-        assert name == "secondary_structure_reps1-5_eq200.00ns.json"
+        assert name == "secondary_structure_reps1-5_eq200ns.json"
 
     def test_nonconsecutive_replicates(self, ss_analysis):
         """Non-consecutive replicates should list individually."""
@@ -569,7 +569,7 @@ class TestMakeAggregatedFilename:
         first.equilibration_unit = "ns"
 
         name = ss_analysis._make_aggregated_filename((1, 3, 5), first)
-        assert name == "secondary_structure_reps1_3_5_eq100.00ns.json"
+        assert name == "secondary_structure_reps1_3_5_eq100ns.json"
 
     def test_ps_equilibration(self, ss_analysis):
         """Equilibration in ps should be formatted correctly."""
@@ -578,7 +578,7 @@ class TestMakeAggregatedFilename:
         first.equilibration_unit = "ps"
 
         name = ss_analysis._make_aggregated_filename((1, 2), first)
-        assert name == "secondary_structure_reps1-2_eq5000.00ps.json"
+        assert name == "secondary_structure_reps1-2_eq5000ps.json"
 
 
 # ============================================================================

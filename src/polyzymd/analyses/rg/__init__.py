@@ -182,7 +182,7 @@ class RgAnalysis(Analysis):
         sim_config = ctx.sim_config
 
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        eq_str = f"eq{eq_value:.2f}{eq_unit}"
+        eq_str = f"eq{eq_value:g}{eq_unit}"
         settings_tag = self._make_settings_cache_tag(settings)
         result_file = ctx.output_dir / f"rg_{eq_str}_{settings_tag}.json"
 
@@ -1033,7 +1033,7 @@ class RgAnalysis(Analysis):
         settings_tag: str,
     ) -> str:
         """Generate an aggregated Rg filename."""
-        eq_str = f"eq{first_result.equilibration_time:.2f}{first_result.equilibration_unit}"
+        eq_str = f"eq{first_result.equilibration_time:g}{first_result.equilibration_unit}"
         rep_str = Analysis._format_replicate_range(replicates)
         return f"rg_{rep_str}_{eq_str}_{settings_tag}.json"
 

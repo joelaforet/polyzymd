@@ -780,7 +780,7 @@ class DistanceCalculator:
         Includes analysis settings that affect results to ensure cache
         invalidation when settings change.
         """
-        eq_str = f"eq{self.equilibration_time:.2f}{self.equilibration_unit}"
+        eq_str = f"eq{self.equilibration_time:g}{self.equilibration_unit}"
 
         if self.pairs:
             pair_label = _make_pair_label(*self.pairs[0])
@@ -1403,6 +1403,6 @@ class DistancesAnalysis(Analysis):
         settings_tag: str,
     ) -> str:
         """Generate an aggregated distances filename."""
-        eq_str = f"eq{first_result.equilibration_time:.2f}{first_result.equilibration_unit}"
+        eq_str = f"eq{first_result.equilibration_time:g}{first_result.equilibration_unit}"
         rep_str = Analysis._format_replicate_range(replicates)
         return f"distances_{rep_str}_{eq_str}_s{settings_tag}.json"

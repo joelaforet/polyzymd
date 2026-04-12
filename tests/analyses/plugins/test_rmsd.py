@@ -315,7 +315,7 @@ def test_compute_replicate_cache_filename_includes_settings_tag(
 
     expected_tag = analysis._make_settings_cache_tag(settings)
     assert result == {"cached": True}
-    assert captured["result_path"].name == f"rmsd_eq10.00ns_{expected_tag}.json"
+    assert captured["result_path"].name == f"rmsd_eq10ns_{expected_tag}.json"
 
 
 def test_aggregated_cache_filename_includes_settings_tag() -> None:
@@ -327,7 +327,7 @@ def test_aggregated_cache_filename_includes_settings_tag() -> None:
 
     filename = analysis._make_aggregated_filename((1, 2, 3), first_result, settings_tag)
 
-    assert filename == f"rmsd_reps1-3_eq10.00ns_{settings_tag}.json"
+    assert filename == f"rmsd_reps1-3_eq10ns_{settings_tag}.json"
 
 
 def test_plotter_resolves_npz_with_specific_settings_tag(tmp_path: Path) -> None:
@@ -373,8 +373,8 @@ def test_plotter_resolves_npz_with_specific_settings_tag(tmp_path: Path) -> None
         trajectory_files=["/fake/traj.dcd"],
     )
 
-    old_json = run_dir / "rmsd_eq10.00ns_oldtag00.json"
-    new_json = run_dir / "rmsd_eq10.00ns_newtag00.json"
+    old_json = run_dir / "rmsd_eq10ns_oldtag00.json"
+    new_json = run_dir / "rmsd_eq10ns_newtag00.json"
     old_result.save(old_json)
     new_result.save(new_json)
 
@@ -391,7 +391,7 @@ def test_plotter_resolves_npz_with_specific_settings_tag(tmp_path: Path) -> None
         tmp_path / "rmsd",
         "protein_backbone",
         1,
-        "rmsd_eq10.00ns_newtag00.json",
+        "rmsd_eq10ns_newtag00.json",
     )
 
     assert resolved == npz_new
