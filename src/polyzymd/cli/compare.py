@@ -1235,7 +1235,15 @@ def submit_all_analyses_hpc(
     if not filtered:
         raise click.ClickException("No enabled analyses remain after applying --exclude filters.")
 
-    ordered = order_analyses_for_execution(filtered)
+    source = config.source_path
+    comparison_root = source.parent / "comparison" if source is not None else Path("comparison")
+    satisfied: set[str] = set()
+    for excluded_name in excluded_set:
+        result_path = comparison_root / excluded_name / "result.json"
+        if result_path.exists():
+            satisfied.add(excluded_name)
+
+    ordered = order_analyses_for_execution(filtered, satisfied=satisfied)
 
     finalize_ids: dict[str, str] = {}
     summary_rows: list[dict[str, str]] = []
@@ -1636,23 +1644,37 @@ def worker_finalize(manifest_path: Path):
     analysis_dirs: dict[str, Path] = {}
     aggregated_results: dict[str, object] = {}
     missing_conditions: list[str] = []
-    for cond_idx, condition in enumerate(valid_conditions):
-        cond_spec = _resolve_manifest_task_condition(manifest, cond_idx)
-        if condition.label != cond_spec.condition_label:
-            raise click.ClickException(
-                "Manifest/config drift detected: condition labels no longer align with submission"
-            )
-        cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
-        aggregated = plugin._load_aggregated_result(cond_dir / "aggregated")
-        if aggregated is not None:
+    expects_aggregated_results = bool(getattr(plugin, "has_compute_stage", True))
+    if getattr(manifest, "pipeline_mode", "full") == "finalize_only":
+        expects_aggregated_results = False
+
+    if expects_aggregated_results:
+        for cond_idx, condition in enumerate(valid_conditions):
+            cond_spec = _resolve_manifest_task_condition(manifest, cond_idx)
+            if condition.label != cond_spec.condition_label:
+                raise click.ClickException(
+                    "Manifest/config drift detected: condition labels no longer align with submission"
+                )
+            cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
+            aggregated = plugin._load_aggregated_result(cond_dir / "aggregated")
+            if aggregated is not None:
+                analysis_dirs[condition.label] = cond_dir
+                aggregated_results[condition.label] = aggregated
+            else:
+                missing_conditions.append(condition.label)
+    else:
+        for cond_idx, condition in enumerate(valid_conditions):
+            cond_spec = _resolve_manifest_task_condition(manifest, cond_idx)
+            if condition.label != cond_spec.condition_label:
+                raise click.ClickException(
+                    "Manifest/config drift detected: condition labels no longer align with submission"
+                )
+            cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
             analysis_dirs[condition.label] = cond_dir
-            aggregated_results[condition.label] = aggregated
-        else:
-            missing_conditions.append(condition.label)
 
     partial_policy = getattr(manifest, "partial_policy", "strict")
     allow_partial = partial_policy == "allow_partial"
-    if missing_conditions:
+    if expects_aggregated_results and missing_conditions:
         if allow_partial:
             message = "Proceeding with partial finalize"
         else:

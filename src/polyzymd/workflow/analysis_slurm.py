@@ -477,8 +477,6 @@ def _slurm_header(resources: AnalysisSlurmResources, job_name: str, log_path: Pa
     ]
     if resources.partition:
         lines.insert(2, f"#SBATCH --partition={resources.partition}")
-    if resources.partition:
-        lines.append(f"#SBATCH --partition={resources.partition}")
     if resources.qos:
         lines.append(f"#SBATCH --qos={resources.qos}")
     if resources.account:

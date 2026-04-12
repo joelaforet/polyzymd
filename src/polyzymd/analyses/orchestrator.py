@@ -875,13 +875,19 @@ def _topological_sort(analyses: list[Analysis]) -> list[Analysis]:
     return order
 
 
-def order_analyses_for_execution(analysis_names: Sequence[str]) -> list[str]:
+def order_analyses_for_execution(
+    analysis_names: Sequence[str],
+    satisfied: set[str] | None = None,
+) -> list[str]:
     """Return analysis names ordered by dependency constraints.
 
     Parameters
     ----------
     analysis_names : Sequence[str]
         Analysis names or aliases to order.
+    satisfied : set[str] | None, optional
+        Dependency names that are already satisfied outside this run list,
+        such as excluded analyses with completed results on disk.
 
     Returns
     -------
@@ -909,7 +915,7 @@ def order_analyses_for_execution(analysis_names: Sequence[str]) -> list[str]:
         seen_names.add(canonical_name)
         requested.append(analysis_cls())
 
-    _validate_dependencies(requested)
+    _validate_dependencies(requested, satisfied=satisfied)
     ordered = _topological_sort(requested)
     return [analysis.name for analysis in ordered]
 
@@ -1268,16 +1274,25 @@ def run_all_plots(
 # ---------------------------------------------------------------------------
 
 
-def _validate_dependencies(analyses: list[Analysis]) -> None:
+def _validate_dependencies(analyses: list[Analysis], satisfied: set[str] | None = None) -> None:
     """Validate that declared dependencies are discoverable and scheduled.
 
     This catches configuration errors early — e.g. a plugin declares
     ``dependencies = ("contacts",)`` but ``contacts`` isn't in the run list
     or doesn't exist.
+
+    Parameters
+    ----------
+    analyses : list[Analysis]
+        Analyses scheduled for this execution pass.
+    satisfied : set[str] | None, optional
+        Dependency names considered already satisfied outside the scheduled
+        analyses.
     """
     from polyzymd.analyses.discovery import list_all_names
 
     known = list_all_names()
+    resolved_satisfied = satisfied or set()
     scheduled = {a.name for a in analyses}
     for a_aliases in (a.aliases for a in analyses):
         scheduled.update(a_aliases)
@@ -1288,7 +1303,7 @@ def _validate_dependencies(analyses: list[Analysis]) -> None:
                 raise DependencyError(
                     f"{a.name}: declared dependency {dep!r} is not a discoverable analysis plugin"
                 )
-            if dep not in scheduled:
+            if dep not in scheduled and dep not in resolved_satisfied:
                 raise DependencyError(
                     f"{a.name}: declared dependency {dep!r} is not in the current run list"
                 )

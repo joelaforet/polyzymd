@@ -572,6 +572,46 @@ class TestOrchestrator:
         ordered = order_analyses_for_execution(["b", "alias_a"])
         assert ordered == ["a", "b"]
 
+    def test_order_analyses_allows_satisfied_external_dependencies(self, monkeypatch) -> None:
+        """Ordering should allow dependencies satisfied outside the run list."""
+
+        class _Contacts(Analysis):
+            name: ClassVar[str] = "contacts"
+            Settings: ClassVar[type] = ToySettings
+            dependencies: ClassVar[tuple[str, ...]] = ()
+
+            def compute_replicate(self, ctx, replicate):
+                return {"replicate": replicate}
+
+            def aggregate(self, ctx, results):
+                return {"n": len(results)}
+
+        class _Exposure(Analysis):
+            name: ClassVar[str] = "exposure"
+            Settings: ClassVar[type] = ToySettings
+            dependencies: ClassVar[tuple[str, ...]] = ("contacts",)
+
+            def compute_replicate(self, ctx, replicate):
+                return {"replicate": replicate}
+
+            def aggregate(self, ctx, results):
+                return {"n": len(results)}
+
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.get_analysis",
+            lambda name: _Exposure if name == "exposure" else _Contacts,
+        )
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.list_all_names",
+            lambda: ["contacts", "exposure"],
+        )
+
+        with pytest.raises(DependencyError, match="not in the current run list"):
+            order_analyses_for_execution(["exposure"])
+
+        ordered = order_analyses_for_execution(["exposure"], satisfied={"contacts"})
+        assert ordered == ["exposure"]
+
     def test_run_analysis_full(self, toy_analysis, toy_condition, toy_settings, tmp_path):
         """Test the full run_analysis path (compute + aggregate)."""
         result = run_analysis(
