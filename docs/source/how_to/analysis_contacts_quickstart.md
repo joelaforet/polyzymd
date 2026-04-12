@@ -3,6 +3,18 @@
 Analyze polymer-protein contact frequencies and coverage for one or more
 conditions using the `contacts` plugin.
 
+:::{admonition} Environment Setup
+:class: tip
+
+All commands below assume you have activated the PolyzyMD pixi environment:
+
+```bash
+pixi shell -e build
+```
+
+Alternatively, prefix each command with `pixi run -e build`.
+:::
+
 ## TL;DR
 
 ```bash

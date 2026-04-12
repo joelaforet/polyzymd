@@ -22,6 +22,18 @@ If you have not yet run a full analysis/comparison workflow, start with
 [Tutorial: Analyze a Study from Finished Simulations](../tutorials/analysis_complete_workflow.md).
 ```
 
+:::{admonition} Environment Setup
+:class: tip
+
+All commands below assume you have activated the PolyzyMD pixi environment:
+
+```bash
+pixi shell -e build
+```
+
+Alternatively, prefix each command with `pixi run -e build`.
+:::
+
 ## Before You Start
 
 Make sure each condition already has:

@@ -16,6 +16,18 @@ This analysis answers:
 more than one distinct protein residue — and which residue classes and monomer
 types are involved?"*
 
+:::{admonition} Environment Setup
+:class: tip
+
+All commands below assume you have activated the PolyzyMD pixi environment:
+
+```bash
+pixi shell -e build
+```
+
+Alternatively, prefix each command with `pixi run -e build`.
+:::
+
 ## Core Concepts
 
 ### What Is an Observation?

@@ -8,6 +8,18 @@ For interpretation and statistical guidance, see
 {doc}`../explanation/analysis_triad_best_practices`.
 ```
 
+:::{admonition} Environment Setup
+:class: tip
+
+All commands below assume you have activated the PolyzyMD pixi environment:
+
+```bash
+pixi shell -e build
+```
+
+Alternatively, prefix each command with `pixi run -e build`.
+:::
+
 ## TL;DR
 
 ```bash

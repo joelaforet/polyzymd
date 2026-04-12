@@ -13,7 +13,9 @@ PolyzyMD can export your simulation system to GROMACS format, allowing you to:
 
 The GROMACS export maintains **1:1 parity** with OpenMM simulations using OpenFF force field defaults.
 
-:::{note}
+:::{admonition} Environment Setup
+:class: tip
+
 All commands below assume you have activated the PolyzyMD pixi environment:
 
 ```bash

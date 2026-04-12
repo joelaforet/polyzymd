@@ -2,6 +2,18 @@
 
 This guide explains how to generate polymer chains on-the-fly from raw monomer SMILES strings, eliminating the need for pre-built polymer SDF files.
 
+:::{admonition} Environment Setup
+:class: tip
+
+All commands below assume you have activated the PolyzyMD pixi environment:
+
+```bash
+pixi shell -e build
+```
+
+Alternatively, prefix each command with `pixi run -e build`.
+:::
+
 ## Overview
 
 PolyzyMD supports two modes for polymer generation:

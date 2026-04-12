@@ -9,6 +9,18 @@ interactions using PolyzyMD's contacts analysis module.
 advanced analysis techniques.
 ```
 
+:::{admonition} Environment Setup
+:class: tip
+
+All commands below assume you have activated the PolyzyMD pixi environment:
+
+```bash
+pixi shell -e build
+```
+
+Alternatively, prefix each command with `pixi run -e build`.
+:::
+
 ## Overview
 
 This cookbook answers questions like:

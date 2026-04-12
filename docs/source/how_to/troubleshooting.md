@@ -2,6 +2,18 @@
 
 Common issues and solutions for PolyzyMD.
 
+:::{admonition} Environment Setup
+:class: tip
+
+All commands below assume you have activated the PolyzyMD pixi environment:
+
+```bash
+pixi shell -e build
+```
+
+Alternatively, prefix each command with `pixi run -e build`.
+:::
+
 ## Installation Issues
 
 ### "README.md not found"

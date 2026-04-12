@@ -4,6 +4,18 @@ PolyzyMD generates plots automatically when you run analyses. This guide shows
 you how to control output format, resolution, figure size, and style using
 `plot_settings` in `comparison.yaml`.
 
+:::{admonition} Environment Setup
+:class: tip
+
+All commands below assume you have activated the PolyzyMD pixi environment:
+
+```bash
+pixi shell -e build
+```
+
+Alternatively, prefix each command with `pixi run -e build`.
+:::
+
 ## The `plot_settings` block
 
 Add this block to `comparison.yaml`:

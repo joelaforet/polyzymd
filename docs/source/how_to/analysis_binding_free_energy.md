@@ -22,6 +22,18 @@ experimental warnings because the scientific framing and interpretation may
 still change.
 ```
 
+:::{admonition} Environment Setup
+:class: tip
+
+All commands below assume you have activated the PolyzyMD pixi environment:
+
+```bash
+pixi shell -e build
+```
+
+Alternatively, prefix each command with `pixi run -e build`.
+:::
+
 ## Scientific Motivation
 
 ### From Enrichment to Free Energy

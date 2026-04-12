@@ -2,6 +2,18 @@
 
 You already have trajectories. This page helps you choose the analysis plugins that match the question you want to answer.
 
+:::{admonition} Environment Setup
+:class: tip
+
+All commands below assume you have activated the PolyzyMD pixi environment:
+
+```bash
+pixi shell -e build
+```
+
+Alternatively, prefix each command with `pixi run -e build`.
+:::
+
 ## Quick Recommendation
 
 If you are new to PolyzyMD or doing routine characterization, start with:

@@ -5,6 +5,18 @@ analysis plugin. By the end, you will have a working hydrogen-bond comparison
 across simulation conditions, with grouped summaries, composition breakdowns,
 and publication-ready figures.
 
+:::{admonition} Environment Setup
+:class: tip
+
+All commands below assume you have activated the PolyzyMD pixi environment:
+
+```bash
+pixi shell -e build
+```
+
+Alternatively, prefix each command with `pixi run -e build`.
+:::
+
 ## When to Use This Plugin
 
 Use `hydrogen_bonds` when you need to answer questions like:

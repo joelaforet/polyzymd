@@ -14,6 +14,18 @@ SEM vs. SD) and interpretation of RMSD curves, see the
 {doc}`../explanation/analysis_rmsd_best_practices`.
 ```
 
+:::{admonition} Environment Setup
+:class: tip
+
+All commands below assume you have activated the PolyzyMD pixi environment:
+
+```bash
+pixi shell -e build
+```
+
+Alternatively, prefix each command with `pixi run -e build`.
+:::
+
 ## TL;DR
 
 ```bash
