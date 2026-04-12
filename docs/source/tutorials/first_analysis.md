@@ -113,6 +113,13 @@ is handy for quickly testing different equilibration cutoffs without editing the
 YAML each time.
 ```
 
+```{tip}
+**On an HPC cluster?** Use `polyzymd compare submit` instead of `compare run`
+to dispatch analysis as SLURM jobs. This is especially important for expensive
+analyses (SASA, contacts, hydrogen bonds) on large studies. See
+{doc}`../how_to/hpc_execution` for the full workflow.
+```
+
 You should see output similar to:
 
 ```text

@@ -143,6 +143,16 @@ pixi run -e build polyzymd compare run-all
 This runs every enabled comparison and writes canonical cache files into
 `comparison/<analysis>/result.json`.
 
+```{tip}
+**On an HPC cluster?** For large studies, submit each analysis as a SLURM
+job DAG instead of running interactively:
+
+    pixi run -e build polyzymd compare submit sasa --partition <part> --mem 8G
+
+This parallelizes across replicates and conditions. See
+{doc}`../how_to/hpc_execution` for the complete HPC workflow.
+```
+
 If you prefer to inspect one comparison first, a good sanity check is:
 
 ```bash

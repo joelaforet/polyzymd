@@ -179,6 +179,24 @@ This command:
 - writes the canonical cache file to `comparison/rmsf/result.json`
 - prints a formatted summary to the terminal
 
+:::{admonition} Running on an HPC cluster?
+:class: tip
+
+For expensive analyses (SASA, contacts, hydrogen bonds) or large studies with
+many conditions and replicates, use `polyzymd compare submit` to dispatch
+analysis as SLURM jobs instead of running interactively:
+
+```bash
+polyzymd compare submit sasa --partition <part> --mem 8G --time 02:00:00
+polyzymd compare status sasa       # monitor progress
+polyzymd compare finalize sasa     # (if needed) re-run compare + plot
+```
+
+Each replicate runs as an independent job, with automatic dependency wiring
+for aggregation and finalization. See {doc}`hpc_execution` for the full
+workflow, including dry-run previews and job arrays.
+:::
+
 You can save the formatted report separately with `-o`:
 
 ```bash

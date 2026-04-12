@@ -128,18 +128,27 @@ def compare():
     compositions, temperatures, etc.).
 
     \b
-    Workflow:
+    Local workflow (interactive):
     1. polyzymd compare init -n <name>   # Create project with template
     2. Edit comparison.yaml              # Add your conditions
     3. polyzymd compare run <analysis>   # Run a single comparison
     4. polyzymd compare run-all          # Run all enabled comparisons
 
     \b
-    Example:
-        polyzymd compare init -n polymer_study
-        cd polymer_study
-        vim comparison.yaml  # Add your conditions
+    HPC workflow (SLURM):
+    1. polyzymd compare init -n <name>   # Create project with template
+    2. Edit comparison.yaml              # Add your conditions
+    3. polyzymd compare submit <analysis> --partition <part>  # Submit DAG
+    4. polyzymd compare status <analysis>   # Monitor progress
+    5. polyzymd compare finalize <analysis> # (if needed) re-run compare+plot
+
+    \b
+    Example (local):
         polyzymd compare run rmsf --eq-time 10ns
+
+    \b
+    Example (HPC):
+        polyzymd compare submit sasa --partition aa100 --mem 8G --time 02:00:00
     """
     pass
 
@@ -248,6 +257,9 @@ prepared simulation input), NOT a trajectory frame.
         click.echo("     polyzymd compare run triad     # Compare triad geometry")
         click.echo("     polyzymd compare run contacts  # Compare polymer-protein contacts")
         click.echo("     polyzymd compare run exposure  # Compare chaperone-like activity")
+        click.echo()
+        click.echo("  On an HPC cluster, submit as SLURM jobs instead:")
+        click.echo("     polyzymd compare submit sasa --partition <part> --mem 8G")
         click.echo()
 
     except (OSError, IOError) as e:
@@ -416,6 +428,10 @@ def run_comparison(
 
     Runs any discovered analysis plugin by name or alias. Use --list to see
     all available comparison types.
+
+    This command runs analysis interactively in the current process. For
+    large studies on HPC clusters, use 'polyzymd compare submit' to dispatch
+    jobs to SLURM instead.
 
     \b
     Examples:
