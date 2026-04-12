@@ -103,20 +103,17 @@ You should see output similar to:
 
 ```text
 Comparison: my_first_analysis
-Type: rmsf
+Plugin: rmsf
 Conditions: 1
 Equilibration: 10ns
 
-Computing replicates for My Simulation...
-  Replicate 1: loading trajectory (skipping first 10 ns)...
-  Replicate 1: RMSF computed (142 residues, 490 frames)
-Aggregating My Simulation (1 replicate)...
-Saved result: analysis/My_Simulation/rmsf/aggregated/rmsf_aggregated.json
+[My Simulation] Computing replicate 1...
+  Loading trajectory (skipping first 10 ns)...
+  RMSF computed (142 residues, 490 frames)
+[My Simulation] Aggregating 1 replicate...
 
-RMSF Analysis Complete
-  Mean RMSF: 0.621 +/- 0.015 A
-  Min RMSF:  0.248 A
-  Max RMSF:  3.160 A
+RMSF Comparison Complete
+  My Simulation: mean RMSF = 0.621 ± 0.015 Å
 ```
 
 ```{tip}
