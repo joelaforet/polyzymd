@@ -34,13 +34,37 @@ class ToyAnalysis(Analysis):
 class TestDiscovery:
     """Test plugin discovery behavior and safety."""
 
-    def test_discovery_finds_no_plugins_initially(self):
-        """With no concrete analysis files yet, discovery should return empty."""
+    def test_discovery_finds_all_shipped_plugins(self):
+        """Discovery should find shipped plugins and register analysis classes."""
+        from polyzymd.analyses.contacts import ContactsAnalysis
         from polyzymd.analyses.discovery import clear_cache, list_analyses
+        from polyzymd.analyses.rmsf import RMSFAnalysis
 
         clear_cache()
         analyses = list_analyses()
-        assert isinstance(analyses, dict)
+
+        expected_names = {
+            "binding_free_energy",
+            "catalytic_triad",
+            "contacts",
+            "distances",
+            "exposure",
+            "hydrogen_bonds",
+            "polymer_affinity",
+            "polymer_bridging",
+            "rg",
+            "rmsd",
+            "rmsf",
+            "sasa",
+            "secondary_structure",
+        }
+        assert expected_names.issubset(analyses.keys())
+
+        for name, cls in analyses.items():
+            assert issubclass(cls, Analysis), f"{name} is not an Analysis subclass"
+
+        assert analyses["rmsf"] is RMSFAnalysis
+        assert analyses["contacts"] is ContactsAnalysis
 
     def test_get_analysis_unknown_raises(self):
         from polyzymd.analyses.discovery import clear_cache, get_analysis
