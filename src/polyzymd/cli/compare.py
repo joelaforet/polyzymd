@@ -1019,8 +1019,20 @@ def submit_analysis_hpc(
             "'polyzymd compare run' instead."
         )
 
-    config = ComparisonConfig.from_yaml(config_file)
-    analysis_cls = get_analysis(analysis)
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
+        raise click.ClickException(f"Error loading config: {e}") from e
+
+    try:
+        analysis_cls = get_analysis(analysis)
+    except KeyError:
+        from polyzymd.analyses.discovery import list_all_names
+
+        available = list_all_names()
+        raise click.ClickException(
+            f"Unknown analysis type '{analysis}'. Available: {', '.join(sorted(available))}"
+        )
     plugin = analysis_cls()
     resources = AnalysisSlurmResources(
         pixi_path=pixi_path,
@@ -1122,8 +1134,20 @@ def analysis_hpc_status(analysis: str, config_file: Path, reconcile: bool, as_js
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.workflow.analysis_slurm import read_analysis_status, reconcile_status_with_slurm
 
-    config = ComparisonConfig.from_yaml(config_file)
-    analysis_cls = get_analysis(analysis)
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
+        raise click.ClickException(f"Error loading config: {e}") from e
+
+    try:
+        analysis_cls = get_analysis(analysis)
+    except KeyError:
+        from polyzymd.analyses.discovery import list_all_names
+
+        available = list_all_names()
+        raise click.ClickException(
+            f"Unknown analysis type '{analysis}'. Available: {', '.join(sorted(available))}"
+        )
     hpc_dir = _resolve_hpc_dir(config, analysis_cls.name)
 
     reconciliation_summary: dict[str, Any] | None = None
@@ -1208,8 +1232,20 @@ def finalize_analysis_hpc(
     )
     from polyzymd.analyses.shared.paths import sanitize_label
 
-    config = ComparisonConfig.from_yaml(config_file)
-    analysis_cls = get_analysis(analysis)
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
+        raise click.ClickException(f"Error loading config: {e}") from e
+
+    try:
+        analysis_cls = get_analysis(analysis)
+    except KeyError:
+        from polyzymd.analyses.discovery import list_all_names
+
+        available = list_all_names()
+        raise click.ClickException(
+            f"Unknown analysis type '{analysis}'. Available: {', '.join(sorted(available))}"
+        )
     plugin = analysis_cls()
     valid_conditions, settings, equilibration, analysis_root = prepare_comparison_run(
         plugin,
