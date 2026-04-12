@@ -158,7 +158,7 @@ while the other contacts different residues each frame (transient surface
 scanning). For ranking total adhesion strength, this distinction does not
 matter — both have 10 simultaneous contacts contributing to the score. To
 distinguish binding modes, use
-[residence time analysis](analysis_contacts_quickstart.md#residence-time-analysis).
+[residence time analysis](analysis_contacts_quickstart.md#enable-residence-time-statistics).
 ```
 
 #### Cross-Replicate Aggregation

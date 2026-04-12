@@ -11,6 +11,11 @@ configuration fields, API signatures, defaults, or benchmark data.
 - [Comparison YAML Schema](comparison_yaml.md)
 - [Comparison and Plotting Reference](analysis_comparison_reference.md)
 - [RMSD Plugin Reference](analysis_rmsd_reference.md)
+- [Rg Plugin Reference](analysis_rg_reference.md)
+- [RMSF Plugin Reference](analysis_rmsf_reference.md)
+- [Catalytic Triad Plugin Reference](analysis_triad_reference.md)
+- [Distances Plugin Reference](analysis_distances_reference.md)
+- [Contacts Plugin Reference](analysis_contacts_reference.md)
 - [Post-Hoc Testing Reference](posthoc_testing.md)
 - [Benchmarks](benchmarks.md)
 
@@ -43,6 +48,11 @@ Configuration Reference <configuration>
 Comparison YAML Schema <comparison_yaml>
 Comparison and Plotting Reference <analysis_comparison_reference>
 RMSD Plugin Reference <analysis_rmsd_reference>
+Rg Plugin Reference <analysis_rg_reference>
+RMSF Plugin Reference <analysis_rmsf_reference>
+Catalytic Triad Plugin Reference <analysis_triad_reference>
+Distances Plugin Reference <analysis_distances_reference>
+Contacts Plugin Reference <analysis_contacts_reference>
 Post-Hoc Testing Reference <posthoc_testing>
 Benchmarks <benchmarks>
 API Overview <../api/overview>
