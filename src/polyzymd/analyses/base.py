@@ -72,6 +72,28 @@ class BasePlotSettings(BaseModel):
     """
 
 
+class SlurmResourceHint(BaseModel):
+    """Per-plugin SLURM resource hints for HPC submission.
+
+    These values are used as default SLURM resources when users do not pass
+    explicit resource flags on the CLI. Explicit CLI flags always take
+    precedence over plugin hints.
+
+    Parameters
+    ----------
+    mem : str | None
+        Memory request string, for example ``"16G"``.
+    time : str | None
+        Walltime string, for example ``"04:00:00"``.
+    cpus_per_task : int | None
+        Number of CPUs per task.
+    """
+
+    mem: str | None = None
+    time: str | None = None
+    cpus_per_task: int | None = None
+
+
 # ---------------------------------------------------------------------------
 # Context objects — lightweight carriers for framework-provided data
 # ---------------------------------------------------------------------------
@@ -808,6 +830,8 @@ class Analysis(ABC):
         Whether the framework should run ``compute_replicate()``.
     has_aggregate_stage : bool
         Whether the framework should run ``aggregate()``.
+    slurm_resource_hint : SlurmResourceHint | None
+        Optional per-plugin SLURM resource defaults for HPC submission.
 
     Examples
     --------
@@ -884,6 +908,7 @@ class Analysis(ABC):
     min_replicates: ClassVar[int] = 2
     has_compute_stage: ClassVar[bool] = True
     has_aggregate_stage: ClassVar[bool] = True
+    slurm_resource_hint: ClassVar[SlurmResourceHint | None] = None
 
     # === Lifecycle methods ===
 

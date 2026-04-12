@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import ClassVar, Sequence
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from polyzymd.analyses.base import (
     AggregateContext,
@@ -20,6 +20,7 @@ from polyzymd.analyses.base import (
     MetricValue,
     PlotContext,
     ReplicateContext,
+    SlurmResourceHint,
 )
 from polyzymd.analyses.exceptions import PluginContractError
 
@@ -205,6 +206,43 @@ class TestAnalysisABC:
             )
         )
         assert "toy_metric" in toy_result
+
+    def test_default_slurm_resource_hint_is_none(self, toy_analysis) -> None:
+        """Default slurm_resource_hint should be unset."""
+        assert toy_analysis.slurm_resource_hint is None
+
+    def test_subclass_can_set_slurm_resource_hint(self) -> None:
+        """Subclass should be able to provide SLURM defaults."""
+
+        class SlurmHintAnalysis(Analysis):
+            name: ClassVar[str] = "slurm_hint"
+            Settings: ClassVar[type] = ToySettings
+            slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(
+                mem="16G",
+                time="04:00:00",
+                cpus_per_task=4,
+            )
+
+            def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
+                return {"value": float(replicate)}
+
+            def aggregate(
+                self,
+                ctx: AggregateContext,
+                results: Sequence[dict[str, float]],
+            ) -> dict[str, float]:
+                return {"mean": 1.0}
+
+        plugin = SlurmHintAnalysis()
+        assert plugin.slurm_resource_hint is not None
+        assert plugin.slurm_resource_hint.mem == "16G"
+        assert plugin.slurm_resource_hint.time == "04:00:00"
+        assert plugin.slurm_resource_hint.cpus_per_task == 4
+
+    def test_slurm_resource_hint_model_validation(self) -> None:
+        """SlurmResourceHint should validate declared field types."""
+        with pytest.raises(ValidationError):
+            SlurmResourceHint(cpus_per_task="four")
 
 
 # ============================================================================
