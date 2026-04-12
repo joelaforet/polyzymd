@@ -132,9 +132,6 @@ Add `compute_binding_preference: true` to your contacts analysis settings:
 name: "Polymer Binding Preference Study"
 control: "No Polymer"
 
-structures:
-  enzyme_pdb: "structures/enzyme.pdb"  # For SASA calculation
-
 conditions:
   - label: "No Polymer"
     config: "../no_polymer/config.yaml"
@@ -185,56 +182,23 @@ polyzymd compare run contacts -f comparison.yaml --format markdown
 
 ````{tab-item} Python
 ```python
-from pathlib import Path
-from polyzymd.analyses.contacts._results import ContactResult
-from polyzymd.analyses.shared.binding_preference import compute_binding_preference
-from polyzymd.analyses.shared.surface_exposure import SurfaceExposureFilter
+from polyzymd.analyses.shared.binding_preference._models import BindingPreferenceResult
 
-# Load contact results
-contacts = ContactResult.load("analysis/contacts/contacts_rep1.json")
+# Binding preference is computed automatically when:
+# plugins.contacts.compute_binding_preference: true
+#
+# After running:
+#   polyzymd compare run contacts -f comparison.yaml
 
-# Compute surface exposure
-exposure_filter = SurfaceExposureFilter(threshold=0.2)
-surface_exposure = exposure_filter.calculate("structures/enzyme.pdb")
-
-# Define protein groups (resolved to residue IDs)
-# You can use the default AA class groups or define custom ones
-from polyzymd.analyses.shared.aa_classification import AA_CLASS_RESIDUES
-
-protein_groups = {
-    "aromatic": {12, 45, 67, 89, 102},      # resids of aromatic residues
-    "charged_positive": {23, 34, 56, 78},   # LYS, ARG resids
-    "charged_negative": {15, 28, 91},       # ASP, GLU resids
-    "nonpolar": {5, 10, 20, 30, 40, 50},    # hydrophobic resids
-    "polar": {8, 18, 25, 35, 42, 55},       # SER, THR, etc.
-}
-
-# Extract polymer composition from trajectory (stored as metadata)
-from polyzymd.analyses.shared.binding_preference import extract_polymer_composition
-polymer_composition = extract_polymer_composition(universe)  # universe from trajectory
-
-# Compute binding preference
-result = compute_binding_preference(
-    contact_result=contacts,
-    surface_exposure=surface_exposure,
-    protein_groups=protein_groups,
-    polymer_composition=polymer_composition,
+result = BindingPreferenceResult.load(
+    "analysis/<condition>/contacts/aggregated/binding_preference.json"
 )
 
-# Access enrichment values (normalized by protein surface availability)
-print("Enrichment matrix:")
-for polymer_type, groups in result.enrichment_matrix().items():
+# Access enrichment values
+for polymer_type, partition in result.binding_preference.aa_class_binding.items():
     print(f"\n{polymer_type}:")
-    for group, enrichment in groups.items():
-        marker = "+" if enrichment > 0 else "-" if enrichment < 0 else "="
-        print(f"  {group}: {enrichment:+.2f} {marker}")
-
-# Get detailed entry for a specific pair
-entry = result.get_entry("SBM", "aromatic")
-print(f"\nSBM → aromatic:")
-print(f"  Contact share: {entry.contact_share:.3f}")
-print(f"  Expected share (surface): {entry.expected_share:.3f}")
-print(f"  Enrichment: {entry.enrichment:+.2f}")
+    for entry in partition.entries:
+        print(f"  {entry.partition_element}: {entry.enrichment:+.2f}")
 ```
 ````
 `````
@@ -521,9 +485,6 @@ site?"*
 # comparison.yaml
 name: "SBMA vs EGMA Binding Preferences"
 control: "No Polymer"
-
-structures:
-  enzyme_pdb: "structures/lipase.pdb"
 
 conditions:
   - label: "No Polymer"
