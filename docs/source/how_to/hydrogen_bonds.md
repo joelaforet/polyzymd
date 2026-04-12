@@ -321,7 +321,7 @@ For long trajectories or many replicates, submit as a SLURM job:
 
 ```bash
 pixi run -e build polyzymd compare submit hydrogen_bonds \
-    --comparison-yaml comparison.yaml \
+    -f comparison.yaml \
     --partition aa100 \
     --mem 8G \
     --time 02:00:00

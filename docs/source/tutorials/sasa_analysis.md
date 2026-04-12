@@ -164,7 +164,7 @@ For small systems or interactive exploration, run the SASA analysis locally:
 
 ```bash
 pixi run -e build polyzymd compare run sasa \
-    --comparison-yaml comparison.yaml
+    -f comparison.yaml
 ```
 
 This runs the full pipeline sequentially: `compute_replicate` for every
@@ -185,7 +185,7 @@ For large systems or many replicates, submit the analysis as SLURM jobs:
 
 ```bash
 pixi run -e build polyzymd compare submit sasa \
-    --comparison-yaml comparison.yaml \
+    -f comparison.yaml \
     --partition aa100 \
     --mem 8G \
     --time 02:00:00
