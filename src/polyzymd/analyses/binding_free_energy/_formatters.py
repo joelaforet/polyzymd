@@ -102,6 +102,11 @@ def _format_condition_block(
         return
 
     for entry in sorted(summary.entries, key=lambda e: (e.polymer_type, e.protein_group)):
+        group_label = (
+            entry.protein_group
+            if entry.partition_name == "aa_class"
+            else f"{entry.partition_name}:{entry.protein_group}"
+        )
         if entry.delta_G is None:
             dg_str = "      N/A"
             unc_str = "      N/A"
@@ -114,7 +119,7 @@ def _format_condition_block(
             )
 
         lines.append(
-            f"  {entry.polymer_type:<12} {entry.protein_group:<22} "
+            f"  {entry.polymer_type:<12} {group_label:<22} "
             f"{dg_str} {unc_str}  {entry.n_replicates:>5}"
         )
 
@@ -141,7 +146,12 @@ def _format_pairwise_block(
         )
         lines.append("  " + "-" * 97)
 
-        for e in sorted(entries, key=lambda x: (x.polymer_type, x.protein_group)):
+        for e in sorted(entries, key=lambda x: (x.polymer_type, x.partition_name, x.protein_group)):
+            group_label = (
+                e.protein_group
+                if e.partition_name == "aa_class"
+                else f"{e.partition_name}:{e.protein_group}"
+            )
             dg_a = f"{e.delta_G_a:>+10.3f}" if e.delta_G_a is not None else "       N/A"
             dg_b = f"{e.delta_G_b:>+10.3f}" if e.delta_G_b is not None else "       N/A"
             ddg = f"{e.delta_delta_G:>+10.3f}" if e.delta_delta_G is not None else "       N/A"
@@ -159,7 +169,7 @@ def _format_pairwise_block(
                     sig_marker = "*"
             bh_sig = "Yes" if e.significant else "No"
             lines.append(
-                f"  {e.polymer_type:<12} {e.protein_group:<22} {dg_a} {dg_b} {ddg} "
+                f"  {e.polymer_type:<12} {group_label:<22} {dg_a} {dg_b} {ddg} "
                 f"{pval} {p_adj}{sig_marker} {bh_sig:>5}"
             )
 
@@ -209,6 +219,11 @@ def format_bfe_markdown(result: BindingFreeEnergyResult) -> str:
         lines.append("|---------|----------|----------:|---:|---|")
 
         for entry in sorted(summary.entries, key=lambda e: (e.polymer_type, e.protein_group)):
+            group_label = (
+                entry.protein_group
+                if entry.partition_name == "aa_class"
+                else f"{entry.partition_name}:{entry.protein_group}"
+            )
             if entry.delta_G is None:
                 dg_str = "N/A"
                 unc_str = "N/A"
@@ -220,7 +235,7 @@ def format_bfe_markdown(result: BindingFreeEnergyResult) -> str:
                     else "--"
                 )
             lines.append(
-                f"| {entry.polymer_type} | {entry.protein_group} | "
+                f"| {entry.polymer_type} | {group_label} | "
                 f"{dg_str} | {unc_str} | {entry.n_replicates} |"
             )
 
@@ -248,7 +263,14 @@ def format_bfe_markdown(result: BindingFreeEnergyResult) -> str:
                 "|---------|----------|----------:|----------:|----------:|--------:|------:|------|"
             )
 
-            for e in sorted(entries, key=lambda x: (x.polymer_type, x.protein_group)):
+            for e in sorted(
+                entries, key=lambda x: (x.polymer_type, x.partition_name, x.protein_group)
+            ):
+                group_label = (
+                    e.protein_group
+                    if e.partition_name == "aa_class"
+                    else f"{e.partition_name}:{e.protein_group}"
+                )
                 dg_a = f"{e.delta_G_a:+.3f}" if e.delta_G_a is not None else "N/A"
                 dg_b = f"{e.delta_G_b:+.3f}" if e.delta_G_b is not None else "N/A"
                 ddg = f"{e.delta_delta_G:+.3f}" if e.delta_delta_G is not None else "N/A"
@@ -256,7 +278,7 @@ def format_bfe_markdown(result: BindingFreeEnergyResult) -> str:
                 p_adj = f"{e.p_value_adjusted:.4f}" if e.p_value_adjusted is not None else "--"
                 sig = "Yes" if e.significant else "No"
                 lines.append(
-                    f"| {e.polymer_type} | {e.protein_group} | {dg_a} | {dg_b} | {ddg} | "
+                    f"| {e.polymer_type} | {group_label} | {dg_a} | {dg_b} | {ddg} | "
                     f"{pval} | {p_adj} | {sig} |"
                 )
 

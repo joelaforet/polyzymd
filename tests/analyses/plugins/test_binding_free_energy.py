@@ -793,6 +793,109 @@ class TestPairwise:
         # ΔΔG = dg_B - dg_A = -0.6 - (-0.5) = -0.1
         assert pairs[0].delta_delta_G == pytest.approx(-0.1)
 
+    def test_pairwise_keeps_distinct_partition_identity(self):
+        from polyzymd.analyses.binding_free_energy import BindingFreeEnergyAnalysis
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
+            FreeEnergyConditionSummary,
+            FreeEnergyEntry,
+        )
+
+        analysis = BindingFreeEnergyAnalysis()
+
+        entries_a = [
+            FreeEnergyEntry(
+                polymer_type="SBM",
+                protein_group="aromatic",
+                partition_name="aa_class",
+                contact_share=0.2,
+                expected_share=0.1,
+                enrichment_ratio=2.0,
+                delta_G=-0.5,
+                delta_G_uncertainty=0.05,
+                delta_G_per_replicate=[-0.4, -0.5, -0.6],
+                units="kT",
+                temperature_K=300.0,
+                n_replicates=3,
+                n_exposed_in_group=10,
+            ),
+            FreeEnergyEntry(
+                polymer_type="SBM",
+                protein_group="aromatic",
+                partition_name="custom_partition",
+                contact_share=0.25,
+                expected_share=0.1,
+                enrichment_ratio=2.5,
+                delta_G=-0.7,
+                delta_G_uncertainty=0.05,
+                delta_G_per_replicate=[-0.6, -0.7, -0.8],
+                units="kT",
+                temperature_K=300.0,
+                n_replicates=3,
+                n_exposed_in_group=10,
+            ),
+        ]
+        entries_b = [
+            entries_a[0].model_copy(
+                update={"delta_G": -0.6, "delta_G_per_replicate": [-0.5, -0.6, -0.7]}
+            ),
+            entries_a[1].model_copy(
+                update={"delta_G": -0.9, "delta_G_per_replicate": [-0.8, -0.9, -1.0]}
+            ),
+        ]
+
+        summary_a = FreeEnergyConditionSummary(
+            label="A",
+            config_path="/tmp/A/config.yaml",
+            temperature_K=300.0,
+            n_replicates=3,
+            units="kT",
+            entries=entries_a,
+            polymer_types=["SBM"],
+            protein_groups=["aromatic"],
+        )
+        summary_b = FreeEnergyConditionSummary(
+            label="B",
+            config_path="/tmp/B/config.yaml",
+            temperature_K=300.0,
+            n_replicates=3,
+            units="kT",
+            entries=entries_b,
+            polymer_types=["SBM"],
+            protein_groups=["aromatic"],
+        )
+
+        pairs = analysis._compare_condition_pair(summary_a, summary_b)
+
+        assert len(pairs) == 2
+        partition_names = {pair.partition_name for pair in pairs}
+        assert partition_names == {"aa_class", "custom_partition"}
+
+
+class TestPairwiseSerialization:
+    def test_free_energy_pairwise_entry_partition_roundtrip(self):
+        from polyzymd.analyses.binding_free_energy._comparison_results import (
+            FreeEnergyPairwiseEntry,
+        )
+
+        entry = FreeEnergyPairwiseEntry(
+            polymer_type="SBM",
+            protein_group="aromatic",
+            partition_name="custom_partition",
+            condition_a="A",
+            condition_b="B",
+            temperature_a_K=300.0,
+            temperature_b_K=300.0,
+            cross_temperature=False,
+            delta_G_a=-0.5,
+            delta_G_b=-0.7,
+            delta_delta_G=-0.2,
+            t_statistic=1.2,
+            p_value=0.05,
+        )
+
+        loaded = FreeEnergyPairwiseEntry.model_validate_json(entry.model_dump_json())
+        assert loaded.partition_name == "custom_partition"
+
 
 # ===========================================================================
 # Plot

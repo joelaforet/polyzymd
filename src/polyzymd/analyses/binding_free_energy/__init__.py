@@ -831,7 +831,7 @@ class BindingFreeEnergyAnalysis(Analysis):
         summary_a: Any,
         summary_b: Any,
     ) -> list[Any]:
-        """Compare two conditions for all shared (polymer_type, protein_group) pairs.
+        """Compare two conditions for all shared (polymer, partition, group) entries.
 
         Parameters
         ----------
@@ -853,15 +853,19 @@ class BindingFreeEnergyAnalysis(Analysis):
             summary_a.temperature_K, summary_b.temperature_K, rel_tol=1e-3
         )
 
-        pairs_a = {(e.polymer_type, e.protein_group): e for e in summary_a.entries}
-        pairs_b = {(e.polymer_type, e.protein_group): e for e in summary_b.entries}
+        pairs_a = {
+            (e.polymer_type, e.partition_name, e.protein_group): e for e in summary_a.entries
+        }
+        pairs_b = {
+            (e.polymer_type, e.partition_name, e.protein_group): e for e in summary_b.entries
+        }
         shared_pairs = sorted(set(pairs_a.keys()) & set(pairs_b.keys()))
 
         pairwise: list[FreeEnergyPairwiseEntry] = []
 
-        for polymer_type, protein_group in shared_pairs:
-            entry_a = pairs_a[(polymer_type, protein_group)]
-            entry_b = pairs_b[(polymer_type, protein_group)]
+        for polymer_type, partition_name, protein_group in shared_pairs:
+            entry_a = pairs_a[(polymer_type, partition_name, protein_group)]
+            entry_b = pairs_b[(polymer_type, partition_name, protein_group)]
 
             dg_a = entry_a.delta_G
             dg_b = entry_b.delta_G
@@ -882,12 +886,19 @@ class BindingFreeEnergyAnalysis(Analysis):
                         t_stat = ttest.t_statistic
                         p_val = ttest.p_value
                     except (ValueError, TypeError, RuntimeError) as exc:
-                        logger.debug(f"T-test failed for ({polymer_type}, {protein_group}): {exc}")
+                        logger.debug(
+                            "T-test failed for (%s, %s, %s): %s",
+                            polymer_type,
+                            partition_name,
+                            protein_group,
+                            exc,
+                        )
 
             pairwise.append(
                 FreeEnergyPairwiseEntry(
                     polymer_type=polymer_type,
                     protein_group=protein_group,
+                    partition_name=partition_name,
                     condition_a=summary_a.label,
                     condition_b=summary_b.label,
                     temperature_a_K=summary_a.temperature_K,

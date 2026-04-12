@@ -272,6 +272,8 @@ class FreeEnergyPairwiseEntry(BaseModel):
         Polymer residue type.
     protein_group : str
         Protein group label.
+    partition_name : str
+        Partition that defines ``protein_group``.
     condition_a : str
         Label of the first condition.
     condition_b : str
@@ -300,6 +302,7 @@ class FreeEnergyPairwiseEntry(BaseModel):
 
     polymer_type: str
     protein_group: str
+    partition_name: str = "aa_class"
     condition_a: str
     condition_b: str
     temperature_a_K: float
