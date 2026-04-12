@@ -145,6 +145,10 @@ class FakeTrajectory:
 class FakeUniverse:
     """Minimal stand-in for ``MDAnalysis.Universe``.
 
+    The fake universe tracks all atom selection strings passed to
+    :meth:`select_atoms` and can optionally return custom atom groups
+    for specific selection strings.
+
     Parameters
     ----------
     n_atoms : int
@@ -155,6 +159,9 @@ class FakeUniverse:
         Number of residues (default: ``n_atoms // 5``).
     dt : float
         Timestep in ps.
+    selection_map : dict[str, FakeAtomGroup] | None
+        Optional mapping from selection string to custom atom groups.
+        Unknown selections fall back to ``self.atoms``.
 
     Examples
     --------
@@ -172,13 +179,19 @@ class FakeUniverse:
         n_frames: int = 100,
         n_residues: int | None = None,
         dt: float = 10.0,
+        selection_map: dict[str, FakeAtomGroup] | None = None,
     ) -> None:
         self.atoms = FakeAtomGroup(n_atoms, n_residues)
         self.trajectory = FakeTrajectory(n_frames, dt)
         self.residues = self.atoms.residues
+        self.selection_map = selection_map
+        self.selection_calls: list[str] = []
 
-    def select_atoms(self, selection: str) -> FakeAtomGroup:  # noqa: ARG002
-        """Return the atom group regardless of selection string."""
+    def select_atoms(self, selection: str) -> FakeAtomGroup:
+        """Return a mapped atom group when available, else all atoms."""
+        self.selection_calls.append(selection)
+        if self.selection_map is not None and selection in self.selection_map:
+            return self.selection_map[selection]
         return self.atoms
 
 
@@ -249,7 +262,9 @@ def patch_trajectory_loader(
     """
     loader = make_mock_trajectory_loader(universe=universe)
     module = importlib.import_module(module_path)
-    monkeypatch.setattr(module, "TrajectoryLoader", lambda _sim_config: loader)
+    loader_class = create_autospec(TrajectoryLoader, spec_set=True)
+    loader_class.return_value = loader
+    monkeypatch.setattr(module, "TrajectoryLoader", loader_class)
     return loader
 
 
