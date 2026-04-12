@@ -949,6 +949,26 @@ def submit_analysis_hpc(
             f"Unknown analysis type '{analysis}'. Available: {', '.join(sorted(available))}"
         )
     plugin = analysis_cls()
+
+    dependencies = tuple(getattr(analysis_cls, "dependencies", ()))
+    if dependencies:
+        source = config.source_path
+        comparison_root = source.parent / "comparison" if source is not None else Path("comparison")
+        for dep_name in dependencies:
+            expected_path = comparison_root / dep_name / "result.json"
+            if not expected_path.exists():
+                raise click.UsageError(
+                    (
+                        f"Error: '{plugin.name}' depends on '{dep_name}', but '{dep_name}' comparison "
+                        "results were not found at: "
+                        f"{expected_path}\n\n"
+                        f"Run '{dep_name}' first:\n"
+                        f"  polyzymd compare submit {dep_name} [--partition ...] [--qos ...]\n\n"
+                        "Or use 'compare submit-all' to submit all analyses with correct "
+                        "dependency ordering."
+                    )
+                )
+
     resources = AnalysisSlurmResources(
         pixi_path=pixi_path,
         partition=partition,

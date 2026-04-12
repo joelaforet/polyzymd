@@ -766,3 +766,140 @@ def test_submit_without_sbatch(monkeypatch, tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "sbatch' not found on PATH" in result.output
+
+
+def test_submit_with_satisfied_dependencies_succeeds(monkeypatch, tmp_path: Path) -> None:
+    """compare submit should continue when dependency result files exist."""
+    runner = CliRunner()
+
+    class _FakeAnalysis:
+        name = "dep_child"
+
+    class _DepChildClass:
+        name = "dep_child"
+        dependencies = ("contacts",)
+
+        def __call__(self):
+            return _FakeAnalysis()
+
+    class _Cond:
+        def __init__(self, reps):
+            self.replicate_specs = [SimpleNamespace(replicate=r) for r in reps]
+
+    manifest = SimpleNamespace(
+        condition_specs=[_Cond([1])],
+        save=lambda path: Path(path).write_text("{}"),
+    )
+
+    dep_result = tmp_path / "comparison" / "contacts" / "result.json"
+    dep_result.parent.mkdir(parents=True, exist_ok=True)
+    dep_result.write_text("{}")
+
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
+        lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
+    )
+    monkeypatch.setattr("polyzymd.analyses.discovery.get_analysis", lambda name: _DepChildClass())
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.build_manifest", lambda *args, **kwargs: manifest
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_replicate_script",
+        lambda *args, **kwargs: tmp_path / "rep.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_aggregate_script",
+        lambda *args, **kwargs: tmp_path / "agg.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_finalize_script",
+        lambda *args, **kwargs: tmp_path / "fin.sh",
+    )
+
+    result = runner.invoke(
+        compare,
+        ["submit", "dep_child", "-f", str(tmp_path / "comparison.yaml"), "--dry-run"],
+    )
+    assert result.exit_code == 0
+
+
+def test_submit_with_missing_dependencies_fails(monkeypatch, tmp_path: Path) -> None:
+    """compare submit should fail with clear error when dependencies are missing."""
+    runner = CliRunner()
+
+    class _FakeAnalysis:
+        name = "dep_child"
+
+    class _DepChildClass:
+        name = "dep_child"
+        dependencies = ("contacts",)
+
+        def __call__(self):
+            return _FakeAnalysis()
+
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
+        lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
+    )
+    monkeypatch.setattr("polyzymd.analyses.discovery.get_analysis", lambda name: _DepChildClass())
+
+    result = runner.invoke(
+        compare,
+        ["submit", "dep_child", "-f", str(tmp_path / "comparison.yaml"), "--dry-run"],
+    )
+    assert result.exit_code != 0
+    assert "depends on 'contacts'" in result.output
+    assert "polyzymd compare submit contacts" in result.output
+
+
+def test_submit_with_no_dependencies_skips_preflight(monkeypatch, tmp_path: Path) -> None:
+    """compare submit should skip dependency preflight for independent plugins."""
+    runner = CliRunner()
+
+    class _FakeAnalysis:
+        name = "independent"
+
+    class _IndependentClass:
+        name = "independent"
+        dependencies = ()
+
+        def __call__(self):
+            return _FakeAnalysis()
+
+    class _Cond:
+        def __init__(self, reps):
+            self.replicate_specs = [SimpleNamespace(replicate=r) for r in reps]
+
+    manifest = SimpleNamespace(
+        condition_specs=[_Cond([1])],
+        save=lambda path: Path(path).write_text("{}"),
+    )
+
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
+        lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.discovery.get_analysis", lambda name: _IndependentClass()
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.build_manifest", lambda *args, **kwargs: manifest
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_replicate_script",
+        lambda *args, **kwargs: tmp_path / "rep.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_aggregate_script",
+        lambda *args, **kwargs: tmp_path / "agg.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_finalize_script",
+        lambda *args, **kwargs: tmp_path / "fin.sh",
+    )
+
+    result = runner.invoke(
+        compare,
+        ["submit", "independent", "-f", str(tmp_path / "comparison.yaml"), "--dry-run"],
+    )
+    assert result.exit_code == 0
