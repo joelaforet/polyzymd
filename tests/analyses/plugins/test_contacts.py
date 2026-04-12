@@ -562,6 +562,88 @@ class TestAggregate:
         assert "reps1-3" in str(save_call)
 
 
+class TestAggregatePolymerTypeCoverage:
+    """Regression tests for polymer-type per-replicate aggregation."""
+
+    def test_includes_zero_contact_replicates_in_polymer_type_vectors(self):
+        from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
+        from polyzymd.analyses.contacts._results import (
+            ContactEvent,
+            ContactResult,
+            PolymerSegmentContacts,
+            ResidueContactData,
+        )
+
+        rep1 = ContactResult(
+            residue_contacts=[
+                ResidueContactData(
+                    protein_resid=1,
+                    protein_resname="ALA",
+                    protein_group="nonpolar",
+                    segment_contacts=[
+                        PolymerSegmentContacts(
+                            polymer_resname="PEG",
+                            polymer_resid=1,
+                            polymer_chain_idx=0,
+                            events=[ContactEvent(start_frame=0, duration=5)],
+                        )
+                    ],
+                    statistical_inefficiency=1.0,
+                    n_effective=10.0,
+                )
+            ],
+            n_frames=10,
+            criteria_label="distance",
+            criteria_cutoff=4.5,
+            replicate=1,
+        )
+        rep2 = ContactResult(
+            residue_contacts=[
+                ResidueContactData(
+                    protein_resid=1,
+                    protein_resname="ALA",
+                    protein_group="nonpolar",
+                    segment_contacts=[
+                        PolymerSegmentContacts(
+                            polymer_resname="PEG",
+                            polymer_resid=1,
+                            polymer_chain_idx=0,
+                            events=[ContactEvent(start_frame=0, duration=3)],
+                        )
+                    ],
+                    statistical_inefficiency=1.0,
+                    n_effective=10.0,
+                )
+            ],
+            n_frames=10,
+            criteria_label="distance",
+            criteria_cutoff=4.5,
+            replicate=2,
+        )
+        rep3 = ContactResult(
+            residue_contacts=[
+                ResidueContactData(
+                    protein_resid=1,
+                    protein_resname="ALA",
+                    protein_group="nonpolar",
+                    segment_contacts=[],
+                    statistical_inefficiency=1.0,
+                    n_effective=10.0,
+                )
+            ],
+            n_frames=10,
+            criteria_label="distance",
+            criteria_cutoff=4.5,
+            replicate=3,
+        )
+
+        aggregated = aggregate_contact_results([rep1, rep2, rep3])
+        residue = aggregated.residue_stats[0]
+
+        assert residue.by_polymer_type_per_replicate["PEG"] == [0.5, 0.3, 0.0]
+        assert residue.by_polymer_type["PEG"][0] == pytest.approx((0.5 + 0.3 + 0.0) / 3.0)
+
+
 # ---------------------------------------------------------------------------
 # Per-replicate metric computation
 # ---------------------------------------------------------------------------

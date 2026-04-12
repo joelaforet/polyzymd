@@ -812,6 +812,7 @@ def aggregate_contact_results(
         n_eff_per_rep = []
         by_polymer_type_per_rep: dict[str, list[float]] = {}
         rt_by_polymer_type_per_rep: dict[str, list[float]] = {}
+        type_fracs_per_rep: list[dict[str, float]] = []
 
         for i, r in enumerate(results):
             rc_rep = residue_lookups[i].get(resid)
@@ -819,6 +820,7 @@ def aggregate_contact_results(
                 fractions_per_rep.append(0.0)
                 g_per_rep.append(1.0)  # Default g=1 for missing residue
                 n_eff_per_rep.append(float(r.n_frames))
+                type_fracs_per_rep.append({})
                 continue
 
             frac = rc_rep.contact_fraction(r.n_frames)
@@ -830,10 +832,7 @@ def aggregate_contact_results(
 
             # Per polymer type
             type_fracs = rc_rep.contacts_by_polymer_type(r.n_frames)
-            for ptype, pfrac in type_fracs.items():
-                if ptype not in by_polymer_type_per_rep:
-                    by_polymer_type_per_rep[ptype] = []
-                by_polymer_type_per_rep[ptype].append(pfrac)
+            type_fracs_per_rep.append(type_fracs)
 
             # Per-residue residence time by polymer type
             rt_stats = rc_rep.residence_time_by_polymer_type()
@@ -842,6 +841,20 @@ def aggregate_contact_results(
                     if ptype not in rt_by_polymer_type_per_rep:
                         rt_by_polymer_type_per_rep[ptype] = []
                     rt_by_polymer_type_per_rep[ptype].append(stats["mean_frames"])
+
+        all_polymer_types = sorted(
+            {
+                polymer_type
+                for rep_type_fracs in type_fracs_per_rep
+                for polymer_type in rep_type_fracs
+            }
+        )
+        by_polymer_type_per_rep = {
+            polymer_type: [0.0] * len(type_fracs_per_rep) for polymer_type in all_polymer_types
+        }
+        for rep_idx, rep_type_fracs in enumerate(type_fracs_per_rep):
+            for polymer_type, polymer_frac in rep_type_fracs.items():
+                by_polymer_type_per_rep[polymer_type][rep_idx] = polymer_frac
 
         mean, sem = agg_func(fractions_per_rep)
         g_mean, g_sem = agg_func(g_per_rep)
