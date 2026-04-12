@@ -128,7 +128,7 @@ def test_settings_defaults() -> None:
     assert len(settings.summaries) == 1
     assert settings.summaries[0].name == "protein_polymer"
     assert settings.summaries[0].between == ("protein", "polymer")
-    assert settings.allow_empty_groups is False
+    assert settings.allow_empty_groups is True
 
 
 def test_settings_custom() -> None:
@@ -570,7 +570,7 @@ def test_compute_replicate_empty_selection(
         replicates=(1,),
         sim_config=MagicMock(),
     )
-    settings = HydrogenBondSettings(allow_empty_groups=True)
+    settings = HydrogenBondSettings()
     ctx = ReplicateContext(
         condition=condition,
         replicate=1,
@@ -602,8 +602,88 @@ def test_compute_replicate_empty_selection(
     summary = result.summaries[0]
     assert summary.mean_hbonds_per_frame == 0.0
     assert summary.counts_per_frame == [0, 0, 0]
-    assert "matched no atoms" in caplog.text
+    assert "matched 0 atoms" in caplog.text
     assert "No atoms selected for any summary" in caplog.text
+
+
+def test_compute_replicate_skips_only_empty_summary_and_keeps_other_summaries(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Empty-group summaries should be skipped without failing other summaries."""
+
+    class MockHydrogenBondAnalysis:
+        def __init__(self, **kwargs) -> None:
+            self.results = types.SimpleNamespace(hbonds=np.empty((0, 6), dtype=float))
+
+        def run(self, start: int, stop: int | None, step: int, verbose: bool) -> None:
+            self.results.hbonds = np.empty((0, 6), dtype=float)
+
+    atoms = {
+        0: _MockAtom(0, "A", 10, "SER", 0),
+        1: _MockAtom(1, "A", 11, "GLY", 1),
+    }
+    universe = MagicMock()
+    universe.trajectory = [object(), object(), object()]
+    universe.atoms = _MockAtomCollection(atoms)
+    selections = {
+        "chainid A": _MockAtomGroup([0, 1]),
+        "chainid C": _MockAtomGroup([]),
+    }
+    universe.select_atoms.side_effect = lambda selection, updating: selections[selection]
+
+    condition = Condition(
+        label="No Polymer (Control)",
+        config_path=Path("/tmp/config.yaml"),
+        replicates=(1,),
+        sim_config=MagicMock(),
+    )
+    settings = HydrogenBondSettings(
+        groups={"protein": "chainid A", "polymer": "chainid C"},
+        summaries=[
+            HydrogenBondSummarySettings(name="protein_polymer", between=("protein", "polymer")),
+            HydrogenBondSummarySettings(name="protein_internal", within="protein"),
+        ],
+    )
+    ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=condition.sim_config,
+        output_dir=tmp_path / "run_1",
+        equilibration="0ns",
+        recompute=True,
+        settings=settings,
+    )
+
+    analysis = HydrogenBondsAnalysis()
+    mock_modules = _make_mdanalysis_module(MockHydrogenBondAnalysis)
+
+    with (
+        patch.dict(sys.modules, mock_modules),
+        patch("polyzymd.analyses.hydrogen_bonds.TrajectoryLoader") as mock_loader_cls,
+        patch("polyzymd.analyses.hydrogen_bonds.compute_config_hash", return_value="abc123"),
+        caplog.at_level("WARNING", logger="polyzymd.analyses.hydrogen_bonds"),
+    ):
+        mock_loader = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+        mock_loader.load_universe.return_value = universe
+        mock_loader.get_timestep.return_value = 10.0
+
+        result = analysis.compute_replicate(ctx, 1)
+
+    assert isinstance(result, HydrogenBondResult)
+    summaries = {summary.name: summary for summary in result.summaries}
+    assert set(summaries) == {"protein_polymer", "protein_internal"}
+
+    skipped_summary = summaries["protein_polymer"]
+    assert skipped_summary.mean_hbonds_per_frame == 0.0
+    assert skipped_summary.counts_per_frame == [0, 0, 0]
+
+    computed_summary = summaries["protein_internal"]
+    assert computed_summary.mean_hbonds_per_frame == 0.0
+    assert computed_summary.counts_per_frame == [0, 0, 0]
+
+    assert "skipping summary 'protein_polymer'" in caplog.text
+    assert "condition='No Polymer (Control)' replicate=1" in caplog.text
 
 
 def test_compute_replicate_empty_group_raises_by_default(tmp_path: Path) -> None:

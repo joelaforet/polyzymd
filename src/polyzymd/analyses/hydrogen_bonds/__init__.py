@@ -160,8 +160,8 @@ class HydrogenBondSettings(BaseModel):
     top_n_pairs : int
         Number of top residue pairs to report.
     allow_empty_groups : bool
-        If False (default), raise when a group selection matches no atoms.
-        Set to True to warn and skip summaries that use empty groups.
+        If True (default), warn and skip summaries that use empty groups.
+        Set to False to raise when a group selection matches no atoms.
     allow_overlapping_composition : bool
         If False, raise when composition partitions overlap.
     composition : HydrogenBondCompositionSettings | None
@@ -191,10 +191,11 @@ class HydrogenBondSettings(BaseModel):
         description="Number of top residue pairs to report",
     )
     allow_empty_groups: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "If False (default), raise ValueError when a group selection matches no atoms "
-            "(strict mode). Set to True to warn and skip summaries using empty groups."
+            "If True (default), warn and skip summaries using empty groups. "
+            "Set to False to raise ValueError when a group selection matches no atoms "
+            "(strict mode)."
         ),
     )
     allow_overlapping_composition: bool = Field(
@@ -444,13 +445,7 @@ class HydrogenBondsAnalysis(Analysis):
         for group_name, selection_str in settings.groups.items():
             atom_group = u.select_atoms(selection_str, updating=settings.update_selections)
             if len(atom_group) == 0:
-                if settings.allow_empty_groups:
-                    logger.warning(
-                        "Group '%s' selection '%s' matched no atoms — will skip summaries using it",
-                        group_name,
-                        selection_str,
-                    )
-                else:
+                if not settings.allow_empty_groups:
                     raise ValueError(
                         f"Group '{group_name}' selection '{selection_str}' matched no atoms in "
                         "the universe. Fix the selection or set allow_empty_groups: true to "
@@ -474,9 +469,54 @@ class HydrogenBondsAnalysis(Analysis):
                             len(overlap),
                         )
 
+        active_summary_specs: list[HydrogenBondSummarySettings] = []
+        summary_results_by_name: dict[str, HydrogenBondReplicateSummary] = {}
+        for summary_spec in settings.summaries:
+            mode = "between" if summary_spec.between is not None else "within"
+            group_names_for_summary = (
+                list(summary_spec.between)
+                if summary_spec.between is not None
+                else [summary_spec.within]
+            )
+            group_names_for_summary = [g for g in group_names_for_summary if g is not None]
+
+            missing_groups = [
+                group_name
+                for group_name in group_names_for_summary
+                if len(resolved_groups[group_name]) == 0
+            ]
+            if missing_groups:
+                for group_name in missing_groups:
+                    logger.warning(
+                        "hydrogen_bonds: group '%s' selection '%s' matched 0 atoms for "
+                        "condition='%s' replicate=%d — skipping summary '%s'",
+                        group_name,
+                        settings.groups[group_name],
+                        ctx.condition.label,
+                        replicate,
+                        summary_spec.name,
+                    )
+
+                summary_results_by_name[summary_spec.name] = HydrogenBondReplicateSummary(
+                    name=summary_spec.name,
+                    mode=mode,
+                    group_names=group_names_for_summary,
+                    n_frames_used=n_frames,
+                    mean_hbonds_per_frame=0.0,
+                    mean_unique_pairs_per_frame=0.0,
+                    std_unique_pairs_per_frame=0.0,
+                    fraction_frames_with_any_hbond=0.0,
+                    counts_per_frame=[0] * n_frames,
+                    directed_residue_pairs=[],
+                    undirected_residue_pairs=[],
+                )
+                continue
+
+            active_summary_specs.append(summary_spec)
+
         all_atoms = None
         union_selections: set[str] = set()
-        for summary_spec in settings.summaries:
+        for summary_spec in active_summary_specs:
             if summary_spec.between is not None:
                 left_group, right_group = summary_spec.between
                 left_atoms = resolved_groups[left_group]
@@ -498,9 +538,11 @@ class HydrogenBondsAnalysis(Analysis):
 
         if all_atoms is None or len(all_atoms) == 0 or not union_sel:
             logger.warning("No atoms selected for any summary — returning empty result")
-            empty_counts = [0] * n_frames
-            empty_summaries = [
-                HydrogenBondReplicateSummary(
+            for summary_spec in settings.summaries:
+                if summary_spec.name in summary_results_by_name:
+                    continue
+
+                summary_results_by_name[summary_spec.name] = HydrogenBondReplicateSummary(
                     name=summary_spec.name,
                     mode="between" if summary_spec.between is not None else "within",
                     group_names=(
@@ -513,12 +555,12 @@ class HydrogenBondsAnalysis(Analysis):
                     mean_unique_pairs_per_frame=0.0,
                     std_unique_pairs_per_frame=0.0,
                     fraction_frames_with_any_hbond=0.0,
-                    counts_per_frame=empty_counts,
+                    counts_per_frame=[0] * n_frames,
                     directed_residue_pairs=[],
                     undirected_residue_pairs=[],
                 )
-                for summary_spec in settings.summaries
-            ]
+
+            summary_results = [summary_results_by_name[s.name] for s in settings.summaries]
             result = HydrogenBondResult(
                 config_hash=config_hash,
                 replicate=replicate,
@@ -526,7 +568,7 @@ class HydrogenBondsAnalysis(Analysis):
                 equilibration_unit=eq_unit,
                 selection_string=union_sel,
                 timestep_ps=timestep_ps,
-                summaries=empty_summaries,
+                summaries=summary_results,
                 composition_entries=[],
             )
             result.save(result_file)
@@ -578,35 +620,13 @@ class HydrogenBondsAnalysis(Analysis):
                     int(atom.resindex),
                 )
 
-        summary_results: list[HydrogenBondReplicateSummary] = []
-        for summary_spec in settings.summaries:
+        for summary_spec in active_summary_specs:
             mode = "between" if summary_spec.between is not None else "within"
             group_names_for_summary = (
                 list(summary_spec.between)
                 if summary_spec.between is not None
                 else [summary_spec.within]
             )
-
-            if any(
-                group_name is None or len(resolved_groups[group_name]) == 0
-                for group_name in group_names_for_summary
-            ):
-                summary_results.append(
-                    HydrogenBondReplicateSummary(
-                        name=summary_spec.name,
-                        mode=mode,
-                        group_names=[g for g in group_names_for_summary if g is not None],
-                        n_frames_used=n_frames,
-                        mean_hbonds_per_frame=0.0,
-                        mean_unique_pairs_per_frame=0.0,
-                        std_unique_pairs_per_frame=0.0,
-                        fraction_frames_with_any_hbond=0.0,
-                        counts_per_frame=[0] * n_frames,
-                        directed_residue_pairs=[],
-                        undirected_residue_pairs=[],
-                    )
-                )
-                continue
 
             counts_per_frame: dict[int, int] = defaultdict(int)
             unique_pairs_per_frame: dict[int, set[tuple[int, int]]] = defaultdict(set)
@@ -764,21 +784,21 @@ class HydrogenBondsAnalysis(Analysis):
 
             undirected_results.sort(key=lambda pair: pair.occupancy, reverse=True)
 
-            summary_results.append(
-                HydrogenBondReplicateSummary(
-                    name=summary_spec.name,
-                    mode=mode,
-                    group_names=[g for g in group_names_for_summary if g is not None],
-                    n_frames_used=n_frames,
-                    mean_hbonds_per_frame=mean_hbonds,
-                    mean_unique_pairs_per_frame=mean_unique_pairs,
-                    std_unique_pairs_per_frame=std_unique_pairs,
-                    fraction_frames_with_any_hbond=fraction_with_any,
-                    counts_per_frame=counts_list,
-                    directed_residue_pairs=directed_results,
-                    undirected_residue_pairs=undirected_results,
-                )
+            summary_results_by_name[summary_spec.name] = HydrogenBondReplicateSummary(
+                name=summary_spec.name,
+                mode=mode,
+                group_names=[g for g in group_names_for_summary if g is not None],
+                n_frames_used=n_frames,
+                mean_hbonds_per_frame=mean_hbonds,
+                mean_unique_pairs_per_frame=mean_unique_pairs,
+                std_unique_pairs_per_frame=std_unique_pairs,
+                fraction_frames_with_any_hbond=fraction_with_any,
+                counts_per_frame=counts_list,
+                directed_residue_pairs=directed_results,
+                undirected_residue_pairs=undirected_results,
             )
+
+        summary_results = [summary_results_by_name[s.name] for s in settings.summaries]
 
         result = HydrogenBondResult(
             config_hash=config_hash,
