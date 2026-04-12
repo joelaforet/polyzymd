@@ -668,7 +668,7 @@ import pandas as pd
 import json
 
 # Load aggregated result
-with open("analysis/rmsf/aggregated/rmsf_reps1-3_eq10ns.json") as f:
+with open("analysis/<condition>/rmsf/aggregated/rmsf_aggregated.json") as f:
     data = json.load(f)
 
 # Create DataFrame for export
