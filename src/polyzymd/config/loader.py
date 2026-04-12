@@ -133,21 +133,30 @@ class ConfigLoader:
 def load_config(path: Union[str, Path]) -> SimulationConfig:
     """Load a SimulationConfig from a YAML file.
 
-    Args:
-        path: Path to the YAML configuration file
+    Parameters
+    ----------
+    path : str or Path
+        Path to the YAML configuration file.
 
-    Returns:
-        Validated SimulationConfig instance
+    Returns
+    -------
+    SimulationConfig
+        Validated configuration instance.
 
-    Raises:
-        FileNotFoundError: If the config file doesn't exist
-        yaml.YAMLError: If the YAML is malformed
-        pydantic.ValidationError: If the configuration is invalid
+    Raises
+    ------
+    FileNotFoundError
+        If the config file doesn't exist.
+    yaml.YAMLError
+        If the YAML is malformed.
+    pydantic.ValidationError
+        If the configuration is invalid.
 
-    Example:
-        >>> config = load_config("my_simulation.yaml")
-        >>> print(config.enzyme.name)
-        "LipA"
+    Examples
+    --------
+    >>> config = load_config("my_simulation.yaml")
+    >>> print(config.enzyme.name)
+    "LipA"
     """
     path = Path(path)
 
@@ -168,14 +177,19 @@ def save_config(
 ) -> None:
     """Save a SimulationConfig to a YAML file.
 
-    Args:
-        config: Configuration to save
-        path: Destination path for the YAML file
-        relative_paths: Whether to convert paths to relative (default: True)
+    Parameters
+    ----------
+    config : SimulationConfig
+        Configuration to save.
+    path : str or Path
+        Destination path for the YAML file.
+    relative_paths : bool, optional
+        Whether to convert paths to relative, by default True.
 
-    Example:
-        >>> config = SimulationConfig(...)
-        >>> save_config(config, "output_config.yaml")
+    Examples
+    --------
+    >>> config = SimulationConfig(...)
+    >>> save_config(config, "output_config.yaml")
     """
     path = Path(path)
 
