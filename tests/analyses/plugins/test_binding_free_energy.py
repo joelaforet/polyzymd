@@ -165,6 +165,11 @@ class TestSettings:
 
 class TestNoOp:
     def test_compute_replicate_returns_none(self):
+        """Compare-only plugins must no-op compute stage by returning ``None``.
+
+        BindingFreeEnergyAnalysis sets ``has_compute_stage = False``, so the
+        inherited Analysis.compute_replicate contract is to return ``None``.
+        """
         from polyzymd.analyses.base import Condition, ReplicateContext
         from polyzymd.analyses.binding_free_energy import (
             BFESettings,
@@ -191,6 +196,11 @@ class TestNoOp:
         assert analysis.compute_replicate(ctx, 1) is None
 
     def test_aggregate_returns_none(self):
+        """Compare-only plugins must no-op aggregate stage by returning ``None``.
+
+        BindingFreeEnergyAnalysis sets ``has_aggregate_stage = False``, so the
+        inherited Analysis.aggregate contract is to return ``None``.
+        """
         from polyzymd.analyses.base import AggregateContext, Condition
         from polyzymd.analyses.binding_free_energy import (
             BFESettings,
@@ -213,6 +223,18 @@ class TestNoOp:
             settings=BFESettings(),
         )
         assert analysis.aggregate(ctx, []) is None
+
+    def test_compare_is_overridden(self):
+        """BindingFreeEnergyAnalysis must override Analysis.compare.
+
+        BFE performs custom compare-only logic, so it cannot use the base
+        scalar comparison implementation from Analysis.
+        """
+        from polyzymd.analyses.base import Analysis
+        from polyzymd.analyses.binding_free_energy import BindingFreeEnergyAnalysis
+
+        assert BindingFreeEnergyAnalysis.compare is not Analysis.compare
+        assert "compare" in BindingFreeEnergyAnalysis.__dict__
 
 
 # ===========================================================================
@@ -1100,11 +1122,15 @@ class TestExtractMetrics:
 
 
 class TestLifecycle:
-    def test_instantiation(self):
+    def test_class_variables_match_compare_only_contract(self):
         from polyzymd.analyses.binding_free_energy import BindingFreeEnergyAnalysis
 
-        analysis = BindingFreeEnergyAnalysis()
-        assert analysis.name == "binding_free_energy"
+        assert BindingFreeEnergyAnalysis.name == "binding_free_energy"
+        assert BindingFreeEnergyAnalysis.aliases == ("bfe",)
+        assert BindingFreeEnergyAnalysis.dependencies == ("contacts",)
+        assert BindingFreeEnergyAnalysis.min_replicates == 1
+        assert BindingFreeEnergyAnalysis.has_compute_stage is False
+        assert BindingFreeEnergyAnalysis.has_aggregate_stage is False
 
     def test_is_subclass_of_analysis(self):
         from polyzymd.analyses.base import Analysis
@@ -1112,16 +1138,11 @@ class TestLifecycle:
 
         assert issubclass(BindingFreeEnergyAnalysis, Analysis)
 
-    def test_has_all_required_methods(self):
+    def test_extract_metrics_returns_empty_for_custom_compare(self):
         from polyzymd.analyses.binding_free_energy import BindingFreeEnergyAnalysis
 
         analysis = BindingFreeEnergyAnalysis()
-        assert callable(analysis.compute_replicate)
-        assert callable(analysis.aggregate)
-        assert callable(analysis.compare)
-        assert callable(analysis.filter_conditions)
-        assert callable(analysis.plot)
-        assert callable(analysis.extract_metrics)
+        assert analysis.extract_metrics(MagicMock()) == {}
 
     def test_repr(self):
         from polyzymd.analyses.binding_free_energy import BindingFreeEnergyAnalysis
