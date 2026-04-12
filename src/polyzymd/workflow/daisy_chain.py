@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -461,7 +462,10 @@ class DaisyChainSubmitter:
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            job_id = result.stdout.strip().split()[-1]
+            match = re.search(r"\b(\d+)\b", result.stdout)
+            if not match:
+                raise RuntimeError(f"Could not parse job ID from sbatch output: {result.stdout!r}")
+            job_id = match.group(1)
             LOGGER.info(f"Submitted job {job_id} for replicate {replicate}")
 
             return SubmissionResult(

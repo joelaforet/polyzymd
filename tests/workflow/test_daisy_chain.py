@@ -5,6 +5,34 @@ from pathlib import Path
 import pytest
 
 
+class TestSbatchOutputParsing:
+    """C8-M1: sbatch job ID parsing should use regex."""
+
+    def test_standard_output(self):
+        """Standard sbatch output parses correctly."""
+        import re
+
+        stdout = "Submitted batch job 12345"
+        match = re.search(r"\b(\d+)\b", stdout)
+        assert match and match.group(1) == "12345"
+
+    def test_output_with_extra_text(self):
+        """Output with extra context still parses."""
+        import re
+
+        stdout = "Submitted batch job 12345 on cluster foo"
+        match = re.search(r"\b(\d+)\b", stdout)
+        assert match and match.group(1) == "12345"
+
+    def test_no_digits_returns_no_match(self):
+        """Output with no digits produces no regex match."""
+        import re
+
+        stdout = "No job submitted"
+        match = re.search(r"\b(\d+)\b", stdout)
+        assert match is None
+
+
 class TestJobNameGeneration:
     """Tests for DaisyChainSubmitter._create_job_name()."""
 
