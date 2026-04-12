@@ -349,34 +349,33 @@ project/
 The JSON file can be reloaded for downstream processing:
 
 ```python
-from polyzymd.analyses.binding_free_energy._comparison_results import BindingFreeEnergyResult
+import json
+from pathlib import Path
 
-# Legacy pattern: this plugin still exposes result models from
-# _comparison_results.py. New plugins should define result models inline
-# in the plugin package/module unless a separate file is clearly needed.
-
-result = BindingFreeEnergyResult.load(
-    "comparison/binding_free_energy/result.json"
+result = json.loads(
+    Path("comparison/binding_free_energy/result.json").read_text()
 )
 
 # Access per-condition data
-for summary in result.conditions:
-    print(f"\n{summary.label} ({summary.temperature_K} K)")
-    for entry in summary.entries:
-        if entry.delta_G is not None:
+for summary in result["conditions"]:
+    print(f"\n{summary['label']} ({summary['temperature_K']} K)")
+    for entry in summary["entries"]:
+        if entry["delta_G"] is not None:
+            unc = entry.get("delta_G_uncertainty") or 0.0
             print(
-                f"  {entry.polymer_type} × {entry.protein_group}: "
-                f"ΔG_sel = {entry.delta_G:+.3f} ± {entry.delta_G_uncertainty:.3f} "
-                f"{result.units}"
+                f"  {entry['polymer_type']} × {entry['protein_group']}: "
+                f"ΔG_sel = {entry['delta_G']:+.3f} ± {unc:.3f} "
+                f"{result['units']}"
             )
 
 # Access pairwise comparisons
-for pair in result.pairwise_comparisons:
-    if not pair.cross_temperature and pair.p_value is not None:
+for pair in result["pairwise_comparisons"]:
+    if not pair["cross_temperature"] and pair["p_value"] is not None:
         print(
-            f"{pair.condition_a} → {pair.condition_b} | "
-            f"{pair.polymer_type} × {pair.protein_group}: "
-            f"ΔΔG_B−A = {pair.delta_delta_G:+.3f}, p = {pair.p_value:.4f}"
+            f"{pair['condition_a']} → {pair['condition_b']} | "
+            f"{pair['polymer_type']} × {pair['protein_group']}: "
+            f"ΔΔG_B−A = {pair['delta_delta_G']:+.3f}, "
+            f"p = {pair['p_value']:.4f}"
         )
 ```
 

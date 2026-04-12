@@ -421,31 +421,34 @@ comparison_output/
 Reload for downstream processing:
 
 ```python
-from polyzymd.analyses.polymer_affinity._comparison_results import PolymerAffinityScoreResult
+import json
+from pathlib import Path
 
-# Legacy pattern: this plugin still exposes result models from
-# _comparison_results.py. New plugins should define result models inline
-# in the plugin package/module unless a separate file is clearly needed.
-
-result = PolymerAffinityScoreResult.load("comparison/polymer_affinity/result.json")
+result = json.loads(
+    Path("comparison/polymer_affinity/result.json").read_text()
+)
 
 # Access per-condition scores
-for summary in result.conditions:
-    print(f"\n{summary.label}: total_score = {summary.total_score:+.2f} kT")
-    for entry in summary.entries:
-        print(
-            f"  {entry.polymer_type} × {entry.protein_group}: "
-            f"N={entry.n_contacts:.1f}, ΔG_sel={entry.delta_G:+.3f}, "
-            f"Score={entry.score:+.3f} kT"
-        )
+for summary in result["conditions"]:
+    print(f"\n{summary['label']}: total_score = {summary['total_score']:+.2f} kT")
+    for entry in summary["entries"]:
+        dg = entry.get("delta_G_per_contact")
+        score = entry.get("affinity_score")
+        if dg is not None and score is not None:
+            print(
+                f"  {entry['polymer_type']} × {entry['protein_group']}: "
+                f"N={entry['n_contacts']:.1f}, ΔG_sel={dg:+.3f}, "
+                f"Score={score:+.3f} kT"
+            )
 
 # Access pairwise comparisons
-for pair in result.pairwise_comparisons:
-    if pair.p_value is not None:
-        sig = "**" if pair.p_value < 0.01 else "*" if pair.p_value < 0.05 else ""
+for pair in result["pairwise_comparisons"]:
+    if pair["p_value"] is not None:
+        sig = "**" if pair["p_value"] < 0.01 else "*" if pair["p_value"] < 0.05 else ""
         print(
-            f"{pair.condition_a} → {pair.condition_b}: "
-            f"ΔScore = {pair.delta_score:+.2f} kT, p = {pair.p_value:.4f} {sig}"
+            f"{pair['condition_a']} → {pair['condition_b']}: "
+            f"ΔScore = {pair['delta_score']:+.2f} kT, "
+            f"p = {pair['p_value']:.4f} {sig}"
         )
 ```
 
