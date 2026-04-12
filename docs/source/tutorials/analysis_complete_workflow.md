@@ -1,26 +1,9 @@
 # Tutorial: Analyze a Study from Finished Simulations
 
-:::{admonition} Modern workflow available
-:class: note
-
-This tutorial documents the manual, condition-by-condition analysis workflow.
-For most users, the **comparison pipeline** is now the recommended approach —
-it handles compute, aggregation, comparison, and plotting automatically:
-
-```bash
-polyzymd compare init -n my_study
-# Edit comparison.yaml with your conditions
-polyzymd compare run-all --plot
-```
-
-See {doc}`../how_to/analysis_compare_conditions` for the full guide.
-:::
-
 This tutorial walks through one complete PolyzyMD analysis story:
 
 - three simulation conditions already exist
-- you create one `analysis.yaml`
-- you run per-condition analyses
+- you create one `comparison.yaml`
 - you compare the conditions
 - you finish with `polyzymd compare plot-all` as the smoke test
 
@@ -67,108 +50,18 @@ cluster. PolyzyMD resolves those paths through each condition's `config.yaml`.
 <!-- IMAGE OPPORTUNITY: Add a campaign directory-tree diagram showing the three
 conditions plus the later comparison workspace. -->
 
-## Step 1: Create `analysis.yaml` for the First Condition
+## Step 1: Create the Comparison Workspace
 
-Start in the control condition:
+From the study root, initialize a comparison project and move into it:
 
 ```bash
 cd my_enzyme_study
-polyzymd compare init -n noPoly_enzyme_DMSO
-cd noPoly_enzyme_DMSO
-```
-
-Edit the generated `analysis.yaml` so it enables a small stable analysis set:
-
-```yaml
-replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "10ns"
-
-rmsf:
-  enabled: true
-  selection: "protein and name CA"
-  reference_mode: "average"
-
-catalytic_triad:
-  enabled: true
-  name: "Ser-His-Asp"
-  threshold: 3.5
-  pairs:
-    - label: "Ser77-His156"
-      selection_a: "protein and resid 77 and name OG"
-      selection_b: "protein and resid 156 and name NE2"
-    - label: "His156-Asp133"
-      selection_a: "protein and resid 156 and name ND1"
-      selection_b: "midpoint(protein and resid 133 and name OD1 OD2)"
-
-distances:
-  enabled: true
-  pairs:
-    - label: "Substrate-Ser77"
-      selection_a: "resname SUB and name C1"
-      selection_b: "protein and resid 77 and name OG"
-
-contacts:
-  enabled: true
-  polymer_selection: "chainID C"
-  protein_selection: "protein"
-  cutoff: 4.5
-  compute_residence_times: true
-```
-
-## Step 2: Reuse the Same `analysis.yaml` for the Other Conditions
-
-From the study root:
-
-```bash
-cd ../
-cp noPoly_enzyme_DMSO/analysis.yaml SBMA_100_enzyme_DMSO/
-cp noPoly_enzyme_DMSO/analysis.yaml EGMA_100_enzyme_DMSO/
-```
-
-This works because the condition-specific trajectory paths come from each
-condition's own `config.yaml`.
-
-## Step 3: Run Per-Condition Analyses
-
-Run the same command in each condition directory:
-
-```bash
-cd noPoly_enzyme_DMSO
-polyzymd compare run-all
-
-cd ../SBMA_100_enzyme_DMSO
-polyzymd compare run-all
-
-cd ../EGMA_100_enzyme_DMSO
-polyzymd compare run-all
-```
-
-After each run, expect an `analysis/` directory with subdirectories such as:
-
-```text
-analysis/
-├── rmsf/
-├── catalytic_triad/
-├── distances/
-└── contacts/
-```
-
-For the no-polymer control, contacts may be skipped automatically because there
-are no polymer atoms to analyze.
-
-## Step 4: Create the Comparison Workspace
-
-Go back to the study root and initialize a comparison project:
-
-```bash
-cd ..
 polyzymd compare init -n polymer_stabilization_study
 cd polymer_stabilization_study
 ```
 
-Now edit `comparison.yaml` to point at the three conditions:
+Now edit `comparison.yaml` to point at the three conditions and define the
+analysis settings:
 
 ```yaml
 name: "polymer_stabilization_study"
@@ -220,7 +113,7 @@ plugins:
     compute_residence_times: true
 ```
 
-## Step 5: Validate the Comparison Config
+## Step 2: Validate the Comparison Config
 
 ```bash
 polyzymd compare validate
@@ -229,7 +122,7 @@ polyzymd compare validate
 You should see a passing summary that lists the three conditions and the
 enabled analyses.
 
-## Step 6: Run the Cross-Condition Comparison
+## Step 3: Run the Cross-Condition Comparison
 
 For the tutorial, use the batch runner:
 
@@ -246,7 +139,7 @@ If you prefer to inspect one comparison first, a good sanity check is:
 polyzymd compare run rmsf
 ```
 
-## Step 7: Generate the Figures
+## Step 4: Generate the Figures
 
 Now run the plotting smoke test:
 
