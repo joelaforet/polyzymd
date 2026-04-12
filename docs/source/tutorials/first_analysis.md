@@ -134,9 +134,9 @@ my_first_analysis/
 │   └── My_Simulation/
 │       └── rmsf/
 │           ├── run_1/
-│           │   └── rmsf_eq10ns.json         # Per-replicate result
+│           │   └── rmsf_eq10.00ns.json       # Per-replicate result
 │           └── aggregated/
-│               └── rmsf_aggregated.json      # Combined result
+│               └── result.json               # Combined result
 ├── comparison/
 │   └── rmsf/
 │       └── result.json                       # Comparison summary
@@ -146,12 +146,12 @@ my_first_analysis/
 
 The key files are:
 
-- **`rmsf_eq10ns.json`** --- per-replicate RMSF values for every residue in
+- **`rmsf_eq10.00ns.json`** --- per-replicate RMSF values for every residue in
   the selection, computed after discarding the first 10 ns.
-- **`rmsf_aggregated.json`** --- aggregated statistics across replicates (with
+- **`aggregated/result.json`** --- aggregated statistics across replicates (with
   one replicate, this matches the per-replicate file).
-- **`result.json`** --- the comparison-level summary with mean RMSF, standard
-  error, and ranking information.
+- **`comparison/rmsf/result.json`** --- the comparison-level summary with mean
+  RMSF, standard error, and ranking information.
 
 ## Step 5: Add Plotting (Optional)
 
