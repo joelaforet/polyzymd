@@ -155,6 +155,12 @@ class TestSettings:
 
 class TestNoOp:
     def test_compute_replicate_returns_none(self):
+        """compute_replicate is a no-op for compare-only exposure analysis.
+
+        Exposure sets ``has_compute_stage = False``, so the base Analysis
+        implementation returns ``None`` instead of requiring per-replicate
+        compute behavior.
+        """
         from polyzymd.analyses.base import Condition, ReplicateContext
         from polyzymd.analyses.exposure import ExposureAnalysis, ExposureSettings
 
@@ -178,6 +184,11 @@ class TestNoOp:
         assert analysis.compute_replicate(ctx, 1) is None
 
     def test_aggregate_returns_none(self):
+        """aggregate is a no-op because exposure is comparator-only.
+
+        Exposure sets ``has_aggregate_stage = False``, so aggregation is
+        intentionally skipped and handled inside ``compare()``.
+        """
         from polyzymd.analyses.base import AggregateContext, Condition
         from polyzymd.analyses.exposure import ExposureAnalysis, ExposureSettings
 
@@ -197,6 +208,13 @@ class TestNoOp:
             settings=ExposureSettings(),
         )
         assert analysis.aggregate(ctx, []) is None
+
+    def test_compare_method_overrides_default_analysis_compare(self):
+        """Exposure must override compare for custom multi-metric flow."""
+        from polyzymd.analyses.base import Analysis
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        assert ExposureAnalysis.compare is not Analysis.compare
 
 
 # ===========================================================================
@@ -387,6 +405,7 @@ class TestCompare:
         assert result.metric == "chaperone_fraction"
         assert len(result.conditions) == 2
         assert len(result.ranking) == 2
+        assert [cond.label for cond in result.conditions] == ["A", "B"]
 
     def test_compare_pairwise_with_control(self):
         from polyzymd.analyses.exposure import ExposureAnalysis
@@ -406,6 +425,7 @@ class TestCompare:
 
         # With control A and 3 conditions, expect 2 pairwise (A vs B, A vs C)
         assert len(result.pairwise_comparisons) == 2
+        assert {comp.condition_b for comp in result.pairwise_comparisons} == {"B", "C"}
         for comp in result.pairwise_comparisons:
             assert comp.condition_a == "A"
 
@@ -492,6 +512,47 @@ class TestCompare:
 
         assert len(result.ranking) == 2
         assert len(result.ranking_by_transient_fraction) == 2
+
+    def test_compare_ranking_prefers_higher_chaperone_fraction(self):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        analysis = ExposureAnalysis()
+        ctx = self._make_context(n_conditions=2, n_reps=3, control=None)
+
+        def _by_condition(*, cond, **_kwargs):
+            if cond.label == "A":
+                return _make_mock_dynamics(chaperone_fraction=0.2), _make_mock_enrichment()
+            return _make_mock_dynamics(chaperone_fraction=0.8), _make_mock_enrichment()
+
+        with patch.object(analysis, "_load_or_compute_replicate", side_effect=_by_condition):
+            result = analysis.compare(ctx)
+
+        assert result is not None
+        assert result.ranking == ["B", "A"]
+        means = {cond.label: cond.mean_chaperone_fraction for cond in result.conditions}
+        assert means["A"] == pytest.approx(0.2)
+        assert means["B"] == pytest.approx(0.8)
+
+    def test_compare_pairwise_percent_change_uses_condition_means(self):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        analysis = ExposureAnalysis()
+        ctx = self._make_context(n_conditions=2, n_reps=3, control="A")
+
+        def _by_condition(*, cond, **_kwargs):
+            if cond.label == "A":
+                return _make_mock_dynamics(chaperone_fraction=0.2), _make_mock_enrichment()
+            return _make_mock_dynamics(chaperone_fraction=0.8), _make_mock_enrichment()
+
+        with patch.object(analysis, "_load_or_compute_replicate", side_effect=_by_condition):
+            result = analysis.compare(ctx)
+
+        assert result is not None
+        assert len(result.pairwise_comparisons) == 1
+        pair = result.pairwise_comparisons[0]
+        assert pair.condition_a == "A"
+        assert pair.condition_b == "B"
+        assert pair.percent_change == pytest.approx(300.0)
 
     def test_compare_enrichment_aggregated(self):
         from polyzymd.analyses.exposure import ExposureAnalysis
@@ -759,16 +820,16 @@ class TestLifecycle:
 
         assert issubclass(ExposureAnalysis, Analysis)
 
-    def test_has_all_required_methods(self):
+    def test_class_contract_flags(self):
         from polyzymd.analyses.exposure import ExposureAnalysis
 
-        analysis = ExposureAnalysis()
-        assert callable(analysis.compute_replicate)
-        assert callable(analysis.aggregate)
-        assert callable(analysis.compare)
-        assert callable(analysis.filter_conditions)
-        assert callable(analysis.plot)
-        assert callable(analysis.extract_metrics)
+        assert ExposureAnalysis.name == "exposure"
+        assert ExposureAnalysis.aliases == ()
+        assert ExposureAnalysis.dependencies == ("contacts",)
+        assert ExposureAnalysis.min_replicates == 2
+        assert ExposureAnalysis.has_compute_stage is False
+        assert ExposureAnalysis.has_aggregate_stage is False
+        assert ExposureAnalysis.execution_cost_hint == "high"
 
     def test_repr(self):
         from polyzymd.analyses.exposure import ExposureAnalysis
