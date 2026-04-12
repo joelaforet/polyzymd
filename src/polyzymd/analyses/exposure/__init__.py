@@ -194,6 +194,7 @@ class ExposureAnalysis(Analysis):
             ExposureConditionSummary,
         )
         from polyzymd.analyses.shared.inferential_statistics import one_way_anova
+        from polyzymd.analyses.shared.multi_run_comparison import apply_fdr_correction
 
         settings = ctx.settings
         fdr_alpha = ctx.fdr_alpha
@@ -237,7 +238,6 @@ class ExposureAnalysis(Analysis):
                         comp = self._compare_pair(
                             control_summary,
                             treatment,
-                            fdr_alpha=fdr_alpha,
                             ttest_method=ttest_method,
                             posthoc_method=posthoc_method,
                         )
@@ -248,7 +248,6 @@ class ExposureAnalysis(Analysis):
                         comp = self._compare_pair(
                             cond_a,
                             cond_b,
-                            fdr_alpha=fdr_alpha,
                             ttest_method=ttest_method,
                             posthoc_method=posthoc_method,
                         )
@@ -265,6 +264,13 @@ class ExposureAnalysis(Analysis):
                 p_value=result.p_value,
                 significant=result.p_value <= fdr_alpha,
             )
+
+        # Step 4b: Apply BH-FDR correction to pairwise and ANOVA results
+        apply_fdr_correction(
+            pairwise_results=comparisons,
+            anova_by_run=[anova] if anova is not None else None,
+            fdr_alpha=fdr_alpha,
+        )
 
         # Step 5: Dual rankings
         ranked_chaperone = sorted(summaries, key=lambda s: s.mean_chaperone_fraction, reverse=True)
@@ -741,7 +747,6 @@ class ExposureAnalysis(Analysis):
         cond_a: Any,
         cond_b: Any,
         *,
-        fdr_alpha: float = 0.05,
         ttest_method: str = "student",
         posthoc_method: str = "ttest_bh",
     ) -> Any:
@@ -792,7 +797,7 @@ class ExposureAnalysis(Analysis):
             cohens_d=effect.cohens_d,
             effect_size_interpretation=effect.interpretation,
             direction=direction,
-            significant=ttest.p_value <= fdr_alpha,
+            significant=ttest.p_value <= 0.05,
             percent_change=pct,
         )
 

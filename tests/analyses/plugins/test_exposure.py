@@ -580,6 +580,74 @@ class TestCompare:
         assert mock_ttest.call_count == 2
         assert all(call.kwargs["method"] == "welch" for call in mock_ttest.call_args_list)
 
+    def test_compare_populates_adjusted_p_values(self):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        analysis = ExposureAnalysis()
+        ctx = self._make_context(n_conditions=3, control=None)
+
+        dynamics = _make_mock_dynamics()
+        enrichment = _make_mock_enrichment()
+
+        class _FakeTTest:
+            def __init__(self, p_value: float):
+                self.t_statistic = 1.0
+                self.p_value = p_value
+
+        with (
+            patch.object(
+                analysis,
+                "_load_or_compute_replicate",
+                return_value=(dynamics, enrichment),
+            ),
+            patch(
+                "polyzymd.analyses.shared.inferential_statistics.independent_ttest",
+                side_effect=[_FakeTTest(0.001), _FakeTTest(0.049), _FakeTTest(0.9)],
+            ),
+        ):
+            result = analysis.compare(ctx)
+
+        assert result is not None
+        assert len(result.pairwise_comparisons) == 3
+        assert all(comp.p_value_adjusted is not None for comp in result.pairwise_comparisons)
+
+    def test_compare_significance_uses_bh_corrected_p_values(self):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        analysis = ExposureAnalysis()
+        ctx = self._make_context(n_conditions=3, control=None)
+
+        dynamics = _make_mock_dynamics()
+        enrichment = _make_mock_enrichment()
+
+        class _FakeTTest:
+            def __init__(self, p_value: float):
+                self.t_statistic = 1.0
+                self.p_value = p_value
+
+        with (
+            patch.object(
+                analysis,
+                "_load_or_compute_replicate",
+                return_value=(dynamics, enrichment),
+            ),
+            patch(
+                "polyzymd.analyses.shared.inferential_statistics.independent_ttest",
+                side_effect=[_FakeTTest(0.001), _FakeTTest(0.049), _FakeTTest(0.9)],
+            ),
+        ):
+            result = analysis.compare(ctx)
+
+        assert result is not None
+        raw_significant = [comp.p_value <= 0.05 for comp in result.pairwise_comparisons]
+        corrected_significant = [comp.significant for comp in result.pairwise_comparisons]
+
+        assert any(raw_significant)
+        assert any(
+            raw and (not corrected)
+            for raw, corrected in zip(raw_significant, corrected_significant)
+        )
+
 
 # ===========================================================================
 # Plot
