@@ -313,7 +313,6 @@ conditions:
 
 plugins:
   contacts:
-    name: "polymer_contacts"
     polymer_selection: "chainID C"
     protein_selection: "protein"
     cutoff: 4.5
@@ -361,7 +360,7 @@ import json
 from pathlib import Path
 
 # After running: polyzymd compare run exposure -f comparison.yaml
-result_path = Path("results/exposure/comparison_result.json")
+result_path = Path("comparison/exposure/result.json")
 result = json.loads(result_path.read_text())
 ```
 ````
@@ -551,15 +550,31 @@ project/
 └── condition_name/
     └── analysis/
         ├── contacts/
-        │   ├── contacts_rep1.json          ← Contact events (input to exposure analysis)
-        │   ├── contacts_rep2.json
-        │   └── contacts_rep3.json
-        └── rep{N}/
-            └── sasa/
-            │   ├── sasa_trajectory.npz     ← Per-frame SASA (n_frames × n_residues)
-            │   └── sasa_metadata.json      ← Threshold, resnames, aa_classes, n_frames
-            └── exposure/
-                └── exposure_dynamics.json  ← Per-residue stability + chaperone events
+        │   ├── run_1/
+        │   │   └── result.json             ← Contact events (input to exposure analysis)
+        │   ├── run_2/
+        │   │   └── result.json
+        │   └── run_3/
+        │       └── result.json
+        └── exposure/
+            ├── run_1/
+            │   ├── sasa/
+            │   │   ├── sasa_trajectory.npz  ← Per-frame SASA (n_frames × n_residues)
+            │   │   └── sasa_metadata.json   ← Threshold, resnames, aa_classes, n_frames
+            │   └── exposure/
+            │       └── exposure_dynamics.json ← Per-residue stability + chaperone events
+            ├── run_2/
+            │   ├── sasa/
+            │   │   ├── sasa_trajectory.npz
+            │   │   └── sasa_metadata.json
+            │   └── exposure/
+            │       └── exposure_dynamics.json
+            └── run_3/
+                ├── sasa/
+                │   ├── sasa_trajectory.npz
+                │   └── sasa_metadata.json
+                └── exposure/
+                    └── exposure_dynamics.json
 ```
 
 ### sasa_metadata.json fields
@@ -630,7 +645,7 @@ AA_GROUP     = "aromatic"  # group to audit
 analysis_dir = BASE / COND / "analysis"
 
 # ── Load raw SASA ─────────────────────────────────────────────────────────────
-sasa_dir = analysis_dir / f"rep{REP}" / "sasa"
+sasa_dir = analysis_dir / "exposure" / f"run_{REP}" / "sasa"
 npz       = np.load(sasa_dir / "sasa_trajectory.npz")
 rel_sasa  = npz["relative_sasa_per_frame"]          # (n_frames, n_residues)
 resids    = npz["resids"]                            # (n_residues,)
@@ -644,7 +659,7 @@ print(f"SASA: {n_frames} frames × {n_residues} residues, threshold={threshold}"
 
 # ── Load contact events ───────────────────────────────────────────────────────
 contacts_json = json.loads(
-    (analysis_dir / "contacts" / f"contacts_rep{REP}.json").read_text()
+    (analysis_dir / "contacts" / f"run_{REP}" / "result.json").read_text()
 )
 # Frame indices are ABSOLUTE (0-indexed from trajectory frame 0)
 # Do NOT add any equilibration offset when indexing into rel_sasa.
@@ -726,7 +741,7 @@ else:
     print(f"  chaperone_fraction = {frac:.3f}")
 
     # Compare with cached value
-    dyn_path = analysis_dir / f"rep{REP}" / "exposure" / "exposure_dynamics.json"
+    dyn_path = analysis_dir / "exposure" / f"run_{REP}" / "exposure" / "exposure_dynamics.json"
     if dyn_path.exists():
         dyn = json.loads(dyn_path.read_text())
         cached = next((r for r in dyn["residues"] if r["resid"] == resid), None)
@@ -798,8 +813,8 @@ polyzymd compare run exposure -f comparison.yaml --recompute
 Or delete the cache directories manually:
 
 ```bash
-rm -rf condition_name/analysis/rep*/sasa/
-rm -rf condition_name/analysis/rep*/exposure/
+rm -rf condition_name/analysis/exposure/run_*/sasa/
+rm -rf condition_name/analysis/exposure/run_*/exposure/
 ```
 
 ---
