@@ -362,7 +362,17 @@ def _load_pooled_distances(analysis_dir: Path, replicates: list[int]) -> dict[st
 
     for rep in replicates:
         rep_dir = analysis_dir / f"run_{rep}"
-        json_files = list(rep_dir.glob("*.json"))
+        json_files: list[Path] = []
+
+        canonical_file = rep_dir / "result.json"
+        if canonical_file.exists():
+            json_files.append(canonical_file)
+
+        for candidate in sorted(rep_dir.glob("distances_*.json")):
+            if candidate == canonical_file:
+                continue
+            json_files.append(candidate)
+
         if not json_files:
             continue
 
@@ -434,13 +444,19 @@ def _load_distance_aggregated_results(
 
         aggregated_path = Path(aggregated_dir)
 
-        result_file = aggregated_path / "distance_aggregated.json"
+        result_file = aggregated_path / "result.json"
         if not result_file.exists():
-            json_files = list(aggregated_path.glob("*.json"))
-            if json_files:
-                result_file = json_files[0]
+            legacy_file = aggregated_path / "distance_aggregated.json"
+            if legacy_file.exists():
+                result_file = legacy_file
+                logger.warning(f"Using legacy distances aggregate cache: {legacy_file}")
             else:
-                continue
+                prefixed_files = sorted(aggregated_path.glob("distances_*.json"))
+                if prefixed_files:
+                    result_file = prefixed_files[0]
+                    logger.warning(f"Using fallback distances aggregate cache: {result_file}")
+                else:
+                    continue
 
         try:
             with result_file.open(encoding="utf-8") as f:

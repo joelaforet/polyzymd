@@ -1029,6 +1029,86 @@ class TestPlot:
 
 
 # ---------------------------------------------------------------------------
+# Plot loader cache filtering
+# ---------------------------------------------------------------------------
+
+
+class TestPlotLoadersCacheFiltering:
+    """Plot data loaders should only read distances cache files."""
+
+    def test_pooled_loader_ignores_unrelated_json_files(self, tmp_path):
+        import json
+
+        from polyzymd.analyses.distances._plotters import _load_pooled_distances
+
+        analysis_dir = tmp_path / "condition" / "distances"
+        run_dir = analysis_dir / "run_1"
+        run_dir.mkdir(parents=True)
+
+        distances_payload = {
+            "pair_results": [
+                {
+                    "pair_label": "Distance Pair",
+                    "distances": [3.0, 3.2, 3.4],
+                    "threshold": 3.5,
+                }
+            ]
+        }
+        contacts_payload = {
+            "pair_results": [
+                {
+                    "pair_label": "Contacts Pair",
+                    "distances": [10.0, 10.5],
+                    "threshold": 11.0,
+                }
+            ]
+        }
+
+        (run_dir / "distances_result.json").write_text(
+            json.dumps(distances_payload), encoding="utf-8"
+        )
+        (run_dir / "contacts_result.json").write_text(
+            json.dumps(contacts_payload), encoding="utf-8"
+        )
+        (run_dir / "notes.json").write_text(json.dumps({"note": "ignore me"}), encoding="utf-8")
+
+        pooled = _load_pooled_distances(analysis_dir, [1])
+
+        assert set(pooled.keys()) == {"Distance Pair"}
+        assert pooled["Distance Pair"]["threshold"] == pytest.approx(3.5)
+
+    def test_aggregated_loader_ignores_unrelated_json_files(self, tmp_path):
+        import json
+
+        from polyzymd.analyses.distances._plotters import _load_distance_aggregated_results
+
+        aggregated_dir = tmp_path / "condition" / "distances" / "aggregated"
+        aggregated_dir.mkdir(parents=True)
+
+        distances_payload = {"pair_results": [{"pair_label": "Distance Pair", "overall_mean": 3.3}]}
+        contacts_payload = {"pair_results": [{"pair_label": "Contacts Pair", "overall_mean": 9.9}]}
+
+        (aggregated_dir / "distances_result.json").write_text(
+            json.dumps(distances_payload),
+            encoding="utf-8",
+        )
+        (aggregated_dir / "contacts_result.json").write_text(
+            json.dumps(contacts_payload), encoding="utf-8"
+        )
+        (aggregated_dir / "notes.json").write_text(
+            json.dumps({"note": "ignore me"}), encoding="utf-8"
+        )
+
+        data = {"Cond1": {"aggregated_dir": aggregated_dir}}
+        loaded = _load_distance_aggregated_results(data, ["Cond1"])
+
+        assert "Cond1" in loaded
+        pair_results = loaded["Cond1"]["pair_results"]
+        assert len(pair_results) == 1
+        assert pair_results[0]["pair_label"] == "Distance Pair"
+
+
+# ---------------------------------------------------------------------------
 # filter_conditions (default keeps all)
 # ---------------------------------------------------------------------------
 
