@@ -262,16 +262,21 @@ All plots are enabled by default and can be individually toggled in
 ### Comparison cache
 
 ```text
-comparison_output/
+comparison_workspace/
+├── analysis/
+│   ├── <condition_A>/
+│   │   └── polymer_bridging/
+│   │       ├── run_1/
+│   │       │   └── polymer_bridging_result.json
+│   │       ├── run_2/
+│   │       │   └── polymer_bridging_result.json
+│   │       └── aggregated/
+│   │           └── polymer_bridging_aggregated.json
+│   └── <condition_B>/
+│       └── polymer_bridging/
+│           └── ...
 └── comparison/
     └── polymer_bridging/
-        ├── <condition_label>/
-        │   ├── rep1/
-        │   │   └── result.json          # PolymerBridgingReplicateResult
-        │   ├── rep2/
-        │   │   └── result.json
-        │   └── aggregated/
-        │       └── result.json          # PolymerBridgingAggregatedResult
         └── result.json                  # ComparisonResult
 ```
 
@@ -319,14 +324,14 @@ from polyzymd.analyses.polymer_bridging import (
 
 # Load per-replicate result
 rep = PolymerBridgingReplicateResult.load(
-    "comparison/polymer_bridging/my_condition/rep1/result.json"
+    "analysis/<condition>/polymer_bridging/run_1/polymer_bridging_result.json"
 )
 print(f"Multisite fraction: {rep.multisite_fraction:.3f}")
 print(f"Anchor protein groups: {rep.anchor_protein_group_probabilities}")
 
 # Load aggregated result
 agg = PolymerBridgingAggregatedResult.load(
-    "comparison/polymer_bridging/my_condition/aggregated/result.json"
+    "analysis/<condition>/polymer_bridging/aggregated/polymer_bridging_aggregated.json"
 )
 print(f"Mean valency: {agg.mean_contacts_per_contacting_oligomer:.2f} "
       f"+/- {agg.mean_contacts_sem:.2f}")
