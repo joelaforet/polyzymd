@@ -297,11 +297,11 @@ class ExposureAnalysis(Analysis):
         conditions: list[Condition],
         settings: "BaseModel | None" = None,
     ) -> list[Condition]:
-        """Exclude conditions without polymer (no chaperone events possible).
+        """Exclude conditions without polymer configuration.
 
-        A condition is excluded if:
-        1. Its ``sim_config.polymers`` is ``None`` or disabled — no polymer.
-        2. No pre-computed contact JSON exists for any replicate.
+        This filter only checks whether a polymer is configured for each
+        condition. It does not check for cached contacts, which would make
+        filtering depend on execution order.
 
         Parameters
         ----------
@@ -311,7 +311,7 @@ class ExposureAnalysis(Analysis):
         Returns
         -------
         list[Condition]
-            Conditions that have polymer and contacts data.
+            Conditions with polymer configured.
         """
         valid: list[Condition] = []
 
