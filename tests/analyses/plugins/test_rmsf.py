@@ -43,7 +43,7 @@ def default_settings():
 
 @pytest.fixture
 def condition():
-    """Return a mock Condition."""
+    """Return a Condition test object."""
     return Condition(
         label="No Polymer",
         config_path=Path("/fake/config.yaml"),
@@ -389,6 +389,169 @@ class TestComputeReplicate:
         # Verify it completed successfully with legacy settings
         assert result.replicate == 1
         assert result.selection_string == "protein and name CA"
+
+
+class TestComputeReplicateNegativePaths:
+    """Test RMSFAnalysis.compute_replicate error and failure paths."""
+
+    @staticmethod
+    def _make_nonempty_mock_universe(n_frames: int = 100, n_atoms: int = 5) -> MagicMock:
+        """Create a mock Universe with a non-empty selection."""
+        mock_u = MagicMock()
+        mock_u.trajectory.__len__ = MagicMock(return_value=n_frames)
+
+        mock_atoms = MagicMock()
+        mock_atoms.__len__ = MagicMock(return_value=n_atoms)
+        mock_u.select_atoms = MagicMock(return_value=mock_atoms)
+        return mock_u
+
+    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
+    def test_raises_when_selection_is_empty(
+        self,
+        MockLoader,
+        rmsf_analysis,
+        condition,
+        tmp_path,
+    ):
+        """An empty atom selection should raise ValueError with diagnostics."""
+        mock_loader_inst = MagicMock()
+        MockLoader.return_value = mock_loader_inst
+
+        mock_u = MagicMock()
+        mock_atoms = MagicMock()
+        mock_atoms.__len__ = MagicMock(return_value=0)
+        mock_u.select_atoms = MagicMock(return_value=mock_atoms)
+        mock_loader_inst.load_universe.return_value = mock_u
+
+        traj_info = MagicMock()
+        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
+        mock_loader_inst.get_trajectory_info.return_value = traj_info
+
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="10ns",
+            recompute=True,
+            settings=RMSFSettings(selection="protein and name ZZ"),
+        )
+
+        with patch(
+            "polyzymd.analyses.rmsf.get_selection_diagnostics",
+            return_value="Selection diagnostics",
+        ):
+            with pytest.raises(ValueError, match="matched no atoms"):
+                rmsf_analysis.compute_replicate(ctx, 1)
+
+    @patch("polyzymd.analyses.rmsf.validate_equilibration_time")
+    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
+    def test_raises_when_equilibration_invalid(
+        self,
+        MockLoader,
+        mock_validate_equilibration,
+        rmsf_analysis,
+        condition,
+        tmp_path,
+    ):
+        """Invalid equilibration time should raise the validation message."""
+        mock_validate_equilibration.return_value = (
+            False,
+            "Equilibration time exceeds trajectory length",
+        )
+
+        mock_loader_inst = MagicMock()
+        MockLoader.return_value = mock_loader_inst
+        mock_loader_inst.load_universe.return_value = self._make_nonempty_mock_universe(n_frames=20)
+
+        traj_info = MagicMock()
+        traj_info.trajectory_files = [Path("/fake/traj.dcd")]
+        mock_loader_inst.get_trajectory_info.return_value = traj_info
+        mock_loader_inst.get_timestep.return_value = 10.0
+
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="10ns",
+            recompute=True,
+            settings=RMSFSettings(),
+        )
+
+        with pytest.raises(ValueError, match="Equilibration time exceeds trajectory length"):
+            rmsf_analysis.compute_replicate(ctx, 1)
+
+    @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
+    def test_propagates_file_not_found_from_loader(
+        self,
+        MockLoader,
+        rmsf_analysis,
+        condition,
+        tmp_path,
+    ):
+        """FileNotFoundError from trajectory loading should propagate."""
+        mock_loader_inst = MagicMock()
+        MockLoader.return_value = mock_loader_inst
+        mock_loader_inst.load_universe.side_effect = FileNotFoundError("Missing trajectory file")
+
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="10ns",
+            recompute=True,
+            settings=RMSFSettings(),
+        )
+
+        with pytest.raises(FileNotFoundError, match="Missing trajectory file"):
+            rmsf_analysis.compute_replicate(ctx, 1)
+
+    def test_raises_when_frame_mode_missing_reference_frame(
+        self,
+        rmsf_analysis,
+        condition,
+        tmp_path,
+    ):
+        """Frame reference mode requires an explicit reference_frame."""
+        settings = RMSFSettings(reference_mode="frame", reference_frame=None)
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="10ns",
+            recompute=True,
+            settings=settings,
+        )
+
+        with pytest.raises(ValueError, match="reference_frame is required"):
+            rmsf_analysis.compute_replicate(ctx, 1)
+
+    def test_raises_when_external_reference_file_missing(
+        self,
+        rmsf_analysis,
+        condition,
+        tmp_path,
+    ):
+        """External reference mode should reject nonexistent reference files."""
+        settings = RMSFSettings(
+            reference_mode="external",
+            reference_file=str(tmp_path / "does_not_exist.pdb"),
+        )
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="10ns",
+            recompute=True,
+            settings=settings,
+        )
+
+        with pytest.raises(ValueError, match="reference_file does not exist"):
+            rmsf_analysis.compute_replicate(ctx, 1)
 
 
 # ============================================================================
