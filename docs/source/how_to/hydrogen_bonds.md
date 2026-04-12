@@ -5,15 +5,6 @@ analysis plugin. By the end, you will have a working hydrogen-bond comparison
 across simulation conditions, with grouped summaries, composition breakdowns,
 and publication-ready figures.
 
-:::{admonition} Diataxis mode
-:class: tip
-
-This page is primarily a **how-to guide** (task-oriented, practical). The
-Configuration Reference and Understanding the Output sections contain
-reference-style content kept inline for convenience. For general comparison
-workflow setup, see {doc}`../how_to/analysis_compare_conditions`.
-:::
-
 ## When to Use This Plugin
 
 Use `hydrogen_bonds` when you need to answer questions like:
@@ -37,7 +28,7 @@ You need:
 - A working pixi environment (`pixi install -e build`)
 - Completed simulation trajectories for at least two conditions
 - A `comparison.yaml` defining your conditions (see
-  {doc}`../how_to/analysis_compare_conditions`)
+  {doc}`analysis_compare_conditions`)
 - Familiarity with the PolyzyMD chain convention (A=protein, B=substrate,
   C=polymer)
 
@@ -345,7 +336,7 @@ every frame. For large systems (50k+ atoms) with many frames, allocate at
 least 8 GB memory and 1–2 hours per replicate.
 :::
 
-See {doc}`../how_to/hpc_execution` for the full HPC submission guide.
+See {doc}`hpc_execution` for the full HPC submission guide.
 
 ## Understanding the Output
 
@@ -560,9 +551,9 @@ polyzymd compare run hbond
 
 ## See Also
 
-- {doc}`../how_to/analysis_compare_conditions` — Setting up `comparison.yaml`
+- {doc}`analysis_compare_conditions` — Setting up `comparison.yaml`
 - {doc}`../reference/analysis_comparison_reference` — Plugin listing and
   statistical terms
-- {doc}`../how_to/hpc_execution` — Submitting analysis jobs to SLURM
+- {doc}`hpc_execution` — Submitting analysis jobs to SLURM
 - {doc}`../explanation/analysis_statistics_best_practices` — Autocorrelation and uncertainty
 - {doc}`../contributor_guide/extending_analyses` — Writing your own analysis plugin

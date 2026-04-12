@@ -28,7 +28,7 @@ These analyses are production-ready with validated statistics:
 - [Run Distance Analysis](analysis_distances_quickstart.md)
 - [Run Contacts Analysis](analysis_contacts_quickstart.md)
 - [Run SASA Analysis](../tutorials/sasa_analysis.md)
-- [Analyze Hydrogen Bonds](../tutorials/hydrogen_bonds.md)
+- [Analyze Hydrogen Bonds](hydrogen_bonds.md)
 - [Run Catalytic Triad Analysis](analysis_triad_quickstart.md)
 
 ## Experimental Analysis Workflows
@@ -69,7 +69,7 @@ Run RMSF Analysis <analysis_rmsf_quickstart>
 Run Distance Analysis <analysis_distances_quickstart>
 Run Contacts Analysis <analysis_contacts_quickstart>
 Run SASA Analysis <../tutorials/sasa_analysis>
-Analyze Hydrogen Bonds <../tutorials/hydrogen_bonds>
+Analyze Hydrogen Bonds <hydrogen_bonds>
 Run Catalytic Triad Analysis <analysis_triad_quickstart>
 Analyze Binding Preference <analysis_binding_preference>
 Analyze Binding Free Energy <analysis_binding_free_energy>
