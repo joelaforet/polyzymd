@@ -314,12 +314,12 @@ class ParallelContactAnalyzer:
 
         # Build residue index → chain/segment mapping
         res_to_chain_seg: dict[int, tuple[int, int, str, int]] = {}
+        residue_lookup = {self._unique_residue_key(qr): i for i, qr in enumerate(query_residues)}
         for chain_idx, chain in enumerate(polymer_chains):
             for seg_idx, (_, _, res) in enumerate(chain):
-                for i, qr in enumerate(query_residues):
-                    if qr.resid == res.resid and qr.resname == res.resname:
-                        res_to_chain_seg[i] = (chain_idx, seg_idx, res.resname, res.resid)
-                        break
+                query_idx = residue_lookup.get(self._unique_residue_key(res))
+                if query_idx is not None:
+                    res_to_chain_seg[query_idx] = (chain_idx, seg_idx, res.resname, res.resid)
 
         # Convert contact matrix → ContactResult
         residue_contacts: list[ResidueContactData] = []
@@ -390,6 +390,26 @@ class ParallelContactAnalyzer:
     # -- helpers ----------------------------------------------------------
 
     @staticmethod
+    def _unique_residue_key(residue: Any) -> int | tuple[str, int | Any, str]:
+        """Build a stable identity key for one residue.
+
+        Prefer MDAnalysis ``residue.ix`` because it is globally unique
+        within a Universe. For lightweight mocks that do not define ``ix``,
+        fall back to ``(chainID or segid, resid, resname)``.
+        """
+        ix = getattr(residue, "ix", None)
+        if ix is not None:
+            try:
+                return int(ix)
+            except (TypeError, ValueError):
+                pass
+
+        chain_or_seg = getattr(residue, "chainID", None) or getattr(residue, "segid", "")
+        resid = getattr(residue, "resid", None)
+        resname = getattr(residue, "resname", "")
+        return (str(chain_or_seg), resid, str(resname))
+
+    @staticmethod
     def _build_atom_to_residue_map(
         atoms: "AtomGroup",
         residues: "AtomGroup",
@@ -398,10 +418,13 @@ class ParallelContactAnalyzer:
 
         Returns an array where ``arr[atom_local_idx] = residue_idx``.
         """
-        resid_to_idx = {res.resid: i for i, res in enumerate(residues)}
+        residue_to_idx = {
+            ParallelContactAnalyzer._unique_residue_key(res): i for i, res in enumerate(residues)
+        }
         atom_to_res = np.zeros(len(atoms), dtype=np.int64)
         for i, atom in enumerate(atoms):
-            atom_to_res[i] = resid_to_idx.get(atom.residue.resid, 0)
+            residue_key = ParallelContactAnalyzer._unique_residue_key(atom.residue)
+            atom_to_res[i] = residue_to_idx.get(residue_key, 0)
         return atom_to_res
 
 

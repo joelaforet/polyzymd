@@ -338,6 +338,124 @@ class TestComputeReplicate:
         assert f"_s{expected_fp}_" in str(save_path)
 
 
+class TestParallelContactAnalyzerResidueIdentity:
+    """Ensure residue identity preserves chain-separated duplicate resid values."""
+
+    def test_build_atom_to_residue_map_distinguishes_duplicate_resids_by_chain(self):
+        from polyzymd.analyses.contacts import ParallelContactAnalyzer
+
+        class _Residue:
+            def __init__(self, resid: int, resname: str, chain_id: str):
+                self.resid = resid
+                self.resname = resname
+                self.chainID = chain_id
+
+        class _Atom:
+            def __init__(self, residue):
+                self.residue = residue
+
+        residue_a = _Residue(1, "SBM", "C")
+        residue_b = _Residue(1, "SBM", "D")
+        residues = [residue_a, residue_b]
+        atoms = [_Atom(residue_a), _Atom(residue_b)]
+
+        atom_to_res = ParallelContactAnalyzer._build_atom_to_residue_map(atoms, residues)
+
+        assert atom_to_res.tolist() == [0, 1]
+
+    def test_run_keeps_duplicate_resids_distinct_across_chains(self):
+        import numpy as np
+
+        from polyzymd.analyses.contacts import ParallelContactAnalyzer
+
+        class _Residue:
+            def __init__(self, resid: int, resname: str, chain_id: str, ix: int):
+                self.resid = resid
+                self.resname = resname
+                self.chainID = chain_id
+                self.ix = ix
+
+        class _AtomGroup(list):
+            @property
+            def atoms(self):
+                return self
+
+            @property
+            def fragments(self):
+                return [self]
+
+        class _Fragment:
+            def __init__(self, residues):
+                self.residues = residues
+
+        class _QueryAtomGroup(_AtomGroup):
+            @property
+            def fragments(self):
+                return [_Fragment([query_residues[0]]), _Fragment([query_residues[1]])]
+
+        class _ResidueGroup(list):
+            def __init__(self, residues, atoms):
+                super().__init__(residues)
+                self.atoms = atoms
+
+        class _TargetAtom:
+            def __init__(self, residue):
+                self.residue = residue
+
+        class _QueryAtom:
+            def __init__(self, residue):
+                self.residue = residue
+
+        protein_residue = _Residue(10, "ALA", "A", ix=100)
+        query_residues = [
+            _Residue(1, "SBM", "C", ix=200),
+            _Residue(1, "SBM", "D", ix=201),
+        ]
+
+        target_atoms = _AtomGroup([_TargetAtom(protein_residue)])
+        query_atoms = _QueryAtomGroup(
+            [_QueryAtom(query_residues[0]), _QueryAtom(query_residues[1])]
+        )
+
+        selector_result_target = MagicMock()
+        selector_result_target.atoms = target_atoms
+        selector_result_target.residues = [protein_residue]
+        selector_result_query = MagicMock()
+        selector_result_query.atoms = query_atoms
+        selector_result_query.residues = _ResidueGroup(query_residues, query_atoms)
+
+        target_selector = MagicMock()
+        target_selector.select.return_value = selector_result_target
+        target_selector.label = "protein"
+        query_selector = MagicMock()
+        query_selector.select.return_value = selector_result_query
+        query_selector.label = "polymer"
+
+        analyzer = ParallelContactAnalyzer(
+            target_selector=target_selector,
+            query_selector=query_selector,
+            cutoff=4.5,
+        )
+
+        contact_matrix = np.array([[[1, 1]]], dtype=np.uint8)
+        fake_analysis = MagicMock()
+        fake_analysis.results.contact_matrix = contact_matrix
+        fake_analysis.run.return_value = None
+
+        universe = MagicMock()
+        universe.trajectory.dt = 10.0
+
+        with patch("polyzymd.analyses.contacts._get_contact_analysis_base_cls") as mock_factory:
+            mock_factory.return_value.return_value = fake_analysis
+            result = analyzer.run(universe, start=0, stop=1, step=1)
+
+        assert result.n_frames == 1
+        residue_contacts = result.residue_contacts[0].segment_contacts
+        assert len(residue_contacts) == 2
+        assert sorted(sc.polymer_chain_idx for sc in residue_contacts) == [0, 1]
+        assert [sc.polymer_resid for sc in residue_contacts] == [1, 1]
+
+
 # ---------------------------------------------------------------------------
 # aggregate
 # ---------------------------------------------------------------------------
