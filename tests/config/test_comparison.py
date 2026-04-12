@@ -144,3 +144,80 @@ class TestPlotThemeValidation:
         """None theme should use publication preset."""
         ps = PlotSettings(theme=None)
         assert ps.theme is not None
+
+
+class TestPluginSettingsPathResolution:
+    """Plugin path-like settings should resolve relative to comparison.yaml."""
+
+    def test_relative_plugin_path_resolves_from_yaml_parent(self, tmp_path: Path) -> None:
+        """Relative plugin path fields should be rebased to yaml directory."""
+        yaml_path = tmp_path / "comparison.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "path-test",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "plugins": {
+                        "binding_free_energy": {
+                            "enzyme_pdb_for_sasa": "structures/enzyme.pdb",
+                        }
+                    },
+                }
+            )
+        )
+
+        config = ComparisonConfig.from_yaml(yaml_path)
+        settings = config.plugins.get("binding_free_energy")
+        assert settings is not None
+        assert settings.enzyme_pdb_for_sasa == str(tmp_path / "structures" / "enzyme.pdb")
+
+    def test_absolute_plugin_path_is_unchanged(self, tmp_path: Path) -> None:
+        """Absolute plugin path fields should remain unchanged."""
+        yaml_path = tmp_path / "comparison.yaml"
+        absolute_path = tmp_path / "already_absolute" / "enzyme.pdb"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "path-test",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "plugins": {
+                        "polymer_affinity": {
+                            "enzyme_pdb_for_sasa": str(absolute_path),
+                        }
+                    },
+                }
+            )
+        )
+
+        config = ComparisonConfig.from_yaml(yaml_path)
+        settings = config.plugins.get("polymer_affinity")
+        assert settings is not None
+        assert settings.enzyme_pdb_for_sasa == str(absolute_path)
+
+    def test_missing_declared_path_field_is_ignored(self, tmp_path: Path) -> None:
+        """Declared path fields missing from YAML should be ignored."""
+        yaml_path = tmp_path / "comparison.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "path-test",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "plugins": {
+                        "binding_free_energy": {
+                            "units": "kT",
+                        }
+                    },
+                }
+            )
+        )
+
+        config = ComparisonConfig.from_yaml(yaml_path)
+        settings = config.plugins.get("binding_free_energy")
+        assert settings is not None
+        assert settings.enzyme_pdb_for_sasa is None

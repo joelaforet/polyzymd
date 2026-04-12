@@ -189,6 +189,7 @@ class PolymerAffinityAnalysis(Analysis):
     min_replicates: ClassVar[int] = 1
     has_compute_stage: ClassVar[bool] = False
     has_aggregate_stage: ClassVar[bool] = False
+    settings_path_fields: ClassVar[tuple[str, ...]] = ("enzyme_pdb_for_sasa",)
 
     # === Compare (full override) ===
 

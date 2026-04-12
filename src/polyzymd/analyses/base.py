@@ -832,6 +832,9 @@ class Analysis(ABC):
         Whether the framework should run ``aggregate()``.
     slurm_resource_hint : SlurmResourceHint | None
         Optional per-plugin SLURM resource defaults for HPC submission.
+    settings_path_fields : tuple[str, ...]
+        Settings field names that contain filesystem paths to resolve
+        relative to ``comparison.yaml``.
 
     Examples
     --------
@@ -909,6 +912,7 @@ class Analysis(ABC):
     has_compute_stage: ClassVar[bool] = True
     has_aggregate_stage: ClassVar[bool] = True
     slurm_resource_hint: ClassVar[SlurmResourceHint | None] = None
+    settings_path_fields: ClassVar[tuple[str, ...]] = ()
 
     # === Lifecycle methods ===
 

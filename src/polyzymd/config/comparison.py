@@ -663,6 +663,29 @@ class ComparisonConfig(BaseModel):
                     if not cond_path.is_absolute():
                         cond["config"] = str(config_dir / cond_path)
 
+        # Resolve plugin-declared settings path fields relative to comparison.yaml
+        plugins = data.get("plugins")
+        if isinstance(plugins, dict):
+            from polyzymd.analyses.discovery import get_analysis
+
+            yaml_dir = path.parent
+            for plugin_name, plugin_settings in plugins.items():
+                if not isinstance(plugin_settings, dict):
+                    continue
+                try:
+                    analysis_cls = get_analysis(str(plugin_name).lower())
+                except KeyError:
+                    continue
+
+                for field_name in analysis_cls.settings_path_fields:
+                    raw_value = plugin_settings.get(field_name)
+                    if not isinstance(raw_value, str):
+                        continue
+                    candidate = Path(raw_value)
+                    if candidate.is_absolute():
+                        continue
+                    plugin_settings[field_name] = str(yaml_dir / candidate)
+
         config = cls(**data)
         config.source_path = path.resolve()
         return config
