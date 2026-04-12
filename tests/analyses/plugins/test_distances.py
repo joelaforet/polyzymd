@@ -21,9 +21,10 @@ class TestDiscovery:
 
     def test_discovery_by_name(self):
         from polyzymd.analyses.discovery import get_analysis
+        from polyzymd.analyses.distances import DistancesAnalysis
 
         cls = get_analysis("distances")
-        assert cls is not None
+        assert cls is DistancesAnalysis
         assert cls.name == "distances"
 
     def test_listed(self):

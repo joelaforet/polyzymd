@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import ClassVar, Sequence
-from unittest.mock import MagicMock
 
 import pytest
 from pydantic import BaseModel
@@ -111,7 +110,7 @@ def toy_condition(tmp_path):
         label="Test Condition",
         config_path=tmp_path / "config.yaml",
         replicates=(1, 2, 3),
-        sim_config=MagicMock(),
+        sim_config=object(),
     )
 
 
@@ -198,6 +197,7 @@ class TestAnalysisABC:
         """Default extract_metrics returns empty if not overridden on base."""
         # ToyAnalysis DOES override extract_metrics, so test the base
         base_result = Analysis.extract_metrics(toy_analysis, "some_summary")
+        assert base_result == {}
         # ToyAnalysis's own implementation should return metrics
         toy_result = toy_analysis.extract_metrics(
             ToyAggregatedResult(
@@ -239,7 +239,7 @@ class TestContextObjects:
             label="Control",
             config_path=Path("/tmp/ctrl.yaml"),
             replicates=(1, 2),
-            sim_config=MagicMock(),
+            sim_config=object(),
         )
         ctx = ComparisonContext(
             name="Test Project",
@@ -319,7 +319,7 @@ class TestDefaultCompareContract:
             label="A",
             config_path=tmp_path / "a.yaml",
             replicates=(1, 2),
-            sim_config=MagicMock(),
+            sim_config=object(),
         )
         ctx = ComparisonContext(
             name="proj",
@@ -362,7 +362,7 @@ class TestDefaultCompareContract:
             label="A",
             config_path=tmp_path / "a.yaml",
             replicates=(1, 2),
-            sim_config=MagicMock(),
+            sim_config=object(),
         )
         ctx = ComparisonContext(
             name="proj",
@@ -407,7 +407,7 @@ class TestDefaultCompareContract:
             label="A",
             config_path=tmp_path / "a.yaml",
             replicates=(1, 2),
-            sim_config=MagicMock(),
+            sim_config=object(),
         )
         ctx = ComparisonContext(
             name="proj",
@@ -436,7 +436,7 @@ class TestDefaultCompareContract:
             label="A",
             config_path=tmp_path / "a.yaml",
             replicates=(1, 2),
-            sim_config=MagicMock(),
+            sim_config=object(),
         )
         ctx = ComparisonContext(
             name="proj",
@@ -481,7 +481,7 @@ def test_plot_context_default_plot_settings() -> None:
         analysis_dirs={},
         results_dir=Path("/fake"),
         output_dir=Path("/fake"),
-        settings=MagicMock(),
+        settings=ToySettings(),
     )
     assert isinstance(ctx.plot_settings, PlotSettings)
 
@@ -495,7 +495,7 @@ def test_plot_context_materializes_when_none_is_explicitly_passed() -> None:
         analysis_dirs={},
         results_dir=Path("/fake"),
         output_dir=Path("/fake"),
-        settings=MagicMock(),
+        settings=ToySettings(),
         plot_settings=None,
     )
 
@@ -512,7 +512,7 @@ def test_plot_context_keeps_explicit_plot_settings_instance() -> None:
         analysis_dirs={},
         results_dir=Path("/fake"),
         output_dir=Path("/fake"),
-        settings=MagicMock(),
+        settings=ToySettings(),
         plot_settings=plot_settings,
     )
 
@@ -528,6 +528,6 @@ def test_plot_context_rejects_invalid_plot_settings_type(invalid_value: object) 
             analysis_dirs={},
             results_dir=Path("/fake"),
             output_dir=Path("/fake"),
-            settings=MagicMock(),
+            settings=ToySettings(),
             plot_settings=invalid_value,
         )

@@ -21,10 +21,11 @@ class TestDiscovery:
     """The plugin is found by the automatic discovery system."""
 
     def test_discovery_by_name(self):
+        from polyzymd.analyses.contacts import ContactsAnalysis
         from polyzymd.analyses.discovery import get_analysis
 
         cls = get_analysis("contacts")
-        assert cls is not None
+        assert cls is ContactsAnalysis
         assert cls.name == "contacts"
 
     def test_listed(self):
