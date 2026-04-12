@@ -700,7 +700,19 @@ def finalize_comparison_from_disk(
     resolved_control = config.control if config.control is not None else effective_control
     if resolved_control is not None and resolved_control not in condition_labels:
         original_control = resolved_control
-        if allow_partial:
+        filtered_control = any(
+            condition.label == original_control
+            for condition in prepared_state.get("excluded_conditions", [])
+        )
+        if filtered_control:
+            resolved_control = None
+            logger.warning(
+                "Control condition '%s' was excluded by %s.filter_conditions() — proceeding "
+                "with all-vs-all comparison (no control baseline)",
+                original_control,
+                analysis.name,
+            )
+        elif allow_partial:
             resolved_control = None
             logger.warning(
                 "%s: configured control '%s' was dropped during partial finalization; "
