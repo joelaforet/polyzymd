@@ -176,6 +176,7 @@ class TestSettings:
 
 class TestNoOp:
     def test_compute_replicate_returns_none(self):
+        """Compare-only plugins must no-op compute_replicate by contract."""
         from polyzymd.analyses.base import Condition, ReplicateContext
         from polyzymd.analyses.polymer_affinity import (
             PolymerAffinityAnalysis,
@@ -202,6 +203,7 @@ class TestNoOp:
         assert analysis.compute_replicate(ctx, 1) is None
 
     def test_aggregate_returns_none(self):
+        """Compare-only plugins must no-op aggregate by contract."""
         from polyzymd.analyses.base import AggregateContext, Condition
         from polyzymd.analyses.polymer_affinity import (
             PolymerAffinityAnalysis,
@@ -224,6 +226,20 @@ class TestNoOp:
             settings=PolymerAffinitySettings(),
         )
         assert analysis.aggregate(ctx, []) is None
+
+    def test_compare_only_stage_flags(self):
+        """Polymer affinity disables compute and aggregate stages explicitly."""
+        from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
+
+        assert PolymerAffinityAnalysis.has_compute_stage is False
+        assert PolymerAffinityAnalysis.has_aggregate_stage is False
+
+    def test_compare_is_overridden(self):
+        """Plugin must override Analysis.compare for custom comparison logic."""
+        from polyzymd.analyses.base import Analysis
+        from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
+
+        assert PolymerAffinityAnalysis.compare is not Analysis.compare
 
 
 # ===========================================================================
@@ -454,11 +470,32 @@ def _make_condition_summary(label, temperature=300.0, entries=None):
 class TestCompare:
     def test_compare_returns_result(self):
         from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
+        from polyzymd.analyses.polymer_affinity._comparison_results import AffinityScoreEntry
 
         analysis = PolymerAffinityAnalysis()
         ctx = _make_pa_context(n_conditions=2)
 
-        summaries = [_make_condition_summary("A"), _make_condition_summary("B")]
+        summary_a = _make_condition_summary("A")
+        summary_b = _make_condition_summary(
+            "B",
+            entries=[
+                AffinityScoreEntry(
+                    polymer_type="SBM",
+                    protein_group="aromatic",
+                    n_contacts=2.0,
+                    affinity_score=-1.0,
+                    affinity_score_per_replicate=[-0.9, -1.0, -1.1],
+                    mean_contact_fraction=0.2,
+                    n_exposed_in_group=10,
+                    contact_share=0.2,
+                    expected_share=0.1,
+                    temperature_K=300.0,
+                    n_replicates=3,
+                )
+            ],
+        )
+
+        summaries = [summary_a, summary_b]
         side_effects = iter(summaries)
 
         with patch.object(
@@ -469,6 +506,17 @@ class TestCompare:
         assert result is not None
         assert len(result.conditions) == 2
         assert result.name == "test_comparison"
+        assert [condition.label for condition in result.conditions] == ["A", "B"]
+        assert result.mixed_temperatures is False
+        assert result.temperature_groups == {"300.0": ["A", "B"]}
+        assert len(result.pairwise_comparisons) == 1
+        pair = result.pairwise_comparisons[0]
+        assert pair.condition_a == "A"
+        assert pair.condition_b == "B"
+        assert pair.delta_score == pytest.approx(1.0)
+
+        # More negative total score ranks first
+        assert [condition.label for condition in result.get_ranking()] == ["A", "B"]
 
     def test_compare_returns_none_no_data(self):
         from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
@@ -578,6 +626,14 @@ class TestCompare:
         assert result is not None
         assert result.mixed_temperatures is True
         assert len(result.temperature_groups) == 2
+        assert result.temperature_groups == {"300.0": ["A"], "350.0": ["B"]}
+        assert len(result.pairwise_comparisons) == 1
+        pair = result.pairwise_comparisons[0]
+        assert pair.condition_a == "A"
+        assert pair.condition_b == "B"
+        assert pair.cross_temperature is True
+        assert pair.t_statistic is None
+        assert pair.p_value is None
 
     def test_compare_collects_metadata(self):
         from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
@@ -640,9 +696,11 @@ class TestCompare:
             result = analysis.compare(ctx)
 
         assert result is not None
-        assert "EGM" in result.polymer_types
-        assert "SBM" in result.polymer_types
-        assert "aromatic" in result.protein_groups
+        assert result.polymer_types == ["EGM", "SBM"]
+        assert result.protein_groups == ["aromatic", "charged"]
+        assert [condition.label for condition in result.conditions] == ["A", "B"]
+        assert result.conditions[0].total_score == pytest.approx(-3.5)
+        assert result.conditions[1].total_score == pytest.approx(-3.5)
 
 
 # ===========================================================================
@@ -1386,16 +1444,22 @@ class TestLifecycle:
 
         assert issubclass(PolymerAffinityAnalysis, Analysis)
 
-    def test_has_all_required_methods(self):
-        from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
+    def test_plugin_contract_surface(self):
+        """Lifecycle-facing contract uses explicit class variables and overrides."""
+        from polyzymd.analyses.base import Analysis
+        from polyzymd.analyses.polymer_affinity import (
+            PolymerAffinityAnalysis,
+            PolymerAffinitySettings,
+        )
 
         analysis = PolymerAffinityAnalysis()
-        assert callable(analysis.compute_replicate)
-        assert callable(analysis.aggregate)
-        assert callable(analysis.compare)
-        assert callable(analysis.filter_conditions)
-        assert callable(analysis.plot)
-        assert callable(analysis.extract_metrics)
+        assert PolymerAffinityAnalysis.name == "polymer_affinity"
+        assert PolymerAffinityAnalysis.Settings is PolymerAffinitySettings
+        assert PolymerAffinityAnalysis.has_compute_stage is False
+        assert PolymerAffinityAnalysis.has_aggregate_stage is False
+        assert PolymerAffinityAnalysis.compare is not Analysis.compare
+        assert analysis.extract_metrics({"dummy": 1}) == {}
+        assert "polymer_affinity" in str(analysis)
 
     def test_repr(self):
         from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
