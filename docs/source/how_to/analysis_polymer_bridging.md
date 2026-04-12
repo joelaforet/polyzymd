@@ -261,17 +261,21 @@ All plots are enabled by default and can be individually toggled in
 
 ### Comparison cache
 
+Per-replicate and aggregated results use **fingerprinted filenames** that
+encode the analysis settings hash, ensuring that results computed with
+different settings do not collide in the cache.
+
 ```text
 comparison_workspace/
 ├── analysis/
 │   ├── <condition_A>/
 │   │   └── polymer_bridging/
 │   │       ├── run_1/
-│   │       │   └── polymer_bridging_result.json
+│   │       │   └── polymer_bridging_<settings_tag>.json
 │   │       ├── run_2/
-│   │       │   └── polymer_bridging_result.json
+│   │       │   └── polymer_bridging_<settings_tag>.json
 │   │       └── aggregated/
-│   │           └── polymer_bridging_aggregated.json
+│   │           └── polymer_bridging_<rep_range>_<settings_tag>.json
 │   └── <condition_B>/
 │       └── polymer_bridging/
 │           └── ...
@@ -279,6 +283,10 @@ comparison_workspace/
     └── polymer_bridging/
         └── result.json                  # ComparisonResult
 ```
+
+`<settings_tag>` is an 8-character hex fingerprint derived from the plugin
+settings (cutoff, selections, etc.).  `<rep_range>` encodes the replicate
+range (e.g., `r1-3` for replicates 1–3).
 
 ### Generated Figures
 
@@ -316,23 +324,27 @@ Alias: `polyzymd compare run bridging` (resolves to `polymer_bridging`).
 
 ## Loading Results Programmatically
 
+Result files use fingerprinted names (see [Output Files](#output-files)).
+Use `glob` to find the correct file, or import the result classes directly:
+
 ```python
+from pathlib import Path
 from polyzymd.analyses.polymer_bridging import (
     PolymerBridgingAggregatedResult,
     PolymerBridgingReplicateResult,
 )
 
-# Load per-replicate result
-rep = PolymerBridgingReplicateResult.load(
-    "analysis/<condition>/polymer_bridging/run_1/polymer_bridging_result.json"
-)
+# Load per-replicate result (fingerprinted filename)
+run_dir = Path("analysis/<condition>/polymer_bridging/run_1")
+rep_file = next(run_dir.glob("polymer_bridging_*.json"))
+rep = PolymerBridgingReplicateResult.load(rep_file)
 print(f"Multisite fraction: {rep.multisite_fraction:.3f}")
 print(f"Anchor protein groups: {rep.anchor_protein_group_probabilities}")
 
-# Load aggregated result
-agg = PolymerBridgingAggregatedResult.load(
-    "analysis/<condition>/polymer_bridging/aggregated/polymer_bridging_aggregated.json"
-)
+# Load aggregated result (fingerprinted filename)
+agg_dir = Path("analysis/<condition>/polymer_bridging/aggregated")
+agg_file = next(agg_dir.glob("polymer_bridging_*.json"))
+agg = PolymerBridgingAggregatedResult.load(agg_file)
 print(f"Mean valency: {agg.mean_contacts_per_contacting_oligomer:.2f} "
       f"+/- {agg.mean_contacts_sem:.2f}")
 
