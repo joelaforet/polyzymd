@@ -81,8 +81,12 @@ def validate_name(name: str, *, check_existing: bool = True) -> str | None:
 
             if name in list_all_names():
                 return f"'{name}' already exists as a registered analysis plugin."
-        except ImportError:
-            pass  # Discovery module not available (e.g. minimal install)
+        except ModuleNotFoundError as exc:
+            # Only suppress if the discovery module itself isn't available
+            # (e.g. minimal install). Re-raise if a plugin's broken import
+            # bubbles up during discovery
+            if exc.name not in ("polyzymd.analyses", "polyzymd.analyses.discovery"):
+                raise
     return None
 
 
