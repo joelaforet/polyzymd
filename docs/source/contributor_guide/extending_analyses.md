@@ -105,6 +105,115 @@ paths. The scaffold generates a working `plot()` method automatically.
 Custom CLI display. Use `format_scalar_comparison()` from `analyses.stats`
 for formatted tables with rankings, effect sizes, and significance stars.
 
+### `filter_conditions(conditions, settings)` (optional)
+
+Exclude conditions where the analysis cannot run at all. The framework calls
+this **before** dispatching any `compute_replicate()` or `aggregate()` jobs,
+so excluded conditions have zero work done.
+
+**When to use it:** Your analysis requires a molecular component that may not
+be present in all conditions. The canonical case is **polymer-specific
+analyses** — if the comparison includes a "No Polymer (Control)" condition,
+analyses like contacts, exposure, polymer_affinity, and polymer_bridging must
+skip it because there are no polymer atoms to analyse.
+
+**Canonical pattern** (check `sim_config.polymers`, fail-open on errors):
+
+```python
+from polyzymd.analyses.base import Condition
+
+
+def filter_conditions(
+    self,
+    conditions: list[Condition],
+    settings: "BaseModel | None" = None,
+) -> list[Condition]:
+    """Exclude conditions without polymer."""
+    valid: list[Condition] = []
+    for cond in conditions:
+        try:
+            sim_config = cond.sim_config
+            polymers = getattr(sim_config, "polymers", None)
+            has_polymer = polymers is not None and getattr(polymers, "enabled", True)
+            if not has_polymer:
+                logger.info("Excluding '%s': no polymer configured", cond.label)
+                continue
+            valid.append(cond)
+        except (AttributeError, ValueError, KeyError, OSError) as e:
+            logger.warning("Error checking '%s': %s — including anyway", cond.label, e)
+            valid.append(cond)  # fail-open
+    return valid
+```
+
+**Key rules:**
+
+- Always **fail-open** on unexpected errors — include the condition rather
+  than crashing the entire comparison.
+- Log excluded conditions at `INFO` level so users can see what was skipped.
+- The `settings` parameter carries the resolved plugin `Settings` instance.
+  Use it if your exclusion logic depends on user-configurable selections
+  (e.g., a custom polymer selection string).
+
+**Existing implementations:** `contacts`, `exposure`, `polymer_affinity`,
+and `polymer_bridging` all implement `filter_conditions()`.
+`binding_free_energy` has a no-op override (intentionally keeps all
+conditions).
+
+```{tip}
+If only **some** sub-computations within your analysis are inapplicable — not
+the entire analysis — use graceful empty-selection handling inside
+`compute_replicate()` instead. See the next section.
+```
+
+### Handling partially-applicable conditions in `compute_replicate()`
+
+Sometimes an analysis is valid for a condition overall, but specific
+sub-computations within it are not. In that case, **don't exclude the entire
+condition** — instead, handle empty `AtomGroup` selections gracefully inside
+`compute_replicate()`.
+
+**Example:** The `hydrogen_bonds` plugin computes H-bonds between multiple
+group pairs (protein–protein, protein–polymer, protein–substrate). For a
+"No Polymer" control, protein–protein H-bonds are still meaningful, but
+protein–polymer H-bonds are not because there are no polymer atoms. Rather
+than excluding the condition entirely (which would lose the protein–protein
+data), the plugin:
+
+1. Detects that the "polymer" group selection matched zero atoms.
+2. Logs a warning: `"Group 'polymer' selection 'chainid C' matched no atoms
+   — will skip summaries using it"`.
+3. Produces **zero-filled placeholder results** for summaries involving that
+   empty group (e.g., 0 H-bonds, 0.0 occupancy). This is scientifically
+   correct — zero protein–polymer H-bonds is the ground truth when no
+   polymer is present.
+4. Computes normally for summaries that don't involve the empty group
+   (protein–protein H-bonds still run).
+
+```python
+# Pattern: graceful empty-selection handling (from hydrogen_bonds)
+for group_name, selection_str in settings.groups.items():
+    atom_group = u.select_atoms(selection_str)
+    if len(atom_group) == 0:
+        if settings.allow_empty_groups:
+            logger.warning(
+                "Group '%s' selection '%s' matched no atoms — will skip summaries using it",
+                group_name,
+                selection_str,
+            )
+        else:
+            raise ValueError(
+                f"Group '{group_name}' selection '{selection_str}' matched no atoms."
+            )
+```
+
+**When to use which pattern:**
+
+| Situation | Pattern | Example |
+|-----------|---------|---------|
+| Entire analysis is meaningless for a condition | `filter_conditions()` | Polymer–protein contacts with no polymer |
+| Some sub-computations are invalid, others are valid | Graceful empty-selection handling | H-bonds: protein–protein valid, protein–polymer not |
+| Analysis works for all conditions | Neither (use defaults) | RMSF, RMSD, secondary structure |
+
 ## The Complete Example
 
 Here is a single, complete plugin file that uses real framework utilities.
@@ -1073,6 +1182,7 @@ When creating a new analysis plugin:
 - [ ] (Optional) `format()` — CLI display via `format_scalar_comparison()`
 - [ ] (Optional) Use `_check_cache()` in `compute_replicate()` for result caching
 - [ ] (Optional) Use `_format_replicate_range()` for compact log messages
+- [ ] If your analysis requires polymer (or other optional molecular groups), implement `filter_conditions()` to exclude inapplicable conditions — or handle empty selections gracefully in `compute_replicate()`
 - [ ] If using `AggregatedResultClass`, return matching result model instances
 - [ ] Tests: `tests/analyses/plugins/test_<name>.py` (scaffold generates plot tests too)
 - [ ] Verify: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
