@@ -5,66 +5,47 @@ Area) analysis plugin to measure how polymer conjugation affects enzyme surface
 exposure. By the end, you will have configured a multi-run SASA analysis,
 executed it, and interpreted the comparison results.
 
-```{admonition} Page structure note
-:class: tip
+## What You Will Learn
 
-This page is primarily a **tutorial** (learning-oriented, guided workflow).
-Some sections contain reference-style and explanation-style content that
-supports the tutorial flow:
+- How to configure multiple SASA "runs" with different target and context
+  selections
+- How the target/context model lets you isolate polymer shielding effects
+- How to run SASA analysis locally and on HPC
+- How to read the comparison output and identify shielding signals in the plots
 
-- *What SASA Measures* and *Target vs Context Selections* provide conceptual
-  background (explanation mode).
-- *Common Configurations* and *Result Models* are recipe/reference material.
+## Prerequisites
 
-These are kept inline for convenience. For a cleaner separation, consult the
-[Comparison Reference](../reference/analysis_comparison_reference.md) for
-lookup tables and the [Explanation](../explanation/index.md) section for
-deeper conceptual content.
-```
+Before starting, make sure you have:
 
-## What SASA Measures
+- A working pixi environment (`pixi install -e build`)
+- Completed simulation trajectories for at least two conditions
+- A `comparison.yaml` defining your conditions (see
+  {doc}`../how_to/analysis_compare_conditions`)
+- Familiarity with the PolyzyMD chain convention (A=protein, B=substrate,
+  C=polymer)
 
-Solvent Accessible Surface Area quantifies how much of a protein's surface is
-reachable by solvent molecules. PolyzyMD computes SASA using the
-Shrake-Rupley algorithm via MDAnalysis, reporting per-frame total SASA and
+If you have not run a basic analysis yet, complete {doc}`first_analysis` first.
+
+## How the SASA Plugin Works
+
+The SASA plugin computes Solvent Accessible Surface Area using the
+Shrake-Rupley algorithm via MDAnalysis. It reports per-frame total SASA and
 per-residue SASA profiles.
 
-For enzyme-polymer conjugates, SASA is especially valuable because it answers
-a key question: **does the polymer shield the enzyme surface?** By running
-the same SASA calculation with different "context" atoms (the set of atoms
-considered during the computation), you can isolate the polymer's shielding
-effect.
-
-The SASA plugin introduces a **multi-run** model. Instead of computing one
-number, you define multiple "runs" — each with its own target and context
-selections. Comparing runs across conditions reveals which parts of the enzyme
-the polymer covers.
-
-### Target vs Context Selections
-
-Every SASA run uses two selections:
+The key feature is the **multi-run model**. Instead of computing one number,
+you define multiple "runs" — each with its own **target** and **context**
+selections:
 
 | Selection | What it controls |
 |-----------|-----------------|
-| `target_selection` | Atoms whose SASA is **reported** (the "interesting" atoms) |
+| `target_selection` | Atoms whose SASA is **reported** |
 | `context_selection` | Atoms that are **considered as blocking surface** during the calculation |
 
-For example, if you set `target_selection: "protein"` and
-`context_selection: "protein or chainID C"`, the calculation reports the
-protein's SASA while treating the polymer (chain C) as an obstruction that
-can block solvent. Comparing this to a run where `context_selection: "protein"`
-(polymer ignored) tells you exactly how much surface area the polymer covers.
-
-## Before You Start
-
-You need:
-
-- a working pixi environment (`pixi install -e build`)
-- completed simulation trajectories for at least two conditions
-- a `comparison.yaml` defining your conditions (see
-  {doc}`../how_to/analysis_compare_conditions`)
-- familiarity with the PolyzyMD chain convention (A=protein, B=substrate,
-  C=polymer)
+For example, setting `target_selection: "protein"` and
+`context_selection: "protein or chainID C"` reports the protein's SASA while
+treating the polymer (chain C) as an obstruction. Comparing this to a run
+where `context_selection: "protein"` (polymer ignored) tells you how much
+surface area the polymer covers.
 
 ## Step 1: Configure SASA Runs
 

@@ -10,22 +10,32 @@ This tutorial walks through one complete PolyzyMD analysis story:
 By the end, you will have a working comparison workspace with JSON results and
 figures for a small three-condition study.
 
+## What You Will Learn
+
+- How to initialize a comparison workspace with `polyzymd compare init`
+- How to write a `comparison.yaml` that defines conditions and analysis plugins
+- How to run cross-condition comparisons and generate figures
+- What the output directory structure looks like after a successful run
+
+## Prerequisites
+
+Before starting, make sure you have:
+
+- Completed production trajectories for at least three conditions (DCD format
+  in PolyzyMD's standard directory layout)
+- One `config.yaml` per condition
+- A topology such as `solvated_system.pdb` already produced during the build
+- PolyzyMD installed in a pixi environment (see {doc}`installation`)
+
+If you have not run a single-condition analysis yet, complete
+{doc}`first_analysis` first.
+
 ```{important}
 This tutorial uses the stable `v1.3.0` comparison stack: RMSD, Rg, RMSF,
 contacts, distances, catalytic triad, secondary structure, SASA, and hydrogen
 bonds. Experimental workflows are linked at the end, but they are not part of
 the main tutorial path.
 ```
-
-## Before You Start
-
-You need:
-
-- completed **OpenMM** production trajectories for each condition (DCD format
-  in PolyzyMD's standard directory layout; GROMACS XTC support is planned for
-  [v1.2.1](https://github.com/joelaforet/polyzymd/issues/47))
-- one `config.yaml` per condition
-- a topology such as `solvated_system.pdb` already produced during the build
 
 ## The Study We Will Analyze
 

@@ -4,7 +4,14 @@ This tutorial walks through one complete first run: create a project scaffold,
 add an enzyme structure, write a minimal configuration, validate it, and make
 sure PolyzyMD can build the system.
 
-## What you need
+## What You Will Learn
+
+- How to create a project scaffold with `polyzymd init`
+- How to write a minimal `config.yaml` for an enzyme-only simulation
+- How to validate your configuration and run a system build
+- How to choose between local execution and HPC submission
+
+## Prerequisites
 
 - PolyzyMD installed with `pixi` as described in {doc}`installation`
 - a simulation-ready enzyme PDB file
