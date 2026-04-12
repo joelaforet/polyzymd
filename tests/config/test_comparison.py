@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from polyzymd.config.comparison import ComparisonConfig, ConditionConfig
+from polyzymd.config.comparison import ComparisonConfig, ConditionConfig, PlotSettings
 
 
 class TestUnknownTopLevelKeys:
@@ -118,3 +118,29 @@ class TestConditionReplicateValidation:
         """Normal replicate list should work."""
         cond = ConditionConfig(label="A", config=Path("/fake/a.yaml"), replicates=[1, 2, 3])
         assert cond.replicates == [1, 2, 3]
+
+
+class TestPlotThemeValidation:
+    """C8-H3: PlotSettings should reject invalid theme types."""
+
+    def test_string_theme_raises(self):
+        with pytest.raises(TypeError, match="Invalid 'theme' value"):
+            PlotSettings(theme="bad")
+
+    def test_int_theme_raises(self):
+        with pytest.raises(TypeError, match="Invalid 'theme' value"):
+            PlotSettings(theme=123)
+
+    def test_list_theme_raises(self):
+        with pytest.raises(TypeError, match="Invalid 'theme' value"):
+            PlotSettings(theme=["bad"])
+
+    def test_dict_theme_accepted(self):
+        """Dict overrides should still work."""
+        ps = PlotSettings(theme={"dot_size": 42})
+        assert ps.theme.dot_size == 42
+
+    def test_none_theme_uses_default(self):
+        """None theme should use publication preset."""
+        ps = PlotSettings(theme=None)
+        assert ps.theme is not None

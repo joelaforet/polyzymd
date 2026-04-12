@@ -475,6 +475,11 @@ class PlotSettings(BaseModel):
         elif isinstance(theme_overrides, PlotTheme):
             # Already a PlotTheme instance (programmatic usage)
             global_data["theme"] = theme_overrides
+        else:
+            raise TypeError(
+                f"Invalid 'theme' value: expected None, dict, or PlotTheme, "
+                f"got {type(theme_overrides).__name__}"
+            )
 
         super().__init__(**global_data, **per_analysis)
 
