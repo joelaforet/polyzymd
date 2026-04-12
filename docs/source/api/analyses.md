@@ -111,5 +111,5 @@ summaries.
 ## Related Documentation
 
 - [Extending the Analysis Framework](../contributor_guide/extending_analyses.md) — tutorial
-- [Analysis Calculator API](analysis.md) — underlying compute layer
+- [Analysis API Overview](analysis.md) — entry point for the analysis API
 - [API Overview](overview.rst)
