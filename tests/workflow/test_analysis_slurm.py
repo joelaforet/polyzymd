@@ -133,12 +133,15 @@ def test_build_manifest_serialization(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     monkeypatch.setattr(
         "polyzymd.workflow.analysis_slurm.prepare_comparison_run",
-        lambda analysis, config, equilibration: (
-            valid_conditions,
-            _Settings(),
-            "5ns",
-            tmp_path / "analysis",
-        ),
+        lambda analysis, config, equilibration: {
+            "all_conditions": valid_conditions,
+            "valid_conditions": valid_conditions,
+            "excluded_conditions": [],
+            "condition_by_label": {condition.label: condition for condition in valid_conditions},
+            "settings": _Settings(),
+            "equilibration": "5ns",
+            "analysis_root": tmp_path / "analysis",
+        },
     )
     config = cast(Any, SimpleNamespace(source_path=tmp_path / "comparison.yaml"))
 
@@ -263,12 +266,15 @@ def test_build_manifest_allow_partial_policy(
 
     monkeypatch.setattr(
         "polyzymd.workflow.analysis_slurm.prepare_comparison_run",
-        lambda analysis, config, equilibration: (
-            valid_conditions,
-            _Settings(),
-            "5ns",
-            tmp_path / "analysis",
-        ),
+        lambda analysis, config, equilibration: {
+            "all_conditions": valid_conditions,
+            "valid_conditions": valid_conditions,
+            "excluded_conditions": [],
+            "condition_by_label": {condition.label: condition for condition in valid_conditions},
+            "settings": _Settings(),
+            "equilibration": "5ns",
+            "analysis_root": tmp_path / "analysis",
+        },
     )
     config = cast(Any, SimpleNamespace(source_path=tmp_path / "comparison.yaml"))
 

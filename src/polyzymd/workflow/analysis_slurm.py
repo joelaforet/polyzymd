@@ -358,11 +358,15 @@ def validate_manifest_snapshot(
     RuntimeError
         If current config/plugin settings drift from the submitted manifest.
     """
-    valid_conditions, live_settings, resolved_equilibration, analysis_root = prepare_comparison_run(
+    prepared = prepare_comparison_run(
         analysis,
         config,
         manifest.equilibration,
     )
+    valid_conditions = prepared["valid_conditions"]
+    live_settings = prepared["settings"]
+    resolved_equilibration = prepared["equilibration"]
+    analysis_root = prepared["analysis_root"]
     live_settings_snapshot = (
         live_settings.model_dump(mode="json") if hasattr(live_settings, "model_dump") else {}
     )
@@ -509,11 +513,14 @@ def build_manifest(
     allow_partial: bool = False,
 ) -> AnalysisJobManifest:
     """Build submission manifest from comparison config and plugin settings."""
-    valid_conditions, settings, resolved_equilibration, _analysis_root = prepare_comparison_run(
+    prepared = prepare_comparison_run(
         analysis,
         config,
         equilibration,
     )
+    valid_conditions = prepared["valid_conditions"]
+    settings = prepared["settings"]
+    resolved_equilibration = prepared["equilibration"]
     condition_specs = _condition_specs_from_conditions(valid_conditions)
     settings_snapshot = settings.model_dump(mode="json") if hasattr(settings, "model_dump") else {}
     snapshot_hash = compute_manifest_snapshot_hash(
