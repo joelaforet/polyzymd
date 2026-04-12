@@ -42,6 +42,21 @@ class TestSettings:
             PolymerBridgingSettings(min_ca_distance_angstrom=-1.0)
 
 
+class TestCacheFingerprint:
+    """Verify cache filenames include settings fingerprint."""
+
+    def test_cache_tag_changes_with_settings(self):
+        """Different settings must produce different cache tags."""
+        analysis = PolymerBridgingAnalysis()
+        tag_default = analysis._make_settings_cache_tag(PolymerBridgingSettings())
+        tag_custom = analysis._make_settings_cache_tag(
+            PolymerBridgingSettings(cutoff=5.0, min_ca_distance_angstrom=10.0)
+        )
+        assert tag_default != tag_custom
+        assert len(tag_default) == 8
+        assert len(tag_custom) == 8
+
+
 class TestCoreComputation:
     def test_bridging_stats_without_distance_threshold(self):
         frame_contacts = [{10}, {10, 35}, {10, 35}, {60}]
@@ -141,13 +156,15 @@ class TestLifecycle:
 
     def test_compute_replicate_uses_cached_result_when_available(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
         condition = Condition(
             label="Cond",
             config_path=tmp_path / "condition" / "config.yaml",
             replicates=(1,),
             sim_config=MagicMock(),
         )
-        result_path = tmp_path / "out" / "result.json"
+        settings_tag = analysis._make_settings_cache_tag(settings)
+        result_path = tmp_path / "out" / f"polymer_bridging_{settings_tag}.json"
         cached = PolymerBridgingReplicateResult(
             replicate=1,
             n_frames=4,
@@ -174,8 +191,7 @@ class TestLifecycle:
                 output_dir=tmp_path / "out",
                 equilibration="0ns",
                 recompute=False,
-                settings=PolymerBridgingSettings(),
-                result_path=result_path,
+                settings=settings,
             ),
             1,
         )
@@ -244,13 +260,16 @@ class TestLifecycle:
 
     def test_aggregate_uses_cached_result_when_available(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
         condition = Condition(
             label="Cond",
             config_path=Path("/tmp/config.yaml"),
             replicates=(1, 2),
             sim_config=MagicMock(),
         )
-        result_path = tmp_path / "agg" / "result.json"
+        settings_tag = analysis._make_settings_cache_tag(settings)
+        rep_str = analysis._format_replicate_range((1, 2))
+        result_path = tmp_path / "agg" / f"polymer_bridging_{rep_str}_{settings_tag}.json"
         cached = PolymerBridgingAggregatedResult(
             n_replicates=2,
             replicates=[1, 2],
@@ -281,8 +300,7 @@ class TestLifecycle:
                 replicates=(1, 2),
                 output_dir=tmp_path / "agg",
                 equilibration="0ns",
-                settings=PolymerBridgingSettings(),
-                result_path=result_path,
+                settings=settings,
             ),
             [],
         )

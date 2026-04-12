@@ -70,6 +70,7 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.polymer_bridging._plot_settings import PolymerBridgingPlotSettings
 from polyzymd.analyses.shared import apply_axis_style, get_colors, get_output_path, save_figure
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.analyses.shared.groupings import ProteinAAClassification
 from polyzymd.analyses.stats import anova_test, pairwise_comparisons
 from polyzymd.core.experimental import prefix_experimental_output
@@ -399,13 +400,39 @@ class PolymerBridgingAnalysis(Analysis):
     min_replicates: ClassVar[int] = 2
 
     @staticmethod
+    def _make_settings_cache_tag(settings: BaseModel) -> str:
+        """Build a short cache tag from analysis settings.
+
+        Parameters
+        ----------
+        settings : BaseModel
+            Analysis settings model.
+
+        Returns
+        -------
+        str
+            First 8 hex characters from shared settings fingerprinting.
+        """
+        return settings_fingerprint(settings)
+
+    @staticmethod
     def _compute_frame_contacts(*args, **kwargs):
         return _compute_frame_contacts(*args, **kwargs)
 
     def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
         """Compute oligomer bridging metrics directly from the trajectory."""
-        if ctx.result_path is not None and ctx.result_path.exists() and not ctx.recompute:
-            return PolymerBridgingReplicateResult.load(ctx.result_path)
+        settings_tag = self._make_settings_cache_tag(ctx.settings)
+        cache_file = ctx.output_dir / f"polymer_bridging_{settings_tag}.json"
+
+        cached = self._check_cache(
+            PolymerBridgingReplicateResult,
+            cache_file,
+            recompute=ctx.recompute,
+            sim_config=ctx.sim_config,
+            settings=ctx.settings,
+        )
+        if cached is not None:
+            return cached
 
         frame_contacts, n_frames, timestep_ps = self._compute_frame_contacts(
             ctx.condition,
@@ -448,8 +475,18 @@ class PolymerBridgingAnalysis(Analysis):
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
         """Aggregate bridging metrics across replicates."""
         recompute = getattr(ctx, "recompute", False)
-        if ctx.result_path is not None and ctx.result_path.exists() and not recompute:
-            return PolymerBridgingAggregatedResult.load(ctx.result_path)
+        settings_tag = self._make_settings_cache_tag(ctx.settings)
+        rep_str = self._format_replicate_range(ctx.replicates)
+        cache_file = ctx.output_dir / f"polymer_bridging_{rep_str}_{settings_tag}.json"
+
+        cached = self._check_cache(
+            PolymerBridgingAggregatedResult,
+            cache_file,
+            recompute=recompute,
+            settings=ctx.settings,
+        )
+        if cached is not None:
+            return cached
 
         mean_contacts = [float(r.mean_contacts_per_contacting_oligomer) for r in results]
         multisite = [float(r.multisite_fraction) for r in results]
@@ -525,8 +562,7 @@ class PolymerBridgingAnalysis(Analysis):
             fragment_signature_probabilities_sem=_series_sem(fragment_signatures),
             fragment_signature_probabilities_per_replicate=fragment_signatures,
         )
-        if ctx.result_path is not None:
-            self.save_result(aggregated, ctx.result_path)
+        self.save_result(aggregated, cache_file)
         return aggregated
 
     def filter_conditions(
