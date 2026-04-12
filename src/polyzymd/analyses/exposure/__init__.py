@@ -36,6 +36,7 @@ from polyzymd.analyses.base import (
     Condition,
     MetricValue,
     PlotContext,
+    SlurmResourceHint,
 )
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.analyses.shared.plotting import (
@@ -161,6 +162,7 @@ class ExposureAnalysis(Analysis):
     min_replicates: ClassVar[int] = 2
     has_compute_stage: ClassVar[bool] = False
     has_aggregate_stage: ClassVar[bool] = False
+    slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(mem="16G")
 
     # === Compare (full override) ===
 
