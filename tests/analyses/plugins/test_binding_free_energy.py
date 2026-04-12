@@ -17,7 +17,7 @@ Coverage:
 from __future__ import annotations
 
 import math
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -268,6 +268,32 @@ class TestFilterConditions:
 # ===========================================================================
 
 
+@dataclass
+class _MockBPEntry:
+    partition_element: str
+    mean_contact_share: float
+    expected_share: float
+    sem_contact_share: float
+    per_replicate_enrichments: list[float]
+    n_exposed_in_group: int
+
+
+@dataclass
+class _MockPartitionResult:
+    entries: list[_MockBPEntry]
+
+
+@dataclass
+class _MockBindingPreference:
+    aa_class_binding: dict[str, _MockPartitionResult]
+    user_defined_partitions: dict[str, dict[str, _MockPartitionResult]]
+
+
+@dataclass
+class _MockBPResult:
+    binding_preference: _MockBindingPreference
+
+
 def _make_mock_bp_entry(
     partition_element="aromatic",
     mean_contact_share=0.3,
@@ -279,14 +305,14 @@ def _make_mock_bp_entry(
     if per_replicate_enrichments is None:
         per_replicate_enrichments = [1.0, 0.8, 1.2]  # enrichment values
 
-    entry = MagicMock()
-    entry.partition_element = partition_element
-    entry.mean_contact_share = mean_contact_share
-    entry.expected_share = expected_share
-    entry.sem_contact_share = sem_contact_share
-    entry.per_replicate_enrichments = per_replicate_enrichments
-    entry.n_exposed_in_group = 10
-    return entry
+    return _MockBPEntry(
+        partition_element=partition_element,
+        mean_contact_share=mean_contact_share,
+        expected_share=expected_share,
+        sem_contact_share=sem_contact_share,
+        per_replicate_enrichments=per_replicate_enrichments,
+        n_exposed_in_group=10,
+    )
 
 
 def _make_mock_bp_result(entries=None, user_partitions=None):
@@ -294,17 +320,12 @@ def _make_mock_bp_result(entries=None, user_partitions=None):
     if entries is None:
         entries = [_make_mock_bp_entry()]
 
-    bp = MagicMock()
-    partition_result = MagicMock()
-    partition_result.entries = entries
-    bp.aa_class_binding = {"SBM": partition_result}
-    bp.user_defined_partitions = user_partitions or {}
-
-    result = MagicMock()
-    result.binding_preference = bp
-
-    # Make isinstance check work for AggregatedBindingPreferenceResult
-    return result
+    partition_result = _MockPartitionResult(entries=entries)
+    bp = _MockBindingPreference(
+        aa_class_binding={"SBM": partition_result},
+        user_defined_partitions=user_partitions or {},
+    )
+    return _MockBPResult(binding_preference=bp)
 
 
 def _make_context(n_conditions=2, n_reps=3, control="A", temperature=300.0):

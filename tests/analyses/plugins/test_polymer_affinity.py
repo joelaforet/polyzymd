@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -304,18 +305,18 @@ def _make_mock_agg_bp_entry(
     if per_replicate_enrichments is None:
         per_replicate_enrichments = [1.0, 0.8, 1.2]
 
-    entry = MagicMock()
-    entry.polymer_type = polymer_type
-    entry.protein_group = protein_group
-    entry.mean_contact_fraction = mean_contact_fraction
-    entry.n_exposed_in_group = n_exposed_in_group
-    entry.mean_contact_share = mean_contact_share
-    entry.expected_share = expected_share
-    entry.sem_contact_fraction = sem_contact_fraction
-    entry.sem_contact_share = sem_contact_share
-    entry.per_replicate_enrichments = per_replicate_enrichments
-    entry.n_replicates = n_replicates
-    return entry
+    return SimpleNamespace(
+        polymer_type=polymer_type,
+        protein_group=protein_group,
+        mean_contact_fraction=mean_contact_fraction,
+        n_exposed_in_group=n_exposed_in_group,
+        mean_contact_share=mean_contact_share,
+        expected_share=expected_share,
+        sem_contact_fraction=sem_contact_fraction,
+        sem_contact_share=sem_contact_share,
+        per_replicate_enrichments=per_replicate_enrichments,
+        n_replicates=n_replicates,
+    )
 
 
 def _make_mock_agg_bp_result(entries=None):
@@ -323,9 +324,7 @@ def _make_mock_agg_bp_result(entries=None):
     if entries is None:
         entries = [_make_mock_agg_bp_entry()]
 
-    result = MagicMock()
-    result.entries = entries
-    return result
+    return SimpleNamespace(entries=entries)
 
 
 def _make_mock_single_bp_entry(
@@ -337,14 +336,14 @@ def _make_mock_single_bp_entry(
     expected_share=0.1,
 ):
     """Build a mock single-replicate BindingPreferenceEntry."""
-    entry = MagicMock()
-    entry.polymer_type = polymer_type
-    entry.protein_group = protein_group
-    entry.mean_contact_fraction = mean_contact_fraction
-    entry.n_exposed_in_group = n_exposed_in_group
-    entry.contact_share = contact_share
-    entry.expected_share = expected_share
-    return entry
+    return SimpleNamespace(
+        polymer_type=polymer_type,
+        protein_group=protein_group,
+        mean_contact_fraction=mean_contact_fraction,
+        n_exposed_in_group=n_exposed_in_group,
+        contact_share=contact_share,
+        expected_share=expected_share,
+    )
 
 
 def _make_pa_context(n_conditions=2, n_reps=3, control="A", temperature=300.0):
