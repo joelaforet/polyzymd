@@ -8,6 +8,19 @@ run, and how to visualize results. Create one with `polyzymd compare init -n
 Source of truth: {func}`polyzymd.config.comparison.ComparisonConfig` in
 `src/polyzymd/config/comparison.py`.
 
+```{important}
+Plugin settings path fields are resolved relative to the directory containing
+`comparison.yaml`.
+
+For example, in:
+
+`plugins.rmsf.reference_file`, `plugins.contacts.enzyme_pdb_for_sasa`,
+`plugins.binding_free_energy.enzyme_pdb_for_sasa`, and other plugin-declared
+path fields, a relative path like `structures/enzyme.pdb` is interpreted as:
+
+`<comparison_yaml_parent>/structures/enzyme.pdb`
+```
+
 For CLI commands that consume this file, see
 {doc}`analysis_comparison_reference`. For directory layout and data
 expectations, see {doc}`data_requirements`.

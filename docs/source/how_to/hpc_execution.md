@@ -2,8 +2,9 @@
 
 This guide shows you how to submit PolyzyMD analysis computations as SLURM
 jobs. It covers submitting a full analysis DAG (replicate → aggregate →
-finalize), monitoring progress, and collecting comparison results — all without
-running analysis interactively on a login node.
+finalize), monitoring progress, cross-plugin dependency ordering, and
+collecting comparison results — all without running analysis interactively on a
+login node.
 
 ```{note}
 This guide covers **analysis** job submission via `polyzymd compare submit`.
@@ -53,6 +54,49 @@ runs the cross-condition comparison and generates plots.
 Each job includes automatic retry logic. If a worker exits with a non-zero
 code, it requeues itself up to `--max-retries` times (default: 3) before
 marking the task as failed.
+
+## Submitting all enabled analyses with dependency ordering
+
+Use `compare submit-all` to submit every enabled plugin from `comparison.yaml`
+in dependency order:
+
+```bash
+pixi run -e build polyzymd compare submit-all \
+    -f comparison.yaml \
+    --partition aa100 \
+    --qos normal
+```
+
+This command:
+
+- discovers enabled plugins from `plugins:`
+- orders plugins by declared `dependencies`
+- submits each plugin DAG with cross-plugin finalize dependencies
+
+For example, analyses that depend on `contacts` (such as `exposure`,
+`binding_free_energy`, or `polymer_affinity`) are submitted after `contacts`,
+and their root finalize jobs are wired to the upstream `contacts` finalize job.
+
+Exclude one or more analyses with repeatable `--exclude`:
+
+```bash
+pixi run -e build polyzymd compare submit-all \
+    -f comparison.yaml \
+    --exclude exposure \
+    --exclude polymer_affinity \
+    --partition aa100
+```
+
+Use `--dry-run` to generate all scripts and print the submission summary table
+without dispatching jobs.
+
+## Comparator-only plugins and finalize-only mode
+
+Some plugins do not implement compute/aggregate stages and only run
+comparison/plot logic. For these, the manifest pipeline mode is
+`finalize_only`, and submission creates a single finalize job.
+
+This behavior applies to both `compare submit` and `compare submit-all`.
 
 ## The Example Study
 
@@ -373,6 +417,47 @@ Check `polyzymd compare status` to identify the failed conditions, inspect
 their logs, fix the issue, and resubmit. Alternatively, use `--allow-partial`
 to finalize with available data.
 
+```{note}
+If the configured control condition is intentionally filtered out by a plugin's
+`filter_conditions()` (for example, polymer-dependent analyses removing a
+no-polymer control), finalize now auto-switches to all-vs-all comparison
+without requiring `--allow-partial`.
+```
+
+For true runtime data loss (failed/missing condition outputs), strict behavior
+still applies and you must pass `--allow-partial`.
+
+### MDAnalysis ChainReader errors (F13)
+
+If a worker fails with MDAnalysis ChainReader exceptions, this is usually an
+external reader/data issue rather than a PolyzyMD logic bug.
+
+Recommended checks:
+
+- validate trajectory files are complete and readable
+- verify topology/trajectory atom ordering consistency
+- re-run with a single replicate to isolate the broken input file
+
+### SLURM association and job-limit failures (for example MaxJobs=0, F15)
+
+If `sbatch` rejects jobs due to association, account, or quota limits, inspect
+your scheduler associations:
+
+```bash
+sacctmgr show association user=$USER
+```
+
+Then resubmit with explicit account/QoS flags as required by your site.
+
+### QoS/account errors
+
+Many clusters require both partition and QoS/account policy settings.
+
+- set `--qos <name>` when jobs remain pending or are rejected
+- set `--account <allocation>` when your scheduler enforces account routing
+
+PolyzyMD prints a submit-time tip when `--partition` is set but `--qos` is not.
+
 ### Job preempted on a shared partition
 
 If your cluster uses preemption, jobs may be killed and requeued
@@ -401,7 +486,7 @@ All resource options are passed as CLI flags to `polyzymd compare submit`:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--partition` | `aa100` | SLURM partition name |
+| `--partition` | *(none)* | SLURM partition name (optional; if omitted, cluster default partition is used) |
 | `--qos` | *(none)* | Quality of service |
 | `--account` | *(none)* | SLURM account/allocation |
 | `--mem` | `4G` | Memory per job |
@@ -416,6 +501,22 @@ All resource options are passed as CLI flags to `polyzymd compare submit`:
 | `--equilibration` | *(from YAML)* | Override equilibration time |
 | `--dry-run` | off | Generate scripts without submitting |
 | `--job-arrays` | off | Submit one SLURM array job per condition instead of individual jobs |
+
+### Resource precedence and plugin hints
+
+For `--mem`, `--time`, and `--cpus-per-task`, submission precedence is:
+
+1. explicit CLI flag
+2. plugin `slurm_resource_hint`
+3. system default
+
+Current memory hints:
+
+- `secondary_structure`: `16G`
+- `hydrogen_bonds`: `16G`
+
+This means large plugins get safer defaults, while explicit CLI requests still
+override plugin hints.
 
 ### Using Job Arrays
 

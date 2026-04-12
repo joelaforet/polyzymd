@@ -658,6 +658,7 @@ Commands:
   run-all   Run all enabled comparisons
   plot-all  Generate comparison plots from a workspace
   submit    Submit analysis as SLURM job DAG (HPC)
+  submit-all Submit all enabled analyses as dependency-ordered SLURM DAGs
   status    Show status of submitted SLURM analysis jobs
   finalize  Run comparison + plotting from aggregated on-disk results
 ```
@@ -829,6 +830,10 @@ Submit replicate-level SLURM analysis DAG for one plugin. Each replicate is
 computed as an independent SLURM job, followed by per-condition aggregation
 jobs and a final comparison + plotting job.
 
+Before submission, this command runs a dependency preflight check: if the
+target plugin declares `dependencies`, required upstream comparison results must
+already exist on disk (or use `compare submit-all` instead).
+
 ```bash
 polyzymd compare submit ANALYSIS [OPTIONS]
 
@@ -837,7 +842,7 @@ Arguments:
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
-  --partition TEXT        SLURM partition [default: aa100]
+  --partition TEXT        SLURM partition [default: cluster default]
   --qos TEXT             SLURM QoS
   --account TEXT         SLURM account/allocation
   --pixi-path TEXT       Path to pixi executable [default: pixi]
@@ -865,6 +870,49 @@ polyzymd compare submit contacts --dry-run
 
 # Use job arrays for efficiency
 polyzymd compare submit rmsf --job-arrays --partition aa100
+
+# Rely on plugin memory hints and cluster default partition
+polyzymd compare submit secondary_structure --qos normal
+```
+
+### polyzymd compare submit-all
+
+Submit all enabled analyses from `comparison.yaml` in dependency order with
+cross-plugin finalize dependencies.
+
+```bash
+polyzymd compare submit-all [OPTIONS]
+
+Options:
+  -f, --file PATH         Path to comparison.yaml [default: comparison.yaml]
+  --partition TEXT        SLURM partition [default: cluster default]
+  --qos TEXT              SLURM QoS
+  --account TEXT          SLURM account/allocation
+  --pixi-path TEXT        Path to pixi executable [default: pixi]
+  --ntasks INT            SLURM ntasks [default: 1]
+  --cpus-per-task INT     SLURM cpus-per-task [default: 1]
+  --mem TEXT              SLURM memory request [default: 4G]
+  --time TEXT             SLURM walltime [default: 01:00:00]
+  --max-retries INT       Max retries for failed jobs [default: 3]
+  --mail-user TEXT        Email for failure notifications
+  --recompute             Force recomputation in workers
+  --allow-partial         Allow finalize when some conditions are missing results
+  --equilibration TEXT    Override equilibration time
+  --dry-run               Generate scripts without submitting jobs
+  --exclude TEXT          Exclude one analysis (repeatable)
+```
+
+#### Example
+
+```bash
+# Submit everything enabled in comparison.yaml
+polyzymd compare submit-all -f comparison.yaml --partition aa100 --qos normal
+
+# Skip selected plugins
+polyzymd compare submit-all -f comparison.yaml --exclude exposure --exclude polymer_affinity
+
+# Dry-run planning only
+polyzymd compare submit-all -f comparison.yaml --dry-run
 ```
 
 ### polyzymd compare status
