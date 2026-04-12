@@ -91,30 +91,15 @@ polyzymd compare run contacts -f comparison.yaml
 
 ````{tab-item} Python
 ```python
-from pathlib import Path
-from polyzymd.config import SimulationConfig
-from polyzymd.analyses.contacts import ParallelContactAnalyzer
+# Contacts analysis runs through the comparison pipeline.
+# See the YAML tab for the recommended workflow.
+#
+# To load results programmatically after running:
+from polyzymd.analyses.contacts._results import ContactResult
 
-# Load simulation config
-config = SimulationConfig.from_yaml("config.yaml")
+result = ContactResult.load("analysis/<condition>/contacts/run_1/contacts.json")
 
-# Create analyzer with parameters
-analyzer = ParallelContactAnalyzer(
-    config=config,
-    replicate=1,
-    equilibration_time="10ns",
-    cutoff=4.0,
-    polymer_selection="segid C",
-    protein_selection="protein",
-)
-
-# Run analysis
-result = analyzer.analyze()
-
-# Access results
 print(f"Coverage: {result.coverage:.1%}")
-print(f"Mean contact fraction: {result.mean_contact_fraction:.1%}")
-print(f"Contacted residues: {result.n_contacted}/{result.n_residues}")
 ```
 ````
 `````
@@ -207,31 +192,19 @@ polyzymd compare run-all -f comparison.yaml
 
 ````{tab-item} Python
 ```python
-from pathlib import Path
-from polyzymd.config import SimulationConfig
-from polyzymd.analyses.contacts import ParallelContactAnalyzer
-from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
+# Contacts analysis runs through the comparison pipeline.
+# See the YAML tab for the recommended workflow.
+#
+# To load aggregated results programmatically after running:
+from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
 
-config = SimulationConfig.from_yaml("config.yaml")
-
-# Analyze multiple replicates
-results = []
-for rep in [1, 2, 3]:
-    analyzer = ParallelContactAnalyzer(
-        config=config,
-        replicate=rep,
-        equilibration_time="10ns",
-        cutoff=4.5,
-        polymer_selection="chainID C",
-        protein_selection="protein",
-        compute_residence_times=True,
-    )
-    results.append(analyzer.analyze())
-
-# Aggregate results across replicates
-aggregated = aggregate_contact_results(results)
-
-print(f"Contact fraction: {aggregated.mean_contact_fraction:.1%} ± {aggregated.std_contact_fraction:.1%}")
+aggregated = AggregatedContactResult.load(
+    "analysis/<condition>/contacts/aggregated/contacts_aggregated.json"
+)
+print(
+    f"Contact fraction: {aggregated.mean_contact_fraction:.1%} "
+    f"± {aggregated.std_contact_fraction:.1%}"
+)
 ```
 ````
 `````
@@ -283,19 +256,13 @@ polyzymd compare run contacts -f comparison.yaml
 
 ````{tab-item} Python
 ```python
-from polyzymd.config import SimulationConfig
-from polyzymd.analyses.contacts import ParallelContactAnalyzer
+# Contacts analysis runs through the comparison pipeline.
+# See the YAML tab for the recommended workflow.
+#
+# To load results programmatically after running:
+from polyzymd.analyses.contacts._results import ContactResult
 
-config = SimulationConfig.from_yaml("config.yaml")
-
-analyzer = ParallelContactAnalyzer(
-    config=config,
-    replicate=1,
-    equilibration_time="10ns",
-    compute_residence_times=True,  # Enable residence time statistics
-)
-
-result = analyzer.analyze()
+result = ContactResult.load("analysis/<condition>/contacts/run_1/contacts.json")
 
 # Access residence time data
 for polymer_type, stats in result.residence_times.items():
@@ -350,24 +317,15 @@ polyzymd compare run contacts -f comparison.yaml
 
 ````{tab-item} Python
 ```python
-from polyzymd.config import SimulationConfig
-from polyzymd.analyses.contacts import ParallelContactAnalyzer
-from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
+# Contacts analysis runs through the comparison pipeline.
+# See the YAML tab for the recommended workflow.
+#
+# To load aggregated results programmatically after running:
+from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
 
-config = SimulationConfig.from_yaml("config.yaml")
-
-results = []
-for rep in [1, 2, 3]:
-    analyzer = ParallelContactAnalyzer(
-        config=config,
-        replicate=rep,
-        equilibration_time="10ns",
-        compute_residence_times=True,
-    )
-    results.append(analyzer.analyze())
-
-# Aggregate with proper uncertainty quantification
-aggregated = aggregate_contact_results(results)
+aggregated = AggregatedContactResult.load(
+    "analysis/<condition>/contacts/aggregated/contacts_aggregated.json"
+)
 
 print(f"Contact fraction: {aggregated.mean_contact_fraction:.1%} ± {aggregated.std_contact_fraction:.1%}")
 for polymer_type, stats in aggregated.residence_times.items():
@@ -426,8 +384,12 @@ Results are saved as JSON in the project's analysis directory:
 ```
 project/
 └── analysis/
-    └── contacts/
-        └── contacts_rep1.json
+    └── <condition>/
+        └── contacts/
+            ├── run_1/
+            │   └── contacts.json
+            └── aggregated/
+                └── contacts_aggregated.json
 ```
 
 The JSON file contains per-residue contact data including:
@@ -474,31 +436,14 @@ polyzymd compare run contacts -f comparison.yaml
 
 ````{tab-item} Python
 ```python
-from polyzymd.config import SimulationConfig
-from polyzymd.analyses.contacts import ParallelContactAnalyzer
+# Contacts analysis runs through the comparison pipeline.
+# See the YAML tab for the recommended workflow.
+#
+# To load results programmatically after running:
+from polyzymd.analyses.contacts._results import ContactResult
 
-config = SimulationConfig.from_yaml("config.yaml")
-
-# Analyze only SBMA monomers
-sbma_analyzer = ParallelContactAnalyzer(
-    config=config,
-    replicate=1,
-    equilibration_time="10ns",
-    polymer_selection="segid C and resname SBM",
-)
-sbma_result = sbma_analyzer.analyze()
-
-# Analyze only EGMA monomers
-egma_analyzer = ParallelContactAnalyzer(
-    config=config,
-    replicate=1,
-    equilibration_time="10ns",
-    polymer_selection="segid C and resname EGM",
-)
-egma_result = egma_analyzer.analyze()
-
-print(f"SBMA coverage: {sbma_result.coverage:.1%}")
-print(f"EGMA coverage: {egma_result.coverage:.1%}")
+result = ContactResult.load("analysis/<condition>/contacts/run_1/contacts.json")
+print(f"Coverage: {result.coverage:.1%}")
 ```
 ````
 `````
@@ -539,31 +484,14 @@ polyzymd compare run contacts -f comparison.yaml
 
 ````{tab-item} Python
 ```python
-from polyzymd.config import SimulationConfig
-from polyzymd.analyses.contacts import ParallelContactAnalyzer
+# Contacts analysis runs through the comparison pipeline.
+# See the YAML tab for the recommended workflow.
+#
+# To load results programmatically after running:
+from polyzymd.analyses.contacts._results import ContactResult
 
-config = SimulationConfig.from_yaml("config.yaml")
-
-# Analyze contacts with aromatic residues only
-aromatic_analyzer = ParallelContactAnalyzer(
-    config=config,
-    replicate=1,
-    equilibration_time="10ns",
-    protein_selection="protein and (resname TRP PHE TYR)",
-)
-aromatic_result = aromatic_analyzer.analyze()
-
-# Analyze contacts with active site region
-active_site_analyzer = ParallelContactAnalyzer(
-    config=config,
-    replicate=1,
-    equilibration_time="10ns",
-    protein_selection="protein and (resid 75-80 or resid 130-140)",
-)
-active_site_result = active_site_analyzer.analyze()
-
-print(f"Aromatic contact fraction: {aromatic_result.mean_contact_fraction:.1%}")
-print(f"Active site contact fraction: {active_site_result.mean_contact_fraction:.1%}")
+result = ContactResult.load("analysis/<condition>/contacts/run_1/contacts.json")
+print(f"Mean contact fraction: {result.mean_contact_fraction:.1%}")
 ```
 ````
 `````
@@ -586,7 +514,7 @@ of polymer type and protein amino acid class:
 ```python
 from polyzymd.analyses.contacts._results import ContactResult
 
-result = ContactResult.load("analysis/contacts/contacts_rep1.json")
+result = ContactResult.load("analysis/<condition>/contacts/run_1/contacts.json")
 
 # Get contact fraction by (polymer_type, protein_AA_class)
 matrix = result.interaction_matrix(metric="contact_fraction")
