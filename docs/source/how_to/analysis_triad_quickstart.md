@@ -56,17 +56,18 @@ defaults:
   equilibration_time: "100ns"
 
 # Catalytic triad configuration
-catalytic_triad:
-  name: "MyEnzyme_catalytic_triad"
-  description: "Ser-His-Asp catalytic triad"
-  threshold: 3.5  # Angstroms - H-bond distance cutoff
-  pairs:
-    - label: "Asp-His"
-      selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
-      selection_b: "protein and resid 156 and name ND1"
-    - label: "His-Ser"
-      selection_a: "protein and resid 156 and name NE2"
-      selection_b: "protein and resid 77 and name OG"
+plugins:
+  catalytic_triad:
+    name: "MyEnzyme_catalytic_triad"
+    description: "Ser-His-Asp catalytic triad"
+    threshold: 3.5  # Angstroms - H-bond distance cutoff
+    pairs:
+      - label: "Asp-His"
+        selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
+        selection_b: "protein and resid 156 and name ND1"
+      - label: "His-Ser"
+        selection_a: "protein and resid 156 and name NE2"
+        selection_b: "protein and resid 77 and name OG"
 ```
 
 ### Example: LipA (Lipase A)
@@ -142,17 +143,18 @@ conditions:
 defaults:
   equilibration_time: "100ns"
 
-catalytic_triad:
-  name: "LipA_catalytic_triad"
-  description: "Ser-His-Asp catalytic triad"
-  threshold: 3.5
-  pairs:
-    - label: "Asp133-His156"
-      selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
-      selection_b: "protein and resid 156 and name ND1"
-    - label: "His156-Ser77"
-      selection_a: "protein and resid 156 and name NE2"
-      selection_b: "protein and resid 77 and name OG"
+plugins:
+  catalytic_triad:
+    name: "LipA_catalytic_triad"
+    description: "Ser-His-Asp catalytic triad"
+    threshold: 3.5
+    pairs:
+      - label: "Asp133-His156"
+        selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
+        selection_b: "protein and resid 156 and name ND1"
+      - label: "His156-Ser77"
+        selection_a: "protein and resid 156 and name NE2"
+        selection_b: "protein and resid 77 and name OG"
 ```
 
 Then run with minimal CLI arguments:
@@ -186,7 +188,7 @@ Type: catalytic_triad
 Conditions: 2
 Equilibration: 100ns
 
-Saved result: analysis/comparison/catalytic_triad/comparison.json
+Comparison result: comparison/catalytic_triad/result.json
 
 Condition         Mean Contact     SEM
 ------------------------------------------
@@ -429,17 +431,19 @@ effect sizes, ANOVA for 3+ conditions), see the
 Results are saved in your project's analysis directory:
 
 ```
-<projects_directory>/
-└── analysis/
-    └── triad/
-        ├── run_1/
-        │   └── triad_LipA_catalytic_triad_eq100ns.json
-        ├── run_2/
-        │   └── triad_LipA_catalytic_triad_eq100ns.json
-        ├── run_3/
-        │   └── triad_LipA_catalytic_triad_eq100ns.json
-        └── aggregated/
-            └── triad_LipA_catalytic_triad_reps1-3_eq100ns.json
+comparison_workspace/
+├── analysis/
+│   └── <condition>/
+│       └── catalytic_triad/
+│           ├── run_1/
+│           │   └── triad_LipA_catalytic_triad_eq100ns.json
+│           ├── run_2/
+│           │   └── ...
+│           └── aggregated/
+│               └── triad_LipA_catalytic_triad_reps1-3_eq100ns.json
+└── comparison/
+    └── catalytic_triad/
+        └── result.json
 ```
 
 ### JSON Result Structure (Single Replicate)
