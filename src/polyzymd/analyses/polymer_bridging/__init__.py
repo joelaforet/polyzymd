@@ -1499,12 +1499,25 @@ def _safe_pairwise_comparisons(
     )
 
     for result in results:
-        if not np.isfinite(result.t_statistic):
+        has_nan = (
+            not np.isfinite(result.t_statistic)
+            or not np.isfinite(result.p_value)
+            or not np.isfinite(result.cohens_d)
+        )
+        if has_nan:
+            logger.debug(
+                "Non-finite statistics for %s vs %s (%s); marking as not testable "
+                "(likely zero-variance replicates)",
+                result.condition_a,
+                result.condition_b,
+                result.metric,
+            )
             result.t_statistic = 0.0
-        if not np.isfinite(result.p_value):
             result.p_value = 1.0
-        if not np.isfinite(result.cohens_d):
             result.cohens_d = 0.0
+            result.significant = False
+            result.direction = "not_testable"
+            result.effect_size_interpretation = "not_testable"
         if result.p_value_adjusted is not None and not np.isfinite(result.p_value_adjusted):
             result.p_value_adjusted = result.p_value
 
@@ -1521,9 +1534,14 @@ def _safe_anova(
     if result is None:
         return None
 
-    if not np.isfinite(result.f_statistic):
+    has_nan = not np.isfinite(result.f_statistic) or not np.isfinite(result.p_value)
+    if has_nan:
+        logger.debug(
+            "Non-finite ANOVA statistics for metric '%s'; marking as not testable "
+            "(likely zero-variance replicates)",
+            metric_name,
+        )
         result.f_statistic = 0.0
-    if not np.isfinite(result.p_value):
         result.p_value = 1.0
         result.significant = False
     return result

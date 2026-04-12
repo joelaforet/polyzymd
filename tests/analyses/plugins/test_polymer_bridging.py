@@ -613,6 +613,88 @@ class TestLifecycle:
 
         assert result is not None
         assert all(pair.p_value >= 0.0 for pair in result.pairwise_comparisons)
+        for pair in result.pairwise_comparisons:
+            assert pair.direction == "not_testable"
+            assert pair.effect_size_interpretation == "not_testable"
+
+    def test_compare_keeps_normal_direction_for_testable_stats(self):
+        analysis = PolymerBridgingAnalysis()
+        condition_a = Condition(
+            label="A",
+            config_path=Path("/tmp/a.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        condition_b = Condition(
+            label="B",
+            config_path=Path("/tmp/b.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        aggregated_a = PolymerBridgingAggregatedResult(
+            n_replicates=3,
+            replicates=[1, 2, 3],
+            min_ca_distance_angstrom=0.0,
+            mean_contacts_per_contacting_oligomer=1.0,
+            mean_contacts_sem=0.057735,
+            multisite_fraction=0.15,
+            multisite_fraction_sem=0.028868,
+            high_valency_fraction=0.07,
+            high_valency_fraction_sem=0.008819,
+            mean_contacts_per_contacting_oligomer_replicates=[0.9, 1.0, 1.1],
+            multisite_fraction_replicates=[0.1, 0.15, 0.2],
+            high_valency_fraction_replicates=[0.06, 0.07, 0.08],
+            valency_probabilities_mean={"1": 0.7, "2": 0.2, "3+": 0.1},
+            valency_probabilities_sem={"1": 0.02, "2": 0.01, "3+": 0.01},
+            valency_probabilities_per_replicate={
+                "1": [0.72, 0.7, 0.68],
+                "2": [0.18, 0.2, 0.22],
+                "3+": [0.1, 0.1, 0.1],
+            },
+        )
+        aggregated_b = PolymerBridgingAggregatedResult(
+            n_replicates=3,
+            replicates=[1, 2, 3],
+            min_ca_distance_angstrom=0.0,
+            mean_contacts_per_contacting_oligomer=1.6,
+            mean_contacts_sem=0.057735,
+            multisite_fraction=0.45,
+            multisite_fraction_sem=0.028868,
+            high_valency_fraction=0.17,
+            high_valency_fraction_sem=0.008819,
+            mean_contacts_per_contacting_oligomer_replicates=[1.5, 1.6, 1.7],
+            multisite_fraction_replicates=[0.4, 0.45, 0.5],
+            high_valency_fraction_replicates=[0.16, 0.17, 0.18],
+            valency_probabilities_mean={"1": 0.4, "2": 0.3, "3+": 0.3},
+            valency_probabilities_sem={"1": 0.02, "2": 0.01, "3+": 0.01},
+            valency_probabilities_per_replicate={
+                "1": [0.42, 0.4, 0.38],
+                "2": [0.28, 0.3, 0.32],
+                "3+": [0.3, 0.3, 0.3],
+            },
+        )
+        from polyzymd.analyses.base import ComparisonContext
+
+        ctx = ComparisonContext(
+            name="Test",
+            conditions=[condition_a, condition_b],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"A": Path("/tmp/a"), "B": Path("/tmp/b")},
+            results_dir=Path("/tmp/results"),
+            equilibration="0ns",
+            settings=PolymerBridgingSettings(),
+            recompute=False,
+            aggregated_results={"A": aggregated_a, "B": aggregated_b},
+        )
+
+        result = analysis.compare(ctx)
+
+        assert result is not None
+        assert result.pairwise_comparisons
+        for pair in result.pairwise_comparisons:
+            assert pair.direction != "not_testable"
+            assert pair.effect_size_interpretation != "not_testable"
 
     def test_compare_passes_welch_method_to_pairwise_helper(self, monkeypatch):
         analysis = PolymerBridgingAnalysis()
