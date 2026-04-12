@@ -23,7 +23,6 @@ src/polyzymd/
 |- builders/
 |- simulation/
 |- workflow/
-|- analysis/     # per-condition calculators (compute layer)
 |- analyses/     # ★ plugin system — unified analysis lifecycle
 |- config/comparison.py  # comparison config and plot settings
 |- exporters/
@@ -57,12 +56,6 @@ segments.
 
 Handles orchestration around the simulation engine, especially SLURM job
 generation, resubmission, and recovery flows.
-
-### `analysis/`
-
-Computes post-simulation metrics for individual conditions or trajectories.
-This is the **compute layer** with per-condition calculators like
-`ParallelContactAnalyzer` and `DistanceCalculator`.
 
 ### `analyses/`
 
@@ -135,10 +128,11 @@ scaffold the package structure automatically.
 
 ### Separation between per-condition and cross-condition work
 
-The `analysis/` package answers questions about one simulation condition. The
-comparison workflow answers questions across multiple conditions using the
-distributed modules listed above. Keeping those roles separate helps maintain
-both code clarity and scientific interpretation.
+The unified `analyses/` lifecycle handles both scopes in one plugin contract.
+Each plugin computes per-replicate results with `compute_replicate()`,
+aggregates per-condition outputs with `aggregate()`, and then compares across
+conditions with `compare()` before generating plots with `plot()`. This keeps
+the full scientific workflow explicit while preserving clear lifecycle stages.
 
 ## Where contributors usually need to look
 
@@ -158,7 +152,7 @@ If you are new to the codebase, it helps to think in layers:
 - `config` describes what should happen
 - `builders` and `simulation` make it happen for one system
 - `workflow` makes it practical on clusters
-- `analysis` measures what happened
+- `analyses` plugins measure and compare what happened
 - comparison workflows interpret differences across studies
 
 That mental model is usually enough to find the right subsystem before you dive
