@@ -498,25 +498,32 @@ def run_comparison(
         click.echo(f"Saved result: {json_path}")
     click.echo()
 
-    # Format and display — delegates to the plugin's format() method
-    # Map CLI "table" format to plugin "text" format
-    fmt = "text" if output_format == "table" else output_format
-    try:
-        formatted = analysis.format(result, output_format=fmt)
-    except Exception as e:
-        click.echo(f"Warning: Could not format result: {e}", err=True)
+    # Format and display
+    if output_format == "json":
+        # JSON output: serialize directly, skip plugin formatter
         if hasattr(result, "model_dump_json"):
             formatted = result.model_dump_json(indent=2)
         else:
-            formatted = str(result)
+            import json as json_module
+
+            formatted = json_module.dumps(
+                result if isinstance(result, dict) else str(result), indent=2
+            )
+    else:
+        # Table/markdown: delegate to the plugin's format() method
+        fmt = "text" if output_format == "table" else output_format
+        formatted = analysis.format(result, output_format=fmt)
 
     click.echo(formatted)
 
     # Save formatted output if requested
     if output_path:
-        output_path = Path(output_path)
-        output_path.write_text(formatted)
-        click.echo(f"Saved output: {output_path}")
+        try:
+            output_path = Path(output_path)
+            output_path.write_text(formatted)
+            click.echo(f"Saved output: {output_path}")
+        except OSError as e:
+            raise click.ClickException(f"Could not write output file: {e}") from e
 
 
 def _generate_analysis_plots(
