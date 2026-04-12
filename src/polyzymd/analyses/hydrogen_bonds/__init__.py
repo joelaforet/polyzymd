@@ -48,7 +48,7 @@ from polyzymd.analyses.shared.statistics import compute_sem
 logger = logging.getLogger("polyzymd.analyses.hydrogen_bonds")
 
 COORDINATE_DEPENDENT_SELECTION_KEYWORDS = frozenset(
-    {"around", "point", "cyzone", "sphzone", "isolayer"}
+    {"around", "point", "prop", "cyzone", "sphzone", "isolayer"}
 )
 DEFAULT_GROUPS = {"protein": "chainid A", "polymer": "chainid C"}
 
@@ -160,7 +160,8 @@ class HydrogenBondSettings(BaseModel):
     top_n_pairs : int
         Number of top residue pairs to report.
     allow_empty_groups : bool
-        If False, raise when a group selection matches no atoms.
+        If False (default), raise when a group selection matches no atoms.
+        Set to True to warn and skip summaries that use empty groups.
     allow_overlapping_composition : bool
         If False, raise when composition partitions overlap.
     composition : HydrogenBondCompositionSettings | None
@@ -190,10 +191,10 @@ class HydrogenBondSettings(BaseModel):
         description="Number of top residue pairs to report",
     )
     allow_empty_groups: bool = Field(
-        default=True,
+        default=False,
         description=(
-            "If True (default), warn and skip summaries when a group selection matches "
-            "no atoms. Set to False to raise ValueError instead (strict mode)."
+            "If False (default), raise ValueError when a group selection matches no atoms "
+            "(strict mode). Set to True to warn and skip summaries using empty groups."
         ),
     )
     allow_overlapping_composition: bool = Field(
@@ -302,6 +303,38 @@ class HydrogenBondSettings(BaseModel):
                 raise ValueError(
                     f"Summary {summary.name!r} references unknown group: {summary.within!r}"
                 )
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_group_selection_dynamics(self) -> HydrogenBondSettings:
+        """Disallow dynamic group selections when update_selections is enabled.
+
+        Returns
+        -------
+        HydrogenBondSettings
+            Validated settings instance.
+
+        Raises
+        ------
+        ValueError
+            If ``update_selections=True`` and any group selection contains
+            coordinate-dependent MDAnalysis selection keywords.
+        """
+
+        if not self.update_selections:
+            return self
+
+        for group_name, selection_str in self.groups.items():
+            selection_lower = selection_str.lower()
+            for keyword in COORDINATE_DEPENDENT_SELECTION_KEYWORDS:
+                if keyword in selection_lower:
+                    raise ValueError(
+                        "update_selections=True is incompatible with coordinate-dependent "
+                        f"group selection '{selection_str}' for group '{group_name}' "
+                        f"(keyword: '{keyword}'). Set update_selections=False or use "
+                        "frame-invariant selections."
+                    )
 
         return self
 

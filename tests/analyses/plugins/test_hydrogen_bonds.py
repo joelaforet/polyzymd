@@ -128,6 +128,7 @@ def test_settings_defaults() -> None:
     assert len(settings.summaries) == 1
     assert settings.summaries[0].name == "protein_polymer"
     assert settings.summaries[0].between == ("protein", "polymer")
+    assert settings.allow_empty_groups is False
 
 
 def test_settings_custom() -> None:
@@ -967,6 +968,24 @@ def test_composition_warns_dynamic_selection(caplog: pytest.LogCaptureFixture) -
         )
 
     assert "uses coordinate-dependent selection" in caplog.text
+
+
+def test_settings_reject_dynamic_group_selection_when_updating() -> None:
+    """Dynamic group selections should be rejected with update_selections=True."""
+    with pytest.raises(ValidationError, match="coordinate-dependent"):
+        HydrogenBondSettings(
+            groups={"protein": "chainid A", "polymer": "around 5.0 chainid A"},
+            update_selections=True,
+        )
+
+
+def test_settings_allow_dynamic_group_selection_when_not_updating() -> None:
+    """Dynamic group selections should validate with update_selections=False."""
+    settings = HydrogenBondSettings(
+        groups={"protein": "chainid A", "polymer": "around 5.0 chainid A"},
+        update_selections=False,
+    )
+    assert settings.update_selections is False
 
 
 def test_composition_skips_unpartitioned_atoms() -> None:
