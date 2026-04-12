@@ -5,6 +5,7 @@ to interpret outputs, and what assumptions or tradeoffs matter.
 
 ## Concepts and Design
 
+- [Analysis System Concepts](analysis_concepts.md) — How the analysis pipeline, comparison.yaml, conditions, replicates, and plugins fit together.
 - [Architecture](architecture.md)
 - [Residue Assignment and Chain Conventions](residue_assignment.md)
 - [Colored Logging](colored_logging.md)
@@ -40,6 +41,7 @@ longer conceptual pages. -->
 :maxdepth: 1
 
 Architecture <architecture>
+Analysis System Concepts <analysis_concepts>
 Residue Assignment and Chain Conventions <residue_assignment>
 Colored Logging <colored_logging>
 Statistical Best Practices for Analysis <analysis_statistics_best_practices>
