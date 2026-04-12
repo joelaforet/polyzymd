@@ -653,12 +653,16 @@ if result.sim_contact_correlation_time:
 ```python
 from polyzymd.analyses.catalytic_triad._results import TriadResult, TriadAggregatedResult
 
-# Load single replicate result
-result = TriadResult.load("analysis/triad/run_1/triad_LipA_eq100ns.json")
+# Load single replicate result (within comparison workspace)
+result = TriadResult.load(
+    "analysis/<condition>/catalytic_triad/run_1/triad_LipA_eq100ns.json"
+)
 print(result.summary())
 
 # Load aggregated result
-agg = TriadAggregatedResult.load("analysis/triad/aggregated/triad_LipA_reps1-3_eq100ns.json")
+agg = TriadAggregatedResult.load(
+    "analysis/<condition>/catalytic_triad/aggregated/triad_LipA_reps1-3_eq100ns.json"
+)
 print(agg.summary())
 ```
 
