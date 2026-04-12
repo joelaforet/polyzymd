@@ -66,7 +66,7 @@ From the study root, initialize a comparison project and move into it:
 
 ```bash
 cd my_enzyme_study
-polyzymd compare init -n polymer_stabilization_study
+pixi run -e build polyzymd compare init -n polymer_stabilization_study
 cd polymer_stabilization_study
 ```
 
@@ -126,7 +126,7 @@ plugins:
 ## Step 2: Validate the Comparison Config
 
 ```bash
-polyzymd compare validate
+pixi run -e build polyzymd compare validate
 ```
 
 You should see a passing summary that lists the three conditions and the
@@ -137,7 +137,7 @@ enabled analyses.
 For the tutorial, use the batch runner:
 
 ```bash
-polyzymd compare run-all
+pixi run -e build polyzymd compare run-all
 ```
 
 This runs every enabled comparison and writes canonical cache files into
@@ -146,7 +146,7 @@ This runs every enabled comparison and writes canonical cache files into
 If you prefer to inspect one comparison first, a good sanity check is:
 
 ```bash
-polyzymd compare run rmsf
+pixi run -e build polyzymd compare run rmsf
 ```
 
 ## Step 4: Generate the Figures
@@ -154,8 +154,8 @@ polyzymd compare run rmsf
 Now run the plotting smoke test:
 
 ```bash
-polyzymd compare plot-all --list-available
-polyzymd compare plot-all
+pixi run -e build polyzymd compare plot-all --list-available
+pixi run -e build polyzymd compare plot-all
 ```
 
 If those commands succeed, your comparison workspace is in good shape.
