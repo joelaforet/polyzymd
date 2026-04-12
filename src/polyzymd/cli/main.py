@@ -19,6 +19,8 @@ import sys
 from pathlib import Path
 
 import click
+import yaml
+from pydantic import ValidationError
 
 from polyzymd.cli.colors import colored_echo, echo_logo, setup_colored_logging
 from polyzymd.core.branding import prepend_file_header
@@ -1330,7 +1332,7 @@ def run_segment(
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-    except Exception as e:
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
         colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
         sys.exit(1)
 
@@ -1817,7 +1819,7 @@ def check_progress(
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-    except Exception as e:
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
         colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
         sys.exit(EXIT_CODE_CHECK_ERROR)
 
@@ -1840,7 +1842,7 @@ def check_progress(
             timestep_fs=timestep_fs,
             replicate=replicate,
         )
-    except Exception as e:
+    except (FileNotFoundError, ValueError, OSError) as e:
         colored_echo(f"Failed to load progress: {e}", err=True, level=logging.ERROR)
         sys.exit(EXIT_CODE_CHECK_ERROR)
 
@@ -1897,7 +1899,7 @@ def status(config: str) -> None:
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-    except Exception as e:
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
         click.echo(click.style(f"Error: Failed to load config: {e}", fg="red"), err=True)
         sys.exit(1)
 
@@ -2076,7 +2078,7 @@ def validate(config: str) -> None:
     except FileNotFoundError as e:
         click.echo(click.style(f"Error: {e}", fg="red"), err=True)
         sys.exit(1)
-    except Exception as e:
+    except (yaml.YAMLError, ValidationError, ValueError) as e:
         click.echo(click.style(f"Validation failed: {e}", fg="red"), err=True)
         sys.exit(1)
 
@@ -2223,7 +2225,8 @@ def init(name: str) -> None:
         )
 
     except Exception as e:
-        # Clean up on failure
+        # Broad catch is intentional — must clean up partially-created
+        # directory regardless of what went wrong
         if project_dir.exists():
             shutil.rmtree(project_dir)
         click.echo(click.style(f"Error creating project: {e}", fg="red"), err=True)
@@ -2397,7 +2400,7 @@ def recover(
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-    except Exception as e:
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
         colored_echo(f"Failed to load config: {e}", err=True, phase="workflow", level=logging.ERROR)
         sys.exit(1)
 

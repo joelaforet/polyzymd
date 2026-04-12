@@ -16,6 +16,7 @@ from typing import Any
 
 import click
 import yaml
+from pydantic import ValidationError
 
 from polyzymd.cli._compare_utils import (
     common_compare_options,
@@ -328,7 +329,7 @@ def validate(config_file: Path, output_format: str):
 
     except yaml.YAMLError as e:
         result["errors"].append(f"YAML syntax error: {e}")
-    except Exception as e:
+    except (ValidationError, ValueError, OSError) as e:
         result["errors"].append(f"Validation error: {e}")
 
     _output_validation_result(result, output_format)
@@ -475,12 +476,17 @@ def run_comparison(
             analysis, config, recompute=recompute, equilibration=equilibration
         )
         result = pipeline_result["comparison"]
+    except (FileNotFoundError, ValueError, OSError) as e:
+        raise click.ClickException(f"Error during comparison: {e}") from e
     except Exception as e:
-        click.echo(f"Error during comparison: {e}", err=True)
+        # Unexpected error — show traceback hint
+        click.echo(f"Unexpected error during comparison: {e}", err=True)
         if debug:
             import traceback
 
             traceback.print_exc()
+        else:
+            click.echo("Re-run with --debug for full traceback.", err=True)
         sys.exit(1)
 
     if result is None:
@@ -688,9 +694,8 @@ def plot_all(
     # Load config
     try:
         config = ComparisonConfig.from_yaml(config_file)
-    except Exception as e:
-        click.echo(f"Error loading config: {e}", err=True)
-        sys.exit(1)
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
+        raise click.ClickException(f"Error loading config: {e}") from e
 
     # Override output directory if specified
     if output_dir:

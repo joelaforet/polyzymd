@@ -7,10 +7,11 @@ the ``polyzymd compare`` subcommands (run, run-all, plot-all).
 from __future__ import annotations
 
 import functools
-import sys
 from pathlib import Path
 
 import click
+import yaml
+from pydantic import ValidationError
 
 
 def common_compare_options(func):
@@ -69,10 +70,10 @@ def common_compare_options(func):
 
 
 def load_comparison_config(config_file: Path) -> ComparisonConfig:
-    """Load and return a ComparisonConfig, exiting on error.
+    """Load and return a ComparisonConfig, raising ClickException on error.
 
     Checks file existence with a friendly error message, then loads
-    via ComparisonConfig.from_yaml(). Exits with sys.exit(1) on any error.
+    via ComparisonConfig.from_yaml(). Raises click.ClickException on errors.
 
     Parameters
     ----------
@@ -88,26 +89,20 @@ def load_comparison_config(config_file: Path) -> ComparisonConfig:
 
     config_file = Path(config_file).resolve()
     if not config_file.exists():
-        click.echo(f"Error: Config file not found: {config_file}", err=True)
-        click.echo(
-            "Run 'polyzymd compare init -n <name>' to create a comparison project.",
-            err=True,
+        raise click.ClickException(
+            f"Config file not found: {config_file}\n"
+            "Run 'polyzymd compare init -n <name>' to create a comparison project."
         )
-        sys.exit(1)
 
     click.echo(f"Loading config: {config_file}")
     try:
         config = ComparisonConfig.from_yaml(config_file)
     except FileNotFoundError as e:
-        click.echo(f"Error: {e}", err=True)
-        click.echo(
-            "Run 'polyzymd compare init -n <name>' to create a comparison project.",
-            err=True,
+        raise click.ClickException(
+            f"{e}\nRun 'polyzymd compare init -n <name>' to create a comparison project."
         )
-        sys.exit(1)
-    except Exception as e:
-        click.echo(f"Error loading config: {e}", err=True)
-        sys.exit(1)
+    except (yaml.YAMLError, ValidationError, ValueError) as e:
+        raise click.ClickException(f"Error loading config: {e}") from e
 
     return config
 
@@ -115,8 +110,8 @@ def load_comparison_config(config_file: Path) -> ComparisonConfig:
 def validate_and_report(config) -> bool:
     """Validate config and print errors if any.
 
-    Calls config.validate_config() and prints any errors to stderr.
-    Exits with sys.exit(1) if there are errors.
+    Calls config.validate_config() and raises a ClickException
+    if there are errors.
 
     Parameters
     ----------
@@ -130,8 +125,6 @@ def validate_and_report(config) -> bool:
     """
     errors = config.validate_config()
     if errors:
-        click.echo("Configuration errors:", err=True)
-        for error in errors:
-            click.echo(f"  - {error}", err=True)
-        sys.exit(1)
+        msg = "Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
+        raise click.ClickException(msg)
     return True
