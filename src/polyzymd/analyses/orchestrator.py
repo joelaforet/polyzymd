@@ -1081,6 +1081,137 @@ def run_all_comparisons(
     return results
 
 
+def run_plot_only(
+    analysis: Analysis,
+    config: "ComparisonConfig",
+    equilibration: str | None = None,
+) -> tuple[list[Path], list[tuple[str, str]]]:
+    """Run only the plot step for a single analysis type.
+
+    Uses the same path resolution and context construction as
+    ``run_comparison()`` but skips compute, aggregate, and compare.
+    Aggregated results and comparison results must already exist on disk.
+
+    Parameters
+    ----------
+    analysis : Analysis
+        The analysis plugin instance.
+    config : ComparisonConfig
+        Comparison configuration.
+    equilibration : str | None
+        Override equilibration time.
+
+    Returns
+    -------
+    tuple[list[Path], list[tuple[str, str]]]
+        A tuple of (generated_paths, failures) where failures is a list
+        of (analysis_name, error_message) tuples.
+    """
+    from polyzymd.analyses.shared.paths import sanitize_label
+
+    prepared_state = prepare_comparison_run(analysis, config, equilibration)
+    valid_conditions = prepared_state["valid_conditions"]
+    settings = prepared_state["settings"]
+    resolved_equilibration = prepared_state["equilibration"]
+    analysis_root = prepared_state["analysis_root"]
+
+    # Build analysis_dirs mapping
+    analysis_dirs: dict[str, Path] = {}
+    for cond in valid_conditions:
+        analysis_dirs[cond.label] = analysis_root / sanitize_label(cond.label) / analysis.name
+
+    # Resolve comparison result path
+    results_dir = analysis_root.parent / "comparison" / analysis.name
+    comparison_result_path = analysis.comparison_result_path(results_dir)
+
+    # Resolve effective control
+    control_label = config.control
+    effective_control = (
+        control_label
+        if control_label and any(c.label == control_label for c in valid_conditions)
+        else None
+    )
+
+    # Guarantee plot_settings is never None
+    raw_plot_settings = getattr(config, "plot_settings", None)
+    if raw_plot_settings is None:
+        from polyzymd.config.comparison import PlotSettings
+
+        raw_plot_settings = PlotSettings()
+
+    # Resolve figure output directory
+    figures_base = raw_plot_settings.output_dir
+    if not figures_base.is_absolute():
+        source_path = getattr(config, "source_path", None)
+        if source_path is not None:
+            figures_base = source_path.parent / figures_base
+        else:
+            figures_base = analysis_root.parent / figures_base
+    figures_base = figures_base.resolve()
+    figures_dir = analysis.figures_output_dir(figures_base)
+    figures_dir.mkdir(parents=True, exist_ok=True)
+
+    plot_ctx = PlotContext(
+        conditions=valid_conditions,
+        analysis_dirs=analysis_dirs,
+        results_dir=results_dir,
+        output_dir=figures_dir,
+        settings=settings,
+        plot_settings=raw_plot_settings,
+        comparison_path=comparison_result_path,
+        control_label=effective_control,
+    )
+
+    try:
+        paths = analysis.plot(plot_ctx)
+        return paths, []
+    except Exception as e:
+        logger.error(f"Failed to generate plots for {analysis.name}: {e}")
+        return [], [(analysis.name, str(e))]
+
+
+def run_all_plots(
+    config: "ComparisonConfig",
+    analysis_names: list[str] | None = None,
+) -> tuple[list[Path], list[tuple[str, str]]]:
+    """Run plot-only for all (or selected) enabled analyses.
+
+    Parameters
+    ----------
+    config : ComparisonConfig
+        Comparison configuration.
+    analysis_names : list[str] | None
+        Analyses to plot. ``None`` means all enabled analyses.
+
+    Returns
+    -------
+    tuple[list[Path], list[tuple[str, str]]]
+        A tuple of (generated_paths, failures) where failures is a list
+        of (analysis_name, error_message) tuples.
+    """
+    from polyzymd.analyses.discovery import get_analysis
+
+    if analysis_names is None:
+        analysis_names = _get_enabled_from_config(config)
+
+    all_generated: list[Path] = []
+    all_failures: list[tuple[str, str]] = []
+
+    for name in analysis_names:
+        try:
+            analysis_cls = get_analysis(name)
+        except KeyError:
+            all_failures.append((name, f"Unknown analysis type {name!r}"))
+            continue
+
+        analysis = analysis_cls()
+        generated, failures = run_plot_only(analysis, config)
+        all_generated.extend(generated)
+        all_failures.extend(failures)
+
+    return all_generated, all_failures
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------

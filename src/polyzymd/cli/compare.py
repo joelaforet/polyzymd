@@ -526,111 +526,6 @@ def run_comparison(
             raise click.ClickException(f"Could not write output file: {e}") from e
 
 
-def _generate_analysis_plots(
-    config: ComparisonConfig,
-    analysis_names: list[str] | None = None,
-) -> tuple[list[Path], list[tuple[str, str]]]:
-    """Generate plots for analysis plugins using the plugin system.
-
-    Builds :class:`~polyzymd.analyses.base.PlotContext` objects for each
-    enabled analysis and calls the plugin's ``plot()`` method.
-
-    Parameters
-    ----------
-    config : ComparisonConfig
-        Comparison configuration loaded from comparison.yaml.
-    analysis_names : list[str] | None
-        Analyses to plot.  ``None`` means all enabled analyses.
-
-    Returns
-    -------
-    tuple[list[Path], list[tuple[str, str]]]
-        A tuple of (generated_paths, failures) where failures is a list
-        of (analysis_name, error_message) tuples.
-    """
-    from polyzymd.analyses.base import Condition, PlotContext
-    from polyzymd.analyses.discovery import get_analysis
-    from polyzymd.analyses.orchestrator import _resolve_settings
-    from polyzymd.analyses.shared.paths import sanitize_label
-
-    if analysis_names is None:
-        analysis_names = config.plugins.get_enabled_plugins()
-
-    # Build Condition objects
-    conditions = [Condition.from_condition_config(c) for c in config.conditions]
-
-    # Resolve effective control label
-    control_label = config.control
-    effective_control = (
-        control_label
-        if control_label and any(c.label == control_label for c in conditions)
-        else None
-    )
-
-    # Resolve paths relative to comparison.yaml
-    source_path = config.source_path
-    analysis_root = source_path.parent / "analysis" if source_path else Path("analysis")
-
-    # Resolve output directory for figures
-    plot_settings = config.plot_settings
-    figures_base = plot_settings.output_dir
-    if not figures_base.is_absolute():
-        if source_path is not None:
-            figures_base = source_path.parent / figures_base
-        else:
-            figures_base = Path.cwd() / figures_base
-    figures_base = figures_base.resolve()
-
-    generated: list[Path] = []
-    failures: list[tuple[str, str]] = []
-
-    for name in analysis_names:
-        try:
-            analysis_cls = get_analysis(name)
-        except KeyError:
-            failures.append((name, f"Unknown analysis type {name!r}"))
-            continue
-
-        analysis = analysis_cls()
-        settings = _resolve_settings(analysis, config)
-
-        # Filter conditions (pass resolved settings for plugins that need them)
-        valid_conditions = analysis.filter_conditions(conditions, settings=settings)
-
-        # Build analysis_dirs mapping (mirrors orchestrator.run_comparison)
-        analysis_dirs: dict[str, Path] = {}
-        for cond in valid_conditions:
-            analysis_dirs[cond.label] = analysis_root / sanitize_label(cond.label) / analysis.name
-
-        # Comparison results dir
-        results_dir = analysis_root.parent / "comparison" / analysis.name
-        comparison_result_path = analysis.comparison_result_path(results_dir)
-
-        # Figures dir for this analysis
-        figures_dir = analysis.figures_output_dir(figures_base)
-        figures_dir.mkdir(parents=True, exist_ok=True)
-
-        plot_ctx = PlotContext(
-            conditions=valid_conditions,
-            analysis_dirs=analysis_dirs,
-            results_dir=results_dir,
-            output_dir=figures_dir,
-            settings=settings,
-            plot_settings=plot_settings,
-            comparison_path=comparison_result_path,
-            control_label=effective_control,
-        )
-
-        try:
-            paths = analysis.plot(plot_ctx)
-            generated.extend(paths)
-        except Exception as e:
-            LOGGER.error(f"Failed to generate plots for {name}: {e}")
-            failures.append((name, str(e)))
-
-    return generated, failures
-
-
 @compare.command("plot-all")
 @click.option(
     "-f",
@@ -776,9 +671,11 @@ def plot_all(
     click.echo(f"Output directory: {display_dir}")
     click.echo()
 
-    # Generate plots
+    # Generate plots via orchestrator
+    from polyzymd.analyses.orchestrator import run_all_plots
+
     click.echo(f"Generating plots for: {', '.join(target_analyses)}...")
-    generated, failures = _generate_analysis_plots(config, target_analyses)
+    generated, failures = run_all_plots(config, target_analyses)
 
     click.echo()
     if generated:
@@ -929,10 +826,12 @@ def run_all(
 
     # --- Optional plotting --------------------------------------------------
     if run_plots and succeeded:
+        from polyzymd.analyses.orchestrator import run_all_plots
+
         click.echo()
         click.echo("Generating plots ...")
 
-        generated, plot_failures = _generate_analysis_plots(config, succeeded)
+        generated, plot_failures = run_all_plots(config, succeeded)
         click.echo(f"Generated {len(generated)} plots.")
         if plot_failures:
             click.echo(f"Plot failures ({len(plot_failures)}):", err=True)
