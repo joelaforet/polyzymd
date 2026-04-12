@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -1307,3 +1308,122 @@ def test_submit_cli_memory_overrides_plugin_hint(monkeypatch, tmp_path: Path) ->
 
     assert result.exit_code == 0
     assert captured["mem"] == "8G"
+
+
+def test_submit_sets_noisy_loggers_to_warning(monkeypatch, tmp_path: Path) -> None:
+    """compare submit should suppress noisy third-party loggers at planning time."""
+    runner = CliRunner()
+
+    class _FakeAnalysis:
+        name = "toy"
+        dependencies = ()
+
+        def __call__(self):
+            return SimpleNamespace(name="toy")
+
+    class _Cond:
+        def __init__(self, reps):
+            self.replicate_specs = [SimpleNamespace(replicate=r) for r in reps]
+
+    manifest = SimpleNamespace(
+        condition_specs=[_Cond([1])],
+        save=lambda path: Path(path).write_text("{}"),
+    )
+
+    mda_logger = logging.getLogger("MDAnalysis")
+    numexpr_logger = logging.getLogger("numexpr")
+    old_mda = mda_logger.level
+    old_numexpr = numexpr_logger.level
+    mda_logger.setLevel(logging.INFO)
+    numexpr_logger.setLevel(logging.INFO)
+
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
+        lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
+    )
+    monkeypatch.setattr("polyzymd.analyses.discovery.get_analysis", lambda name: _FakeAnalysis())
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.build_manifest", lambda *args, **kwargs: manifest
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_replicate_script",
+        lambda *args, **kwargs: tmp_path / "rep.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_aggregate_script",
+        lambda *args, **kwargs: tmp_path / "agg.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_finalize_script",
+        lambda *args, **kwargs: tmp_path / "fin.sh",
+    )
+
+    try:
+        result = runner.invoke(
+            compare,
+            ["submit", "toy", "-f", str(tmp_path / "comparison.yaml"), "--dry-run"],
+        )
+        assert result.exit_code == 0
+        assert logging.getLogger("MDAnalysis").level == logging.WARNING
+        assert logging.getLogger("numexpr").level == logging.WARNING
+    finally:
+        mda_logger.setLevel(old_mda)
+        numexpr_logger.setLevel(old_numexpr)
+
+
+def test_submit_qos_tip_shown_when_partition_set_without_qos(monkeypatch, tmp_path: Path) -> None:
+    """compare submit should show QoS hint when partition is set and qos is omitted."""
+    runner = CliRunner()
+
+    class _FakeAnalysis:
+        name = "toy"
+        dependencies = ()
+
+        def __call__(self):
+            return SimpleNamespace(name="toy")
+
+    class _Cond:
+        def __init__(self, reps):
+            self.replicate_specs = [SimpleNamespace(replicate=r) for r in reps]
+
+    manifest = SimpleNamespace(
+        condition_specs=[_Cond([1])],
+        save=lambda path: Path(path).write_text("{}"),
+    )
+
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml",
+        lambda path: SimpleNamespace(source_path=tmp_path / "comparison.yaml"),
+    )
+    monkeypatch.setattr("polyzymd.analyses.discovery.get_analysis", lambda name: _FakeAnalysis())
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.build_manifest", lambda *args, **kwargs: manifest
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_replicate_script",
+        lambda *args, **kwargs: tmp_path / "rep.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_aggregate_script",
+        lambda *args, **kwargs: tmp_path / "agg.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_finalize_script",
+        lambda *args, **kwargs: tmp_path / "fin.sh",
+    )
+
+    result = runner.invoke(
+        compare,
+        [
+            "submit",
+            "toy",
+            "-f",
+            str(tmp_path / "comparison.yaml"),
+            "--partition",
+            "gpu",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Tip: Many HPC clusters require --qos to be set." in result.output
