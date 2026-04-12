@@ -34,6 +34,7 @@ from polyzymd.analyses.exposure._classification import (
     ResidueStability,
     classify_residue_stability,
 )
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 if TYPE_CHECKING:
     from polyzymd.analyses.contacts._results import ContactResult
@@ -188,9 +189,12 @@ class ExposureDynamicsResult(BaseAnalysisResult):
     # ------------------------------------------------------------------ #
 
     @classmethod
-    def cache_path(cls, analysis_dir: Path | str) -> Path:
+    def cache_path(cls, analysis_dir: Path | str, settings_fp: str | None = None) -> Path:
         """Standard cache file path under analysis_dir."""
-        return Path(analysis_dir) / "exposure" / "exposure_dynamics.json"
+        base_dir = Path(analysis_dir) / "exposure"
+        if settings_fp:
+            return base_dir / f"exposure_dynamics_{settings_fp}.json"
+        return base_dir / "exposure_dynamics.json"
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +296,10 @@ def analyze_exposure_dynamics(
     # Check cache
     cache_file: Path | None = None
     if analysis_dir is not None:
-        cache_file = ExposureDynamicsResult.cache_path(analysis_dir)
+        dynamics_settings_fp = settings_fingerprint(config)
+        cache_file = ExposureDynamicsResult.cache_path(
+            analysis_dir, settings_fp=dynamics_settings_fp
+        )
         if not recompute and cache_file.exists():
             logger.info(f"Loading cached exposure dynamics from {cache_file}")
             return ExposureDynamicsResult.load(cache_file)

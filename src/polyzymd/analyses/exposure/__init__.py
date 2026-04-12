@@ -37,6 +37,7 @@ from polyzymd.analyses.base import (
     MetricValue,
     PlotContext,
 )
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
 from polyzymd.analyses.shared.plotting import (
     annotate_cells,
     apply_axis_style,
@@ -603,8 +604,17 @@ class ExposureAnalysis(Analysis):
                 cache_sasa=True,
             )
 
+            exposure_config = ExposureConfig(
+                transient_lower=settings.transient_lower,
+                transient_upper=settings.transient_upper,
+                min_event_length=settings.min_event_length,
+            )
+
             # Check cached dynamics
-            dynamics_cache_path = ExposureDynamicsResult.cache_path(analysis_dir)
+            dynamics_cache_path = ExposureDynamicsResult.cache_path(
+                analysis_dir,
+                settings_fp=settings_fingerprint(exposure_config),
+            )
             if not recompute and dynamics_cache_path.exists():
                 logger.info(f"    Loading cached dynamics: {dynamics_cache_path}")
                 dynamics = ExposureDynamicsResult.load(dynamics_cache_path)
@@ -634,12 +644,6 @@ class ExposureAnalysis(Analysis):
             )
 
             # Compute exposure dynamics
-            exposure_config = ExposureConfig(
-                transient_lower=settings.transient_lower,
-                transient_upper=settings.transient_upper,
-                min_event_length=settings.min_event_length,
-            )
-
             logger.info(f"    Analyzing exposure dynamics for rep {replicate}...")
             dynamics = analyze_exposure_dynamics(
                 sasa_result=sasa_result,

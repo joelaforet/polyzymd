@@ -899,3 +899,74 @@ class TestExposureFormatterEnrichmentMarkers:
         else:
             assert f"{enrichment_value:>10.2f}+ " not in text
             assert f"{enrichment_value:>10.2f}- " not in text
+
+
+# ===========================================================================
+# Cache fingerprinting and chain validation
+# ===========================================================================
+
+
+class TestExposureCacheFingerprinting:
+    def test_sasa_cache_path_changes_with_probe_radius_and_sphere_points(self, tmp_path):
+        from polyzymd.analyses.exposure._sasa_config import SASAConfig
+        from polyzymd.analyses.exposure._sasa_trajectory import SASATrajectoryResult
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        cfg_a = SASAConfig(probe_radius_nm=0.14, n_sphere_points=960)
+        cfg_b = SASAConfig(probe_radius_nm=0.16, n_sphere_points=960)
+        cfg_c = SASAConfig(probe_radius_nm=0.14, n_sphere_points=1000)
+
+        path_a = SASATrajectoryResult.cache_path(tmp_path, settings_fp=settings_fingerprint(cfg_a))
+        path_b = SASATrajectoryResult.cache_path(tmp_path, settings_fp=settings_fingerprint(cfg_b))
+        path_c = SASATrajectoryResult.cache_path(tmp_path, settings_fp=settings_fingerprint(cfg_c))
+
+        assert path_a != path_b
+        assert path_a != path_c
+
+    def test_dynamics_cache_path_changes_with_event_settings(self, tmp_path):
+        from polyzymd.analyses.exposure._config import ExposureConfig
+        from polyzymd.analyses.exposure._dynamics import ExposureDynamicsResult
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        cfg_a = ExposureConfig(transient_lower=0.2, transient_upper=0.8, min_event_length=1)
+        cfg_b = ExposureConfig(transient_lower=0.25, transient_upper=0.8, min_event_length=1)
+        cfg_c = ExposureConfig(transient_lower=0.2, transient_upper=0.8, min_event_length=3)
+
+        path_a = ExposureDynamicsResult.cache_path(
+            tmp_path, settings_fp=settings_fingerprint(cfg_a)
+        )
+        path_b = ExposureDynamicsResult.cache_path(
+            tmp_path, settings_fp=settings_fingerprint(cfg_b)
+        )
+        path_c = ExposureDynamicsResult.cache_path(
+            tmp_path, settings_fp=settings_fingerprint(cfg_c)
+        )
+
+        assert path_a != path_b
+        assert path_a != path_c
+
+
+class TestSASAChainSelection:
+    @patch("mdtraj.load")
+    def test_missing_chain_raises_value_error(self, mock_load, tmp_path):
+        from polyzymd.analyses.exposure._sasa_config import SASAConfig
+        from polyzymd.analyses.exposure._sasa_trajectory import compute_trajectory_sasa
+
+        mock_topology = MagicMock()
+        mock_topology.select.return_value = []
+        mock_chain = MagicMock()
+        mock_chain.index = 0
+        mock_topology.chains = [mock_chain]
+
+        mock_traj = MagicMock()
+        mock_traj.topology = mock_topology
+        mock_load.return_value = mock_traj
+
+        with pytest.raises(ValueError, match="Chain 'Z' not found in topology"):
+            compute_trajectory_sasa(
+                topology_path=tmp_path / "top.pdb",
+                trajectory_path=tmp_path / "traj.xtc",
+                config=SASAConfig(chain_id="Z"),
+                analysis_dir=tmp_path / "analysis",
+                recompute=True,
+            )

@@ -29,6 +29,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from polyzymd.analyses.shared.aa_classification import MAX_ASA_TABLE, get_aa_class
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 if TYPE_CHECKING:
     from polyzymd.analyses.exposure._sasa_config import SASAConfig
@@ -223,9 +224,12 @@ class SASATrajectoryResult:
         )
 
     @classmethod
-    def cache_path(cls, analysis_dir: Path | str) -> Path:
+    def cache_path(cls, analysis_dir: Path | str, settings_fp: str | None = None) -> Path:
         """Return the cache directory for this result."""
-        return Path(analysis_dir) / "sasa"
+        base_dir = Path(analysis_dir) / "sasa"
+        if settings_fp:
+            return base_dir / f"fp_{settings_fp}"
+        return base_dir
 
 
 # --------------------------------------------------------------------------- #
@@ -284,7 +288,12 @@ def compute_trajectory_sasa(
     traj_files_str = [str(p) for p in traj_paths]
 
     # Check cache
-    cache_dir = SASATrajectoryResult.cache_path(analysis_dir) if analysis_dir is not None else None
+    sasa_settings_fp = settings_fingerprint(config)
+    cache_dir = (
+        SASATrajectoryResult.cache_path(analysis_dir, settings_fp=sasa_settings_fp)
+        if analysis_dir is not None
+        else None
+    )
     if cache_dir is not None and not recompute and (cache_dir / "sasa_trajectory.npz").exists():
         logger.info(f"Loading cached SASA from {cache_dir}")
         result = SASATrajectoryResult.load(cache_dir)
@@ -316,11 +325,10 @@ def compute_trajectory_sasa(
     # Select protein chain only
     protein_indices = traj.topology.select(f"chainid {_chain_letter_to_index(config.chain_id)}")
     if len(protein_indices) == 0:
-        # Fallback: select all protein atoms
-        protein_indices = traj.topology.select("protein")
-        logger.warning(
-            f"Chain '{config.chain_id}' not found; falling back to 'protein' selection "
-            f"({len(protein_indices)} atoms)"
+        raise ValueError(
+            f"Chain '{config.chain_id}' not found in topology. "
+            f"Available chains: {[c.index for c in traj.topology.chains]}. "
+            "Check your Settings.chain_id configuration."
         )
 
     protein_traj = traj.atom_slice(protein_indices)
