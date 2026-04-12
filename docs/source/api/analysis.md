@@ -23,11 +23,11 @@ For the unified analysis lifecycle, see the [Analyses Plugin API](analyses.md).
 
 ## Notes
 
-- **Stable plugins** (13 total): RMSD, Rg, RMSF, catalytic triad, secondary structure,
-  SASA, distances, contacts, exposure, hydrogen bonds, binding free energy,
-  polymer affinity, and polymer bridging.
-- Polymer bridging is labeled **experimental** — see individual plugin docs
-  for details.
+- **Stable plugins** (9): RMSD, Rg, RMSF, catalytic triad, secondary structure,
+  SASA, distances, contacts, and hydrogen bonds.
+- **Experimental plugins** (4): exposure, binding free energy, polymer affinity,
+  and polymer bridging — metric definitions and interpretation may still change.
+  See individual plugin docs for details.
 
 <!-- IMAGE OPPORTUNITY: Add a compact analysis architecture diagram showing
 analyses plugin -> comparison -> plot generation. -->
