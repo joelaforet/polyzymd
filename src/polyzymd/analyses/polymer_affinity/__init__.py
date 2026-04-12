@@ -228,11 +228,15 @@ class PolymerAffinityAnalysis(Analysis):
             try:
                 summary = self._build_condition_summary(cond, ctx, settings)
                 condition_summaries.append(summary)
-            except Exception as e:
+            except (FileNotFoundError, OSError, ValueError, TypeError, KeyError) as e:
                 logger.warning(f"  Skipping condition '{cond.label}': {e}")
 
         if not condition_summaries:
             logger.warning("No binding preference data found for any condition")
+            return None
+
+        if all(not summary.entries for summary in condition_summaries):
+            logger.warning("All condition summaries are empty - no polymer affinity entries")
             return None
 
         # Step 2: Collect metadata
@@ -286,7 +290,22 @@ class PolymerAffinityAnalysis(Analysis):
         contacts and therefore no affinity data.  They are excluded from
         comparison but noted in logs.
         """
-        filtered = [c for c in conditions if _condition_has_polymer(c)]
+        if isinstance(settings, PolymerAffinitySettings):
+            polymer_chain = settings.polymer_chain
+            polymer_type_selections = settings.polymer_type_selections
+        else:
+            polymer_chain = "C"
+            polymer_type_selections = None
+
+        filtered = [
+            c
+            for c in conditions
+            if _condition_has_polymer(
+                c,
+                polymer_chain=polymer_chain,
+                polymer_type_selections=polymer_type_selections,
+            )
+        ]
         excluded = len(conditions) - len(filtered)
         if excluded:
             logger.info(
@@ -629,7 +648,7 @@ class PolymerAffinityAnalysis(Analysis):
                 try:
                     rep_result = BindingPreferenceResult.load(rep_path)
                     per_rep[rep] = rep_result.entries
-                except Exception as exc:
+                except (FileNotFoundError, OSError, ValueError, KeyError) as exc:
                     logger.debug(f"Failed to load per-replicate BP for rep{rep}: {exc}")
 
         return per_rep if per_rep else None
@@ -1142,7 +1161,7 @@ class PolymerAffinityAnalysis(Analysis):
                     ttest = independent_ttest(reps_a, reps_b)
                     t_stat = ttest.t_statistic
                     p_val = ttest.p_value
-                except Exception as exc:
+                except (ValueError, TypeError, RuntimeError) as exc:
                     logger.debug(f"T-test failed for {summary_a.label} vs {summary_b.label}: {exc}")
 
         return AffinityScorePairwiseEntry(
@@ -1207,7 +1226,12 @@ class PolymerAffinityAnalysis(Analysis):
 # ---------------------------------------------------------------------------
 
 
-def _condition_has_polymer(cond: Condition, polymer_selection: str = "chainID C") -> bool:
+def _condition_has_polymer(
+    cond: Condition,
+    *,
+    polymer_chain: str = "C",
+    polymer_type_selections: dict[str, str] | None = None,
+) -> bool:
     """Check whether a condition's simulation includes polymer chains.
 
     Uses three detection strategies in order:
@@ -1221,14 +1245,22 @@ def _condition_has_polymer(cond: Condition, polymer_selection: str = "chainID C"
     ----------
     cond : Condition
         Condition to check.
-    polymer_selection : str
-        MDAnalysis selection string for polymer atoms.  Defaults to
-        ``"chainID C"`` (PolyzyMD chain convention).
+    polymer_chain : str
+        Chain identifier used for topology-based polymer detection.
+    polymer_type_selections : dict[str, str] | None
+        Optional MDAnalysis selection strings used for polymer detection.
+        If provided, these selections are validated and queried instead of the
+        chain-based fallback.
 
     Returns
     -------
     bool
-        True if the simulation config mentions polymer chains.
+        True if the simulation config indicates polymer presence.
+
+    Raises
+    ------
+    ValueError
+        If any provided polymer selection is invalid.
     """
     sim_config = cond.sim_config
 
@@ -1244,10 +1276,16 @@ def _condition_has_polymer(cond: Condition, polymer_selection: str = "chainID C"
         topo = sim_config.topology
         if hasattr(topo, "chains") and topo.chains:
             chain_ids = [c.chain_id if hasattr(c, "chain_id") else c for c in topo.chains]
-            if "C" in chain_ids:
+            if polymer_chain in chain_ids:
                 return True
 
     # Check 3: MDAnalysis topology inspection (same approach as contacts plugin)
+    selections_to_query = (
+        list(polymer_type_selections.values())
+        if polymer_type_selections
+        else [f"chainID {polymer_chain}"]
+    )
+
     try:
         for rep in cond.replicates:
             run_dir = sim_config.get_working_directory(rep)
@@ -1266,19 +1304,34 @@ def _condition_has_polymer(cond: Condition, polymer_selection: str = "chainID C"
                 import MDAnalysis as mda
 
                 universe = mda.Universe(str(topology_path))
-                polymer_atoms = universe.select_atoms(polymer_selection)
-                if len(polymer_atoms) > 0:
-                    logger.debug(f"  {cond.label} rep {rep}: {len(polymer_atoms)} polymer atoms")
-                    return True
-                else:
-                    logger.debug(f"  {cond.label} rep {rep}: 0 polymer atoms")
-            except Exception as e:
-                logger.warning(f"  Error checking {cond.label} rep {rep}: {e}")
-                continue
-    except (AttributeError, TypeError):
-        # sim_config may not have get_working_directory (e.g. in tests)
-        pass
+                for selection in selections_to_query:
+                    try:
+                        polymer_atoms = universe.select_atoms(selection)
+                    except (ValueError, TypeError) as selection_error:
+                        raise ValueError(
+                            f"Invalid polymer selection '{selection}': {selection_error}"
+                        ) from selection_error
 
+                    if len(polymer_atoms) > 0:
+                        logger.debug(
+                            "  %s rep %d: %d polymer atoms for selection '%s'",
+                            cond.label,
+                            rep,
+                            len(polymer_atoms),
+                            selection,
+                        )
+                        return True
+                logger.debug("  %s rep %d: 0 polymer atoms", cond.label, rep)
+            except (ValueError, OSError, ImportError) as e:
+                logger.warning(f"  Error checking {cond.label} rep {rep}: {e}")
+                if isinstance(e, ValueError) and "Invalid polymer selection" in str(e):
+                    raise
+                continue
+    except ValueError:
+        raise
+    except (AttributeError, OSError, ImportError):
+        # sim_config may not have get_working_directory (e.g. in tests)
+        return False
     return False
 
 

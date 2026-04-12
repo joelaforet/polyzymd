@@ -19,6 +19,8 @@ Coverage:
 from __future__ import annotations
 
 import math
+import sys
+import types
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -283,6 +285,34 @@ class TestFilterConditions:
         result = analysis.filter_conditions(conditions)
         assert len(result) == 2
 
+    def test_respects_polymer_chain_from_settings(self):
+        from polyzymd.analyses.base import Condition
+        from polyzymd.analyses.polymer_affinity import (
+            PolymerAffinityAnalysis,
+            PolymerAffinitySettings,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        mock_sim = MagicMock()
+        mock_sim.polymers = None
+
+        chain_b = MagicMock()
+        chain_b.chain_id = "B"
+        mock_sim.topology.chains = [chain_b]
+
+        condition = Condition(
+            label="With Polymer B",
+            config_path=Path("/tmp/b.yaml"),
+            replicates=(1,),
+            sim_config=mock_sim,
+        )
+
+        settings = PolymerAffinitySettings(polymer_chain="B")
+        result = analysis.filter_conditions([condition], settings=settings)
+
+        assert len(result) == 1
+        assert result[0].label == "With Polymer B"
+
 
 # ===========================================================================
 # compare
@@ -454,6 +484,49 @@ class TestCompare:
             result = analysis.compare(ctx)
 
         assert result is None
+
+    def test_compare_returns_none_all_summaries_empty(self):
+        from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
+            AffinityScoreConditionSummary,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=2)
+
+        summary_a = AffinityScoreConditionSummary(
+            label="A",
+            config_path="/tmp/A/config.yaml",
+            temperature_K=300.0,
+            n_replicates=0,
+            entries=[],
+            polymer_types=[],
+            protein_groups=[],
+        )
+        summary_b = summary_a.model_copy(update={"label": "B", "config_path": "/tmp/B/config.yaml"})
+
+        with patch.object(
+            analysis,
+            "_build_condition_summary",
+            side_effect=[summary_a, summary_b],
+        ):
+            result = analysis.compare(ctx)
+
+        assert result is None
+
+    def test_compare_propagates_unexpected_runtime_error(self):
+        from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1)
+
+        with patch.object(
+            analysis,
+            "_build_condition_summary",
+            side_effect=RuntimeError("unexpected compare failure"),
+        ):
+            with pytest.raises(RuntimeError, match="unexpected compare failure"):
+                analysis.compare(ctx)
 
     def test_compare_mixed_temperatures(self):
         from polyzymd.analyses.base import ComparisonContext, Condition
@@ -1468,6 +1541,40 @@ class TestConditionHasPolymer:
             sim_config=mock_sim,
         )
         assert _condition_has_polymer(cond) is True
+
+    def test_invalid_polymer_selection_raises(self):
+        from polyzymd.analyses.base import Condition
+        from polyzymd.analyses.polymer_affinity import _condition_has_polymer
+
+        mock_sim = MagicMock(spec=[])
+        mock_sim.get_working_directory = MagicMock(return_value=Path("/tmp/run_1"))
+
+        cond = Condition(
+            label="test",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1,),
+            sim_config=mock_sim,
+        )
+
+        mock_universe = MagicMock()
+        mock_universe.select_atoms.side_effect = ValueError("Invalid selection token")
+
+        mda_module = types.ModuleType("MDAnalysis")
+        mda_module.Universe = MagicMock(return_value=mock_universe)
+
+        with (
+            patch.dict(sys.modules, {"MDAnalysis": mda_module}),
+            patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as mock_loader_cls,
+        ):
+            mock_loader = MagicMock()
+            mock_loader_cls.return_value = mock_loader
+            mock_loader.find_topology.return_value = Path("/tmp/system.pdb")
+
+            with pytest.raises(ValueError, match="Invalid polymer selection"):
+                _condition_has_polymer(
+                    cond,
+                    polymer_type_selections={"bad": "not a valid selection"},
+                )
 
 
 # ===========================================================================
