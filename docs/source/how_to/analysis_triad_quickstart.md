@@ -28,7 +28,7 @@ polyzymd compare run triad -f comparison.yaml --recompute
 
 Before running catalytic triad analysis, you need:
 
-1. **Completed production simulation(s)** - at least one replicate
+1. **Completed production simulation(s)** - at least two replicates (the plugin requires `min_replicates = 2` for aggregation and statistical comparison)
 2. **A comparison.yaml file** - with a `catalytic_triad` section defining your triad
 3. **Trajectory files** - in the scratch directory specified in your simulation configs
 
@@ -190,10 +190,10 @@ Equilibration: 100ns
 
 Comparison result: comparison/catalytic_triad/result.json
 
-Condition         Mean Contact     SEM
-------------------------------------------
-No Polymer        49.9%            27.3%
-With Polymer      87.3%             2.2%
+Condition         Simultaneous Contact   SEM
+------------------------------------------------
+No Polymer        49.9%                  27.3%
+With Polymer      87.3%                   2.2%
 ```
 
 ### Replicates and conditions come from comparison.yaml
@@ -436,11 +436,11 @@ comparison_workspace/
 │   └── <condition>/
 │       └── catalytic_triad/
 │           ├── run_1/
-│           │   └── triad_LipA_catalytic_triad_eq100ns.json
+│           │   └── triad_LipA_catalytic_triad_eq100.00ns.json
 │           ├── run_2/
 │           │   └── ...
 │           └── aggregated/
-│               └── triad_LipA_catalytic_triad_reps1-3_eq100ns.json
+│               └── triad_LipA_catalytic_triad_reps1-3_eq100.00ns.json
 └── comparison/
     └── catalytic_triad/
         └── result.json
