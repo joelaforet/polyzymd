@@ -25,6 +25,7 @@ from polyzymd.analyses.base import (
     MetricValue,
     PlotContext,
     ReplicateContext,
+    SlurmResourceHint,
 )
 from polyzymd.analyses.secondary_structure._plot_settings import SSPlotSettings
 from polyzymd.analyses.secondary_structure._plotters import (
@@ -106,6 +107,7 @@ class SecondaryStructureAnalysis(Analysis):
     aliases: ClassVar[tuple[str, ...]] = ("ss",)
     dependencies: ClassVar[tuple[str, ...]] = ()
     min_replicates: ClassVar[int] = 2
+    slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(mem="16G")
 
     # === Required methods ===
 

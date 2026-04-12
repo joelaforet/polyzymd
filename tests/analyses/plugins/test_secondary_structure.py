@@ -23,6 +23,7 @@ from polyzymd.analyses.base import (
     MetricValue,
     PlotContext,
     ReplicateContext,
+    SlurmResourceHint,
 )
 from polyzymd.analyses.secondary_structure import (
     SecondaryStructureAnalysis,
@@ -157,6 +158,9 @@ class TestClassAttributes:
 
     def test_min_replicates(self):
         assert SecondaryStructureAnalysis.min_replicates == 2
+
+    def test_slurm_resource_hint(self):
+        assert SecondaryStructureAnalysis.slurm_resource_hint == SlurmResourceHint(mem="16G")
 
 
 # ============================================================================

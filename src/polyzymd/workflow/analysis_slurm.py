@@ -49,7 +49,7 @@ class AnalysisSlurmResources(BaseModel):
     """SLURM resource settings for analysis workers."""
 
     pixi_path: str = Field(default="pixi")
-    partition: str = "aa100"
+    partition: str | None = None
     qos: str | None = None
     account: str | None = None
     ntasks: int = Field(default=1, ge=1, le=256)
@@ -75,7 +75,8 @@ class AnalysisSlurmResources(BaseModel):
             If a field contains unsafe shell characters or invalid format.
         """
         self.pixi_path = _sanitize_slurm_value(self.pixi_path, "pixi_path")
-        self.partition = _sanitize_slurm_value(self.partition, "partition")
+        if self.partition is not None:
+            self.partition = _sanitize_slurm_value(self.partition, "partition")
         self.mem = _sanitize_slurm_value(self.mem, "mem")
         self.time = _sanitize_slurm_value(self.time, "time")
         self.mail_type = _sanitize_slurm_value(self.mail_type, "mail_type")
@@ -467,7 +468,6 @@ def _slurm_header(resources: AnalysisSlurmResources, job_name: str, log_path: Pa
     lines = [
         "#!/bin/bash",
         "#SBATCH --requeue",
-        f"#SBATCH --partition={resources.partition}",
         f"#SBATCH --job-name={job_name}",
         f'#SBATCH --output="{log_path_str}"',
         f"#SBATCH --ntasks={resources.ntasks}",
@@ -475,6 +475,10 @@ def _slurm_header(resources: AnalysisSlurmResources, job_name: str, log_path: Pa
         f"#SBATCH --mem={resources.mem}",
         f"#SBATCH --time={resources.time}",
     ]
+    if resources.partition:
+        lines.insert(2, f"#SBATCH --partition={resources.partition}")
+    if resources.partition:
+        lines.append(f"#SBATCH --partition={resources.partition}")
     if resources.qos:
         lines.append(f"#SBATCH --qos={resources.qos}")
     if resources.account:

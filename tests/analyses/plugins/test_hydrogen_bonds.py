@@ -21,6 +21,7 @@ from polyzymd.analyses.base import (
     PairwiseResult,
     PlotContext,
     ReplicateContext,
+    SlurmResourceHint,
 )
 from polyzymd.analyses.hydrogen_bonds import (
     HydrogenBondCompositionSettings,
@@ -119,6 +120,7 @@ def test_class_variables() -> None:
     assert cls.Settings is HydrogenBondSettings
     assert cls.has_compute_stage is True
     assert cls.has_aggregate_stage is True
+    assert cls.slurm_resource_hint == SlurmResourceHint(mem="16G")
 
 
 def test_settings_defaults() -> None:

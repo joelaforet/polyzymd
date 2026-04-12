@@ -193,6 +193,17 @@ def test_script_generation_contains_worker_commands(tmp_path: Path) -> None:
     assert "worker-finalize" in fin_script.read_text()
 
 
+def test_slurm_header_omits_partition_when_unset(tmp_path: Path) -> None:
+    """Generated scripts should omit partition SBATCH line when unset."""
+    manifest = _make_manifest(tmp_path)
+    resources = AnalysisSlurmResources(partition=None)
+    hpc_dir = tmp_path / "comparison" / "toy_slurm" / "_hpc"
+
+    script = generate_finalize_script(manifest, resources, hpc_dir)
+    text = script.read_text()
+    assert "#SBATCH --partition=" not in text
+
+
 def test_generate_array_script_contains_array_directive(tmp_path: Path) -> None:
     """Array scripts should include explicit array task specification."""
     manifest = _make_manifest(tmp_path)

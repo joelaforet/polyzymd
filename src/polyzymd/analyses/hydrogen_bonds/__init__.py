@@ -23,6 +23,7 @@ from polyzymd.analyses.base import (
     MetricValue,
     PlotContext,
     ReplicateContext,
+    SlurmResourceHint,
 )
 from polyzymd.analyses.hydrogen_bonds._results import (
     AggregatedCompositionEntry,
@@ -358,6 +359,7 @@ class HydrogenBondsAnalysis(Analysis):
     aliases: ClassVar[tuple[str, ...]] = ("hbonds", "hbond")
     has_compute_stage: ClassVar[bool] = True
     has_aggregate_stage: ClassVar[bool] = True
+    slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(mem="16G")
     ReplicateResultClass: ClassVar[type | None] = HydrogenBondResult
     _defaults_warned: ClassVar[bool] = False
 

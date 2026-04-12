@@ -59,7 +59,7 @@ def _resolve_submit_resources_with_hints(
     *,
     plugin,
     pixi_path: str,
-    partition: str,
+    partition: str | None,
     qos: str | None,
     account: str | None,
     ntasks: int,
@@ -951,7 +951,7 @@ def run_all(
     default="comparison.yaml",
     help="Path to comparison.yaml config file.",
 )
-@click.option("--partition", default="aa100", help="SLURM partition.")
+@click.option("--partition", default=None, help="SLURM partition.")
 @click.option("--qos", default=None, help="SLURM QoS.")
 @click.option("--account", default=None, help="SLURM account/allocation.")
 @click.option("--pixi-path", default="pixi", show_default=True, help="Path to pixi executable.")
@@ -978,7 +978,7 @@ def submit_analysis_hpc(
     ctx: click.Context,
     analysis: str,
     config_file: Path,
-    partition: str,
+    partition: str | None,
     qos: str | None,
     account: str | None,
     pixi_path: str,
@@ -1157,7 +1157,7 @@ def submit_analysis_hpc(
     default="comparison.yaml",
     help="Path to comparison.yaml config file.",
 )
-@click.option("--partition", default="aa100", help="SLURM partition.")
+@click.option("--partition", default=None, help="SLURM partition.")
 @click.option("--qos", default=None, help="SLURM QoS.")
 @click.option("--account", default=None, help="SLURM account/allocation.")
 @click.option("--pixi-path", default="pixi", show_default=True, help="Path to pixi executable.")
@@ -1184,7 +1184,7 @@ def submit_analysis_hpc(
 def submit_all_analyses_hpc(
     ctx: click.Context,
     config_file: Path,
-    partition: str,
+    partition: str | None,
     qos: str | None,
     account: str | None,
     pixi_path: str,
