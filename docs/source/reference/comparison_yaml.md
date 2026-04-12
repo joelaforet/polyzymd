@@ -89,9 +89,9 @@ defaults.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `selection` | string | `"protein and name CA"` | MDAnalysis selection string for RMSF computation |
-| `reference_mode` | string | `"centroid"` | Reference structure: `"centroid"`, `"average"`, or `"frame"` |
+| `reference_mode` | string | `"centroid"` | Reference structure: `"centroid"`, `"average"`, `"frame"`, or `"external"` |
 | `reference_frame` | int | `null` | Required when `reference_mode` is `"frame"` |
-| `reference_file` | path | `null` | Crystal/input PDB for secondary structure annotation bar on profiles |
+| `reference_file` | path | `null` | Path to external PDB reference structure. Required when `reference_mode` is `"external"`. Also used for secondary structure annotation on profile plots. |
 
 ### `plugins.secondary_structure`
 
@@ -182,7 +182,7 @@ Each entry in `runs`:
 |-------|------|---------|-------------|
 | `label` | string | **(required)** | Name for this RMSD computation (e.g., `"backbone"`) |
 | `selection` | string | **(required)** | MDAnalysis selection |
-| `align_selection` | string | same as `selection` | MDAnalysis selection for alignment |
+| `alignment_selection` | string | same as `selection` | MDAnalysis selection for alignment |
 | `stride` | int | `1` | Frame stride |
 
 ### `plugins.rg`
