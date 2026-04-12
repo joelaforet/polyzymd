@@ -857,8 +857,8 @@ class TestMakeAggregatedFilename:
         mock_result.equilibration_time = 100.0
         mock_result.equilibration_unit = "ns"
 
-        filename = DistancesAnalysis._make_aggregated_filename((1, 2, 3), mock_result)
-        assert filename == "distances_reps1-3_eq100.00ns.json"
+        filename = DistancesAnalysis._make_aggregated_filename((1, 2, 3), mock_result, "a1b2c3d4")
+        assert filename == "distances_reps1-3_eq100.00ns_sa1b2c3d4.json"
 
     def test_nonconsecutive_replicates(self):
         from polyzymd.analyses.distances import DistancesAnalysis
@@ -867,8 +867,8 @@ class TestMakeAggregatedFilename:
         mock_result.equilibration_time = 50.0
         mock_result.equilibration_unit = "ns"
 
-        filename = DistancesAnalysis._make_aggregated_filename((1, 3, 5), mock_result)
-        assert filename == "distances_reps1_3_5_eq50.00ns.json"
+        filename = DistancesAnalysis._make_aggregated_filename((1, 3, 5), mock_result, "a1b2c3d4")
+        assert filename == "distances_reps1_3_5_eq50.00ns_sa1b2c3d4.json"
 
     def test_ps_equilibration(self):
         from polyzymd.analyses.distances import DistancesAnalysis
@@ -877,8 +877,52 @@ class TestMakeAggregatedFilename:
         mock_result.equilibration_time = 5000.0
         mock_result.equilibration_unit = "ps"
 
-        filename = DistancesAnalysis._make_aggregated_filename((1, 2), mock_result)
-        assert filename == "distances_reps1-2_eq5000.00ps.json"
+        filename = DistancesAnalysis._make_aggregated_filename((1, 2), mock_result, "a1b2c3d4")
+        assert filename == "distances_reps1-2_eq5000.00ps_sa1b2c3d4.json"
+
+
+class TestSettingsCacheTag:
+    """Settings fingerprinting should differentiate cache identities."""
+
+    def test_cache_tag_changes_with_use_pbc(self):
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesAnalysis,
+            DistancesSettings,
+        )
+
+        settings_true = DistancesSettings(
+            use_pbc=True,
+            pairs=[DistancePairSettings(label="A", selection_a="resid 1", selection_b="resid 2")],
+        )
+        settings_false = DistancesSettings(
+            use_pbc=False,
+            pairs=[DistancePairSettings(label="A", selection_a="resid 1", selection_b="resid 2")],
+        )
+
+        tag_true = DistancesAnalysis._make_settings_cache_tag(settings_true)
+        tag_false = DistancesAnalysis._make_settings_cache_tag(settings_false)
+
+        assert tag_true != tag_false
+
+    def test_cache_tag_changes_with_pair_definitions(self):
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesAnalysis,
+            DistancesSettings,
+        )
+
+        settings_a = DistancesSettings(
+            pairs=[DistancePairSettings(label="A", selection_a="resid 1", selection_b="resid 2")],
+        )
+        settings_b = DistancesSettings(
+            pairs=[DistancePairSettings(label="B", selection_a="resid 10", selection_b="resid 20")],
+        )
+
+        tag_a = DistancesAnalysis._make_settings_cache_tag(settings_a)
+        tag_b = DistancesAnalysis._make_settings_cache_tag(settings_b)
+
+        assert tag_a != tag_b
 
 
 # ---------------------------------------------------------------------------

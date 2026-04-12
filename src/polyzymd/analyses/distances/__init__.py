@@ -51,6 +51,7 @@ from polyzymd.analyses.distances._plotters import (
     _plot_distance_threshold_bars,
 )
 from polyzymd.analyses.distances._results import DistanceAggregatedResult
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
@@ -321,6 +322,7 @@ class DistanceCalculator:
         thresholds: Sequence[float | None] | float | None = None,
         use_pbc: bool = True,
         alignment: Any | None = None,
+        settings_tag: str | None = None,
     ) -> None:
         from polyzymd.analyses.shared.alignment import AlignmentConfig
         from polyzymd.analyses.shared.config_hash import compute_config_hash
@@ -361,6 +363,7 @@ class DistanceCalculator:
         # Initialize loader
         self._loader = TrajectoryLoader(config)
         self._config_hash = compute_config_hash(config)
+        self._settings_tag = settings_tag
 
     def compute(
         self,
@@ -797,7 +800,8 @@ class DistanceCalculator:
         settings_parts.append(align_str)
 
         settings_suffix = "_".join(settings_parts)
-        return f"distances_{pair_label}_{eq_str}_{settings_suffix}.json"
+        tag = self._settings_tag or "legacy"
+        return f"distances_{pair_label}_{eq_str}_{settings_suffix}_s{tag}.json"
 
 
 # ---------------------------------------------------------------------------
@@ -838,6 +842,22 @@ class DistancesAnalysis(Analysis):
 
     # === Required methods ===
 
+    @staticmethod
+    def _make_settings_cache_tag(settings: BaseModel) -> str:
+        """Build a short cache tag for settings.
+
+        Parameters
+        ----------
+        settings : BaseModel
+            Analysis settings model.
+
+        Returns
+        -------
+        str
+            First 8 hex characters from shared settings fingerprinting.
+        """
+        return settings_fingerprint(settings)
+
     def compute_replicate(
         self,
         ctx: ReplicateContext,
@@ -861,6 +881,7 @@ class DistancesAnalysis(Analysis):
             Per-replicate distance result.
         """
         settings = ctx.settings
+        settings_tag = self._make_settings_cache_tag(settings)
 
         pairs = settings.get_pair_selections()
         thresholds = settings.get_pair_thresholds()
@@ -873,6 +894,7 @@ class DistancesAnalysis(Analysis):
             thresholds=thresholds,
             use_pbc=getattr(settings, "use_pbc", True),
             alignment=alignment,
+            settings_tag=settings_tag,
         )
 
         result = calc.compute(
@@ -980,7 +1002,8 @@ class DistancesAnalysis(Analysis):
 
         target_path = ctx.result_path
         if target_path is None:
-            filename = self._make_aggregated_filename(ctx.replicates, first)
+            settings_tag = self._make_settings_cache_tag(ctx.settings)
+            filename = self._make_aggregated_filename(ctx.replicates, first, settings_tag)
             target_path = ctx.output_dir / filename
         self.save_result(agg_result, target_path)
         logger.info(f"Saved aggregated distances to {target_path}")
@@ -1377,8 +1400,9 @@ class DistancesAnalysis(Analysis):
     def _make_aggregated_filename(
         replicates: tuple[int, ...] | Sequence[int],
         first_result: Any,
+        settings_tag: str,
     ) -> str:
-        """Backward-compatible filename helper retained for tests."""
+        """Generate an aggregated distances filename."""
         eq_str = f"eq{first_result.equilibration_time:.2f}{first_result.equilibration_unit}"
         rep_str = Analysis._format_replicate_range(replicates)
-        return f"distances_{rep_str}_{eq_str}.json"
+        return f"distances_{rep_str}_{eq_str}_s{settings_tag}.json"
