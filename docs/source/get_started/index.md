@@ -1,34 +1,96 @@
 # Get Started
 
-Use this section if you are new to PolyzyMD and want the shortest path from a
-fresh checkout to a working simulation setup.
+Welcome to PolyzyMD! This page gets you from zero to a working setup in about
+10 minutes.
 
-## Start Here
+## Quick Install
 
-- [Install PolyzyMD with pixi](../tutorials/installation.md) for local or HPC
-  environments
-- [Run Your First PolyzyMD Simulation](../tutorials/quickstart.md) for a guided
-  first run
+PolyzyMD uses [pixi](https://pixi.sh) for environment management. Install pixi
+(if you don't already have it), then clone and set up the project:
 
-## What You Will Accomplish
+```bash
+# Install pixi
+curl -fsSL https://pixi.sh/install.sh | sh
+source ~/.bashrc
 
-- install the supported `pixi` environments
-- verify that `polyzymd` is on `PATH`
-- create a project scaffold with `polyzymd init`
-- prepare a minimal `config.yaml`
-- validate and submit your first simulation
+# Clone and install PolyzyMD
+git clone https://github.com/joelaforet/polyzymd.git
+cd polyzymd
+pixi install -e build
+pixi shell -e build
+```
 
-## Before You Move On
+Verify the install:
 
-After this section, most users should continue to one of these places:
+```bash
+polyzymd --help
+polyzymd info
+```
 
-- [How-To Guides](../how_to/index.md) for targeted tasks
-- [Tutorials](../tutorials/index.md) for guided end-to-end workflows
-- [Reference](../reference/index.md) for CLI and configuration lookup
+If both commands print output without errors, you are ready to go.
 
-<!-- IMAGE OPPORTUNITY: Add a screenshot of the generated project scaffold from
-`polyzymd init`, or a simple annotated terminal capture showing pixi install,
-pixi shell, and `polyzymd info`. -->
+For the full installation guide (including GPU cluster setup and
+troubleshooting), see {doc}`../tutorials/installation`.
+
+## Create Your First Project
+
+PolyzyMD organizes simulations into project directories. Create one with:
+
+```bash
+polyzymd init --name my_first_project
+cd my_first_project
+```
+
+This creates a directory with a template `config.yaml`, a `structures/` folder
+for your input PDB files, and `job_scripts/` and `slurm_logs/` directories for
+HPC workflows.
+
+## What's Inside `config.yaml`
+
+The `config.yaml` file controls everything about your simulation: which enzyme
+to simulate, solvent conditions, thermodynamic parameters, equilibration stages,
+and production settings. You edit this file to describe your system, then
+PolyzyMD handles the rest.
+
+For a detailed walkthrough of writing your first config and running a build, see
+{doc}`../tutorials/quickstart`.
+
+## Where to Go Next
+
+Pick the path that matches your situation:
+
+::::{grid} 2
+:gutter: 3
+
+:::{grid-item-card} I want to set up and run a simulation
+:link: ../tutorials/quickstart
+:link-type: doc
+
+Follow the first simulation tutorial step by step.
+:::
+
+:::{grid-item-card} I have trajectories and want to analyze them
+:link: ../tutorials/first_analysis
+:link-type: doc
+
+Run your first analysis in five steps.
+:::
+
+:::{grid-item-card} I want to compare multiple conditions
+:link: ../tutorials/analysis_complete_workflow
+:link-type: doc
+
+Set up a multi-condition comparison study.
+:::
+
+:::{grid-item-card} I need a specific task done
+:link: ../how_to/index
+:link-type: doc
+
+Jump to how-to guides for polymers, restraints, GROMACS export, SLURM, and more.
+:::
+
+::::
 
 ```{toctree}
 :hidden:
