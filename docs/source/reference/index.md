@@ -10,6 +10,7 @@ configuration fields, API signatures, defaults, or benchmark data.
 - [Configuration Reference](configuration.md)
 - [Comparison YAML Schema](comparison_yaml.md)
 - [Comparison and Plotting Reference](analysis_comparison_reference.md)
+- [RMSD Plugin Reference](analysis_rmsd_reference.md)
 - [Post-Hoc Testing Reference](posthoc_testing.md)
 - [Benchmarks](benchmarks.md)
 
@@ -41,6 +42,7 @@ Data Requirements & Directory Layout <data_requirements>
 Configuration Reference <configuration>
 Comparison YAML Schema <comparison_yaml>
 Comparison and Plotting Reference <analysis_comparison_reference>
+RMSD Plugin Reference <analysis_rmsd_reference>
 Post-Hoc Testing Reference <posthoc_testing>
 Benchmarks <benchmarks>
 API Overview <../api/overview>
