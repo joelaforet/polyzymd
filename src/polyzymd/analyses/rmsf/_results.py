@@ -45,7 +45,7 @@ class RMSFResult(BaseAnalysisResult):
 
     Examples
     --------
-    >>> result = RMSFResult.load("analysis/rmsf/run_1/rmsf_results.json")
+    >>> result = RMSFResult.load(Path("condition/analysis/rep1/rmsf_eq10ns.json"))
     >>> print(result.summary())
     RMSF Analysis (replicate 1)
     ===========================
@@ -175,7 +175,7 @@ class RMSFAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
 
     Examples
     --------
-    >>> result = RMSFAggregatedResult.load("analysis/rmsf/aggregated/rmsf_reps1-5.json")
+    >>> result = RMSFAggregatedResult.load(Path("condition/analysis/aggregated/rmsf_reps1-5.json"))
     >>> print(f"Overall RMSF: {result.overall_mean_rmsf:.2f} ± {result.overall_sem_rmsf:.2f} Å")
     Overall RMSF: 1.45 ± 0.08 Å
     """

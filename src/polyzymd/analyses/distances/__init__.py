@@ -72,7 +72,7 @@ DEFAULT_DISTANCE_THRESHOLD = 3.5
 
 
 # ---------------------------------------------------------------------------
-# Helper functions (migrated from analysis/distances/calculator.py)
+# Helper functions
 # ---------------------------------------------------------------------------
 
 

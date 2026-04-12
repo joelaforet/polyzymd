@@ -1336,7 +1336,7 @@ def _condition_has_polymer(
 
 
 # ===========================================================================
-# Inlined plotting functions (from compare/plotters/polymer_affinity.py)
+# Plotting functions
 # ===========================================================================
 
 

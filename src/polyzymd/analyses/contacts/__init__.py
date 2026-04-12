@@ -5,8 +5,7 @@ neighbour searching, aggregates per-residue contact fractions across
 replicates, and performs cross-condition comparison with dual metrics
 (coverage and mean contact fraction).
 
-Contact computation uses :class:`ParallelContactAnalyzer` (inlined from the
-former ``analysis.contacts.calculator_parallel`` module) which delegates to
+Contact computation uses :class:`ParallelContactAnalyzer` which delegates to
 MDAnalysis ``capped_distance`` for O(N) neighbour searching — typically
 10–100× faster than naïve pairwise distance calculations.
 
@@ -79,8 +78,7 @@ DEFAULT_CONTACT_CUTOFF = 4.5
 
 
 # ---------------------------------------------------------------------------
-# Inlined computation classes (formerly in analysis.contacts.calculator_parallel
-# and analysis.contacts._utils)
+# Contact computation classes
 # ---------------------------------------------------------------------------
 
 

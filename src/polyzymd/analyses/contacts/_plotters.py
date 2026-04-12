@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 # ===================================================================
-# Data loaders (inlined from compare/plotters/_contacts_shared)
+# Data loaders
 # ===================================================================
 
 
@@ -420,7 +420,7 @@ def _load_partition_definitions(
 
 
 # ===================================================================
-# Profile plotters (inlined from compare/plotters/contacts_profiles)
+# Profile plotters
 # ===================================================================
 
 
@@ -682,7 +682,7 @@ def _plot_residence_time_profile(
 
 
 # ===================================================================
-# Grouped-bar plotters (inlined from compare/plotters/contacts_grouped_bars)
+# Grouped-bar plotters
 # ===================================================================
 
 
@@ -1234,7 +1234,7 @@ def _plot_rt_by_partition_bars(
 
 
 # ===================================================================
-# Coverage plotters (inlined from compare/plotters/contacts_coverage)
+# Coverage plotters
 # ===================================================================
 
 
@@ -1571,7 +1571,6 @@ def _plot_user_partition_bars(
 
 # ===================================================================
 # Binding preference plotters
-# (inlined from compare/plotters/contacts_binding_preference)
 # ===================================================================
 
 

@@ -295,9 +295,9 @@ def validate_config_hash(
 
     Examples
     --------
-    >>> result = RMSFResult.from_json("analysis/rmsf/run_1/rmsf_results.json")
+    >>> stored_hash = loaded_result.get("config_hash", "")
     >>> config = load_config("config.yaml")
-    >>> if not validate_config_hash(result.config_hash, config):
+    >>> if not validate_config_hash(stored_hash, config):
     ...     print("Warning: Results may be stale!")
     """
     current_hash = compute_config_hash(current_config)

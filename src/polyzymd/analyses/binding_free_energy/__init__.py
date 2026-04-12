@@ -962,7 +962,7 @@ class BindingFreeEnergyAnalysis(Analysis):
 
 
 # ---------------------------------------------------------------------------
-# Plotting helpers (inlined from compare/plotters/binding_free_energy.py)
+# Plotting helpers
 # ---------------------------------------------------------------------------
 
 

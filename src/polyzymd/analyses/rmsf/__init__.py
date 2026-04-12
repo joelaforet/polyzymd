@@ -4,8 +4,7 @@ Computes per-residue Root Mean Square Fluctuation from MD trajectories,
 aggregates across replicates, compares conditions via the default scalar
 comparison pipeline, and produces comparison/profile plots.
 
-All heavy computation is self-contained — no delegation to legacy
-``analysis.rmsf`` calculator classes.
+All heavy computation is self-contained within this plugin package.
 """
 
 from __future__ import annotations

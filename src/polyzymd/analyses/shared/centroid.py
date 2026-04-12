@@ -25,8 +25,8 @@ frame
 
 See Also
 --------
-The documentation at docs/analysis/reference_selection.md provides detailed
-guidance on when to use each method.
+The RMSF best-practices documentation provides detailed guidance on when to
+use each reference selection method.
 """
 
 from __future__ import annotations
