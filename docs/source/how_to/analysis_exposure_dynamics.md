@@ -336,56 +336,33 @@ polyzymd compare run exposure -f comparison.yaml
 
 ````{tab-item} Python
 
+Exposure dynamics is designed to be run through the CLI — there is no stable
+public Python API for calling the analysis directly.
+
+**Recommended: use the orchestrator**
+
+If you need programmatic access, use the public orchestrator interface:
+
 ```python
+from polyzymd.analyses import get_analysis, run_comparison
+from polyzymd.config.comparison import ComparisonConfig
+
+config = ComparisonConfig.from_yaml("comparison.yaml")
+exposure = get_analysis("exposure")
+result = run_comparison(exposure(), config)
+```
+
+**Loading results after a CLI run**
+
+You can also run the analysis via the CLI and then load the JSON results:
+
+```python
+import json
 from pathlib import Path
-from polyzymd.analyses.exposure._sasa_trajectory import SASATrajectoryResult
-from polyzymd.analyses.contacts._results import ContactResult
-from polyzymd.analyses.exposure._enrichment import compute_chaperone_enrichment
-from polyzymd.analyses.exposure._dynamics import analyze_exposure_dynamics
-from polyzymd.analyses.exposure._config import ExposureConfig
 
-# Load per-frame SASA (computed previously)
-sasa_result = SASATrajectoryResult.load("analysis/rep1/sasa/")
-
-# Load contact analysis result
-contact_result = ContactResult.load("analysis/contacts/contacts_rep1.json")
-
-# Configure exposure analysis
-config = ExposureConfig(
-    transient_lower=0.20,
-    transient_upper=0.80,
-    min_event_length=1,
-    polymer_resnames=["SBM", "EGM"],  # or leave empty for all types
-)
-
-# Compute exposure dynamics (stability + chaperone events)
-dynamics = analyze_exposure_dynamics(
-    sasa_result=sasa_result,
-    contact_result=contact_result,
-    config=config,
-    analysis_dir=Path("analysis/rep1/"),
-)
-
-print(f"Transient residues: {dynamics.n_transient()}")
-print(f"Chaperone events:   {dynamics.total_chaperone_events()}")
-print(f"Unassisted events:  {dynamics.total_unassisted_events()}")
-
-# Condition-level chaperone fraction (mean over transient residues)
-transient = dynamics.transient_residues()
-mean_chap_frac = sum(r.chaperone_fraction for r in transient) / len(transient)
-print(f"Mean chaperone fraction: {mean_chap_frac:.3f}")
-
-# Compute dynamic enrichment
-enrichment = compute_chaperone_enrichment(
-    sasa_result=sasa_result,
-    contact_result=contact_result,
-    polymer_resnames=["SBM", "EGM"],
-)
-
-# Print enrichment table
-print("\nDynamic Enrichment (residue-based):")
-for entry in enrichment.entries:
-    print(f"  {entry.polymer_type} → {entry.aa_group}: {entry.enrichment_residue:+.3f}")
+# After running: polyzymd compare run exposure -f comparison.yaml
+result_path = Path("results/exposure/comparison_result.json")
+result = json.loads(result_path.read_text())
 ```
 ````
 `````
