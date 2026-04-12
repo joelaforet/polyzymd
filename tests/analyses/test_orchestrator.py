@@ -27,6 +27,7 @@ from polyzymd.analyses.exceptions import (
 from polyzymd.analyses.orchestrator import (
     _validate_dependencies,
     aggregate_condition_from_disk,
+    order_analyses_for_execution,
     prepare_comparison_run,
     run_analysis,
     run_comparison,
@@ -532,6 +533,44 @@ class TestOrchestrator:
 
         with pytest.raises(ValueError, match="Circular dependency"):
             _topological_sort([CircA(), CircB()])
+
+    def test_order_analyses_for_execution_returns_dependency_order(self, monkeypatch) -> None:
+        """Public ordering helper should return canonical dependency order."""
+
+        class _A(Analysis):
+            name: ClassVar[str] = "a"
+            aliases: ClassVar[tuple[str, ...]] = ("alias_a",)
+            Settings: ClassVar[type] = ToySettings
+            dependencies: ClassVar[tuple[str, ...]] = ()
+
+            def compute_replicate(self, ctx, replicate):
+                return {"replicate": replicate}
+
+            def aggregate(self, ctx, results):
+                return {"n": len(results)}
+
+        class _B(Analysis):
+            name: ClassVar[str] = "b"
+            Settings: ClassVar[type] = ToySettings
+            dependencies: ClassVar[tuple[str, ...]] = ("a",)
+
+            def compute_replicate(self, ctx, replicate):
+                return {"replicate": replicate}
+
+            def aggregate(self, ctx, results):
+                return {"n": len(results)}
+
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.get_analysis",
+            lambda name: _A if name in {"a", "alias_a"} else _B,
+        )
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.list_all_names",
+            lambda: ["a", "alias_a", "b"],
+        )
+
+        ordered = order_analyses_for_execution(["b", "alias_a"])
+        assert ordered == ["a", "b"]
 
     def test_run_analysis_full(self, toy_analysis, toy_condition, toy_settings, tmp_path):
         """Test the full run_analysis path (compute + aggregate)."""

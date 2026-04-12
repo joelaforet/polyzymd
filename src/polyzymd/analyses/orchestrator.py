@@ -863,6 +863,45 @@ def _topological_sort(analyses: list[Analysis]) -> list[Analysis]:
     return order
 
 
+def order_analyses_for_execution(analysis_names: Sequence[str]) -> list[str]:
+    """Return analysis names ordered by dependency constraints.
+
+    Parameters
+    ----------
+    analysis_names : Sequence[str]
+        Analysis names or aliases to order.
+
+    Returns
+    -------
+    list[str]
+        Canonical analysis names in dependency-safe execution order.
+
+    Raises
+    ------
+    KeyError
+        If an analysis name cannot be resolved.
+    DependencyError
+        If declared dependencies are missing from the requested set.
+    ValueError
+        If a dependency cycle is detected.
+    """
+    from polyzymd.analyses.discovery import get_analysis
+
+    requested: list[Analysis] = []
+    seen_names: set[str] = set()
+    for name in analysis_names:
+        analysis_cls = get_analysis(name)
+        canonical_name = analysis_cls.name
+        if canonical_name in seen_names:
+            continue
+        seen_names.add(canonical_name)
+        requested.append(analysis_cls())
+
+    _validate_dependencies(requested)
+    ordered = _topological_sort(requested)
+    return [analysis.name for analysis in ordered]
+
+
 # ---------------------------------------------------------------------------
 # Full comparison pipeline
 # ---------------------------------------------------------------------------

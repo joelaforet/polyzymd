@@ -903,3 +903,279 @@ def test_submit_with_no_dependencies_skips_preflight(monkeypatch, tmp_path: Path
         ["submit", "independent", "-f", str(tmp_path / "comparison.yaml"), "--dry-run"],
     )
     assert result.exit_code == 0
+
+
+def test_submit_all_dry_run_orders_and_submits_enabled_analyses(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """compare submit-all should dry-run all enabled analyses in dependency order."""
+    runner = CliRunner()
+
+    class _Plugins:
+        def get_enabled_plugins(self):
+            return ["exposure", "contacts"]
+
+    config = SimpleNamespace(source_path=tmp_path / "comparison.yaml", plugins=_Plugins())
+
+    class _Contacts:
+        name = "contacts"
+        dependencies = ()
+
+        def __call__(self):
+            return SimpleNamespace(name="contacts")
+
+    class _Exposure:
+        name = "exposure"
+        dependencies = ("contacts",)
+
+        def __call__(self):
+            return SimpleNamespace(name="exposure")
+
+    class _Cond:
+        def __init__(self, reps):
+            self.replicate_specs = [SimpleNamespace(replicate=r) for r in reps]
+
+    build_calls: list[str] = []
+
+    def _build_manifest(plugin, *args, **kwargs):
+        del args, kwargs
+        build_calls.append(plugin.name)
+        return SimpleNamespace(
+            condition_specs=[_Cond([1, 2])],
+            pipeline_mode="full",
+            save=lambda path: Path(path).write_text("{}"),
+        )
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/sbatch")
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml", lambda path: config
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.orchestrator.order_analyses_for_execution",
+        lambda names: ["contacts", "exposure"],
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.discovery.get_analysis",
+        lambda name: _Contacts() if name == "contacts" else _Exposure(),
+    )
+    monkeypatch.setattr("polyzymd.workflow.analysis_slurm.build_manifest", _build_manifest)
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_replicate_script",
+        lambda *args, **kwargs: tmp_path / "rep.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_aggregate_script",
+        lambda *args, **kwargs: tmp_path / "agg.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_finalize_script",
+        lambda *args, **kwargs: tmp_path / "fin.sh",
+    )
+
+    result = runner.invoke(
+        compare,
+        ["submit-all", "-f", str(tmp_path / "comparison.yaml"), "--dry-run"],
+    )
+
+    assert result.exit_code == 0
+    assert build_calls == ["contacts", "exposure"]
+    assert "Submitted analyses summary:" in result.output
+    assert "Dry run only: no jobs were submitted" in result.output
+    assert result.output.index("contacts") < result.output.index("exposure")
+
+
+def test_submit_all_exclude_filters_requested_plugins(monkeypatch, tmp_path: Path) -> None:
+    """compare submit-all should skip analyses listed with --exclude."""
+    runner = CliRunner()
+
+    class _Plugins:
+        def get_enabled_plugins(self):
+            return ["contacts", "exposure", "rmsf"]
+
+    config = SimpleNamespace(source_path=tmp_path / "comparison.yaml", plugins=_Plugins())
+
+    captured: dict[str, Any] = {}
+
+    def _order(analysis_names):
+        captured["names"] = list(analysis_names)
+        return ["contacts", "rmsf"]
+
+    class _AnalysisClass:
+        def __init__(self, name):
+            self.name = name
+            self.dependencies = ()
+
+        def __call__(self):
+            return SimpleNamespace(name=self.name)
+
+    class _Cond:
+        def __init__(self):
+            self.replicate_specs = [SimpleNamespace(replicate=1)]
+
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml", lambda path: config
+    )
+    monkeypatch.setattr("polyzymd.analyses.orchestrator.order_analyses_for_execution", _order)
+    monkeypatch.setattr(
+        "polyzymd.analyses.discovery.get_analysis",
+        lambda name: _AnalysisClass(name),
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.build_manifest",
+        lambda *args, **kwargs: SimpleNamespace(
+            condition_specs=[_Cond()],
+            pipeline_mode="full",
+            save=lambda path: Path(path).write_text("{}"),
+        ),
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_replicate_script",
+        lambda *args, **kwargs: tmp_path / "rep.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_aggregate_script",
+        lambda *args, **kwargs: tmp_path / "agg.sh",
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_finalize_script",
+        lambda *args, **kwargs: tmp_path / "fin.sh",
+    )
+
+    result = runner.invoke(
+        compare,
+        [
+            "submit-all",
+            "-f",
+            str(tmp_path / "comparison.yaml"),
+            "--exclude",
+            "exposure",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["names"] == ["contacts", "rmsf"]
+    assert "exposure" not in result.output
+
+
+def test_submit_all_finalize_only_plugin_dry_run(monkeypatch, tmp_path: Path) -> None:
+    """compare submit-all should account for finalize-only plugin manifests."""
+    runner = CliRunner()
+
+    class _Plugins:
+        def get_enabled_plugins(self):
+            return ["compare_only"]
+
+    config = SimpleNamespace(source_path=tmp_path / "comparison.yaml", plugins=_Plugins())
+
+    class _CompareOnly:
+        name = "compare_only"
+        dependencies = ()
+
+        def __call__(self):
+            return SimpleNamespace(name="compare_only")
+
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml", lambda path: config
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.orchestrator.order_analyses_for_execution",
+        lambda names: ["compare_only"],
+    )
+    monkeypatch.setattr("polyzymd.analyses.discovery.get_analysis", lambda name: _CompareOnly())
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.build_manifest",
+        lambda *args, **kwargs: SimpleNamespace(
+            condition_specs=[],
+            pipeline_mode="finalize_only",
+            save=lambda path: Path(path).write_text("{}"),
+        ),
+    )
+    monkeypatch.setattr(
+        "polyzymd.workflow.analysis_slurm.generate_finalize_script",
+        lambda *args, **kwargs: tmp_path / "fin.sh",
+    )
+
+    result = runner.invoke(
+        compare,
+        ["submit-all", "-f", str(tmp_path / "comparison.yaml"), "--dry-run"],
+    )
+
+    assert result.exit_code == 0
+    assert "compare_only\tfinalize_only\t1\tdry-run:compare_only:finalize" in result.output
+
+
+def test_submit_all_passes_cross_plugin_root_dependencies(monkeypatch, tmp_path: Path) -> None:
+    """compare submit-all should wire finalize job dependencies across plugins."""
+    runner = CliRunner()
+
+    class _Plugins:
+        def get_enabled_plugins(self):
+            return ["contacts", "exposure"]
+
+    config = SimpleNamespace(source_path=tmp_path / "comparison.yaml", plugins=_Plugins())
+
+    class _Contacts:
+        name = "contacts"
+        dependencies = ()
+
+        def __call__(self):
+            return SimpleNamespace(name="contacts")
+
+    class _Exposure:
+        name = "exposure"
+        dependencies = ("contacts",)
+
+        def __call__(self):
+            return SimpleNamespace(name="exposure")
+
+    class _Cond:
+        def __init__(self):
+            self.replicate_specs = [SimpleNamespace(replicate=1)]
+
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def _submit_graph(manifest, resources, hpc_dir, root_dependencies=()):
+        del resources, hpc_dir
+        analysis_name = (
+            Path(manifest.comparison_yaml).name if hasattr(manifest, "comparison_yaml") else ""
+        )
+        calls.append((analysis_name, tuple(root_dependencies)))
+        job_id = "101" if len(calls) == 1 else "202"
+        return SimpleNamespace(
+            finalizer_job_id=job_id, save=lambda path: Path(path).write_text("{}")
+        )
+
+    def _build_manifest(plugin, *args, **kwargs):
+        del args, kwargs
+        return SimpleNamespace(
+            comparison_yaml=f"{plugin.name}.yaml",
+            condition_specs=[_Cond()],
+            pipeline_mode="full",
+            save=lambda path: Path(path).write_text("{}"),
+        )
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/sbatch")
+    monkeypatch.setattr(
+        "polyzymd.config.comparison.ComparisonConfig.from_yaml", lambda path: config
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.orchestrator.order_analyses_for_execution",
+        lambda names: ["contacts", "exposure"],
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses.discovery.get_analysis",
+        lambda name: _Contacts() if name == "contacts" else _Exposure(),
+    )
+    monkeypatch.setattr("polyzymd.workflow.analysis_slurm.build_manifest", _build_manifest)
+    monkeypatch.setattr("polyzymd.workflow.analysis_slurm.submit_analysis_graph", _submit_graph)
+
+    result = runner.invoke(
+        compare,
+        ["submit-all", "-f", str(tmp_path / "comparison.yaml")],
+    )
+
+    assert result.exit_code == 0
+    assert calls[0][1] == ()
+    assert calls[1][1] == ("101",)

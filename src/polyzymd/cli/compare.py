@@ -55,6 +55,84 @@ def _resolve_hpc_dir(config: ComparisonConfig, analysis_name: str) -> Path:
     return source.parent / "comparison" / analysis_name / "_hpc"
 
 
+def _resolve_submit_resources_with_hints(
+    *,
+    plugin,
+    pixi_path: str,
+    partition: str,
+    qos: str | None,
+    account: str | None,
+    ntasks: int,
+    cpus_per_task: int,
+    mem: str,
+    time_limit: str,
+    max_retries: int,
+    mail_user: str | None,
+    cpus_from_cli: bool,
+    mem_from_cli: bool,
+    time_from_cli: bool,
+):
+    """Resolve submit resources with CLI and plugin hint precedence.
+
+    Precedence for CPU, memory, and time is:
+
+    - explicit CLI flag
+    - plugin ``slurm_resource_hint``
+    - global system default
+    """
+    from polyzymd.workflow.analysis_slurm import AnalysisSlurmResources
+
+    defaults = AnalysisSlurmResources()
+    hint = getattr(type(plugin), "slurm_resource_hint", None)
+
+    resolved_mem = mem
+    if not mem_from_cli:
+        resolved_mem = hint.mem if hint is not None and hint.mem is not None else defaults.mem
+
+    resolved_time = time_limit
+    if not time_from_cli:
+        resolved_time = hint.time if hint is not None and hint.time is not None else defaults.time
+
+    resolved_cpus = cpus_per_task
+    if not cpus_from_cli:
+        resolved_cpus = (
+            hint.cpus_per_task
+            if hint is not None and hint.cpus_per_task is not None
+            else defaults.cpus_per_task
+        )
+
+    return AnalysisSlurmResources(
+        pixi_path=pixi_path,
+        partition=partition,
+        qos=qos,
+        account=account,
+        ntasks=ntasks,
+        cpus_per_task=resolved_cpus,
+        mem=resolved_mem,
+        time=resolved_time,
+        max_retries=max_retries,
+        mail_user=mail_user,
+    )
+
+
+def _echo_submit_all_summary(rows: list[dict[str, str]]) -> None:
+    """Print a compact submit-all summary table."""
+    click.echo()
+    click.echo("Submitted analyses summary:")
+    click.echo("analysis\tmode\tjobs\tfinalize_job_id")
+    for row in rows:
+        click.echo(f"{row['analysis']}\t{row['mode']}\t{row['jobs']}\t{row['finalize_job_id']}")
+
+
+def _echo_qos_tip_if_needed(partition: str | None, qos: str | None) -> None:
+    """Print a gentle QoS reminder for common HPC queues."""
+    if partition and not qos:
+        click.echo(
+            "Tip: Many HPC clusters require --qos to be set. If jobs fail to start,\n"
+            "try: polyzymd compare submit <analysis> --qos <your-qos>"
+        )
+
+
 def _resolve_manifest_task_condition(
     manifest,
     condition_index: int,
@@ -863,6 +941,7 @@ def run_all(
 
 
 @compare.command("submit")
+@click.pass_context
 @click.argument("analysis", type=str)
 @click.option(
     "-f",
@@ -896,6 +975,7 @@ def run_all(
     help="Submit one SLURM array job per condition for replicate workers.",
 )
 def submit_analysis_hpc(
+    ctx: click.Context,
     analysis: str,
     config_file: Path,
     partition: str,
@@ -917,7 +997,6 @@ def submit_analysis_hpc(
     """Submit replicate-level SLURM analysis DAG for one plugin."""
     from polyzymd.analyses.discovery import get_analysis
     from polyzymd.workflow.analysis_slurm import (
-        AnalysisSlurmResources,
         build_manifest,
         generate_aggregate_script,
         generate_array_script,
@@ -926,6 +1005,12 @@ def submit_analysis_hpc(
         submit_analysis_graph,
         submit_analysis_graph_with_arrays,
     )
+
+    # Suppress noisy third-party INFO logs during submission planning
+    for logger_name in ("MDAnalysis", "numexpr"):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+    _echo_qos_tip_if_needed(partition, qos)
 
     if not dry_run and shutil.which("sbatch") is None:
         raise click.ClickException(
@@ -969,7 +1054,8 @@ def submit_analysis_hpc(
                     )
                 )
 
-    resources = AnalysisSlurmResources(
+    resources = _resolve_submit_resources_with_hints(
+        plugin=plugin,
         pixi_path=pixi_path,
         partition=partition,
         qos=qos,
@@ -977,9 +1063,14 @@ def submit_analysis_hpc(
         ntasks=ntasks,
         cpus_per_task=cpus_per_task,
         mem=mem,
-        time=time_limit,
+        time_limit=time_limit,
         max_retries=max_retries,
         mail_user=mail_user,
+        cpus_from_cli=(
+            ctx.get_parameter_source("cpus_per_task") != click.core.ParameterSource.DEFAULT
+        ),
+        mem_from_cli=ctx.get_parameter_source("mem") != click.core.ParameterSource.DEFAULT,
+        time_from_cli=ctx.get_parameter_source("time_limit") != click.core.ParameterSource.DEFAULT,
     )
     manifest = build_manifest(
         plugin,
@@ -1054,6 +1145,186 @@ def submit_analysis_hpc(
             "Submitted "
             f"{total} jobs ({replicate_count} replicate + {aggregate_count} aggregate + 1 finalize)"
         )
+
+
+@compare.command("submit-all")
+@click.pass_context
+@click.option(
+    "-f",
+    "--file",
+    "config_file",
+    type=click.Path(path_type=Path),
+    default="comparison.yaml",
+    help="Path to comparison.yaml config file.",
+)
+@click.option("--partition", default="aa100", help="SLURM partition.")
+@click.option("--qos", default=None, help="SLURM QoS.")
+@click.option("--account", default=None, help="SLURM account/allocation.")
+@click.option("--pixi-path", default="pixi", show_default=True, help="Path to pixi executable.")
+@click.option("--ntasks", default=1, type=int, show_default=True)
+@click.option("--cpus-per-task", default=1, type=int, show_default=True)
+@click.option("--mem", default="4G", show_default=True, help="SLURM memory request.")
+@click.option("--time", "time_limit", default="01:00:00", show_default=True, help="SLURM walltime.")
+@click.option("--max-retries", default=3, type=int, show_default=True)
+@click.option("--mail-user", default=None, help="Email for failure notifications.")
+@click.option("--recompute", is_flag=True, help="Force recomputation in workers.")
+@click.option(
+    "--allow-partial",
+    is_flag=True,
+    help="Allow finalize to proceed when some conditions are missing aggregated results.",
+)
+@click.option("--equilibration", default=None, help="Override equilibration time.")
+@click.option("--dry-run", is_flag=True, help="Generate scripts without submitting jobs.")
+@click.option(
+    "--exclude",
+    "excluded_analyses",
+    multiple=True,
+    help="Exclude one analysis plugin name from submission.",
+)
+def submit_all_analyses_hpc(
+    ctx: click.Context,
+    config_file: Path,
+    partition: str,
+    qos: str | None,
+    account: str | None,
+    pixi_path: str,
+    ntasks: int,
+    cpus_per_task: int,
+    mem: str,
+    time_limit: str,
+    max_retries: int,
+    mail_user: str | None,
+    recompute: bool,
+    allow_partial: bool,
+    equilibration: str | None,
+    dry_run: bool,
+    excluded_analyses: tuple[str, ...],
+):
+    """Submit all enabled analyses with dependency-ordered SLURM DAGs."""
+    from polyzymd.analyses.discovery import get_analysis
+    from polyzymd.analyses.orchestrator import order_analyses_for_execution
+    from polyzymd.workflow.analysis_slurm import (
+        build_manifest,
+        generate_aggregate_script,
+        generate_finalize_script,
+        generate_replicate_script,
+        submit_analysis_graph,
+    )
+
+    # Suppress noisy third-party INFO logs during submission planning
+    for logger_name in ("MDAnalysis", "numexpr"):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+    _echo_qos_tip_if_needed(partition, qos)
+
+    if not dry_run and shutil.which("sbatch") is None:
+        raise click.ClickException(
+            "SLURM is not available: 'sbatch' not found on PATH. The HPC submission "
+            "commands require a SLURM cluster. Run analysis locally with "
+            "'polyzymd compare run' instead."
+        )
+
+    try:
+        config = ComparisonConfig.from_yaml(config_file)
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
+        raise click.ClickException(f"Error loading config: {e}") from e
+
+    enabled = list(config.plugins.get_enabled_plugins())
+    excluded_set = set(excluded_analyses)
+    filtered = [name for name in enabled if name not in excluded_set]
+    if not filtered:
+        raise click.ClickException("No enabled analyses remain after applying --exclude filters.")
+
+    ordered = order_analyses_for_execution(filtered)
+
+    finalize_ids: dict[str, str] = {}
+    summary_rows: list[dict[str, str]] = []
+    for analysis_name in ordered:
+        analysis_cls = get_analysis(analysis_name)
+        plugin = analysis_cls()
+
+        resources = _resolve_submit_resources_with_hints(
+            plugin=plugin,
+            pixi_path=pixi_path,
+            partition=partition,
+            qos=qos,
+            account=account,
+            ntasks=ntasks,
+            cpus_per_task=cpus_per_task,
+            mem=mem,
+            time_limit=time_limit,
+            max_retries=max_retries,
+            mail_user=mail_user,
+            cpus_from_cli=(
+                ctx.get_parameter_source("cpus_per_task") != click.core.ParameterSource.DEFAULT
+            ),
+            mem_from_cli=ctx.get_parameter_source("mem") != click.core.ParameterSource.DEFAULT,
+            time_from_cli=ctx.get_parameter_source("time_limit")
+            != click.core.ParameterSource.DEFAULT,
+        )
+
+        manifest = build_manifest(
+            plugin,
+            config,
+            resources,
+            recompute,
+            equilibration,
+            allow_partial=allow_partial,
+        )
+        hpc_dir = _resolve_hpc_dir(config, plugin.name)
+        hpc_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = hpc_dir / "manifest.json"
+        manifest.save(manifest_path)
+
+        dependencies = tuple(getattr(analysis_cls, "dependencies", ()))
+        root_dependencies = [finalize_ids[dep] for dep in dependencies if dep in finalize_ids]
+
+        replicate_count = sum(len(cond.replicate_specs) for cond in manifest.condition_specs)
+        aggregate_count = len(manifest.condition_specs)
+        finalize_only = getattr(manifest, "pipeline_mode", "full") == "finalize_only"
+
+        if dry_run:
+            if not finalize_only:
+                for cond in manifest.condition_specs:
+                    for rep in cond.replicate_specs:
+                        generate_replicate_script(manifest, rep, resources, hpc_dir)
+                    generate_aggregate_script(manifest, cond, resources, hpc_dir)
+            generate_finalize_script(manifest, resources, hpc_dir)
+
+            fake_finalize_id = f"dry-run:{plugin.name}:finalize"
+            finalize_ids[plugin.name] = fake_finalize_id
+            total_jobs = 1 if finalize_only else (replicate_count + aggregate_count + 1)
+            summary_rows.append(
+                {
+                    "analysis": plugin.name,
+                    "mode": manifest.pipeline_mode,
+                    "jobs": str(total_jobs),
+                    "finalize_job_id": fake_finalize_id,
+                }
+            )
+            continue
+
+        graph = submit_analysis_graph(
+            manifest,
+            resources,
+            hpc_dir,
+            root_dependencies=tuple(root_dependencies),
+        )
+        graph.save(hpc_dir / "job_graph.json")
+        finalize_ids[plugin.name] = graph.finalizer_job_id
+        total_jobs = 1 if finalize_only else (replicate_count + aggregate_count + 1)
+        summary_rows.append(
+            {
+                "analysis": plugin.name,
+                "mode": manifest.pipeline_mode,
+                "jobs": str(total_jobs),
+                "finalize_job_id": graph.finalizer_job_id,
+            }
+        )
+
+    _echo_submit_all_summary(summary_rows)
+    if dry_run:
+        click.echo("Dry run only: no jobs were submitted")
 
 
 @compare.command("status")
