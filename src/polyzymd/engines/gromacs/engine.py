@@ -94,6 +94,9 @@ class GromacsEngine(SimulationEngine):
         if request.slurm_config is None:
             raise ValueError("GROMACS submission requires slurm_config")
 
+        pixi_env = str(request.extra.get("pixi_env", "cuda-12-4"))
+        skip_build = bool(request.extra.get("skip_build", False))
+
         request.working_dir.mkdir(parents=True, exist_ok=True)
 
         # Build and export GROMACS inputs when not already present
@@ -103,9 +106,18 @@ class GromacsEngine(SimulationEngine):
         em_path = request.working_dir / "em.mdp"
         prod_path = request.working_dir / "prod.mdp"
 
-        if not (
+        inputs_exist = (
             top_path.exists() and gro_path.exists() and em_path.exists() and prod_path.exists()
-        ):
+        )
+
+        if not inputs_exist and skip_build:
+            raise FileNotFoundError(
+                "skip_build=True but required GROMACS inputs are missing "
+                f"in {request.working_dir}. Expected: {top_path.name}, {gro_path.name}, "
+                f"{em_path.name}, {prod_path.name}."
+            )
+
+        if not inputs_exist:
             from polyzymd.builders.system_builder import SystemBuilder
             from polyzymd.exporters.gromacs import GromacsExporter
 
@@ -131,6 +143,7 @@ class GromacsEngine(SimulationEngine):
 
         generator = GromacsSlurmScriptGenerator(
             slurm_config=request.slurm_config,
+            pixi_env=pixi_env,
             gmx_binary=self._gmx_binary,
             grompp_flags=self._config.gromacs.grompp_flags,
             mdrun_flags=self._config.gromacs.mdrun_flags,

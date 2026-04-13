@@ -46,6 +46,7 @@ def _make_dry_run_config() -> SimpleNamespace:
             projects_directory=Path("/tmp/projects"),
             effective_scratch_directory=Path("/tmp/scratch"),
             scratch_directory=Path("/tmp/scratch"),
+            get_job_scripts_directory=lambda: Path("/tmp/projects/job_scripts"),
         ),
         restraints=[],
         get_working_directory=lambda rep: Path(f"/tmp/scratch/run_{rep}"),
@@ -273,6 +274,13 @@ class TestSubmitCommandUnchanged:
         assert result.exit_code == 0
         assert "--generate-only" in result.output
 
+    def test_submit_help_shows_engine_flag(self) -> None:
+        """submit --help should show --engine option."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["submit", "--help"])
+        assert result.exit_code == 0
+        assert "--engine" in result.output
+
     def test_submit_dry_run_and_generate_only_conflict(self, tmp_path: Path) -> None:
         """submit should reject --dry-run with --generate-only."""
         config_path = tmp_path / "fake.yaml"
@@ -451,9 +459,16 @@ class TestCliExceptionHandlingNarrowing:
                 catch_exceptions=False,
             )
 
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
-    def test_submit_catches_runtime_error(self, mock_submit_daisy_chain, tmp_path: Path) -> None:
+    def test_submit_catches_runtime_error(
+        self,
+        mock_submit_daisy_chain,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
         """submit should catch RuntimeError and exit cleanly."""
+        mock_from_yaml.return_value = _make_dry_run_config()
         mock_submit_daisy_chain.side_effect = RuntimeError("submission blew up")
         config_path = tmp_path / "fake.yaml"
         config_path.write_text("name: test\n", encoding="utf-8")
@@ -467,11 +482,16 @@ class TestCliExceptionHandlingNarrowing:
         assert result.exit_code != 0
         assert "Submission failed: submission blew up" in result.output
 
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
     def test_submit_does_not_catch_type_error(
-        self, mock_submit_daisy_chain, tmp_path: Path
+        self,
+        mock_submit_daisy_chain,
+        mock_from_yaml,
+        tmp_path: Path,
     ) -> None:
         """submit should not catch TypeError programmer errors."""
+        mock_from_yaml.return_value = _make_dry_run_config()
         mock_submit_daisy_chain.side_effect = TypeError("submit programmer bug")
         config_path = tmp_path / "fake.yaml"
         config_path.write_text("name: test\n", encoding="utf-8")
@@ -623,9 +643,16 @@ class TestSubmitDryRunVsGenerateOnly:
         assert "DRY RUN" in result.output
         assert not output_dir.exists()
 
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
-    def test_generate_only_calls_submit_with_flag(self, mock_submit, tmp_path: Path) -> None:
+    def test_generate_only_calls_submit_with_flag(
+        self,
+        mock_submit,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
         """submit --generate-only should pass generate_only=True to the backend."""
+        mock_from_yaml.return_value = _make_dry_run_config()
         config_path = tmp_path / "fake.yaml"
         config_path.write_text("name: test\n", encoding="utf-8")
 
@@ -640,3 +667,108 @@ class TestSubmitDryRunVsGenerateOnly:
         call_kwargs = mock_submit.call_args.kwargs
         assert call_kwargs["generate_only"] is True
         assert call_kwargs["dry_run"] is False
+
+
+class TestSubmitEngineAware:
+    """Tests for engine-aware submit command."""
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_submit_dry_run_gromacs(self, mock_from_yaml, tmp_path: Path) -> None:
+        """submit --engine gromacs --dry-run should preview without files."""
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "gromacs"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            ["submit", "-c", str(config_path), "--engine", "gromacs", "--dry-run"],
+        )
+
+        assert result.exit_code == 0
+        assert "DRY RUN" in result.output
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_submit_openmm_path_unchanged(
+        self, mock_submit, mock_from_yaml, tmp_path: Path
+    ) -> None:
+        """submit without --engine should still use OpenMM daisy-chain."""
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "openmm"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["submit", "-c", str(config_path)])
+
+        assert result.exit_code == 0
+        mock_submit.assert_called_once()
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_submit_gromacs_calls_engine_submit(
+        self,
+        mock_from_yaml,
+        mock_resolve_gmx,
+        mock_engine_submit,
+        tmp_path: Path,
+    ) -> None:
+        """submit --engine gromacs should call GromacsEngine.submit()."""
+        _ = mock_resolve_gmx
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "gromacs"
+        mock_config.gromacs = SimpleNamespace(
+            grompp_flags="", mdrun_flags="", module_load=None, gmx_binary=None
+        )
+        mock_config.generate_system_name = lambda: "test_system"
+        mock_from_yaml.return_value = mock_config
+        mock_engine_submit.return_value = {
+            "submitted": False,
+            "script_path": "/tmp/script.sh",
+            "reason": "sbatch_not_available",
+        }
+
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        with patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[]):
+            with patch("polyzymd.workflow.daisy_chain.create_job_name", return_value="test_job"):
+                result = runner.invoke(
+                    cli,
+                    ["submit", "-c", str(config_path), "--engine", "gromacs"],
+                )
+
+        assert result.exit_code == 0
+        mock_engine_submit.assert_called_once()
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_submit_openff_logs_warns_for_gromacs(self, mock_from_yaml, tmp_path: Path) -> None:
+        """--openff-logs with --engine gromacs should warn."""
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "gromacs"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            [
+                "submit",
+                "-c",
+                str(config_path),
+                "--engine",
+                "gromacs",
+                "--openff-logs",
+                "--dry-run",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "no effect" in result.output.lower()

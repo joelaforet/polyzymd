@@ -1044,10 +1044,8 @@ def _run_openmm_impl(
 
 @cli.command(
     help=(
-        "Submit OpenMM self-resubmitting SLURM jobs. This command is "
-        "OpenMM-only; GROMACS users should use run --engine gromacs locally "
-        "or build --format gromacs for manual cluster submission. "
-        "Integrated GROMACS SLURM submission is planned for v1.4.0."
+        "Submit self-resubmitting SLURM jobs for OpenMM or GROMACS. "
+        "Use --engine to override the engine configured in YAML."
     )
 )
 @click.option(
@@ -1149,6 +1147,12 @@ def _run_openmm_impl(
     ),
 )
 @click.option(
+    "--engine",
+    default=None,
+    type=click.Choice(["gromacs", "openmm"], case_sensitive=False),
+    help="Engine override for submission backend (default: from config or openmm)",
+)
+@click.option(
     "--force",
     is_flag=True,
     help="Skip duplicate-job check and submit even if a SLURM job is already running for the replicate",
@@ -1170,18 +1174,14 @@ def submit(
     submit_openff_logs: bool,
     skip_build: bool,
     pixi_env: str | None,
+    engine: str | None,
     force: bool,
 ) -> None:
-    """Submit OpenMM simulation jobs to SLURM.
+    """Submit OpenMM or GROMACS simulation jobs to SLURM.
 
-    Creates and optionally submits one self-resubmitting OpenMM job per
-    replicate. These jobs checkpoint and resume automatically until the full
-    production duration is complete.
-
-    This command does not yet support GROMACS as a simulation engine. GROMACS
-    users should use ``run --engine gromacs`` for local execution or
-    ``build --format gromacs`` to export files for manual SLURM submission.
-    Integrated GROMACS SLURM submission is planned for v1.4.0.
+    Creates and optionally submits one self-resubmitting job per replicate.
+    OpenMM submission uses the existing daisy-chain flow, while GROMACS
+    submission uses the engine submission interface.
 
     \b
     Directory structure:
@@ -1220,10 +1220,18 @@ def submit(
 
         replicate_list = _resolve_replicates_option(replicates, None, "submit")
         sim_config = SimulationConfig.from_yaml(config)
+        engine_name = _resolve_engine_name(sim_config, override=engine)
         if scratch_dir:
             sim_config.output.scratch_directory = Path(scratch_dir)
         if projects_dir:
             sim_config.output.projects_directory = Path(projects_dir)
+
+        if engine_name == "gromacs" and submit_openff_logs:
+            colored_echo(
+                "Warning: --openff-logs has no effect with --engine gromacs",
+                phase="workflow",
+                level=logging.WARNING,
+            )
 
         script_dir = (
             Path(output_dir) if output_dir else sim_config.output.get_job_scripts_directory()
@@ -1243,6 +1251,89 @@ def submit(
         )
         colored_echo("Dry run complete. No files were written.", phase="workflow")
         colored_echo("=" * 60, phase="workflow")
+        return
+
+    from polyzymd.config.schema import SimulationConfig
+
+    sim_config = SimulationConfig.from_yaml(config)
+    engine_name = _resolve_engine_name(sim_config, override=engine)
+
+    if scratch_dir:
+        sim_config.output.scratch_directory = Path(scratch_dir)
+    if projects_dir:
+        sim_config.output.projects_directory = Path(projects_dir)
+
+    if engine_name == "gromacs":
+        from polyzymd.engines import create_engine
+        from polyzymd.engines.base import EngineSubmitRequest
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs, create_job_name
+        from polyzymd.workflow.slurm import SlurmConfig
+
+        if submit_openff_logs:
+            colored_echo(
+                "Warning: --openff-logs has no effect with --engine gromacs",
+                phase="workflow",
+                level=logging.WARNING,
+            )
+
+        engine_impl = create_engine(sim_config, override="gromacs")
+        replicate_list = _resolve_replicates_option(replicates, None, "submit")
+        config_path_abs = Path(config).resolve()
+
+        colored_echo("Using GROMACS submission backend", phase="workflow")
+
+        for rep in replicate_list:
+            slurm_config = SlurmConfig.from_preset(preset)
+            if time_limit:
+                slurm_config.time_limit = time_limit
+            if memory:
+                slurm_config.memory = memory
+            if account:
+                slurm_config.account = account
+            if gpu_type:
+                slurm_config.gpu_type = gpu_type
+
+            working_dir = sim_config.output.projects_directory / f"replicate_{rep}" / "gromacs"
+            job_name = create_job_name(sim_config, rep)
+
+            if not force:
+                existing = check_existing_slurm_jobs(job_name)
+                if existing:
+                    ids = ", ".join(existing)
+                    colored_echo(
+                        f"Replicate {rep} already has RUNNING/PENDING SLURM "
+                        f"job(s): {ids}. Use --force to submit anyway.",
+                        err=True,
+                        phase="workflow",
+                        level=logging.ERROR,
+                    )
+                    continue
+
+            request = EngineSubmitRequest(
+                replicate=rep,
+                config_path=config_path_abs,
+                working_dir=working_dir,
+                slurm_config=slurm_config,
+                job_name=job_name,
+                extra={"pixi_env": resolved_pixi_env, "skip_build": skip_build},
+            )
+
+            if generate_only:
+                script_path = engine_impl.prepare_submission(request)
+                colored_echo(f"  Rep {rep}: script at {script_path}", phase="workflow")
+            else:
+                result = engine_impl.submit(request)
+                if result.get("submitted"):
+                    colored_echo(f"  Rep {rep}: {result['stdout']}", phase="workflow")
+                else:
+                    colored_echo(
+                        f"  Rep {rep}: script at {result['script_path']} (sbatch not available)",
+                        phase="workflow",
+                    )
+
+        if not generate_only:
+            colored_echo("\nGROMACS job submission complete!", phase="workflow")
+            colored_echo("Monitor with: squeue -u $USER", phase="workflow")
         return
 
     if generate_only:
