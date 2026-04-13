@@ -9,117 +9,20 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from polyzymd.analyses.base import AggregateContext, Condition, ReplicateContext
+from polyzymd.analyses.base import AggregateContext, ReplicateContext
 from polyzymd.analyses.rmsf import RMSFAnalysis, RMSFSettings
 from polyzymd.engines.gromacs import GromacsEngine
-
-
-def _make_gromacs_config(tmp_path: Path) -> MagicMock:
-    """Create a minimal config mock that dispatches to GROMACS.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Temporary root directory for run folders.
-
-    Returns
-    -------
-    MagicMock
-        Config mock with the attributes required by TrajectoryLoader
-        and GromacsEngine layout resolution.
-    """
-    config = MagicMock()
-    config.engine = "gromacs"
-
-    config.gromacs = MagicMock()
-    config.gromacs.gmx_binary = "gmx"
-
-    config.generate_system_name = MagicMock(return_value="test_system")
-    config.get_working_directory = MagicMock(
-        side_effect=lambda replicate: tmp_path / f"run_{replicate}"
-    )
-
-    config.output = MagicMock()
-    config.output.effective_scratch_directory = tmp_path
-
-    return config
-
-
-def _create_gromacs_layout(run_dir: Path) -> None:
-    """Create a minimal GROMACS run directory layout on disk.
-
-    Parameters
-    ----------
-    run_dir : Path
-        Replicate directory (for example ``run_1``).
-    """
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "test_system.pdb").write_bytes(b"\n")
-    (run_dir / "prod.xtc").write_bytes(b"\n")
-
-
-class _MockTrajectory:
-    """Simple trajectory object emulating minimal MDAnalysis behavior."""
-
-    def __init__(self, n_frames: int = 200, dt_ps: float = 10.0) -> None:
-        self._n_frames = n_frames
-        self._dt_ps = dt_ps
-        self.time = 0.0
-
-    def __len__(self) -> int:
-        return self._n_frames
-
-    def __getitem__(self, item: int | slice):
-        if isinstance(item, slice):
-            start, stop, step = item.indices(self._n_frames)
-            return [self[idx] for idx in range(start, stop, step)]
-
-        frame = int(item)
-        self.time = frame * self._dt_ps
-        ts = MagicMock()
-        ts.frame = frame
-        ts.time = self.time
-        return ts
-
-    def __iter__(self):
-        for frame in range(self._n_frames):
-            yield self[frame]
-
-
-def _make_mock_universe() -> MagicMock:
-    """Build a mock MDAnalysis Universe with protein CA selection.
-
-    Returns
-    -------
-    MagicMock
-        Universe-like object with trajectory, select_atoms, residues,
-        positions, and indices used by RMSFAnalysis.
-    """
-    universe = MagicMock()
-    universe.trajectory = _MockTrajectory(n_frames=200, dt_ps=10.0)
-
-    atoms = MagicMock()
-    atoms.__len__ = MagicMock(return_value=5)
-
-    rng = np.random.default_rng(7)
-    atoms.positions = rng.random((5, 3)).astype(np.float32)
-    atoms.indices = np.arange(5)
-
-    residues = []
-    for resid in range(1, 6):
-        residue = MagicMock()
-        residue.resid = resid
-        residue.resname = "ALA"
-        residues.append(residue)
-    atoms.residues = residues
-
-    universe.select_atoms = MagicMock(return_value=atoms)
-    return universe
+from tests._support.gromacs_smoke import (
+    create_gromacs_layout,
+    install_fake_mdanalysis,
+    make_condition,
+    make_gromacs_config,
+    make_mock_universe,
+)
 
 
 class TestRMSFGromacsSmoke:
@@ -135,21 +38,16 @@ class TestRMSFGromacsSmoke:
         tmp_path : Path
             Pytest temporary directory fixture.
         """
-        config = _make_gromacs_config(tmp_path)
-        _create_gromacs_layout(tmp_path / "run_1")
-        _create_gromacs_layout(tmp_path / "run_2")
+        config = make_gromacs_config(tmp_path)
+        create_gromacs_layout(tmp_path / "run_1")
+        create_gromacs_layout(tmp_path / "run_2")
 
-        condition = Condition(
-            label="GROMACS Smoke",
-            config_path=tmp_path / "config.yaml",
-            replicates=(1, 2),
-            sim_config=config,
-        )
+        condition = make_condition(tmp_path, config)
         analysis = RMSFAnalysis()
         settings = RMSFSettings()
 
-        universe_1 = _make_mock_universe()
-        universe_2 = _make_mock_universe()
+        universe_1 = make_mock_universe()
+        universe_2 = make_mock_universe()
 
         def _mock_universe_ctor(topology: str, trajectory: str):
             if "run_1" in topology:
@@ -158,7 +56,7 @@ class TestRMSFGromacsSmoke:
                 return universe_2
             raise AssertionError(f"Unexpected topology path: {topology}")
 
-        fake_mda = ModuleType("MDAnalysis")
+        fake_mda = install_fake_mdanalysis()
         fake_mda.Universe = MagicMock(side_effect=_mock_universe_ctor)
 
         rmsf_values = [
