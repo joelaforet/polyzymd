@@ -1907,10 +1907,17 @@ def _run_continuation_segment(
     type=click.Path(),
     help="Override scratch directory",
 )
+@click.option(
+    "--engine",
+    default=None,
+    type=click.Choice(["gromacs", "openmm"], case_sensitive=False),
+    hidden=True,
+)
 def check_progress(
     config: str,
     replicate: int,
     scratch_dir: str | None,
+    engine: str | None,
 ) -> None:
     """Check whether a simulation is complete.
 
@@ -1925,7 +1932,8 @@ def check_progress(
         3 - Error (do NOT resubmit)
     """
     from polyzymd.config.schema import SimulationConfig
-    from polyzymd.simulation.progress import load_or_scan_progress
+    from polyzymd.engines import create_engine
+    from polyzymd.simulation.progress import save_progress
     from polyzymd.simulation.signals import EXIT_CODE_CHECK_ERROR
 
     try:
@@ -1939,20 +1947,14 @@ def check_progress(
     else:
         working_dir = sim_config.get_working_directory(replicate)
 
+    engine_name = _resolve_engine_name(sim_config, override=engine)
+
     prod = sim_config.simulation_phases.production
     timestep_fs = prod.time_step
-    total_steps = int(prod.duration * 1e6 / timestep_fs)
-    total_samples = prod.samples
-
     try:
-        progress = load_or_scan_progress(
-            working_dir=working_dir,
-            config_path=str(Path(config).resolve()),
-            total_steps=total_steps,
-            total_samples=total_samples,
-            timestep_fs=timestep_fs,
-            replicate=replicate,
-        )
+        engine_inst = create_engine(sim_config, override=engine_name)
+        progress = engine_inst.load_or_scan_progress(working_dir, replicate)
+        save_progress(working_dir, progress)
     except (FileNotFoundError, ValueError, OSError) as e:
         colored_echo(f"Failed to load progress: {e}", err=True, level=logging.ERROR)
         sys.exit(EXIT_CODE_CHECK_ERROR)
@@ -2002,11 +2004,8 @@ def status(config: str) -> None:
     """
     from polyzymd.cli.colors import render_progress_bar
     from polyzymd.config.schema import SimulationConfig
-    from polyzymd.simulation.progress import (
-        SimulationStatus,
-        load_or_scan_progress,
-        save_progress,
-    )
+    from polyzymd.engines import create_engine
+    from polyzymd.simulation.progress import SimulationStatus, save_progress
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
@@ -2014,12 +2013,12 @@ def status(config: str) -> None:
         click.echo(click.style(f"Error: Failed to load config: {e}", fg="red"), err=True)
         sys.exit(1)
 
+    engine_name = _resolve_engine_name(sim_config, override=None)
+    engine_inst = create_engine(sim_config, override=engine_name)
+
     # Total production metadata from config
     prod = sim_config.simulation_phases.production
     total_ns = prod.duration
-    timestep_fs = prod.time_step
-    total_steps = int(prod.duration * 1e6 / timestep_fs)
-    total_samples = prod.samples
 
     # Build a human-readable system name from the directory template
     # (format with replicate=1, then strip the trailing "_run1")
@@ -2067,14 +2066,7 @@ def status(config: str) -> None:
             status_str = "not_found"
             status_display = "not found"
         else:
-            progress = load_or_scan_progress(
-                working_dir=rep_path,
-                config_path=str(Path(config).resolve()),
-                total_steps=total_steps,
-                total_samples=total_samples,
-                timestep_fs=timestep_fs,
-                replicate=rep_num,
-            )
+            progress = engine_inst.load_or_scan_progress(rep_path, rep_num)
             save_progress(rep_path, progress)
 
             frac = progress.fraction_complete()

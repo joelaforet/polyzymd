@@ -145,12 +145,94 @@ def _write_progress_json(
 def _mock_sim_config(scratch_dir: Path) -> MagicMock:
     """Create a mock SimulationConfig for status tests."""
     mock = MagicMock()
+    mock.engine = "openmm"
     mock.simulation_phases.production.duration = 100.0
     mock.simulation_phases.production.time_step = 2.0
     mock.simulation_phases.production.samples = 250
     mock._format_run_directory_name.return_value = "fnIII_apo_none_100ns_310K_run1"
     mock.output.effective_scratch_directory = scratch_dir
     return mock
+
+
+class TestCheckProgressEngineAware:
+    """Tests for engine-aware check-progress command."""
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
+    def test_check_progress_uses_engine_dispatch(
+        self, mock_load_progress, mock_from_yaml, tmp_path
+    ):
+        """check-progress should use engine dispatch for progress loading."""
+        mock_cfg = _mock_sim_config(tmp_path / "scratch")
+        mock_cfg.engine = "openmm"
+        mock_from_yaml.return_value = mock_cfg
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=50_000_000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=50_000_000,
+                    steps_requested=50_000_000,
+                    samples_written=250,
+                    status=SegmentStatus.COMPLETED,
+                    duration_ns=100.0,
+                )
+            ],
+            status=SimulationStatus.COMPLETED,
+            replicate=1,
+        )
+        mock_load_progress.return_value = progress
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("name: test\n")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["check-progress", "-c", str(config_path)])
+
+        assert result.exit_code == 0
+        assert "COMPLETE" in result.output
+        mock_load_progress.assert_called_once()
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
+    def test_check_progress_incomplete_exits_1(self, mock_load_progress, mock_from_yaml, tmp_path):
+        """check-progress should exit 1 when work remains."""
+        mock_cfg = _mock_sim_config(tmp_path / "scratch")
+        mock_cfg.engine = "openmm"
+        mock_from_yaml.return_value = mock_cfg
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=50_000_000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=25_000_000,
+                    steps_requested=50_000_000,
+                    samples_written=125,
+                    status=SegmentStatus.INTERRUPTED,
+                    duration_ns=50.0,
+                )
+            ],
+            status=SimulationStatus.INTERRUPTED,
+            replicate=1,
+        )
+        mock_load_progress.return_value = progress
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("name: test\n")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["check-progress", "-c", str(config_path)])
+
+        assert result.exit_code == 1
+        assert "remaining" in result.output.lower()
 
 
 class TestStatusCli:

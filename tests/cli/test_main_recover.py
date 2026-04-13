@@ -68,6 +68,7 @@ class TestFindTopologyPdb:
 def _mock_sim_config(working_dir: Path):
     """Create a mock SimulationConfig that returns working_dir."""
     mock = MagicMock()
+    mock.engine = "openmm"
     mock.get_working_directory.return_value = working_dir
     mock.simulation_phases.production.time_step = 2.0
     mock.simulation_phases.production.duration = 20.0  # ns
@@ -181,7 +182,7 @@ class TestRecoverStatusReport:
 class TestCheckProgress:
     """check-progress reports status and exits with correct code."""
 
-    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_complete_exits_zero(self, mock_from_yaml, mock_load, tmp_path):
         """check-progress should exit 0 when simulation is complete."""
@@ -201,7 +202,7 @@ class TestCheckProgress:
         assert result.exit_code == 0
         assert "COMPLETE" in result.output
 
-    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_incomplete_exits_one(self, mock_from_yaml, mock_load, tmp_path):
         """check-progress should exit 1 when work remains."""
@@ -221,7 +222,7 @@ class TestCheckProgress:
         assert result.exit_code == 1
         assert "remaining" in result.output.lower()
 
-    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_shows_segment_count(self, mock_from_yaml, mock_load, tmp_path):
         """check-progress should report the number of segments."""
@@ -256,7 +257,7 @@ class TestCheckProgress:
         result = runner.invoke(cli, ["check-progress", "-c", str(config_file), "-r", "1"])
         assert result.exit_code == 3
 
-    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_progress_load_error_exits_three(self, mock_from_yaml, mock_load, tmp_path):
         """check-progress should exit 3 on progress load failure."""
@@ -822,7 +823,7 @@ class TestBuildDryRunGromacs:
             cli, ["build", "-c", str(config_file), "--dry-run", "--gromacs", "-r", "1"]
         )
         assert result.exit_code == 0, result.output
-        assert (
-            "{projects_dir}" not in result.output
-        ), "Output path must be interpolated, not literal {projects_dir}"
+        assert "{projects_dir}" not in result.output, (
+            "Output path must be interpolated, not literal {projects_dir}"
+        )
         assert str(tmp_path / "projects") in result.output
