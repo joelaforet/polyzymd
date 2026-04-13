@@ -549,6 +549,98 @@ limits or non-standard array scheduling behavior. Test with `--dry-run
 --job-arrays` first to inspect the generated scripts.
 :::
 
+## CU Boulder HPC: Alpine and Blanca
+
+CU Boulder operates two SLURM clusters: **Alpine** (shared campus resource) and
+**Blanca** (condo model with PI-owned nodes). Both clusters require
+`--partition`, `--account`, and `--qos` to be set explicitly for job
+submission.
+
+### Switching between clusters
+
+Use environment modules to select which cluster's SLURM scheduler you target:
+
+```bash
+# Target Blanca (PI-owned condo nodes)
+ml slurm/blanca
+
+# Target Alpine (shared campus resource)
+ml slurm/alpine
+```
+
+Run the appropriate `ml slurm/<cluster>` command **before** any `polyzymd`
+submission command. The module swap updates `sbatch`, `squeue`, and other
+SLURM utilities to point at the selected cluster.
+
+### Required SLURM flags
+
+Both clusters require all three scheduling flags. Omitting any of them causes
+`sbatch` to reject the job.
+
+| Flag | Alpine (shared) | Blanca (condo) |
+|------|-----------------|----------------|
+| `--partition` | `amilan` (CPU), `aa100` or `ami100` (GPU) | `blanca-<group>` (e.g. `blanca-shirts`) |
+| `--account` | Your allocation (e.g. `ucb625_asc1`) | Same as partition (e.g. `blanca-shirts`) |
+| `--qos` | `normal` | Same as partition (e.g. `blanca-shirts`) |
+
+:::{warning}
+If you omit `--partition` on Blanca, `sbatch` fails with
+*"A partition has not been provided"* — and the error message unhelpfully
+references Alpine documentation. This does not mean you need to switch to
+Alpine. Add `--partition=blanca-<group>` and resubmit.
+:::
+
+### Example: submit all analyses on Alpine
+
+```bash
+ml slurm/alpine
+
+pixi run -e build polyzymd compare submit-all \
+    -f comparison.yaml \
+    --partition amilan \
+    --account ucb625_asc1 \
+    --qos normal
+```
+
+### Example: submit all analyses on Blanca
+
+On Blanca, the partition, account, and QoS are typically the same value —
+your PI's condo allocation name:
+
+```bash
+ml slurm/blanca
+
+pixi run -e build polyzymd compare submit-all \
+    -f comparison.yaml \
+    --partition blanca-shirts \
+    --account blanca-shirts \
+    --qos blanca-shirts
+```
+
+### Example: submit a single analysis on Blanca
+
+The same flags work with `compare submit` for individual plugins:
+
+```bash
+pixi run -e build polyzymd compare submit sasa \
+    -f comparison.yaml \
+    --partition blanca-shirts \
+    --account blanca-shirts \
+    --qos blanca-shirts \
+    --mem 8G \
+    --time 02:00:00
+```
+
+:::{tip}
+If you are unsure which accounts and partitions you have access to, run:
+
+```bash
+sacctmgr show association user=$USER format=account,partition,qos
+```
+
+This lists every account/partition/QoS combination available to your user.
+:::
+
 ## What You Have Now
 
 After following this guide, you have:

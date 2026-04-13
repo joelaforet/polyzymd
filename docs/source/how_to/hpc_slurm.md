@@ -142,6 +142,42 @@ Common Bridges2 differences:
 - you may need `--account` if you want to charge a specific allocation
 - GPU selection can be adjusted with `--gpu-type`
 
+## Cluster-specific note for CU Boulder (Alpine and Blanca)
+
+CU Boulder runs two SLURM clusters. Switch between them with environment
+modules before submitting:
+
+```bash
+ml slurm/alpine   # shared campus resource
+ml slurm/blanca   # PI-owned condo nodes
+```
+
+Both clusters require `--partition`, `--account`, and `--qos` explicitly.
+Alpine example:
+
+```bash
+pixi run -e cuda-12-4 polyzymd submit \
+    -c config.yaml \
+    --preset aa100 \
+    --account ucb625_asc1 \
+    --replicates 1-5
+```
+
+Blanca example (partition, account, and QoS are typically the same value):
+
+```bash
+pixi run -e cuda-12-4 polyzymd submit \
+    -c config.yaml \
+    --preset blanca-shirts \
+    --replicates 1-5
+```
+
+:::{tip}
+If you are also running analysis jobs via `polyzymd compare submit-all`, see
+{doc}`hpc_execution` for detailed CU Boulder cluster configuration including
+partition tables and troubleshooting.
+:::
+
 ## What the generated scripts do
 
 Each generated script follows the same loop:
