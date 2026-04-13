@@ -3,6 +3,34 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
+
+from polyzymd.config.schema import SimulationConfig
+
+
+@pytest.fixture
+def minimal_config_data():
+    """Provide minimal valid SimulationConfig input data."""
+    return {
+        "name": "test_simulation",
+        "enzyme": {"name": "TestEnzyme", "pdb_path": "test.pdb"},
+        "thermodynamics": {"temperature": 300.0},
+        "simulation_phases": {
+            "equilibration_stages": [
+                {
+                    "name": "eq1",
+                    "duration": 0.1,
+                    "temperature": 300.0,
+                    "ensemble": "NVT",
+                }
+            ],
+            "production": {
+                "ensemble": "NPT",
+                "duration": 1.0,
+                "samples": 10,
+            },
+        },
+    }
 
 
 class TestImports:
@@ -260,3 +288,53 @@ class TestStatepointCoSolventExport:
         # Should not raise
         sp = _to_statepoint(cfg)
         assert "cosolvent_urea_molarity" in sp
+
+
+class TestEngineConfig:
+    """Tests for engine configuration fields."""
+
+    def test_default_engine_is_openmm(self, minimal_config_data):
+        """Default engine should be openmm for backward compatibility."""
+        config = SimulationConfig(**minimal_config_data)
+        assert config.engine == "openmm"
+
+    def test_gromacs_engine_parses(self, minimal_config_data):
+        """Setting engine to gromacs should work."""
+        minimal_config_data["engine"] = "gromacs"
+        config = SimulationConfig(**minimal_config_data)
+        assert config.engine == "gromacs"
+
+    def test_invalid_engine_rejected(self, minimal_config_data):
+        """Invalid engine names should be rejected."""
+        minimal_config_data["engine"] = "lammps"
+        with pytest.raises(ValidationError):
+            SimulationConfig(**minimal_config_data)
+
+    def test_openmm_engine_config_defaults(self, minimal_config_data):
+        """OpenMM engine config should have sensible defaults."""
+        config = SimulationConfig(**minimal_config_data)
+        assert config.openmm.platform == "CUDA"
+        assert config.openmm.precision == "mixed"
+
+    def test_gromacs_engine_config_defaults(self, minimal_config_data):
+        """GROMACS engine config should have sensible defaults."""
+        config = SimulationConfig(**minimal_config_data)
+        assert config.gromacs.gmx_binary is None
+        assert config.gromacs.grompp_flags == "-maxwarn 1"
+
+    def test_gromacs_engine_config_custom(self, minimal_config_data):
+        """Custom GROMACS settings should be parsed."""
+        minimal_config_data["engine"] = "gromacs"
+        minimal_config_data["gromacs"] = {
+            "gmx_binary": "gmx_mpi",
+            "mdrun_flags": "-ntmpi 1 -ntomp 8",
+        }
+        config = SimulationConfig(**minimal_config_data)
+        assert config.gromacs.gmx_binary == "gmx_mpi"
+        assert config.gromacs.mdrun_flags == "-ntmpi 1 -ntomp 8"
+
+    def test_old_config_without_engine_field(self, minimal_config_data):
+        """Old configs without engine field should default to openmm."""
+        minimal_config_data.pop("engine", None)
+        config = SimulationConfig(**minimal_config_data)
+        assert config.engine == "openmm"
