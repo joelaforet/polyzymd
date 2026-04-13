@@ -547,6 +547,14 @@ def _try_load_sibling_sasa(
             logger.debug("Corrupted sibling artifact %s: %s", candidate.npz_path, exc)
             continue
 
+        # Legacy artifacts without atom indices cannot be verified
+        if sasa_result.target_atom_indices.size == 0:
+            logger.debug(
+                "Sibling %s: legacy artifact without atom indices, skipping",
+                candidate.npz_path.name,
+            )
+            continue
+
         # Tier 2: atom-index comparison
         stored_target = np.sort(sasa_result.target_atom_indices)
         stored_context = np.sort(sasa_result.context_atom_indices)

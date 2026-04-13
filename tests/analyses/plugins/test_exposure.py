@@ -1269,6 +1269,333 @@ class TestSiblingSASAReuse:
 
         assert result is None
 
+    def test_legacy_sibling_without_atom_indices_returns_none(self, tmp_path):
+        """Legacy sibling artifacts without index arrays should be skipped."""
+        import json
+
+        from polyzymd.analyses.exposure._sasa_config import SASAConfig
+        from polyzymd.analyses.exposure._sasa_trajectory import _try_load_sibling_sasa
+        from polyzymd.analyses.shared.sasa import (
+            SASA_ARTIFACT_COMPATIBILITY_VERSION,
+            SASA_ARTIFACT_SCHEMA_NAME,
+            SASA_ARTIFACT_SCHEMA_VERSION,
+            compute_sasa_artifact_compatibility_hash,
+        )
+
+        exposure_run = tmp_path / "analysis" / "cond" / "exposure" / "run_1"
+        exposure_run.mkdir(parents=True)
+        sasa_run = tmp_path / "analysis" / "cond" / "sasa" / "run_1"
+        sasa_run.mkdir(parents=True)
+
+        n_frames = 3
+        n_residues = 5
+
+        compat_hash = compute_sasa_artifact_compatibility_hash(
+            probe_radius_nm=0.14,
+            n_sphere_points=960,
+            selection="protein and chainid 0",
+            context_selection="protein and chainid 0",
+            equilibration="0ns",
+        )
+
+        metadata = {
+            "artifact_schema": SASA_ARTIFACT_SCHEMA_NAME,
+            "artifact_schema_version": SASA_ARTIFACT_SCHEMA_VERSION,
+            "artifact_compatibility_version": SASA_ARTIFACT_COMPATIBILITY_VERSION,
+            "probe_radius_nm": 0.14,
+            "n_sphere_points": 960,
+            "equilibration": "0ns",
+            "units": "A^2",
+            "sasa_mode": "atom",
+            "compatibility_hash": compat_hash,
+            "target_selection": "protein and chainid 0",
+            "context_selection": "protein and chainid 0",
+        }
+        (sasa_run / "sasa_legacy.json").write_text(json.dumps(metadata))
+
+        np.savez_compressed(
+            sasa_run / "sasa_legacy.npz",
+            atom_sasa_a2=np.random.rand(n_frames, 50).astype(np.float64) * 100,
+            residue_sasa_a2=np.random.rand(n_frames, n_residues).astype(np.float64) * 100,
+            total_sasa_a2=np.random.rand(n_frames).astype(np.float64) * 500,
+            frames=np.arange(n_frames),
+            time_ns=np.arange(n_frames, dtype=np.float64),
+            residue_keys=np.array(["A:1:ALA", "A:2:GLY", "A:3:VAL", "A:4:LEU", "A:5:ILE"]),
+            residue_chainids=np.array(["A"] * n_residues),
+            residue_resids=np.arange(1, n_residues + 1),
+            residue_resnames=np.array(["ALA", "GLY", "VAL", "LEU", "ILE"]),
+        )
+
+        config = SASAConfig(probe_radius_nm=0.14, n_sphere_points=960, chain_id="A")
+
+        with patch(
+            "polyzymd.analyses.exposure._sasa_trajectory._resolve_protein_indices_from_topology",
+            return_value=np.arange(50, dtype=np.int64),
+        ):
+            result = _try_load_sibling_sasa(
+                topology_path=tmp_path / "top.pdb",
+                config=config,
+                analysis_dir=exposure_run,
+                equilibration="0ns",
+            )
+
+        assert result is None
+
+    def test_sibling_context_with_polymer_rejected_even_when_target_matches(self, tmp_path):
+        """Sibling artifacts with polymer context should be rejected for exposure."""
+        import json
+
+        from polyzymd.analyses.exposure._sasa_config import SASAConfig
+        from polyzymd.analyses.exposure._sasa_trajectory import _try_load_sibling_sasa
+        from polyzymd.analyses.shared.sasa import (
+            SASA_ARTIFACT_COMPATIBILITY_VERSION,
+            SASA_ARTIFACT_SCHEMA_NAME,
+            SASA_ARTIFACT_SCHEMA_VERSION,
+            compute_sasa_artifact_compatibility_hash,
+        )
+
+        exposure_run = tmp_path / "analysis" / "cond" / "exposure" / "run_1"
+        exposure_run.mkdir(parents=True)
+        sasa_run = tmp_path / "analysis" / "cond" / "sasa" / "run_1"
+        sasa_run.mkdir(parents=True)
+
+        n_frames = 3
+        n_residues = 5
+        protein_indices = np.arange(50, dtype=np.int64)
+        protein_plus_polymer_indices = np.arange(100, dtype=np.int64)
+
+        compat_hash = compute_sasa_artifact_compatibility_hash(
+            probe_radius_nm=0.14,
+            n_sphere_points=960,
+            selection="protein and chainid 0",
+            context_selection="protein and chainid 0",
+            equilibration="0ns",
+        )
+
+        metadata = {
+            "artifact_schema": SASA_ARTIFACT_SCHEMA_NAME,
+            "artifact_schema_version": SASA_ARTIFACT_SCHEMA_VERSION,
+            "artifact_compatibility_version": SASA_ARTIFACT_COMPATIBILITY_VERSION,
+            "probe_radius_nm": 0.14,
+            "n_sphere_points": 960,
+            "equilibration": "0ns",
+            "units": "A^2",
+            "sasa_mode": "atom",
+            "compatibility_hash": compat_hash,
+            "target_selection": "protein and chainid 0",
+            "context_selection": "protein and chainid 0",
+        }
+        (sasa_run / "sasa_protein_with_polymer_context.json").write_text(json.dumps(metadata))
+
+        np.savez_compressed(
+            sasa_run / "sasa_protein_with_polymer_context.npz",
+            atom_sasa_a2=np.random.rand(n_frames, 50).astype(np.float64) * 100,
+            residue_sasa_a2=np.random.rand(n_frames, n_residues).astype(np.float64) * 100,
+            total_sasa_a2=np.random.rand(n_frames).astype(np.float64) * 500,
+            frames=np.arange(n_frames),
+            time_ns=np.arange(n_frames, dtype=np.float64),
+            target_atom_indices=protein_indices,
+            context_atom_indices=protein_plus_polymer_indices,
+            residue_keys=np.array(["A:1:ALA", "A:2:GLY", "A:3:VAL", "A:4:LEU", "A:5:ILE"]),
+            residue_chainids=np.array(["A"] * n_residues),
+            residue_resids=np.arange(1, n_residues + 1),
+            residue_resnames=np.array(["ALA", "GLY", "VAL", "LEU", "ILE"]),
+        )
+
+        config = SASAConfig(probe_radius_nm=0.14, n_sphere_points=960, chain_id="A")
+
+        with patch(
+            "polyzymd.analyses.exposure._sasa_trajectory._resolve_protein_indices_from_topology",
+            return_value=protein_indices,
+        ):
+            result = _try_load_sibling_sasa(
+                topology_path=tmp_path / "top.pdb",
+                config=config,
+                analysis_dir=exposure_run,
+                equilibration="0ns",
+            )
+
+        assert result is None
+
+    def test_sibling_hit_converts_residue_sasa_a2_to_nm2(self, tmp_path):
+        """Sibling adaptation should convert residue SASA from Å² to nm²."""
+        import json
+
+        from polyzymd.analyses.exposure._sasa_config import SASAConfig
+        from polyzymd.analyses.exposure._sasa_trajectory import _try_load_sibling_sasa
+        from polyzymd.analyses.shared.sasa import (
+            A2_TO_NM2,
+            SASA_ARTIFACT_COMPATIBILITY_VERSION,
+            SASA_ARTIFACT_SCHEMA_NAME,
+            SASA_ARTIFACT_SCHEMA_VERSION,
+            compute_sasa_artifact_compatibility_hash,
+        )
+
+        exposure_run = tmp_path / "analysis" / "cond" / "exposure" / "run_1"
+        exposure_run.mkdir(parents=True)
+        sasa_run = tmp_path / "analysis" / "cond" / "sasa" / "run_1"
+        sasa_run.mkdir(parents=True)
+
+        protein_indices = np.arange(50, dtype=np.int64)
+        residue_sasa_a2 = np.asarray([[100.0, 200.0, 300.0]], dtype=np.float64)
+
+        compat_hash = compute_sasa_artifact_compatibility_hash(
+            probe_radius_nm=0.14,
+            n_sphere_points=960,
+            selection="protein and chainid 0",
+            context_selection="protein and chainid 0",
+            equilibration="0ns",
+        )
+
+        metadata = {
+            "artifact_schema": SASA_ARTIFACT_SCHEMA_NAME,
+            "artifact_schema_version": SASA_ARTIFACT_SCHEMA_VERSION,
+            "artifact_compatibility_version": SASA_ARTIFACT_COMPATIBILITY_VERSION,
+            "probe_radius_nm": 0.14,
+            "n_sphere_points": 960,
+            "equilibration": "0ns",
+            "units": "A^2",
+            "sasa_mode": "atom",
+            "compatibility_hash": compat_hash,
+            "target_selection": "protein and chainid 0",
+            "context_selection": "protein and chainid 0",
+        }
+        (sasa_run / "sasa_unit_conversion.json").write_text(json.dumps(metadata))
+
+        np.savez_compressed(
+            sasa_run / "sasa_unit_conversion.npz",
+            atom_sasa_a2=np.random.rand(1, 50).astype(np.float64) * 100,
+            residue_sasa_a2=residue_sasa_a2,
+            total_sasa_a2=np.asarray([600.0], dtype=np.float64),
+            frames=np.asarray([0], dtype=np.int64),
+            time_ns=np.asarray([0.0], dtype=np.float64),
+            target_atom_indices=protein_indices,
+            context_atom_indices=protein_indices,
+            residue_keys=np.array(["A:1:ALA", "A:2:GLY", "A:3:VAL"]),
+            residue_chainids=np.array(["A", "A", "A"]),
+            residue_resids=np.asarray([1, 2, 3], dtype=np.int64),
+            residue_resnames=np.array(["ALA", "GLY", "VAL"]),
+        )
+
+        config = SASAConfig(probe_radius_nm=0.14, n_sphere_points=960, chain_id="A")
+
+        with patch(
+            "polyzymd.analyses.exposure._sasa_trajectory._resolve_protein_indices_from_topology",
+            return_value=protein_indices,
+        ):
+            result = _try_load_sibling_sasa(
+                topology_path=tmp_path / "top.pdb",
+                config=config,
+                analysis_dir=exposure_run,
+                equilibration="0ns",
+            )
+
+        assert result is not None
+        expected_nm2 = residue_sasa_a2.astype(np.float32) * A2_TO_NM2
+        np.testing.assert_allclose(result.sasa_per_frame, expected_nm2)
+
+    def test_sibling_missing_probe_radius_metadata_returns_none(self, tmp_path):
+        """Sibling metadata missing required fields should be rejected."""
+        import json
+
+        from polyzymd.analyses.exposure._sasa_config import SASAConfig
+        from polyzymd.analyses.exposure._sasa_trajectory import _try_load_sibling_sasa
+        from polyzymd.analyses.shared.sasa import (
+            SASA_ARTIFACT_COMPATIBILITY_VERSION,
+            SASA_ARTIFACT_SCHEMA_NAME,
+            SASA_ARTIFACT_SCHEMA_VERSION,
+            compute_sasa_artifact_compatibility_hash,
+        )
+
+        exposure_run = tmp_path / "analysis" / "cond" / "exposure" / "run_1"
+        exposure_run.mkdir(parents=True)
+        sasa_run = tmp_path / "analysis" / "cond" / "sasa" / "run_1"
+        sasa_run.mkdir(parents=True)
+
+        compat_hash = compute_sasa_artifact_compatibility_hash(
+            probe_radius_nm=0.14,
+            n_sphere_points=960,
+            selection="protein and chainid 0",
+            context_selection="protein and chainid 0",
+            equilibration="0ns",
+        )
+
+        metadata = {
+            "artifact_schema": SASA_ARTIFACT_SCHEMA_NAME,
+            "artifact_schema_version": SASA_ARTIFACT_SCHEMA_VERSION,
+            "artifact_compatibility_version": SASA_ARTIFACT_COMPATIBILITY_VERSION,
+            "n_sphere_points": 960,
+            "equilibration": "0ns",
+            "units": "A^2",
+            "sasa_mode": "atom",
+            "compatibility_hash": compat_hash,
+            "target_selection": "protein and chainid 0",
+            "context_selection": "protein and chainid 0",
+        }
+        (sasa_run / "sasa_missing_probe.json").write_text(json.dumps(metadata))
+
+        protein_indices = np.arange(50, dtype=np.int64)
+        np.savez_compressed(
+            sasa_run / "sasa_missing_probe.npz",
+            atom_sasa_a2=np.random.rand(1, 50).astype(np.float64) * 100,
+            residue_sasa_a2=np.random.rand(1, 3).astype(np.float64) * 100,
+            total_sasa_a2=np.asarray([250.0], dtype=np.float64),
+            frames=np.asarray([0], dtype=np.int64),
+            time_ns=np.asarray([0.0], dtype=np.float64),
+            target_atom_indices=protein_indices,
+            context_atom_indices=protein_indices,
+            residue_keys=np.array(["A:1:ALA", "A:2:GLY", "A:3:VAL"]),
+            residue_chainids=np.array(["A", "A", "A"]),
+            residue_resids=np.asarray([1, 2, 3], dtype=np.int64),
+            residue_resnames=np.array(["ALA", "GLY", "VAL"]),
+        )
+
+        config = SASAConfig(probe_radius_nm=0.14, n_sphere_points=960, chain_id="A")
+        result = _try_load_sibling_sasa(
+            topology_path=tmp_path / "top.pdb",
+            config=config,
+            analysis_dir=exposure_run,
+            equilibration="0ns",
+        )
+
+        assert result is None
+
+    def test_corrupted_sibling_metadata_json_skipped(self, tmp_path):
+        """Sibling metadata JSON parse failures should be skipped safely."""
+        from polyzymd.analyses.exposure._sasa_config import SASAConfig
+        from polyzymd.analyses.exposure._sasa_trajectory import _try_load_sibling_sasa
+
+        exposure_run = tmp_path / "analysis" / "cond" / "exposure" / "run_1"
+        exposure_run.mkdir(parents=True)
+        sasa_run = tmp_path / "analysis" / "cond" / "sasa" / "run_1"
+        sasa_run.mkdir(parents=True)
+
+        np.savez_compressed(
+            sasa_run / "sasa_bad_metadata.npz",
+            atom_sasa_a2=np.random.rand(1, 50).astype(np.float64) * 100,
+            residue_sasa_a2=np.random.rand(1, 3).astype(np.float64) * 100,
+            total_sasa_a2=np.asarray([250.0], dtype=np.float64),
+            frames=np.asarray([0], dtype=np.int64),
+            time_ns=np.asarray([0.0], dtype=np.float64),
+            target_atom_indices=np.arange(50, dtype=np.int64),
+            context_atom_indices=np.arange(50, dtype=np.int64),
+            residue_keys=np.array(["A:1:ALA", "A:2:GLY", "A:3:VAL"]),
+            residue_chainids=np.array(["A", "A", "A"]),
+            residue_resids=np.asarray([1, 2, 3], dtype=np.int64),
+            residue_resnames=np.array(["ALA", "GLY", "VAL"]),
+        )
+        (sasa_run / "sasa_bad_metadata.json").write_bytes(b"not valid json {{{")
+
+        config = SASAConfig(probe_radius_nm=0.14, n_sphere_points=960, chain_id="A")
+        result = _try_load_sibling_sasa(
+            topology_path=tmp_path / "top.pdb",
+            config=config,
+            analysis_dir=exposure_run,
+            equilibration="0ns",
+        )
+
+        assert result is None
+
     def test_corrupted_sibling_skipped(self, tmp_path):
         """Corrupted sibling NPZ should be caught and skipped."""
         import json
@@ -1454,13 +1781,12 @@ class TestSiblingSASAReuse:
 
     def test_adaptation_failure_skips_sibling(self, tmp_path):
         """If adapt_canonical_sasa_to_exposure() raises, the sibling is skipped."""
-        from polyzymd.analyses.exposure._sasa_config import SASAConfig
-        from polyzymd.analyses.exposure._sasa_trajectory import _try_load_sibling_sasa
-
         import json
 
         import numpy as np
 
+        from polyzymd.analyses.exposure._sasa_config import SASAConfig
+        from polyzymd.analyses.exposure._sasa_trajectory import _try_load_sibling_sasa
         from polyzymd.analyses.shared.sasa import (
             SASA_ARTIFACT_COMPATIBILITY_VERSION,
             SASA_ARTIFACT_SCHEMA_NAME,
