@@ -86,7 +86,6 @@ def _mock_sim_config_gromacs(working_dir: Path):
     mock.simulation_phases.production.time_step = 2.0
     mock.simulation_phases.production.duration = 20.0
     mock.simulation_phases.production.samples = 250
-    mock.generate_system_name.return_value = "system"
     mock.output.slurm_logs_subdir = "slurm_logs"
     mock.enzyme.name = "CALB"
     mock.thermodynamics.temperature = 310
@@ -993,7 +992,7 @@ class TestRecoverGromacsSubmit:
         working_dir = tmp_path / "work"
         working_dir.mkdir()
 
-        (working_dir / "system.top").write_text("[ system ]\n")
+        (working_dir / "CALB.top").write_text("[ system ]\n")
         (working_dir / "prod.mdp").write_text("integrator = md\n")
 
         sim_config = _mock_sim_config_gromacs(working_dir)

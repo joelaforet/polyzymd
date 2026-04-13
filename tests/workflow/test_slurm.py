@@ -372,9 +372,8 @@ class TestScriptValueValidation:
             == "/home/user/project/config.yaml"
         )
 
-    def test_empty_string_rejected(self):
-        """Empty strings should be rejected with the safe pattern."""
+    def test_empty_string_accepted(self):
+        """Empty strings should pass validation (e.g. empty mdrun_flags)."""
         from polyzymd.workflow.slurm import _validate_script_value
 
-        with pytest.raises(ValueError, match="unsafe characters"):
-            _validate_script_value("", "partition")
+        assert _validate_script_value("", "mdrun_flags") == ""
