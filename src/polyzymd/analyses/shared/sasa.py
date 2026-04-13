@@ -393,23 +393,15 @@ def save_sasa_artifacts(
         residue_resnames=np.asarray(result.residue_resnames, dtype=str),
     )
 
-    metadata = {
-        "run_label": run_label,
-        "target_selection": target_selection,
-        "context_selection": context_selection,
-        "units": "A^2",
-        "probe_radius_nm": probe_radius_nm,
-        "n_sphere_points": n_sphere_points,
-        "equilibration": equilibration,
-        "n_frames": int(result.frames.size),
-        "n_target_atoms": int(result.target_atom_indices.size),
-        "n_context_atoms": int(result.context_atom_indices.size),
-        "n_target_residues": len(result.residue_keys),
-        "residue_keys": result.residue_keys,
-        "residue_chainids": result.residue_chainids,
-        "residue_resids": result.residue_resids,
-        "residue_resnames": result.residue_resnames,
-    }
+    metadata = build_sasa_artifact_metadata(
+        result,
+        run_label=run_label,
+        target_selection=target_selection,
+        context_selection=context_selection,
+        probe_radius_nm=probe_radius_nm,
+        n_sphere_points=n_sphere_points,
+        equilibration=equilibration,
+    )
     metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
 
@@ -438,8 +430,16 @@ def load_sasa_artifacts(
             total_sasa_a2=np.asarray(payload["total_sasa_a2"], dtype=np.float64),
             frames=np.asarray(payload["frames"], dtype=np.int64),
             time_ns=np.asarray(payload["time_ns"], dtype=np.float64),
-            target_atom_indices=np.asarray(payload["target_atom_indices"], dtype=np.int64),
-            context_atom_indices=np.asarray(payload["context_atom_indices"], dtype=np.int64),
+            target_atom_indices=(
+                np.asarray(payload["target_atom_indices"], dtype=np.int64)
+                if "target_atom_indices" in payload
+                else np.empty((0,), dtype=np.int64)
+            ),
+            context_atom_indices=(
+                np.asarray(payload["context_atom_indices"], dtype=np.int64)
+                if "context_atom_indices" in payload
+                else np.empty((0,), dtype=np.int64)
+            ),
             residue_keys=[str(v) for v in payload["residue_keys"].tolist()],
             residue_chainids=[str(v) for v in payload["residue_chainids"].tolist()],
             residue_resids=[int(v) for v in payload["residue_resids"].tolist()],

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -140,8 +141,106 @@ def test_save_load_roundtrip(tmp_path: Path) -> None:
     loaded, metadata = load_sasa_artifacts(npz_path, metadata_path)
     assert np.allclose(loaded.total_sasa_a2, result.total_sasa_a2)
     assert loaded.residue_keys == result.residue_keys
+    assert np.array_equal(loaded.target_atom_indices, result.target_atom_indices)
+    assert np.array_equal(loaded.context_atom_indices, result.context_atom_indices)
     assert metadata["units"] == "A^2"
     assert metadata["n_target_atoms"] == 2
+    assert "artifact_schema" in metadata
+    assert "artifact_schema_version" in metadata
+    assert "artifact_compatibility_version" in metadata
+    assert "compatibility_hash" in metadata
+
+
+def test_load_sasa_artifacts_legacy_without_atom_indices(tmp_path: Path) -> None:
+    """Legacy NPZ payloads without atom indices should load with empty arrays."""
+    npz_path = tmp_path / "legacy_sasa.npz"
+    metadata_path = tmp_path / "legacy_sasa.json"
+
+    atom_sasa_a2 = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
+    residue_sasa_a2 = np.asarray([[3.0], [7.0]], dtype=np.float64)
+    total_sasa_a2 = np.asarray([3.0, 7.0], dtype=np.float64)
+    frames = np.asarray([0, 1], dtype=np.int64)
+    time_ns = np.asarray([0.0, 0.01], dtype=np.float64)
+    residue_keys = np.asarray(["A:10:ALA"], dtype=str)
+    residue_chainids = np.asarray(["A"], dtype=str)
+    residue_resids = np.asarray([10], dtype=np.int64)
+    residue_resnames = np.asarray(["ALA"], dtype=str)
+
+    np.savez_compressed(
+        npz_path,
+        atom_sasa_a2=atom_sasa_a2,
+        residue_sasa_a2=residue_sasa_a2,
+        total_sasa_a2=total_sasa_a2,
+        frames=frames,
+        time_ns=time_ns,
+        residue_keys=residue_keys,
+        residue_chainids=residue_chainids,
+        residue_resids=residue_resids,
+        residue_resnames=residue_resnames,
+    )
+
+    legacy_metadata = {
+        "run_label": "legacy_run",
+        "target_selection": "chainid A",
+        "context_selection": "all",
+        "units": "A^2",
+        "probe_radius_nm": 0.14,
+        "n_sphere_points": 960,
+        "equilibration": "10ns",
+    }
+    metadata_path.write_text(json.dumps(legacy_metadata), encoding="utf-8")
+
+    loaded, _metadata = load_sasa_artifacts(npz_path, metadata_path)
+
+    assert np.array_equal(loaded.target_atom_indices, np.empty((0,), dtype=np.int64))
+    assert np.array_equal(loaded.context_atom_indices, np.empty((0,), dtype=np.int64))
+    assert loaded.target_atom_indices.dtype == np.int64
+    assert loaded.context_atom_indices.dtype == np.int64
+    assert np.array_equal(loaded.atom_sasa_a2, atom_sasa_a2)
+    assert np.array_equal(loaded.residue_sasa_a2, residue_sasa_a2)
+    assert np.array_equal(loaded.total_sasa_a2, total_sasa_a2)
+
+
+def test_save_metadata_contains_versioned_schema_fields(tmp_path: Path) -> None:
+    """Saved metadata should include versioned and legacy schema fields."""
+    result = _make_sasa_result()
+    npz_path = tmp_path / "sasa.npz"
+    metadata_path = tmp_path / "sasa.json"
+
+    save_sasa_artifacts(
+        npz_path,
+        metadata_path,
+        result,
+        run_label="run_1",
+        target_selection="chainid A",
+        context_selection="all",
+        probe_radius_nm=0.14,
+        n_sphere_points=960,
+        equilibration="10ns",
+    )
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    versioned_keys = {
+        "artifact_schema",
+        "artifact_schema_version",
+        "artifact_compatibility_version",
+        "compatibility_hash",
+        "artifact_producer",
+        "sasa_engine",
+        "sasa_mode",
+    }
+    legacy_keys = {
+        "run_label",
+        "target_selection",
+        "context_selection",
+        "units",
+        "probe_radius_nm",
+        "n_sphere_points",
+    }
+
+    assert versioned_keys.issubset(metadata.keys())
+    assert legacy_keys.issubset(metadata.keys())
 
 
 def test_multichain_warning_integration(caplog: pytest.LogCaptureFixture) -> None:
@@ -964,6 +1063,39 @@ class TestFindSiblingSASAArtifacts:
         np.savez_compressed(
             sibling_dir / "sasa_candidate.npz", data=np.asarray([1.0], dtype=np.float64)
         )
+        matches = find_sibling_sasa_artifacts(replicate_dir, self._query())
+        assert matches == []
+
+    def test_find_sibling_returns_empty_when_metadata_json_invalid(self, tmp_path: Path) -> None:
+        replicate_dir = self._make_replicate_dir(tmp_path)
+        sibling_dir = tmp_path / "analysis" / "condA" / "sasa" / "run_1"
+        sibling_dir.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            sibling_dir / "sasa_candidate.npz", data=np.asarray([1.0], dtype=np.float64)
+        )
+        (sibling_dir / "sasa_candidate.json").write_bytes(b"not valid json {{{")
+
+        matches = find_sibling_sasa_artifacts(replicate_dir, self._query())
+        assert matches == []
+
+    def test_find_sibling_returns_empty_when_required_metadata_missing(
+        self, tmp_path: Path
+    ) -> None:
+        replicate_dir = self._make_replicate_dir(tmp_path)
+        sibling_dir = tmp_path / "analysis" / "condA" / "sasa" / "run_1"
+        sibling_dir.mkdir(parents=True, exist_ok=True)
+
+        good_hash = compute_sasa_artifact_compatibility_hash(
+            probe_radius_nm=0.14,
+            n_sphere_points=960,
+            selection="chainid A",
+            context_selection="all",
+            equilibration="10ns",
+        )
+        metadata = self._versioned_metadata(hash_value=good_hash)
+        metadata.pop("probe_radius_nm")
+        self._write_artifact(sibling_dir, "sasa_missing_probe", metadata)
+
         matches = find_sibling_sasa_artifacts(replicate_dir, self._query())
         assert matches == []
 
