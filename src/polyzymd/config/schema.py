@@ -1102,6 +1102,48 @@ class ForceFieldConfig(BaseModel):
 
 
 # =============================================================================
+# Engine Configuration
+# =============================================================================
+
+
+class OpenMMEngineConfig(BaseModel):
+    """OpenMM-specific engine settings.
+
+    These settings control OpenMM platform selection and device configuration.
+    Only relevant when ``engine`` is ``"openmm"``.
+
+    Attributes:
+        platform: OpenMM platform to use for computation.
+        device_index: GPU device index (platform-specific).
+        precision: Floating-point precision mode.
+    """
+
+    platform: str = Field("CUDA", description="OpenMM compute platform")
+    device_index: str | None = Field(None, description="GPU device index")
+    precision: str = Field("mixed", description="Floating-point precision")
+
+
+class GromacsEngineConfig(BaseModel):
+    """GROMACS-specific engine settings.
+
+    These settings control how GROMACS binaries are located and invoked.
+    Only relevant when ``engine`` is ``"gromacs"``.
+
+    Attributes:
+        gmx_binary: Path or name of the GROMACS binary.
+            Resolved via config > $GMX_BIN > PATH discovery if None.
+        mdrun_flags: Additional flags passed to ``gmx mdrun``.
+        grompp_flags: Additional flags passed to ``gmx grompp``.
+        module_load: Module load command for HPC (e.g. ``"module load gromacs/2024"``)
+    """
+
+    gmx_binary: str | None = Field(None, description="GROMACS binary path or name")
+    mdrun_flags: str = Field("", description="Extra flags for gmx mdrun")
+    grompp_flags: str = Field("-maxwarn 1", description="Extra flags for gmx grompp")
+    module_load: str | None = Field(None, description="HPC module load command")
+
+
+# =============================================================================
 # Main Simulation Configuration
 # =============================================================================
 
@@ -1148,6 +1190,13 @@ class SimulationConfig(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig, description="Output settings")
     force_field: ForceFieldConfig = Field(
         default_factory=ForceFieldConfig, description="Force field settings"
+    )
+    engine: Literal["openmm", "gromacs"] = Field("openmm", description="Simulation engine to use")
+    openmm: OpenMMEngineConfig = Field(
+        default_factory=OpenMMEngineConfig, description="OpenMM engine settings"
+    )
+    gromacs: GromacsEngineConfig = Field(
+        default_factory=GromacsEngineConfig, description="GROMACS engine settings"
     )
 
     @classmethod
