@@ -318,6 +318,9 @@ class PlotContext:
     control_label : str | None
         Label of the control condition, or ``None`` if not specified /
         excluded.  Mirrors ``ComparisonContext.control_label``.
+    equilibration : str
+        Equilibration time string used for equilibration-aware cache
+        filenames in plot helpers.
 
     Notes
     -----
@@ -341,6 +344,7 @@ class PlotContext:
     plot_settings: PlotSettings = field(default_factory=_default_plot_settings)
     comparison_path: Path | None = None
     control_label: str | None = None
+    equilibration: str = "0ns"
 
     def __post_init__(self) -> None:
         """Ensure plot settings is always materialized for plugins."""

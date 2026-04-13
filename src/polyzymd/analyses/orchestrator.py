@@ -789,6 +789,7 @@ def finalize_comparison_from_disk(
         plot_settings=raw_plot_settings,
         comparison_path=comparison_result_path if comparison_result is not None else None,
         control_label=resolved_control,
+        equilibration=resolved_equilibration,
     )
     try:
         plots = analysis.plot(plot_ctx)
@@ -1217,6 +1218,7 @@ def run_plot_only(
         plot_settings=raw_plot_settings,
         comparison_path=comparison_result_path,
         control_label=effective_control,
+        equilibration=resolved_equilibration,
     )
 
     try:
