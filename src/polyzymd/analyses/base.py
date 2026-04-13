@@ -1464,6 +1464,8 @@ class Analysis(ABC):
 
         data["__meta__"] = {
             "results_dir": ctx.results_dir,
+            "comparison_result_path": ctx.results_dir / "result.json",
+            "comparison_dir": ctx.results_dir,
             "settings": ctx.settings,
             "control_label": ctx.control_label,
         }

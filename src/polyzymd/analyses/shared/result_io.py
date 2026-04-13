@@ -221,6 +221,10 @@ def _try_load_from_dir(
     if not directory.is_dir():
         return None
 
+    canonical_result = _try_load_exact(directory / "result.json", loader, log)
+    if canonical_result is not None:
+        return canonical_result
+
     files: list[Path] = []
     for pattern in glob_patterns:
         files.extend(directory.glob(pattern))
