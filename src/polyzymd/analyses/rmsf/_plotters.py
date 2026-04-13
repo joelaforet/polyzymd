@@ -16,6 +16,7 @@ import numpy as np
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
     apply_legend,
+    find_json,
     get_colors,
     get_output_path,
     save_figure,
@@ -270,18 +271,9 @@ def _plot_rmsf_comparison_from_aggregated(
 
         aggregated_dir = Path(aggregated_dir)
 
-        # Look for aggregated RMSF result
-        result_file = aggregated_dir / "rmsf_aggregated.json"
-        if not result_file.exists():
-            json_files = sorted(aggregated_dir.glob("rmsf_*.json"))
-            if json_files:
-                result_file = json_files[0]
-                logger.warning(
-                    f"Expected rmsf_aggregated.json not found in {aggregated_dir}; "
-                    f"falling back to {result_file.name}"
-                )
-            else:
-                continue
+        result_file = _find_rmsf_aggregated_result_file(aggregated_dir)
+        if result_file is None:
+            continue
 
         try:
             with open(result_file) as f:
@@ -482,17 +474,9 @@ def _load_rmsf_profile(aggregated_dir: Path) -> dict | None:
     """
     import json
 
-    result_file = aggregated_dir / "rmsf_aggregated.json"
-    if not result_file.exists():
-        json_files = sorted(aggregated_dir.glob("rmsf_*.json"))
-        if json_files:
-            result_file = json_files[0]
-            logger.warning(
-                f"Expected rmsf_aggregated.json not found in {aggregated_dir}; "
-                f"falling back to {result_file.name}"
-            )
-        else:
-            return None
+    result_file = _find_rmsf_aggregated_result_file(aggregated_dir)
+    if result_file is None:
+        return None
 
     try:
         with open(result_file) as f:
@@ -525,3 +509,39 @@ def _load_rmsf_profile(aggregated_dir: Path) -> dict | None:
     except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
         logger.debug(f"Failed to load RMSF profile from {result_file}: {e}")
         return None
+
+
+def _find_rmsf_aggregated_result_file(aggregated_dir: Path) -> Path | None:
+    """Find an aggregated RMSF JSON file with backward-compatible fallbacks.
+
+    Search order keeps legacy behavior while supporting the framework's
+    canonical ``result.json`` filename.
+
+    Parameters
+    ----------
+    aggregated_dir : Path
+        Condition aggregated results directory.
+
+    Returns
+    -------
+    Path | None
+        Located JSON file path, or ``None`` when no candidate exists.
+    """
+    result_file = find_json(aggregated_dir, "rmsf_aggregated.json", "rmsf_*.json")
+    if result_file is not None:
+        if result_file.name != "rmsf_aggregated.json":
+            logger.warning(
+                f"Expected rmsf_aggregated.json not found in {aggregated_dir}; "
+                f"falling back to {result_file.name}"
+            )
+        return result_file
+
+    canonical_file = aggregated_dir / "result.json"
+    if canonical_file.exists():
+        logger.warning(
+            f"Expected rmsf_aggregated.json not found in {aggregated_dir}; "
+            "falling back to canonical result.json"
+        )
+        return canonical_file
+
+    return None
