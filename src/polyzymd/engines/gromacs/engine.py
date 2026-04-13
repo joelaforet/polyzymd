@@ -225,32 +225,63 @@ class GromacsEngine(SimulationEngine):
     def resolve_trajectory_layout(self, working_dir: Path, replicate: int) -> TrajectoryLayout:
         """Resolve GROMACS trajectory layout for downstream analyses.
 
+        Topology search order:
+
+        1. ``<prefix>.pdb`` (from system name)
+        2. Any ``*.pdb`` (sorted, first match)
+        3. ``<prefix>.gro``
+        4. Any ``*.gro`` (sorted, first match)
+
+        Trajectory search order:
+
+        1. ``prod.xtc`` (standard GROMACS production output)
+        2. Any ``*.xtc`` (sorted)
+
         Parameters
         ----------
         working_dir : Path
             Replicate working directory.
         replicate : int
-            Replicate index.
+            Replicate index (unused, kept for interface parity).
 
         Returns
         -------
         TrajectoryLayout
-            Resolved XTC layout with PDB topology fallback to GRO.
+            Resolved XTC layout with PDB topology preferred over GRO.
         """
         _ = replicate
 
-        trajectory_paths = sorted(working_dir.glob("*.xtc"))
-
-        pdb_candidates = sorted(working_dir.glob("*.pdb"))
-        gro_candidates = sorted(working_dir.glob("*.gro"))
+        prod_xtc = working_dir / "prod.xtc"
+        if prod_xtc.exists():
+            trajectory_paths = [prod_xtc]
+        else:
+            trajectory_paths = sorted(working_dir.glob("*.xtc"))
 
         topology_path: Path | None = None
         topology_format = "pdb"
-        if pdb_candidates:
-            topology_path = pdb_candidates[0]
-        elif gro_candidates:
-            topology_path = gro_candidates[0]
-            topology_format = "gro"
+
+        prefix = getattr(self._config, "generate_system_name", lambda: None)()
+        if prefix:
+            named_pdb = working_dir / f"{prefix}.pdb"
+            if named_pdb.exists():
+                topology_path = named_pdb
+
+        if topology_path is None:
+            pdb_candidates = sorted(working_dir.glob("*.pdb"))
+            if pdb_candidates:
+                topology_path = pdb_candidates[0]
+
+        if topology_path is None and prefix:
+            named_gro = working_dir / f"{prefix}.gro"
+            if named_gro.exists():
+                topology_path = named_gro
+                topology_format = "gro"
+
+        if topology_path is None:
+            gro_candidates = sorted(working_dir.glob("*.gro"))
+            if gro_candidates:
+                topology_path = gro_candidates[0]
+                topology_format = "gro"
 
         return TrajectoryLayout(
             topology_path=topology_path,
