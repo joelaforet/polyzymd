@@ -68,7 +68,7 @@ def _validate_script_value(value: str, field_name: str) -> str:
     ValueError
         If the value contains unsafe characters.
     """
-    if not _SAFE_SCRIPT_VALUE.match(value):
+    if value and not _SAFE_SCRIPT_VALUE.match(value):
         raise ValueError(
             f"SLURM script field '{field_name}' contains unsafe characters: {value!r}. "
             "Only alphanumerics and -_./:,@%=+ are allowed."
