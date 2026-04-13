@@ -153,6 +153,26 @@ def _resolve_replicates_option(
     return [1]
 
 
+def _resolve_engine_name(sim_config: object, override: str | None = None) -> str:
+    """Resolve the simulation engine from CLI override or config.
+
+    Parameters
+    ----------
+    sim_config : object
+        Simulation configuration with optional ``engine`` attribute.
+    override : str or None
+        CLI-provided engine override (takes priority).
+
+    Returns
+    -------
+    str
+        Resolved engine name (lowercase).
+    """
+    if override:
+        return override.lower()
+    return getattr(sim_config, "engine", "openmm") or "openmm"
+
+
 @click.group()
 @click.version_option(prog_name="polyzymd")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")

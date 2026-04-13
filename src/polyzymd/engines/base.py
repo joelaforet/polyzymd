@@ -47,6 +47,8 @@ class EngineSubmitRequest(BaseModel):
         Scheduler job name override.
     slurm_config : Any, optional
         Scheduler-specific config object.
+    extra : dict[str, Any], optional
+        Engine-specific metadata for submission handling.
     """
 
     replicate: int
@@ -54,6 +56,7 @@ class EngineSubmitRequest(BaseModel):
     working_dir: Path
     job_name: str | None = None
     slurm_config: Any = None
+    extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class SimulationEngine(ABC):

@@ -110,6 +110,55 @@ class TestResolveReplicatesOption:
             _resolve_replicates_option("", None, "test")
 
 
+class TestResolveEngineName:
+    """Unit tests for _resolve_engine_name()."""
+
+    def test_override_takes_priority(self) -> None:
+        """CLI --engine override should take priority over config."""
+        from types import SimpleNamespace
+
+        from polyzymd.cli.main import _resolve_engine_name
+
+        config = SimpleNamespace(engine="openmm")
+        assert _resolve_engine_name(config, override="gromacs") == "gromacs"
+
+    def test_reads_config_engine(self) -> None:
+        """Should read engine from config when no override."""
+        from types import SimpleNamespace
+
+        from polyzymd.cli.main import _resolve_engine_name
+
+        config = SimpleNamespace(engine="gromacs")
+        assert _resolve_engine_name(config) == "gromacs"
+
+    def test_defaults_to_openmm(self) -> None:
+        """Should default to openmm when config has no engine field."""
+        from types import SimpleNamespace
+
+        from polyzymd.cli.main import _resolve_engine_name
+
+        config = SimpleNamespace()
+        assert _resolve_engine_name(config) == "openmm"
+
+    def test_none_engine_defaults_to_openmm(self) -> None:
+        """Should default to openmm when config.engine is None."""
+        from types import SimpleNamespace
+
+        from polyzymd.cli.main import _resolve_engine_name
+
+        config = SimpleNamespace(engine=None)
+        assert _resolve_engine_name(config) == "openmm"
+
+    def test_case_insensitive(self) -> None:
+        """Override should be case-insensitive."""
+        from types import SimpleNamespace
+
+        from polyzymd.cli.main import _resolve_engine_name
+
+        config = SimpleNamespace(engine="openmm")
+        assert _resolve_engine_name(config, override="GROMACS") == "gromacs"
+
+
 class TestBuildCommandReplicateFlags:
     """Test that the build command accepts the new flags via Click invocation."""
 
