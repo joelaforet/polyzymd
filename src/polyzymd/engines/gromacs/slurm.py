@@ -88,7 +88,7 @@ echo "=================================================="
 # =========================================================================
 if [ ! -f em.gro ]; then
     echo "=== Energy Minimization ==="
-    $GMX grompp -f em.mdp -c ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}
+    $GMX grompp -f em.mdp -c ${{PREFIX}}.gro -r ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}
     $GMX mdrun -deffnm em -v
     if [ ! -f em.gro ]; then
         echo "FATAL: Energy minimization failed — em.gro not produced"
@@ -112,10 +112,10 @@ echo "=== Production MD ==="
 # Create TPR if needed
 if [ ! -f prod.tpr ]; then
     if [ -f ${{LAST_EQ}}.cpt ]; then
-        $GMX grompp -f prod.mdp -c ${{LAST_EQ}}.gro -t ${{LAST_EQ}}.cpt \\
+        $GMX grompp -f prod.mdp -c ${{LAST_EQ}}.gro -r em.gro -t ${{LAST_EQ}}.cpt \\
             -p ${{PREFIX}}.top -o prod.tpr {grompp_flags}
     else
-        $GMX grompp -f prod.mdp -c ${{LAST_EQ}}.gro -p ${{PREFIX}}.top -o prod.tpr {grompp_flags}
+        $GMX grompp -f prod.mdp -c ${{LAST_EQ}}.gro -r em.gro -p ${{PREFIX}}.top -o prod.tpr {grompp_flags}
     fi
 fi
 
@@ -414,12 +414,13 @@ exit 0
             lines.append(f'    echo "=== Equilibration {idx}: {mdp_name} ==="')
             lines.append("    if [ -f ${LAST_EQ}.cpt ]; then")
             lines.append(
-                f"        $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro -t ${{LAST_EQ}}.cpt "
+                f"        $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro -r em.gro "
+                f"-t ${{LAST_EQ}}.cpt "
                 f"-p ${{PREFIX}}.top -o {stage}.tpr {self._grompp_flags}"
             )
             lines.append("    else")
             lines.append(
-                f"        $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro "
+                f"        $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro -r em.gro "
                 f"-p ${{PREFIX}}.top -o {stage}.tpr {self._grompp_flags}"
             )
             lines.append("    fi")
