@@ -62,3 +62,68 @@ def test_parse_wall_time_hours_with_days() -> None:
     """Wall time parser should parse D-HH:MM:SS format."""
     hours = _generator()._parse_wall_time_hours("1-12:00:00")
     assert hours == 36.0
+
+
+def test_em_block_two_stage() -> None:
+    """Two-stage EM block should include soft + standard EM and in-block health check."""
+    block = _generator()._generate_energy_minimization_block(use_soft_em=True)
+
+    assert "em_soft.mdp" in block
+    assert "em_soft.gro" in block
+    assert "em.mdp" in block
+    assert "em.gro" in block
+    assert "force.*not finite" in block
+
+    em_if_idx = block.index("if [ ! -f em.gro ]; then")
+    health_idx = block.index("force.*not finite")
+    em_else_idx = block.index(
+        'else\n    echo "Skipping standard energy minimization (em.gro exists)."'
+    )
+    assert em_if_idx < health_idx < em_else_idx
+
+
+def test_em_block_legacy() -> None:
+    """Legacy EM block should not include soft-stage artifacts."""
+    block = _generator()._generate_energy_minimization_block(use_soft_em=False)
+
+    assert "em_soft" not in block
+    assert "em.mdp" in block
+    assert "em.gro" in block
+    assert "force.*not finite" in block
+
+
+def test_use_soft_em_parameter(monkeypatch) -> None:
+    """Job script should omit soft EM when use_soft_em is False."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    script = _generator().generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+        use_soft_em=False,
+    )
+
+    assert "em_soft" not in script
+
+
+def test_use_soft_em_default(monkeypatch) -> None:
+    """Job script should include soft EM by default."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    script = _generator().generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert "em_soft" in script
