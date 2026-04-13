@@ -929,8 +929,8 @@ def compute_binding_preference(
 
     Notes
     -----
-    Enrichment Calculation (centered at zero)
-    -----------------------------------------
+    Enrichment calculation is centered at zero
+
     For each (polymer_type, protein_group) pair:
 
         contact_share = polymer_contacts_to_group / polymer_total_contacts
@@ -1170,5 +1170,3 @@ def compute_binding_preference(
                 )
 
     return result
-
-

@@ -686,6 +686,7 @@ def statistical_inefficiency_multiple(
     `statistical_inefficiency_multiple()`, adapted without the PyMBAR dependency.
 
     The algorithm:
+
     1. Compute global mean μ across all timeseries
     2. For each lag t:
        - Compute sum of (x - μ) products across all timeseries where t < N_k

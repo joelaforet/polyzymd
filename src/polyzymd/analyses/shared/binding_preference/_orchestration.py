@@ -237,6 +237,7 @@ def compute_binding_preference_from_config(
     -----
     This function requires rust_sasa_python to be installed for
     surface exposure calculation. Install with:
+
         pip install rust-sasa-python
 
     Examples

@@ -80,7 +80,8 @@ def resolve_protein_groups_from_surface_exposure(
     requiring an MDAnalysis Universe at comparison time.
 
     The function supports:
-    - Default AA class groups (aromatic, polar, nonpolar, charged_+, charged_-)
+
+    - Default AA class groups (aromatic, polar, nonpolar, charged_positive, charged_negative)
       derived from the aa_class field in surface exposure data
     - Custom user-defined groups specified as resid lists
     - Override behavior: if a custom group has the same name as a default,
@@ -232,5 +233,3 @@ def resolve_polymer_type_selections(
     except (ValueError, AttributeError, TypeError) as e:
         logger.warning(f"Failed to auto-detect polymer types: {e}")
         return []
-
-

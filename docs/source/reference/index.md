@@ -29,6 +29,7 @@ configuration fields, API signatures, defaults, or benchmark data.
 - [Core API](../api/core.md)
 - [Analysis API](../api/analysis.md)
 - [Analyses Plugin API](../api/analyses.md)
+- [API Reference Landing Page](../api/index.rst)
 
 ## When Not to Use This Section
 
@@ -53,8 +54,10 @@ RMSF Plugin Reference <analysis_rmsf_reference>
 Catalytic Triad Plugin Reference <analysis_triad_reference>
 Distances Plugin Reference <analysis_distances_reference>
 Contacts Plugin Reference <analysis_contacts_reference>
+Analysis Plugin Settings Reference <analysis_plugin_settings>
 Post-Hoc Testing Reference <posthoc_testing>
 Benchmarks <benchmarks>
+API Reference Landing Page <../api/index>
 API Overview <../api/overview>
 Configuration API <../api/config>
 Builders API <../api/builders>

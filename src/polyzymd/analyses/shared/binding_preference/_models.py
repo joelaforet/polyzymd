@@ -613,6 +613,7 @@ class SystemCoverageEntry(BaseModel):
         coverage_enrichment = (coverage_share / expected_share) - 1
 
     Interpretation (centered at zero):
+
     - coverage_enrichment > 0: Preferential coverage (more than surface predicts)
         - +0.5 means "50% more coverage than expected"
     - coverage_enrichment = 0: Neutral (coverage matches surface availability)
@@ -1740,5 +1741,3 @@ class AggregatedSystemCoverageResult(BaseModel):
         """Load from JSON file."""
         data = json.loads(Path(path).read_text())
         return cls.model_validate(data)
-
-
