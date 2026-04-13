@@ -358,7 +358,11 @@ class ExposureAnalysis(Analysis):
         if not labels:
             return plots
 
-        data["__meta__"] = {"results_dir": ctx.results_dir}
+        data["__meta__"] = {
+            "results_dir": ctx.results_dir,
+            "comparison_result_path": ctx.results_dir / "result.json",
+            "comparison_dir": ctx.results_dir,
+        }
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
         plot_settings = ctx.plot_settings
