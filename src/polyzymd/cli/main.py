@@ -173,6 +173,38 @@ def _resolve_engine_name(sim_config: object, override: str | None = None) -> str
     return getattr(sim_config, "engine", "openmm") or "openmm"
 
 
+def _generate_system_prefix(sim_config: object) -> str:
+    """Generate a system filename prefix from simulation config.
+
+    Replicates ``GromacsExporter._generate_prefix`` so CLI checks use the
+    same naming convention as build and submit workflows.
+
+    Parameters
+    ----------
+    sim_config : object
+        Simulation configuration object.
+
+    Returns
+    -------
+    str
+        System prefix (e.g. ``"CALB_SBMA-EGMA"``).
+    """
+    parts: list[str] = []
+
+    enzyme = getattr(sim_config, "enzyme", None)
+    enzyme_name = getattr(enzyme, "name", None)
+    if isinstance(enzyme_name, str) and enzyme_name:
+        parts.append(enzyme_name)
+
+    polymers = getattr(sim_config, "polymers", None)
+    polymers_enabled = getattr(polymers, "enabled", False)
+    polymer_prefix = getattr(polymers, "type_prefix", None)
+    if isinstance(polymers_enabled, bool) and polymers_enabled and isinstance(polymer_prefix, str):
+        parts.append(polymer_prefix)
+
+    return "_".join(parts) if parts else "system"
+
+
 @click.group()
 @click.version_option(prog_name="polyzymd")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
@@ -2633,7 +2665,7 @@ def recover(
         if memory:
             slurm_config.memory = memory
 
-        prefix = sim_config.generate_system_name()
+        prefix = _generate_system_prefix(sim_config)
         gromacs_inputs_exist = (working_dir / f"{prefix}.top").exists() and (
             working_dir / "prod.mdp"
         ).exists()
