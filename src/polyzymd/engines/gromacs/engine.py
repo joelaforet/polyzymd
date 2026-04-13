@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -9,10 +11,12 @@ from polyzymd.engines.base import EngineSubmitRequest, SimulationEngine, Traject
 from polyzymd.simulation.progress import SimulationProgress
 
 from .binary import resolve_gromacs_binary
+from .progress import load_or_scan_gromacs_progress
+from .slurm import GromacsSlurmScriptGenerator
 
 
 class GromacsEngine(SimulationEngine):
-    """Phase-1 GROMACS execution adapter."""
+    """GROMACS execution adapter for local and scheduler workflows."""
 
     name: ClassVar[str] = "gromacs"
 
@@ -77,8 +81,6 @@ class GromacsEngine(SimulationEngine):
     def prepare_submission(self, request: EngineSubmitRequest) -> Path:
         """Prepare scheduler artifacts for a GROMACS job.
 
-        Planned for Phase 3.
-
         Parameters
         ----------
         request : EngineSubmitRequest
@@ -87,15 +89,66 @@ class GromacsEngine(SimulationEngine):
         Returns
         -------
         Path
-            Placeholder return type for planned SLURM integration.
+            Path to the generated SLURM script.
         """
-        _ = request
-        raise NotImplementedError("GROMACS SLURM submission will be implemented in Phase 3")
+        if request.slurm_config is None:
+            raise ValueError("GROMACS submission requires slurm_config")
+
+        request.working_dir.mkdir(parents=True, exist_ok=True)
+
+        # Build and export GROMACS inputs when not already present
+        prefix = self._config.generate_system_name()
+        top_path = request.working_dir / f"{prefix}.top"
+        gro_path = request.working_dir / f"{prefix}.gro"
+        em_path = request.working_dir / "em.mdp"
+        prod_path = request.working_dir / "prod.mdp"
+
+        if not (
+            top_path.exists() and gro_path.exists() and em_path.exists() and prod_path.exists()
+        ):
+            from polyzymd.builders.system_builder import SystemBuilder
+            from polyzymd.exporters.gromacs import GromacsExporter
+
+            builder = SystemBuilder.from_config(self._config)
+            interchange = builder.build_from_config(
+                config=self._config,
+                working_dir=request.working_dir,
+                polymer_seed=request.replicate,
+            )
+            component_info = builder.get_component_info()
+            exporter = GromacsExporter(interchange, self._config, component_info=component_info)
+            exporter.export(
+                output_dir=request.working_dir,
+                prefix=prefix,
+                gmx_command=self._gmx_binary,
+            )
+
+        eq_mdps = sorted(path.name for path in request.working_dir.glob("eq_*.mdp"))
+
+        script_dir = request.working_dir / "daisy_chain_scripts"
+        script_dir.mkdir(parents=True, exist_ok=True)
+        script_path = script_dir / f"run_rep{request.replicate}.sh"
+
+        generator = GromacsSlurmScriptGenerator(
+            slurm_config=request.slurm_config,
+            gmx_binary=self._gmx_binary,
+            grompp_flags=self._config.gromacs.grompp_flags,
+            mdrun_flags=self._config.gromacs.mdrun_flags,
+            module_load=self._config.gromacs.module_load,
+        )
+        script = generator.generate_job_script(
+            config_path=str(request.config_path),
+            replicate=request.replicate,
+            working_dir=str(request.working_dir),
+            system_prefix=prefix,
+            equilibration_mdps=eq_mdps,
+            job_name=request.job_name,
+        )
+        generator.save_script(script, script_path)
+        return script_path
 
     def submit(self, request: EngineSubmitRequest) -> Any:
         """Submit GROMACS jobs to scheduler.
-
-        Planned for Phase 3.
 
         Parameters
         ----------
@@ -105,15 +158,32 @@ class GromacsEngine(SimulationEngine):
         Returns
         -------
         Any
-            Placeholder scheduler result for planned implementation.
+            Submission metadata with script path and optional SLURM job id.
         """
-        _ = request
-        raise NotImplementedError("GROMACS SLURM submission will be implemented in Phase 3")
+        script_path = self.prepare_submission(request)
+
+        if shutil.which("sbatch") is None:
+            return {
+                "submitted": False,
+                "script_path": script_path,
+                "reason": "sbatch_not_available",
+            }
+
+        command = ["sbatch", str(script_path)]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(f"sbatch submission failed: {result.stderr.strip()}")
+
+        return {
+            "submitted": True,
+            "script_path": script_path,
+            "stdout": result.stdout.strip(),
+            "stderr": result.stderr.strip(),
+            "returncode": result.returncode,
+        }
 
     def load_or_scan_progress(self, working_dir: Path, replicate: int) -> SimulationProgress:
         """Load or reconstruct GROMACS progress state.
-
-        Planned for Phase 3.
 
         Parameters
         ----------
@@ -125,11 +195,19 @@ class GromacsEngine(SimulationEngine):
         Returns
         -------
         SimulationProgress
-            Planned engine progress model.
+            Current progress model for the replicate.
         """
-        _ = working_dir
-        _ = replicate
-        raise NotImplementedError("GROMACS progress tracking will be implemented in Phase 3")
+        prod = self._config.simulation_phases.production
+        total_steps = int(prod.duration * 1e6 / prod.time_step)
+
+        return load_or_scan_gromacs_progress(
+            working_dir=working_dir,
+            config_path="",
+            replicate=replicate,
+            total_steps=total_steps,
+            total_samples=prod.samples,
+            timestep_fs=prod.time_step,
+        )
 
     def resolve_trajectory_layout(self, working_dir: Path, replicate: int) -> TrajectoryLayout:
         """Resolve GROMACS trajectory layout for downstream analyses.
