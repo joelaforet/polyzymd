@@ -1094,3 +1094,86 @@ class TestUpdateGromacsProgressCmd:
         progress = load_progress(working_dir)
         assert progress is not None
         assert progress.status == SimulationStatus.COMPLETED
+
+
+class TestRecoverGromacsEdgeCases:
+    """Edge case tests for GROMACS recover path."""
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.load_or_scan_progress")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_recover_gromacs_complete_nothing_to_recover(
+        self,
+        mock_from_yaml,
+        mock_resolve,
+        mock_load,
+        tmp_path,
+    ):
+        """recover --engine gromacs when simulation is complete should say nothing to recover."""
+        _ = mock_resolve
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        mock_cfg = _mock_sim_config_gromacs(working_dir)
+        mock_from_yaml.return_value = mock_cfg
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000,
+            completed_steps=10000000,
+            is_complete=True,
+            n_segments=2,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["recover", "-c", str(config_file), "-r", "1", "--engine", "gromacs"],
+        )
+        assert result.exit_code == 0
+        assert "nothing to recover" in result.output.lower()
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.load_or_scan_progress")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_recover_gromacs_shows_progress_report(
+        self,
+        mock_from_yaml,
+        mock_resolve,
+        mock_load,
+        tmp_path,
+    ):
+        """recover --engine gromacs should show a progress report."""
+        _ = mock_resolve
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        mock_cfg = _mock_sim_config_gromacs(working_dir)
+        mock_from_yaml.return_value = mock_cfg
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["recover", "-c", str(config_file), "-r", "1", "--engine", "gromacs"],
+        )
+        assert result.exit_code == 0
+        assert "5000000/10000000" in result.output
+        assert "50.0%" in result.output
+
+    def test_update_gromacs_progress_missing_dir_fails(self):
+        """_update-gromacs-progress should fail with non-existent directory."""
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "_update-gromacs-progress",
+                "--working-dir",
+                "/nonexistent/path",
+            ],
+        )
+        assert result.exit_code != 0

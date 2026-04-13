@@ -772,3 +772,90 @@ class TestSubmitEngineAware:
 
         assert result.exit_code == 0
         assert "no effect" in result.output.lower()
+
+
+class TestSubmitGromacsDuplicateGuard:
+    """Tests for duplicate-job detection in GROMACS submit path."""
+
+    @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=["12345"])
+    @patch("polyzymd.workflow.daisy_chain.create_job_name", return_value="test_job")
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_submit_gromacs_blocked_by_existing_job(
+        self,
+        mock_from_yaml,
+        mock_resolve,
+        mock_submit,
+        mock_create_name,
+        mock_check,
+        tmp_path,
+    ):
+        """submit --engine gromacs should be blocked when a job already exists."""
+        _ = mock_resolve, mock_create_name, mock_check
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "gromacs"
+        mock_config.gromacs = SimpleNamespace(
+            grompp_flags="",
+            mdrun_flags="",
+            module_load=None,
+            gmx_binary=None,
+        )
+        mock_config.generate_system_name = lambda: "test_system"
+        mock_from_yaml.return_value = mock_config
+
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            ["submit", "-c", str(config_path), "--engine", "gromacs"],
+        )
+
+        assert result.exit_code == 0
+        assert "already has RUNNING/PENDING" in result.output
+        mock_submit.assert_not_called()
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
+    @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=["12345"])
+    @patch("polyzymd.workflow.daisy_chain.create_job_name", return_value="test_job")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_submit_gromacs_force_bypasses_guard(
+        self,
+        mock_from_yaml,
+        mock_resolve,
+        mock_create_name,
+        mock_check,
+        mock_submit,
+        tmp_path,
+    ):
+        """submit --engine gromacs --force should bypass duplicate guard."""
+        _ = mock_resolve, mock_create_name, mock_check
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "gromacs"
+        mock_config.gromacs = SimpleNamespace(
+            grompp_flags="",
+            mdrun_flags="",
+            module_load=None,
+            gmx_binary=None,
+        )
+        mock_config.generate_system_name = lambda: "test_system"
+        mock_from_yaml.return_value = mock_config
+        mock_submit.return_value = {
+            "submitted": False,
+            "script_path": "/tmp/script.sh",
+            "reason": "sbatch_not_available",
+        }
+
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            ["submit", "-c", str(config_path), "--engine", "gromacs", "--force"],
+        )
+        assert result.exit_code == 0
+        mock_submit.assert_called_once()
