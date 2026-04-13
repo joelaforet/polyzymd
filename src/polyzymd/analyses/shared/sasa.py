@@ -448,3 +448,528 @@ def load_sasa_artifacts(
 
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     return result, metadata
+
+
+SASA_ARTIFACT_SCHEMA_NAME = "polyzymd.sasa_artifact"
+SASA_ARTIFACT_SCHEMA_VERSION = 1
+SASA_ARTIFACT_COMPATIBILITY_VERSION = 1
+A2_TO_NM2 = 0.01
+SASA_COMPAT_PROBE_RADIUS_ABS_TOL = 1e-6
+
+
+@dataclass(frozen=True)
+class SASAArtifactContract:
+    """Canonical contract metadata for a persisted SASA artifact.
+
+    Parameters
+    ----------
+    schema_name : str
+        Artifact schema identifier.
+    schema_version : int
+        Artifact schema version.
+    compatibility_version : int
+        Compatibility hash payload version.
+    producer : str
+        Producer module name.
+    engine : str
+        SASA engine identifier.
+    mode : str
+        SASA mode. Canonical value is ``"atom"``.
+    units : str
+        SASA units. Canonical value is ``"A^2"``.
+    run_label : str
+        Human-readable run label.
+    target_selection : str
+        Target atom selection used for SASA reporting.
+    context_selection : str
+        Context atom selection used during SASA computation.
+    probe_radius_nm : float
+        Probe radius in nm.
+    n_sphere_points : int
+        Number of Shrake-Rupley sphere points.
+    equilibration : str
+        Equilibration descriptor.
+    compatibility_hash : str
+        Deterministic compatibility hash.
+    """
+
+    schema_name: str
+    schema_version: int
+    compatibility_version: int
+    producer: str
+    engine: str
+    mode: str
+    units: str
+    run_label: str
+    target_selection: str
+    context_selection: str
+    probe_radius_nm: float
+    n_sphere_points: int
+    equilibration: str
+    compatibility_hash: str
+
+
+@dataclass(frozen=True)
+class SASAArtifactCompatibilityQuery:
+    """Compatibility query metadata for sibling artifact lookup.
+
+    Parameters
+    ----------
+    probe_radius_nm : float
+        Probe radius expected by the consumer.
+    n_sphere_points : int
+        Sphere point count expected by the consumer.
+    equilibration : str
+        Equilibration label expected by the consumer.
+    selection : str | None, optional
+        Target selection string for advisory hash comparison.
+    context_selection : str | None, optional
+        Context selection string for advisory hash comparison.
+    """
+
+    probe_radius_nm: float
+    n_sphere_points: int
+    equilibration: str
+    selection: str | None = None
+    context_selection: str | None = None
+
+
+@dataclass(frozen=True)
+class SASAArtifactCompatibility:
+    """Compatibility decision for a single SASA artifact metadata payload.
+
+    Parameters
+    ----------
+    is_compatible : bool
+        True when metadata-level required fields are compatible.
+    is_legacy : bool
+        True when schema version fields are absent.
+    schema_version : int | None
+        Parsed schema version if present.
+    selection_hash_matches : bool | None
+        Advisory selection hash result when query selections are supplied.
+    mismatched_fields : tuple[str, ...]
+        Names of fields that made the artifact incompatible.
+    """
+
+    is_compatible: bool
+    is_legacy: bool
+    schema_version: int | None
+    selection_hash_matches: bool | None
+    mismatched_fields: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SASASiblingArtifactMatch:
+    """A sibling SASA artifact candidate and its compatibility outcome.
+
+    Parameters
+    ----------
+    sibling_analysis_dir : Path
+        Directory containing sibling SASA artifacts for the replicate.
+    npz_path : Path
+        Path to the SASA NPZ payload.
+    metadata_path : Path
+        Path to the JSON metadata sidecar.
+    metadata : dict[str, Any]
+        Parsed metadata dictionary.
+    compatibility : SASAArtifactCompatibility
+        Compatibility decision for this artifact.
+    """
+
+    sibling_analysis_dir: Path
+    npz_path: Path
+    metadata_path: Path
+    metadata: dict[str, Any]
+    compatibility: SASAArtifactCompatibility
+
+
+def compute_sasa_artifact_compatibility_hash(
+    *,
+    probe_radius_nm: float,
+    n_sphere_points: int,
+    selection: str,
+    equilibration: str,
+    context_selection: str | None = None,
+) -> str:
+    """Compute deterministic compatibility hash for SASA artifacts.
+
+    Parameters
+    ----------
+    probe_radius_nm : float
+        Probe radius in nm.
+    n_sphere_points : int
+        Number of Shrake-Rupley sphere points.
+    selection : str
+        Target selection string.
+    equilibration : str
+        Equilibration label.
+    context_selection : str | None, optional
+        Context selection string. Defaults to ``selection`` when omitted.
+
+    Returns
+    -------
+    str
+        First 16 characters of the SHA-256 compatibility digest.
+    """
+    import hashlib
+
+    normalized_selection = selection.strip()
+    normalized_context = (context_selection or selection).strip()
+    payload = {
+        "compatibility_version": SASA_ARTIFACT_COMPATIBILITY_VERSION,
+        "mode": "atom",
+        "units": "A^2",
+        "selection": normalized_selection,
+        "context_selection": normalized_context,
+        "probe_radius_nm": round(float(probe_radius_nm), 6),
+        "n_sphere_points": int(n_sphere_points),
+        "equilibration": equilibration.strip(),
+    }
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+
+
+def build_sasa_artifact_contract(
+    *,
+    run_label: str,
+    target_selection: str,
+    context_selection: str,
+    probe_radius_nm: float,
+    n_sphere_points: int,
+    equilibration: str,
+) -> SASAArtifactContract:
+    """Build canonical SASA artifact contract metadata.
+
+    Parameters
+    ----------
+    run_label : str
+        Human-readable run label.
+    target_selection : str
+        Target atom selection used for SASA reporting.
+    context_selection : str
+        Context atom selection used during SASA computation.
+    probe_radius_nm : float
+        Probe radius in nm.
+    n_sphere_points : int
+        Number of Shrake-Rupley sphere points.
+    equilibration : str
+        Equilibration descriptor.
+
+    Returns
+    -------
+    SASAArtifactContract
+        Fully populated canonical metadata contract.
+    """
+    compatibility_hash = compute_sasa_artifact_compatibility_hash(
+        probe_radius_nm=probe_radius_nm,
+        n_sphere_points=n_sphere_points,
+        selection=target_selection,
+        context_selection=context_selection,
+        equilibration=equilibration,
+    )
+    return SASAArtifactContract(
+        schema_name=SASA_ARTIFACT_SCHEMA_NAME,
+        schema_version=SASA_ARTIFACT_SCHEMA_VERSION,
+        compatibility_version=SASA_ARTIFACT_COMPATIBILITY_VERSION,
+        producer="polyzymd.analyses.shared.sasa",
+        engine="mdtraj.shrake_rupley",
+        mode="atom",
+        units="A^2",
+        run_label=run_label,
+        target_selection=target_selection,
+        context_selection=context_selection,
+        probe_radius_nm=probe_radius_nm,
+        n_sphere_points=n_sphere_points,
+        equilibration=equilibration,
+        compatibility_hash=compatibility_hash,
+    )
+
+
+def build_sasa_artifact_metadata(
+    result: SASAComputationResult,
+    *,
+    run_label: str,
+    target_selection: str,
+    context_selection: str,
+    probe_radius_nm: float,
+    n_sphere_points: int,
+    equilibration: str,
+) -> dict[str, Any]:
+    """Build flat SASA artifact metadata with schema versioning fields.
+
+    Parameters
+    ----------
+    result : SASAComputationResult
+        Raw SASA arrays and residue metadata.
+    run_label : str
+        Human-readable run label.
+    target_selection : str
+        Target atom selection.
+    context_selection : str
+        Context atom selection.
+    probe_radius_nm : float
+        Probe radius in nm.
+    n_sphere_points : int
+        Number of Shrake-Rupley sphere points.
+    equilibration : str
+        Equilibration descriptor.
+
+    Returns
+    -------
+    dict[str, Any]
+        Flat metadata dictionary for JSON sidecar persistence.
+    """
+    contract = build_sasa_artifact_contract(
+        run_label=run_label,
+        target_selection=target_selection,
+        context_selection=context_selection,
+        probe_radius_nm=probe_radius_nm,
+        n_sphere_points=n_sphere_points,
+        equilibration=equilibration,
+    )
+    return {
+        "run_label": run_label,
+        "target_selection": target_selection,
+        "context_selection": context_selection,
+        "units": "A^2",
+        "probe_radius_nm": probe_radius_nm,
+        "n_sphere_points": n_sphere_points,
+        "equilibration": equilibration,
+        "n_frames": int(result.frames.size),
+        "n_target_atoms": int(result.target_atom_indices.size),
+        "n_context_atoms": int(result.context_atom_indices.size),
+        "n_target_residues": len(result.residue_keys),
+        "residue_keys": result.residue_keys,
+        "residue_chainids": result.residue_chainids,
+        "residue_resids": result.residue_resids,
+        "residue_resnames": result.residue_resnames,
+        "artifact_schema": contract.schema_name,
+        "artifact_schema_version": contract.schema_version,
+        "artifact_compatibility_version": contract.compatibility_version,
+        "artifact_producer": contract.producer,
+        "sasa_engine": contract.engine,
+        "sasa_mode": contract.mode,
+        "compatibility_hash": contract.compatibility_hash,
+    }
+
+
+def check_sasa_artifact_compatibility(
+    metadata: dict[str, Any],
+    query: SASAArtifactCompatibilityQuery,
+) -> SASAArtifactCompatibility:
+    """Evaluate metadata-level compatibility for reusable SASA artifacts.
+
+    Parameters
+    ----------
+    metadata : dict[str, Any]
+        Parsed SASA metadata sidecar.
+    query : SASAArtifactCompatibilityQuery
+        Consumer compatibility query.
+
+    Returns
+    -------
+    SASAArtifactCompatibility
+        Compatibility decision containing definitive and advisory signals.
+    """
+    mismatched_fields: list[str] = []
+
+    schema_name_raw = metadata.get("artifact_schema")
+    if schema_name_raw is not None and str(schema_name_raw) != SASA_ARTIFACT_SCHEMA_NAME:
+        mismatched_fields.append("artifact_schema")
+
+    schema_raw = metadata.get("artifact_schema_version")
+    schema_version: int | None
+    if schema_raw is None:
+        schema_version = None
+    else:
+        try:
+            schema_version = int(schema_raw)
+        except (TypeError, ValueError):
+            schema_version = None
+            mismatched_fields.append("artifact_schema_version")
+
+    is_legacy = schema_raw is None
+    if schema_version is not None and schema_version > SASA_ARTIFACT_SCHEMA_VERSION:
+        mismatched_fields.append("artifact_schema_version")
+
+    compat_version_raw = metadata.get("artifact_compatibility_version")
+    if compat_version_raw is not None:
+        try:
+            compatibility_version = int(compat_version_raw)
+        except (TypeError, ValueError):
+            compatibility_version = None
+            mismatched_fields.append("artifact_compatibility_version")
+        if (
+            compatibility_version is not None
+            and compatibility_version > SASA_ARTIFACT_COMPATIBILITY_VERSION
+        ):
+            mismatched_fields.append("artifact_compatibility_version")
+
+    probe_value = metadata.get("probe_radius_nm")
+    try:
+        probe_float = float(probe_value)
+    except (TypeError, ValueError):
+        probe_float = float("nan")
+    if not np.isfinite(probe_float) or (
+        abs(probe_float - float(query.probe_radius_nm)) > SASA_COMPAT_PROBE_RADIUS_ABS_TOL
+    ):
+        mismatched_fields.append("probe_radius_nm")
+
+    sphere_value = metadata.get("n_sphere_points")
+    try:
+        sphere_points = int(sphere_value)
+    except (TypeError, ValueError):
+        sphere_points = -1
+    if sphere_points != int(query.n_sphere_points):
+        mismatched_fields.append("n_sphere_points")
+
+    equilibration_value = str(metadata.get("equilibration", "")).strip()
+    if equilibration_value != query.equilibration.strip():
+        mismatched_fields.append("equilibration")
+
+    units_value = metadata.get("units", "A^2")
+    if str(units_value) != "A^2":
+        mismatched_fields.append("units")
+
+    mode_value = metadata.get("sasa_mode", "atom")
+    if str(mode_value) != "atom":
+        mismatched_fields.append("sasa_mode")
+
+    selection_hash_matches: bool | None = None
+    if query.selection is not None or query.context_selection is not None:
+        selection_value = (
+            query.selection if query.selection is not None else (query.context_selection or "")
+        )
+        context_value = (
+            query.context_selection if query.context_selection is not None else selection_value
+        )
+        query_hash = compute_sasa_artifact_compatibility_hash(
+            probe_radius_nm=query.probe_radius_nm,
+            n_sphere_points=query.n_sphere_points,
+            selection=selection_value,
+            context_selection=context_value,
+            equilibration=query.equilibration,
+        )
+        metadata_hash = metadata.get("compatibility_hash")
+        selection_hash_matches = str(metadata_hash) == query_hash
+
+    return SASAArtifactCompatibility(
+        is_compatible=len(mismatched_fields) == 0,
+        is_legacy=is_legacy,
+        schema_version=schema_version,
+        selection_hash_matches=selection_hash_matches,
+        mismatched_fields=tuple(mismatched_fields),
+    )
+
+
+def adapt_canonical_sasa_to_exposure(
+    result: SASAComputationResult,
+    *,
+    exposure_threshold: float,
+) -> Any:
+    """Adapt canonical shared SASA result into exposure SASA trajectory format.
+
+    Parameters
+    ----------
+    result : SASAComputationResult
+        Canonical shared SASA computation result in Å².
+    exposure_threshold : float
+        Relative SASA threshold used by exposure consumers.
+
+    Returns
+    -------
+    Any
+        ``SASATrajectoryResult`` instance for exposure analysis.
+    """
+    from polyzymd.analyses.exposure._sasa_trajectory import SASATrajectoryResult
+    from polyzymd.analyses.shared.aa_classification import MAX_ASA_TABLE, get_aa_class
+
+    sasa_per_frame = result.residue_sasa_a2.astype(np.float32) * A2_TO_NM2
+    resids = np.asarray(result.residue_resids, dtype=np.int32)
+    resnames = [str(x).upper() for x in result.residue_resnames]
+    aa_classes = [get_aa_class(name) for name in resnames]
+
+    max_sasa_nm2 = np.asarray(
+        [MAX_ASA_TABLE.get(name, 200.0) * A2_TO_NM2 for name in resnames],
+        dtype=np.float32,
+    )
+    safe_max = np.where(max_sasa_nm2 > 0.0, max_sasa_nm2, 1.0).astype(np.float32)
+    relative_sasa_per_frame = sasa_per_frame / safe_max[np.newaxis, :]
+
+    n_frames = int(sasa_per_frame.shape[0])
+    n_residues = int(sasa_per_frame.shape[1]) if sasa_per_frame.ndim == 2 else 0
+    return SASATrajectoryResult(
+        sasa_per_frame=sasa_per_frame,
+        relative_sasa_per_frame=relative_sasa_per_frame.astype(np.float32),
+        resids=resids,
+        resnames=resnames,
+        aa_classes=aa_classes,
+        max_sasa_nm2=max_sasa_nm2,
+        n_frames=n_frames,
+        n_residues=n_residues,
+        exposure_threshold=exposure_threshold,
+    )
+
+
+def find_sibling_sasa_artifacts(
+    replicate_analysis_dir: Path,
+    query: SASAArtifactCompatibilityQuery,
+) -> list[SASASiblingArtifactMatch]:
+    """Find compatible sibling SASA artifacts for a replicate analysis directory.
+
+    Parameters
+    ----------
+    replicate_analysis_dir : Path
+        Replicate analysis directory, for example ``analysis/<cond>/exposure/run_1``.
+    query : SASAArtifactCompatibilityQuery
+        Compatibility query used to pre-filter candidates.
+
+    Returns
+    -------
+    list[SASASiblingArtifactMatch]
+        Compatible sibling artifacts sorted by preference.
+    """
+    sibling_dir = replicate_analysis_dir.parent.parent / "sasa" / replicate_analysis_dir.name
+    if not sibling_dir.exists():
+        return []
+
+    matches: list[SASASiblingArtifactMatch] = []
+    for npz_path in sibling_dir.glob("sasa_*.npz"):
+        metadata_path = npz_path.with_suffix(".json")
+        if not metadata_path.exists():
+            continue
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+
+        compatibility = check_sasa_artifact_compatibility(metadata, query)
+        if not compatibility.is_compatible:
+            continue
+
+        matches.append(
+            SASASiblingArtifactMatch(
+                sibling_analysis_dir=sibling_dir,
+                npz_path=npz_path,
+                metadata_path=metadata_path,
+                metadata=metadata,
+                compatibility=compatibility,
+            )
+        )
+
+    def _selection_hash_rank(value: bool | None) -> int:
+        if value is True:
+            return 0
+        if value is None:
+            return 1
+        return 2
+
+    matches.sort(
+        key=lambda item: (
+            int(item.compatibility.is_legacy),
+            _selection_hash_rank(item.compatibility.selection_hash_matches),
+            item.npz_path.name,
+        )
+    )
+    return matches
