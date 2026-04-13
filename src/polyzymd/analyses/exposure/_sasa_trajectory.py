@@ -224,9 +224,34 @@ class SASATrajectoryResult:
         )
 
     @classmethod
-    def cache_path(cls, analysis_dir: Path | str, settings_fp: str | None = None) -> Path:
-        """Return the cache directory for this result."""
+    def cache_path(
+        cls,
+        analysis_dir: Path | str,
+        settings_fp: str | None = None,
+        equilibration: str | None = None,
+    ) -> Path:
+        """Return the cache directory for this result.
+
+        Parameters
+        ----------
+        analysis_dir : Path or str
+            Per-replicate analysis directory.
+        settings_fp : str or None
+            Settings fingerprint hash.
+        equilibration : str or None
+            Equilibration label. When provided, the cache path includes
+            an ``eq_<label>`` segment so that different equilibration
+            values do not share cached SASA arrays.
+
+        Returns
+        -------
+        Path
+            Cache directory path.
+        """
         base_dir = Path(analysis_dir) / "sasa"
+        if equilibration is not None:
+            eq_label = equilibration.strip().replace(" ", "_") or "0ns"
+            base_dir = base_dir / f"eq_{eq_label}"
         if settings_fp:
             return base_dir / f"fp_{settings_fp}"
         return base_dir
@@ -303,7 +328,9 @@ def compute_trajectory_sasa(
         if sibling_result is not None:
             # Cache the adapted result for future runs
             sasa_settings_fp = settings_fingerprint(config)
-            cache_dir = SASATrajectoryResult.cache_path(analysis_dir, settings_fp=sasa_settings_fp)
+            cache_dir = SASATrajectoryResult.cache_path(
+                analysis_dir, settings_fp=sasa_settings_fp, equilibration=equilibration
+            )
             if config.cache_sasa:
                 sibling_result.save(cache_dir)
             return sibling_result
@@ -311,7 +338,9 @@ def compute_trajectory_sasa(
     # Check cache
     sasa_settings_fp = settings_fingerprint(config)
     cache_dir = (
-        SASATrajectoryResult.cache_path(analysis_dir, settings_fp=sasa_settings_fp)
+        SASATrajectoryResult.cache_path(
+            analysis_dir, settings_fp=sasa_settings_fp, equilibration=equilibration
+        )
         if analysis_dir is not None
         else None
     )

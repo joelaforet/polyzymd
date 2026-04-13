@@ -1523,3 +1523,159 @@ class TestSiblingSASAReuse:
 
         # Should return None because adaptation failed
         assert result is None
+
+
+# ===========================================================================
+# Equilibration-aware cache identity (Phase 3)
+# ===========================================================================
+
+
+class TestEquilibrationCacheIdentity:
+    """Cache paths must differ when equilibration differs."""
+
+    def test_different_equilibration_gives_different_cache_path(self, tmp_path):
+        from polyzymd.analyses.exposure._sasa_config import SASAConfig
+        from polyzymd.analyses.exposure._sasa_trajectory import SASATrajectoryResult
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        cfg = SASAConfig(probe_radius_nm=0.14, n_sphere_points=960)
+        fp = settings_fingerprint(cfg)
+
+        path_0ns = SASATrajectoryResult.cache_path(tmp_path, settings_fp=fp, equilibration="0ns")
+        path_10ns = SASATrajectoryResult.cache_path(tmp_path, settings_fp=fp, equilibration="10ns")
+        path_50ns = SASATrajectoryResult.cache_path(tmp_path, settings_fp=fp, equilibration="50ns")
+
+        assert path_0ns != path_10ns
+        assert path_0ns != path_50ns
+        assert path_10ns != path_50ns
+
+    def test_equilibration_none_omits_eq_segment(self, tmp_path):
+        """When equilibration is None (legacy callers), no eq_ segment appears."""
+        from polyzymd.analyses.exposure._sasa_trajectory import SASATrajectoryResult
+
+        path_none = SASATrajectoryResult.cache_path(tmp_path, settings_fp="abc", equilibration=None)
+        path_0ns = SASATrajectoryResult.cache_path(tmp_path, settings_fp="abc", equilibration="0ns")
+
+        assert "eq_" not in str(path_none)
+        assert "eq_0ns" in str(path_0ns)
+        assert path_none != path_0ns
+
+    def test_whitespace_normalized(self, tmp_path):
+        """Whitespace in equilibration labels should be normalized."""
+        from polyzymd.analyses.exposure._sasa_trajectory import SASATrajectoryResult
+
+        path_clean = SASATrajectoryResult.cache_path(
+            tmp_path, settings_fp="abc", equilibration="10ns"
+        )
+        path_padded = SASATrajectoryResult.cache_path(
+            tmp_path, settings_fp="abc", equilibration="  10ns  "
+        )
+
+        assert path_clean == path_padded
+
+    def test_cache_path_includes_eq_and_fp_segments(self, tmp_path):
+        from polyzymd.analyses.exposure._sasa_trajectory import SASATrajectoryResult
+
+        path = SASATrajectoryResult.cache_path(
+            tmp_path, settings_fp="deadbeef", equilibration="10ns"
+        )
+        parts = path.parts
+        # Should contain sasa/eq_10ns/fp_deadbeef
+        assert "sasa" in parts
+        assert "eq_10ns" in parts
+        assert "fp_deadbeef" in parts
+
+    def test_different_equilibration_not_cached_together(self, tmp_path):
+        """A cached SASA for eq=0ns must not be returned for eq=10ns."""
+        from polyzymd.analyses.exposure._sasa_config import SASAConfig
+        from polyzymd.analyses.exposure._sasa_trajectory import (
+            SASATrajectoryResult,
+            compute_trajectory_sasa,
+        )
+
+        config = SASAConfig(probe_radius_nm=0.14, n_sphere_points=960, chain_id="A")
+        analysis_dir = tmp_path / "analysis" / "run_1"
+        analysis_dir.mkdir(parents=True)
+
+        # Pre-populate a cache for equilibration="0ns"
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        fp = settings_fingerprint(config)
+        cache_0ns = SASATrajectoryResult.cache_path(
+            analysis_dir, settings_fp=fp, equilibration="0ns"
+        )
+        cache_0ns.mkdir(parents=True)
+
+        import numpy as np
+
+        np.savez_compressed(
+            cache_0ns / "sasa_trajectory.npz",
+            sasa_per_frame=np.ones((5, 3), dtype=np.float32),
+            relative_sasa_per_frame=np.ones((5, 3), dtype=np.float32) * 0.5,
+            resids=np.array([1, 2, 3], dtype=np.int32),
+            max_sasa_nm2=np.array([2.0, 2.0, 2.0], dtype=np.float32),
+        )
+        import json
+
+        (cache_0ns / "sasa_metadata.json").write_text(
+            json.dumps(
+                {
+                    "resnames": ["ALA", "GLY", "VAL"],
+                    "aa_classes": ["nonpolar", "nonpolar", "nonpolar"],
+                    "n_frames": 5,
+                    "n_residues": 3,
+                    "exposure_threshold": 0.2,
+                    "trajectory_path": "",
+                    "topology_path": "",
+                }
+            )
+        )
+
+        # Loading with eq="0ns" should find the cache (no mdtraj needed)
+        result_0ns = compute_trajectory_sasa(
+            topology_path=tmp_path / "top.pdb",
+            trajectory_path=tmp_path / "traj.xtc",
+            config=config,
+            analysis_dir=analysis_dir,
+            recompute=False,
+            equilibration="0ns",
+        )
+        assert result_0ns.n_frames == 5
+
+        # Loading with eq="10ns" should NOT find the cache (different path)
+        # and should attempt to compute (hitting mdtraj.load)
+        mock_traj = MagicMock()
+        mock_traj.n_frames = 10
+        mock_traj.n_atoms = 100
+        mock_topology = MagicMock()
+        mock_topology.select.return_value = np.arange(50)
+        mock_sub_traj = MagicMock()
+        mock_sub_traj.n_atoms = 50
+        mock_sub_traj.n_residues = 3
+        mock_residues = []
+        for i in range(1, 4):
+            r = MagicMock()
+            r.resSeq = i
+            r.name = "ALA"
+            mock_residues.append(r)
+        mock_sub_traj.topology.residues = mock_residues
+        mock_traj.topology = mock_topology
+        mock_traj.atom_slice.return_value = mock_sub_traj
+
+        with (
+            patch("mdtraj.load", return_value=mock_traj) as mock_load,
+            patch(
+                "mdtraj.shrake_rupley",
+                return_value=np.random.rand(10, 3).astype(np.float32),
+            ),
+        ):
+            result_10ns = compute_trajectory_sasa(
+                topology_path=tmp_path / "top.pdb",
+                trajectory_path=tmp_path / "traj.xtc",
+                config=config,
+                analysis_dir=analysis_dir,
+                recompute=False,
+                equilibration="10ns",
+            )
+            # mdtraj.load SHOULD have been called (no cache for 10ns)
+            mock_load.assert_called_once()
