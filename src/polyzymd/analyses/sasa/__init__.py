@@ -18,6 +18,7 @@ from polyzymd.analyses.base import (
     ComparisonContext,
     PlotContext,
     ReplicateContext,
+    SlurmResourceHint,
 )
 from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
 from polyzymd.analyses.sasa._results import SASAAggregatedResult, SASAResult
@@ -149,6 +150,9 @@ class SASAAnalysis(Analysis):
     AggregatedResultClass: ClassVar[type | None] = SASAAggregatedResult
     ReplicateResultClass: ClassVar[type | None] = SASAResult
     execution_cost_hint: ClassVar[str] = "high"
+    slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(
+        mem="8G", time="02:00:00"
+    )
     aliases: ClassVar[tuple[str, ...]] = ()
     dependencies: ClassVar[tuple[str, ...]] = ()
     # SASA is a mean-based observable (all frames contribute, SEM corrected via N_eff)
