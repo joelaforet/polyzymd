@@ -450,6 +450,7 @@ class ExposureAnalysis(Analysis):
                 exposure_analysis_dir=exposure_analysis_dir,
                 contacts_analysis_dir=contacts_analysis_dir,
                 recompute=ctx.recompute,
+                equilibration=ctx.equilibration or "0ns",
             )
             if result is not None:
                 dynamics, enrichment = result
@@ -538,6 +539,7 @@ class ExposureAnalysis(Analysis):
         exposure_analysis_dir: Path | None,
         contacts_analysis_dir: Path | None,
         recompute: bool,
+        equilibration: str = "0ns",
     ) -> tuple[Any, Any] | None:
         """Load or compute exposure dynamics for a single replicate.
 
@@ -555,6 +557,8 @@ class ExposureAnalysis(Analysis):
             Contacts sibling directory.
         recompute : bool
             Force recompute.
+        equilibration : str
+            Equilibration label, by default ``"0ns"``.
 
         Returns
         -------
@@ -633,6 +637,7 @@ class ExposureAnalysis(Analysis):
                     config=sasa_config,
                     analysis_dir=analysis_dir,
                     recompute=False,
+                    equilibration=equilibration,
                 )
                 enrichment = compute_chaperone_enrichment(
                     sasa_result=sasa_result,
@@ -649,6 +654,7 @@ class ExposureAnalysis(Analysis):
                 config=sasa_config,
                 analysis_dir=analysis_dir,
                 recompute=recompute,
+                equilibration=equilibration,
             )
 
             # Compute exposure dynamics

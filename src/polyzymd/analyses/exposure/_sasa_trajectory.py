@@ -243,6 +243,8 @@ def compute_trajectory_sasa(
     config: "SASAConfig | None" = None,
     analysis_dir: Path | str | None = None,
     recompute: bool = False,
+    *,
+    equilibration: str = "0ns",
 ) -> SASATrajectoryResult:
     """Compute (or load cached) per-frame, per-residue SASA for a trajectory.
 
@@ -264,6 +266,9 @@ def compute_trajectory_sasa(
         ``analysis_dir/sasa/`` when ``config.cache_sasa`` is True.
     recompute : bool
         Force recomputation even if cache exists.
+    equilibration : str, optional
+        Equilibration label used for sibling SASA artifact compatibility checks,
+        by default ``"0ns"``.
 
     Returns
     -------
@@ -286,6 +291,22 @@ def compute_trajectory_sasa(
     else:
         traj_paths = [Path(p) for p in trajectory_path]
     traj_files_str = [str(p) for p in traj_paths]
+
+    # --- Sibling SASA artifact reuse (Phase 2) ---
+    if analysis_dir is not None and not recompute:
+        sibling_result = _try_load_sibling_sasa(
+            topology_path=topology_path,
+            config=config,
+            analysis_dir=Path(analysis_dir),
+            equilibration=equilibration,
+        )
+        if sibling_result is not None:
+            # Cache the adapted result for future runs
+            sasa_settings_fp = settings_fingerprint(config)
+            cache_dir = SASATrajectoryResult.cache_path(analysis_dir, settings_fp=sasa_settings_fp)
+            if config.cache_sasa:
+                sibling_result.save(cache_dir)
+            return sibling_result
 
     # Check cache
     sasa_settings_fp = settings_fingerprint(config)
@@ -389,6 +410,155 @@ def compute_trajectory_sasa(
         result.save(cache_dir)
 
     return result
+
+
+def _resolve_protein_indices_from_topology(
+    topology_path: Path,
+    chain_id: str,
+) -> NDArray[np.int64]:
+    """Resolve sorted protein atom indices from topology without loading full trajectory.
+
+    Uses mdtraj.load_topology() which reads only the PDB structure, not
+    trajectory frames — fast even for large systems.
+
+    Parameters
+    ----------
+    topology_path : Path
+        Path to the topology PDB file.
+    chain_id : str
+        Chain letter (e.g. "A") to select.
+
+    Returns
+    -------
+    NDArray[np.int64]
+        Sorted atom indices for the protein chain.
+
+    Raises
+    ------
+    ValueError
+        If the chain is not found in the topology.
+    """
+    import mdtraj as md
+
+    top = md.load_topology(str(topology_path))
+    chain_idx = _chain_letter_to_index(chain_id)
+    indices = top.select(f"chainid {chain_idx}")
+    if len(indices) == 0:
+        raise ValueError(
+            f"Chain '{chain_id}' (index {chain_idx}) not found in topology {topology_path}"
+        )
+    return np.sort(np.asarray(indices, dtype=np.int64))
+
+
+def _try_load_sibling_sasa(
+    topology_path: Path,
+    config: "SASAConfig",
+    analysis_dir: Path,
+    equilibration: str,
+) -> SASATrajectoryResult | None:
+    """Attempt to load a compatible SASA artifact from the sibling sasa plugin.
+
+    Performs the full two-tier compatibility check:
+
+    1. Metadata-level filtering via ``find_sibling_sasa_artifacts()``
+    2. Atom-index verification: loads NPZ ``target_atom_indices`` and compares
+       against protein indices resolved from topology.
+
+    Parameters
+    ----------
+    topology_path : Path
+        Path to the topology PDB file.
+    config : SASAConfig
+        Exposure SASA configuration (probe radius, sphere points, chain, threshold).
+    analysis_dir : Path
+        Per-replicate analysis directory (e.g. ``analysis/<cond>/exposure/run_1``).
+    equilibration : str
+        Equilibration label.
+
+    Returns
+    -------
+    SASATrajectoryResult or None
+        Adapted SASA result if a compatible sibling was found, else ``None``.
+    """
+    from polyzymd.analyses.shared.sasa import (
+        SASAArtifactCompatibilityQuery,
+        adapt_canonical_sasa_to_exposure,
+        find_sibling_sasa_artifacts,
+        load_sasa_artifacts,
+    )
+
+    # Build query — exposure wants protein-only SASA, so target and context
+    # are the same selection (protein chain only, no polymer)
+    # The selection strings here are advisory; definitive check is atom indices
+    protein_selection = f"protein and chainid {_chain_letter_to_index(config.chain_id)}"
+    query = SASAArtifactCompatibilityQuery(
+        probe_radius_nm=config.probe_radius_nm,
+        n_sphere_points=config.n_sphere_points,
+        equilibration=equilibration,
+        selection=protein_selection,
+        context_selection=protein_selection,
+    )
+
+    candidates = find_sibling_sasa_artifacts(analysis_dir, query)
+    if not candidates:
+        logger.debug("No sibling SASA artifacts found for %s", analysis_dir)
+        return None
+
+    # Resolve expected protein atom indices from topology (fast, no trajectory load)
+    try:
+        expected_indices = _resolve_protein_indices_from_topology(topology_path, config.chain_id)
+    except (ValueError, OSError) as exc:
+        logger.debug("Cannot resolve protein indices from topology: %s", exc)
+        return None
+
+    for candidate in candidates:
+        try:
+            sasa_result, _meta = load_sasa_artifacts(candidate.npz_path, candidate.metadata_path)
+        except (OSError, KeyError, ValueError) as exc:
+            logger.debug("Corrupted sibling artifact %s: %s", candidate.npz_path, exc)
+            continue
+
+        # Tier 2: atom-index comparison
+        stored_target = np.sort(sasa_result.target_atom_indices)
+        stored_context = np.sort(sasa_result.context_atom_indices)
+
+        # Exposure wants protein-only SASA: target == context == protein atoms
+        if not (
+            np.array_equal(stored_target, expected_indices)
+            and np.array_equal(stored_context, expected_indices)
+        ):
+            logger.debug(
+                "Sibling %s: atom-index mismatch "
+                "(target: %d vs %d expected, context: %d vs %d expected)",
+                candidate.npz_path.name,
+                len(stored_target),
+                len(expected_indices),
+                len(stored_context),
+                len(expected_indices),
+            )
+            continue
+
+        # Match found — adapt to exposure format
+        try:
+            adapted = adapt_canonical_sasa_to_exposure(
+                sasa_result,
+                exposure_threshold=config.exposure_threshold,
+            )
+        except (ValueError, IndexError, TypeError, KeyError) as exc:
+            logger.debug("Sibling %s: adaptation failed: %s", candidate.npz_path, exc)
+            continue
+
+        logger.info(
+            "Reusing sibling SASA artifact: %s (adapted from sasa plugin)",
+            candidate.npz_path,
+        )
+        return adapted
+
+    logger.debug(
+        "No sibling SASA artifacts matched atom-index check for %s",
+        analysis_dir,
+    )
+    return None
 
 
 def _chain_letter_to_index(chain_id: str) -> int:
