@@ -2467,6 +2467,12 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     is_flag=True,
     help="Skip duplicate-job check and submit even if a SLURM job is already running for the replicate",
 )
+@click.option(
+    "--engine",
+    default=None,
+    hidden=True,
+    help="Override simulation engine",
+)
 def recover(
     config: str,
     replicate: int,
@@ -2477,6 +2483,7 @@ def recover(
     memory: str | None,
     pixi_env: str | None,
     force: bool,
+    engine: str | None,
 ) -> None:
     """Resume a stalled or interrupted simulation.
 
@@ -2527,15 +2534,23 @@ def recover(
     total_steps = int(prod.duration * 1e6 / timestep_fs)
     total_samples = prod.samples
 
+    engine_name = _resolve_engine_name(sim_config, override=engine)
+
     # Load progress
-    progress = load_or_scan_progress(
-        working_dir=working_dir,
-        config_path=str(Path(config).resolve()),
-        total_steps=total_steps,
-        total_samples=total_samples,
-        timestep_fs=timestep_fs,
-        replicate=replicate,
-    )
+    if engine_name == "gromacs":
+        from polyzymd.engines import create_engine
+
+        engine_impl = create_engine(sim_config, override="gromacs")
+        progress = engine_impl.load_or_scan_progress(working_dir, replicate)
+    else:
+        progress = load_or_scan_progress(
+            working_dir=working_dir,
+            config_path=str(Path(config).resolve()),
+            total_steps=total_steps,
+            total_samples=total_samples,
+            timestep_fs=timestep_fs,
+            replicate=replicate,
+        )
     save_progress(working_dir, progress)
 
     # Report status
@@ -2570,7 +2585,8 @@ def recover(
     if not submit:
         colored_echo(
             "\nTo resume, run:\n"
-            f"  polyzymd recover -c {config} -r {replicate} --submit --preset <preset>",
+            f"  polyzymd recover -c {config} -r {replicate} --submit --preset <preset>"
+            f" [engine={engine_name}]",
             phase="workflow",
         )
         return
@@ -2583,34 +2599,13 @@ def recover(
     resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "cuda-12-4")
 
     colored_echo(
-        f"\nGenerating recovery job (preset: {preset}, pixi env: {resolved_pixi_env})...",
+        f"\nGenerating recovery job (preset: {preset}, engine: {engine_name}, "
+        f"pixi env: {resolved_pixi_env})...",
         phase="workflow",
-    )
-
-    slurm_config = SlurmConfig.from_preset(preset)
-    if memory:
-        slurm_config.memory = memory
-
-    # Detect pre-built system files so the recovery job loads the existing
-    # topology instead of rebuilding (non-deterministic packing would produce
-    # a different atom count and crash on checkpoint reload).
-    system_already_built = (working_dir / "solvated_system.pdb").exists() and (
-        working_dir / "system.xml"
-    ).exists()
-    if system_already_built:
-        colored_echo(
-            "Detected pre-built system — recovery job will use --skip-build",
-            phase="workflow",
-        )
-
-    generator = SlurmScriptGenerator(
-        slurm_config, pixi_env=resolved_pixi_env, skip_build=system_already_built
     )
 
     # Use the same descriptive job naming as `polyzymd submit`
     job_name = create_job_name(sim_config, replicate)
-    logs_subdir = sim_config.output.slurm_logs_subdir
-    output_file = f"{logs_subdir}/{job_name}.%j.out"
 
     # Best-effort duplicate guard
     if not force:
@@ -2627,49 +2622,137 @@ def recover(
             )
             sys.exit(1)
 
-    config_path_abs = str(Path(config).resolve())
-    script_content = generator.generate_job_script(
-        config_path=config_path_abs,
-        replicate=replicate,
-        working_dir=str(working_dir),
-        job_name=job_name,
-        output_file=output_file,
-    )
+    if engine_name == "gromacs":
+        import shutil
+        import subprocess
 
-    # Write script
-    script_dir = working_dir / "recovery_scripts"
-    script_dir.mkdir(exist_ok=True)
-    script_path = script_dir / f"recover_rep{replicate}.sh"
-    script_path.write_text(script_content)
-    script_path.chmod(0o755)
+        from polyzymd.engines import create_engine
+        from polyzymd.engines.base import EngineSubmitRequest
 
-    colored_echo(f"Script: {script_path}", phase="workflow")
+        slurm_config = SlurmConfig.from_preset(preset)
+        if memory:
+            slurm_config.memory = memory
 
-    if dry_run:
-        colored_echo("\n[DRY RUN] Would submit:", phase="workflow")
-        colored_echo(f"  sbatch {script_path}", phase="workflow")
-        return
+        prefix = sim_config.generate_system_name()
+        gromacs_inputs_exist = (working_dir / f"{prefix}.top").exists() and (
+            working_dir / "prod.mdp"
+        ).exists()
+        if gromacs_inputs_exist:
+            colored_echo(
+                "Detected existing GROMACS inputs — recovery will reuse them",
+                phase="workflow",
+            )
 
-    # Submit
-    import subprocess
-
-    result = subprocess.run(
-        ["sbatch", str(script_path)],
-        capture_output=True,
-        text=True,
-    )
-
-    if result.returncode == 0:
-        colored_echo(f"Submitted: {result.stdout.strip()}", phase="workflow")
-        colored_echo("Monitor with: squeue -u $USER", phase="workflow")
-    else:
-        colored_echo(
-            f"Submission failed: {result.stderr.strip()}",
-            err=True,
-            phase="workflow",
-            level=logging.ERROR,
+        config_path_abs = str(Path(config).resolve())
+        request = EngineSubmitRequest(
+            replicate=replicate,
+            config_path=Path(config_path_abs),
+            working_dir=working_dir,
+            slurm_config=slurm_config,
+            job_name=job_name,
+            extra={"pixi_env": resolved_pixi_env, "skip_build": gromacs_inputs_exist},
         )
-        sys.exit(1)
+
+        engine_impl = create_engine(sim_config, override="gromacs")
+        script_path = engine_impl.prepare_submission(request)
+
+        recovery_dir = working_dir / "recovery_scripts"
+        recovery_dir.mkdir(exist_ok=True)
+        recovery_path = recovery_dir / f"recover_rep{replicate}.sh"
+        shutil.copy2(script_path, recovery_path)
+        recovery_path.chmod(0o755)
+
+        colored_echo(f"Script: {recovery_path}", phase="workflow")
+
+        if dry_run:
+            colored_echo("\n[DRY RUN] Would submit:", phase="workflow")
+            colored_echo(f"  sbatch {recovery_path}", phase="workflow")
+            return
+
+        result = subprocess.run(
+            ["sbatch", str(recovery_path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            colored_echo(f"Submitted: {result.stdout.strip()}", phase="workflow")
+            colored_echo("Monitor with: squeue -u $USER", phase="workflow")
+        else:
+            colored_echo(
+                f"Submission failed: {result.stderr.strip()}",
+                err=True,
+                phase="workflow",
+                level=logging.ERROR,
+            )
+            sys.exit(1)
+    else:
+        # OpenMM recovery path
+        slurm_config = SlurmConfig.from_preset(preset)
+        if memory:
+            slurm_config.memory = memory
+
+        # Detect pre-built system files so the recovery job loads the existing
+        # topology instead of rebuilding (non-deterministic packing would produce
+        # a different atom count and crash on checkpoint reload).
+        system_already_built = (working_dir / "solvated_system.pdb").exists() and (
+            working_dir / "system.xml"
+        ).exists()
+        if system_already_built:
+            colored_echo(
+                "Detected pre-built system — recovery job will use --skip-build",
+                phase="workflow",
+            )
+
+        generator = SlurmScriptGenerator(
+            slurm_config, pixi_env=resolved_pixi_env, skip_build=system_already_built
+        )
+
+        logs_subdir = sim_config.output.slurm_logs_subdir
+        output_file = f"{logs_subdir}/{job_name}.%j.out"
+
+        config_path_abs = str(Path(config).resolve())
+        script_content = generator.generate_job_script(
+            config_path=config_path_abs,
+            replicate=replicate,
+            working_dir=str(working_dir),
+            job_name=job_name,
+            output_file=output_file,
+        )
+
+        # Write script
+        script_dir = working_dir / "recovery_scripts"
+        script_dir.mkdir(exist_ok=True)
+        script_path = script_dir / f"recover_rep{replicate}.sh"
+        script_path.write_text(script_content)
+        script_path.chmod(0o755)
+
+        colored_echo(f"Script: {script_path}", phase="workflow")
+
+        if dry_run:
+            colored_echo("\n[DRY RUN] Would submit:", phase="workflow")
+            colored_echo(f"  sbatch {script_path}", phase="workflow")
+            return
+
+        # Submit
+        import subprocess
+
+        result = subprocess.run(
+            ["sbatch", str(script_path)],
+            capture_output=True,
+            text=True,
+        )
+
+        if result.returncode == 0:
+            colored_echo(f"Submitted: {result.stdout.strip()}", phase="workflow")
+            colored_echo("Monitor with: squeue -u $USER", phase="workflow")
+        else:
+            colored_echo(
+                f"Submission failed: {result.stderr.strip()}",
+                err=True,
+                phase="workflow",
+                level=logging.ERROR,
+            )
+            sys.exit(1)
 
 
 def _find_topology_pdb(working_dir: Path) -> Path:
@@ -2889,6 +2972,60 @@ def _register_optional_command_groups() -> None:
     from polyzymd.cli.compare import compare
 
     cli.add_command(compare)
+
+
+# =============================================================================
+# Hidden: GROMACS progress update (called by GROMACS SLURM scripts)
+# =============================================================================
+
+
+@cli.command("_update-gromacs-progress", hidden=True)
+@click.option(
+    "--working-dir",
+    required=True,
+    type=click.Path(exists=True),
+    help="GROMACS working directory",
+)
+@click.option(
+    "--config-path",
+    default="",
+    help="Simulation config path for metadata",
+)
+@click.option(
+    "--replicate",
+    default=1,
+    type=int,
+    help="Replicate index",
+)
+@click.option(
+    "--mark-complete",
+    is_flag=True,
+    help="Force completion status after post-processing",
+)
+def update_gromacs_progress_cmd(
+    working_dir: str,
+    config_path: str,
+    replicate: int,
+    mark_complete: bool,
+) -> None:
+    """Update GROMACS progress.json from prod.log scan.
+
+    Called by the GROMACS self-resubmitting SLURM wrapper after each
+    mdrun invocation. Merges the latest log scan into progress.json.
+    """
+    from polyzymd.engines.gromacs.progress import update_gromacs_progress
+
+    progress = update_gromacs_progress(
+        working_dir=Path(working_dir),
+        config_path=config_path,
+        replicate=replicate,
+        mark_complete=mark_complete,
+    )
+    pct = progress.fraction_complete() * 100
+    click.echo(
+        f"Progress updated: {progress.total_steps_completed}/{progress.total_steps_requested} "
+        f"steps ({pct:.1f}%) — status: {progress.status.value}"
+    )
 
 
 _register_optional_command_groups()
