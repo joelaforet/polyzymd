@@ -187,9 +187,9 @@ def test_mdrun_flags_in_all_stages(monkeypatch) -> None:
         output_file="slurm_logs/gmx_r2.%j.out",
     )
 
-    assert "$MDRUN -deffnm em $MDRUN_FLAGS_EM -v" in script
-    assert "$MDRUN -deffnm eq_01 $MDRUN_FLAGS -v" in script
-    assert "$MDRUN -deffnm eq_02 $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm em -cpo em.cpt $MDRUN_FLAGS_EM -v" in script
+    assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm eq_02 -cpo eq_02.cpt $MDRUN_FLAGS -v" in script
     assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v" in script
     assert script.count("$MDRUN_FLAGS") >= 4
 
@@ -248,8 +248,8 @@ def test_mdrun_variable_uses_mpirun_for_mpi_binary(monkeypatch) -> None:
     )
 
     assert 'MDRUN="mpirun $GMX mdrun"' in script
-    assert "$MDRUN -deffnm em $MDRUN_FLAGS_EM -v" in script
-    assert "$MDRUN -deffnm eq_01 $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm em -cpo em.cpt $MDRUN_FLAGS_EM -v" in script
+    assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS -v" in script
     assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v" in script
 
 
@@ -743,9 +743,9 @@ class TestGPUSlurmScripts:
             equilibration_mdps=["eq_01_nvt.mdp", "eq_02_npt.mdp"],
         )
 
-        assert "$MDRUN -deffnm em $MDRUN_FLAGS_EM -v" in script
-        assert "$MDRUN -deffnm eq_01 $MDRUN_FLAGS -v" in script
-        assert "$MDRUN -deffnm eq_02 $MDRUN_FLAGS -v" in script
+        assert "$MDRUN -deffnm em -cpo em.cpt $MDRUN_FLAGS_EM -v" in script
+        assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS -v" in script
+        assert "$MDRUN -deffnm eq_02 -cpo eq_02.cpt $MDRUN_FLAGS -v" in script
         assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v" in script
         assert "MDRUN_FLAGS_EM=" in script
         assert "-pme" in script
@@ -783,8 +783,76 @@ class TestGPUSlurmScripts:
             equilibration_mdps=["eq_01_nvt.mdp"],
         )
 
-        assert "$MDRUN -deffnm em $MDRUN_FLAGS_EM -v" in script
+        assert "$MDRUN -deffnm em -cpo em.cpt $MDRUN_FLAGS_EM -v" in script
         assert "MDRUN_FLAGS_EM=" in script
+
+
+class TestCheckpointResume:
+    """Tests for stage-local checkpoint resume logic."""
+
+    def test_em_checkpoint_resume_logic(self, monkeypatch) -> None:
+        """EM block should check for em.cpt and resume if found."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        block = _generator()._generate_energy_minimization_block()
+        assert "-cpi em.cpt" in block
+        assert "-cpo em.cpt" in block
+        assert "Resuming energy minimization from checkpoint" in block
+
+    def test_em_fresh_run_creates_checkpoint(self, monkeypatch) -> None:
+        """Fresh EM run should use -cpo to create checkpoint."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        block = _generator()._generate_energy_minimization_block()
+        assert "-cpo em.cpt" in block
+
+    def test_em_skips_grompp_when_tpr_exists(self, monkeypatch) -> None:
+        """EM should skip grompp if em.tpr already exists."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        block = _generator()._generate_energy_minimization_block()
+        assert "if [ ! -f em.tpr ]; then" in block
+
+    def test_equilibration_checkpoint_resume_logic(self, monkeypatch) -> None:
+        """Equilibration stages should check for stage-local checkpoints."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        block = _generator()._generate_equilibration_block(["eq_01_nvt.mdp", "eq_02_npt.mdp"])
+        assert "-cpi eq_01.cpt" in block
+        assert "-cpo eq_01.cpt" in block
+        assert "-cpi eq_02.cpt" in block
+        assert "-cpo eq_02.cpt" in block
+        assert "Resuming equilibration stage 1" in block
+        assert "Resuming equilibration stage 2" in block
+
+    def test_equilibration_skips_grompp_when_tpr_exists(self, monkeypatch) -> None:
+        """Equilibration should skip grompp if stage.tpr exists."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        block = _generator()._generate_equilibration_block(["eq_01_nvt.mdp"])
+        assert "if [ ! -f eq_01.tpr ]; then" in block
+
+    def test_append_flag_only_on_resume(self, monkeypatch) -> None:
+        """The -append flag should only appear in checkpoint resume branches."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        block = _generator()._generate_equilibration_block(["eq_01_nvt.mdp"])
+        lines = block.split("\n")
+        for line in lines:
+            if "-append" in line:
+                assert "-cpi" in line, "'-append' found without '-cpi' on same line"
 
 
 class TestSetEOrdering:

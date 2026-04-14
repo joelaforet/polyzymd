@@ -478,8 +478,15 @@ exit 0
         lines = [
             "if [ ! -f em.gro ]; then",
             '    echo "=== Energy Minimization ==="',
-            "    run_foreground $GMX grompp -f em.mdp -c ${{PREFIX}}.gro -r ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}",
-            '    run_mdrun_stage "energy minimization" $MDRUN -deffnm em $MDRUN_FLAGS_EM -v',
+            "    if [ ! -f em.tpr ]; then",
+            "        run_foreground $GMX grompp -f em.mdp -c ${{PREFIX}}.gro -r ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}",
+            "    fi",
+            "    if [ -f em.cpt ]; then",
+            '        echo "Resuming energy minimization from checkpoint: em.cpt"',
+            '        run_mdrun_stage "energy minimization" $MDRUN -deffnm em -cpi em.cpt -cpo em.cpt -append $MDRUN_FLAGS_EM -v',
+            "    else",
+            '        run_mdrun_stage "energy minimization" $MDRUN -deffnm em -cpo em.cpt $MDRUN_FLAGS_EM -v',
+            "    fi",
             "    if [ ! -f em.gro ]; then",
             '        echo "FATAL: Energy minimization failed — em.gro not produced"',
             "        exit 1",
@@ -557,22 +564,34 @@ exit 0
             lines.append("")
             lines.append(f"if [ ! -f {stage}.gro ]; then")
             lines.append(f'    echo "=== Equilibration {idx}: {mdp_name} ==="')
-            lines.append("    if [ -f ${LAST_EQ}.cpt ]; then")
+            lines.append(f"    if [ ! -f {stage}.tpr ]; then")
+            lines.append("        if [ -f ${LAST_EQ}.cpt ]; then")
             lines.append(
-                f"        run_foreground $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro -r em.gro "
+                f"            run_foreground $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro -r em.gro "
                 f"-t ${{LAST_EQ}}.cpt "
                 f"-p ${{PREFIX}}.top -o {stage}.tpr {self._grompp_flags}"
             )
-            lines.append("    else")
+            lines.append("        else")
             lines.append(
-                f"        run_foreground $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro -r em.gro "
+                f"            run_foreground $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro -r em.gro "
                 f"-p ${{PREFIX}}.top -o {stage}.tpr {self._grompp_flags}"
             )
+            lines.append("        fi")
             lines.append("    fi")
+            lines.append(f"    if [ -f {stage}.cpt ]; then")
             lines.append(
-                f'    run_mdrun_stage "equilibration stage {idx}" '
-                f"$MDRUN -deffnm {stage} $MDRUN_FLAGS -v"
+                f'        echo "Resuming equilibration stage {idx} from checkpoint: {stage}.cpt"'
             )
+            lines.append(
+                f'        run_mdrun_stage "equilibration stage {idx}" '
+                f"$MDRUN -deffnm {stage} -cpi {stage}.cpt -cpo {stage}.cpt -append $MDRUN_FLAGS -v"
+            )
+            lines.append("    else")
+            lines.append(
+                f'        run_mdrun_stage "equilibration stage {idx}" '
+                f"$MDRUN -deffnm {stage} -cpo {stage}.cpt $MDRUN_FLAGS -v"
+            )
+            lines.append("    fi")
             lines.append(f"    if [ ! -f {stage}.gro ]; then")
             lines.append(
                 f'        echo "FATAL: Equilibration stage {idx} failed — {stage}.gro not produced"'
