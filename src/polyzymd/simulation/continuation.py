@@ -689,9 +689,9 @@ class ContinuationManager:
                 "__class__": "Quantity",
                 "__values__": {"value": duration_ns, "unit": "nanosecond"},
             }
-            self._param_dict["__values__"]["integ_params"]["__values__"][
-                "num_samples"
-            ] = num_samples
+            self._param_dict["__values__"]["integ_params"]["__values__"]["num_samples"] = (
+                num_samples
+            )
 
         # Add barostat if needed
         self._add_barostat_if_needed()

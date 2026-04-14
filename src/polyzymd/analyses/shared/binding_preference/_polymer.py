@@ -151,5 +151,3 @@ def extract_polymer_composition(
     )
 
     return composition
-
-
