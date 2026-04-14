@@ -55,13 +55,13 @@ analysis directory:
 └── analysis/
     └── rmsf/
         ├── run_1/
-        │   └── rmsf_eq10.00ns.json
+        │   └── rmsf_eq10ns.json
         ├── run_2/
-        │   └── rmsf_eq10.00ns.json
+        │   └── rmsf_eq10ns.json
         ├── run_3/
-        │   └── rmsf_eq10.00ns.json
+        │   └── rmsf_eq10ns.json
         └── aggregated/
-            └── rmsf_reps1-3_eq10.00ns.json
+            └── rmsf_reps1-3_eq10ns.json
 ```
 
 Comparison-level output is written separately in the comparison workspace:

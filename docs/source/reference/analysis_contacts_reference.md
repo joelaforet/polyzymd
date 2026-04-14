@@ -59,14 +59,14 @@ Contacts results are written under each condition's analysis directory.
         └── contacts/
             ├── run_1/
             │   ├── result.json
-            │   └── contacts_eq10.00ns_cut4.5_s<fingerprint>_rep1.json
+            │   └── contacts_eq10ns_cut4.5_s<fingerprint>_rep1.json
             ├── run_2/
             │   └── ...
             ├── run_3/
             │   └── ...
             ├── aggregated/
             │   └── result.json
-            └── contacts_aggregated_eq10.00ns_cut4.5_s<fingerprint>_reps1-3.json
+            └── contacts_aggregated_eq10ns_cut4.5_s<fingerprint>_reps1-3.json
 ```
 
 Depending on cache history and plugin version, legacy file names may also

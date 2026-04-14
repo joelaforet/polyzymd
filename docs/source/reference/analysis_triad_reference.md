@@ -63,13 +63,13 @@ comparison_workspace/
 │   └── <condition>/
 │       └── catalytic_triad/
 │           ├── run_1/
-│           │   └── triad_LipA_catalytic_triad_eq100.00ns.json
+│           │   └── triad_LipA_catalytic_triad_eq100ns.json
 │           ├── run_2/
-│           │   └── triad_LipA_catalytic_triad_eq100.00ns.json
+│           │   └── triad_LipA_catalytic_triad_eq100ns.json
 │           ├── run_3/
-│           │   └── triad_LipA_catalytic_triad_eq100.00ns.json
+│           │   └── triad_LipA_catalytic_triad_eq100ns.json
 │           └── aggregated/
-│               └── triad_LipA_catalytic_triad_reps1-3_eq100.00ns.json
+│               └── triad_LipA_catalytic_triad_reps1-3_eq100ns.json
 └── comparison/
     └── catalytic_triad/
         └── result.json
