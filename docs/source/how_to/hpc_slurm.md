@@ -152,6 +152,12 @@ ml slurm/alpine   # shared campus resource
 ml slurm/blanca   # PI-owned condo nodes
 ```
 
+:::{important}
+You must run `module load slurm/blanca` (or `ml slurm/blanca`) before
+`sbatch` to see Blanca partitions. Without it, Blanca queues are invisible
+to the scheduler.
+:::
+
 Both clusters require `--partition`, `--account`, and `--qos` explicitly.
 Alpine example:
 
@@ -172,6 +178,15 @@ pixi run -e cuda-12-4 polyzymd submit \
     --replicates 1-5
 ```
 
+Blanca has 9+ different GPU types (P100, T4, V100, RTX 6000, A40, A100, L40,
+H100, RTX Pro 6000). If you are running GPU GROMACS on Blanca, use
+`--constraint` to pin your job to a compatible architecture — see
+[GROMACS engine](#gromacs-engine) below.
+
+The `blanca-shirts` preset uses `qos=preemptable`, which means jobs can be
+preempted by the node owner. GROMACS scripts handle this gracefully via
+SIGTERM trapping (see [Preemption resilience](#preemption-resilience)).
+
 :::{tip}
 If you are also running analysis jobs via `polyzymd compare submit-all`, see
 {doc}`hpc_execution` for detailed CU Boulder cluster configuration including
@@ -189,6 +204,89 @@ Each generated script follows the same loop:
 
 That is why long runs can continue automatically after wall-time expiry or a
 graceful interruption.
+
+For GROMACS jobs the scripts additionally:
+
+- run EM, equilibration stages, and production with checkpoint restart
+- pass `-maxh` so GROMACS exits cleanly before the wall-time limit
+- trap SIGTERM and forward it to `gmx mdrun`, which flushes a checkpoint
+- self-resubmit until the full production duration completes
+
+## GROMACS engine
+
+:::{versionchanged} 1.4.0
+`polyzymd submit` now supports `--engine gromacs` for GROMACS SLURM
+submission with the same self-resubmitting workflow used by OpenMM.
+:::
+
+### CPU GROMACS
+
+```bash
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset aa100 \
+    --replicates 1-3
+```
+
+:::{note}
+GROMACS CPU jobs use `pixi run -e build` (not `cuda-12-4`) because the
+GROMACS binary comes from `module load`, not from the pixi environment.
+:::
+
+### GPU GROMACS
+
+```bash
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset blanca-shirts \
+    --constraint "A40|A100" \
+    --replicates 1-3
+```
+
+### GPU constraints (`--constraint`)
+
+GROMACS uses ahead-of-time compiled CUDA kernels. Unlike OpenMM, which
+JIT-compiles kernels at launch, a GROMACS binary compiled for one GPU
+architecture may not run on another. If your cluster has mixed GPU types,
+`--constraint` ensures your job lands on compatible hardware:
+
+```bash
+--constraint "A40"              # single GPU type
+--constraint "A40|A100"         # either type (OR)
+--constraint "avx2&rh8"         # feature AND (CPU + OS flags)
+```
+
+This maps directly to the SLURM `#SBATCH --constraint` directive and works
+on any cluster — it is not specific to CU Boulder.
+
+(preemption-resilience)=
+### Preemption resilience
+
+GROMACS SLURM scripts trap `SIGTERM` (the signal SLURM sends before
+preempting a job). When the trap fires, the script:
+
+1. forwards the signal to `gmx mdrun`, which flushes a `.cpt` checkpoint
+2. waits for GROMACS to exit
+3. resubmits the job so production resumes from the checkpoint
+
+Combined with `--constraint`, this ensures resumed jobs land on compatible
+GPU hardware. This is especially important on clusters with preemptable QoS
+(e.g., Blanca `qos=preemptable`).
+
+### Module loading (`gromacs.module_load`)
+
+GROMACS on HPC clusters typically requires loading prerequisite modules
+(compiler, MPI) before the GROMACS module itself. Use the `gromacs.module_load`
+config field — it is inserted verbatim into the generated SLURM script:
+
+```yaml
+gromacs:
+  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
+```
+
+List prerequisites before the GROMACS module so dependencies resolve in order.
 
 ## Common fixes
 

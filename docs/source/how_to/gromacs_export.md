@@ -35,7 +35,7 @@ Alternatively, prefix each command with `pixi run -e build`.
 | **HPC availability** | Less common | Very common |
 | **Analysis tools** | MDTraj, MDAnalysis | Built-in + MDAnalysis |
 | **Restart/checkpoint** | Native in PolyzyMD | Standard .cpt files |
-| **Job management** | Self-resubmitting jobs | Manual or script-based |
+| **Job management** | Self-resubmitting jobs | Self-resubmitting jobs |
 | **Learning curve** | Simpler | More complex |
 
 **Use GROMACS when:**
@@ -46,7 +46,6 @@ Alternatively, prefix each command with `pixi run -e build`.
 
 **Use OpenMM when:**
 - You want the simplest workflow
-- You need built-in self-resubmitting job management
 - You're running locally or on a workstation
 
 ---
@@ -343,50 +342,79 @@ You can customize this script or use it as a template for HPC submission.
 
 ## Running on HPC Clusters
 
-```{note}
-`polyzymd submit` does not yet support GROMACS as a simulation engine.
-The workflow below uses `build --format gromacs` to export files, then
-manual SLURM submission. Integrated GROMACS submission is planned for v1.4.0.
-```
+:::{versionchanged} 1.4.0
+`polyzymd submit` now supports GROMACS as a simulation engine. The manual
+SLURM script approach below is no longer required but remains valid.
+:::
 
-### Manual SLURM Submission
+Use `polyzymd submit` with `--engine gromacs` to generate self-resubmitting
+SLURM scripts, just like the OpenMM workflow. See {doc}`hpc_slurm` for full
+SLURM details.
 
-After exporting with `build --format gromacs`, create a SLURM script:
-
-```bash
-#!/bin/bash
-#SBATCH --job-name=LipA_gmx
-#SBATCH --partition=aa100
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:1
-#SBATCH --time=24:00:00
-#SBATCH --output=slurm_%j.out
-
-module load gromacs/2023.3
-
-cd /path/to/replicate_1/gromacs
-
-# Set GMX environment variable for the run script
-export GMX=$(which gmx)
-
-# Run the generated script
-bash run_LipA_SBMA-EGPMA_gromacs.sh
-```
-
-### Using GPU Acceleration
-
-GROMACS GPU acceleration is configured via environment variables:
+### CPU submission
 
 ```bash
-# Use GPU for non-bonded and PME
-export GMX_GPU_DD_COMMS=1
-export GMX_GPU_PME_PP_COMMS=1
-export GMX_FORCE_UPDATE_DEFAULT_GPU=1
-
-$GMX mdrun -deffnm prod -v -nb gpu -pme gpu -bonded gpu
+polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset aa100 \
+    --replicates 1-3
 ```
+
+### GPU submission
+
+Add a `gromacs:` block to your config YAML to enable GPU acceleration:
+
+```yaml
+gromacs:
+  gpu: true
+  gpus: 1
+  binary: "gmx"                # NOT gmx_mpi for single-node GPU runs
+  ntmpi: 1
+  ntomp: 12
+  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
+```
+
+Then submit:
+
+```bash
+polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset blanca-shirts \
+    --constraint "A40|A100" \
+    --replicates 1-3
+```
+
+### GPU constraints
+
+GROMACS uses ahead-of-time compiled CUDA kernels, so the binary must match the
+GPU architecture at runtime. If your cluster has mixed GPU types, use
+`--constraint` to ensure your job lands on compatible hardware:
+
+```bash
+--constraint "A40"              # single GPU type
+--constraint "A40|A100"         # either type (OR)
+--constraint "avx2&rh8"         # feature AND (CPU + OS flags)
+```
+
+This is a standard SLURM feature (`#SBATCH --constraint`), not
+cluster-specific. OpenMM does not need this because it JIT-compiles CUDA
+kernels at launch.
+
+### Module loading
+
+GROMACS on HPC clusters typically requires loading prerequisite modules before
+the GROMACS module itself. The `gromacs.module_load` config field is inserted
+verbatim into the generated SLURM script:
+
+```yaml
+gromacs:
+  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
+```
+
+List prerequisites (compiler, MPI) before the GROMACS module so dependencies
+resolve in order.
 
 ---
 
