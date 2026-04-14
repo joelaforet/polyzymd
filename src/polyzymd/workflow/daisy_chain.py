@@ -647,6 +647,7 @@ def submit_daisy_chain(
     qos: str | None = None,
     gpu_type: str | None = None,
     constraint: str | None = None,
+    nodelist: str | None = None,
     openff_logs: bool = False,
     skip_build: bool = False,
 ) -> Dict[int, List[SubmissionResult]]:
@@ -694,6 +695,8 @@ def submit_daisy_chain(
         Override GPU type for presets that use ``--gpus`` directive.
     constraint : str or None
         SLURM ``--constraint`` expression (e.g. ``"A40|A100"``).
+    nodelist : str or None
+        Optional SLURM ``--nodelist`` override.
     openff_logs : bool
         Enable verbose OpenFF logs in generated scripts.
     skip_build : bool
@@ -746,6 +749,8 @@ def submit_daisy_chain(
         slurm_config.gpu_type = gpu_type
     if constraint:
         slurm_config.constraint = constraint
+    if nodelist is not None:
+        slurm_config.nodelist = nodelist
 
     # Guard: an empty account on presets that require one (e.g. Alpine) will
     # produce an invalid SBATCH script.  Skip the guard when the preset itself

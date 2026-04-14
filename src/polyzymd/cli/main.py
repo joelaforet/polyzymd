@@ -1079,6 +1079,7 @@ def _print_gromacs_dry_run_details(
     account: str | None,
     gpu_type: str | None,
     constraint: str | None,
+    nodelist: str | None,
     partition: str | None = None,
     qos: str | None = None,
     email: str = "",
@@ -1103,6 +1104,8 @@ def _print_gromacs_dry_run_details(
         CLI GPU type override.
     constraint : str or None
         CLI constraint override.
+    nodelist : str or None
+        CLI nodelist override.
     partition : str or None, optional
         CLI partition override.
     qos : str or None, optional
@@ -1134,6 +1137,8 @@ def _print_gromacs_dry_run_details(
         base_slurm.gpu_type = gpu_type
     if constraint:
         base_slurm.constraint = constraint
+    if nodelist:
+        base_slurm.nodelist = nodelist
 
     effective = engine_impl._resolve_slurm_config(base_slurm)
     effective_flags = engine_impl._resolve_mdrun_flags(effective)
@@ -1150,6 +1155,8 @@ def _print_gromacs_dry_run_details(
     colored_echo(f"    GPUs:           {effective.gpus}", phase=phase)
     if effective.constraint:
         colored_echo(f"    Constraint:     {effective.constraint}", phase=phase)
+    if effective.nodelist:
+        colored_echo(f"    Nodelist:       {effective.nodelist}", phase=phase)
     if effective.qos:
         colored_echo(f"    QoS:            {effective.qos}", phase=phase)
     colored_echo(phase=phase)
@@ -1277,6 +1284,11 @@ def _print_gromacs_dry_run_details(
     ),
 )
 @click.option(
+    "--nodelist",
+    default=None,
+    help="SLURM --nodelist override (e.g., 'node01' or 'node[01-04]').",
+)
+@click.option(
     "--openff-logs",
     "submit_openff_logs",
     is_flag=True,
@@ -1324,6 +1336,7 @@ def submit(
     qos: str | None,
     gpu_type: str | None,
     constraint: str | None,
+    nodelist: str | None,
     submit_openff_logs: bool,
     skip_build: bool,
     pixi_env: str | None,
@@ -1413,6 +1426,7 @@ def submit(
                 account=account,
                 gpu_type=gpu_type,
                 constraint=constraint,
+                nodelist=nodelist,
                 partition=partition,
                 qos=qos,
                 email=email,
@@ -1475,6 +1489,8 @@ def submit(
                 slurm_config.gpu_type = gpu_type
             if constraint:
                 slurm_config.constraint = constraint
+            if nodelist:
+                slurm_config.nodelist = nodelist
 
             working_dir = sim_config.get_working_directory(rep) / "gromacs"
             job_name = create_job_name(sim_config, rep)
@@ -1544,6 +1560,7 @@ def submit(
             qos=qos,
             gpu_type=gpu_type,
             constraint=constraint,
+            nodelist=nodelist,
             openff_logs=submit_openff_logs,
             skip_build=skip_build,
         )
@@ -2684,6 +2701,11 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     ),
 )
 @click.option(
+    "--nodelist",
+    default=None,
+    help="SLURM --nodelist override (e.g., 'node01' or 'node[01-04]').",
+)
+@click.option(
     "--pixi-env",
     default=None,
     type=click.Choice(["cuda-12-4", "cuda-12-6"]),
@@ -2711,6 +2733,7 @@ def recover(
     partition: str | None,
     qos: str | None,
     constraint: str | None,
+    nodelist: str | None,
     pixi_env: str | None,
     force: bool,
     engine: str | None,
@@ -2856,6 +2879,8 @@ def recover(
             slurm_config.qos = qos
         if constraint:
             slurm_config.constraint = constraint
+        if nodelist:
+            slurm_config.nodelist = nodelist
 
         prefix = _generate_system_prefix(sim_config)
         gromacs_inputs_exist = all(
@@ -2932,6 +2957,8 @@ def recover(
             slurm_config.qos = qos
         if constraint:
             slurm_config.constraint = constraint
+        if nodelist:
+            slurm_config.nodelist = nodelist
 
         # Detect pre-built system files so the recovery job loads the existing
         # topology instead of rebuilding (non-deterministic packing would produce

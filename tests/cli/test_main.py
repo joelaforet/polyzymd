@@ -694,6 +694,7 @@ class TestSubmitEngineAware:
             gpus=1,
             constraint=None,
             qos=None,
+            nodelist=None,
         )
         mock_engine._resolve_mdrun_flags = lambda _effective: "-pin on"
         mock_create_engine.return_value = mock_engine
@@ -704,6 +705,7 @@ class TestSubmitEngineAware:
             gmx_binary=None,
             gpu=True,
             ntmpi=1,
+            slurm_ntasks=None,
             ntomp=4,
             module_load=None,
         )
@@ -747,6 +749,7 @@ class TestSubmitEngineAware:
             gpus=1,
             constraint="A40",
             qos="normal",
+            nodelist=None,
         )
         mock_engine._resolve_mdrun_flags = lambda _effective: "-update gpu -bonded gpu"
         mock_create_engine.return_value = mock_engine
@@ -757,6 +760,7 @@ class TestSubmitEngineAware:
             gmx_binary="gmx_mpi",
             gpu=True,
             ntmpi=2,
+            slurm_ntasks=None,
             ntomp=8,
             module_load="gromacs/2024.1",
         )
@@ -814,6 +818,7 @@ class TestSubmitEngineAware:
             gpus=base.gpus,
             constraint=base.constraint,
             qos=base.qos,
+            nodelist=base.nodelist,
         )
         mock_engine._resolve_mdrun_flags = lambda _effective: "-pin on"
         mock_create_engine.return_value = mock_engine
@@ -824,6 +829,7 @@ class TestSubmitEngineAware:
             gmx_binary=None,
             gpu=False,
             ntmpi=1,
+            slurm_ntasks=None,
             ntomp=4,
             module_load=None,
         )
@@ -897,6 +903,7 @@ class TestSubmitEngineAware:
             module_load=None,
             gmx_binary=None,
             ntmpi=1,
+            slurm_ntasks=None,
             ntomp=4,
             gpu=False,
             gpus=1,
@@ -935,6 +942,7 @@ class TestSubmitEngineAware:
             module_load=None,
             gmx_binary=None,
             ntmpi=1,
+            slurm_ntasks=None,
             ntomp=4,
             gpu=False,
             gpus=1,
@@ -964,6 +972,13 @@ class TestSubmitEngineAware:
 
 class TestSubmitConstraintOption:
     """Tests for --constraint CLI option on submit command."""
+
+    def test_submit_help_shows_nodelist(self) -> None:
+        """'polyzymd submit --help' should show --nodelist option."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["submit", "--help"])
+        assert result.exit_code == 0
+        assert "--nodelist" in result.output
 
     def test_submit_help_shows_constraint(self) -> None:
         """'polyzymd submit --help' should show --constraint option."""
@@ -1044,6 +1059,38 @@ class TestSubmitConstraintOption:
         assert kwargs["qos"] == "normal"
         assert kwargs["email"] == "user@example.com"
 
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_nodelist_passed_to_submit_daisy_chain(
+        self,
+        mock_submit,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """submit should pass nodelist override to OpenMM submission path."""
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "openmm"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "submit",
+                "-c",
+                str(config_path),
+                "--nodelist",
+                "bgpu-shirts3",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mock_submit.assert_called_once()
+        kwargs = mock_submit.call_args.kwargs
+        assert kwargs["nodelist"] == "bgpu-shirts3"
+
     @patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
     @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
@@ -1061,6 +1108,7 @@ class TestSubmitConstraintOption:
         mock_config.gromacs = SimpleNamespace(
             grompp_flags="", mdrun_flags="", module_load=None, gmx_binary=None
         )
+        mock_config.gromacs.slurm_ntasks = None
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
         mock_engine_submit.return_value = {
@@ -1117,6 +1165,7 @@ class TestSubmitConstraintOption:
             module_load=None,
             gmx_binary=None,
             ntmpi=1,
+            slurm_ntasks=None,
             ntomp=4,
             gpu=False,
             gpus=1,
@@ -1161,6 +1210,131 @@ class TestSubmitConstraintOption:
         assert request.slurm_config.partition == "debug"
         assert request.slurm_config.qos == "normal"
         assert request.slurm_config.email == "user@example.com"
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_nodelist_set_on_gromacs_slurm_config(
+        self,
+        mock_from_yaml,
+        mock_resolve_gmx,
+        mock_engine_submit,
+        tmp_path: Path,
+    ) -> None:
+        """submit --engine gromacs should pass nodelist override to SlurmConfig."""
+        _ = mock_resolve_gmx
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "gromacs"
+        mock_config.gromacs = SimpleNamespace(
+            grompp_flags="",
+            mdrun_flags="",
+            mdrun_flags_equilibration=None,
+            mdrun_flags_production=None,
+            command_prefix=None,
+            mpi_launcher_flags="",
+            module_load=None,
+            gmx_binary=None,
+            ntmpi=1,
+            slurm_ntasks=None,
+            ntomp=4,
+            gpu=False,
+            gpus=1,
+            memory="16G",
+            env_exports={},
+            setup_commands=[],
+        )
+        mock_config.generate_system_name = lambda: "test_system"
+        mock_from_yaml.return_value = mock_config
+        mock_engine_submit.return_value = {
+            "submitted": False,
+            "script_path": "/tmp/script.sh",
+            "reason": "sbatch_not_available",
+        }
+
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        with patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[]):
+            with patch("polyzymd.workflow.daisy_chain.create_job_name", return_value="test_job"):
+                result = runner.invoke(
+                    cli,
+                    [
+                        "submit",
+                        "-c",
+                        str(config_path),
+                        "--engine",
+                        "gromacs",
+                        "--nodelist",
+                        "bgpu-shirts3",
+                    ],
+                )
+
+        assert result.exit_code == 0
+        mock_engine_submit.assert_called_once()
+        request = mock_engine_submit.call_args[0][0]
+        assert request.slurm_config.nodelist == "bgpu-shirts3"
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.engines.create_engine")
+    def test_submit_dry_run_gromacs_displays_nodelist_override(
+        self,
+        mock_create_engine,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """GROMACS dry-run output should display nodelist when provided."""
+        mock_engine = SimpleNamespace()
+        mock_engine._resolve_slurm_config = lambda base: SimpleNamespace(
+            partition=base.partition,
+            time_limit=base.time_limit,
+            memory=base.memory,
+            account=base.account,
+            email=base.email,
+            nodes=base.nodes,
+            ntasks=base.ntasks,
+            cpus_per_task=base.cpus_per_task,
+            gpus=base.gpus,
+            constraint=base.constraint,
+            qos=base.qos,
+            nodelist=base.nodelist,
+        )
+        mock_engine._resolve_mdrun_flags = lambda _effective: "-pin on"
+        mock_create_engine.return_value = mock_engine
+
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "gromacs"
+        mock_config.gromacs = SimpleNamespace(
+            gmx_binary=None,
+            gpu=False,
+            ntmpi=1,
+            slurm_ntasks=None,
+            ntomp=4,
+            module_load=None,
+        )
+        mock_from_yaml.return_value = mock_config
+
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            [
+                "submit",
+                "-c",
+                str(config_path),
+                "--engine",
+                "gromacs",
+                "--dry-run",
+                "--nodelist",
+                "bgpu-shirts3",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "Nodelist:" in result.output
+        assert "bgpu-shirts3" in result.output
 
     def test_recover_help_shows_constraint(self) -> None:
         """'polyzymd recover --help' should show --constraint option."""
@@ -1211,6 +1385,7 @@ class TestSubmitGromacsDuplicateGuard:
             module_load=None,
             gmx_binary=None,
         )
+        mock_config.gromacs.slurm_ntasks = None
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
 
@@ -1251,6 +1426,7 @@ class TestSubmitGromacsDuplicateGuard:
             module_load=None,
             gmx_binary=None,
         )
+        mock_config.gromacs.slurm_ntasks = None
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
         mock_submit.return_value = {
