@@ -304,3 +304,256 @@ def test_grompp_calls_never_use_mpirun(monkeypatch) -> None:
     )
 
     assert "mpirun $GMX grompp" not in script
+
+
+class TestGPUSlurmScripts:
+    """GPU-specific SLURM script regression tests."""
+
+    def test_single_gpu_gres_directive(self, monkeypatch) -> None:
+        """Single GPU should emit --gres=gpu:1."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+
+        generator = GromacsSlurmScriptGenerator(
+            slurm_config=SlurmConfig(
+                partition="blanca-shirts",
+                qos="blanca-shirts",
+                account="blanca-shirts",
+                time_limit="23:59:59",
+                nodes=1,
+                ntasks=1,
+                cpus_per_task=12,
+                memory="64G",
+                gpus=1,
+            ),
+            pixi_env="cuda-12-4",
+            gmx_binary="gmx",
+            grompp_flags="-maxwarn 1",
+            mdrun_flags="-ntmpi 1 -ntomp 12 -nb gpu -pme gpu -bonded gpu -update gpu",
+            module_load="module load gromacs/2024.2",
+        )
+
+        script = generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/rc_scratch/run1/gromacs",
+            system_prefix="CALB_PEG",
+            equilibration_mdps=["eq_01_nvt.mdp", "eq_02_npt.mdp"],
+        )
+
+        assert "#SBATCH --gres=gpu:1" in script
+
+    def test_multi_gpu_gres_directive(self, monkeypatch) -> None:
+        """Multiple GPUs should emit --gres=gpu:4."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+
+        generator = GromacsSlurmScriptGenerator(
+            slurm_config=SlurmConfig(
+                partition="blanca-shirts",
+                qos="blanca-shirts",
+                account="blanca-shirts",
+                time_limit="23:59:59",
+                nodes=1,
+                ntasks=4,
+                cpus_per_task=12,
+                memory="128G",
+                gpus=4,
+            ),
+            pixi_env="cuda-12-4",
+            gmx_binary="gmx",
+            mdrun_flags="-ntmpi 4 -ntomp 12 -nb gpu -pme gpu -bonded gpu -update gpu",
+        )
+
+        script = generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/rc_scratch/run1/gromacs",
+            system_prefix="CALB_PEG",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+        assert "#SBATCH --gres=gpu:4" in script
+
+    def test_gpu_script_gmx_uses_direct_launch(self, monkeypatch) -> None:
+        """GPU scripts with gmx (thread-MPI) should NOT use mpirun."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+
+        generator = GromacsSlurmScriptGenerator(
+            slurm_config=SlurmConfig(
+                partition="blanca-shirts",
+                qos="blanca-shirts",
+                account="blanca-shirts",
+                time_limit="23:59:59",
+                nodes=1,
+                ntasks=1,
+                cpus_per_task=12,
+                memory="64G",
+                gpus=1,
+            ),
+            pixi_env="cuda-12-4",
+            gmx_binary="gmx",
+            mdrun_flags="-ntmpi 1 -ntomp 12 -nb gpu -pme gpu -bonded gpu -update gpu",
+            module_load="module load gromacs/2024.2",
+        )
+
+        script = generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/rc_scratch/run1/gromacs",
+            system_prefix="CALB_PEG",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+        assert 'MDRUN="$GMX mdrun"' in script
+        assert "mpirun" not in script
+
+    def test_gpu_script_gmx_mpi_uses_mpirun(self, monkeypatch) -> None:
+        """GPU scripts with gmx_mpi should use mpirun launch."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+
+        generator = GromacsSlurmScriptGenerator(
+            slurm_config=SlurmConfig(
+                partition="blanca-shirts",
+                qos="blanca-shirts",
+                account="blanca-shirts",
+                time_limit="23:59:59",
+                nodes=1,
+                ntasks=4,
+                cpus_per_task=12,
+                memory="128G",
+                gpus=4,
+            ),
+            pixi_env="cuda-12-4",
+            gmx_binary="gmx_mpi",
+            mdrun_flags="-ntomp 12 -nb gpu -pme gpu",
+            module_load="module load gromacs/2024.2",
+        )
+
+        script = generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/rc_scratch/run1/gromacs",
+            system_prefix="CALB_PEG",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+        assert 'MDRUN="mpirun $GMX mdrun"' in script
+
+    def test_gpu_type_directive_style(self, monkeypatch) -> None:
+        """gpu_directive_style='gpus' with gpu_type should emit --gpus=a100:2."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+
+        generator = GromacsSlurmScriptGenerator(
+            slurm_config=SlurmConfig(
+                partition="gpu",
+                qos="normal",
+                account="myaccount",
+                time_limit="23:59:59",
+                nodes=1,
+                ntasks=1,
+                cpus_per_task=8,
+                memory="64G",
+                gpus=2,
+                gpu_type="a100",
+                gpu_directive_style="gpus",
+            ),
+            pixi_env="cuda-12-4",
+            gmx_binary="gmx",
+            mdrun_flags="-nb gpu",
+        )
+
+        script = generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="CALB_PEG",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+        assert "#SBATCH --gpus=a100:2" in script
+        assert "--gres" not in script
+
+    def test_gpu_script_contains_module_load(self, monkeypatch) -> None:
+        """GPU scripts should include the module load command."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+
+        generator = GromacsSlurmScriptGenerator(
+            slurm_config=SlurmConfig(
+                partition="blanca-shirts",
+                qos="blanca-shirts",
+                account="blanca-shirts",
+                time_limit="23:59:59",
+                nodes=1,
+                ntasks=1,
+                cpus_per_task=12,
+                memory="64G",
+                gpus=1,
+            ),
+            pixi_env="cuda-12-4",
+            gmx_binary="gmx",
+            mdrun_flags="-ntmpi 1 -ntomp 12 -nb gpu -pme gpu -bonded gpu -update gpu",
+            module_load="module load gromacs/2024.2",
+        )
+
+        script = generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/rc_scratch/run1/gromacs",
+            system_prefix="CALB_PEG",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+        assert "module load gromacs/2024.2" in script
+
+    def test_gpu_mdrun_flags_in_script_variable(self, monkeypatch) -> None:
+        """GPU offload flags should appear in the MDRUN_FLAGS variable."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+
+        mdrun_flags = "-ntmpi 1 -ntomp 12 -nb gpu -pme gpu -bonded gpu -update gpu"
+        generator = GromacsSlurmScriptGenerator(
+            slurm_config=SlurmConfig(
+                partition="blanca-shirts",
+                qos="blanca-shirts",
+                account="blanca-shirts",
+                time_limit="23:59:59",
+                nodes=1,
+                ntasks=1,
+                cpus_per_task=12,
+                memory="64G",
+                gpus=1,
+            ),
+            pixi_env="cuda-12-4",
+            gmx_binary="gmx",
+            mdrun_flags=mdrun_flags,
+            module_load="module load gromacs/2024.2",
+        )
+
+        script = generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/rc_scratch/run1/gromacs",
+            system_prefix="CALB_PEG",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+        assert f'MDRUN_FLAGS="{mdrun_flags}"' in script
