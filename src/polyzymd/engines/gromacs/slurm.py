@@ -488,6 +488,16 @@ exit 0
         if self._command_prefix:
             gmx_base = f"{self._command_prefix} {self._gmx_binary}"
 
+        if self._is_mpi_binary and self._command_prefix and self._mpi_launcher_flags:
+            LOGGER.warning(
+                "command_prefix is set alongside mpi_launcher_flags for a real-MPI "
+                "binary (%s). The command_prefix will handle process launching, so "
+                "mpi_launcher_flags (%s) will be ignored. Remove mpi_launcher_flags "
+                "or fold them into command_prefix.",
+                self._gmx_binary,
+                self._mpi_launcher_flags,
+            )
+
         if self._is_mpi_binary and not self._command_prefix:
             mpi_prefix = "mpirun"
             if self._mpi_launcher_flags:
