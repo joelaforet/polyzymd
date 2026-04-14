@@ -914,6 +914,44 @@ class TestRecoverEngineAware:
         mock_gromacs_load.assert_called_once_with(gromacs_dir, 1)
         mock_openmm_load.assert_not_called()
 
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.engines.gromacs.binary.shutil.which", return_value=None)
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_recover_gromacs_status_only_works_without_gmx_on_path(
+        self,
+        mock_from_yaml,
+        mock_gromacs_load,
+        mock_which,
+        mock_openmm_load,
+        mock_save,
+        tmp_path,
+    ):
+        """Status-only recover should not require gmx to exist on PATH."""
+        _ = mock_which, mock_save
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+        gromacs_dir = working_dir / "gromacs"
+        gromacs_dir.mkdir()
+
+        mock_from_yaml.return_value = _mock_sim_config_gromacs(working_dir)
+        mock_gromacs_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["recover", "-c", str(config_file), "-r", "1", "--engine", "gromacs"],
+        )
+
+        assert result.exit_code == 0, result.output
+        mock_gromacs_load.assert_called_once_with(gromacs_dir, 1)
+        mock_openmm_load.assert_not_called()
+
 
 class TestRecoverGromacsSubmit:
     """recover --submit supports GROMACS engine submission flow."""

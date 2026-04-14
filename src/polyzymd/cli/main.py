@@ -2727,7 +2727,7 @@ def recover(
         sys.exit(1)
 
     engine_name = _resolve_engine_name(sim_config, override=engine)
-    engine_impl = create_engine(sim_config, override=engine_name)
+    engine_impl = create_engine(sim_config, override=engine_name, defer_binary=True)
 
     if scratch_dir:
         working_dir = Path(scratch_dir)
