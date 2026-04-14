@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 
 from polyzymd.core.branding import FULL_CREDIT_LINE
@@ -33,6 +34,7 @@ class GromacsSlurmScriptGenerator:
     """
 
     MAXH_SAFETY_FACTOR = 0.90
+    _PATH_EXPORT_PATTERN = re.compile(r"^export PATH=\$PATH:[A-Za-z0-9._/,:\-@%=+]+$")
 
     JOB_TEMPLATE = """#!/bin/bash
 #SBATCH --partition={partition}
@@ -63,6 +65,8 @@ set -e
 eval "$(pixi shell-hook -e {pixi_env} --manifest-path {manifest_path})"
 
 {module_load_line}
+{env_exports_block}
+{setup_commands_block}
 
 # Resolve this script's path for self-resubmission
 THIS_SCRIPT="${{SLURM_JOB_SCRIPT:-$(realpath "$0")}}"
@@ -286,6 +290,8 @@ exit 0
         grompp_flags: str = "-maxwarn 1",
         mdrun_flags: str = "",
         module_load: str | None = None,
+        env_exports: dict[str, str] | None = None,
+        setup_commands: list[str] | None = None,
     ) -> None:
         """Initialize the GROMACS SLURM script generator.
 
@@ -303,6 +309,10 @@ exit 0
             Extra flags appended to ``gmx mdrun`` invocations.
         module_load : str | None, optional
             Optional module command executed before simulation commands.
+        env_exports : dict[str, str] | None, optional
+            Environment variables exported in the script prior to GROMACS commands.
+        setup_commands : list[str] | None, optional
+            Shell commands executed after module loading and env exports.
         """
         self._config = slurm_config
         self._pixi_env = pixi_env
@@ -311,6 +321,8 @@ exit 0
         self._grompp_flags = grompp_flags
         self._mdrun_flags = mdrun_flags
         self._module_load = module_load
+        self._env_exports = env_exports or {}
+        self._setup_commands = setup_commands or []
 
     def _gpu_line(self) -> str:
         """Return the GPU SBATCH directive for the configured cluster style."""
@@ -358,6 +370,23 @@ exit 0
         """Return the constraint SBATCH directive, or an empty string to omit it."""
         return f"#SBATCH --constraint={self._config.constraint}" if self._config.constraint else ""
 
+    def _validate_setup_command(self, command: str) -> None:
+        """Validate setup command content for script safety.
+
+        Parameters
+        ----------
+        command : str
+            Setup command to validate.
+
+        Raises
+        ------
+        ValueError
+            If the command contains unsafe characters.
+        """
+        if self._PATH_EXPORT_PATTERN.match(command):
+            return
+        _validate_script_value(command, "setup_commands")
+
     def generate_job_script(
         self,
         config_path: str,
@@ -403,6 +432,10 @@ exit 0
         equilibration_block = self._generate_equilibration_block(equilibration_mdps)
         manifest_path = _discover_manifest_path()
         module_load_line = self._module_load if self._module_load else ""
+        env_exports_block = "\n".join(
+            f'export {key}="{value}"' for key, value in self._env_exports.items()
+        )
+        setup_commands_block = "\n".join(self._setup_commands)
         mdrun_command = "mpirun $GMX mdrun" if self._is_mpi_binary else "$GMX mdrun"
 
         _validate_script_value(self._config.partition, "partition")
@@ -419,6 +452,11 @@ exit 0
         _validate_script_value(self._mdrun_flags, "mdrun_flags")
         if module_load_line:
             _validate_script_value(module_load_line, "module_load")
+        for key, value in self._env_exports.items():
+            _validate_script_value(key, "env_exports.key")
+            _validate_script_value(value, "env_exports.value")
+        for setup_command in self._setup_commands:
+            self._validate_setup_command(setup_command)
         if self._config.qos:
             _validate_script_value(self._config.qos, "qos")
         if self._config.memory:
@@ -464,6 +502,8 @@ exit 0
             energy_minimization_block=energy_minimization_block,
             equilibration_block=equilibration_block,
             module_load_line=module_load_line,
+            env_exports_block=env_exports_block,
+            setup_commands_block=setup_commands_block,
             FULL_CREDIT_LINE=FULL_CREDIT_LINE,
         )
 

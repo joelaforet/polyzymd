@@ -309,6 +309,53 @@ def test_grompp_calls_never_use_mpirun(monkeypatch) -> None:
     assert "mpirun $GMX grompp" not in script
 
 
+def test_env_exports_and_setup_commands_rendered_in_order(monkeypatch) -> None:
+    """env_exports and setup_commands should render after module load."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(
+            partition="aa100",
+            qos="normal",
+            account="ucb625_asc1",
+            time_limit="23:59:59",
+            email="",
+            nodes=1,
+            ntasks=1,
+            memory="3G",
+            gpus=1,
+        ),
+        pixi_env="cuda-12-4",
+        gmx_binary="gmx",
+        module_load="module load gromacs/2024",
+        env_exports={
+            "GMX_GPU_DD_COMMS": "true",
+            "GMX_GPU_PME_PP_COMMS": "true",
+        },
+        setup_commands=[
+            "source /projects/software/gromacs/bin/GMXRC",
+            "export PATH=$PATH:/projects/software/plumed/bin",
+        ],
+    )
+
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    module_idx = script.index("module load gromacs/2024")
+    env_idx = script.index('export GMX_GPU_DD_COMMS="true"')
+    setup_idx = script.index("source /projects/software/gromacs/bin/GMXRC")
+    resolve_idx = script.index("THIS_SCRIPT=")
+    assert module_idx < env_idx < setup_idx < resolve_idx
+
+
 class TestSignalInfrastructure:
     """Signal handling and preemption resilience tests."""
 

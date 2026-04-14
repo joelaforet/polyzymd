@@ -240,6 +240,8 @@ class GromacsEngine(SimulationEngine):
             grompp_flags=self._config.gromacs.grompp_flags,
             mdrun_flags=effective_mdrun_flags,
             module_load=self._config.gromacs.module_load,
+            env_exports=self._config.gromacs.env_exports,
+            setup_commands=self._config.gromacs.setup_commands,
         )
         script = generator.generate_job_script(
             config_path=str(request.config_path),

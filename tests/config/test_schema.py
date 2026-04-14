@@ -321,6 +321,8 @@ class TestEngineConfig:
         config = SimulationConfig(**minimal_config_data)
         assert config.gromacs.gmx_binary is None
         assert config.gromacs.grompp_flags == "-maxwarn 1"
+        assert config.gromacs.env_exports == {}
+        assert config.gromacs.setup_commands == []
         assert config.gromacs.ntmpi == 1
         assert config.gromacs.ntomp == 8
         assert config.gromacs.gpu is False
@@ -345,10 +347,20 @@ class TestEngineConfig:
         minimal_config_data["gromacs"] = {
             "gmx_binary": "gmx_mpi",
             "mdrun_flags": "-ntmpi 1 -ntomp 8",
+            "env_exports": {
+                "GMX_GPU_DD_COMMS": "true",
+                "GMX_FORCE_UPDATE_DEFAULT_GPU": "true",
+            },
+            "setup_commands": [
+                "source /opt/gromacs/bin/GMXRC",
+                "export PATH=$PATH:/opt/plumed/bin",
+            ],
         }
         config = SimulationConfig(**minimal_config_data)
         assert config.gromacs.gmx_binary == "gmx_mpi"
         assert config.gromacs.mdrun_flags == "-ntmpi 1 -ntomp 8"
+        assert config.gromacs.env_exports["GMX_GPU_DD_COMMS"] == "true"
+        assert config.gromacs.setup_commands[0] == "source /opt/gromacs/bin/GMXRC"
 
     def test_old_config_without_engine_field(self, minimal_config_data):
         """Old configs without engine field should default to openmm."""

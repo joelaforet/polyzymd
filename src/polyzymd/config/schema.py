@@ -1164,6 +1164,14 @@ class GromacsEngineConfig(BaseModel):
     mdrun_flags: str = Field("", description="Extra flags for gmx mdrun (all stages)")
     grompp_flags: str = Field("-maxwarn 1", description="Extra flags for gmx grompp")
     module_load: str | None = Field(None, description="HPC module load command")
+    env_exports: dict[str, str] = Field(
+        default_factory=dict,
+        description=("Environment variables exported before GROMACS commands (key=value pairs)"),
+    )
+    setup_commands: list[str] = Field(
+        default_factory=list,
+        description="Shell commands run after module_load and before GROMACS commands",
+    )
     ntmpi: int = Field(1, ge=1, description="MPI ranks (-ntmpi); sets SLURM --ntasks")
     ntomp: int = Field(
         8,

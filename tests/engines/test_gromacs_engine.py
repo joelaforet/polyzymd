@@ -439,6 +439,55 @@ class TestEngineSubmitModuleLoad:
         assert result["submitted"] is True
 
 
+class TestPrepareSubmissionPassThrough:
+    """Tests for passing config fields to script generator."""
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsSlurmScriptGenerator")
+    def test_prepare_submission_passes_env_exports_and_setup_commands(
+        self, mock_generator_cls, tmp_path
+    ):
+        """prepare_submission should pass env_exports and setup_commands to generator."""
+        config = _make_config()
+        config.gromacs.env_exports = {
+            "GMX_GPU_DD_COMMS": "true",
+            "GMX_FORCE_UPDATE_DEFAULT_GPU": "true",
+        }
+        config.gromacs.setup_commands = [
+            "source /projects/software/gromacs/bin/GMXRC",
+            "export PATH=$PATH:/projects/software/plumed/bin",
+        ]
+
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+
+        working_dir = tmp_path / "gromacs"
+        working_dir.mkdir(parents=True)
+        (working_dir / "CALB_PEG.top").write_text("[ system ]\n")
+        (working_dir / "CALB_PEG.gro").write_text("test\n")
+        (working_dir / "em.mdp").write_text("integrator = steep\n")
+        (working_dir / "prod.mdp").write_text("integrator = md\n")
+
+        mock_generator = MagicMock()
+        mock_generator.generate_job_script.return_value = "#!/bin/bash\n"
+        mock_generator.save_script.return_value = (
+            working_dir / "daisy_chain_scripts" / "run_rep1.sh"
+        )
+        mock_generator_cls.return_value = mock_generator
+
+        request = EngineSubmitRequest(
+            replicate=1,
+            config_path=tmp_path / "config.yaml",
+            working_dir=working_dir,
+            slurm_config=SlurmConfig(),
+            extra={"skip_build": True},
+        )
+
+        engine.prepare_submission(request)
+
+        kwargs = mock_generator_cls.call_args.kwargs
+        assert kwargs["env_exports"] == config.gromacs.env_exports
+        assert kwargs["setup_commands"] == config.gromacs.setup_commands
+
+
 class TestFromConfigBinaryResolution:
     """Tests for deferred GROMACS binary resolution."""
 
