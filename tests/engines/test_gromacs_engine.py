@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from polyzymd.engines.base import EngineSubmitRequest
 from polyzymd.engines.gromacs.engine import GromacsEngine
 from polyzymd.workflow.slurm import SlurmConfig
@@ -619,4 +621,14 @@ class TestFromConfigBinaryResolution:
         engine = GromacsEngine.from_config(config, defer_binary=True)
 
         assert engine._gmx_binary == "gmx"
+        mock_resolve.assert_not_called()
+
+    @patch("polyzymd.engines.gromacs.engine.resolve_gromacs_binary")
+    def test_from_config_deferred_rejects_mpi_with_gpu(self, mock_resolve):
+        """defer_binary=True + gpu=True should still reject gmx_mpi."""
+        config = _make_config(gmx_binary="gmx_mpi", gpu=True)
+
+        with pytest.raises(ValueError, match="thread-MPI"):
+            GromacsEngine.from_config(config, defer_binary=True)
+
         mock_resolve.assert_not_called()
