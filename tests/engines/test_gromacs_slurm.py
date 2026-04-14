@@ -1157,14 +1157,15 @@ class TestCheckpointResume:
         block = _generator()._generate_energy_minimization_block()
         assert "-cpo em.cpt" in block
 
-    def test_em_skips_grompp_when_tpr_exists(self, monkeypatch) -> None:
-        """EM should skip grompp if em.tpr already exists."""
+    def test_em_grompp_removes_stale_tpr(self, monkeypatch) -> None:
+        """EM block should rm -f em.tpr before grompp for SIGTERM safety."""
         monkeypatch.setattr(
             "polyzymd.engines.gromacs.slurm._discover_manifest_path",
             lambda: "/tmp/pixi.toml",
         )
         block = _generator()._generate_energy_minimization_block()
-        assert "if [ ! -f em.tpr ]; then" in block
+        assert "rm -f em.tpr" in block
+        assert "if [ ! -f em.tpr ]; then" not in block
 
     def test_equilibration_checkpoint_resume_logic(self, monkeypatch) -> None:
         """Equilibration stages should check for stage-local checkpoints."""
@@ -1180,14 +1181,34 @@ class TestCheckpointResume:
         assert "Resuming equilibration stage 1" in block
         assert "Resuming equilibration stage 2" in block
 
-    def test_equilibration_skips_grompp_when_tpr_exists(self, monkeypatch) -> None:
-        """Equilibration should skip grompp if stage.tpr exists."""
+    def test_equilibration_grompp_removes_stale_tpr(self, monkeypatch) -> None:
+        """Equilibration should rm -f {stage}.tpr before grompp."""
         monkeypatch.setattr(
             "polyzymd.engines.gromacs.slurm._discover_manifest_path",
             lambda: "/tmp/pixi.toml",
         )
         block = _generator()._generate_equilibration_block(["eq_01_nvt.mdp"])
-        assert "if [ ! -f eq_01.tpr ]; then" in block
+        assert "rm -f eq_01.tpr" in block
+        assert "if [ ! -f eq_01.tpr ]; then" not in block
+
+
+def test_production_grompp_removes_stale_tpr(monkeypatch) -> None:
+    """Production should rm -f prod.tpr before grompp."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    script = _generator().generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert "rm -f prod.tpr" in script
+    assert "if [ ! -f prod.tpr ]; then" not in script
 
     def test_append_flag_only_on_resume(self, monkeypatch) -> None:
         """The -append flag should only appear in checkpoint resume branches."""

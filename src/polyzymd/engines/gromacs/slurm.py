@@ -217,14 +217,14 @@ echo "=================================================="
 # =========================================================================
 echo "=== Production MD ==="
 
-# Create TPR if needed
-if [ ! -f prod.tpr ]; then
-    if [ -f ${{LAST_EQ}}.cpt ]; then
-        run_foreground $GMX grompp -f prod.mdp -c ${{LAST_EQ}}.gro -r em.gro -t ${{LAST_EQ}}.cpt \\
-            -p ${{PREFIX}}.top -o prod.tpr {grompp_flags}
-    else
-        run_foreground $GMX grompp -f prod.mdp -c ${{LAST_EQ}}.gro -r em.gro -p ${{PREFIX}}.top -o prod.tpr {grompp_flags}
-    fi
+# Create fresh TPR for current restart context
+if [ -f ${{LAST_EQ}}.cpt ]; then
+    rm -f prod.tpr
+    run_foreground $GMX grompp -f prod.mdp -c ${{LAST_EQ}}.gro -r em.gro -t ${{LAST_EQ}}.cpt \\
+        -p ${{PREFIX}}.top -o prod.tpr {grompp_flags}
+else
+    rm -f prod.tpr
+    run_foreground $GMX grompp -f prod.mdp -c ${{LAST_EQ}}.gro -r em.gro -p ${{PREFIX}}.top -o prod.tpr {grompp_flags}
 fi
 
 # Run production: -cpi for checkpoint restart, -append to extend existing files
@@ -603,9 +603,8 @@ exit 0
         lines = [
             "if [ ! -f em.gro ]; then",
             '    echo "=== Energy Minimization ==="',
-            "    if [ ! -f em.tpr ]; then",
+            "    rm -f em.tpr",
             "        run_foreground $GMX grompp -f em.mdp -c ${{PREFIX}}.gro -r ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}",
-            "    fi",
             "    if [ -f em.cpt ]; then",
             '        echo "Resuming energy minimization from checkpoint: em.cpt"',
             '        run_mdrun_stage "energy minimization" $MDRUN -deffnm em -cpi em.cpt -cpo em.cpt -append $MDRUN_FLAGS_EM -v',
@@ -689,20 +688,20 @@ exit 0
             lines.append("")
             lines.append(f"if [ ! -f {stage}.gro ]; then")
             lines.append(f'    echo "=== Equilibration {idx}: {mdp_name} ==="')
-            lines.append(f"    if [ ! -f {stage}.tpr ]; then")
             lines.append("        if [ -f ${LAST_EQ}.cpt ]; then")
+            lines.append(f"            rm -f {stage}.tpr")
             lines.append(
                 f"            run_foreground $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro -r em.gro "
                 f"-t ${{LAST_EQ}}.cpt "
                 f"-p ${{PREFIX}}.top -o {stage}.tpr {self._grompp_flags}"
             )
             lines.append("        else")
+            lines.append(f"            rm -f {stage}.tpr")
             lines.append(
                 f"            run_foreground $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro -r em.gro "
                 f"-p ${{PREFIX}}.top -o {stage}.tpr {self._grompp_flags}"
             )
             lines.append("        fi")
-            lines.append("    fi")
             lines.append(f"    if [ -f {stage}.cpt ]; then")
             lines.append(
                 f'        echo "Resuming equilibration stage {idx} from checkpoint: {stage}.cpt"'
