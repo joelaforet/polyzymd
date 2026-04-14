@@ -980,6 +980,31 @@ class TestSubmitConstraintOption:
         assert result.exit_code == 0
         assert "--nodelist" in result.output
 
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_submit_gpu_type_a100_accepted_by_click(
+        self,
+        mock_submit,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """submit should accept arbitrary sanitized --gpu-type values like a100."""
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "openmm"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["submit", "-c", str(config_path), "--gpu-type", "a100"],
+        )
+
+        assert result.exit_code == 0
+        mock_submit.assert_called_once()
+        assert mock_submit.call_args.kwargs["gpu_type"] == "a100"
+
     def test_submit_help_shows_constraint(self) -> None:
         """'polyzymd submit --help' should show --constraint option."""
         runner = CliRunner()

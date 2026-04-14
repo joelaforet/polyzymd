@@ -1269,11 +1269,7 @@ def _print_gromacs_dry_run_details(
 @click.option(
     "--gpu-type",
     default=None,
-    type=click.Choice(["v100-16", "v100-32", "l40s-48", "h100-80"]),
-    help=(
-        "Override GPU type for presets that use the --gpus directive (e.g. bridges2). "
-        "Valid types: v100-16, v100-32, l40s-48, h100-80. Default for bridges2: v100-32."
-    ),
+    help="GPU type for GRES (e.g., 'a100', 'a40', 'v100-32', 'mi100').",
 )
 @click.option(
     "--constraint",

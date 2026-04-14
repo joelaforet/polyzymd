@@ -12,6 +12,7 @@ from polyzymd.workflow.slurm import (
     SlurmConfig,
     _discover_manifest_path,
     _validate_constraint_value,
+    _validate_gpu_type_value,
     _validate_nodelist_value,
     _validate_script_value,
 )
@@ -553,7 +554,7 @@ exit 0
         if self._config.constraint:
             _validate_constraint_value(self._config.constraint, "constraint")
         if self._config.gpu_type:
-            _validate_script_value(self._config.gpu_type, "gpu_type")
+            _validate_gpu_type_value(self._config.gpu_type, "gpu_type")
         for mdp_name in equilibration_mdps:
             _validate_script_value(mdp_name, "equilibration_mdp")
 

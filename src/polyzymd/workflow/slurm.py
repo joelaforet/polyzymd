@@ -48,6 +48,7 @@ PRESET_DEFAULT_PIXI_ENV: Dict[str, str] = {
 _SAFE_SCRIPT_VALUE = _re.compile(r"^[A-Za-z0-9._/,:\-@%=+ ]+$")
 _SAFE_CONSTRAINT_VALUE = _re.compile(r"^[A-Za-z0-9._\-|&]+$")
 _SAFE_NODELIST_VALUE = _re.compile(r"^[A-Za-z0-9._,\-\[\]]+$")
+_SAFE_GPU_TYPE_VALUE = _re.compile(r"^[A-Za-z0-9._\-]+$")
 
 
 def _validate_script_value(value: str, field_name: str) -> str:
@@ -136,6 +137,34 @@ def _validate_nodelist_value(value: str, field_name: str = "nodelist") -> str:
         raise ValueError(
             f"{field_name} contains unsafe characters: {value!r}. "
             "Only alphanumeric, '.', '_', '-', ',', '[', ']' are allowed."
+        )
+    return value
+
+
+def _validate_gpu_type_value(value: str, field_name: str = "gpu_type") -> str:
+    """Validate a GPU type string for SBATCH GRES rendering.
+
+    Parameters
+    ----------
+    value : str
+        GPU type value to validate.
+    field_name : str, optional
+        Field name used in validation error messages.
+
+    Returns
+    -------
+    str
+        The validated value.
+
+    Raises
+    ------
+    ValueError
+        If the value contains unsafe characters.
+    """
+    if value and not _SAFE_GPU_TYPE_VALUE.match(value):
+        raise ValueError(
+            f"{field_name} contains unsafe characters: {value!r}. "
+            "Only alphanumeric, '.', '_', '-' are allowed."
         )
     return value
 
@@ -683,7 +712,7 @@ exit 0
         if self._config.constraint:
             _validate_constraint_value(self._config.constraint, "constraint")
         if self._config.gpu_type:
-            _validate_script_value(self._config.gpu_type, "gpu_type")
+            _validate_gpu_type_value(self._config.gpu_type, "gpu_type")
 
         return self.JOB_TEMPLATE.format(
             partition=self._config.partition,

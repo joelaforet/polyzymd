@@ -523,3 +523,39 @@ class TestNodelistValidation:
 
         with pytest.raises(ValueError, match="unsafe characters"):
             _validate_nodelist_value("node01 node02")
+
+
+class TestGpuTypeValidation:
+    """Tests for GPU type value validation used in SBATCH rendering."""
+
+    def test_gpu_type_a100_accepted(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        assert _validate_gpu_type_value("a100") == "a100"
+
+    def test_gpu_type_a40_accepted(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        assert _validate_gpu_type_value("a40") == "a40"
+
+    def test_gpu_type_mi100_accepted(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        assert _validate_gpu_type_value("mi100") == "mi100"
+
+    def test_gpu_type_v100_32_accepted(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        assert _validate_gpu_type_value("v100-32") == "v100-32"
+
+    def test_gpu_type_semicolon_rejected(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_gpu_type_value("a100;rm -rf /")
+
+    def test_gpu_type_dollar_rejected(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_gpu_type_value("$HOME")
