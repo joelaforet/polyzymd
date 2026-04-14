@@ -66,6 +66,51 @@ class SimulationEngine(ABC):
     """Abstract interface for simulation execution engines."""
 
     name: ClassVar[str]
+    engine_subdir: ClassVar[str | None] = None
+
+    def get_engine_working_directory(self, sim_config: object, replicate: int) -> Path:
+        """Resolve the engine-specific working directory for a replicate.
+
+        Combines the shared scratch-based replicate root from
+        ``sim_config.get_working_directory(replicate)`` with this engine's
+        ``engine_subdir`` (if any).
+
+        Parameters
+        ----------
+        sim_config : object
+            Simulation configuration with ``get_working_directory`` method.
+        replicate : int
+            Replicate index.
+
+        Returns
+        -------
+        Path
+            Engine-specific working directory.
+        """
+        root = sim_config.get_working_directory(replicate)
+        if self.engine_subdir:
+            return root / self.engine_subdir
+        return root
+
+    def resolve_engine_working_directory(self, replicate_root: Path) -> Path:
+        """Append the engine subdirectory to a discovered replicate root.
+
+        Used by ``status`` and ``recover`` to map a discovered replicate
+        directory to the engine-specific working directory.
+
+        Parameters
+        ----------
+        replicate_root : Path
+            Replicate root directory (e.g. from ``discover_replicate_dirs``).
+
+        Returns
+        -------
+        Path
+            Engine working directory (root / engine_subdir, or root itself).
+        """
+        if self.engine_subdir:
+            return replicate_root / self.engine_subdir
+        return replicate_root
 
     @classmethod
     @abstractmethod

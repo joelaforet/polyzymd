@@ -14,6 +14,7 @@ class OpenMMEngine(SimulationEngine):
     """Thin adapter for the OpenMM execution path."""
 
     name: ClassVar[str] = "openmm"
+    # OpenMM stores outputs directly in the replicate root
 
     def __init__(self, config: object):
         """Initialize the engine adapter.

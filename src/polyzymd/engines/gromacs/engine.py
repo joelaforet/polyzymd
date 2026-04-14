@@ -20,6 +20,7 @@ class GromacsEngine(SimulationEngine):
     """GROMACS execution adapter for local and scheduler workflows."""
 
     name: ClassVar[str] = "gromacs"
+    engine_subdir: ClassVar[str] = "gromacs"
 
     def __init__(self, config: object, gmx_binary: str = "gmx"):
         """Initialize a GROMACS engine adapter.
