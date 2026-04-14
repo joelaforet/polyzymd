@@ -259,6 +259,40 @@ class TestConditionalDirectives:
         assert gen._exclude_line() == ""
 
 
+class TestConstraintDirective:
+    """Tests for the --constraint SBATCH directive."""
+
+    def test_constraint_none_omits_line(self):
+        """When constraint is None, no --constraint line appears."""
+        cfg = SlurmConfig(constraint=None)
+        gen = _make_generator(cfg)
+        assert gen._constraint_line() == ""
+
+    def test_constraint_single_value(self):
+        """A single constraint value renders correctly."""
+        cfg = SlurmConfig(constraint="A40")
+        gen = _make_generator(cfg)
+        assert gen._constraint_line() == "#SBATCH --constraint=A40"
+
+    def test_constraint_or_expression(self):
+        """SLURM OR expressions (pipe) are accepted."""
+        cfg = SlurmConfig(constraint="A40|A100")
+        gen = _make_generator(cfg)
+        assert gen._constraint_line() == "#SBATCH --constraint=A40|A100"
+
+    def test_constraint_and_expression(self):
+        """SLURM AND expressions (ampersand) are accepted."""
+        cfg = SlurmConfig(constraint="avx2&rh8")
+        gen = _make_generator(cfg)
+        assert gen._constraint_line() == "#SBATCH --constraint=avx2&rh8"
+
+    def test_constraint_complex_expression(self):
+        """Mixed constraint expressions are accepted."""
+        cfg = SlurmConfig(constraint="A40|A100|H100")
+        gen = _make_generator(cfg)
+        assert gen._constraint_line() == "#SBATCH --constraint=A40|A100|H100"
+
+
 # ---------------------------------------------------------------------------
 # Exit code handling in JOB_TEMPLATE
 # ---------------------------------------------------------------------------
@@ -377,3 +411,43 @@ class TestScriptValueValidation:
         from polyzymd.workflow.slurm import _validate_script_value
 
         assert _validate_script_value("", "mdrun_flags") == ""
+
+    def test_constraint_pipe_accepted(self):
+        """Pipe is valid in constraint expressions (OR)."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        assert _validate_constraint_value("A40|A100", "constraint") == "A40|A100"
+
+    def test_constraint_ampersand_accepted(self):
+        """Ampersand is valid in constraint expressions (AND)."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        assert _validate_constraint_value("avx2&rh8", "constraint") == "avx2&rh8"
+
+    def test_constraint_semicolon_rejected(self):
+        """Semicolons are still rejected in constraint values."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_constraint_value("A40; rm -rf /", "constraint")
+
+    def test_constraint_dollar_rejected(self):
+        """Dollar signs are rejected in constraint values."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_constraint_value("$HOME", "constraint")
+
+    def test_constraint_backtick_rejected(self):
+        """Backticks are rejected in constraint values."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_constraint_value("`whoami`", "constraint")
+
+    def test_constraint_space_rejected(self):
+        """Spaces are rejected in constraint values (not valid in SLURM constraints)."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_constraint_value("A40 A100", "constraint")

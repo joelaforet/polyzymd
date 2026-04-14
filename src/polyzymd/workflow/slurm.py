@@ -46,6 +46,7 @@ PRESET_DEFAULT_PIXI_ENV: Dict[str, str] = {
 # Pattern allowing alphanumerics, common path chars, and SLURM-safe punctuation
 # Intentionally excludes shell metacharacters: ; | & $ ` ( ) { } < > ' " \ !
 _SAFE_SCRIPT_VALUE = _re.compile(r"^[A-Za-z0-9._/,:\-@%=+ ]+$")
+_SAFE_CONSTRAINT_VALUE = _re.compile(r"^[A-Za-z0-9._\-|&]+$")
 
 
 def _validate_script_value(value: str, field_name: str) -> str:
@@ -72,6 +73,40 @@ def _validate_script_value(value: str, field_name: str) -> str:
         raise ValueError(
             f"SLURM script field '{field_name}' contains unsafe characters: {value!r}. "
             "Only alphanumerics and -_./:,@%=+ are allowed."
+        )
+    return value
+
+
+def _validate_constraint_value(value: str, field_name: str) -> str:
+    """Validate a SLURM --constraint value, allowing ``|`` (OR) and ``&`` (AND).
+
+    SLURM constraint expressions use ``|`` and ``&`` as boolean operators
+    (e.g. ``"A40|A100"``), which are deliberately forbidden by
+    ``_validate_script_value``.  This helper uses a separate regex that
+    permits those two characters while still rejecting dangerous shell
+    metacharacters (``; $ ` ( ) { } < > ' " \\ !``).
+
+    Parameters
+    ----------
+    value : str
+        The constraint value to validate.
+    field_name : str
+        Name of the field for error messages.
+
+    Returns
+    -------
+    str
+        The validated value unchanged.
+
+    Raises
+    ------
+    ValueError
+        If the value contains unsafe characters.
+    """
+    if value and not _SAFE_CONSTRAINT_VALUE.match(value):
+        raise ValueError(
+            f"SLURM constraint field '{field_name}' contains unsafe characters: {value!r}. "
+            "Only alphanumerics, hyphens, dots, underscores, | (OR), and & (AND) are allowed."
         )
     return value
 
@@ -147,6 +182,9 @@ class SlurmConfig:
         gpu_directive_style: ``"gres"`` (default, Alpine-style) or ``"gpus"``
             (Bridges2-style).  Controls which SBATCH GPU directive is written.
             Also governs which nodes/ntasks format is emitted.
+        constraint: Optional SLURM ``--constraint`` expression. Supports
+            boolean expressions with ``|`` (OR) and ``&`` (AND), such as
+            ``"A40|A100"``.
     """
 
     partition: str = "aa100"
@@ -163,6 +201,7 @@ class SlurmConfig:
     # --- GPU directive fields ---
     gpu_type: Optional[str] = None
     gpu_directive_style: str = "gres"
+    constraint: Optional[str] = None
 
     @classmethod
     def from_preset(cls, preset: PresetType, email: str = "") -> "SlurmConfig":
@@ -301,6 +340,7 @@ class SlurmScriptGenerator:
 {mail_line}
 {account_line}
 {exclude_line}
+{constraint_line}
 #SBATCH --signal=B:USR1@300
 #SBATCH --no-requeue
 
@@ -522,6 +562,10 @@ exit 0
         """Return the exclude SBATCH directive, or an empty string to omit it."""
         return f"#SBATCH --exclude={self._config.exclude}" if self._config.exclude else ""
 
+    def _constraint_line(self) -> str:
+        """Return the constraint SBATCH directive, or an empty string to omit it."""
+        return f"#SBATCH --constraint={self._config.constraint}" if self._config.constraint else ""
+
     # ------------------------------------------------------------------
     # Self-resubmitting job generation
     # ------------------------------------------------------------------
@@ -596,6 +640,8 @@ exit 0
             _validate_script_value(self._config.email, "email")
         if self._config.exclude:
             _validate_script_value(self._config.exclude, "exclude")
+        if self._config.constraint:
+            _validate_constraint_value(self._config.constraint, "constraint")
         if self._config.gpu_type:
             _validate_script_value(self._config.gpu_type, "gpu_type")
 
@@ -612,6 +658,7 @@ exit 0
             mail_line=self._mail_line(),
             account_line=self._account_line(),
             exclude_line=self._exclude_line(),
+            constraint_line=self._constraint_line(),
             pixi_env=self._pixi_env,
             manifest_path=manifest_path,
             config_path=config_path,
