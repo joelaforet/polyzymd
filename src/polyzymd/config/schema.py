@@ -1202,6 +1202,16 @@ class GromacsEngineConfig(BaseModel):
         description="Shell commands run after module_load and before GROMACS commands",
     )
     ntmpi: int = Field(1, ge=1, description="MPI ranks (-ntmpi); sets SLURM --ntasks")
+    slurm_ntasks: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Override SLURM --ntasks independently of GROMACS -ntmpi. "
+            "Advanced option for multi-node MPI+GPU workflows where scheduler "
+            "tasks differ from GROMACS thread-MPI ranks. When None, SLURM ntasks "
+            "is set from ntmpi (default behavior)."
+        ),
+    )
     ntomp: int = Field(
         8,
         ge=1,

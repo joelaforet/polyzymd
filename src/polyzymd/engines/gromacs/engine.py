@@ -290,7 +290,11 @@ class GromacsEngine(SimulationEngine):
 
         gromacs_cfg = self._config.gromacs
         overrides: dict[str, Any] = {
-            "ntasks": gromacs_cfg.ntmpi,
+            "ntasks": (
+                gromacs_cfg.slurm_ntasks
+                if gromacs_cfg.slurm_ntasks is not None
+                else gromacs_cfg.ntmpi
+            ),
             "cpus_per_task": gromacs_cfg.ntomp,
             "memory": gromacs_cfg.memory,
         }
@@ -342,7 +346,7 @@ class GromacsEngine(SimulationEngine):
 
         extras: list[str] = []
         if not mpi_build and "-ntmpi" not in token_set:
-            extras.append(f"-ntmpi {effective_slurm.ntasks}")
+            extras.append(f"-ntmpi {self._config.gromacs.ntmpi}")
         if "-ntomp" not in token_set:
             extras.append(f"-ntomp {effective_slurm.cpus_per_task}")
 

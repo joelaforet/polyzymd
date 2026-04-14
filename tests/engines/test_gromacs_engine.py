@@ -22,6 +22,7 @@ def _make_config(
     mdrun_flags: str = "",
     grompp_flags: str = "-maxwarn 1",
     gmx_binary: str | None = None,
+    slurm_ntasks: int | None = None,
     module_load: str | None = None,
 ) -> MagicMock:
     """Build a minimal mock SimulationConfig with GROMACS settings."""
@@ -34,6 +35,7 @@ def _make_config(
     config.gromacs.mdrun_flags = mdrun_flags
     config.gromacs.grompp_flags = grompp_flags
     config.gromacs.gmx_binary = gmx_binary
+    config.gromacs.slurm_ntasks = slurm_ntasks
     config.gromacs.module_load = module_load
     config.enzyme.name = "CALB"
     config.polymers.enabled = True
@@ -80,6 +82,22 @@ class TestResolveSlurmConfig:
         resolved = engine._resolve_slurm_config(base)
         assert resolved.ntasks == 4
 
+    def test_resolve_slurm_config_uses_slurm_ntasks_override(self):
+        """slurm_ntasks should override derived SLURM ntasks when provided."""
+        config = _make_config(ntmpi=3, slurm_ntasks=16)
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        base = SlurmConfig(ntasks=1)
+        resolved = engine._resolve_slurm_config(base)
+        assert resolved.ntasks == 16
+
+    def test_resolve_slurm_config_defaults_to_ntmpi(self):
+        """SLURM ntasks should default to ntmpi when slurm_ntasks is unset."""
+        config = _make_config(ntmpi=3, slurm_ntasks=None)
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        base = SlurmConfig(ntasks=1)
+        resolved = engine._resolve_slurm_config(base)
+        assert resolved.ntasks == 3
+
     def test_cpus_per_task_from_ntomp(self):
         config = _make_config(ntomp=16)
         engine = GromacsEngine(config=config, gmx_binary="gmx")
@@ -101,7 +119,7 @@ class TestResolveMdrunFlags:
     def test_auto_adds_ntmpi_ntomp(self):
         config = _make_config(ntmpi=2, ntomp=16, mdrun_flags="")
         engine = GromacsEngine(config=config, gmx_binary="gmx")
-        slurm = SlurmConfig(ntasks=2, cpus_per_task=16)
+        slurm = SlurmConfig(ntasks=8, cpus_per_task=16)
         flags = engine._resolve_mdrun_flags(slurm)
         assert "-ntmpi 2" in flags
         assert "-ntomp 16" in flags
@@ -137,7 +155,7 @@ class TestResolveMdrunFlags:
     def test_empty_flags_gets_defaults(self):
         config = _make_config(mdrun_flags="", ntmpi=1, ntomp=8)
         engine = GromacsEngine(config=config, gmx_binary="gmx")
-        slurm = SlurmConfig(ntasks=1, cpus_per_task=8)
+        slurm = SlurmConfig(ntasks=4, cpus_per_task=8)
         flags = engine._resolve_mdrun_flags(slurm)
         assert flags == "-ntmpi 1 -ntomp 8"
 

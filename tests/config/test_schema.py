@@ -328,9 +328,27 @@ class TestEngineConfig:
         assert config.gromacs.env_exports == {}
         assert config.gromacs.setup_commands == []
         assert config.gromacs.ntmpi == 1
+        assert config.gromacs.slurm_ntasks is None
         assert config.gromacs.ntomp == 8
         assert config.gromacs.gpu is False
         assert config.gromacs.memory == "16G"
+
+    def test_gromacs_slurm_ntasks_default_none(self, minimal_config_data):
+        """GROMACS slurm_ntasks should default to None."""
+        config = SimulationConfig(**minimal_config_data)
+        assert config.gromacs.slurm_ntasks is None
+
+    def test_gromacs_slurm_ntasks_override(self, minimal_config_data):
+        """GROMACS slurm_ntasks should accept explicit override values."""
+        minimal_config_data["gromacs"] = {"slurm_ntasks": 16}
+        config = SimulationConfig(**minimal_config_data)
+        assert config.gromacs.slurm_ntasks == 16
+
+    def test_gromacs_slurm_ntasks_zero_rejected(self, minimal_config_data):
+        """GROMACS slurm_ntasks must be a positive integer."""
+        minimal_config_data["gromacs"] = {"slurm_ntasks": 0}
+        with pytest.raises(ValidationError):
+            SimulationConfig(**minimal_config_data)
 
     def test_gromacs_engine_config_gpu_enabled(self, minimal_config_data):
         """GROMACS config should accept explicit GPU settings."""
