@@ -1155,6 +1155,14 @@ def _run_openmm_impl(
     ),
 )
 @click.option(
+    "--constraint",
+    default=None,
+    help=(
+        "SLURM --constraint expression for node feature selection. "
+        "Supports boolean expressions: 'A40' (single), 'A40|A100' (OR), 'avx2&rh8' (AND)."
+    ),
+)
+@click.option(
     "--openff-logs",
     "submit_openff_logs",
     is_flag=True,
@@ -1199,6 +1207,7 @@ def submit(
     memory: str | None,
     account: str | None,
     gpu_type: str | None,
+    constraint: str | None,
     submit_openff_logs: bool,
     skip_build: bool,
     pixi_env: str | None,
@@ -1240,6 +1249,8 @@ def submit(
         colored_echo(f"Memory allocation: {memory}", phase="workflow")
     if gpu_type:
         colored_echo(f"GPU type override: {gpu_type}", phase="workflow")
+    if constraint:
+        colored_echo(f"Constraint: {constraint}", phase="workflow")
     if skip_build:
         colored_echo("Skip-build mode: using pre-built systems", phase="workflow")
 
@@ -1320,6 +1331,8 @@ def submit(
                 slurm_config.account = account
             if gpu_type:
                 slurm_config.gpu_type = gpu_type
+            if constraint:
+                slurm_config.constraint = constraint
 
             working_dir = sim_config.get_working_directory(rep) / "gromacs"
             job_name = create_job_name(sim_config, rep)
@@ -1386,6 +1399,7 @@ def submit(
             memory=memory,
             account=account,
             gpu_type=gpu_type,
+            constraint=constraint,
             openff_logs=submit_openff_logs,
             skip_build=skip_build,
         )
@@ -2503,6 +2517,14 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     help="Override SLURM memory allocation (e.g. '4G', '8G'). Not needed for bridges2 (allocated per GPU).",
 )
 @click.option(
+    "--constraint",
+    default=None,
+    help=(
+        "SLURM --constraint expression for node feature selection. "
+        "Supports boolean expressions: 'A40' (single), 'A40|A100' (OR)."
+    ),
+)
+@click.option(
     "--pixi-env",
     default=None,
     type=click.Choice(["cuda-12-4", "cuda-12-6"]),
@@ -2527,6 +2549,7 @@ def recover(
     submit: bool,
     dry_run: bool,
     memory: str | None,
+    constraint: str | None,
     pixi_env: str | None,
     force: bool,
     engine: str | None,
@@ -2665,6 +2688,8 @@ def recover(
         slurm_config = SlurmConfig.from_preset(preset)
         if memory:
             slurm_config.memory = memory
+        if constraint:
+            slurm_config.constraint = constraint
 
         prefix = _generate_system_prefix(sim_config)
         gromacs_inputs_exist = (working_dir / f"{prefix}.top").exists() and (
@@ -2723,6 +2748,8 @@ def recover(
         slurm_config = SlurmConfig.from_preset(preset)
         if memory:
             slurm_config.memory = memory
+        if constraint:
+            slurm_config.constraint = constraint
 
         # Detect pre-built system files so the recovery job loads the existing
         # topology instead of rebuilding (non-deterministic packing would produce

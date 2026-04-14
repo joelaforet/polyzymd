@@ -774,6 +774,98 @@ class TestSubmitEngineAware:
         assert "no effect" in result.output.lower()
 
 
+class TestSubmitConstraintOption:
+    """Tests for --constraint CLI option on submit command."""
+
+    def test_submit_help_shows_constraint(self) -> None:
+        """'polyzymd submit --help' should show --constraint option."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["submit", "--help"])
+        assert result.exit_code == 0
+        assert "--constraint" in result.output
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_constraint_passed_to_submit_daisy_chain(
+        self,
+        mock_submit,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """--constraint should be passed to submit_daisy_chain."""
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "openmm"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["submit", "-c", str(config_path), "--constraint", "A40|A100"],
+        )
+
+        assert result.exit_code == 0
+        mock_submit.assert_called_once()
+        assert mock_submit.call_args.kwargs["constraint"] == "A40|A100"
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_constraint_set_on_gromacs_slurm_config(
+        self,
+        mock_from_yaml,
+        mock_resolve_gmx,
+        mock_engine_submit,
+        tmp_path: Path,
+    ) -> None:
+        """--constraint with --engine gromacs should set constraint on SlurmConfig."""
+        _ = mock_resolve_gmx
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "gromacs"
+        mock_config.gromacs = SimpleNamespace(
+            grompp_flags="", mdrun_flags="", module_load=None, gmx_binary=None
+        )
+        mock_config.generate_system_name = lambda: "test_system"
+        mock_from_yaml.return_value = mock_config
+        mock_engine_submit.return_value = {
+            "submitted": False,
+            "script_path": "/tmp/script.sh",
+            "reason": "sbatch_not_available",
+        }
+
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        with patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[]):
+            with patch("polyzymd.workflow.daisy_chain.create_job_name", return_value="test_job"):
+                result = runner.invoke(
+                    cli,
+                    [
+                        "submit",
+                        "-c",
+                        str(config_path),
+                        "--engine",
+                        "gromacs",
+                        "--constraint",
+                        "A40",
+                    ],
+                )
+
+        assert result.exit_code == 0
+        mock_engine_submit.assert_called_once()
+        request = mock_engine_submit.call_args[0][0]
+        assert request.slurm_config.constraint == "A40"
+
+    def test_recover_help_shows_constraint(self) -> None:
+        """'polyzymd recover --help' should show --constraint option."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["recover", "--help"])
+        assert result.exit_code == 0
+        assert "--constraint" in result.output
+
+
 class TestSubmitGromacsDuplicateGuard:
     """Tests for duplicate-job detection in GROMACS submit path."""
 
