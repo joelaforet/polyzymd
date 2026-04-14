@@ -2680,7 +2680,6 @@ def recover(
 
     if engine_name == "gromacs":
         import shutil
-        import subprocess
 
         from polyzymd.engines import create_engine
         from polyzymd.engines.base import EngineSubmitRequest
@@ -2727,11 +2726,12 @@ def recover(
             colored_echo(f"  sbatch {recovery_path}", phase="workflow")
             return
 
-        result = subprocess.run(
-            ["sbatch", str(recovery_path)],
-            capture_output=True,
-            text=True,
+        from polyzymd.workflow.slurm_submit import run_sbatch
+
+        module_load = (
+            getattr(sim_config.gromacs, "module_load", None) if sim_config.gromacs else None
         )
+        result = run_sbatch(recovery_path, module_load=module_load)
         if result.returncode == 0:
             colored_echo(f"Submitted: {result.stdout.strip()}", phase="workflow")
             colored_echo("Monitor with: squeue -u $USER", phase="workflow")
