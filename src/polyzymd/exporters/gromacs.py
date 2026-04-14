@@ -405,30 +405,6 @@ class MDPGenerator:
             nstenergy=500,
         )
 
-    def generate_soft_energy_minimization(self) -> MDPParameters:
-        """Generate MDP parameters for a gentle first minimization stage.
-
-        Two-stage minimization improves robustness for freshly packed systems
-        that can contain severe close contacts. A conservative first stage with
-        smaller minimization steps and looser convergence criteria relaxes hard
-        clashes before standard minimization begins.
-
-        Returns
-        -------
-        MDPParameters
-            Parameters configured for gentle steepest descent minimization.
-        """
-        return MDPParameters(
-            title="Energy Minimization Stage 1 (gentle) - Run before standard EM",
-            stage_type="em",
-            integrator="steep",
-            nsteps=100000,
-            emtol=10000.0,
-            emstep=0.001,
-            nstlog=500,
-            nstenergy=500,
-        )
-
     def generate_equilibration_stages(self) -> List[Tuple[str, MDPParameters]]:
         """Generate MDP parameters for all equilibration stages.
 
@@ -1341,26 +1317,7 @@ class RunScriptGenerator:
             "if [ ! -f em.gro ]; then",
             '    echo "=== Step 1: Energy Minimization ==="',
             "",
-            "    # Stage 1: Gentle minimization for initial clash relaxation",
-            "    if [ -f em_soft.mdp ] && [ ! -f em_soft.gro ]; then",
-            '        echo "=== Step 1a: Gentle Energy Minimization ==="',
-            "        $GMX grompp -f em_soft.mdp -c ${PREFIX}.gro -r ${PREFIX}.gro -p ${PREFIX}.top -o em_soft.tpr -maxwarn 1",
-            "        $GMX mdrun -deffnm em_soft -v",
-            "",
-            "        if [ ! -f em_soft.gro ]; then",
-            '            echo "ERROR: Gentle energy minimization failed!"',
-            "            exit 1",
-            "        fi",
-            "    fi",
-            "",
-            "    # Stage 2: Standard minimization",
-            "    if [ -f em_soft.gro ]; then",
-            '        EM_INPUT="em_soft"',
-            "    else",
-            '        EM_INPUT="${PREFIX}"',
-            "    fi",
-            "",
-            "    $GMX grompp -f em.mdp -c ${EM_INPUT}.gro -r ${EM_INPUT}.gro -p ${PREFIX}.top -o em.tpr -maxwarn 1",
+            "    $GMX grompp -f em.mdp -c ${PREFIX}.gro -r ${PREFIX}.gro -p ${PREFIX}.top -o em.tpr -maxwarn 1",
             "    $GMX mdrun -deffnm em -v",
             "",
             "    # Check if standard minimization succeeded",
@@ -1551,7 +1508,6 @@ class GromacsExporter:
             Dictionary mapping file types to paths:
             - "gro": Coordinate file
             - "top": Topology file
-            - "em_soft_mdp": Gentle energy minimization MDP
             - "em_mdp": Energy minimization MDP
             - "eq_mdps": List of equilibration MDP paths
             - "prod_mdp": Production MDP
@@ -1575,12 +1531,6 @@ class GromacsExporter:
         # Step 2: Generate MDP files
         logger.info("Generating MDP files...")
         mdp_generator = MDPGenerator(self._config)
-
-        # Gentle energy minimization (stage 1)
-        em_soft_params = mdp_generator.generate_soft_energy_minimization()
-        em_soft_path = output_dir / "em_soft.mdp"
-        em_soft_path.write_text(em_soft_params.to_mdp_string())
-        result["em_soft_mdp"] = em_soft_path
 
         # Energy minimization
         em_params = mdp_generator.generate_energy_minimization()
@@ -2203,47 +2153,6 @@ class GromacsRunner:
         """Run energy minimization step."""
         self._print_banner("Step 1: Energy Minimization")
 
-        use_soft_em = (self._working_dir / "em_soft.mdp").exists()
-
-        if use_soft_em:
-            self._run_command(
-                [
-                    self._gmx,
-                    "grompp",
-                    "-f",
-                    "em_soft.mdp",
-                    "-c",
-                    f"{self._prefix}.gro",
-                    "-r",
-                    f"{self._prefix}.gro",
-                    "-p",
-                    f"{self._prefix}.top",
-                    "-o",
-                    "em_soft.tpr",
-                    "-maxwarn",
-                    "1",
-                ],
-                "Preparing gentle energy minimization (grompp)",
-            )
-
-            self._run_command(
-                [self._gmx, "mdrun", "-deffnm", "em_soft", "-v"],
-                "Running gentle energy minimization (mdrun)",
-            )
-
-            if not (self._working_dir / "em_soft.gro").exists():
-                raise GromacsError(
-                    command="mdrun -deffnm em_soft",
-                    returncode=1,
-                    message="Gentle energy minimization failed: em_soft.gro not produced",
-                )
-
-            grompp_input = "em_soft.gro"
-            grompp_reference = "em_soft.gro"
-        else:
-            grompp_input = f"{self._prefix}.gro"
-            grompp_reference = f"{self._prefix}.gro"
-
         # grompp
         grompp_cmd = [
             self._gmx,
@@ -2251,7 +2160,9 @@ class GromacsRunner:
             "-f",
             "em.mdp",
             "-c",
-            grompp_input,
+            f"{self._prefix}.gro",
+            "-r",
+            f"{self._prefix}.gro",
             "-p",
             f"{self._prefix}.top",
             "-o",
@@ -2259,8 +2170,6 @@ class GromacsRunner:
             "-maxwarn",
             "1",
         ]
-        if use_soft_em:
-            grompp_cmd[6:6] = ["-r", grompp_reference]
 
         self._run_command(
             grompp_cmd,

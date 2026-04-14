@@ -167,7 +167,6 @@ class GromacsEngine(SimulationEngine):
             )
 
         eq_mdps = sorted(path.name for path in request.working_dir.glob("eq_*.mdp"))
-        use_soft_em = (request.working_dir / "em_soft.mdp").exists()
 
         script_dir = request.working_dir / "daisy_chain_scripts"
         script_dir.mkdir(parents=True, exist_ok=True)
@@ -190,7 +189,6 @@ class GromacsEngine(SimulationEngine):
             working_dir=str(request.working_dir),
             system_prefix=prefix,
             equilibration_mdps=eq_mdps,
-            use_soft_em=use_soft_em,
             job_name=request.job_name,
         )
         generator.save_script(script, script_path)

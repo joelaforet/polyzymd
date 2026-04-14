@@ -262,7 +262,6 @@ exit 0
         equilibration_mdps: list[str],
         job_name: str | None = None,
         output_file: str | None = None,
-        use_soft_em: bool = True,
     ) -> str:
         """Generate a self-resubmitting GROMACS SLURM script.
 
@@ -282,8 +281,6 @@ exit 0
             Custom scheduler job name.
         output_file : str | None, optional
             Custom SLURM log path pattern.
-        use_soft_em : bool, optional
-            Whether to use two-stage minimization with ``em_soft.mdp``.
 
         Returns
         -------
@@ -297,7 +294,7 @@ exit 0
 
         wall_hours = self._parse_wall_time_hours(self._config.time_limit)
         maxh_hours = wall_hours * self.MAXH_SAFETY_FACTOR
-        energy_minimization_block = self._generate_energy_minimization_block(use_soft_em)
+        energy_minimization_block = self._generate_energy_minimization_block()
         equilibration_block = self._generate_equilibration_block(equilibration_mdps)
         manifest_path = _discover_manifest_path()
         module_load_line = self._module_load if self._module_load else ""
@@ -362,59 +359,14 @@ exit 0
             FULL_CREDIT_LINE=FULL_CREDIT_LINE,
         )
 
-    def _generate_energy_minimization_block(self, use_soft_em: bool) -> str:
-        """Generate EM bash block with optional gentle first stage.
-
-        Parameters
-        ----------
-        use_soft_em : bool
-            Whether to run gentle stage-1 minimization before standard EM.
+    def _generate_energy_minimization_block(self) -> str:
+        """Generate single-stage energy minimization bash block.
 
         Returns
         -------
         str
             Rendered bash block.
         """
-        if use_soft_em:
-            lines = [
-                "# Stage 1: Gentle energy minimization (handles clashing atoms)",
-                "if [ ! -f em_soft.gro ]; then",
-                '    echo "=== Energy Minimization Stage 1 (gentle) ==="',
-                "    $GMX grompp -f em_soft.mdp -c ${{PREFIX}}.gro -r ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em_soft.tpr {grompp_flags}",
-                "    $MDRUN -deffnm em_soft $MDRUN_FLAGS -v",
-                "    if [ ! -f em_soft.gro ]; then",
-                '        echo "FATAL: Gentle energy minimization failed — em_soft.gro not produced"',
-                "        exit 1",
-                "    fi",
-                '    echo "Gentle energy minimization complete."',
-                "else",
-                '    echo "Skipping gentle energy minimization (em_soft.gro exists)."',
-                "fi",
-                "",
-                "# Stage 2: Standard energy minimization",
-                "if [ ! -f em.gro ]; then",
-                '    echo "=== Energy Minimization Stage 2 (standard) ==="',
-                "    $GMX grompp -f em.mdp -c em_soft.gro -r em_soft.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}",
-                "    $MDRUN -deffnm em $MDRUN_FLAGS -v",
-                "    if [ ! -f em.gro ]; then",
-                '        echo "FATAL: Standard energy minimization failed — em.gro not produced"',
-                "        exit 1",
-                "    fi",
-                "",
-                "    # Verify EM health (detect infinite forces from bad initial geometry)",
-                '    if grep -qi "force.*not finite\\|inf.*atom" em.log 2>/dev/null; then',
-                '        echo "FATAL: Energy minimization failed — infinite forces detected in em.log"',
-                '        echo "This usually indicates severe atomic overlaps in the initial structure."',
-                '        echo "Try increasing packing padding or box size, or check Packmol logs."',
-                "        exit 1",
-                "    fi",
-                '    echo "Standard energy minimization complete."',
-                "else",
-                '    echo "Skipping standard energy minimization (em.gro exists)."',
-                "fi",
-            ]
-            return "\n".join(lines).format(grompp_flags=self._grompp_flags)
-
         lines = [
             "if [ ! -f em.gro ]; then",
             '    echo "=== Energy Minimization ==="',

@@ -714,16 +714,7 @@ class TestFixGroMultiplePolymerTypes:
 
 
 class TestEnergyMinimizationHelpers:
-    """Tests for soft EM settings and EM health checks."""
-
-    def test_soft_em_mdp_generated(self):
-        """Soft EM MDP should use conservative emstep and loose emtol."""
-        generator = MDPGenerator.__new__(MDPGenerator)
-        params = generator.generate_soft_energy_minimization()
-        mdp_content = params.to_mdp_string()
-
-        assert "emstep          = 0.001" in mdp_content
-        assert "emtol           = 10000.0" in mdp_content
+    """Tests for EM health checks."""
 
     def test_em_health_check_in_runner(self, tmp_path):
         """Runner health check should fail on non-finite force signatures."""
