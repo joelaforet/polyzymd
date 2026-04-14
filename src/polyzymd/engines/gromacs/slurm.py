@@ -35,6 +35,7 @@ class GromacsSlurmScriptGenerator:
 
     MAXH_SAFETY_FACTOR = 0.90
     _PATH_EXPORT_PATTERN = re.compile(r"^export PATH=\$PATH:[A-Za-z0-9._/,:\-@%=+]+$")
+    _COMMAND_PREFIX_PATTERN = re.compile(r"^[A-Za-z0-9._/,:\-@%=+ $]+$")
 
     JOB_TEMPLATE = """#!/bin/bash
 #SBATCH --partition={partition}
@@ -49,6 +50,7 @@ class GromacsSlurmScriptGenerator:
 {mail_line}
 {account_line}
 {exclude_line}
+{nodelist_line}
 {constraint_line}
 #SBATCH --no-requeue
 
@@ -295,6 +297,8 @@ exit 0
         mdrun_flags: str = "",
         mdrun_flags_eq: str | None = None,
         mdrun_flags_prod: str | None = None,
+        command_prefix: str | None = None,
+        mpi_launcher_flags: str = "",
         module_load: str | None = None,
         env_exports: dict[str, str] | None = None,
         setup_commands: list[str] | None = None,
@@ -317,6 +321,10 @@ exit 0
             Equilibration-specific mdrun flags.
         mdrun_flags_prod : str | None, optional
             Production-specific mdrun flags.
+        command_prefix : str | None, optional
+            Prefix prepended to all GROMACS commands.
+        mpi_launcher_flags : str, optional
+            Extra flags passed to mpirun for real-MPI builds.
         module_load : str | None, optional
             Optional module command executed before simulation commands.
         env_exports : dict[str, str] | None, optional
@@ -332,6 +340,8 @@ exit 0
         self._mdrun_flags = mdrun_flags
         self._mdrun_flags_eq = mdrun_flags_eq
         self._mdrun_flags_prod = mdrun_flags_prod
+        self._command_prefix = command_prefix
+        self._mpi_launcher_flags = mpi_launcher_flags
         self._module_load = module_load
         self._env_exports = env_exports or {}
         self._setup_commands = setup_commands or []
@@ -342,6 +352,8 @@ exit 0
             return ""
         if self._config.gpu_directive_style == "gpus" and self._config.gpu_type:
             return f"#SBATCH --gpus={self._config.gpu_type}:{self._config.gpus}"
+        if self._config.gpu_type:
+            return f"#SBATCH --gres=gpu:{self._config.gpu_type}:{self._config.gpus}"
         return f"#SBATCH --gres=gpu:{self._config.gpus}"
 
     def _nodes_line(self) -> str:
@@ -382,6 +394,10 @@ exit 0
         """Return the constraint SBATCH directive, or an empty string to omit it."""
         return f"#SBATCH --constraint={self._config.constraint}" if self._config.constraint else ""
 
+    def _nodelist_line(self) -> str:
+        """Return optional nodelist SBATCH directive."""
+        return f"#SBATCH --nodelist={self._config.nodelist}" if self._config.nodelist else ""
+
     def _validate_setup_command(self, command: str) -> None:
         """Validate setup command content for script safety.
 
@@ -398,6 +414,25 @@ exit 0
         if self._PATH_EXPORT_PATTERN.match(command):
             return
         _validate_script_value(command, "setup_commands")
+
+    def _validate_command_prefix(self, command_prefix: str) -> None:
+        """Validate command prefix with support for shell variables.
+
+        Parameters
+        ----------
+        command_prefix : str
+            Prefix command to validate.
+
+        Raises
+        ------
+        ValueError
+            If the command prefix contains unsafe characters.
+        """
+        if not self._COMMAND_PREFIX_PATTERN.match(command_prefix):
+            raise ValueError(
+                "SLURM script field 'command_prefix' contains unsafe characters: "
+                f"{command_prefix!r}."
+            )
 
     def generate_job_script(
         self,
@@ -448,7 +483,17 @@ exit 0
             f'export {key}="{value}"' for key, value in self._env_exports.items()
         )
         setup_commands_block = "\n".join(self._setup_commands)
-        mdrun_command = "mpirun $GMX mdrun" if self._is_mpi_binary else "$GMX mdrun"
+        gmx_base = self._gmx_binary
+        if self._command_prefix:
+            gmx_base = f"{self._command_prefix} {self._gmx_binary}"
+
+        if self._is_mpi_binary:
+            mpi_prefix = "mpirun"
+            if self._mpi_launcher_flags:
+                mpi_prefix = f"mpirun {self._mpi_launcher_flags}"
+            mdrun_command = f"{mpi_prefix} $GMX mdrun"
+        else:
+            mdrun_command = "$GMX mdrun"
 
         _validate_script_value(self._config.partition, "partition")
         _validate_script_value(job_name, "job_name")
@@ -459,6 +504,10 @@ exit 0
         _validate_script_value(str(config_path), "config_path")
         _validate_script_value(str(working_dir), "working_dir")
         _validate_script_value(self._gmx_binary, "gmx_binary")
+        if self._command_prefix:
+            self._validate_command_prefix(self._command_prefix)
+        if self._mpi_launcher_flags:
+            _validate_script_value(self._mpi_launcher_flags, "mpi_launcher_flags")
         _validate_script_value(system_prefix, "system_prefix")
         _validate_script_value(self._grompp_flags, "grompp_flags")
         _validate_script_value(self._mdrun_flags, "mdrun_flags")
@@ -483,6 +532,8 @@ exit 0
             _validate_script_value(self._config.email, "email")
         if self._config.exclude:
             _validate_script_value(self._config.exclude, "exclude")
+        if self._config.nodelist:
+            _validate_script_value(self._config.nodelist, "nodelist")
         if self._config.constraint:
             _validate_constraint_value(self._config.constraint, "constraint")
         if self._config.gpu_type:
@@ -503,13 +554,14 @@ exit 0
             mail_line=self._mail_line(),
             account_line=self._account_line(),
             exclude_line=self._exclude_line(),
+            nodelist_line=self._nodelist_line(),
             constraint_line=self._constraint_line(),
             pixi_env=self._pixi_env,
             manifest_path=manifest_path,
             config_path=config_path,
             replicate=replicate,
             working_dir=working_dir,
-            gmx_binary=self._gmx_binary,
+            gmx_binary=gmx_base,
             system_prefix=system_prefix,
             maxh_hours=f"{maxh_hours:.2f}",
             grompp_flags=self._grompp_flags,

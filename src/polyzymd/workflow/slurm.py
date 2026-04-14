@@ -176,6 +176,7 @@ class SlurmConfig:
             and reject an explicit ``--mem`` request).
         gpus: Number of GPUs.
         exclude: Nodes to exclude (omitted when ``None``).
+        nodelist: Optional SLURM ``--nodelist`` value.
         gpu_type: Optional GPU type string used with the ``--gpus`` directive
             (e.g. ``"v100-32"`` for Bridges2).  When ``None`` the classic
             ``--gres=gpu:<N>`` directive is emitted instead.
@@ -198,6 +199,7 @@ class SlurmConfig:
     memory: Optional[str] = "3G"
     gpus: int = 1
     exclude: Optional[str] = None
+    nodelist: Optional[str] = None
     # --- GPU directive fields ---
     gpu_type: Optional[str] = None
     gpu_directive_style: str = "gres"
@@ -340,6 +342,7 @@ class SlurmScriptGenerator:
 {mail_line}
 {account_line}
 {exclude_line}
+{nodelist_line}
 {constraint_line}
 #SBATCH --signal=B:USR1@300
 #SBATCH --no-requeue
@@ -507,6 +510,8 @@ exit 0
             return ""
         if self._config.gpu_directive_style == "gpus" and self._config.gpu_type:
             return f"#SBATCH --gpus={self._config.gpu_type}:{self._config.gpus}"
+        if self._config.gpu_type:
+            return f"#SBATCH --gres=gpu:{self._config.gpu_type}:{self._config.gpus}"
         return f"#SBATCH --gres=gpu:{self._config.gpus}"
 
     def _nodes_line(self) -> str:
@@ -561,6 +566,10 @@ exit 0
     def _exclude_line(self) -> str:
         """Return the exclude SBATCH directive, or an empty string to omit it."""
         return f"#SBATCH --exclude={self._config.exclude}" if self._config.exclude else ""
+
+    def _nodelist_line(self) -> str:
+        """Return the nodelist SBATCH directive, or empty string when unset."""
+        return f"#SBATCH --nodelist={self._config.nodelist}" if self._config.nodelist else ""
 
     def _constraint_line(self) -> str:
         """Return the constraint SBATCH directive, or an empty string to omit it."""
@@ -640,6 +649,8 @@ exit 0
             _validate_script_value(self._config.email, "email")
         if self._config.exclude:
             _validate_script_value(self._config.exclude, "exclude")
+        if self._config.nodelist:
+            _validate_script_value(self._config.nodelist, "nodelist")
         if self._config.constraint:
             _validate_constraint_value(self._config.constraint, "constraint")
         if self._config.gpu_type:
@@ -658,6 +669,7 @@ exit 0
             mail_line=self._mail_line(),
             account_line=self._account_line(),
             exclude_line=self._exclude_line(),
+            nodelist_line=self._nodelist_line(),
             constraint_line=self._constraint_line(),
             pixi_env=self._pixi_env,
             manifest_path=manifest_path,

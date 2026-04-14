@@ -242,6 +242,8 @@ class GromacsEngine(SimulationEngine):
             mdrun_flags=effective_mdrun_flags,
             mdrun_flags_eq=mdrun_flags_eq,
             mdrun_flags_prod=mdrun_flags_prod,
+            command_prefix=self._config.gromacs.command_prefix,
+            mpi_launcher_flags=self._config.gromacs.mpi_launcher_flags,
             module_load=self._config.gromacs.module_load,
             env_exports=self._config.gromacs.env_exports,
             setup_commands=self._config.gromacs.setup_commands,

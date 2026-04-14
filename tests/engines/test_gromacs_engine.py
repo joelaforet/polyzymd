@@ -458,6 +458,8 @@ class TestPrepareSubmissionPassThrough:
         ]
         config.gromacs.mdrun_flags_equilibration = None
         config.gromacs.mdrun_flags_production = None
+        config.gromacs.command_prefix = None
+        config.gromacs.mpi_launcher_flags = ""
 
         engine = GromacsEngine(config=config, gmx_binary="gmx")
 
@@ -497,6 +499,8 @@ class TestPrepareSubmissionPassThrough:
         config = _make_config(mdrun_flags="-ntomp 8")
         config.gromacs.mdrun_flags_equilibration = "-ntomp 4"
         config.gromacs.mdrun_flags_production = "-ntomp 8 -plumed plumed_setup.dat"
+        config.gromacs.command_prefix = None
+        config.gromacs.mpi_launcher_flags = ""
         config.gromacs.env_exports = {}
         config.gromacs.setup_commands = []
 
@@ -529,6 +533,49 @@ class TestPrepareSubmissionPassThrough:
         kwargs = mock_generator_cls.call_args.kwargs
         assert kwargs["mdrun_flags_eq"] == "-ntomp 4 -ntmpi 1"
         assert kwargs["mdrun_flags_prod"] == "-ntomp 8 -plumed plumed_setup.dat -ntmpi 1"
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsSlurmScriptGenerator")
+    def test_prepare_submission_passes_wrapper_and_mpi_launcher(self, mock_generator_cls, tmp_path):
+        """prepare_submission should pass command wrapper and MPI launcher flags."""
+        config = _make_config()
+        config.gromacs.command_prefix = (
+            "singularity exec --rocm --bind /scratch /path/to/gromacs.sif"
+        )
+        config.gromacs.mpi_launcher_flags = "-genv I_MPI_FABRICS shm:tcp"
+        config.gromacs.mdrun_flags_equilibration = None
+        config.gromacs.mdrun_flags_production = None
+        config.gromacs.env_exports = {}
+        config.gromacs.setup_commands = []
+
+        engine = GromacsEngine(config=config, gmx_binary="gmx_mpi")
+
+        working_dir = tmp_path / "gromacs"
+        working_dir.mkdir(parents=True)
+        (working_dir / "CALB_PEG.top").write_text("[ system ]\n")
+        (working_dir / "CALB_PEG.gro").write_text("test\n")
+        (working_dir / "em.mdp").write_text("integrator = steep\n")
+        (working_dir / "prod.mdp").write_text("integrator = md\n")
+
+        mock_generator = MagicMock()
+        mock_generator.generate_job_script.return_value = "#!/bin/bash\n"
+        mock_generator.save_script.return_value = (
+            working_dir / "daisy_chain_scripts" / "run_rep1.sh"
+        )
+        mock_generator_cls.return_value = mock_generator
+
+        request = EngineSubmitRequest(
+            replicate=1,
+            config_path=tmp_path / "config.yaml",
+            working_dir=working_dir,
+            slurm_config=SlurmConfig(),
+            extra={"skip_build": True},
+        )
+
+        engine.prepare_submission(request)
+
+        kwargs = mock_generator_cls.call_args.kwargs
+        assert kwargs["command_prefix"] == config.gromacs.command_prefix
+        assert kwargs["mpi_launcher_flags"] == config.gromacs.mpi_launcher_flags
 
 
 class TestFromConfigBinaryResolution:

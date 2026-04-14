@@ -1176,6 +1176,22 @@ class GromacsEngineConfig(BaseModel):
             "Override mdrun_flags for production only. When None, falls back to mdrun_flags."
         ),
     )
+    command_prefix: str | None = Field(
+        None,
+        description=(
+            "Prefix prepended to all GROMACS commands. "
+            "Use for container wrappers, e.g. "
+            "'singularity exec --rocm --bind $PWD /path/to/gromacs.sif'"
+        ),
+    )
+    mpi_launcher_flags: str = Field(
+        "",
+        description=(
+            "Extra flags passed to the MPI launcher (mpirun). "
+            "Only used when the binary is a real-MPI build. "
+            "E.g. '-genv I_MPI_FABRICS shm:tcp' for Intel MPI."
+        ),
+    )
     module_load: str | None = Field(None, description="HPC module load command")
     env_exports: dict[str, str] = Field(
         default_factory=dict,

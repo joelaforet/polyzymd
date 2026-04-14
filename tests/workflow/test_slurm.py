@@ -151,6 +151,12 @@ class TestConditionalDirectives:
         gen = _make_generator(cfg)
         assert gen._gpu_line() == "#SBATCH --gres=gpu:1"
 
+    def test_gpu_line_gres_style_with_gpu_type_emits_typed_gres(self):
+        """gres style with gpu_type should emit typed --gres directive."""
+        cfg = SlurmConfig(gpu_directive_style="gres", gpu_type="a100", gpus=2)
+        gen = _make_generator(cfg)
+        assert gen._gpu_line() == "#SBATCH --gres=gpu:a100:2"
+
     # --- Nodes line ---
 
     def test_nodes_line_alpine_emits_two_directives(self):
@@ -257,6 +263,18 @@ class TestConditionalDirectives:
         cfg = SlurmConfig.from_preset("aa100")
         gen = _make_generator(cfg)
         assert gen._exclude_line() == ""
+
+    def test_nodelist_line_present(self):
+        """Configured nodelist should render as SBATCH directive."""
+        cfg = SlurmConfig(nodelist="node123")
+        gen = _make_generator(cfg)
+        assert gen._nodelist_line() == "#SBATCH --nodelist=node123"
+
+    def test_nodelist_line_absent(self):
+        """nodelist SBATCH line should be omitted when unset."""
+        cfg = SlurmConfig(nodelist=None)
+        gen = _make_generator(cfg)
+        assert gen._nodelist_line() == ""
 
 
 class TestConstraintDirective:

@@ -323,6 +323,8 @@ class TestEngineConfig:
         assert config.gromacs.grompp_flags == "-maxwarn 1"
         assert config.gromacs.mdrun_flags_equilibration is None
         assert config.gromacs.mdrun_flags_production is None
+        assert config.gromacs.command_prefix is None
+        assert config.gromacs.mpi_launcher_flags == ""
         assert config.gromacs.env_exports == {}
         assert config.gromacs.setup_commands == []
         assert config.gromacs.ntmpi == 1
@@ -351,6 +353,8 @@ class TestEngineConfig:
             "mdrun_flags": "-ntmpi 1 -ntomp 8",
             "mdrun_flags_equilibration": "-ntomp 4",
             "mdrun_flags_production": "-ntomp 8 -plumed plumed_setup.dat",
+            "command_prefix": "singularity exec --rocm --bind /scratch /path/to/gromacs.sif",
+            "mpi_launcher_flags": "-genv I_MPI_FABRICS shm:tcp",
             "env_exports": {
                 "GMX_GPU_DD_COMMS": "true",
                 "GMX_FORCE_UPDATE_DEFAULT_GPU": "true",
@@ -365,6 +369,11 @@ class TestEngineConfig:
         assert config.gromacs.mdrun_flags == "-ntmpi 1 -ntomp 8"
         assert config.gromacs.mdrun_flags_equilibration == "-ntomp 4"
         assert config.gromacs.mdrun_flags_production == "-ntomp 8 -plumed plumed_setup.dat"
+        assert (
+            config.gromacs.command_prefix
+            == "singularity exec --rocm --bind /scratch /path/to/gromacs.sif"
+        )
+        assert config.gromacs.mpi_launcher_flags == "-genv I_MPI_FABRICS shm:tcp"
         assert config.gromacs.env_exports["GMX_GPU_DD_COMMS"] == "true"
         assert config.gromacs.setup_commands[0] == "source /opt/gromacs/bin/GMXRC"
 
