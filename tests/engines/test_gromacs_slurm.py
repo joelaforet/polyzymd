@@ -198,3 +198,46 @@ def test_cpus_per_task_in_script(monkeypatch) -> None:
     )
 
     assert "#SBATCH --cpus-per-task=16" in script
+
+
+def test_mdrun_flags_in_all_stages(monkeypatch) -> None:
+    """MDRUN_FLAGS should be used in EM, equilibration, and production."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    script = _generator().generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=2,
+        working_dir="/scratch/run2/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp", "eq_02_npt.mdp"],
+        job_name="gmx_r2",
+        output_file="slurm_logs/gmx_r2.%j.out",
+    )
+
+    assert "$GMX mdrun -deffnm em_soft $MDRUN_FLAGS -v" in script
+    assert "$GMX mdrun -deffnm em $MDRUN_FLAGS -v" in script
+    assert "$GMX mdrun -deffnm eq_01 $MDRUN_FLAGS -v" in script
+    assert "$GMX mdrun -deffnm eq_02 $MDRUN_FLAGS -v" in script
+    assert "$GMX mdrun -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v" in script
+    assert script.count("$MDRUN_FLAGS") >= 5
+
+
+def test_mdrun_flags_variable_defined_before_em(monkeypatch) -> None:
+    """MDRUN_FLAGS variable should be declared before EM block commands."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    script = _generator().generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert script.index("MDRUN_FLAGS=") < script.index("em_soft.mdp")

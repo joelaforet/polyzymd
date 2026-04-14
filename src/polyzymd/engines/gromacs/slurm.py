@@ -66,6 +66,7 @@ WORKING_DIR="{working_dir}"
 GMX="{gmx_binary}"
 PREFIX="{system_prefix}"
 MAXH={maxh_hours}
+MDRUN_FLAGS="{mdrun_flags}"
 
 # Ensure working directory exists
 mkdir -p "$WORKING_DIR"
@@ -111,7 +112,6 @@ fi
 
 # Run production: -cpi for checkpoint restart, -append to extend existing files
 # -maxh limits wall time so we can cleanly resubmit
-MDRUN_FLAGS="{mdrun_flags}"
 if [ -f state.cpt ]; then
     echo "Resuming from checkpoint: state.cpt"
     $GMX mdrun -deffnm prod -cpi state.cpt -cpo state.cpt -append -maxh $MAXH $MDRUN_FLAGS -v
@@ -377,7 +377,7 @@ exit 0
                 "if [ ! -f em_soft.gro ]; then",
                 '    echo "=== Energy Minimization Stage 1 (gentle) ==="',
                 "    $GMX grompp -f em_soft.mdp -c ${{PREFIX}}.gro -r ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em_soft.tpr {grompp_flags}",
-                "    $GMX mdrun -deffnm em_soft -v",
+                "    $GMX mdrun -deffnm em_soft $MDRUN_FLAGS -v",
                 "    if [ ! -f em_soft.gro ]; then",
                 '        echo "FATAL: Gentle energy minimization failed — em_soft.gro not produced"',
                 "        exit 1",
@@ -391,7 +391,7 @@ exit 0
                 "if [ ! -f em.gro ]; then",
                 '    echo "=== Energy Minimization Stage 2 (standard) ==="',
                 "    $GMX grompp -f em.mdp -c em_soft.gro -r em_soft.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}",
-                "    $GMX mdrun -deffnm em -v",
+                "    $GMX mdrun -deffnm em $MDRUN_FLAGS -v",
                 "    if [ ! -f em.gro ]; then",
                 '        echo "FATAL: Standard energy minimization failed — em.gro not produced"',
                 "        exit 1",
@@ -415,7 +415,7 @@ exit 0
             "if [ ! -f em.gro ]; then",
             '    echo "=== Energy Minimization ==="',
             "    $GMX grompp -f em.mdp -c ${{PREFIX}}.gro -r ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}",
-            "    $GMX mdrun -deffnm em -v",
+            "    $GMX mdrun -deffnm em $MDRUN_FLAGS -v",
             "    if [ ! -f em.gro ]; then",
             '        echo "FATAL: Energy minimization failed — em.gro not produced"',
             "        exit 1",
@@ -505,7 +505,7 @@ exit 0
                 f"-p ${{PREFIX}}.top -o {stage}.tpr {self._grompp_flags}"
             )
             lines.append("    fi")
-            lines.append(f"    $GMX mdrun -deffnm {stage} -v")
+            lines.append(f"    $GMX mdrun -deffnm {stage} $MDRUN_FLAGS -v")
             lines.append(f"    if [ ! -f {stage}.gro ]; then")
             lines.append(
                 f'        echo "FATAL: Equilibration stage {idx} failed — {stage}.gro not produced"'
