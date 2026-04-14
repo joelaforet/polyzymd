@@ -82,13 +82,6 @@ Here is what each section does:
 - **`plugins.rmsf`** --- settings for the RMSF analysis plugin. The
   `selection` field is an MDAnalysis atom selection string.
 
-```{tip}
-If you are working with older PolyzyMD projects, you may see
-`analysis_settings:` instead of `plugins:` in existing YAML files. Both keys
-are accepted — `analysis_settings` is a legacy alias that still works but emits
-a deprecation warning.
-```
-
 ```{important}
 The `config` path must point to the simulation project's `config.yaml`. This
 is how PolyzyMD locates your topology and trajectory files on disk. Relative
