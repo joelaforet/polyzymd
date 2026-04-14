@@ -1970,17 +1970,17 @@ def check_progress(
         colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
         sys.exit(EXIT_CODE_CHECK_ERROR)
 
+    engine_name = _resolve_engine_name(sim_config, override=engine)
+    engine_inst = create_engine(sim_config, override=engine_name)
+
     if scratch_dir:
         working_dir = Path(scratch_dir)
     else:
-        working_dir = sim_config.get_working_directory(replicate)
-
-    engine_name = _resolve_engine_name(sim_config, override=engine)
+        working_dir = engine_inst.get_engine_working_directory(sim_config, replicate)
 
     prod = sim_config.simulation_phases.production
     timestep_fs = prod.time_step
     try:
-        engine_inst = create_engine(sim_config, override=engine_name)
         progress = engine_inst.load_or_scan_progress(working_dir, replicate)
         save_progress(working_dir, progress)
     except (FileNotFoundError, ValueError, OSError) as e:
@@ -2094,8 +2094,9 @@ def status(config: str) -> None:
             status_str = "not_found"
             status_display = "not found"
         else:
-            progress = engine_inst.load_or_scan_progress(rep_path, rep_num)
-            save_progress(rep_path, progress)
+            engine_dir = engine_inst.resolve_engine_working_directory(rep_path)
+            progress = engine_inst.load_or_scan_progress(engine_dir, rep_num)
+            save_progress(engine_dir, progress)
 
             frac = progress.fraction_complete()
             # Compute ns from total steps (not time_completed_ns which
@@ -2532,7 +2533,8 @@ def recover(
         polyzymd recover -c config.yaml -r 1 --submit --dry-run
     """
     from polyzymd.config.schema import SimulationConfig
-    from polyzymd.simulation.progress import load_or_scan_progress, save_progress
+    from polyzymd.engines import create_engine
+    from polyzymd.simulation.progress import save_progress
 
     _echo_branding()
 
@@ -2542,10 +2544,13 @@ def recover(
         colored_echo(f"Failed to load config: {e}", err=True, phase="workflow", level=logging.ERROR)
         sys.exit(1)
 
+    engine_name = _resolve_engine_name(sim_config, override=engine)
+    engine_impl = create_engine(sim_config, override=engine_name)
+
     if scratch_dir:
         working_dir = Path(scratch_dir)
     else:
-        working_dir = sim_config.get_working_directory(replicate)
+        working_dir = engine_impl.get_engine_working_directory(sim_config, replicate)
 
     if not working_dir.exists():
         colored_echo(
@@ -2556,29 +2561,12 @@ def recover(
         )
         sys.exit(1)
 
-    # Calculate total steps from config
+    # Calculate progress metadata from config
     prod = sim_config.simulation_phases.production
     timestep_fs = prod.time_step
-    total_steps = int(prod.duration * 1e6 / timestep_fs)
-    total_samples = prod.samples
-
-    engine_name = _resolve_engine_name(sim_config, override=engine)
 
     # Load progress
-    if engine_name == "gromacs":
-        from polyzymd.engines import create_engine
-
-        engine_impl = create_engine(sim_config, override="gromacs")
-        progress = engine_impl.load_or_scan_progress(working_dir, replicate)
-    else:
-        progress = load_or_scan_progress(
-            working_dir=working_dir,
-            config_path=str(Path(config).resolve()),
-            total_steps=total_steps,
-            total_samples=total_samples,
-            timestep_fs=timestep_fs,
-            replicate=replicate,
-        )
+    progress = engine_impl.load_or_scan_progress(working_dir, replicate)
     save_progress(working_dir, progress)
 
     # Report status
