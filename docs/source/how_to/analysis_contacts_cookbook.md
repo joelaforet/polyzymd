@@ -38,48 +38,8 @@ This cookbook answers questions like:
 
 ## YAML Configuration Reference
 
-PolyzyMD supports contacts analysis via YAML configuration files. Choose the 
-approach that fits your workflow:
+PolyzyMD supports contacts analysis via `comparison.yaml` configuration files:
 
-`````{tab-set}
-
-````{tab-item} analysis.yaml (legacy)
-```{deprecated} v1.3.0
-The `analysis.yaml` per-simulation format is legacy. Use `comparison.yaml`
-with `polyzymd compare` instead — it handles single-condition analysis too.
-```
-
-Configure contacts as part of a simulation's analysis suite. Place `analysis.yaml` 
-in the same directory as your `config.yaml`.
-
-```yaml
-# analysis.yaml
-replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "10ns"
-
-contacts:
-  enabled: true
-  polymer_selection: "chainID C"      # MDAnalysis selection for polymer
-  protein_selection: "protein"        # MDAnalysis selection for protein
-  cutoff: 4.5                         # Contact distance in Angstroms
-  polymer_types: ["SBM", "EGM"]       # Optional: filter by monomer type
-  grouping: "aa_class"                # aa_class | secondary_structure | none
-  compute_residence_times: true       # Enable residence time statistics
-```
-
-**Run with:**
-```bash
-polyzymd compare init -n contacts_study
-# Edit comparison.yaml with your condition(s) and plugins.contacts
-polyzymd compare run contacts
-```
-
-**Best for:** Single-condition analysis, reproducible configuration, CI/CD pipelines.
-````
-
-````{tab-item} comparison.yaml (multi-condition)
 Configure contacts analysis for statistical comparison across multiple simulation 
 conditions (e.g., different polymer ratios).
 
@@ -115,9 +75,6 @@ polyzymd compare run contacts -f comparison.yaml
 ```
 
 **Best for:** Multi-condition experiments, statistical comparisons, publication figures.
-````
-
-`````
 
 ### Statistical Settings for Cross-Condition Comparison
 
@@ -296,37 +253,6 @@ the binding surface characteristics.
 
 `````{tab-set}
 
-````{tab-item} YAML (legacy analysis.yaml)
-```{deprecated} v1.3.0
-Use `comparison.yaml` with `plugins.contacts` instead.
-```
-
-Configure `analysis.yaml` with AA class grouping:
-
-```yaml
-# analysis.yaml
-replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "10ns"
-
-contacts:
-  enabled: true
-  polymer_selection: "chainID C"
-  protein_selection: "protein"
-  cutoff: 4.5
-  grouping: "aa_class"              # Groups results by amino acid class
-  compute_residence_times: true
-```
-
-```bash
-polyzymd compare run contacts -f comparison.yaml
-```
-
-The JSON output includes per-residue data with AA classifications. To get 
-the coverage breakdown, load the result in Python or use CLI post-processing.
-````
-
 ````{tab-item} CLI
 Run contacts comparison using settings from `comparison.yaml`:
 
@@ -416,36 +342,6 @@ the protein compared to PEG-like polymers?
 ### Approach
 
 `````{tab-set}
-
-````{tab-item} YAML (legacy analysis.yaml)
-```{deprecated} v1.3.0
-Use `comparison.yaml` with `plugins.contacts` instead.
-```
-
-Enable residence time computation in `analysis.yaml`:
-
-```yaml
-# analysis.yaml
-replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "10ns"
-
-contacts:
-  enabled: true
-  polymer_selection: "chainID C"
-  protein_selection: "protein"
-  cutoff: 4.5
-  compute_residence_times: true     # Enable residence time statistics
-```
-
-```bash
-polyzymd compare run contacts -f comparison.yaml
-```
-
-The JSON output includes residence time data per polymer type. Load in Python 
-to compare across polymer types.
-````
 
 ````{tab-item} CLI
 Enable `compute_residence_times: true` in `comparison.yaml`, then run:
@@ -721,37 +617,6 @@ result = analyzer.run()
 Select all protein residues EXCEPT those near the active site:
 
 `````{tab-set}
-````{tab-item} YAML (legacy analysis.yaml)
-```{deprecated} v1.3.0
-Use `comparison.yaml` with `plugins.contacts` instead.
-```
-
-For exclusion-based selections, use MDAnalysis `not` syntax directly:
-
-```yaml
-# analysis.yaml
-replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "10ns"
-
-contacts:
-  enabled: true
-  polymer_selection: "chainID C"
-  # Select surface residues by excluding active site vicinity
-  protein_selection: "protein and not (byres (resid 77 133 156) around 8.0)"
-  cutoff: 4.5
-```
-
-```bash
-polyzymd compare run contacts -f comparison.yaml
-```
-
-```{note}
-The `byres ... around X` syntax selects complete residues within X Å of the 
-reference atoms. The `not` inverts this to get surface-only residues.
-```
-````
 
 ````{tab-item} CLI
 ```bash

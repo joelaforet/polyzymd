@@ -39,9 +39,7 @@ The RMSF and RMSD calculations now live in the RMSF plugin class:
   timeseries calculation for autocorrelation analysis.
 
 The implementation is plain NumPy with no MDAnalysis analysis class
-dependencies. The `MDAnalysis.analysis.rms.RMSF` and
-`MDAnalysis.analysis.rms.RMSD` imports that existed previously were
-confirmed dead code and removed in commit `19a247e`.
+dependencies.
 
 ## Benchmark Methodology
 
