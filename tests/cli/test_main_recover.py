@@ -358,6 +358,7 @@ def _mock_sim_config_for_submit(working_dir: Path):
     SlurmScriptGenerator, and the script-generation path.
     """
     mock = MagicMock()
+    mock.engine = "openmm"
     mock.get_working_directory.return_value = working_dir
     mock.simulation_phases.production.time_step = 2.0
     mock.simulation_phases.production.duration = 20.0
@@ -843,9 +844,9 @@ class TestBuildDryRunGromacs:
             cli, ["build", "-c", str(config_file), "--dry-run", "--gromacs", "-r", "1"]
         )
         assert result.exit_code == 0, result.output
-        assert "{projects_dir}" not in result.output, (
-            "Output path must be interpolated, not literal {projects_dir}"
-        )
+        assert (
+            "{projects_dir}" not in result.output
+        ), "Output path must be interpolated, not literal {projects_dir}"
         assert str(tmp_path / "projects") in result.output
 
 
@@ -895,6 +896,8 @@ class TestRecoverEngineAware:
         config_file.write_text("name: test")
         working_dir = tmp_path / "work"
         working_dir.mkdir()
+        gromacs_dir = working_dir / "gromacs"
+        gromacs_dir.mkdir()
 
         mock_from_yaml.return_value = _mock_sim_config_gromacs(working_dir)
         mock_gromacs_load.return_value = _mock_progress(
@@ -908,7 +911,7 @@ class TestRecoverEngineAware:
         )
 
         assert result.exit_code == 0, result.output
-        mock_gromacs_load.assert_called_once_with(working_dir, 1)
+        mock_gromacs_load.assert_called_once_with(gromacs_dir, 1)
         mock_openmm_load.assert_not_called()
 
 
@@ -938,6 +941,7 @@ class TestRecoverGromacsSubmit:
         mock_from_yaml.return_value = sim_config
 
         engine_mock = MagicMock()
+        engine_mock.get_engine_working_directory.return_value = working_dir
         engine_mock.load_or_scan_progress.return_value = _mock_progress(
             total_steps=10000000, completed_steps=5000000, n_segments=1
         )
@@ -999,6 +1003,7 @@ class TestRecoverGromacsSubmit:
         mock_from_yaml.return_value = sim_config
 
         engine_mock = MagicMock()
+        engine_mock.get_engine_working_directory.return_value = working_dir
         engine_mock.load_or_scan_progress.return_value = _mock_progress(
             total_steps=10000000, completed_steps=5000000, n_segments=1
         )
@@ -1114,6 +1119,7 @@ class TestRecoverGromacsEdgeCases:
         config_file.write_text("name: test")
         working_dir = tmp_path / "work"
         working_dir.mkdir()
+        (working_dir / "gromacs").mkdir()
 
         mock_cfg = _mock_sim_config_gromacs(working_dir)
         mock_from_yaml.return_value = mock_cfg
@@ -1148,6 +1154,7 @@ class TestRecoverGromacsEdgeCases:
         config_file.write_text("name: test")
         working_dir = tmp_path / "work"
         working_dir.mkdir()
+        (working_dir / "gromacs").mkdir()
 
         mock_cfg = _mock_sim_config_gromacs(working_dir)
         mock_from_yaml.return_value = mock_cfg
