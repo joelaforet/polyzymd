@@ -307,6 +307,154 @@ def test_grompp_calls_never_use_mpirun(monkeypatch) -> None:
     assert "mpirun $GMX grompp" not in script
 
 
+class TestSignalInfrastructure:
+    """Signal handling and preemption resilience tests."""
+
+    def test_constraint_directive_rendered_when_configured(self, monkeypatch) -> None:
+        """Constraint directive should appear when configured."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        generator = GromacsSlurmScriptGenerator(
+            slurm_config=SlurmConfig(
+                partition="blanca,blanca-shirts",
+                qos="preemptable",
+                account="blanca-shirts",
+                time_limit="23:59:59",
+                nodes=1,
+                ntasks=1,
+                cpus_per_task=12,
+                memory="64G",
+                gpus=1,
+                constraint="A40|A100",
+            ),
+            pixi_env="cuda-12-4",
+            gmx_binary="gmx",
+            mdrun_flags="-nb gpu",
+        )
+        script = generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert "#SBATCH --constraint=A40|A100" in script
+
+    def test_constraint_directive_omitted_when_unset(self, monkeypatch) -> None:
+        """No constraint line should appear when constraint is None."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert "#SBATCH --constraint=" not in script
+
+    def test_script_contains_term_trap(self, monkeypatch) -> None:
+        """Script should trap SIGTERM and define forward_term function."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert "trap 'forward_term' TERM" in script
+        assert "forward_term()" in script
+
+    def test_script_does_not_include_usr1_signal_directive(self, monkeypatch) -> None:
+        """GROMACS scripts should not use USR1 signal (that's OpenMM-only)."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert "--signal=B:USR1" not in script
+        assert "trap" in script
+        assert "USR1" not in script
+
+    def test_script_defines_resubmit_once_function(self, monkeypatch) -> None:
+        """Script should define resubmit_once with double-submit guard."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert "resubmit_once()" in script
+        assert "RESUBMITTED" in script
+
+    def test_script_defines_run_mdrun_stage_function(self, monkeypatch) -> None:
+        """run_mdrun_stage helper should be defined exactly once."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert script.count("run_mdrun_stage()") == 1
+        assert script.count("run_mdrun_stage ") >= 3
+
+    def test_mdrun_stages_are_backgrounded(self, monkeypatch) -> None:
+        """run_mdrun_stage should background the child and capture PID."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert '"$@" &' in script
+        assert "CHILD_PID=$!" in script
+
+    def test_term_received_state_declared_and_checked(self, monkeypatch) -> None:
+        """TERM_RECEIVED should be declared and checked in run_mdrun_stage."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert "TERM_RECEIVED=0" in script
+        assert '"$TERM_RECEIVED" -eq 1' in script
+
+
 class TestGPUSlurmScripts:
     """GPU-specific SLURM script regression tests."""
 

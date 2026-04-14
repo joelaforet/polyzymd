@@ -7,7 +7,12 @@ import os
 from pathlib import Path
 
 from polyzymd.core.branding import FULL_CREDIT_LINE
-from polyzymd.workflow.slurm import SlurmConfig, _discover_manifest_path, _validate_script_value
+from polyzymd.workflow.slurm import (
+    SlurmConfig,
+    _discover_manifest_path,
+    _validate_constraint_value,
+    _validate_script_value,
+)
 
 from .binary import is_mpi_binary
 
@@ -42,6 +47,7 @@ class GromacsSlurmScriptGenerator:
 {mail_line}
 {account_line}
 {exclude_line}
+{constraint_line}
 #SBATCH --no-requeue
 
 # =============================================================================
@@ -72,6 +78,71 @@ MDRUN_FLAGS="{mdrun_flags}"
 # EM-safe flags: strip GPU offload flags incompatible with non-dynamical integrators
 MDRUN_FLAGS_EM=$(echo "$MDRUN_FLAGS" | sed 's/-pme  *gpu//g; s/-update  *gpu//g; s/-bonded  *gpu//g' | xargs)
 MDRUN="{mdrun_command}"
+
+# =========================================================================
+# Signal infrastructure: trap SIGTERM (preemption), forward to backgrounded
+# mdrun, and resubmit exactly once after checkpoint flush.
+# =========================================================================
+CHILD_PID=""
+TERM_RECEIVED=0
+RESUBMITTED=0
+
+forward_term() {{
+    TERM_RECEIVED=1
+    if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+        echo "Forwarding TERM to mdrun process (PID $CHILD_PID)"
+        kill -TERM "$CHILD_PID"
+    fi
+}}
+
+resubmit_once() {{
+    if [ "$RESUBMITTED" -eq 1 ]; then
+        echo "Resubmission already attempted — skipping duplicate sbatch."
+        return 0
+    fi
+    echo "Resubmitting job..."
+    set +e
+    sbatch "$THIS_SCRIPT"
+    SUBMIT_RC=$?
+    set -e
+    if [ $SUBMIT_RC -eq 0 ]; then
+        RESUBMITTED=1
+        echo "Resubmitted successfully."
+        return 0
+    fi
+    echo "WARNING: sbatch resubmission failed (exit code $SUBMIT_RC)"
+    echo "You can manually resume with: sbatch $THIS_SCRIPT"
+    return 1
+}}
+
+run_mdrun_stage() {{
+    local stage_name="$1"
+    shift
+    echo "Launching ${{stage_name}}: $*"
+    "$@" &
+    CHILD_PID=$!
+    local rc
+    set +e
+    wait "$CHILD_PID" 2>/dev/null
+    rc=$?
+    while kill -0 "$CHILD_PID" 2>/dev/null; do
+        wait "$CHILD_PID" 2>/dev/null
+        rc=$?
+    done
+    set -e
+    CHILD_PID=""
+    if [ "$TERM_RECEIVED" -eq 1 ]; then
+        echo "SIGTERM received during ${{stage_name}} — resubmitting after checkpoint flush."
+        resubmit_once || exit 1
+        exit 0
+    fi
+    if [ $rc -ne 0 ]; then
+        echo "FATAL: ${{stage_name}} failed (exit code $rc)"
+        exit $rc
+    fi
+}}
+
+trap 'forward_term' TERM
 
 # Ensure working directory exists
 mkdir -p "$WORKING_DIR"
@@ -119,13 +190,11 @@ fi
 # -maxh limits wall time so we can cleanly resubmit
 if [ -f state.cpt ]; then
     echo "Resuming from checkpoint: state.cpt"
-    $MDRUN -deffnm prod -cpi state.cpt -cpo state.cpt -append -maxh $MAXH $MDRUN_FLAGS -v
+    run_mdrun_stage "production" $MDRUN -deffnm prod -cpi state.cpt -cpo state.cpt -append -maxh $MAXH $MDRUN_FLAGS -v
 else
     echo "Starting fresh production run"
-    $MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v
+    run_mdrun_stage "production" $MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v
 fi
-
-MDRUN_RC=$?
 
 # =========================================================================
 # Step 4: Update progress tracking
@@ -167,16 +236,7 @@ if [ -f prod.log ]; then
 fi
 
 echo "Production incomplete (wall-time limit reached) — resubmitting..."
-sbatch "$THIS_SCRIPT"
-SUBMIT_RC=$?
-
-if [ $SUBMIT_RC -eq 0 ]; then
-    echo "Resubmitted successfully."
-else
-    echo "WARNING: sbatch resubmission failed (exit code $SUBMIT_RC)"
-    echo "You can manually resume with: sbatch $THIS_SCRIPT"
-    exit 1
-fi
+resubmit_once || exit 1
 
 exit 0
 """
@@ -257,6 +317,10 @@ exit 0
         """Return optional node exclusion SBATCH directive."""
         return f"#SBATCH --exclude={self._config.exclude}" if self._config.exclude else ""
 
+    def _constraint_line(self) -> str:
+        """Return the constraint SBATCH directive, or an empty string to omit it."""
+        return f"#SBATCH --constraint={self._config.constraint}" if self._config.constraint else ""
+
     def generate_job_script(
         self,
         config_path: str,
@@ -328,6 +392,8 @@ exit 0
             _validate_script_value(self._config.email, "email")
         if self._config.exclude:
             _validate_script_value(self._config.exclude, "exclude")
+        if self._config.constraint:
+            _validate_constraint_value(self._config.constraint, "constraint")
         if self._config.gpu_type:
             _validate_script_value(self._config.gpu_type, "gpu_type")
         for mdp_name in equilibration_mdps:
@@ -346,6 +412,7 @@ exit 0
             mail_line=self._mail_line(),
             account_line=self._account_line(),
             exclude_line=self._exclude_line(),
+            constraint_line=self._constraint_line(),
             pixi_env=self._pixi_env,
             manifest_path=manifest_path,
             config_path=config_path,
@@ -375,7 +442,7 @@ exit 0
             "if [ ! -f em.gro ]; then",
             '    echo "=== Energy Minimization ==="',
             "    $GMX grompp -f em.mdp -c ${{PREFIX}}.gro -r ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}",
-            "    $MDRUN -deffnm em $MDRUN_FLAGS_EM -v",
+            '    run_mdrun_stage "energy minimization" $MDRUN -deffnm em $MDRUN_FLAGS_EM -v',
             "    if [ ! -f em.gro ]; then",
             '        echo "FATAL: Energy minimization failed — em.gro not produced"',
             "        exit 1",
@@ -465,7 +532,10 @@ exit 0
                 f"-p ${{PREFIX}}.top -o {stage}.tpr {self._grompp_flags}"
             )
             lines.append("    fi")
-            lines.append(f"    $MDRUN -deffnm {stage} $MDRUN_FLAGS -v")
+            lines.append(
+                f'    run_mdrun_stage "equilibration stage {idx}" '
+                f"$MDRUN -deffnm {stage} $MDRUN_FLAGS -v"
+            )
             lines.append(f"    if [ ! -f {stage}.gro ]; then")
             lines.append(
                 f'        echo "FATAL: Equilibration stage {idx} failed — {stage}.gro not produced"'
