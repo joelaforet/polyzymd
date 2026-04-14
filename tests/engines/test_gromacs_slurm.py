@@ -416,6 +416,39 @@ def test_nodelist_and_typed_gres_render(monkeypatch) -> None:
     assert "#SBATCH --nodelist=nodeA40-01" in script
 
 
+def test_mail_line_uses_fail_end(monkeypatch) -> None:
+    """GROMACS SLURM mail line should use FAIL,END notifications."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(
+            partition="aa100",
+            qos="normal",
+            account="ucb625_asc1",
+            time_limit="23:59:59",
+            email="user@example.com",
+            nodes=1,
+            ntasks=1,
+            memory="3G",
+            gpus=1,
+        ),
+        pixi_env="cuda-12-4",
+        gmx_binary="gmx",
+    )
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert "#SBATCH --mail-type=FAIL,END" in script
+    assert "#SBATCH --mail-user=user@example.com" in script
+
+
 def test_grompp_calls_never_use_mpirun(monkeypatch) -> None:
     """grompp commands should never be prefixed with mpirun."""
     monkeypatch.setattr(

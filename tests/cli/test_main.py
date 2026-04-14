@@ -903,6 +903,15 @@ class TestSubmitConstraintOption:
         assert result.exit_code == 0
         assert "--constraint" in result.output
 
+    def test_submit_help_shows_partition_qos_email(self) -> None:
+        """'polyzymd submit --help' should show partition/qos/email options."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["submit", "--help"])
+        assert result.exit_code == 0
+        assert "--partition" in result.output
+        assert "--qos" in result.output
+        assert "--email" in result.output
+
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
     def test_constraint_passed_to_submit_daisy_chain(
@@ -927,6 +936,44 @@ class TestSubmitConstraintOption:
         assert result.exit_code == 0
         mock_submit.assert_called_once()
         assert mock_submit.call_args.kwargs["constraint"] == "A40|A100"
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_partition_qos_email_passed_to_submit_daisy_chain(
+        self,
+        mock_submit,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """submit should pass partition/qos/email overrides to OpenMM path."""
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "openmm"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "submit",
+                "-c",
+                str(config_path),
+                "--partition",
+                "debug",
+                "--qos",
+                "normal",
+                "--email",
+                "user@example.com",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mock_submit.assert_called_once()
+        kwargs = mock_submit.call_args.kwargs
+        assert kwargs["partition"] == "debug"
+        assert kwargs["qos"] == "normal"
+        assert kwargs["email"] == "user@example.com"
 
     @patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
     @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
@@ -977,12 +1024,88 @@ class TestSubmitConstraintOption:
         request = mock_engine_submit.call_args[0][0]
         assert request.slurm_config.constraint == "A40"
 
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_partition_qos_email_set_on_gromacs_slurm_config(
+        self,
+        mock_from_yaml,
+        mock_resolve_gmx,
+        mock_engine_submit,
+        tmp_path: Path,
+    ) -> None:
+        """submit --engine gromacs should pass partition/qos/email to SlurmConfig."""
+        _ = mock_resolve_gmx
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "gromacs"
+        mock_config.gromacs = SimpleNamespace(
+            grompp_flags="",
+            mdrun_flags="",
+            mdrun_flags_equilibration=None,
+            mdrun_flags_production=None,
+            command_prefix=None,
+            mpi_launcher_flags="",
+            module_load=None,
+            gmx_binary=None,
+            ntmpi=1,
+            ntomp=4,
+            gpu=False,
+            gpus=1,
+            memory="16G",
+            env_exports={},
+            setup_commands=[],
+        )
+        mock_config.generate_system_name = lambda: "test_system"
+        mock_from_yaml.return_value = mock_config
+        mock_engine_submit.return_value = {
+            "submitted": False,
+            "script_path": "/tmp/script.sh",
+            "reason": "sbatch_not_available",
+        }
+
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        with patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[]):
+            with patch("polyzymd.workflow.daisy_chain.create_job_name", return_value="test_job"):
+                result = runner.invoke(
+                    cli,
+                    [
+                        "submit",
+                        "-c",
+                        str(config_path),
+                        "--engine",
+                        "gromacs",
+                        "--partition",
+                        "debug",
+                        "--qos",
+                        "normal",
+                        "--email",
+                        "user@example.com",
+                    ],
+                )
+
+        assert result.exit_code == 0
+        mock_engine_submit.assert_called_once()
+        request = mock_engine_submit.call_args[0][0]
+        assert request.slurm_config.partition == "debug"
+        assert request.slurm_config.qos == "normal"
+        assert request.slurm_config.email == "user@example.com"
+
     def test_recover_help_shows_constraint(self) -> None:
         """'polyzymd recover --help' should show --constraint option."""
         runner = CliRunner()
         result = runner.invoke(cli, ["recover", "--help"])
         assert result.exit_code == 0
         assert "--constraint" in result.output
+
+    def test_recover_help_shows_email(self) -> None:
+        """'polyzymd recover --help' should show --email option."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["recover", "--help"])
+        assert result.exit_code == 0
+        assert "--email" in result.output
 
     def test_recover_help_shows_engine(self) -> None:
         """'polyzymd recover --help' should show --engine option."""

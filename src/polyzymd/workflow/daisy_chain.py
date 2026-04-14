@@ -643,6 +643,8 @@ def submit_daisy_chain(
     time_limit: str | None = None,
     memory: str | None = None,
     account: str | None = None,
+    partition: str | None = None,
+    qos: str | None = None,
     gpu_type: str | None = None,
     constraint: str | None = None,
     openff_logs: bool = False,
@@ -684,6 +686,10 @@ def submit_daisy_chain(
         Override SLURM memory allocation (e.g. ``"4G"``).
     account : str or None
         Override SLURM account / allocation ID.
+    partition : str or None
+        Override SLURM partition.
+    qos : str or None
+        Override SLURM QoS value.
     gpu_type : str or None
         Override GPU type for presets that use ``--gpus`` directive.
     constraint : str or None
@@ -732,6 +738,10 @@ def submit_daisy_chain(
         slurm_config.memory = memory
     if account:
         slurm_config.account = account
+    if partition:
+        slurm_config.partition = partition
+    if qos:
+        slurm_config.qos = qos
     if gpu_type:
         slurm_config.gpu_type = gpu_type
     if constraint:

@@ -1234,6 +1234,16 @@ def _print_gromacs_dry_run_details(
     ),
 )
 @click.option(
+    "--partition",
+    default=None,
+    help="Override SLURM partition",
+)
+@click.option(
+    "--qos",
+    default=None,
+    help="Override SLURM QoS",
+)
+@click.option(
     "--gpu-type",
     default=None,
     type=click.Choice(["v100-16", "v100-32", "l40s-48", "h100-80"]),
@@ -1294,6 +1304,8 @@ def submit(
     time_limit: str | None,
     memory: str | None,
     account: str | None,
+    partition: str | None,
+    qos: str | None,
     gpu_type: str | None,
     constraint: str | None,
     submit_openff_logs: bool,
@@ -1333,6 +1345,10 @@ def submit(
         colored_echo(f"Projects directory: {projects_dir}", phase="workflow")
     if account:
         colored_echo(f"Account: {account}", phase="workflow")
+    if partition:
+        colored_echo(f"Partition override: {partition}", phase="workflow")
+    if qos:
+        colored_echo(f"QoS override: {qos}", phase="workflow")
     if memory:
         colored_echo(f"Memory allocation: {memory}", phase="workflow")
     if gpu_type:
@@ -1424,12 +1440,18 @@ def submit(
 
         for rep in replicate_list:
             slurm_config = SlurmConfig.from_preset(preset)
+            if email:
+                slurm_config.email = email
             if time_limit:
                 slurm_config.time_limit = time_limit
             if memory:
                 slurm_config.memory = memory
             if account:
                 slurm_config.account = account
+            if partition:
+                slurm_config.partition = partition
+            if qos:
+                slurm_config.qos = qos
             if gpu_type:
                 slurm_config.gpu_type = gpu_type
             if constraint:
@@ -1499,6 +1521,8 @@ def submit(
             time_limit=time_limit,
             memory=memory,
             account=account,
+            partition=partition,
+            qos=qos,
             gpu_type=gpu_type,
             constraint=constraint,
             openff_logs=submit_openff_logs,
@@ -2613,9 +2637,24 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     help="Show status and what would be submitted without actually submitting",
 )
 @click.option(
+    "--email",
+    default="",
+    help="Email for job notifications",
+)
+@click.option(
     "--memory",
     default=None,
     help="Override SLURM memory allocation (e.g. '4G', '8G'). Not needed for bridges2 (allocated per GPU).",
+)
+@click.option(
+    "--partition",
+    default=None,
+    help="Override SLURM partition",
+)
+@click.option(
+    "--qos",
+    default=None,
+    help="Override SLURM QoS",
 )
 @click.option(
     "--constraint",
@@ -2648,7 +2687,10 @@ def recover(
     preset: str,
     submit: bool,
     dry_run: bool,
+    email: str,
     memory: str | None,
+    partition: str | None,
+    qos: str | None,
     constraint: str | None,
     pixi_env: str | None,
     force: bool,
@@ -2785,8 +2827,14 @@ def recover(
         from polyzymd.engines.base import EngineSubmitRequest
 
         slurm_config = SlurmConfig.from_preset(preset)
+        if email:
+            slurm_config.email = email
         if memory:
             slurm_config.memory = memory
+        if partition:
+            slurm_config.partition = partition
+        if qos:
+            slurm_config.qos = qos
         if constraint:
             slurm_config.constraint = constraint
 
@@ -2847,8 +2895,14 @@ def recover(
     else:
         # OpenMM recovery path
         slurm_config = SlurmConfig.from_preset(preset)
+        if email:
+            slurm_config.email = email
         if memory:
             slurm_config.memory = memory
+        if partition:
+            slurm_config.partition = partition
+        if qos:
+            slurm_config.qos = qos
         if constraint:
             slurm_config.constraint = constraint
 

@@ -383,7 +383,7 @@ exit 0
     def _mail_line(self) -> str:
         """Return optional SLURM email directives."""
         if self._config.email:
-            return f"#SBATCH --mail-type=FAIL\n#SBATCH --mail-user={self._config.email}"
+            return f"#SBATCH --mail-type=FAIL,END\n#SBATCH --mail-user={self._config.email}"
         return ""
 
     def _exclude_line(self) -> str:
