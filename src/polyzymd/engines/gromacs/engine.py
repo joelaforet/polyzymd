@@ -229,6 +229,11 @@ class GromacsEngine(SimulationEngine):
         Appends ``-ntmpi`` and ``-ntomp`` only if the user has not already
         specified them in ``mdrun_flags``.
 
+        The ``-ntmpi`` flag is only appended for thread-MPI builds (binary
+        name ``gmx``). Real-MPI builds (``gmx_mpi``, ``gmx_mpi_d``, etc.)
+        do **not** support ``-ntmpi`` — MPI rank count is controlled by the
+        MPI launcher (``mpirun``/``srun``).
+
         Parameters
         ----------
         effective_slurm : SlurmConfig
@@ -240,13 +245,19 @@ class GromacsEngine(SimulationEngine):
             Complete mdrun flags string.
         """
         import shlex
+        from pathlib import Path
 
         raw = self._config.gromacs.mdrun_flags
         tokens = shlex.split(raw) if raw else []
         token_set = set(tokens)
 
+        # Detect whether the binary is an MPI build (gmx_mpi, gmx_mpi_d, ...)
+        # Thread-MPI builds use plain "gmx" or "gmx_d"; only they accept -ntmpi.
+        binary_name = Path(self._gmx_binary).name
+        is_mpi_build = "_mpi" in binary_name
+
         extras: list[str] = []
-        if "-ntmpi" not in token_set:
+        if not is_mpi_build and "-ntmpi" not in token_set:
             extras.append(f"-ntmpi {effective_slurm.ntasks}")
         if "-ntomp" not in token_set:
             extras.append(f"-ntomp {effective_slurm.cpus_per_task}")

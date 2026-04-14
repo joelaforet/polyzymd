@@ -126,3 +126,64 @@ class TestResolveMdrunFlags:
         slurm = SlurmConfig(ntasks=1, cpus_per_task=8)
         flags = engine._resolve_mdrun_flags(slurm)
         assert flags == "-ntmpi 1 -ntomp 8"
+
+
+class TestResolveMdrunFlagsMPIBinary:
+    """Test -ntmpi suppression for real-MPI GROMACS builds (gmx_mpi)."""
+
+    def test_mpi_binary_omits_ntmpi(self):
+        """gmx_mpi does not support -ntmpi; only -ntomp should be added."""
+        config = _make_config(ntmpi=1, ntomp=16, mdrun_flags="")
+        engine = GromacsEngine(config=config, gmx_binary="gmx_mpi")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=16)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert "-ntmpi" not in flags
+        assert "-ntomp 16" in flags
+
+    def test_mpi_binary_full_path_omits_ntmpi(self):
+        """Even a full path like /usr/bin/gmx_mpi should suppress -ntmpi."""
+        config = _make_config(ntmpi=2, ntomp=8, mdrun_flags="")
+        engine = GromacsEngine(config=config, gmx_binary="/usr/local/bin/gmx_mpi")
+        slurm = SlurmConfig(ntasks=2, cpus_per_task=8)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert "-ntmpi" not in flags
+        assert "-ntomp 8" in flags
+
+    def test_mpi_double_binary_omits_ntmpi(self):
+        """gmx_mpi_d (double precision MPI) should also suppress -ntmpi."""
+        config = _make_config(ntmpi=1, ntomp=4, mdrun_flags="")
+        engine = GromacsEngine(config=config, gmx_binary="gmx_mpi_d")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=4)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert "-ntmpi" not in flags
+        assert "-ntomp 4" in flags
+
+    def test_thread_mpi_binary_includes_ntmpi(self):
+        """Plain gmx (thread-MPI) should still get -ntmpi."""
+        config = _make_config(ntmpi=2, ntomp=8, mdrun_flags="")
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        slurm = SlurmConfig(ntasks=2, cpus_per_task=8)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert "-ntmpi 2" in flags
+        assert "-ntomp 8" in flags
+
+    def test_mpi_binary_preserves_explicit_ntomp(self):
+        """User-specified -ntomp should be preserved with gmx_mpi."""
+        config = _make_config(mdrun_flags="-ntomp 32")
+        engine = GromacsEngine(config=config, gmx_binary="gmx_mpi")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=8)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert "-ntomp 32" in flags
+        assert flags.count("-ntomp") == 1
+        assert "-ntmpi" not in flags
+
+    def test_mpi_binary_with_extra_flags(self):
+        """Extra flags like -nb gpu should pass through with gmx_mpi."""
+        config = _make_config(mdrun_flags="-nb gpu -pme gpu")
+        engine = GromacsEngine(config=config, gmx_binary="gmx_mpi")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=16)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert "-nb gpu" in flags
+        assert "-pme gpu" in flags
+        assert "-ntomp 16" in flags
+        assert "-ntmpi" not in flags
