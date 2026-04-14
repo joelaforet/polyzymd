@@ -463,16 +463,34 @@ gromacs:
   # Optional per-stage overrides (fallback to mdrun_flags)
   mdrun_flags_equilibration: "-pin on -dlb yes"
   mdrun_flags_production: "-pin on -dlb auto"
-
-  # Optional wrappers for command launch
-  command_prefix: "srun --cpu-bind=cores"
-  mpi_launcher_flags: "--bind-to core"
 ```
 
 Use `command_prefix` when your site requires wrapping GROMACS commands with a
 launcher (`srun`, profiling wrappers, or affinity tools). Use
-`mpi_launcher_flags` only when your selected GROMACS binary requires MPI
-launching.
+`mpi_launcher_flags` when your selected GROMACS binary is launched with
+PolyzyMD-managed `mpirun` wrapping.
+
+Example A — Container or wrapper launch (`command_prefix` only):
+
+```yaml
+gromacs:
+  command_prefix: "singularity exec --nv /path/to/gromacs.sif"
+  # No mpi_launcher_flags needed — command_prefix handles launching
+```
+
+Example B — Standard MPI launch (`mpi_launcher_flags` only):
+
+```yaml
+gromacs:
+  gmx_binary: "gmx_mpi"
+  mpi_launcher_flags: "--bind-to core"
+  # PolyzyMD prepends: mpirun -np N --bind-to core gmx_mpi mdrun ...
+```
+
+> **Note:** When `command_prefix` is set with a real-MPI binary (for example,
+> `gmx_mpi`), PolyzyMD skips automatic `mpirun` wrapping to avoid
+> double-launching. Any `mpi_launcher_flags` are ignored in this case (a
+> warning is emitted). Use one approach or the other, not both.
 
 `env_exports` keys must be valid shell variable names that match
 `[A-Za-z_][A-Za-z0-9_]*` (for example, `GMX_GPU_DD_COMMS`). Keys containing
