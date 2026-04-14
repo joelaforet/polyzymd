@@ -107,11 +107,11 @@ class GromacsEngine(SimulationEngine):
             configured = getattr(gromacs_cfg, "gmx_binary", None) if gromacs_cfg else None
             gmx_binary = configured or "gmx"
             if gpu and is_mpi_binary(gmx_binary):
-                raise ValueError(
-                    "GPU mode requires a thread-MPI GROMACS binary (gmx), "
-                    f"but config specifies '{gmx_binary}'. Real-MPI builds "
-                    "(gmx_mpi) typically lack CUDA support. Set "
-                    "gmx_binary to 'gmx' or remove it to auto-resolve."
+                logging.getLogger(__name__).warning(
+                    "GPU mode with a real-MPI binary (%s) requires manual -ntmpi/-ntomp "
+                    "flag management via mdrun_flags. Consider using thread-MPI (gmx) "
+                    "for single-node GPU workflows.",
+                    gmx_binary,
                 )
         else:
             gmx_binary = resolve_gromacs_binary(config=config, gpu=gpu)

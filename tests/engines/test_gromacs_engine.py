@@ -624,11 +624,28 @@ class TestFromConfigBinaryResolution:
         mock_resolve.assert_not_called()
 
     @patch("polyzymd.engines.gromacs.engine.resolve_gromacs_binary")
-    def test_from_config_deferred_rejects_mpi_with_gpu(self, mock_resolve):
-        """defer_binary=True + gpu=True should still reject gmx_mpi."""
+    def test_from_config_deferred_warns_for_mpi_with_gpu(self, mock_resolve, caplog):
+        """defer_binary=True + gpu=True should warn for gmx_mpi."""
+        import logging
+
         config = _make_config(gmx_binary="gmx_mpi", gpu=True)
 
-        with pytest.raises(ValueError, match="thread-MPI"):
+        with caplog.at_level(logging.WARNING):
             GromacsEngine.from_config(config, defer_binary=True)
 
+        assert any("real-MPI binary" in r.message for r in caplog.records)
+        mock_resolve.assert_not_called()
+
+    @patch("polyzymd.engines.gromacs.engine.resolve_gromacs_binary")
+    def test_from_config_deferred_gpu_no_warning_for_thread_mpi(self, mock_resolve, caplog):
+        """defer_binary=True + gpu=True should not warn when using gmx."""
+        import logging
+
+        config = _make_config(gmx_binary="gmx", gpu=True)
+
+        with caplog.at_level(logging.WARNING):
+            engine = GromacsEngine.from_config(config, defer_binary=True)
+
+        assert engine._gmx_binary == "gmx"
+        assert not any("real-MPI binary" in r.message for r in caplog.records)
         mock_resolve.assert_not_called()
