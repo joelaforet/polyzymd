@@ -2867,6 +2867,14 @@ def recover(
                 "Detected existing GROMACS inputs — recovery will reuse them",
                 phase="workflow",
             )
+            if not list(working_dir.glob("eq_*.mdp")):
+                colored_echo(
+                    "Warning: core GROMACS inputs found but no equilibration MDPs "
+                    "(eq_*.mdp). The recovery job will skip equilibration and go "
+                    "straight to production.",
+                    phase="workflow",
+                    level=logging.WARNING,
+                )
 
         config_path_abs = str(Path(config).resolve())
         request = EngineSubmitRequest(

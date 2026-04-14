@@ -232,6 +232,12 @@ class GromacsEngine(SimulationEngine):
             )
 
         eq_mdps = sorted(path.name for path in request.working_dir.glob("eq_*.mdp"))
+        if inputs_exist and not eq_mdps:
+            logging.getLogger(__name__).warning(
+                "Core GROMACS inputs found in %s but no equilibration MDPs (eq_*.mdp). "
+                "The generated script will skip equilibration and run production from EM output.",
+                request.working_dir,
+            )
 
         script_dir = request.working_dir / "daisy_chain_scripts"
         script_dir.mkdir(parents=True, exist_ok=True)
