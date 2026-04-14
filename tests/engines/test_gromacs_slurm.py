@@ -2,6 +2,8 @@
 
 import re
 
+import pytest
+
 from polyzymd.engines.gromacs.slurm import GromacsSlurmScriptGenerator
 from polyzymd.workflow.slurm import SlurmConfig
 
@@ -531,6 +533,73 @@ def test_env_exports_and_setup_commands_rendered_in_order(monkeypatch) -> None:
     setup_idx = script.index("source /projects/software/gromacs/bin/GMXRC")
     resolve_idx = script.index("THIS_SCRIPT=")
     assert module_idx < env_idx < setup_idx < resolve_idx
+
+
+def test_env_exports_rejects_key_with_spaces(monkeypatch) -> None:
+    """env_exports keys must be valid shell identifiers."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(),
+        env_exports={"MY VAR": "value"},
+    )
+
+    with pytest.raises(ValueError, match="valid shell variable"):
+        generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+
+def test_env_exports_rejects_key_starting_with_digit(monkeypatch) -> None:
+    """env_exports keys must not start with a digit."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(),
+        env_exports={"123ABC": "value"},
+    )
+
+    with pytest.raises(ValueError, match="valid shell variable"):
+        generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+
+def test_env_exports_accepts_valid_identifier(monkeypatch) -> None:
+    """env_exports with valid identifiers should render export lines."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(),
+        env_exports={"GMX_GPU_DD_COMMS": "true"},
+    )
+
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert 'export GMX_GPU_DD_COMMS="true"' in script
 
 
 class TestSignalInfrastructure:

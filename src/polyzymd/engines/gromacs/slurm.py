@@ -36,6 +36,7 @@ class GromacsSlurmScriptGenerator:
     MAXH_SAFETY_FACTOR = 0.90
     _PATH_EXPORT_PATTERN = re.compile(r"^export PATH=\$PATH:[A-Za-z0-9._/,:\-@%=+]+$")
     _COMMAND_PREFIX_PATTERN = re.compile(r"^[A-Za-z0-9._/,:\-@%=+ $]+$")
+    _ENV_VAR_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
     JOB_TEMPLATE = """#!/bin/bash
 #SBATCH --partition={partition}
@@ -518,8 +519,12 @@ exit 0
         if module_load_line:
             _validate_script_value(module_load_line, "module_load")
         for key, value in self._env_exports.items():
-            _validate_script_value(key, "env_exports.key")
-            _validate_script_value(value, "env_exports.value")
+            if not self._ENV_VAR_NAME.match(key):
+                raise ValueError(
+                    f"env_exports key '{key}' is not a valid shell variable name. "
+                    "Must match [A-Za-z_][A-Za-z0-9_]*."
+                )
+            _validate_script_value(value, f"env_exports[{key}]")
         for setup_command in self._setup_commands:
             self._validate_setup_command(setup_command)
         if self._config.qos:
