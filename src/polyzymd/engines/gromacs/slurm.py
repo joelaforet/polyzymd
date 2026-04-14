@@ -69,8 +69,8 @@ GMX="{gmx_binary}"
 PREFIX="{system_prefix}"
 MAXH={maxh_hours}
 MDRUN_FLAGS="{mdrun_flags}"
-# EM-safe flags: strip -pme gpu and -update gpu (incompatible with non-dynamical integrators)
-MDRUN_FLAGS_EM=$(echo "$MDRUN_FLAGS" | sed 's/-pme  *gpu//g; s/-update  *gpu//g' | xargs)
+# EM-safe flags: strip GPU offload flags incompatible with non-dynamical integrators
+MDRUN_FLAGS_EM=$(echo "$MDRUN_FLAGS" | sed 's/-pme  *gpu//g; s/-update  *gpu//g; s/-bonded  *gpu//g' | xargs)
 MDRUN="{mdrun_command}"
 
 # Ensure working directory exists
