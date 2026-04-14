@@ -9,6 +9,7 @@ from typing import Any, ClassVar
 
 from polyzymd.engines.base import EngineSubmitRequest, SimulationEngine, TrajectoryLayout
 from polyzymd.simulation.progress import SimulationProgress
+from polyzymd.workflow.slurm import SlurmConfig
 
 from .binary import resolve_gromacs_binary
 from .progress import load_or_scan_gromacs_progress
@@ -172,12 +173,15 @@ class GromacsEngine(SimulationEngine):
         script_dir.mkdir(parents=True, exist_ok=True)
         script_path = script_dir / f"run_rep{request.replicate}.sh"
 
+        effective_slurm = self._resolve_slurm_config(request.slurm_config)
+        effective_mdrun_flags = self._resolve_mdrun_flags(effective_slurm)
+
         generator = GromacsSlurmScriptGenerator(
-            slurm_config=request.slurm_config,
+            slurm_config=effective_slurm,
             pixi_env=pixi_env,
             gmx_binary=self._gmx_binary,
             grompp_flags=self._config.gromacs.grompp_flags,
-            mdrun_flags=self._config.gromacs.mdrun_flags,
+            mdrun_flags=effective_mdrun_flags,
             module_load=self._config.gromacs.module_load,
         )
         script = generator.generate_job_script(
@@ -191,6 +195,64 @@ class GromacsEngine(SimulationEngine):
         )
         generator.save_script(script, script_path)
         return script_path
+
+    def _resolve_slurm_config(self, base: SlurmConfig) -> SlurmConfig:
+        """Override base SLURM config with GROMACS-specific hardware settings.
+
+        Parameters
+        ----------
+        base : SlurmConfig
+            SLURM config from preset or CLI.
+
+        Returns
+        -------
+        SlurmConfig
+            Config with GROMACS hardware overrides applied.
+        """
+        from dataclasses import replace
+
+        gromacs_cfg = self._config.gromacs
+        overrides: dict[str, Any] = {
+            "ntasks": gromacs_cfg.ntmpi,
+            "cpus_per_task": gromacs_cfg.ntomp,
+            "memory": gromacs_cfg.memory,
+        }
+        if gromacs_cfg.gpu:
+            overrides["gpus"] = max(base.gpus, 1)
+        else:
+            overrides["gpus"] = 0
+        return replace(base, **overrides)
+
+    def _resolve_mdrun_flags(self, effective_slurm: SlurmConfig) -> str:
+        """Compose final mdrun flags from config + hardware settings.
+
+        Appends ``-ntmpi`` and ``-ntomp`` only if the user has not already
+        specified them in ``mdrun_flags``.
+
+        Parameters
+        ----------
+        effective_slurm : SlurmConfig
+            Resolved SLURM config with hardware overrides.
+
+        Returns
+        -------
+        str
+            Complete mdrun flags string.
+        """
+        import shlex
+
+        raw = self._config.gromacs.mdrun_flags
+        tokens = shlex.split(raw) if raw else []
+        token_set = set(tokens)
+
+        extras: list[str] = []
+        if "-ntmpi" not in token_set:
+            extras.append(f"-ntmpi {effective_slurm.ntasks}")
+        if "-ntomp" not in token_set:
+            extras.append(f"-ntomp {effective_slurm.cpus_per_task}")
+
+        parts = [raw] + extras
+        return " ".join(part for part in parts if part).strip()
 
     def submit(self, request: EngineSubmitRequest) -> Any:
         """Submit GROMACS jobs to scheduler.
