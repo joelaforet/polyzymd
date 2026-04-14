@@ -791,6 +791,73 @@ class TestSubmitEngineAware:
         assert "mdrun flags:" in result.output
 
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.engines.create_engine")
+    def test_submit_dry_run_gromacs_shows_partition_qos_overrides(
+        self,
+        mock_create_engine,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """Dry run for GROMACS should show partition and QoS overrides."""
+        mock_engine = SimpleNamespace()
+        mock_engine._resolve_slurm_config = lambda base: SimpleNamespace(
+            partition=base.partition,
+            time_limit=base.time_limit,
+            memory=base.memory,
+            account=base.account,
+            email=base.email,
+            nodes=base.nodes,
+            ntasks=base.ntasks,
+            cpus_per_task=base.cpus_per_task,
+            gpus=base.gpus,
+            constraint=base.constraint,
+            qos=base.qos,
+        )
+        mock_engine._resolve_mdrun_flags = lambda _effective: "-pin on"
+        mock_create_engine.return_value = mock_engine
+
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "gromacs"
+        mock_config.gromacs = SimpleNamespace(
+            gmx_binary=None,
+            gpu=False,
+            ntmpi=1,
+            ntomp=4,
+            module_load=None,
+        )
+        mock_from_yaml.return_value = mock_config
+
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            [
+                "submit",
+                "-c",
+                str(config_path),
+                "--engine",
+                "gromacs",
+                "--dry-run",
+                "--partition",
+                "blanca",
+                "--qos",
+                "preemptable",
+                "--email",
+                "user@example.com",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "Partition:" in result.output
+        assert "blanca" in result.output
+        assert "QoS:" in result.output
+        assert "preemptable" in result.output
+        assert "Email:" in result.output
+        assert "user@example.com" in result.output
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
     def test_submit_openmm_path_unchanged(
         self, mock_submit, mock_from_yaml, tmp_path: Path

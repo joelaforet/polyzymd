@@ -1079,6 +1079,9 @@ def _print_gromacs_dry_run_details(
     account: str | None,
     gpu_type: str | None,
     constraint: str | None,
+    partition: str | None = None,
+    qos: str | None = None,
+    email: str = "",
 ) -> None:
     """Print GROMACS-specific dry-run details with effective SLURM configuration.
 
@@ -1100,6 +1103,12 @@ def _print_gromacs_dry_run_details(
         CLI GPU type override.
     constraint : str or None
         CLI constraint override.
+    partition : str or None, optional
+        CLI partition override.
+    qos : str or None, optional
+        CLI QoS override.
+    email : str, optional
+        CLI email override.
     """
     from polyzymd.engines import create_engine
     from polyzymd.workflow.slurm import SlurmConfig
@@ -1115,6 +1124,12 @@ def _print_gromacs_dry_run_details(
         base_slurm.memory = memory
     if account:
         base_slurm.account = account
+    if partition:
+        base_slurm.partition = partition
+    if qos:
+        base_slurm.qos = qos
+    if email:
+        base_slurm.email = email
     if gpu_type:
         base_slurm.gpu_type = gpu_type
     if constraint:
@@ -1128,6 +1143,7 @@ def _print_gromacs_dry_run_details(
     colored_echo(f"    Time limit:     {effective.time_limit}", phase=phase)
     colored_echo(f"    Memory:         {effective.memory}", phase=phase)
     colored_echo(f"    Account:        {effective.account or '(none)'}", phase=phase)
+    colored_echo(f"    Email:          {effective.email or '(none)'}", phase=phase)
     colored_echo(f"    Nodes:          {effective.nodes}", phase=phase)
     colored_echo(f"    Tasks:          {effective.ntasks}", phase=phase)
     colored_echo(f"    CPUs/task:      {effective.cpus_per_task}", phase=phase)
@@ -1397,6 +1413,9 @@ def submit(
                 account=account,
                 gpu_type=gpu_type,
                 constraint=constraint,
+                partition=partition,
+                qos=qos,
+                email=email,
             )
         else:
             script_dir = (
