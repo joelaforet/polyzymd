@@ -1232,17 +1232,18 @@ def test_production_grompp_removes_stale_tpr(monkeypatch) -> None:
     assert "rm -f prod.tpr" in script
     assert "if [ ! -f prod.tpr ]; then" not in script
 
-    def test_append_flag_only_on_resume(self, monkeypatch) -> None:
-        """The -append flag should only appear in checkpoint resume branches."""
-        monkeypatch.setattr(
-            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
-            lambda: "/tmp/pixi.toml",
-        )
-        block = _generator()._generate_equilibration_block(["eq_01_nvt.mdp"])
-        lines = block.split("\n")
-        for line in lines:
-            if "-append" in line:
-                assert "-cpi" in line, "'-append' found without '-cpi' on same line"
+
+def test_append_flag_only_on_resume(monkeypatch) -> None:
+    """The -append flag should only appear in checkpoint resume branches."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+    block = _generator()._generate_equilibration_block(["eq_01_nvt.mdp"])
+    lines = block.split("\n")
+    for line in lines:
+        if "-append" in line:
+            assert "-cpi" in line, "'-append' found without '-cpi' on same line"
 
 
 class TestSetEOrdering:

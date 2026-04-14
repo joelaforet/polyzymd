@@ -484,7 +484,7 @@ Example B — Standard MPI launch (`mpi_launcher_flags` only):
 gromacs:
   gmx_binary: "gmx_mpi"
   mpi_launcher_flags: "--bind-to core"
-  # PolyzyMD prepends: mpirun -np N --bind-to core gmx_mpi mdrun ...
+  # PolyzyMD prepends: mpirun --bind-to core gmx_mpi mdrun ...
 ```
 
 > **Note:** When `command_prefix` is set with a real-MPI binary (for example,
