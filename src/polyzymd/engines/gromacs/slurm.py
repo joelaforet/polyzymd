@@ -109,8 +109,8 @@ handle_term() {{
             ;;
         foreground|idle)
             echo "SIGTERM during ${{CURRENT_PHASE}} phase — resubmitting immediately."
-            resubmit_once || true
-            exit 0
+            resubmit_once
+            exit $?
             ;;
     esac
 }}

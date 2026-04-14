@@ -943,6 +943,22 @@ class TestGlobalTermHandling:
         done_idx = script.index("All done.")
         assert complete_idx < done_idx
 
+    def test_foreground_term_resubmit_failure_exits_non_zero(self, monkeypatch) -> None:
+        """foreground/idle TERM path should propagate resubmit_once failure code."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert "resubmit_once || true" not in script
+        assert "resubmit_once\n            exit $?" in script
+
     def test_run_foreground_wrapper_defined(self, monkeypatch) -> None:
         """run_foreground wrapper must be defined for tracked foreground commands."""
         monkeypatch.setattr(
