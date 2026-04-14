@@ -416,6 +416,64 @@ gromacs:
 List prerequisites (compiler, MPI) before the GROMACS module so dependencies
 resolve in order.
 
+### Advanced runtime and scheduler customization
+
+For collaborator workflows on shared clusters, you can combine config-level
+GROMACS settings with CLI-level SLURM overrides.
+
+#### CLI overrides for submit and recover
+
+Both `polyzymd submit --engine gromacs` and `polyzymd recover --engine gromacs`
+support scheduler overrides:
+
+```bash
+--partition <name>   # override SLURM partition
+--qos <name>         # override SLURM QoS
+--email <address>    # enable SLURM mail notifications
+```
+
+When `--email` is set, generated scripts include:
+
+- `#SBATCH --mail-type=FAIL,END`
+- `#SBATCH --mail-user=<address>`
+
+#### GROMACS config fields for launch behavior
+
+Use the `gromacs:` block to control environment preparation and stage-specific
+`mdrun` behavior:
+
+```yaml
+gromacs:
+  gmx_binary: "gmx"
+  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
+
+  # Inject export lines before execution
+  env_exports:
+    OMP_PLACES: "cores"
+    OMP_PROC_BIND: "close"
+
+  # Run extra shell setup lines in order
+  setup_commands:
+    - "ulimit -s unlimited"
+    - "export PATH=$PATH:/opt/site-tools/bin"
+
+  # Global mdrun flags
+  mdrun_flags: "-pin on"
+
+  # Optional per-stage overrides (fallback to mdrun_flags)
+  mdrun_flags_equilibration: "-pin on -dlb yes"
+  mdrun_flags_production: "-pin on -dlb auto"
+
+  # Optional wrappers for command launch
+  command_prefix: "srun --cpu-bind=cores"
+  mpi_launcher_flags: "--bind-to core"
+```
+
+Use `command_prefix` when your site requires wrapping GROMACS commands with a
+launcher (`srun`, profiling wrappers, or affinity tools). Use
+`mpi_launcher_flags` only when your selected GROMACS binary requires MPI
+launching.
+
 ---
 
 ## Recovering Preempted Jobs
