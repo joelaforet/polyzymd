@@ -257,7 +257,7 @@ gromacs/
 ├── prod.xtc                  # Production trajectory
 ├── prod.edr                  # Production energies
 ├── prod.gro                  # Final coordinates
-├── prod.cpt                  # Checkpoint for restart
+├── state.cpt                 # Checkpoint for restart
 │
 ├── prod_nojump.xtc           # Trajectory with PBC jumps removed
 └── prod_centered.xtc         # Centered trajectory for visualization
@@ -369,7 +369,7 @@ Add a `gromacs:` block to your config YAML to enable GPU acceleration:
 gromacs:
   gpu: true
   gpus: 1
-  binary: "gmx"                # NOT gmx_mpi for single-node GPU runs
+  gmx_binary: "gmx"            # NOT gmx_mpi for single-node GPU runs
   ntmpi: 1
   ntomp: 12
   module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
