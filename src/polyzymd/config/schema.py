@@ -1163,6 +1163,19 @@ class GromacsEngineConfig(BaseModel):
     gmx_binary: str | None = Field(None, description="GROMACS binary path or name")
     mdrun_flags: str = Field("", description="Extra flags for gmx mdrun (all stages)")
     grompp_flags: str = Field("-maxwarn 1", description="Extra flags for gmx grompp")
+    mdrun_flags_equilibration: str | None = Field(
+        None,
+        description=(
+            "Override mdrun_flags for equilibration stages only. "
+            "When None, falls back to mdrun_flags."
+        ),
+    )
+    mdrun_flags_production: str | None = Field(
+        None,
+        description=(
+            "Override mdrun_flags for production only. When None, falls back to mdrun_flags."
+        ),
+    )
     module_load: str | None = Field(None, description="HPC module load command")
     env_exports: dict[str, str] = Field(
         default_factory=dict,

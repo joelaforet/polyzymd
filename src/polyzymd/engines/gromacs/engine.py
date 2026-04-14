@@ -232,6 +232,7 @@ class GromacsEngine(SimulationEngine):
 
         effective_slurm = self._resolve_slurm_config(request.slurm_config)
         effective_mdrun_flags = self._resolve_mdrun_flags(effective_slurm)
+        mdrun_flags_eq, mdrun_flags_prod = self._resolve_stage_mdrun_flags(effective_slurm)
 
         generator = GromacsSlurmScriptGenerator(
             slurm_config=effective_slurm,
@@ -239,6 +240,8 @@ class GromacsEngine(SimulationEngine):
             gmx_binary=self._gmx_binary,
             grompp_flags=self._config.gromacs.grompp_flags,
             mdrun_flags=effective_mdrun_flags,
+            mdrun_flags_eq=mdrun_flags_eq,
+            mdrun_flags_prod=mdrun_flags_prod,
             module_load=self._config.gromacs.module_load,
             env_exports=self._config.gromacs.env_exports,
             setup_commands=self._config.gromacs.setup_commands,
@@ -337,6 +340,53 @@ class GromacsEngine(SimulationEngine):
 
         parts = [raw] + extras
         return " ".join(part for part in parts if part).strip()
+
+    def _resolve_stage_mdrun_flags(
+        self, effective_slurm: SlurmConfig
+    ) -> tuple[str | None, str | None]:
+        """Resolve equilibration and production flag strings with fallback.
+
+        Parameters
+        ----------
+        effective_slurm : SlurmConfig
+            Resolved SLURM config with hardware overrides.
+
+        Returns
+        -------
+        tuple[str | None, str | None]
+            Stage-specific mdrun flags for equilibration and production.
+            ``None`` indicates fallback to global ``mdrun_flags`` in script.
+        """
+        eq_raw = getattr(self._config.gromacs, "mdrun_flags_equilibration", None)
+        prod_raw = getattr(self._config.gromacs, "mdrun_flags_production", None)
+
+        eq_flags = self._resolve_mdrun_flags_for_raw(eq_raw, effective_slurm) if eq_raw else None
+        prod_flags = (
+            self._resolve_mdrun_flags_for_raw(prod_raw, effective_slurm) if prod_raw else None
+        )
+        return eq_flags, prod_flags
+
+    def _resolve_mdrun_flags_for_raw(self, raw_flags: str, effective_slurm: SlurmConfig) -> str:
+        """Resolve one mdrun flag string against current SLURM settings.
+
+        Parameters
+        ----------
+        raw_flags : str
+            Raw mdrun flag string from configuration.
+        effective_slurm : SlurmConfig
+            Resolved SLURM config with hardware overrides.
+
+        Returns
+        -------
+        str
+            Fully resolved mdrun flags for one stage.
+        """
+        original = self._config.gromacs.mdrun_flags
+        self._config.gromacs.mdrun_flags = raw_flags
+        try:
+            return self._resolve_mdrun_flags(effective_slurm)
+        finally:
+            self._config.gromacs.mdrun_flags = original
 
     def submit(self, request: EngineSubmitRequest) -> Any:
         """Submit GROMACS jobs to scheduler.

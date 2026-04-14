@@ -188,10 +188,10 @@ def test_mdrun_flags_in_all_stages(monkeypatch) -> None:
     )
 
     assert "$MDRUN -deffnm em -cpo em.cpt $MDRUN_FLAGS_EM -v" in script
-    assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS -v" in script
-    assert "$MDRUN -deffnm eq_02 -cpo eq_02.cpt $MDRUN_FLAGS -v" in script
-    assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v" in script
-    assert script.count("$MDRUN_FLAGS") >= 4
+    assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS_EQ -v" in script
+    assert "$MDRUN -deffnm eq_02 -cpo eq_02.cpt $MDRUN_FLAGS_EQ -v" in script
+    assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS_PROD -v" in script
+    assert script.count("$MDRUN_FLAGS") >= 1
 
 
 def test_mdrun_flags_variable_defined_before_em(monkeypatch) -> None:
@@ -210,7 +210,46 @@ def test_mdrun_flags_variable_defined_before_em(monkeypatch) -> None:
     )
 
     assert script.index("MDRUN_FLAGS=") < script.index("em.mdp")
+    assert script.index("MDRUN_FLAGS_EQ=") < script.index("em.mdp")
+    assert script.index("MDRUN_FLAGS_PROD=") < script.index("em.mdp")
     assert script.index("MDRUN_FLAGS_EM=") < script.index("em.mdp")
+
+
+def test_stage_specific_mdrun_flags_override(monkeypatch) -> None:
+    """Equilibration and production should use stage-specific flags when set."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(
+            partition="aa100",
+            qos="normal",
+            account="ucb625_asc1",
+            time_limit="23:59:59",
+            email="",
+            nodes=1,
+            ntasks=1,
+            memory="3G",
+            gpus=1,
+        ),
+        pixi_env="cuda-12-4",
+        gmx_binary="gmx",
+        mdrun_flags="-ntomp 8",
+        mdrun_flags_eq="-ntomp 4",
+        mdrun_flags_prod="-ntomp 8 -plumed plumed_setup.dat",
+    )
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+    assert 'MDRUN_FLAGS_EQ="-ntomp 4"' in script
+    assert 'MDRUN_FLAGS_PROD="-ntomp 8 -plumed plumed_setup.dat"' in script
+    assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS_EQ -v" in script
+    assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS_PROD -v" in script
 
 
 def test_mdrun_variable_uses_mpirun_for_mpi_binary(monkeypatch) -> None:
@@ -249,8 +288,8 @@ def test_mdrun_variable_uses_mpirun_for_mpi_binary(monkeypatch) -> None:
 
     assert 'MDRUN="mpirun $GMX mdrun"' in script
     assert "$MDRUN -deffnm em -cpo em.cpt $MDRUN_FLAGS_EM -v" in script
-    assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS -v" in script
-    assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS_EQ -v" in script
+    assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS_PROD -v" in script
 
 
 def test_mdrun_variable_omits_mpirun_for_non_mpi_binary(monkeypatch) -> None:
@@ -791,9 +830,9 @@ class TestGPUSlurmScripts:
         )
 
         assert "$MDRUN -deffnm em -cpo em.cpt $MDRUN_FLAGS_EM -v" in script
-        assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS -v" in script
-        assert "$MDRUN -deffnm eq_02 -cpo eq_02.cpt $MDRUN_FLAGS -v" in script
-        assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v" in script
+        assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS_EQ -v" in script
+        assert "$MDRUN -deffnm eq_02 -cpo eq_02.cpt $MDRUN_FLAGS_EQ -v" in script
+        assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS_PROD -v" in script
         assert "MDRUN_FLAGS_EM=" in script
         assert "-pme" in script
         assert "-update" in script

@@ -79,6 +79,10 @@ GMX="{gmx_binary}"
 PREFIX="{system_prefix}"
 MAXH={maxh_hours}
 MDRUN_FLAGS="{mdrun_flags}"
+MDRUN_FLAGS_EQ="{mdrun_flags_eq}"
+MDRUN_FLAGS_PROD="{mdrun_flags_prod}"
+if [ -z "$MDRUN_FLAGS_EQ" ]; then MDRUN_FLAGS_EQ="$MDRUN_FLAGS"; fi
+if [ -z "$MDRUN_FLAGS_PROD" ]; then MDRUN_FLAGS_PROD="$MDRUN_FLAGS"; fi
 # EM-safe flags: strip GPU offload flags incompatible with non-dynamical integrators
 MDRUN_FLAGS_EM=$(echo "$MDRUN_FLAGS" | sed 's/-pme  *gpu//g; s/-update  *gpu//g; s/-bonded  *gpu//g' | xargs)
 MDRUN="{mdrun_command}"
@@ -224,10 +228,10 @@ fi
 # -maxh limits wall time so we can cleanly resubmit
 if [ -f state.cpt ]; then
     echo "Resuming from checkpoint: state.cpt"
-    run_mdrun_stage "production" $MDRUN -deffnm prod -cpi state.cpt -cpo state.cpt -append -maxh $MAXH $MDRUN_FLAGS -v
+    run_mdrun_stage "production" $MDRUN -deffnm prod -cpi state.cpt -cpo state.cpt -append -maxh $MAXH $MDRUN_FLAGS_PROD -v
 else
     echo "Starting fresh production run"
-    run_mdrun_stage "production" $MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v
+    run_mdrun_stage "production" $MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS_PROD -v
 fi
 
 # =========================================================================
@@ -289,6 +293,8 @@ exit 0
         gmx_binary: str = "gmx",
         grompp_flags: str = "-maxwarn 1",
         mdrun_flags: str = "",
+        mdrun_flags_eq: str | None = None,
+        mdrun_flags_prod: str | None = None,
         module_load: str | None = None,
         env_exports: dict[str, str] | None = None,
         setup_commands: list[str] | None = None,
@@ -307,6 +313,10 @@ exit 0
             Extra flags appended to ``gmx grompp`` invocations.
         mdrun_flags : str, optional
             Extra flags appended to ``gmx mdrun`` invocations.
+        mdrun_flags_eq : str | None, optional
+            Equilibration-specific mdrun flags.
+        mdrun_flags_prod : str | None, optional
+            Production-specific mdrun flags.
         module_load : str | None, optional
             Optional module command executed before simulation commands.
         env_exports : dict[str, str] | None, optional
@@ -320,6 +330,8 @@ exit 0
         self._is_mpi_binary = is_mpi_binary(self._gmx_binary)
         self._grompp_flags = grompp_flags
         self._mdrun_flags = mdrun_flags
+        self._mdrun_flags_eq = mdrun_flags_eq
+        self._mdrun_flags_prod = mdrun_flags_prod
         self._module_load = module_load
         self._env_exports = env_exports or {}
         self._setup_commands = setup_commands or []
@@ -450,6 +462,10 @@ exit 0
         _validate_script_value(system_prefix, "system_prefix")
         _validate_script_value(self._grompp_flags, "grompp_flags")
         _validate_script_value(self._mdrun_flags, "mdrun_flags")
+        if self._mdrun_flags_eq is not None:
+            _validate_script_value(self._mdrun_flags_eq, "mdrun_flags_eq")
+        if self._mdrun_flags_prod is not None:
+            _validate_script_value(self._mdrun_flags_prod, "mdrun_flags_prod")
         if module_load_line:
             _validate_script_value(module_load_line, "module_load")
         for key, value in self._env_exports.items():
@@ -498,6 +514,8 @@ exit 0
             maxh_hours=f"{maxh_hours:.2f}",
             grompp_flags=self._grompp_flags,
             mdrun_flags=self._mdrun_flags,
+            mdrun_flags_eq=self._mdrun_flags_eq or "",
+            mdrun_flags_prod=self._mdrun_flags_prod or "",
             mdrun_command=mdrun_command,
             energy_minimization_block=energy_minimization_block,
             equilibration_block=equilibration_block,
@@ -624,12 +642,12 @@ exit 0
             )
             lines.append(
                 f'        run_mdrun_stage "equilibration stage {idx}" '
-                f"$MDRUN -deffnm {stage} -cpi {stage}.cpt -cpo {stage}.cpt -append $MDRUN_FLAGS -v"
+                f"$MDRUN -deffnm {stage} -cpi {stage}.cpt -cpo {stage}.cpt -append $MDRUN_FLAGS_EQ -v"
             )
             lines.append("    else")
             lines.append(
                 f'        run_mdrun_stage "equilibration stage {idx}" '
-                f"$MDRUN -deffnm {stage} -cpo {stage}.cpt $MDRUN_FLAGS -v"
+                f"$MDRUN -deffnm {stage} -cpo {stage}.cpt $MDRUN_FLAGS_EQ -v"
             )
             lines.append("    fi")
             lines.append(f"    if [ ! -f {stage}.gro ]; then")
