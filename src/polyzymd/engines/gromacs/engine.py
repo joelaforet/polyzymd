@@ -258,7 +258,7 @@ class GromacsEngine(SimulationEngine):
             "memory": gromacs_cfg.memory,
         }
         if gromacs_cfg.gpu:
-            overrides["gpus"] = max(base.gpus, 1)
+            overrides["gpus"] = gromacs_cfg.gpus
         else:
             overrides["gpus"] = 0
         return replace(base, **overrides)

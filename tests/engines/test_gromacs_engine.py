@@ -13,6 +13,7 @@ def _make_config(
     ntmpi: int = 1,
     ntomp: int = 8,
     gpu: bool = False,
+    gpus: int = 1,
     memory: str = "16G",
     mdrun_flags: str = "",
     grompp_flags: str = "-maxwarn 1",
@@ -24,6 +25,7 @@ def _make_config(
     config.gromacs.ntmpi = ntmpi
     config.gromacs.ntomp = ntomp
     config.gromacs.gpu = gpu
+    config.gromacs.gpus = gpus
     config.gromacs.memory = memory
     config.gromacs.mdrun_flags = mdrun_flags
     config.gromacs.grompp_flags = grompp_flags
@@ -45,19 +47,27 @@ class TestResolveSlurmConfig:
         resolved = engine._resolve_slurm_config(base)
         assert resolved.gpus == 0
 
-    def test_gpu_enabled_preserves_gpus(self):
-        config = _make_config(gpu=True)
+    def test_gpu_enabled_uses_config_gpus(self):
+        config = _make_config(gpu=True, gpus=2)
         engine = GromacsEngine(config=config, gmx_binary="gmx")
-        base = SlurmConfig(gpus=2)
+        base = SlurmConfig(gpus=0)
         resolved = engine._resolve_slurm_config(base)
         assert resolved.gpus == 2
 
-    def test_gpu_enabled_sets_minimum_one(self):
+    def test_gpu_enabled_single_gpu_default(self):
         config = _make_config(gpu=True)
         engine = GromacsEngine(config=config, gmx_binary="gmx")
         base = SlurmConfig(gpus=0)
         resolved = engine._resolve_slurm_config(base)
         assert resolved.gpus == 1
+
+    def test_gpu_multi_gpu_from_config(self):
+        """gpu=True with gpus=4 should request 4 GPUs."""
+        config = _make_config(gpu=True, gpus=4)
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        base = SlurmConfig(gpus=0)
+        resolved = engine._resolve_slurm_config(base)
+        assert resolved.gpus == 4
 
     def test_ntasks_from_ntmpi(self):
         config = _make_config(ntmpi=4)

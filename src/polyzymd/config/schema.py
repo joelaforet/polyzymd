@@ -1151,6 +1151,8 @@ class GromacsEngineConfig(BaseModel):
             Also sets SLURM ``--cpus-per-task``.
         gpu: Request a GPU via SLURM. When False, the ``--gres=gpu``
             directive is omitted entirely.
+        gpus: Number of GPUs to request when ``gpu`` is True. Ignored
+            when ``gpu`` is False.
         memory: SLURM ``--mem`` allocation for GROMACS jobs.
     """
 
@@ -1167,6 +1169,11 @@ class GromacsEngineConfig(BaseModel):
     gpu: bool = Field(
         False,
         description="Request GPU via SLURM (set True for CUDA-enabled GROMACS)",
+    )
+    gpus: int = Field(
+        1,
+        ge=1,
+        description="Number of GPUs to request via SLURM when gpu is True",
     )
     memory: str = Field("16G", description="SLURM --mem allocation for GROMACS jobs")
 
