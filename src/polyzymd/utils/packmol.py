@@ -650,11 +650,12 @@ def solvate_with_packmol(
     n_solute_atoms = len(positions) - solvent_topology.n_atoms
     solvent_topology.set_positions(Quantity(positions[n_solute_atoms:], "angstrom"))
 
-    # Prepend the original (un-centered) solute so that positions match
-    # the caller's topology.  OpenFF's pack_box() does the same thing:
-    # it uses the *original* solute positions, not the centered copy.
+    # Use the *centered* solute so that solute coordinates match the
+    # Packmol frame of reference (waters were placed around the centered
+    # copy).  Previous code incorrectly used the original un-centered
+    # solute, creating a spatial mismatch between solute and solvent.
     if solute is not None:
-        solvated_topology = solute + solvent_topology
+        solvated_topology = centered_solute + solvent_topology
     else:
         solvated_topology = solvent_topology
 
