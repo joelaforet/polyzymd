@@ -12,6 +12,7 @@ from polyzymd.workflow.slurm import (
     SlurmConfig,
     _discover_manifest_path,
     _validate_constraint_value,
+    _validate_nodelist_value,
     _validate_script_value,
 )
 
@@ -548,7 +549,7 @@ exit 0
         if self._config.exclude:
             _validate_script_value(self._config.exclude, "exclude")
         if self._config.nodelist:
-            _validate_script_value(self._config.nodelist, "nodelist")
+            _validate_nodelist_value(self._config.nodelist, "nodelist")
         if self._config.constraint:
             _validate_constraint_value(self._config.constraint, "constraint")
         if self._config.gpu_type:

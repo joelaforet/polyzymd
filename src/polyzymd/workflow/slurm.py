@@ -47,6 +47,7 @@ PRESET_DEFAULT_PIXI_ENV: Dict[str, str] = {
 # Intentionally excludes shell metacharacters: ; | & $ ` ( ) { } < > ' " \ !
 _SAFE_SCRIPT_VALUE = _re.compile(r"^[A-Za-z0-9._/,:\-@%=+ ]+$")
 _SAFE_CONSTRAINT_VALUE = _re.compile(r"^[A-Za-z0-9._\-|&]+$")
+_SAFE_NODELIST_VALUE = _re.compile(r"^[A-Za-z0-9._,\-\[\]]+$")
 
 
 def _validate_script_value(value: str, field_name: str) -> str:
@@ -107,6 +108,34 @@ def _validate_constraint_value(value: str, field_name: str) -> str:
         raise ValueError(
             f"SLURM constraint field '{field_name}' contains unsafe characters: {value!r}. "
             "Only alphanumerics, hyphens, dots, underscores, | (OR), and & (AND) are allowed."
+        )
+    return value
+
+
+def _validate_nodelist_value(value: str, field_name: str = "nodelist") -> str:
+    """Validate a SLURM nodelist value, allowing bracket hostlist syntax.
+
+    Parameters
+    ----------
+    value : str
+        The nodelist string to validate.
+    field_name : str, optional
+        Field name for error messages, by default "nodelist".
+
+    Returns
+    -------
+    str
+        The validated value.
+
+    Raises
+    ------
+    ValueError
+        If the value contains unsafe characters.
+    """
+    if value and not _SAFE_NODELIST_VALUE.match(value):
+        raise ValueError(
+            f"{field_name} contains unsafe characters: {value!r}. "
+            "Only alphanumeric, '.', '_', '-', ',', '[', ']' are allowed."
         )
     return value
 
@@ -650,7 +679,7 @@ exit 0
         if self._config.exclude:
             _validate_script_value(self._config.exclude, "exclude")
         if self._config.nodelist:
-            _validate_script_value(self._config.nodelist, "nodelist")
+            _validate_nodelist_value(self._config.nodelist, "nodelist")
         if self._config.constraint:
             _validate_constraint_value(self._config.constraint, "constraint")
         if self._config.gpu_type:

@@ -472,6 +472,28 @@ def test_nodelist_and_typed_gres_render(monkeypatch) -> None:
     assert "#SBATCH --nodelist=nodeA40-01" in script
 
 
+def test_nodelist_bracket_hostlist_rendered(monkeypatch) -> None:
+    """Bracket hostlist nodelist values should render in GROMACS scripts."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(nodelist="node[01-04]"),
+        gmx_binary="gmx",
+    )
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert "#SBATCH --nodelist=node[01-04]" in script
+
+
 def test_mail_line_uses_fail_end(monkeypatch) -> None:
     """GROMACS SLURM mail line should use FAIL,END notifications."""
     monkeypatch.setattr(

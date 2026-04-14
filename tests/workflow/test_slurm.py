@@ -469,3 +469,57 @@ class TestScriptValueValidation:
 
         with pytest.raises(ValueError, match="unsafe characters"):
             _validate_constraint_value("A40 A100", "constraint")
+
+
+class TestNodelistValidation:
+    """Tests for SLURM nodelist validation."""
+
+    def test_simple_nodename_accepted(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        assert _validate_nodelist_value("bgpu-shirts3") == "bgpu-shirts3"
+
+    def test_bracket_hostlist_accepted(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        assert _validate_nodelist_value("node[01-04]") == "node[01-04]"
+
+    def test_comma_hostlist_accepted(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        assert _validate_nodelist_value("node01,node02,node03") == "node01,node02,node03"
+
+    def test_complex_bracket_hostlist_accepted(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        assert _validate_nodelist_value("gpu[01-04,07]") == "gpu[01-04,07]"
+
+    def test_semicolon_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node01;rm -rf /")
+
+    def test_pipe_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node01|cat /etc/passwd")
+
+    def test_backtick_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node`whoami`")
+
+    def test_dollar_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node${HOME}")
+
+    def test_space_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node01 node02")
