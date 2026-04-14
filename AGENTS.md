@@ -30,7 +30,7 @@ outside the managed pixi environment.
 ## Git Workflow
 
 - **Branches:** `main` (stable), `dev` (integration), `feature/*` (work)
-- Currently on `feature/analysis-module` (25 commits ahead of main)
+- Currently on `refactor/analysis-ocp-compliance` (checked out from `v1.2.1`)
 - Commit messages: imperative mood, 50-char subject, reference issues (`#20`)
 - Run `ruff check` and `black --check` before committing
 - Never force-push to `main` or `dev`
@@ -39,19 +39,35 @@ outside the managed pixi environment.
 
 ```
 src/polyzymd/
-├── cli/          # Click CLI (main.py = entry point)
+├── cli/          # Click CLI (main.py = entry point, scaffold.py = new-analysis generator)
 ├── config/       # Pydantic v2 models (schema.py), YAML loading
 ├── builders/     # System construction (PDB → parameterized topology)
 ├── simulation/   # OpenMM simulation runners
 ├── workflow/     # Orchestration (build → simulate → analyze)
 ├── core/         # Base classes, shared types
-├── analysis/     # Post-simulation analysis (contacts, RMSD, etc.)
-├── compare/      # Multi-condition comparison engine
+├── analyses/     # ★ Plugin system — unified analysis lifecycle (primary extension point)
+│   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
+│   └── <name>/   #   One package per analysis type (all plugins are packages)
 ├── exporters/    # GROMACS/other format exporters
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
-└── configs/      # Default YAML configs
+└── templates/    # Example YAML configs and project templates
 ```
+
+### Inside `analyses/`
+
+| Layer | Files | Role |
+|-------|-------|------|
+| **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the **extension point** for contributors |
+| **Private modules** | `<name>/_plotters.py`, `<name>/_results.py`, etc. | Plotting functions, result models, formatters, aggregators used internally by plugins |
+| **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics, autocorrelation — reusable across plugins |
+| **Shared compute** | `shared/binding_preference.py`, `shared/surface_exposure.py` | Cross-plugin compute (used by contacts, BFE, polymer_affinity) |
+| **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py` | Plugin ABC, auto-discovery, lifecycle runner, default comparison utilities |
+
+New analysis types are added as **packages in `analyses/<name>/`**. All 13
+existing plugins are packages (no single-file plugins exist). Established
+plugins extract plotting into `_plotters.py` modules; new plugins can keep
+plotting inline in `plot()` or extract it as complexity grows.
 
 ## Key Patterns
 
@@ -59,86 +75,100 @@ src/polyzymd/
 - **Factory pattern:** `ClassName.from_config(config)` or `ClassName.from_yaml(path)`
 - **Lazy imports:** Heavy deps (OpenMM, MDAnalysis) imported inside functions/methods
 - **ABC + Strategy:** `ContactCriteria`, `MolecularSelector`, `MoleculeCharger`
-- **Registry pattern:** `ComparatorRegistry`, `PlotterRegistry` for extensibility
+- **Plugin discovery:** `pkgutil`-based auto-discovery in `analyses/` — no registries
 - **Config:** Pydantic v2 `BaseModel` subclasses with `model_validator`
 
 ### Contributor Entry Points for Analysis
 
-When adding a new analysis type or result class, start with these two base
-class docstrings — they contain step-by-step instructions:
+To add a new analysis type, use the scaffold command or create a package
+in `src/polyzymd/analyses/<name>/` and subclass `Analysis`:
 
-| Base Class | Location | What It Documents |
-|------------|----------|-------------------|
-| `BaseAnalyzer` | `analysis/core/registry.py` | How to add a new analyzer (compute, aggregate, register, CLI) |
-| `BaseAnalysisResult` | `analysis/results/base.py` | Serialization contract (save/load, field conventions, migration) |
+| Resource | Location | What It Documents |
+|----------|----------|-------------------|
+| **Scaffold CLI** | `polyzymd new-analysis <name>` | Generates plugin package + tests automatically |
+| `Analysis` base class | `analyses/base.py` | Full contract: required methods, optional overrides, context objects |
+| Plugin discovery | `analyses/discovery.py` | How auto-discovery works, naming rules |
+| Orchestrator | `analyses/orchestrator.py` | How the framework runs your plugin |
+| Shared utilities | `analyses/shared/` | `TrajectoryLoader`, alignment, statistics, autocorrelation |
+| Scaffold output | `polyzymd new-analysis <name>` | Simplest working plugin — start here |
+| Richer example | `analyses/catalytic_triad/` | Default-compare lifecycle with DistanceCalculator + complex plotting |
+| Stats utilities | `analyses/stats.py` | `default_scalar_comparison()`, `format_scalar_comparison()` |
+| Contributor tutorial | `docs/source/contributor_guide/extending_analyses.md` | Step-by-step guide with test examples |
 
-Key rules from those docstrings:
+Key rules:
 
-- **Results**: Inherit `BaseAnalysisResult`, set `analysis_type` as `ClassVar[str]`,
-  implement `summary()`. Do NOT reimplement `save()`/`load()`.
-- **Analyzers**: Implement `analysis_type()`, `from_config()`, `compute()`,
-  `compute_aggregated()`, and a `label` property. Register settings with
-  `@AnalysisSettingsRegistry.register()`.
-- **Nested data objects** (e.g., per-residue stats) inherit `BaseModel`, not
-  `BaseAnalysisResult`.
-- **Large binary data** (e.g., per-frame SASA) uses NPZ + JSON sidecar instead
-  of `BaseAnalysisResult`.
+- **Required class variables**: `name` (str) and `Settings` (Pydantic BaseModel)
+- **Required methods**: `compute_replicate(ctx, replicate)` and `aggregate(ctx, results)`
+- **Optional overrides**: `compare()`, `plot()`, `format()`, `extract_metrics()`, `filter_conditions()`
+- **Default compare path**: Implement `extract_metrics()` — the framework loads results automatically (via `AggregatedResultClass` or `json.loads()`) and does t-tests, ANOVA, ranking
+- **Custom compare path**: Override `compare()` entirely for multi-metric or entry-table analyses
+- **Auto-discovery**: Drop a package in `analyses/<name>/` — no imports, no registries, no bootstrap
+- **Result saving**: Existing plugins save results explicitly; the orchestrator has a fallback auto-save if the plugin doesn't
+- **No `compare/` files needed**: Keep comparison and formatting logic in plugin packages, with shared helpers in `analyses/stats.py` and `analyses/shared/inferential_statistics.py`
+
+### Planned MetricType classification (future)
+
+The `MetricType` classification (`MEAN_BASED` and `VARIANCE_BASED`) is a
+planned enhancement and is not implemented in the current codebase.
+
+For now, reviewers should treat any `metric_type` checks as aspirational
+guidance rather than a required plugin contract.
 
 ## Design Principles (Critical for Contributors)
 
-This project prioritizes **extensibility** so users can contribute new analyses,
-comparators, and plotters without modifying core code. Follow these principles:
+This project prioritizes **extensibility** so users can contribute new analyses
+without modifying core code. Follow these principles:
 
 ### Open-Closed Principle (OCP)
 
-Classes should be **open for extension, closed for modification**. Use:
-- Abstract base classes (`ABC`) with well-defined contracts
-- Registry patterns for runtime discovery of new implementations
-- Strategy pattern for swappable algorithms
-
-**Example:** To add a new plotter, inherit from `BasePlotter` and register
-with `@PlotterRegistry.register()`. No changes to `ComparisonPlotter` needed.
+Classes should be **open for extension, closed for modification**. The plugin
+system achieves this:
+- Subclass `Analysis` and drop a package in `analyses/<name>/` — no core changes needed
+- Framework discovers plugins automatically via `pkgutil`
+- Default implementations (compare, format, plot) are overridable
 
 ### Follow Established Contracts
 
-When extending a registry-based system, **study existing implementations first**:
+When writing a new analysis plugin, **study existing implementations first**:
 
-1. **Read the base class docstrings** — they define the contract
-2. **Study 2-3 existing implementations** — understand the expected data flow
-3. **Match the pattern exactly** — don't invent new data passing mechanisms
+1. **Read `analyses/base.py`** — it defines the full contract
+2. **Start with the scaffold output** — `polyzymd new-analysis <name>` generates a complete working plugin with compute, aggregate, comparison, plotting, and tests
+3. **Study `analyses/rmsf/`** for default compare with plots, or **`analyses/catalytic_triad/`** for default-compare lifecycle
 
 **Anti-pattern to avoid:**
 ```python
-# WRONG: Expecting custom kwargs that the orchestrator doesn't provide
-def plot(self, data, labels, output_dir, **kwargs):
-    result = kwargs.get("comparison_result")  # Orchestrator never passes this!
-    ...
+# WRONG: Inventing custom data passing, bypassing the context
+def compute_replicate(self, ctx, replicate):
+    config = SimulationConfig.from_yaml(self.custom_config_path)  # Don't do this!
 ```
 
 **Correct pattern:**
 ```python
-# RIGHT: Load data from filesystem paths provided in data dict
-def plot(self, data, labels, output_dir, **kwargs):
-    for label in labels:
-        analysis_dir = data[label]["analysis_dir"]
-        result = MyResult.load(analysis_dir / "my_result.json")
-    ...
+# RIGHT: Use the framework-provided context
+def compute_replicate(self, ctx, replicate):
+    sim_config = ctx.sim_config  # Already loaded by framework
+    settings = ctx.settings       # Your Settings model, resolved from YAML
 ```
 
-### Registry Pattern Contracts
+### Plugin System Contracts
 
-| Registry | Base Class | Data Source | Key Contract |
-|----------|------------|-------------|--------------|
-| `ComparatorRegistry` | `BaseComparator` | Load from filesystem via `_load_or_compute()` | Returns structured result object |
-| `PlotterRegistry` | `BasePlotter` | Receives `data` dict with `analysis_dir` paths | Load your own data from `analysis_dir` |
+| Method | When Called | Input | Output |
+|--------|-----------|-------|--------|
+| `compute_replicate()` | Once per replicate per condition | `ReplicateContext` + replicate int | Pydantic model or dict |
+| `aggregate()` | Once per condition (after all replicates) | `AggregateContext` + list of replicate results | Aggregated model or dict |
+| `extract_metrics()` | During default `compare()` | Aggregated result | `dict[str, MetricValue]` |
+| `compare()` | Once per analysis (cross-condition) | `ComparisonContext` | `ComparisonResult` or custom Pydantic model |
+| `plot()` | Once per analysis | `PlotContext` | `list[Path]` of figures |
+| `format()` | CLI display | Comparison result + format string | Formatted string |
 
 ### When Adding New Features
 
-1. **Identify the extension point** — which registry/ABC to use?
-2. **Read the base class** — understand required methods and their signatures
-3. **Study existing implementations** — at least 2-3 similar classes
-4. **Follow the data flow** — how does data get to your code?
-5. **Test with the orchestrator** — don't just test in isolation
+1. **Read the tutorial**: `docs/source/contributor_guide/extending_analyses.md`
+2. **Read `analyses/base.py`** — the class docstring defines the full contract
+3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
+4. **Study a matching example**: start with scaffold output (`polyzymd new-analysis <name>`), then use `rmsf/` for default compare with plots or `contacts/` for custom compare
+5. **Write your plugin** in `analyses/<name>/` — start with all logic in `__init__.py`; extract plotting to `_plotters.py` as complexity grows
+6. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
 
 ## Code Style
 
@@ -154,14 +184,15 @@ def plot(self, data, labels, output_dir, **kwargs):
 2. **Contacts criteria mismatch** — cached 4.0A vs 4.5A cutoff disagreement
 3. **Docs sidebar** — after adding toctree entries, run `make clean html` (not just `make html`)
 4. **GitHub Issue #20** — tracks remaining analysis module TODOs
+5. **Pre-existing LSP type errors** — Pyright/Pylance reports false positives in `config/schema.py`, `builders/system_builder.py`, etc. due to missing type stubs for OpenMM/OpenFF. Does NOT affect runtime.
 
 ## Modular Instructions
 
 See `.opencode/instructions/` for detailed rules on specific topics:
 - `code-style.md` — formatting, linting, import conventions
 - `architecture.md` — module structure, design patterns, extension points
-- `environment.md` — conda setup, dependency management, CI
+- `environment.md` — pixi environment setup, dependency management, CI
 - `testing.md` — test infrastructure, running tests, writing new tests
-- `analysis-module.md` — analysis-specific patterns and Issue #20 scope
-- `documentation.md` — Sphinx/MyST conventions, API docs
+- `analysis-module.md` — analysis plugin system patterns and contracts
+- `documentation.md` — Sphinx/MyST conventions, API docs, zero-warning build gate, `:no-index:` rules
 - `known-issues.md` — detailed bug descriptions and workarounds

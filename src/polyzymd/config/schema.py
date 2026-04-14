@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -89,7 +89,7 @@ class EnzymeConfig(BaseModel):
 
     name: str = Field(..., description="Enzyme identifier")
     pdb_path: Path = Field(..., description="Path to enzyme PDB file")
-    description: Optional[str] = Field(None, description="Optional description")
+    description: str | None = Field(None, description="Optional description")
 
     @field_validator("pdb_path")
     @classmethod
@@ -207,12 +207,12 @@ class MonomerSpec(BaseModel):
 
     label: str = Field(..., min_length=1, max_length=1, description="Monomer label")
     probability: float = Field(..., ge=0.0, le=1.0, description="Selection probability")
-    name: Optional[str] = Field(None, description="Full monomer name")
-    smiles: Optional[str] = Field(
+    name: str | None = Field(None, description="Full monomer name")
+    smiles: str | None = Field(
         None,
         description="Raw monomer SMILES (required for dynamic generation mode)",
     )
-    residue_name: Optional[str] = Field(
+    residue_name: str | None = Field(
         None,
         max_length=3,
         description="3-char PDB residue name (auto-generated from name if not provided)",
@@ -330,13 +330,13 @@ class PolymerConfig(BaseModel):
         description="Polymer generation mode: 'cached' (pre-built SDFs) or 'dynamic' (generate from SMILES)",
     )
     type_prefix: str = Field(..., description="Polymer type prefix for filenames")
-    monomers: List[MonomerSpec] = Field(..., min_length=1, description="Monomer specifications")
+    monomers: list[MonomerSpec] = Field(..., min_length=1, description="Monomer specifications")
     length: int = Field(..., ge=1, description="Monomers per chain")
     count: int = Field(..., ge=1, description="Number of polymer chains")
-    sdf_directory: Optional[Path] = Field(
+    sdf_directory: Path | None = Field(
         None, description="Directory with pre-built polymer SDFs (for cached mode)"
     )
-    reactions: Optional[ReactionConfig] = Field(
+    reactions: ReactionConfig | None = Field(
         None, description="ATRP reaction templates (required for dynamic mode)"
     )
     charger: ChargeMethod = Field(
@@ -355,7 +355,7 @@ class PolymerConfig(BaseModel):
         default_factory=PolymerPackingConfig,
         description="Polymer packing settings (padding, tolerance)",
     )
-    random_seed: Optional[int] = Field(
+    random_seed: int | None = Field(
         None,
         description="Random seed for polymer sequence generation. If None, uses replicate number.",
     )
@@ -438,10 +438,10 @@ class CoSolventSpec(BaseModel):
     """
 
     name: str = Field(..., description="Co-solvent identifier")
-    smiles: Optional[str] = Field(None, description="SMILES string (optional if in library)")
+    smiles: str | None = Field(None, description="SMILES string (optional if in library)")
 
     # Specification method 1: Volume fraction
-    volume_fraction: Optional[float] = Field(
+    volume_fraction: float | None = Field(
         None,
         gt=0.0,
         lt=1.0,
@@ -449,16 +449,16 @@ class CoSolventSpec(BaseModel):
     )
 
     # Specification method 2: Molar concentration
-    concentration: Optional[float] = Field(None, gt=0.0, description="Molar concentration (mol/L)")
+    concentration: float | None = Field(None, gt=0.0, description="Molar concentration (mol/L)")
 
     # Physical property for volume fraction calculation
-    density: Optional[float] = Field(
+    density: float | None = Field(
         None,
         gt=0.0,
         description="Density in g/mL (required for volume_fraction with custom molecules)",
     )
 
-    residue_name: Optional[str] = Field(None, max_length=3, description="Residue name")
+    residue_name: str | None = Field(None, max_length=3, description="Residue name")
 
     @model_validator(mode="after")
     def validate_and_populate(self) -> "CoSolventSpec":
@@ -566,7 +566,7 @@ class SolventConfig(BaseModel):
     primary: PrimarySolventConfig = Field(
         default_factory=PrimarySolventConfig, description="Primary solvent"
     )
-    co_solvents: List[CoSolventSpec] = Field(default_factory=list, description="Co-solvents")
+    co_solvents: list[CoSolventSpec] = Field(default_factory=list, description="Co-solvents")
     ions: IonConfig = Field(default_factory=IonConfig, description="Ion settings")
     box: BoxConfig = Field(default_factory=BoxConfig, description="Box settings")
 
@@ -595,7 +595,7 @@ class AtomSelectionConfig(BaseModel):
     """
 
     selection: str = Field(..., description="MDAnalysis selection string")
-    description: Optional[str] = Field(None, description="Human-readable description")
+    description: str | None = Field(None, description="Human-readable description")
 
 
 class RestraintConfig(BaseModel):
@@ -667,7 +667,7 @@ class SimulationPhaseConfig(BaseModel):
         ThermostatType.LANGEVIN_MIDDLE, description="Thermostat type"
     )
     thermostat_timescale: float = Field(1.0, gt=0.0, description="Thermostat timescale (ps)")
-    barostat: Optional[BarostatType] = Field(None, description="Barostat type")
+    barostat: BarostatType | None = Field(None, description="Barostat type")
     barostat_frequency: int = Field(25, ge=1, description="Barostat update frequency")
     checkpoint_interval: float = Field(
         60.0,
@@ -736,9 +736,10 @@ class EquilibrationStageConfig(BaseModel):
     """Configuration for a single equilibration stage.
 
     Supports two temperature modes:
-    1. Constant temperature: Set 'temperature' field
-    2. Temperature ramping (simulated annealing): Set 'temperature_start' and
-       'temperature_end' fields
+
+    1. Constant temperature: Set 'temperature' field.
+    2. Temperature ramping (simulated annealing): Set 'temperature_start'
+       and 'temperature_end' fields.
 
     Position restraints can be applied to hold specific atom groups in place
     during the stage.
@@ -767,17 +768,17 @@ class EquilibrationStageConfig(BaseModel):
     ensemble: Ensemble = Field(Ensemble.NVT, description="Thermodynamic ensemble")
 
     # Constant temperature mode
-    temperature: Optional[float] = Field(
+    temperature: float | None = Field(
         None,
         gt=0.0,
         description="Constant temperature (K). Mutually exclusive with temperature ramping.",
     )
 
     # Temperature ramping mode (simulated annealing)
-    temperature_start: Optional[float] = Field(
+    temperature_start: float | None = Field(
         None, gt=0.0, description="Starting temperature for ramping (K)"
     )
-    temperature_end: Optional[float] = Field(
+    temperature_end: float | None = Field(
         None, gt=0.0, description="Ending temperature for ramping (K)"
     )
     temperature_increment: float = Field(
@@ -788,18 +789,18 @@ class EquilibrationStageConfig(BaseModel):
     )
 
     # Position restraints
-    position_restraints: List[PositionRestraintConfig] = Field(
+    position_restraints: list[PositionRestraintConfig] = Field(
         default_factory=list, description="Position restraints for this stage"
     )
 
     # Optional overrides (inherit from parent/defaults if not specified)
-    time_step: Optional[float] = Field(None, gt=0.0, description="Time step (fs)")
-    thermostat: Optional[ThermostatType] = Field(None, description="Thermostat type")
-    thermostat_timescale: Optional[float] = Field(
+    time_step: float | None = Field(None, gt=0.0, description="Time step (fs)")
+    thermostat: ThermostatType | None = Field(None, description="Thermostat type")
+    thermostat_timescale: float | None = Field(
         None, gt=0.0, description="Thermostat timescale (ps)"
     )
-    barostat: Optional[BarostatType] = Field(None, description="Barostat type (for NPT)")
-    barostat_frequency: Optional[int] = Field(None, ge=1, description="Barostat update frequency")
+    barostat: BarostatType | None = Field(None, description="Barostat type (for NPT)")
+    barostat_frequency: int | None = Field(None, ge=1, description="Barostat update frequency")
 
     @model_validator(mode="after")
     def validate_temperature_mode(self) -> "EquilibrationStageConfig":
@@ -863,7 +864,7 @@ class SimulationPhasesConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    equilibration_stages: Optional[List[EquilibrationStageConfig]] = Field(
+    equilibration_stages: list[EquilibrationStageConfig] | None = Field(
         None, description="Multi-stage equilibration protocol with position restraints"
     )
 
@@ -977,7 +978,7 @@ class OutputConfig(BaseModel):
         Path("."),
         description="Base directory for scripts and logs (typically in projects/long-term storage)",
     )
-    scratch_directory: Optional[Path] = Field(
+    scratch_directory: Path | None = Field(
         None,
         description="Base directory for simulation output (scratch storage). If None, uses projects_directory.",
     )
@@ -1002,7 +1003,7 @@ class OutputConfig(BaseModel):
     trajectory_format: str = Field("dcd", description="Trajectory file format")
 
     # Legacy compatibility
-    base_directory: Optional[Path] = Field(
+    base_directory: Path | None = Field(
         None,
         description="Deprecated: Use scratch_directory instead",
         exclude=True,
@@ -1010,7 +1011,7 @@ class OutputConfig(BaseModel):
 
     @field_validator("projects_directory", "scratch_directory", "base_directory", mode="before")
     @classmethod
-    def expand_env_vars_in_paths(cls, v: Optional[Union[str, Path]]) -> Optional[Path]:
+    def expand_env_vars_in_paths(cls, v: str | Path | None) -> Path | None:
         """Expand environment variables and ~ in path fields.
 
         Supports $USER, ${HOME}, ~/path, etc.
@@ -1131,15 +1132,15 @@ class SimulationConfig(BaseModel):
     """
 
     name: str = Field(..., description="Simulation identifier")
-    description: Optional[str] = Field(None, description="Simulation description")
+    description: str | None = Field(None, description="Simulation description")
 
     enzyme: EnzymeConfig = Field(..., description="Enzyme configuration")
-    substrate: Optional[SubstrateConfig] = Field(None, description="Substrate configuration")
-    polymers: Optional[PolymerConfig] = Field(None, description="Polymer configuration")
+    substrate: SubstrateConfig | None = Field(None, description="Substrate configuration")
+    polymers: PolymerConfig | None = Field(None, description="Polymer configuration")
     solvent: SolventConfig = Field(
         default_factory=SolventConfig, description="Solvent configuration"
     )
-    restraints: List[RestraintConfig] = Field(
+    restraints: list[RestraintConfig] = Field(
         default_factory=list, description="Restraint configurations"
     )
     thermodynamics: ThermodynamicsConfig = Field(..., description="Thermodynamic conditions")
@@ -1150,7 +1151,7 @@ class SimulationConfig(BaseModel):
     )
 
     @classmethod
-    def from_yaml(cls, path: Union[str, Path]) -> "SimulationConfig":
+    def from_yaml(cls, path: str | Path) -> "SimulationConfig":
         """Load configuration from a YAML file.
 
         Args:
@@ -1167,7 +1168,7 @@ class SimulationConfig(BaseModel):
 
         return load_config(path)
 
-    def to_yaml(self, path: Union[str, Path]) -> None:
+    def to_yaml(self, path: str | Path) -> None:
         """Save configuration to a YAML file.
 
         Args:
@@ -1274,7 +1275,7 @@ class SimulationConfig(BaseModel):
             duration=self.simulation_phases.production.duration,
         )
 
-    def to_signac_statepoint(self, replicate: int = 1) -> Dict[str, Any]:
+    def to_signac_statepoint(self, replicate: int = 1) -> dict[str, Any]:
         """Convert configuration to a Signac-compatible state point dictionary.
 
         Args:

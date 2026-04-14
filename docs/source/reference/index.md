@@ -5,10 +5,19 @@ configuration fields, API signatures, defaults, or benchmark data.
 
 ## User-Facing Reference
 
-- [CLI Reference](../tutorials/cli_reference.md)
-- [Configuration Reference](../tutorials/configuration.md)
+- [Data Requirements & Directory Layout](data_requirements.md)
+- [CLI Reference](cli_reference.md)
+- [Configuration Reference](configuration.md)
+- [Comparison YAML Schema](comparison_yaml.md)
 - [Comparison and Plotting Reference](analysis_comparison_reference.md)
-- [Benchmarks](../tutorials/benchmarks.md)
+- [RMSD Plugin Reference](analysis_rmsd_reference.md)
+- [Rg Plugin Reference](analysis_rg_reference.md)
+- [RMSF Plugin Reference](analysis_rmsf_reference.md)
+- [Catalytic Triad Plugin Reference](analysis_triad_reference.md)
+- [Distances Plugin Reference](analysis_distances_reference.md)
+- [Contacts Plugin Reference](analysis_contacts_reference.md)
+- [Post-Hoc Testing Reference](posthoc_testing.md)
+- [Benchmarks](benchmarks.md)
 
 ## API Reference
 
@@ -19,7 +28,8 @@ configuration fields, API signatures, defaults, or benchmark data.
 - [Workflow API](../api/workflow.md)
 - [Core API](../api/core.md)
 - [Analysis API](../api/analysis.md)
-- [Compare API](../api/compare.md)
+- [Analyses Plugin API](../api/analyses.md)
+- [API Reference Landing Page](../api/index.rst)
 
 ## When Not to Use This Section
 
@@ -27,16 +37,27 @@ If you need a guided path, go to [Tutorials](../tutorials/index.md).
 If you need a concrete task solution, go to [How-To Guides](../how_to/index.md).
 
 <!-- IMAGE OPPORTUNITY: Add a compact module map that groups config, builders,
-simulation, workflow, analysis, and compare as a reference navigation aid. -->
+simulation, workflow, and analysis as a reference navigation aid. -->
 
 ```{toctree}
 :hidden:
 :maxdepth: 1
 
-CLI Reference <../tutorials/cli_reference>
-Configuration Reference <../tutorials/configuration>
+CLI Reference <cli_reference>
+Data Requirements & Directory Layout <data_requirements>
+Configuration Reference <configuration>
+Comparison YAML Schema <comparison_yaml>
 Comparison and Plotting Reference <analysis_comparison_reference>
-Benchmarks <../tutorials/benchmarks>
+RMSD Plugin Reference <analysis_rmsd_reference>
+Rg Plugin Reference <analysis_rg_reference>
+RMSF Plugin Reference <analysis_rmsf_reference>
+Catalytic Triad Plugin Reference <analysis_triad_reference>
+Distances Plugin Reference <analysis_distances_reference>
+Contacts Plugin Reference <analysis_contacts_reference>
+Analysis Plugin Settings Reference <analysis_plugin_settings>
+Post-Hoc Testing Reference <posthoc_testing>
+Benchmarks <benchmarks>
+API Reference Landing Page <../api/index>
 API Overview <../api/overview>
 Configuration API <../api/config>
 Builders API <../api/builders>
@@ -44,5 +65,5 @@ Simulation API <../api/simulation>
 Workflow API <../api/workflow>
 Core API <../api/core>
 Analysis API <../api/analysis>
-Compare API <../api/compare>
+Analyses Plugin API <../api/analyses>
 ```

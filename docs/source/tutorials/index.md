@@ -7,8 +7,12 @@ want a worked example with a clear beginning, middle, and end.
 
 - [Run Your First PolyzyMD Simulation](quickstart.md)
   Build your first project scaffold and validate a minimal run.
+- [Run Your First Analysis](first_analysis.md)
+  Go from finished trajectories to RMSF results in five steps.
 - [Analyze a Multi-Condition Study](analysis_complete_workflow.md)
   Follow the full path from finished trajectories to comparison figures.
+- [Measure Surface Accessibility with SASA](sasa_analysis.md)
+  Configure multi-run SASA analysis to quantify polymer shielding effects.
 
 ## What Belongs Here
 
@@ -30,5 +34,8 @@ backbone. -->
 :hidden:
 :maxdepth: 1
 
+Run Your First PolyzyMD Simulation <quickstart>
+Run Your First Analysis <first_analysis>
 Analyze a Multi-Condition Study <analysis_complete_workflow>
+Measure Surface Accessibility with SASA <sasa_analysis>
 ```

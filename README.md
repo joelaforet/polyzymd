@@ -140,7 +140,7 @@ See the [Quick Start Guide](https://polyzymd.readthedocs.io/en/latest/tutorials/
 | `polyzymd init -n my_project` | Initialize a new project directory |
 | `polyzymd validate -c config.yaml` | Validate configuration file |
 | `polyzymd build -c config.yaml` | Build simulation system |
-| `polyzymd run-gromacs -c config.yaml` | Build and run GROMACS simulation |
+| `polyzymd run -c config.yaml --engine gromacs` | Build and run GROMACS simulation |
 | `polyzymd submit -c config.yaml` | Submit self-resubmitting jobs to SLURM |
 | `polyzymd run-segment -c config.yaml` | Run a single production segment |
 | `polyzymd check-progress -c config.yaml` | Check simulation completion status |

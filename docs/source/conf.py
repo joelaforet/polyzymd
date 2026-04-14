@@ -38,13 +38,14 @@ autodoc_mock_imports = [
 project = "PolyzyMD"
 copyright = "2026, Joseph R. Laforet Jr."
 author = "Joseph R. Laforet Jr."
-release = "1.2.0"
+release = "1.3.0"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
     "sphinx.ext.autodoc",  # Auto-generate docs from docstrings
+    "sphinxcontrib.autodoc_pydantic",
     "sphinx.ext.autosummary",  # Generate summary tables
     "sphinx.ext.napoleon",  # Support Google/NumPy style docstrings
     "sphinx.ext.viewcode",  # Add links to source code
@@ -81,6 +82,19 @@ autodoc_default_options = {
 }
 autodoc_typehints = "description"
 autodoc_typehints_description_target = "documented"
+
+# autodoc-pydantic settings (Pydantic v2 model rendering)
+autodoc_pydantic_model_show_field_summary = False
+autodoc_pydantic_model_show_json = False
+autodoc_pydantic_model_show_config_summary = False
+autodoc_pydantic_model_show_config_member = False
+autodoc_pydantic_model_show_validator_summary = True
+autodoc_pydantic_model_show_validator_members = True
+autodoc_pydantic_field_show_constraints = True
+autodoc_pydantic_field_show_required = True
+autodoc_pydantic_field_show_default = True
+autodoc_pydantic_field_show_alias = False
+autodoc_pydantic_model_undoc_members = True
 
 # Autosummary settings
 autosummary_generate = True

@@ -7,6 +7,7 @@
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 ```
 
 ## SLURM Configuration
@@ -16,4 +17,15 @@
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
+```
+
+## Analysis SLURM Orchestration
+
+```{eval-rst}
+.. automodule:: polyzymd.workflow.analysis_slurm
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :no-index:
 ```

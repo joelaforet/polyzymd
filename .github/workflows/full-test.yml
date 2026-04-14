@@ -2,9 +2,9 @@ name: Full Test Suite
 
 on:
   push:
-    branches: [main, refactor]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   schedule:
     # Weekly tests on Sunday at midnight
     - cron: "0 0 * * 0"

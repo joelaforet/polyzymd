@@ -1,7 +1,7 @@
 # Set Up a Contributor Environment
 
 Use this page when you want to modify PolyzyMD, run tests, build the docs, or
-work on new analysis and comparison features.
+work on new analysis plugins.
 
 ## What This Environment Is For
 
@@ -22,23 +22,23 @@ git clone https://github.com/joelaforet/polyzymd.git
 cd polyzymd
 ```
 
-## 2. Install and Activate the Build Environment
+## 2. Install the Build Environment
 
 ```bash
 pixi install -e build
-pixi shell -e build
 ```
 
 PolyzyMD is installed in editable mode by default, so source changes are picked
-up immediately.
+up immediately. If you want an interactive shell inside the environment, run
+`pixi shell -e build`.
 
 ## 3. Run the Core Contributor Checks
 
 ```bash
-pytest tests/ -x -q --tb=short --ignore=tests/test_packmol.py
-ruff check src/
-black --check src/
-make -C docs clean html
+pixi run -e build pytest tests/ -x -q --tb=short --ignore=tests/test_packmol.py
+pixi run -e build ruff check src/
+pixi run -e build black --check src/
+pixi run -e build make -C docs clean html
 ```
 
 ## 4. Optional Tooling Notes
@@ -72,7 +72,6 @@ pixi install -e build
 ## Related Pages
 
 - {doc}`index`
-- {doc}`../tutorials/packaging`
-- {doc}`../tutorials/contributing`
-- {doc}`../tutorials/extending_comparators`
-- {doc}`../tutorials/extending_plotters`
+- {doc}`packaging`
+- {doc}`contributing`
+- {doc}`extending_analyses`

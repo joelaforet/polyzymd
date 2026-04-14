@@ -1,0 +1,591 @@
+"""Output formatters for contacts comparison results.
+
+This module provides functions to format ContactsComparisonResult objects
+for different output formats: console tables, Markdown, and JSON.
+
+Note:
+    Per-residue comparisons have been removed. Contact data is mechanistic
+    (explains WHY stability changes), not an observable. Per-residue
+    contact-RMSF correlations are computed in ``polyzymd compare report``.
+"""
+
+from __future__ import annotations
+
+from polyzymd.analyses.contacts._comparison_results import ContactsComparisonResult
+from polyzymd.analyses.stats import format_pct
+from polyzymd.core.experimental import prefix_experimental_output
+
+
+def format_contacts_console_table(
+    result: ContactsComparisonResult,
+    show_pairwise: bool = True,
+    show_anova: bool = True,
+) -> str:
+    """Format contacts comparison result as a console-friendly ASCII table.
+
+    Parameters
+    ----------
+    result : ContactsComparisonResult
+        Comparison result to format
+    show_pairwise : bool, optional
+        Include pairwise comparison tables. Default True.
+    show_anova : bool, optional
+        Include ANOVA results. Default True.
+
+    Returns
+    -------
+    str
+        Formatted ASCII table string
+    """
+    lines = []
+
+    # Header
+    lines.append("")
+    lines.append(f"Polymer-Protein Contacts Comparison: {result.name}")
+    lines.append("=" * 80)
+    lines.append(f"Analysis: {result.contacts_name}")
+    if result.contacts_description:
+        lines.append(f"Description: {result.contacts_description}")
+    lines.append(f"Polymer selection: {result.polymer_selection}")
+    lines.append(f"Contact cutoff: {result.cutoff} A")
+    lines.append(f"Contact criteria: {result.contact_criteria}")
+    lines.append(f"Equilibration: {result.equilibration_time}")
+    if result.control_label:
+        lines.append(f"Control: {result.control_label}")
+    if result.excluded_conditions:
+        lines.append(f"Auto-excluded (no polymer): {', '.join(result.excluded_conditions)}")
+    lines.append("")
+
+    # Conditions summary table - Coverage
+    lines.append("Condition Summary - Coverage (ranked, highest first)")
+    lines.append("-" * 80)
+    header = f"{'Rank':<5} {'Condition':<25} {'Coverage':<12} {'SEM':<10} {'N':<4}"
+    lines.append(header)
+    lines.append("-" * 80)
+
+    for rank, label in enumerate(result.ranking_by_coverage, 1):
+        cond = result.get_condition(label)
+        marker = "*" if label == result.control_label else " "
+        coverage_pct = cond.coverage_mean * 100
+        sem_pct = cond.coverage_sem * 100
+        lines.append(
+            f"{rank:<5} {cond.label:<25} {coverage_pct:>8.1f}%   "
+            f"{sem_pct:>8.2f}%  {cond.n_replicates:<4}{marker}"
+        )
+
+    lines.append("-" * 80)
+    if result.control_label:
+        lines.append("* = control condition")
+    lines.append("")
+
+    # Conditions summary table - Mean Contact Fraction
+    lines.append("Condition Summary - Mean Contact Fraction (ranked, highest first)")
+    lines.append("-" * 80)
+    header = f"{'Rank':<5} {'Condition':<25} {'Contact %':<12} {'SEM':<10} {'N':<4}"
+    lines.append(header)
+    lines.append("-" * 80)
+
+    for rank, label in enumerate(result.ranking_by_contact_fraction, 1):
+        cond = result.get_condition(label)
+        marker = "*" if label == result.control_label else " "
+        contact_pct = cond.mean_contact_fraction * 100
+        sem_pct = cond.mean_contact_fraction_sem * 100
+        lines.append(
+            f"{rank:<5} {cond.label:<25} {contact_pct:>8.1f}%   "
+            f"{sem_pct:>8.2f}%  {cond.n_replicates:<4}{marker}"
+        )
+
+    lines.append("-" * 80)
+    lines.append("")
+
+    # Residence Time by Polymer Type summary
+    # Collect all polymer types across conditions
+    all_polymer_types: set[str] = set()
+    for cond in result.conditions:
+        all_polymer_types.update(cond.residence_time_by_polymer_type.keys())
+
+    if all_polymer_types:
+        lines.append("Residence Time by Polymer Type (frames)")
+        lines.append("-" * 80)
+        # Build header with polymer types
+        header_parts = [f"{'Condition':<25}"]
+        sorted_types = sorted(all_polymer_types)
+        for ptype in sorted_types:
+            header_parts.append(f"{ptype:>12}")
+        lines.append(" ".join(header_parts))
+        lines.append("-" * 80)
+
+        for cond in result.conditions:
+            row_parts = [f"{cond.label:<25}"]
+            for ptype in sorted_types:
+                if ptype in cond.residence_time_by_polymer_type:
+                    mean, sem = cond.residence_time_by_polymer_type[ptype]
+                    row_parts.append(f"{mean:>5.1f}±{sem:<4.1f}")
+                else:
+                    row_parts.append(f"{'--':>12}")
+            lines.append(" ".join(row_parts))
+
+        lines.append("-" * 80)
+        lines.append("")
+
+    # Binding Preference Enrichment Summary
+    if result.binding_preference and result.binding_preference.entries:
+        bp = result.binding_preference
+        lines.append("Binding Preference - Enrichment by Amino Acid Class")
+        lines.append("-" * 95)
+        if bp.surface_exposure_threshold is not None:
+            lines.append(
+                f"Surface exposure threshold: {bp.surface_exposure_threshold * 100:.0f}% "
+                "relative SASA"
+            )
+        else:
+            lines.append("Surface exposure threshold: not specified")
+        lines.append("")
+
+        # Group entries by polymer type
+        for poly_type in sorted(bp.polymer_types):
+            lines.append(f"  Polymer: {poly_type}")
+            lines.append(
+                f"  {'Protein Group':<20} "
+                + " ".join(f"{cond[:15]:<18}" for cond in bp.condition_labels)
+            )
+            lines.append("  " + "-" * (20 + 18 * len(bp.condition_labels)))
+
+            for group in sorted(bp.protein_groups):
+                entry = bp.get_entry(poly_type, group)
+                if not entry:
+                    continue
+
+                row_parts = [f"  {group:<20}"]
+                for cond in bp.condition_labels:
+                    values = entry.condition_values.get(cond)
+                    if values:
+                        mean, sem = values
+                        # Enrichment > 1 means preference, < 1 means avoidance
+                        marker = "+" if mean > 1.0 else "-" if mean < 1.0 else " "
+                        row_parts.append(f"{mean:>5.2f}±{sem:<4.2f} {marker:<6}")
+                    else:
+                        row_parts.append(f"{'--':>18}")
+                lines.append("".join(row_parts))
+
+            lines.append("")
+
+        lines.append("  + = enriched (>1.0), - = depleted (<1.0)")
+        lines.append("-" * 95)
+        lines.append("")
+
+    # Pairwise aggregate comparisons
+    if show_pairwise and result.pairwise_comparisons:
+        lines.append("Aggregate Comparisons")
+        lines.append("-" * 118)
+        header = (
+            f"{'Comparison':<30} {'Metric':<15} {'% Change':<10} "
+            f"{'p-value':<12} {'p-adj':<12} {'Cohen d':<10} {'Effect':<12} {'ES':<2}"
+        )
+        lines.append(header)
+        lines.append("-" * 118)
+
+        for comp in result.pairwise_comparisons:
+            comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
+            for agg in comp.aggregate_comparisons:
+                sig_marker = "*" if agg.significant else ""
+                p_str = f"{agg.p_value:.4f}"
+                p_adj = agg.p_value_adjusted
+                p_adj_str = f"{p_adj:.4f}{sig_marker}" if p_adj is not None else "--"
+                pct_str = format_pct(agg.percent_change)
+                d_str = f"{agg.cohens_d:.2f}"
+                metric = agg.metric.replace("_", " ")[:14]
+                effect_marker = "†" if agg.meets_effect_size_threshold else ""
+                lines.append(
+                    f"{comparison_name:<30} {metric:<15} {pct_str:<10} "
+                    f"{p_str:<12} {p_adj_str:<12} {d_str:<10} "
+                    f"{agg.effect_size_interpretation:<12} {effect_marker:<2}"
+                )
+            # Add separator between comparisons if more than one
+            if len(result.pairwise_comparisons) > 1:
+                lines.append("")
+
+        lines.append("-" * 118)
+        lines.append(
+            "* p_adj < "
+            f"{result.fdr_alpha} (BH-corrected); "
+            f"† meets min effect size |d| >= {result.min_effect_size}"
+        )
+        lines.append("positive % change = more contact in treatment")
+        lines.append("")
+
+    # ANOVA
+    if show_anova and result.anova:
+        lines.append("One-way ANOVA")
+        lines.append("-" * 84)
+        lines.append(
+            f"{'Metric':<25} {'F-stat':<12} {'p-value':<12} {'p-adj':<12} {'Significant':<12}"
+        )
+        lines.append("-" * 84)
+        for anova in result.anova:
+            sig = "Yes*" if anova.significant else "No"
+            metric = anova.metric.replace("_", " ")
+            p_adj_str = (
+                f"{anova.p_value_adjusted:.4f}" if anova.p_value_adjusted is not None else "--"
+            )
+            lines.append(
+                f"{metric:<25} {anova.f_statistic:<12.3f} {anova.p_value:<12.4f} "
+                f"{p_adj_str:<12} {sig:<12}"
+            )
+        lines.append("-" * 84)
+        lines.append(f"* p_adj < {result.fdr_alpha} (BH-corrected)")
+        lines.append("")
+
+    if result.top_contacted_residues:
+        lines.append("Top Contacted Residues")
+        lines.append("-" * 80)
+        for cond_label, residues in result.top_contacted_residues.items():
+            lines.append(f"{cond_label} (top {result.top_residues})")
+            if not residues:
+                lines.append("  (no residue data)")
+                continue
+            for resid, resname, frac in residues:
+                lines.append(f"  {resid:>5} {resname:<4} {frac * 100:>7.2f}%")
+            lines.append("")
+        lines.append("-" * 80)
+        lines.append("")
+
+    # Interpretation
+    lines.append("Interpretation")
+    lines.append("-" * 80)
+    best_coverage = result.ranking_by_coverage[0]
+    best_contact = result.ranking_by_contact_fraction[0]
+    best_cov_cond = result.get_condition(best_coverage)
+    best_con_cond = result.get_condition(best_contact)
+
+    lines.append(f"Highest coverage: {best_coverage} ({best_cov_cond.coverage_mean * 100:.1f}%)")
+    lines.append(
+        f"Highest mean contact: {best_contact} ({best_con_cond.mean_contact_fraction * 100:.1f}%)"
+    )
+
+    if result.control_label and result.pairwise_comparisons:
+        lines.append("")
+        for comp in result.pairwise_comparisons:
+            # Find coverage comparison
+            for agg in comp.aggregate_comparisons:
+                if agg.metric == "coverage" and agg.significant:
+                    p_for_display = (
+                        agg.p_value_adjusted if agg.p_value_adjusted is not None else agg.p_value
+                    )
+                    lines.append(
+                        f"  {comp.condition_b}: {format_pct(agg.percent_change)} coverage vs {comp.condition_a} "
+                        f"(p_adj={p_for_display:.4f}, d={agg.cohens_d:.2f})"
+                    )
+
+    lines.append("")
+    lines.append("Note: For per-residue contact-stability correlations, run:")
+    lines.append("  polyzymd compare report")
+    lines.append("")
+    lines.append(f"Analysis completed: {result.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"PolyzyMD version: {result.polyzymd_version}")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_contacts_markdown(
+    result: ContactsComparisonResult,
+    show_pairwise: bool = True,
+    show_anova: bool = True,
+) -> str:
+    """Format contacts comparison result as Markdown.
+
+    Parameters
+    ----------
+    result : ContactsComparisonResult
+        Comparison result to format
+    show_pairwise : bool, optional
+        Include pairwise comparison tables. Default True.
+    show_anova : bool, optional
+        Include ANOVA results. Default True.
+
+    Returns
+    -------
+    str
+        Markdown formatted string
+    """
+    lines = []
+
+    # Header
+    lines.append(f"# Polymer-Protein Contacts Comparison: {result.name}")
+    lines.append("")
+    lines.append("## Analysis Parameters")
+    lines.append("")
+    lines.append(f"- **Analysis name:** {result.contacts_name}")
+    if result.contacts_description:
+        lines.append(f"- **Description:** {result.contacts_description}")
+    lines.append(f"- **Polymer selection:** `{result.polymer_selection}`")
+    lines.append(f"- **Protein selection:** `{result.protein_selection}`")
+    lines.append(f"- **Contact cutoff:** {result.cutoff} A")
+    lines.append(f"- **Contact criteria:** {result.contact_criteria}")
+    lines.append(f"- **Equilibration:** {result.equilibration_time}")
+    if result.control_label:
+        lines.append(f"- **Control:** {result.control_label}")
+    if result.excluded_conditions:
+        lines.append(f"- **Auto-excluded (no polymer):** {', '.join(result.excluded_conditions)}")
+    lines.append(f"- **Analysis date:** {result.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"- **PolyzyMD version:** {result.polyzymd_version}")
+    lines.append("")
+
+    # Coverage summary
+    lines.append("## Condition Summary - Coverage")
+    lines.append("")
+    lines.append("Ranked by coverage (fraction of protein residues contacted):")
+    lines.append("")
+    lines.append("| Rank | Condition | Coverage | SEM | N Replicates |")
+    lines.append("|------|-----------|----------|-----|--------------|")
+
+    for rank, label in enumerate(result.ranking_by_coverage, 1):
+        cond = result.get_condition(label)
+        marker = " (control)" if label == result.control_label else ""
+        coverage_pct = cond.coverage_mean * 100
+        sem_pct = cond.coverage_sem * 100
+        lines.append(
+            f"| {rank} | **{cond.label}**{marker} | {coverage_pct:.1f}% | "
+            f"{sem_pct:.2f}% | {cond.n_replicates} |"
+        )
+
+    lines.append("")
+
+    # Mean contact fraction summary
+    lines.append("## Condition Summary - Mean Contact Fraction")
+    lines.append("")
+    lines.append("Ranked by mean contact fraction across all residues:")
+    lines.append("")
+    lines.append("| Rank | Condition | Contact % | SEM | N Replicates |")
+    lines.append("|------|-----------|-----------|-----|--------------|")
+
+    for rank, label in enumerate(result.ranking_by_contact_fraction, 1):
+        cond = result.get_condition(label)
+        marker = " (control)" if label == result.control_label else ""
+        contact_pct = cond.mean_contact_fraction * 100
+        sem_pct = cond.mean_contact_fraction_sem * 100
+        lines.append(
+            f"| {rank} | **{cond.label}**{marker} | {contact_pct:.1f}% | "
+            f"{sem_pct:.2f}% | {cond.n_replicates} |"
+        )
+
+    lines.append("")
+
+    # Binding Preference Enrichment Summary
+    if result.binding_preference and result.binding_preference.entries:
+        bp = result.binding_preference
+        lines.append("## Binding Preference - Enrichment by Amino Acid Class")
+        lines.append("")
+        if bp.surface_exposure_threshold is not None:
+            lines.append(
+                f"Surface exposure threshold: {bp.surface_exposure_threshold * 100:.0f}% "
+                "relative SASA"
+            )
+        else:
+            lines.append("Surface exposure threshold: not specified")
+        lines.append("")
+
+        for poly_type in sorted(bp.polymer_types):
+            lines.append(f"### Polymer: {poly_type}")
+            lines.append("")
+
+            # Build header row
+            header = "| Protein Group |"
+            divider = "|---------------|"
+            for cond in bp.condition_labels:
+                header += f" {cond[:20]} |"
+                divider += "-------------|"
+            lines.append(header)
+            lines.append(divider)
+
+            for group in sorted(bp.protein_groups):
+                entry = bp.get_entry(poly_type, group)
+                if not entry:
+                    continue
+
+                row = f"| **{group}** |"
+                for cond in bp.condition_labels:
+                    values = entry.condition_values.get(cond)
+                    if values:
+                        mean, sem = values
+                        marker = "+" if mean > 1.0 else "-" if mean < 1.0 else ""
+                        row += f" {mean:.2f}±{sem:.2f} {marker} |"
+                    else:
+                        row += " -- |"
+                lines.append(row)
+
+            lines.append("")
+
+        lines.append("> **Key:** + = enriched (>1.0), - = depleted (<1.0)")
+        lines.append("")
+
+    # Aggregate comparisons
+    if show_pairwise and result.pairwise_comparisons:
+        lines.append("## Aggregate Statistical Comparisons")
+        lines.append("")
+        lines.append(
+            "| Comparison | Metric | % Change | p-value | p-adj | Cohen's d | Effect | ES | Significant |"
+        )
+        lines.append(
+            "|------------|--------|----------|---------|-------|-----------|--------|----|-------------|"
+        )
+
+        for comp in result.pairwise_comparisons:
+            comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
+            for agg in comp.aggregate_comparisons:
+                sig = "Yes*" if agg.significant else "No"
+                metric = agg.metric.replace("_", " ")
+                p_adj_str = (
+                    f"{agg.p_value_adjusted:.4f}" if agg.p_value_adjusted is not None else "--"
+                )
+                effect_marker = "†" if agg.meets_effect_size_threshold else ""
+                lines.append(
+                    f"| {comparison_name} | {metric} | {format_pct(agg.percent_change)} | "
+                    f"{agg.p_value:.4f} | {p_adj_str} | {agg.cohens_d:.2f} | "
+                    f"{agg.effect_size_interpretation} | {effect_marker} | {sig} |"
+                )
+
+        lines.append("")
+        lines.append(
+            f"*p_adj < {result.fdr_alpha} (BH-corrected); "
+            f"† meets min effect size |d| >= {result.min_effect_size}"
+        )
+        lines.append("positive % change = more contact in treatment")
+        lines.append("")
+
+    # ANOVA
+    if show_anova and result.anova:
+        lines.append("## One-way ANOVA")
+        lines.append("")
+        lines.append("| Metric | F-statistic | p-value | p-adj | Significant |")
+        lines.append("|--------|-------------|---------|-------|-------------|")
+        for anova in result.anova:
+            sig = "Yes*" if anova.significant else "No"
+            metric = anova.metric.replace("_", " ")
+            p_adj_str = (
+                f"{anova.p_value_adjusted:.4f}" if anova.p_value_adjusted is not None else "--"
+            )
+            lines.append(
+                f"| {metric} | {anova.f_statistic:.3f} | {anova.p_value:.4f} | {p_adj_str} | {sig} |"
+            )
+        lines.append("")
+        lines.append(f"*p_adj < {result.fdr_alpha} (BH-corrected)")
+        lines.append("")
+
+    if result.top_contacted_residues:
+        lines.append("## Top Contacted Residues")
+        lines.append("")
+        for cond_label, residues in result.top_contacted_residues.items():
+            lines.append(f"### {cond_label} (top {result.top_residues})")
+            lines.append("")
+            lines.append("| Resid | Resname | Contact fraction |")
+            lines.append("|------:|---------|-----------------:|")
+            if not residues:
+                lines.append("| -- | -- | -- |")
+            else:
+                for resid, resname, frac in residues:
+                    lines.append(f"| {resid} | {resname} | {frac:.4f} |")
+            lines.append("")
+
+    # Key findings
+    lines.append("## Key Findings")
+    lines.append("")
+
+    best_coverage = result.ranking_by_coverage[0]
+    best_contact = result.ranking_by_contact_fraction[0]
+    best_cov_cond = result.get_condition(best_coverage)
+    best_con_cond = result.get_condition(best_contact)
+
+    lines.append(
+        f"1. **Highest coverage:** {best_coverage} ({best_cov_cond.coverage_mean * 100:.1f}%)"
+    )
+    lines.append(
+        f"2. **Highest mean contact:** {best_contact} ({best_con_cond.mean_contact_fraction * 100:.1f}%)"
+    )
+
+    if result.control_label and result.pairwise_comparisons:
+        finding_num = 3
+        for comp in result.pairwise_comparisons:
+            for agg in comp.aggregate_comparisons:
+                if agg.significant:
+                    p_for_display = (
+                        agg.p_value_adjusted if agg.p_value_adjusted is not None else agg.p_value
+                    )
+                    lines.append(
+                        f"{finding_num}. {comp.condition_b} shows **{format_pct(agg.percent_change)}** "
+                        f"{agg.metric.replace('_', ' ')} vs {comp.condition_a} "
+                        f"(p_adj={p_for_display:.4f}, d={agg.cohens_d:.2f} "
+                        f"[{agg.effect_size_interpretation}])"
+                    )
+                    finding_num += 1
+
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("> **Note:** For per-residue contact-stability correlations, run:")
+    lines.append("> `polyzymd compare report`")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def contacts_to_json(result: ContactsComparisonResult, indent: int = 2) -> str:
+    """Serialize contacts comparison result to JSON string.
+
+    Parameters
+    ----------
+    result : ContactsComparisonResult
+        Comparison result to serialize
+    indent : int, optional
+        JSON indentation level. Default 2.
+
+    Returns
+    -------
+    str
+        JSON string
+    """
+    return result.model_dump_json(indent=indent)
+
+
+def format_contacts_result(
+    result: ContactsComparisonResult,
+    format: str = "table",
+    show_pairwise: bool = True,
+    show_anova: bool = True,
+) -> str:
+    """Format contacts comparison result in the specified format.
+
+    Parameters
+    ----------
+    result : ContactsComparisonResult
+        Comparison result to format
+    format : str
+        Output format: "table", "markdown", or "json"
+    show_pairwise : bool, optional
+        Include pairwise comparisons. Default True.
+    show_anova : bool, optional
+        Include ANOVA results. Default True.
+
+    Returns
+    -------
+    str
+        Formatted output string
+
+    Raises
+    ------
+    ValueError
+        If format is not recognized
+    """
+    if format == "table":
+        formatted = format_contacts_console_table(result, show_pairwise, show_anova)
+    elif format == "markdown":
+        formatted = format_contacts_markdown(result, show_pairwise, show_anova)
+    elif format == "json":
+        formatted = contacts_to_json(result)
+    else:
+        raise ValueError(f"Unknown format: {format}. Use 'table', 'markdown', or 'json'.")
+
+    if result.binding_preference and result.binding_preference.entries:
+        return prefix_experimental_output(formatted, ("contacts_binding_preference",), format)
+    return formatted

@@ -3,29 +3,39 @@
 This tutorial walks through one complete PolyzyMD analysis story:
 
 - three simulation conditions already exist
-- you create one `analysis.yaml`
-- you run per-condition analyses
+- you create one `comparison.yaml`
 - you compare the conditions
 - you finish with `polyzymd compare plot-all` as the smoke test
 
 By the end, you will have a working comparison workspace with JSON results and
 figures for a small three-condition study.
 
+## What You Will Learn
+
+- How to initialize a comparison workspace with `polyzymd compare init`
+- How to write a `comparison.yaml` that defines conditions and analysis plugins
+- How to run cross-condition comparisons and generate figures
+- What the output directory structure looks like after a successful run
+
+## Prerequisites
+
+Before starting, make sure you have:
+
+- Completed production trajectories for at least three conditions (DCD format
+  in PolyzyMD's standard directory layout)
+- One `config.yaml` per condition
+- A topology such as `solvated_system.pdb` already produced during the build
+- PolyzyMD installed in a pixi environment (see {doc}`installation`)
+
+If you have not run a single-condition analysis yet, complete
+{doc}`first_analysis` first.
+
 ```{important}
-This tutorial uses the stable `v1.2.0` comparison stack: RMSF, contacts,
-distances, and catalytic triad. Experimental workflows are linked at the end,
-but they are not part of the main tutorial path.
+This tutorial uses the stable `v1.3.0` comparison stack: RMSD, Rg, RMSF,
+contacts, distances, catalytic triad, secondary structure, SASA, and hydrogen
+bonds. Experimental workflows are linked at the end, but they are not part of
+the main tutorial path.
 ```
-
-## Before You Start
-
-You need:
-
-- completed **OpenMM** production trajectories for each condition (DCD format
-  in PolyzyMD's standard directory layout; GROMACS XTC support is planned for
-  [v1.2.1](https://github.com/joelaforet/polyzymd/issues/47))
-- one `config.yaml` per condition
-- a topology such as `solvated_system.pdb` already produced during the build
 
 ## The Study We Will Analyze
 
@@ -50,107 +60,18 @@ cluster. PolyzyMD resolves those paths through each condition's `config.yaml`.
 <!-- IMAGE OPPORTUNITY: Add a campaign directory-tree diagram showing the three
 conditions plus the later comparison workspace. -->
 
-## Step 1: Create `analysis.yaml` for the First Condition
+## Step 1: Create the Comparison Workspace
 
-Start in the control condition:
-
-```bash
-cd my_enzyme_study/noPoly_enzyme_DMSO
-polyzymd analyze init
-```
-
-Edit the generated `analysis.yaml` so it enables a small stable analysis set:
-
-```yaml
-replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "10ns"
-
-rmsf:
-  enabled: true
-  selection: "protein and name CA"
-  reference_mode: "average"
-
-catalytic_triad:
-  enabled: true
-  name: "Ser-His-Asp"
-  threshold: 3.5
-  pairs:
-    - label: "Ser77-His156"
-      selection_a: "protein and resid 77 and name OG"
-      selection_b: "protein and resid 156 and name NE2"
-    - label: "His156-Asp133"
-      selection_a: "protein and resid 156 and name ND1"
-      selection_b: "midpoint(protein and resid 133 and name OD1 OD2)"
-
-distances:
-  enabled: true
-  pairs:
-    - label: "Substrate-Ser77"
-      selection_a: "resname SUB and name C1"
-      selection_b: "protein and resid 77 and name OG"
-
-contacts:
-  enabled: true
-  polymer_selection: "chainID C"
-  protein_selection: "protein"
-  cutoff: 4.5
-  compute_residence_times: true
-```
-
-## Step 2: Reuse the Same `analysis.yaml` for the Other Conditions
-
-From the study root:
+From the study root, initialize a comparison project and move into it:
 
 ```bash
-cd ../
-cp noPoly_enzyme_DMSO/analysis.yaml SBMA_100_enzyme_DMSO/
-cp noPoly_enzyme_DMSO/analysis.yaml EGMA_100_enzyme_DMSO/
-```
-
-This works because the condition-specific trajectory paths come from each
-condition's own `config.yaml`.
-
-## Step 3: Run Per-Condition Analyses
-
-Run the same command in each condition directory:
-
-```bash
-cd noPoly_enzyme_DMSO
-polyzymd analyze run
-
-cd ../SBMA_100_enzyme_DMSO
-polyzymd analyze run
-
-cd ../EGMA_100_enzyme_DMSO
-polyzymd analyze run
-```
-
-After each run, expect an `analysis/` directory with subdirectories such as:
-
-```text
-analysis/
-├── rmsf/
-├── catalytic_triad/
-├── distances/
-└── contacts/
-```
-
-For the no-polymer control, contacts may be skipped automatically because there
-are no polymer atoms to analyze.
-
-## Step 4: Create the Comparison Workspace
-
-Go back to the study root and initialize a comparison project:
-
-```bash
-cd ..
-polyzymd compare init -n polymer_stabilization_study
+cd my_enzyme_study
+pixi run -e build polyzymd compare init -n polymer_stabilization_study
 cd polymer_stabilization_study
 ```
 
-Now edit `comparison.yaml` to point at the three conditions:
+Now edit `comparison.yaml` to point at the three conditions and define the
+analysis settings:
 
 ```yaml
 name: "polymer_stabilization_study"
@@ -173,7 +94,7 @@ conditions:
 defaults:
   equilibration_time: "10ns"
 
-analysis_settings:
+plugins:
   rmsf:
     selection: "protein and name CA"
     reference_mode: "average"
@@ -200,46 +121,51 @@ analysis_settings:
     protein_selection: "protein"
     cutoff: 4.5
     compute_residence_times: true
-
-comparison_settings:
-  rmsf: {}
-  catalytic_triad: {}
-  distances: {}
-  contacts: {}
 ```
 
-## Step 5: Validate the Comparison Config
+## Step 2: Validate the Comparison Config
 
 ```bash
-polyzymd compare validate
+pixi run -e build polyzymd compare validate
 ```
 
 You should see a passing summary that lists the three conditions and the
 enabled analyses.
 
-## Step 6: Run the Cross-Condition Comparison
+## Step 3: Run the Cross-Condition Comparison
 
 For the tutorial, use the batch runner:
 
 ```bash
-polyzymd compare run-all
+pixi run -e build polyzymd compare run-all
 ```
 
-This runs every enabled comparison and writes JSON results into `results/`.
+This runs every enabled comparison and writes canonical cache files into
+`comparison/<analysis>/result.json`.
+
+```{tip}
+**On an HPC cluster?** For large studies, submit each analysis as a SLURM
+job DAG instead of running interactively:
+
+    pixi run -e build polyzymd compare submit sasa --partition <part> --mem 8G
+
+This parallelizes across replicates and conditions. See
+{doc}`../how_to/hpc_execution` for the complete HPC workflow.
+```
 
 If you prefer to inspect one comparison first, a good sanity check is:
 
 ```bash
-polyzymd compare run rmsf
+pixi run -e build polyzymd compare run rmsf
 ```
 
-## Step 7: Generate the Figures
+## Step 4: Generate the Figures
 
 Now run the plotting smoke test:
 
 ```bash
-polyzymd compare plot-all --list-available
-polyzymd compare plot-all
+pixi run -e build polyzymd compare plot-all --list-available
+pixi run -e build polyzymd compare plot-all
 ```
 
 If those commands succeed, your comparison workspace is in good shape.
@@ -254,11 +180,15 @@ At this point you should have:
 ```text
 polymer_stabilization_study/
 ├── comparison.yaml
-├── results/
-│   ├── rmsf_comparison_polymer_stabilization_study.json
-│   ├── contacts_comparison_polymer_stabilization_study.json
-│   ├── distances_comparison_polymer_stabilization_study.json
-│   └── triad_comparison_polymer_stabilization_study.json
+├── comparison/
+│   ├── rmsf/
+│   │   └── result.json
+│   ├── contacts/
+│   │   └── result.json
+│   ├── distances/
+│   │   └── result.json
+│   └── catalytic_triad/
+│       └── result.json
 └── figures/
     ├── rmsf_comparison.png
     ├── rmsf_profile.png
@@ -266,20 +196,20 @@ polymer_stabilization_study/
     └── ...
 ```
 
-That is the tutorial success state: the comparison JSON exists, the figures
-exist, and `polyzymd compare plot-all` completes without error.
+That is the tutorial success state: the canonical comparison caches exist, the
+figures exist, and `polyzymd compare plot-all` completes without error.
 
 ## What to Do Next
 
-- Use [How to Compare Simulation Conditions](analysis_compare_conditions.md) for
+- Use [How to Compare Simulation Conditions](../how_to/analysis_compare_conditions.md) for
   a shorter operational version of this workflow
 - Use [Comparison and Plotting Reference](../reference/analysis_comparison_reference.md)
   for CLI, config, and output lookup
 - Explore metric-specific guides:
-  - [Run RMSF Analysis](analysis_rmsf_quickstart.md)
-  - [Run Contacts Analysis](analysis_contacts_quickstart.md)
-  - [Run Distance Analysis](analysis_distances_quickstart.md)
-  - [Run Catalytic Triad Analysis](analysis_triad_quickstart.md)
+  - [Run RMSF Analysis](../how_to/analysis_rmsf_quickstart.md)
+  - [Run Contacts Analysis](../how_to/analysis_contacts_quickstart.md)
+  - [Run Distance Analysis](../how_to/analysis_distances_quickstart.md)
+  - [Run Catalytic Triad Analysis](../how_to/analysis_triad_quickstart.md)
 
 Experimental workflows remain available, but they are intentionally outside the
 main tutorial path for this release.

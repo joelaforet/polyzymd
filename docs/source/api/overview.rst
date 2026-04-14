@@ -29,19 +29,27 @@ Package Structure
     ├── core/             # Core utilities
     │   ├── parameters.py # Simulation parameters
     │   └── restraints.py # Restraint definitions
-    ├── analysis/         # Post-simulation trajectory analysis
-    │   ├── rmsf/         # Root Mean Square Fluctuation
-    │   ├── distances/    # Inter-atomic distance analysis
-    │   ├── triad/        # Catalytic triad integrity
-    │   ├── contacts/     # Polymer-protein contacts, binding preference
-    │   ├── sasa/         # Solvent Accessible Surface Area
-    │   ├── exposure/     # Chaperone-like exposure dynamics
-    │   ├── core/         # Statistics, autocorrelation, MetricType
-    │   └── results/      # Serializable result models
-    ├── compare/          # Multi-condition statistical comparison
-    │   ├── comparators/  # RMSF, contacts, triad, BFE, affinity, exposure
-    │   ├── results/      # Comparison result models
-    │   └── plotters/     # Publication-quality figures
+    ├── analyses/         # ★ Plugin system — unified analysis lifecycle
+    │   ├── base.py       # Analysis ABC, context objects, result models
+    │   ├── discovery.py  # pkgutil-based auto-discovery
+    │   ├── orchestrator.py  # Framework engine
+    │   ├── stats.py      # Shared statistical utilities
+    │   ├── shared/       # Reusable utilities (TrajectoryLoader, alignment, etc.)
+    │   ├── rmsd/         # RMSD plugin package
+    │   ├── rg/           # Rg plugin package
+    │   ├── rmsf/         # RMSF plugin package
+    │   ├── contacts/     # Contacts plugin package
+    │   ├── distances/    # Distance analysis plugin package
+    │   ├── secondary_structure/  # Secondary structure plugin package
+    │   └── ...           # One sub-package per analysis type
+    ├── config/
+    │   └── comparison.py # ComparisonConfig, PlotSettings, condition models
+    ├── analyses/shared/
+    │   ├── inferential_statistics.py # t-tests, ANOVA, effect sizes
+    │   ├── result_io.py  # Comparison result discovery/loading
+    │   └── paths.py      # sanitize_label() and path helpers
+    ├── cli/
+    │   └── compare.py    # `polyzymd compare` subcommands
     └── cli/              # Command-line interface
         └── main.py       # Click CLI
 
@@ -87,19 +95,19 @@ Restraints
 Analysis
 ~~~~~~~~
 
-- :py:class:`~polyzymd.analysis.rmsf.calculator.RMSFCalculator` - Per-residue RMSF
-- :py:class:`~polyzymd.analysis.distances.calculator.DistanceCalculator` - Inter-group distances
-- :py:class:`~polyzymd.analysis.triad.analyzer.CatalyticTriadAnalyzer` - Catalytic triad integrity
-- :py:class:`~polyzymd.analysis.contacts.calculator_parallel.ParallelContactAnalyzer` - Polymer-protein contacts
-- :py:class:`~polyzymd.analysis.results.base.BaseAnalysisResult` - Serializable result base class
+- :py:class:`~polyzymd.analyses.base.Analysis` - Plugin base class for all analyses
+- :py:class:`~polyzymd.analyses.distances.DistanceCalculator` - Inter-group distances
+- :py:class:`~polyzymd.analyses.contacts.ParallelContactAnalyzer` - Polymer-protein contacts
+- :py:class:`~polyzymd.analyses._results_base.BaseAnalysisResult` - Serializable result base class
 
 Comparison
 ~~~~~~~~~~
 
-- :py:class:`~polyzymd.compare.core.base.BaseComparator` - Template Method comparator base
-- :py:class:`~polyzymd.compare.comparators.exposure.ExposureDynamicsComparator` - Chaperone analysis
-- :py:class:`~polyzymd.compare.comparators.binding_free_energy.BindingFreeEnergyComparator` - Per-contact ΔG_sel
-- :py:class:`~polyzymd.compare.comparators.polymer_affinity.PolymerAffinityScoreComparator` - Total interaction strength
+- :py:class:`~polyzymd.analyses.base.Analysis` - Plugin base class for all analyses
+- :py:class:`~polyzymd.analyses.base.ComparisonResult` - Universal comparison result model
+- :py:class:`~polyzymd.analyses.base.MetricValue` - Scalar metric descriptor
+- :py:class:`~polyzymd.analyses.base.ReplicateContext` - Context for per-replicate computation
+- :py:class:`~polyzymd.analyses.base.ComparisonContext` - Context for cross-condition comparison
 
 
 Quick Reference

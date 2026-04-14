@@ -24,6 +24,9 @@ def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
     Converts relative paths to absolute paths based on the config file location.
     Also expands environment variables in path strings.
 
+    Sentinel values (e.g. ``"default"``) are passed through untouched so that
+    downstream Pydantic validators can resolve them to bundled resources.
+
     Args:
         data: Configuration dictionary
         base_path: Directory containing the config file
@@ -42,8 +45,15 @@ def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
         "termination",
     }
 
+    # Sentinel values that should be forwarded to Pydantic validators as-is,
+    # not treated as filesystem paths.
+    _SENTINEL_VALUES = {"default"}
+
     def expand_value(key: str, value: Any) -> Any:
         if key in path_keys and isinstance(value, str):
+            # Pass through sentinel values without path expansion
+            if value.lower().strip() in _SENTINEL_VALUES:
+                return value
             # Expand environment variables
             expanded = os.path.expandvars(value)
             path = Path(expanded)
@@ -81,8 +91,14 @@ def _convert_paths_to_relative(data: Dict[str, Any], base_path: Path) -> Dict[st
         "termination",
     }
 
+    # Sentinel values that should be forwarded as-is (see _expand_paths).
+    _SENTINEL_VALUES = {"default"}
+
     def relativize_value(key: str, value: Any) -> Any:
         if key in path_keys and isinstance(value, str):
+            # Pass through sentinel values without relativizing
+            if value.lower().strip() in _SENTINEL_VALUES:
+                return value
             path = Path(value)
             if path.is_absolute():
                 try:
@@ -117,21 +133,30 @@ class ConfigLoader:
 def load_config(path: Union[str, Path]) -> SimulationConfig:
     """Load a SimulationConfig from a YAML file.
 
-    Args:
-        path: Path to the YAML configuration file
+    Parameters
+    ----------
+    path : str or Path
+        Path to the YAML configuration file.
 
-    Returns:
-        Validated SimulationConfig instance
+    Returns
+    -------
+    SimulationConfig
+        Validated configuration instance.
 
-    Raises:
-        FileNotFoundError: If the config file doesn't exist
-        yaml.YAMLError: If the YAML is malformed
-        pydantic.ValidationError: If the configuration is invalid
+    Raises
+    ------
+    FileNotFoundError
+        If the config file doesn't exist.
+    yaml.YAMLError
+        If the YAML is malformed.
+    pydantic.ValidationError
+        If the configuration is invalid.
 
-    Example:
-        >>> config = load_config("my_simulation.yaml")
-        >>> print(config.enzyme.name)
-        "LipA"
+    Examples
+    --------
+    >>> config = load_config("my_simulation.yaml")
+    >>> print(config.enzyme.name)
+    "LipA"
     """
     path = Path(path)
 
@@ -152,14 +177,19 @@ def save_config(
 ) -> None:
     """Save a SimulationConfig to a YAML file.
 
-    Args:
-        config: Configuration to save
-        path: Destination path for the YAML file
-        relative_paths: Whether to convert paths to relative (default: True)
+    Parameters
+    ----------
+    config : SimulationConfig
+        Configuration to save.
+    path : str or Path
+        Destination path for the YAML file.
+    relative_paths : bool, optional
+        Whether to convert paths to relative, by default True.
 
-    Example:
-        >>> config = SimulationConfig(...)
-        >>> save_config(config, "output_config.yaml")
+    Examples
+    --------
+    >>> config = SimulationConfig(...)
+    >>> save_config(config, "output_config.yaml")
     """
     path = Path(path)
 

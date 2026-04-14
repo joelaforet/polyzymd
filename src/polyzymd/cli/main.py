@@ -6,10 +6,10 @@ for argument parsing and command organization.
 
 Usage:
     polyzymd --help
-    polyzymd build --config simulation.yaml
+    polyzymd build --config simulation.yaml --replicates 1-3
+    polyzymd run --config simulation.yaml --replicates 1-3 --engine openmm
     polyzymd submit --config simulation.yaml --replicates 1-5
     polyzymd run-segment --config simulation.yaml --replicate 1
-    polyzymd run-gromacs --config simulation.yaml --replicate 1
 """
 
 from __future__ import annotations
@@ -17,12 +17,13 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
+import yaml
+from pydantic import ValidationError
 
 from polyzymd.cli.colors import colored_echo, echo_logo, setup_colored_logging
-from polyzymd.core.branding import SHORT_CREDIT_LINE, prepend_file_header
+from polyzymd.core.branding import prepend_file_header
 
 # Bootstrap a minimal root handler so suppress_openff_logs() works at import
 # time.  setup_colored_logging() replaces this handler when the CLI runs.
@@ -33,7 +34,7 @@ logging.basicConfig(
 LOGGER = logging.getLogger("polyzymd")
 
 
-def _echo_branding(phase: str = "cli") -> None:
+def _echo_branding() -> None:
     """Print the PolyzyMD ASCII logo for top-level user-facing commands."""
     echo_logo()
 
@@ -96,6 +97,62 @@ def enable_openff_logs() -> None:
 suppress_openff_logs()
 
 
+def _resolve_replicates_option(
+    replicates: str | None,
+    replicate: int | None,
+    command_name: str,
+) -> list[int]:
+    """Resolve --replicates / --replicate into a list of replicate numbers.
+
+    Parameters
+    ----------
+    replicates : str or None
+        Value from ``--replicates`` (range syntax, e.g. ``"1-3"``)
+    replicate : int or None
+        Value from deprecated ``--replicate`` (single integer)
+    command_name : str
+        Name of the CLI command (for error messages)
+
+    Returns
+    -------
+    list[int]
+        Sorted, deduplicated list of replicate numbers
+
+    Raises
+    ------
+    click.UsageError
+        If both ``--replicates`` and ``--replicate`` are given
+    """
+    from polyzymd.utils.replicates import parse_replicate_range
+
+    if replicates is not None and replicate is not None:
+        raise click.UsageError(
+            f"Cannot use both --replicates and --replicate in '{command_name}'. "
+            "Use --replicates (e.g., --replicates 1-3)."
+        )
+
+    if replicate is not None:
+        if replicate <= 0:
+            raise click.BadParameter(
+                f"Replicate must be a positive integer, got {replicate}.",
+                param_hint="'--replicate'",
+            )
+        click.echo(
+            f"Warning: --replicate is deprecated in '{command_name}', use --replicates instead.",
+            err=True,
+        )
+        return [replicate]
+
+    if replicates is not None:
+        try:
+            return parse_replicate_range(replicates)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint="'--replicates'") from e
+
+    # Default to a single replicate
+    return [1]
+
+
 @click.group()
 @click.version_option(prog_name="polyzymd")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
@@ -128,7 +185,14 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
 # =============================================================================
 
 
-@cli.command()
+@cli.command(
+    help=(
+        "Build simulation input files (OpenMM, GROMACS, LAMMPS, AMBER) without "
+        "running. Use --format to select the output engine. "
+        "Use run --engine <gromacs|openmm> to execute locally, or submit for "
+        "OpenMM SLURM jobs."
+    )
+)
 @click.option(
     "-c",
     "--config",
@@ -138,10 +202,17 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
 )
 @click.option(
     "-r",
+    "--replicates",
+    default=None,
+    type=str,
+    help="Replicate range (e.g., '1', '1-3', '1,3,5'). Default: 1",
+)
+@click.option(
     "--replicate",
-    default=1,
+    default=None,
     type=int,
-    help="Replicate number (default: 1)",
+    hidden=True,
+    help="[Deprecated] Use --replicates instead.",
 )
 @click.option(
     "-o",
@@ -168,35 +239,75 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     help="Validate config without building",
 )
 @click.option(
+    "--format",
+    "export_format",
+    default=None,
+    type=click.Choice(["gromacs", "lammps", "amber"], case_sensitive=False),
+    help=(
+        "Export format: gromacs, lammps (planned), amber (planned). Default: OpenMM (no export)."
+    ),
+)
+@click.option(
     "--gromacs",
     is_flag=True,
-    help="Export to GROMACS format (.gro, .top, .mdp) instead of preparing for OpenMM",
+    hidden=True,
+    help="[Deprecated] Use --format gromacs instead.",
 )
 def build(
     config: str,
-    replicate: int,
-    output_dir: Optional[str],
-    scratch_dir: Optional[str],
-    projects_dir: Optional[str],
+    replicates: str | None,
+    replicate: int | None,
+    output_dir: str | None,
+    scratch_dir: str | None,
+    projects_dir: str | None,
     dry_run: bool,
+    export_format: str | None,
     gromacs: bool,
 ) -> None:
-    """Build a simulation system from configuration.
+    """Build simulation input files from configuration.
 
     Loads the YAML configuration, constructs the molecular system
-    (enzyme, substrate, polymers, solvent), and prepares it for simulation.
+    (enzyme, substrate, polymers, solvent), and writes engine-ready input
+    artifacts for one or more replicates. No simulation is executed.
 
-    By default, prepares the system for OpenMM simulation. Use --gromacs to
-    export GROMACS-compatible files instead (.gro, .top, .mdp).
+    By default, this prepares OpenMM inputs in the working directory. Use
+    ``--format gromacs`` to export GROMACS files (``.gro``, ``.top``,
+    ``.itp``, ``.mdp``). AMBER and LAMMPS export are not yet supported.
 
-    GROMACS Export Notes:
-        - Output files are placed in {projects_dir}/{replicate}/gromacs/
+    Use ``run --engine gromacs`` if you want PolyzyMD to build and then
+    execute the full local GROMACS workflow. Use ``run --engine openmm`` for
+    local OpenMM execution, or ``submit`` for OpenMM self-resubmitting SLURM
+    workflows.
+
+    The ``--replicates`` option accepts range syntax (for example ``1-3`` or
+    ``1,3,5``). Each replicate is built independently with a different polymer
+    random seed.
+
+    \b
+    Export Notes:
+        - Output files are placed in replicate_<n>/<format>/
         - Filenames are derived from config: {enzyme_name}_{polymer_prefix}.*
-        - The .mdp file is a stub for single-point energy; modify for production
+        - MDP files include energy minimization, equilibration, and production stages
         - Topology is split into .itp files for cleaner multi-component systems
     """
+    from pydantic import ValidationError as PydanticValidationError
+
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.config.schema import SimulationConfig
+
+    # Resolve export format: --format takes priority, --gromacs is deprecated alias
+    if gromacs and export_format is not None:
+        raise click.UsageError(
+            "Cannot use both --gromacs and --format. Use --format gromacs instead."
+        )
+    if gromacs:
+        click.echo(
+            "Warning: --gromacs is deprecated, use --format gromacs instead.",
+            err=True,
+        )
+        export_format = "gromacs"
+
+    replicate_list = _resolve_replicates_option(replicates, replicate, "build")
 
     colored_echo(f"Loading configuration from: {config}", phase="build")
 
@@ -212,160 +323,325 @@ def build(
             sim_config.output.projects_directory = Path(projects_dir)
 
         if dry_run:
-            colored_echo("Dry run - configuration is valid", phase="build")
-            colored_echo(f"  Enzyme: {sim_config.enzyme.name}", phase="build")
+            colored_echo("=" * 60, phase="build")
+            colored_echo("DRY RUN — Validation Report", phase="build")
+            colored_echo("=" * 60, phase="build")
+            colored_echo(phase="build")
+
+            colored_echo("Configuration Summary:", phase="build")
+            colored_echo(f"  Name: {sim_config.name}", phase="build")
+            if sim_config.description:
+                colored_echo(f"  Description: {sim_config.description}", phase="build")
+            colored_echo(f"  Config file: {config}", phase="build")
+            colored_echo(phase="build")
+
+            colored_echo("Replicates:", phase="build")
+            colored_echo(f"  Count: {len(replicate_list)}", phase="build")
+            colored_echo(f"  IDs: {replicate_list}", phase="build")
+            colored_echo(f"  Polymer seeds: {replicate_list} (one per replicate)", phase="build")
+            colored_echo(phase="build")
+
+            colored_echo("System Components:", phase="build")
+            colored_echo(f"  Chain A (Protein): {sim_config.enzyme.name}", phase="build")
+            colored_echo(f"    PDB: {sim_config.enzyme.pdb_path}", phase="build")
             if sim_config.substrate:
-                colored_echo(f"  Substrate: {sim_config.substrate.name}", phase="build")
+                colored_echo(f"  Chain B (Substrate): {sim_config.substrate.name}", phase="build")
+                colored_echo(f"    SDF: {sim_config.substrate.sdf_path}", phase="build")
+            else:
+                colored_echo("  Chain B (Substrate): none (apo system)", phase="build")
             if sim_config.polymers and sim_config.polymers.enabled:
-                colored_echo(f"  Polymers: {sim_config.polymers.type_prefix}", phase="build")
-                colored_echo(f"  Polymer count: {sim_config.polymers.count}", phase="build")
-            colored_echo(f"  Temperature: {sim_config.thermodynamics.temperature} K", phase="build")
+                colored_echo(
+                    f"  Chain C (Polymer): {sim_config.polymers.type_prefix}", phase="build"
+                )
+                colored_echo(f"    Count: {sim_config.polymers.count}", phase="build")
+                colored_echo(f"    Length: {sim_config.polymers.length} monomers", phase="build")
+                for monomer in sim_config.polymers.monomers:
+                    colored_echo(
+                        f"    Monomer: {monomer.label} ({monomer.probability * 100:.0f}%)",
+                        phase="build",
+                    )
+            else:
+                colored_echo("  Chain C (Polymer): none (no polymer)", phase="build")
+            colored_echo(f"  Chain D+ (Solvent): {sim_config.solvent.primary.model}", phase="build")
+            colored_echo(f"    Box padding: {sim_config.solvent.box.padding} nm", phase="build")
             colored_echo(
-                f"  Production time: {sim_config.simulation_phases.production.duration} ns",
+                f"    NaCl concentration: {sim_config.solvent.ions.nacl_concentration} M",
                 phase="build",
             )
             colored_echo(phase="build")
+
+            colored_echo("Parameterization Plan:", phase="build")
+            colored_echo(f"  Protein FF: {sim_config.force_field.protein}", phase="build")
+            colored_echo(
+                f"  Small molecule FF: {sim_config.force_field.small_molecule}", phase="build"
+            )
+            colored_echo(f"  Water model: {sim_config.solvent.primary.model}", phase="build")
+            colored_echo(phase="build")
+
+            colored_echo("Thermodynamics:", phase="build")
+            colored_echo(f"  Temperature: {sim_config.thermodynamics.temperature} K", phase="build")
+            pressure = sim_config.thermodynamics.pressure
+            if pressure is not None:
+                colored_echo(f"  Pressure: {pressure} atm", phase="build")
+            colored_echo(phase="build")
+
+            colored_echo("Simulation Phases:", phase="build")
+            eq_stages = sim_config.simulation_phases.equilibration_stages
+            if eq_stages:
+                colored_echo(f"  Equilibration: {len(eq_stages)} stage(s)", phase="build")
+                for i, stage in enumerate(eq_stages, 1):
+                    colored_echo(
+                        f"    Stage {i}: {stage.duration} ns, {stage.ensemble}",
+                        phase="build",
+                    )
+            colored_echo(
+                f"  Production: {sim_config.simulation_phases.production.duration} ns",
+                phase="build",
+            )
+            colored_echo(
+                f"  Samples: {sim_config.simulation_phases.production.samples}",
+                phase="build",
+            )
+            colored_echo(phase="build")
+
             colored_echo("Directories:", phase="build")
             colored_echo(f"  Projects: {sim_config.output.projects_directory}", phase="build")
             colored_echo(
                 f"  Scratch: {sim_config.output.effective_scratch_directory}", phase="build"
             )
-            if gromacs:
+            colored_echo(phase="build")
+
+            colored_echo("Per-Replicate Output:", phase="build")
+            for rep in replicate_list:
+                working_dir = sim_config.get_working_directory(rep)
+                colored_echo(f"  Replicate {rep}:", phase="build")
+                colored_echo(f"    Working dir: {working_dir}", phase="build")
+                if export_format:
+                    export_dir = (
+                        sim_config.output.projects_directory / f"replicate_{rep}" / export_format
+                    )
+                    colored_echo(f"    Export dir:  {export_dir}", phase="build")
+            colored_echo(phase="build")
+
+            if export_format:
+                colored_echo(f"Files to Generate ({export_format.upper()}):", phase="build")
+                colored_echo("  Per replicate:", phase="build")
+                if export_format == "gromacs":
+                    colored_echo("    - *.gro (coordinates)", phase="build")
+                    colored_echo("    - *.top (topology)", phase="build")
+                    colored_echo("    - *.itp (molecule parameters)", phase="build")
+                    colored_echo("    - em.mdp (energy minimization)", phase="build")
+                    if eq_stages:
+                        for i, stage in enumerate(eq_stages, 1):
+                            colored_echo(
+                                f"    - eq_{i:02d}_{stage.name}.mdp (equilibration)",
+                                phase="build",
+                            )
+                    colored_echo("    - prod.mdp (production)", phase="build")
+                    colored_echo(
+                        "    - Position restraints appended to molecule *.itp files",
+                        phase="build",
+                    )
+                    colored_echo("    - run_*_gromacs.sh (run script)", phase="build")
+                elif export_format in ("lammps", "amber"):
+                    colored_echo(
+                        f"    ({export_format.upper()} export is not yet supported)",
+                        phase="build",
+                    )
+            else:
+                colored_echo("Files to Generate (OpenMM):", phase="build")
+                colored_echo("  Per replicate:", phase="build")
+                colored_echo("    - solvated_system.pdb (topology + positions)", phase="build")
+                colored_echo("    - system.xml (OpenMM system with restraints)", phase="build")
+            colored_echo(phase="build")
+
+            if sim_config.restraints:
+                colored_echo("Restraints:", phase="build")
+                for r in sim_config.restraints:
+                    status = "ENABLED" if r.enabled else "DISABLED"
+                    colored_echo(
+                        f"  - {r.name}: {r.type.value}, d={r.distance} Å, "
+                        f"k={r.force_constant} kJ/mol/nm², {status}",
+                        phase="build",
+                    )
                 colored_echo(phase="build")
-                colored_echo("GROMACS export enabled:", phase="build")
+
+            colored_echo("=" * 60, phase="build")
+            if export_format in ("lammps", "amber"):
                 colored_echo(
-                    f"  Output: {sim_config.output.projects_directory}/{replicate}/gromacs/",
+                    f"Validation passed. {export_format.upper()} export is not yet implemented.",
                     phase="build",
                 )
+            else:
+                colored_echo("Validation passed. Ready to build.", phase="build")
+            colored_echo("=" * 60, phase="build")
             return
 
-        colored_echo(f"Building system for replicate {replicate}...", phase="build")
-        working_dir = sim_config.get_working_directory(replicate)
-        builder = SystemBuilder.from_config(sim_config)
-        interchange = builder.build_from_config(
-            config=sim_config,
-            working_dir=working_dir,
-            polymer_seed=replicate,
-        )
-
-        # Branch based on export format
-        if gromacs:
-            # Export to GROMACS format
-            colored_echo("Exporting to GROMACS format...", phase="export")
-            gromacs_dir = (
-                sim_config.output.projects_directory / f"replicate_{replicate}" / "gromacs"
-            )
-            export_result = builder.export_to_gromacs(gromacs_dir)
-
-            colored_echo("GROMACS export successful!", phase="export")
-            colored_echo(f"Output directory: {gromacs_dir}", phase="export")
-            colored_echo("Files generated:", phase="export")
-            colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
-            colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
-            colored_echo(
-                f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export"
-            )
-            for eq_mdp in export_result.get("eq_mdps", []):
-                colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
-            colored_echo(f"  - {export_result['prod_mdp'].name} (production)", phase="export")
-            if export_result.get("posres_defines"):
-                colored_echo("Position restraints added to molecule ITP files:", phase="export")
-                for component, define in export_result["posres_defines"].items():
-                    colored_echo(f"  - {component}: #ifdef {define}", phase="export")
-            colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
-            colored_echo(phase="export")
-            colored_echo(
-                f"To run: cd {gromacs_dir} && ./{export_result['run_script'].name}", phase="export"
+        for rep in replicate_list:
+            colored_echo(f"Building system for replicate {rep}...", phase="build")
+            working_dir = sim_config.get_working_directory(rep)
+            builder = SystemBuilder.from_config(sim_config)
+            interchange = builder.build_from_config(
+                config=sim_config,
+                working_dir=working_dir,
+                polymer_seed=rep,
             )
 
-        else:
-            # Default: prepare for OpenMM simulation
-            colored_echo("Extracting OpenMM components...", phase="build")
-            omm_topology, omm_system, omm_positions = builder.get_openmm_components()
+            # Branch based on export format
+            if export_format:
+                # Export to requested engine format
+                from polyzymd.exporters.interchange import export_system
 
-            # Apply restraints if configured
-            if sim_config.restraints:
-                from polyzymd.core.restraints import RestraintFactory, apply_restraints
-
-                colored_echo(
-                    f"Applying {len(sim_config.restraints)} restraint(s)...", phase="build"
+                colored_echo(f"Exporting to {export_format.upper()} format...", phase="export")
+                export_dir = (
+                    sim_config.output.projects_directory / f"replicate_{rep}" / export_format
                 )
-                restraint_defs = []
-                for r in sim_config.restraints:
-                    if not r.enabled:
-                        colored_echo(f"  - {r.name}: DISABLED (skipping)", phase="build")
-                        continue
+                export_result = export_system(
+                    interchange=interchange,
+                    config=sim_config,
+                    output_dir=export_dir,
+                    fmt=export_format,
+                    component_info=builder.get_component_info(),
+                )
 
-                    # Create restraint definition from config
-                    restraint_def = RestraintFactory.from_config(r.model_dump())
+                colored_echo(f"{export_format.upper()} export successful!", phase="export")
+                colored_echo(f"Output directory: {export_dir}", phase="export")
+                colored_echo("Files generated:", phase="export")
+                colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
+                colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
+                colored_echo("  - *.itp (molecule parameters)", phase="export")
+                colored_echo(
+                    f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export"
+                )
+                for eq_mdp in export_result.get("eq_mdps", []):
+                    colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
+                colored_echo(f"  - {export_result['prod_mdp'].name} (production)", phase="export")
+                if export_result.get("posres_defines"):
+                    colored_echo("Position restraints added to molecule ITP files:", phase="export")
+                    for component, define in export_result["posres_defines"].items():
+                        colored_echo(f"  - {component}: #ifdef {define}", phase="export")
+                colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
+                colored_echo(phase="export")
+                colored_echo(
+                    f"To run: cd {export_dir} && ./{export_result['run_script'].name}",
+                    phase="export",
+                )
 
-                    # Validate the selection resolves to exactly one atom each
-                    try:
-                        indices1 = restraint_def.atom1.resolve(omm_topology)
-                        indices2 = restraint_def.atom2.resolve(omm_topology)
+            else:
+                # Default: prepare for OpenMM simulation
+                colored_echo("Extracting OpenMM components...", phase="build")
+                omm_topology, omm_system, omm_positions = builder.get_openmm_components()
 
-                        if len(indices1) != 1:
+                # Apply restraints if configured
+                if sim_config.restraints:
+                    from polyzymd.core.restraints import RestraintFactory, apply_restraints
+
+                    colored_echo(
+                        f"Applying {len(sim_config.restraints)} restraint(s)...", phase="build"
+                    )
+                    restraint_defs = []
+                    for r in sim_config.restraints:
+                        if not r.enabled:
+                            colored_echo(f"  - {r.name}: DISABLED (skipping)", phase="build")
+                            continue
+
+                        # Create restraint definition from config
+                        restraint_def = RestraintFactory.from_config(r.model_dump())
+
+                        # Validate the selection resolves to exactly one atom each
+                        try:
+                            indices1 = restraint_def.atom1.resolve(omm_topology)
+                            indices2 = restraint_def.atom2.resolve(omm_topology)
+
+                            if len(indices1) != 1:
+                                colored_echo(
+                                    f"Error: Restraint '{r.name}' atom1 selection matched "
+                                    f"{len(indices1)} atoms (need exactly 1)",
+                                    err=True,
+                                    level=logging.ERROR,
+                                )
+                                sys.exit(1)
+                            if len(indices2) != 1:
+                                colored_echo(
+                                    f"Error: Restraint '{r.name}' atom2 selection matched "
+                                    f"{len(indices2)} atoms (need exactly 1)",
+                                    err=True,
+                                    level=logging.ERROR,
+                                )
+                                sys.exit(1)
+
                             colored_echo(
-                                f"Error: Restraint '{r.name}' atom1 selection matched "
-                                f"{len(indices1)} atoms (need exactly 1)",
+                                f"  - {r.name}: atom {indices1[0]} <-> atom {indices2[0]} "
+                                f"(type={r.type.value}, d={r.distance} A, "
+                                f"k={r.force_constant} kJ/mol/nm^2)",
+                                phase="build",
+                            )
+                            restraint_defs.append(restraint_def)
+
+                        except ValueError as e:
+                            colored_echo(
+                                f"Error: Restraint '{r.name}' invalid: {e}",
                                 err=True,
                                 level=logging.ERROR,
                             )
                             sys.exit(1)
-                        if len(indices2) != 1:
-                            colored_echo(
-                                f"Error: Restraint '{r.name}' atom2 selection matched "
-                                f"{len(indices2)} atoms (need exactly 1)",
-                                err=True,
-                                level=logging.ERROR,
-                            )
-                            sys.exit(1)
 
+                    # Apply all validated restraints to the system
+                    if restraint_defs:
+                        apply_restraints(restraint_defs, omm_topology, omm_system)
                         colored_echo(
-                            f"  - {r.name}: atom {indices1[0]} <-> atom {indices2[0]} "
-                            f"(type={r.type.value}, d={r.distance} A, "
-                            f"k={r.force_constant} kJ/mol/nm^2)",
+                            f"Successfully applied {len(restraint_defs)} restraint(s)",
                             phase="build",
                         )
-                        restraint_defs.append(restraint_def)
 
-                    except ValueError as e:
-                        colored_echo(
-                            f"Error: Restraint '{r.name}' invalid: {e}",
-                            err=True,
-                            level=logging.ERROR,
-                        )
-                        sys.exit(1)
+                # Save OpenMM system to XML for --skip-build support
+                from openmm import XmlSerializer
 
-                # Apply all validated restraints to the system
-                if restraint_defs:
-                    apply_restraints(restraint_defs, omm_topology, omm_system)
-                    colored_echo(
-                        f"Successfully applied {len(restraint_defs)} restraint(s)", phase="build"
-                    )
+                system_xml_path = working_dir / "system.xml"
+                colored_echo(f"Saving OpenMM system to {system_xml_path}...", phase="build")
+                with open(system_xml_path, "w") as f:
+                    f.write(XmlSerializer.serialize(omm_system))
 
-            # Save OpenMM system to XML for --skip-build support
-            from openmm import XmlSerializer
+                colored_echo("System built successfully!", phase="build")
+                colored_echo(f"Output directory: {working_dir}", phase="build")
+                colored_echo("Files saved:", phase="build")
+                colored_echo("  - solvated_system.pdb (topology + positions)", phase="build")
+                colored_echo("  - system.xml (OpenMM system with restraints)", phase="build")
+                colored_echo(
+                    "Use 'polyzymd submit' to submit for HPC execution,",
+                    phase="build",
+                )
+                colored_echo(
+                    "or 'polyzymd run-segment' to run a single segment locally.",
+                    phase="build",
+                )
 
-            system_xml_path = working_dir / "system.xml"
-            colored_echo(f"Saving OpenMM system to {system_xml_path}...", phase="build")
-            with open(system_xml_path, "w") as f:
-                f.write(XmlSerializer.serialize(omm_system))
-
-            colored_echo("System built successfully!", phase="build")
-            colored_echo(f"Output directory: {working_dir}", phase="build")
-            colored_echo("Files saved:", phase="build")
-            colored_echo("  - solvated_system.pdb (topology + positions)", phase="build")
-            colored_echo("  - system.xml (OpenMM system with restraints)", phase="build")
-            colored_echo(
-                "Use 'polyzymd run --skip-build' to run without rebuilding.", phase="build"
-            )
+    except PydanticValidationError as e:
+        colored_echo("Configuration error:", err=True, level=logging.ERROR)
+        for error in e.errors():
+            loc = " → ".join(str(x) for x in error["loc"])
+            colored_echo(f"  {loc}: {error['msg']}", err=True, level=logging.ERROR)
+        sys.exit(1)
 
     except FileNotFoundError as e:
-        colored_echo(f"Error: {e}", err=True, level=logging.ERROR)
+        colored_echo(f"File not found: {e}", err=True, level=logging.ERROR)
         sys.exit(1)
+
+    except ValueError as e:
+        colored_echo(f"Validation error: {e}", err=True, level=logging.ERROR)
+        sys.exit(1)
+
+    except NotImplementedError as e:
+        colored_echo(f"Not yet supported: {e}", err=True, level=logging.ERROR)
+        sys.exit(1)
+
     except Exception as e:
-        colored_echo(f"Build failed: {e}", err=True, level=logging.ERROR)
+        colored_echo(f"Unexpected error: {e}", err=True, level=logging.ERROR)
+        colored_echo(
+            "This may be a bug. Re-run with --verbose for details.",
+            err=True,
+            level=logging.ERROR,
+        )
         if LOGGER.level == logging.DEBUG:
             import traceback
 
@@ -374,11 +650,82 @@ def build(
 
 
 # =============================================================================
-# Run-GROMACS Command
+# Run Command
 # =============================================================================
 
 
-@cli.command("run-gromacs")
+def _print_run_dry_run_report(
+    sim_config: "SimulationConfig",
+    config_path: str,
+    replicate_list: list[int],
+    engine: str,
+    gmx_path: str | None,
+) -> None:
+    """Print a preview report for ``run --dry-run``.
+
+    Parameters
+    ----------
+    sim_config : SimulationConfig
+        Validated simulation configuration.
+    config_path : str
+        Path to the YAML configuration file.
+    replicate_list : list[int]
+        Replicates that would be run.
+    engine : str
+        Execution engine (``"gromacs"`` or ``"openmm"``).
+    gmx_path : str or None
+        Optional GROMACS executable path.
+    """
+    phase = "simulation"
+    colored_echo("=" * 60, phase=phase)
+    colored_echo("DRY RUN — Run Command Preview", phase=phase)
+    colored_echo("=" * 60, phase=phase)
+    colored_echo(phase=phase)
+
+    colored_echo("Configuration Summary:", phase=phase)
+    colored_echo(f"  Name: {sim_config.name}", phase=phase)
+    if sim_config.description:
+        colored_echo(f"  Description: {sim_config.description}", phase=phase)
+    colored_echo(f"  Config file: {config_path}", phase=phase)
+    colored_echo(f"  Engine: {engine}", phase=phase)
+    if engine == "gromacs":
+        colored_echo(f"  GROMACS executable: {gmx_path or 'gmx'}", phase=phase)
+    colored_echo(phase=phase)
+
+    colored_echo("Replicates:", phase=phase)
+    colored_echo(f"  Count: {len(replicate_list)}", phase=phase)
+    colored_echo(f"  IDs: {replicate_list}", phase=phase)
+    colored_echo(phase=phase)
+
+    colored_echo("Planned output:", phase=phase)
+    for rep in replicate_list:
+        working_dir = sim_config.get_working_directory(rep)
+        colored_echo(f"  Replicate {rep}:", phase=phase)
+        colored_echo(f"    Working dir: {working_dir}", phase=phase)
+        if engine == "gromacs":
+            gromacs_dir = sim_config.output.projects_directory / f"replicate_{rep}" / "gromacs"
+            colored_echo(f"    GROMACS dir: {gromacs_dir}", phase=phase)
+        else:
+            colored_echo(
+                "    Workflow: build -> minimize -> equilibrate -> production", phase=phase
+            )
+            colored_echo(
+                "    Outputs: solvated_system.pdb, system.xml, production_0/*", phase=phase
+            )
+
+    colored_echo(phase=phase)
+    colored_echo("Dry run complete. No files were written.", phase=phase)
+    colored_echo("=" * 60, phase=phase)
+
+
+@cli.command(
+    help=(
+        "Build and run simulations locally with a selected engine. "
+        "Use --engine gromacs for full local GROMACS workflow, or "
+        "--engine openmm for local OpenMM execution. Use --dry-run for "
+        "preview-only validation without writing files."
+    ),
+)
 @click.option(
     "-c",
     "--config",
@@ -388,10 +735,17 @@ def build(
 )
 @click.option(
     "-r",
+    "--replicates",
+    default=None,
+    type=str,
+    help="Replicate range (e.g., '1', '1-3', '1,3,5'). Default: 1",
+)
+@click.option(
     "--replicate",
-    default=1,
+    default=None,
     type=int,
-    help="Replicate number (default: 1)",
+    hidden=True,
+    help="[Deprecated] Use --replicates instead.",
 )
 @click.option(
     "--scratch-dir",
@@ -407,42 +761,60 @@ def build(
 )
 @click.option(
     "--gmx-path",
-    default="gmx",
-    help="Path to GROMACS executable (default: gmx)",
+    default=None,
+    help="Path to GROMACS executable (only valid with --engine gromacs)",
+)
+@click.option(
+    "--engine",
+    required=True,
+    type=click.Choice(["gromacs", "openmm"], case_sensitive=False),
+    help="Simulation engine to run locally",
 )
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Export files but don't run simulation",
+    help="Validate config and preview planned execution without writing files",
 )
-def run_gromacs(
+def run(
     config: str,
-    replicate: int,
-    scratch_dir: Optional[str],
-    projects_dir: Optional[str],
-    gmx_path: str,
+    replicates: str | None,
+    replicate: int | None,
+    scratch_dir: str | None,
+    projects_dir: str | None,
+    gmx_path: str | None,
+    engine: str,
     dry_run: bool,
 ) -> None:
-    """Run a simulation using GROMACS.
+    """Build and run a simulation locally.
 
-    Builds the system, exports to GROMACS format (.gro, .top, .mdp),
-    and executes the full GROMACS workflow locally (EM, equilibration,
-    production, and trajectory post-processing).
+    For each replicate, this command builds the system and executes the full
+    local simulation workflow using the selected engine.
+
+    Use ``--dry-run`` to validate the configuration and preview planned output
+    without building or running.
 
     \b
     Notes:
-        - Requires GROMACS to be installed and accessible
-        - Use --gmx-path to specify a custom GROMACS executable
-        - Use --dry-run to export files without running the simulation
+        - ``--engine gromacs`` requires GROMACS to be installed and accessible
+        - ``--gmx-path`` is valid only with ``--engine gromacs``
+        - ``--dry-run`` validates and previews without writing files
     """
-    from polyzymd.builders.system_builder import SystemBuilder
+    from pydantic import ValidationError as PydanticValidationError
+
     from polyzymd.config.schema import SimulationConfig
 
-    colored_echo(f"Loading configuration from: {config}", phase="export")
+    engine = engine.lower()
+    if engine == "openmm" and gmx_path is not None:
+        raise click.UsageError("--gmx-path can only be used with --engine gromacs")
+
+    replicate_list = _resolve_replicates_option(replicates, replicate, "run")
+
+    colored_echo(f"Loading configuration from: {config}", phase="simulation")
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-        colored_echo(f"Running GROMACS simulation: {sim_config.name}", phase="export")
+        colored_echo(f"Running local simulation: {sim_config.name}", phase="simulation")
+        colored_echo(f"Engine: {engine}", phase="simulation")
 
         # Override directories if provided via CLI
         if scratch_dir:
@@ -450,15 +822,66 @@ def run_gromacs(
         if projects_dir:
             sim_config.output.projects_directory = Path(projects_dir)
 
-        _run_gromacs_impl(
-            sim_config=sim_config,
-            replicate=replicate,
-            gmx_path=gmx_path,
-            dry_run=dry_run,
-        )
+        if dry_run:
+            _print_run_dry_run_report(
+                sim_config=sim_config,
+                config_path=config,
+                replicate_list=replicate_list,
+                engine=engine,
+                gmx_path=gmx_path,
+            )
+            return
 
-    except Exception as e:
-        colored_echo(f"Simulation failed: {e}", err=True, level=logging.ERROR)
+        resolved_gmx_path = gmx_path or "gmx"
+
+        succeeded = 0
+        for rep in replicate_list:
+            colored_echo(
+                f"\n--- Replicate {rep} ({succeeded + 1}/{len(replicate_list)}) ---",
+                phase="simulation",
+            )
+
+            if engine == "gromacs":
+                _run_gromacs_impl(
+                    sim_config=sim_config,
+                    replicate=rep,
+                    gmx_path=resolved_gmx_path,
+                )
+            else:
+                _run_openmm_impl(
+                    sim_config=sim_config,
+                    replicate=rep,
+                )
+
+            succeeded += 1
+
+        if len(replicate_list) > 1:
+            colored_echo(
+                f"\nAll {succeeded} replicate(s) completed successfully.", phase="simulation"
+            )
+
+    except PydanticValidationError as e:
+        colored_echo("Configuration error:", err=True, level=logging.ERROR)
+        for error in e.errors():
+            loc = " → ".join(str(x) for x in error["loc"])
+            colored_echo(f"  {loc}: {error['msg']}", err=True, level=logging.ERROR)
+        sys.exit(1)
+
+    except FileNotFoundError as e:
+        colored_echo(f"File not found: {e}", err=True, level=logging.ERROR)
+        sys.exit(1)
+
+    except ValueError as e:
+        colored_echo(f"Validation error: {e}", err=True, level=logging.ERROR)
+        sys.exit(1)
+
+    except (RuntimeError, OSError) as e:
+        colored_echo(f"Unexpected error: {e}", err=True, level=logging.ERROR)
+        colored_echo(
+            "This may be a bug. Re-run with --verbose for details.",
+            err=True,
+            level=logging.ERROR,
+        )
         if LOGGER.level == logging.DEBUG:
             import traceback
 
@@ -470,7 +893,6 @@ def _run_gromacs_impl(
     sim_config: "SimulationConfig",
     replicate: int,
     gmx_path: str,
-    dry_run: bool,
 ) -> None:
     """Run simulation using GROMACS.
 
@@ -482,8 +904,6 @@ def _run_gromacs_impl(
         Replicate number.
     gmx_path : str
         Path to GROMACS executable.
-    dry_run : bool
-        If True, export files but don't run simulation.
     """
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
@@ -519,6 +939,7 @@ def _run_gromacs_impl(
     colored_echo("Files generated:", phase="export")
     colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
     colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
+    colored_echo("  - *.itp (molecule parameters)", phase="export")
     colored_echo(f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export")
     for eq_mdp in export_result["eq_mdps"]:
         colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
@@ -528,16 +949,6 @@ def _run_gromacs_impl(
         for component, define in export_result["posres_defines"].items():
             colored_echo(f"  - {component}: #ifdef {define}", phase="export")
     colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
-
-    if dry_run:
-        colored_echo(
-            "\n--dry-run specified: Files exported but simulation not started.", phase="export"
-        )
-        colored_echo(
-            f"To run manually: cd {gromacs_dir} && ./{export_result['run_script'].name}",
-            phase="export",
-        )
-        return
 
     # Run GROMACS workflow
     colored_echo("\nStarting GROMACS simulation...", phase="export")
@@ -576,12 +987,48 @@ def _run_gromacs_impl(
         sys.exit(1)
 
 
+def _run_openmm_impl(
+    sim_config: "SimulationConfig",
+    replicate: int,
+) -> None:
+    """Build and run a full local OpenMM simulation.
+
+    Parameters
+    ----------
+    sim_config : SimulationConfig
+        Validated simulation configuration.
+    replicate : int
+        Replicate number.
+    """
+    production = sim_config.simulation_phases.production
+    working_dir = sim_config.get_working_directory(replicate)
+
+    colored_echo(f"Building and running OpenMM in {working_dir}", phase="simulation")
+    _run_initial_segment(
+        sim_config=sim_config,
+        working_dir=working_dir,
+        replicate=replicate,
+        skip_build=False,
+        duration_ns=production.duration,
+        num_samples=production.samples,
+        timestep_fs=production.time_step,
+    )
+    colored_echo("OpenMM simulation completed successfully.", phase="simulation")
+    colored_echo(f"Output directory: {working_dir}", phase="simulation")
+
+
 # =============================================================================
 # Submit Command (SLURM)
 # =============================================================================
 
 
-@cli.command()
+@cli.command(
+    help=(
+        "Submit OpenMM self-resubmitting SLURM jobs. This command is "
+        "OpenMM-only; GROMACS users should use run --engine gromacs locally "
+        "or build --format gromacs for manual cluster submission."
+    )
+)
 @click.option(
     "-c",
     "--config",
@@ -621,7 +1068,12 @@ def _run_gromacs_impl(
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Generate scripts without submitting",
+    help="Preview submission plan only (no files written, no submission)",
+)
+@click.option(
+    "--generate-only",
+    is_flag=True,
+    help="Generate job scripts without submitting to SLURM",
 )
 @click.option(
     "--output-dir",
@@ -683,38 +1135,47 @@ def _run_gromacs_impl(
 def submit(
     config: str,
     replicates: str,
-    scratch_dir: Optional[str],
-    projects_dir: Optional[str],
+    scratch_dir: str | None,
+    projects_dir: str | None,
     preset: str,
     email: str,
     dry_run: bool,
-    output_dir: Optional[str],
-    time_limit: Optional[str],
-    memory: Optional[str],
-    account: Optional[str],
-    gpu_type: Optional[str],
+    generate_only: bool,
+    output_dir: str | None,
+    time_limit: str | None,
+    memory: str | None,
+    account: str | None,
+    gpu_type: str | None,
     submit_openff_logs: bool,
     skip_build: bool,
-    pixi_env: Optional[str],
+    pixi_env: str | None,
     force: bool,
 ) -> None:
-    """Submit simulation jobs to SLURM.
+    """Submit OpenMM simulation jobs to SLURM.
 
-    Creates and submits self-resubmitting jobs (one per replicate)
-    that automatically checkpoint and resume until the full
+    Creates and optionally submits one self-resubmitting OpenMM job per
+    replicate. These jobs checkpoint and resume automatically until the full
     production duration is complete.
 
+    This command does not yet support GROMACS as a simulation engine. GROMACS
+    users should use ``run --engine gromacs`` for local execution or
+    ``build --format gromacs`` to export files for manual SLURM submission.
+
+    \b
     Directory structure:
-    - projects_dir: Where job scripts and SLURM logs are stored (long-term storage)
-    - scratch_dir: Where simulation data is written (high-performance storage)
+        - projects_dir: Where job scripts and SLURM logs are stored (long-term storage)
+        - scratch_dir: Where simulation data is written (high-performance storage)
     """
     from polyzymd.workflow.daisy_chain import submit_daisy_chain
     from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV
 
+    if dry_run and generate_only:
+        raise click.UsageError("Cannot use both --dry-run and --generate-only")
+
     # Resolve pixi environment: explicit flag > preset default
     resolved_pixi_env = pixi_env or PRESET_DEFAULT_PIXI_ENV.get(preset, "cuda-12-4")
 
-    _echo_branding("workflow")
+    _echo_branding()
     colored_echo(f"Loading configuration from: {config}", phase="workflow")
     colored_echo(f"Submitting jobs with preset: {preset}", phase="workflow")
     colored_echo(f"Pixi environment: {resolved_pixi_env}", phase="workflow")
@@ -733,15 +1194,48 @@ def submit(
         colored_echo("Skip-build mode: using pre-built systems", phase="workflow")
 
     if dry_run:
-        colored_echo("DRY RUN MODE - scripts will be created but not submitted", phase="workflow")
+        from polyzymd.config.schema import SimulationConfig
+
+        replicate_list = _resolve_replicates_option(replicates, None, "submit")
+        sim_config = SimulationConfig.from_yaml(config)
+        if scratch_dir:
+            sim_config.output.scratch_directory = Path(scratch_dir)
+        if projects_dir:
+            sim_config.output.projects_directory = Path(projects_dir)
+
+        script_dir = (
+            Path(output_dir) if output_dir else sim_config.output.get_job_scripts_directory()
+        )
+
+        colored_echo("=" * 60, phase="workflow")
+        colored_echo("DRY RUN — Submission Preview", phase="workflow")
+        colored_echo("=" * 60, phase="workflow")
+        colored_echo(f"Simulation: {sim_config.name}", phase="workflow")
+        colored_echo(f"Preset: {preset}", phase="workflow")
+        colored_echo(f"Pixi environment: {resolved_pixi_env}", phase="workflow")
+        colored_echo(f"Replicates: {replicate_list}", phase="workflow")
+        colored_echo(f"Script output directory: {script_dir}", phase="workflow")
+        colored_echo(
+            "Planned action: generate one self-resubmitting script per replicate and submit with sbatch",
+            phase="workflow",
+        )
+        colored_echo("Dry run complete. No files were written.", phase="workflow")
+        colored_echo("=" * 60, phase="workflow")
+        return
+
+    if generate_only:
+        colored_echo(
+            "GENERATE-ONLY MODE - scripts will be created but not submitted", phase="workflow"
+        )
 
     try:
-        results = submit_daisy_chain(
+        submit_daisy_chain(
             config_path=config,
             slurm_preset=preset,
             replicates=replicates,
             email=email,
             dry_run=dry_run,
+            generate_only=generate_only,
             force=force,
             pixi_env=resolved_pixi_env,
             output_dir=output_dir,
@@ -755,11 +1249,11 @@ def submit(
             skip_build=skip_build,
         )
 
-        if not dry_run:
+        if not generate_only:
             colored_echo("\nJob submission complete!", phase="workflow")
             colored_echo("Monitor with: squeue -u $USER", phase="workflow")
 
-    except Exception as e:
+    except (FileNotFoundError, ValueError, RuntimeError, OSError) as e:
         colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
         if LOGGER.level == logging.DEBUG:
             import traceback
@@ -773,7 +1267,7 @@ def submit(
 # =============================================================================
 
 
-@cli.command("run-segment")
+@cli.command("run-segment", hidden=True)
 @click.option(
     "-c",
     "--config",
@@ -802,7 +1296,7 @@ def submit(
 def run_segment(
     config: str,
     replicate: int,
-    scratch_dir: Optional[str],
+    scratch_dir: str | None,
     skip_build: bool,
 ) -> None:
     """Run the next simulation segment (self-resubmitting job entry point).
@@ -836,7 +1330,7 @@ def run_segment(
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-    except Exception as e:
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
         colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
         sys.exit(1)
 
@@ -1279,7 +1773,7 @@ def _run_continuation_segment(
 # =============================================================================
 
 
-@cli.command("check-progress")
+@cli.command("check-progress", hidden=True)
 @click.option(
     "-c",
     "--config",
@@ -1303,7 +1797,7 @@ def _run_continuation_segment(
 def check_progress(
     config: str,
     replicate: int,
-    scratch_dir: Optional[str],
+    scratch_dir: str | None,
 ) -> None:
     """Check whether a simulation is complete.
 
@@ -1323,7 +1817,7 @@ def check_progress(
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-    except Exception as e:
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
         colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
         sys.exit(EXIT_CODE_CHECK_ERROR)
 
@@ -1346,7 +1840,7 @@ def check_progress(
             timestep_fs=timestep_fs,
             replicate=replicate,
         )
-    except Exception as e:
+    except (FileNotFoundError, ValueError, OSError) as e:
         colored_echo(f"Failed to load progress: {e}", err=True, level=logging.ERROR)
         sys.exit(EXIT_CODE_CHECK_ERROR)
 
@@ -1403,7 +1897,7 @@ def status(config: str) -> None:
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-    except Exception as e:
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
         click.echo(click.style(f"Error: Failed to load config: {e}", fg="red"), err=True)
         sys.exit(1)
 
@@ -1422,9 +1916,6 @@ def status(config: str) -> None:
     # Discover replicate directories
     replicates = sim_config.discover_replicate_dirs()
 
-    # Also include configured replicates that don't exist on disk yet
-    # (they show as "not found")
-    found_nums = {num for num, _ in replicates}
     rep_map: dict[int, Path | None] = dict(replicates)
 
     # If no replicates found on disk, show a message
@@ -1446,7 +1937,7 @@ def status(config: str) -> None:
     click.echo()
 
     # Determine the widest replicate label for alignment
-    max_rep = max(found_nums)
+    max_rep = max(rep_map)
     label_width = len(f"run{max_rep}")
 
     need_attention = 0
@@ -1585,7 +2076,7 @@ def validate(config: str) -> None:
     except FileNotFoundError as e:
         click.echo(click.style(f"Error: {e}", fg="red"), err=True)
         sys.exit(1)
-    except Exception as e:
+    except (yaml.YAMLError, ValidationError, ValueError) as e:
         click.echo(click.style(f"Validation failed: {e}", fg="red"), err=True)
         sys.exit(1)
 
@@ -1643,7 +2134,7 @@ def init(name: str) -> None:
         (project_dir / "slurm_logs").mkdir()
 
         # Copy template configuration
-        template_path = resources.files("polyzymd.configs.templates").joinpath(
+        template_path = resources.files("polyzymd.templates.templates").joinpath(
             "config_template.yaml"
         )
         config_dest = project_dir / "config.yaml"
@@ -1732,7 +2223,8 @@ def init(name: str) -> None:
         )
 
     except Exception as e:
-        # Clean up on failure
+        # Broad catch is intentional — must clean up partially-created
+        # directory regardless of what went wrong
         if project_dir.exists():
             shutil.rmtree(project_dir)
         click.echo(click.style(f"Error creating project: {e}", fg="red"), err=True)
@@ -1873,12 +2365,12 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 def recover(
     config: str,
     replicate: int,
-    scratch_dir: Optional[str],
+    scratch_dir: str | None,
     preset: str,
     submit: bool,
     dry_run: bool,
-    memory: Optional[str],
-    pixi_env: Optional[str],
+    memory: str | None,
+    pixi_env: str | None,
     force: bool,
 ) -> None:
     """Resume a stalled or interrupted simulation.
@@ -1902,11 +2394,11 @@ def recover(
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.simulation.progress import load_or_scan_progress, save_progress
 
-    _echo_branding("workflow")
+    _echo_branding()
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
-    except Exception as e:
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
         colored_echo(f"Failed to load config: {e}", err=True, phase="workflow", level=logging.ERROR)
         sys.exit(1)
 
@@ -2158,7 +2650,128 @@ def info() -> None:
         colored_echo("  Pydantic: NOT INSTALLED", phase="cli")
 
     colored_echo("", phase="cli")
-    colored_echo("Example configs: polyzymd/configs/examples/", phase="cli")
+    colored_echo("Example configs: polyzymd/templates/examples/", phase="cli")
+
+
+# =============================================================================
+# Scaffold Command
+# =============================================================================
+
+
+@cli.command("new-analysis")
+@click.argument("name")
+@click.option(
+    "--class-name",
+    default=None,
+    help="PascalCase class prefix (default: auto-derived from NAME).",
+)
+@click.option(
+    "--style",
+    type=click.Choice(["dict", "pydantic"], case_sensitive=False),
+    default="dict",
+    help="Template style: 'dict' (default) for plain dicts, 'pydantic' for typed result models.",
+)
+@click.option(
+    "--project-root",
+    type=click.Path(exists=True, file_okay=False, resolve_path=True),
+    default=None,
+    help="Repository root. Default: auto-detected from this file's location.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Overwrite existing files.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Print what would be created without writing files.",
+)
+def new_analysis(
+    name: str,
+    class_name: str | None,
+    style: str,
+    project_root: str | None,
+    force: bool,
+    dry_run: bool,
+) -> None:
+    """Scaffold a new analysis plugin.
+
+    NAME is the snake_case plugin name (e.g. 'solvent_shell').
+
+    Creates:
+
+    \b
+      src/polyzymd/analyses/<NAME>/__init__.py    — plugin class
+      tests/analyses/plugins/test_<NAME>.py       — smoke tests
+
+    Styles:
+
+    \b
+      dict      Plain dicts for results (default, simplest)
+      pydantic  Typed Pydantic result models (better for complex analyses)
+
+    Run the generated tests with:
+
+    \b
+      pixi run -e build pytest tests/analyses/plugins/test_<NAME>.py -v
+    """
+    from polyzymd.cli.scaffold import generate_scaffold, validate_class_name, validate_name
+
+    # Validate name
+    error = validate_name(name)
+    if error:
+        raise click.BadParameter(error, param_hint="'NAME'")
+
+    # Validate class name if provided
+    if class_name is not None:
+        cls_error = validate_class_name(class_name)
+        if cls_error:
+            raise click.BadParameter(cls_error, param_hint="'--class-name'")
+
+    # Resolve project root
+    if project_root is None:
+        # Walk up from this file to find pyproject.toml
+        root = Path(__file__).resolve().parent
+        for _ in range(10):
+            if (root / "pyproject.toml").exists():
+                break
+            root = root.parent
+        else:
+            raise click.UsageError(
+                "Could not auto-detect project root. Pass --project-root explicitly."
+            )
+    else:
+        root = Path(project_root)
+
+    try:
+        created = generate_scaffold(
+            name,
+            root,
+            class_name=class_name,
+            style=style,
+            force=force,
+            dry_run=dry_run,
+        )
+    except FileExistsError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    verb = "Would create" if dry_run else "Created"
+    for p in created:
+        try:
+            display = p.relative_to(root)
+        except ValueError:
+            display = p
+        colored_echo(f"  {verb}: {display}", phase="cli")
+
+    if not dry_run:
+        colored_echo(f"\nPlugin '{name}' scaffolded successfully!", phase="cli")
+        colored_echo(
+            f"Run tests: pixi run -e build pytest tests/analyses/plugins/test_{name}.py -v",
+            phase="cli",
+        )
 
 
 # =============================================================================
@@ -2167,12 +2780,9 @@ def info() -> None:
 
 
 def _register_optional_command_groups() -> None:
-    """Register analysis/compare command groups only when optional deps are importable."""
-    from polyzymd.analysis.cli import analyze, plot
-    from polyzymd.compare.cli import compare
+    """Register optional command groups when deps are importable."""
+    from polyzymd.cli.compare import compare
 
-    cli.add_command(analyze)
-    cli.add_command(plot)
     cli.add_command(compare)
 
 

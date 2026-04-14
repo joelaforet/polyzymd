@@ -15,12 +15,14 @@ batch scripts for self-resubmitting MD simulation jobs.
 from __future__ import annotations
 
 import logging
+import re as _re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union
 
 from polyzymd.core.branding import FULL_CREDIT_LINE
+from polyzymd.utils.replicates import parse_replicate_range, validate_replicate_range  # noqa: F401
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +42,38 @@ PRESET_DEFAULT_PIXI_ENV: Dict[str, str] = {
     "bridges2": "cuda-12-6",
     "testing": "cuda-12-4",
 }
+
+# Pattern allowing alphanumerics, common path chars, and SLURM-safe punctuation
+# Intentionally excludes shell metacharacters: ; | & $ ` ( ) { } < > ' " \ !
+_SAFE_SCRIPT_VALUE = _re.compile(r"^[A-Za-z0-9._/,:\-@%=+ ]+$")
+
+
+def _validate_script_value(value: str, field_name: str) -> str:
+    """Reject values containing shell metacharacters before bash interpolation.
+
+    Parameters
+    ----------
+    value : str
+        The value to validate.
+    field_name : str
+        Name of the field for error messages.
+
+    Returns
+    -------
+    str
+        The validated value unchanged.
+
+    Raises
+    ------
+    ValueError
+        If the value contains unsafe characters.
+    """
+    if not _SAFE_SCRIPT_VALUE.match(value):
+        raise ValueError(
+            f"SLURM script field '{field_name}' contains unsafe characters: {value!r}. "
+            "Only alphanumerics and -_./:,@%=+ are allowed."
+        )
+    return value
 
 
 def _discover_manifest_path() -> str:
@@ -531,6 +565,29 @@ exit 0
         # Auto-detect the pixi manifest path from the current installation.
         manifest_path = _discover_manifest_path()
 
+        # Validate all interpolated string values against shell injection
+        _validate_script_value(self._config.partition, "partition")
+        _validate_script_value(job_name, "job_name")
+        _validate_script_value(output_file, "output_file")
+        _validate_script_value(self._config.time_limit, "time_limit")
+        _validate_script_value(self._pixi_env, "pixi_env")
+        _validate_script_value(str(manifest_path), "manifest_path")
+        _validate_script_value(str(config_path), "config_path")
+        _validate_script_value(str(working_dir), "working_dir")
+
+        if self._config.qos:
+            _validate_script_value(self._config.qos, "qos")
+        if self._config.memory:
+            _validate_script_value(self._config.memory, "memory")
+        if self._config.account:
+            _validate_script_value(self._config.account, "account")
+        if self._config.email:
+            _validate_script_value(self._config.email, "email")
+        if self._config.exclude:
+            _validate_script_value(self._config.exclude, "exclude")
+        if self._config.gpu_type:
+            _validate_script_value(self._config.gpu_type, "gpu_type")
+
         return self.JOB_TEMPLATE.format(
             partition=self._config.partition,
             job_name=job_name,
@@ -582,62 +639,3 @@ exit 0
 
         LOGGER.info(f"Saved script to {output_path}")
         return output_path
-
-
-def parse_replicate_range(replicate_range: str) -> List[int]:
-    """Parse a SLURM array range into a list of replicate numbers.
-
-    Args:
-        replicate_range: SLURM array format (e.g., "1-5", "1,3,5", "1-10:2").
-
-    Returns:
-        List of replicate numbers.
-
-    Example:
-        >>> parse_replicate_range("1-5")
-        [1, 2, 3, 4, 5]
-        >>> parse_replicate_range("1,3,5")
-        [1, 3, 5]
-        >>> parse_replicate_range("1-10:2")
-        [1, 3, 5, 7, 9]
-    """
-    replicates = []
-
-    parts = replicate_range.split(",")
-
-    for part in parts:
-        part = part.strip()
-        if "-" in part:
-            if ":" in part:
-                range_part, step = part.split(":")
-                step = int(step)
-            else:
-                range_part = part
-                step = 1
-
-            start, end = map(int, range_part.split("-"))
-            replicates.extend(range(start, end + 1, step))
-        else:
-            replicates.append(int(part))
-
-    return sorted(list(set(replicates)))
-
-
-def validate_replicate_range(replicate_range: str) -> bool:
-    """Validate that a replicate range is in proper SLURM array format.
-
-    Args:
-        replicate_range: Range string to validate.
-
-    Returns:
-        True if valid.
-
-    Raises:
-        ValueError: If the format is invalid.
-    """
-    import re
-
-    pattern = r"^(\d+(-\d+(:\d+)?)?)(,\d+(-\d+(:\d+)?)?)*$"
-    if not re.match(pattern, replicate_range):
-        raise ValueError(f"Invalid replicate range format: {replicate_range}")
-    return True

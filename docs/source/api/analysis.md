@@ -2,42 +2,32 @@
 
 This page is the entry point for the analysis-side API.
 
-PolyzyMD analysis code is organized around a small shared core plus
-analysis-specific implementations for stable and experimental workflows.
+All analysis code lives in `polyzymd.analyses`:
 
-## Core Analysis Interfaces
+| Package | Role |
+|---------|------|
+| `polyzymd.analyses` | **Plugin system** — unified analysis lifecycle (compute → aggregate → compare → plot → format) |
+| `polyzymd.analyses.shared` | Reusable utilities (trajectory loading, alignment, autocorrelation, statistics) |
+| `polyzymd.analyses.<name>._results` | Pydantic result models for serialization (existing plugins) |
 
-- `polyzymd.analysis`
-- `polyzymd.analysis.config`
-- `polyzymd.analysis.core.registry`
-- `polyzymd.analysis.results.base`
+## Plugin System
 
-These modules define the reusable contracts for analysis settings, analyzers,
-and serialized result objects.
-
-## Stable Analysis Implementations
-
-- `polyzymd.analysis.rmsf`
-- `polyzymd.analysis.distances`
-- `polyzymd.analysis.contacts`
-- `polyzymd.analysis.triad`
-- `polyzymd.analysis.secondary_structure`
+For the unified analysis lifecycle, see the [Analyses Plugin API](analyses.md).
 
 ## Related Documentation
 
+- [Analyses Plugin API](analyses.md)
 - [Configuration API](config.md)
-- [Compare API](compare.md)
 - [API Overview](overview.rst)
-- [Analyze a Multi-Condition Study](../tutorials/analysis_complete_workflow.md)
+- [Extending the Analysis Framework](../contributor_guide/extending_analyses.md)
 
 ## Notes
 
-- The analysis API is still evolving rapidly as the post-simulation analysis
-  stack stabilizes.
-- Stable release workflows are RMSF, contacts, distances, catalytic triad, and
-  secondary structure.
-- Experimental workflows remain documented separately in the user docs and are
-  clearly labeled there.
+- **Stable plugins** (9): RMSD, Rg, RMSF, catalytic triad, secondary structure,
+  SASA, distances, contacts, and hydrogen bonds.
+- **Experimental plugins** (4): exposure, binding free energy, polymer affinity,
+  and polymer bridging — metric definitions and interpretation may still change.
+  See individual plugin docs for details.
 
 <!-- IMAGE OPPORTUNITY: Add a compact analysis architecture diagram showing
-analysis core -> per-condition analysis -> comparison -> plot generation. -->
+analyses plugin -> comparison -> plot generation. -->

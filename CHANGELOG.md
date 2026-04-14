@@ -5,6 +5,328 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-04-09 — Analysis Plugin System & OCP Compliance
+
+Large-scale refactoring of the analysis and comparison subsystems to achieve
+Open-Closed Principle compliance.  New analysis types can now be added by
+dropping a package in `analyses/<name>/` with no modifications to core code.
+
+### Breaking Changes
+
+- **`compare/` package removed.**  The entire `compare/` package (lazy-export
+  facade, re-export layer, registries, plotters, formatters, comparators) has
+  been deleted.  Analysis-specific code now lives in each plugin's package under
+  `analyses/<name>/`.  Shared statistics live in `analyses/stats.py` and
+  `analyses/shared/inferential_statistics.py`.  No external downstream consumers
+  existed.
+- **Three dead registries removed.**  `AnalyzerRegistry`,
+  `AnalysisSettingsRegistry`, and `ComparisonSettingsRegistry` (plus all 16
+  `@register` decorators) were deleted from `compare/registries.py` during
+  the initial OCP refactor.
+- **`compare/plotters/` directory removed.**  All per-analysis plotting code
+  now lives in each plugin's `_plotters.py` module.  The orchestrator
+  (`analyses/orchestrator.py`) delegates plotting to each plugin's `plot()`
+  method.
+- **`compare/formatters.py` removed.**  RMSF-specific formatters moved to
+  `analyses/rmsf/`.
+- **`compare/comparators/` directory removed.**  All 11 old comparator files
+  deleted; comparison logic lives in each plugin's `compare()` method.
+- **Contacts plugin slimmed.**  `_binding_preference.py` (3,938 lines),
+  `_surface_exposure.py` (369 lines), and `_helpers.py` (369 lines) extracted
+  to `analyses/shared/` as reusable cross-plugin compute utilities.
+
+### Added
+
+- **`polyzymd new-analysis <name>` scaffold CLI command.**  Generates a complete
+  plugin package (`__init__.py`) and test file
+  (`tests/analyses/plugins/test_<name>.py`) with working discovery, compute,
+  aggregate, extract_metrics, format, and plot implementations.  Supports
+  `--class-name`, `--force`, `--dry-run`, `--style` (dict or pydantic), and
+  `--project-root` options.  Validates plugin names (snake_case, no collisions)
+  and class names (PascalCase, valid identifiers).  (`cli/scaffold.py`,
+  `cli/main.py`)
+- **Analysis plugin framework.**  `Analysis` ABC (`analyses/base.py`),
+  `pkgutil`-based auto-discovery (`analyses/discovery.py`), lifecycle
+  orchestrator (`analyses/orchestrator.py`), and default scalar comparison
+  pipeline (`analyses/stats.py`).  Eight analysis types migrated as plugins:
+  RMSF, contacts, distances, catalytic triad, secondary structure, exposure,
+  binding free energy, polymer affinity.
+- **Shared analysis utilities.**  `analyses/shared/` package with reusable
+  `TrajectoryLoader`, alignment helpers, autocorrelation, plot utilities,
+  `surface_exposure.py`, `binding_preference.py`, and
+  `binding_preference_helpers.py`.
+- **Framework hardening.**  `compute_replicate()` return values are validated
+  (None rejected).  `ComparisonContext` gains `failed_conditions` and
+  `aggregated_results` fields.  Orchestrator warns on undeclared plugin
+  dependencies.
+- **`cohens_d()` default corrected.**  `rmsf_mode` default changed from `True`
+  to `False` in `analyses/shared/inferential_statistics.py` so the
+  general-purpose function is not biased toward one analysis type.
+- **Unified `run` command.**  `polyzymd run --engine gromacs|openmm` replaces the
+  old `run-gromacs` command.  OpenMM engine runs simulations locally using the
+  existing runner infrastructure.  (`cli/main.py`)
+- **`submit --generate-only` flag.**  Generates SLURM scripts without submitting,
+  replacing the previous `--dry-run` behavior for script generation.
+  (`cli/main.py`, `workflow/daisy_chain.py`)
+- **RMSD convergence detection.**  Always-on sliding-window slope diagnostic
+  integrated into the RMSD analysis plugin.  Detects when RMSD timeseries have
+  plateaued.  Configurable via `convergence_window_size_ns`,
+  `convergence_step_size_ns`, `convergence_slope_threshold`, and
+  `convergence_sustained_for_ns` settings.  (`analyses/rmsd/`)
+- **Shared convergence utility.**  `analyses/shared/convergence.py` provides
+  `find_convergence_time()` for any timeseries — reusable across plugins.
+  (`analyses/shared/convergence.py`)
+- **Convergence diagnostic plots.**  Dual-axis panels showing RMSD timeseries
+  with sliding slope and convergence markers.  Controlled via
+  `show_convergence_plots` plot setting.  (`analyses/rmsd/_plotters.py`)
+- **"Establishing Convergence" documentation.**  New Explanation page covering
+  convergence concepts, the sliding-window algorithm, parameter tuning, and
+  limitations.  (`docs/source/explanation/convergence_detection.md`)
+- **Benjamini-Hochberg FDR correction.**  Pairwise t-tests are now corrected
+  for multiple comparisons across the full family of tests.  Configurable via
+  `fdr_alpha` in `comparison.yaml` defaults.  (`analyses/stats.py`,
+  `analyses/shared/inferential_statistics.py`)
+- **Configurable t-test method.**  `ttest_method` in `comparison.yaml` defaults
+  selects Student's (`"student"`, default) or Welch's (`"welch"`) t-test for
+  pairwise comparisons.  (`analyses/shared/defaults.py`, `analyses/stats.py`)
+- **Tukey's HSD post-hoc testing.**  `posthoc_method` in `comparison.yaml`
+  defaults selects either `"ttest_bh"` (default, pairwise t-tests with
+  Benjamini-Hochberg correction) or `"tukey_hsd"` (Tukey's Honestly
+  Significant Difference).  Tukey HSD uses a single studentized range
+  distribution for FWER control without requiring separate FDR correction.
+  (`analyses/shared/defaults.py`, `analyses/shared/inferential_statistics.py`,
+  `analyses/stats.py`, `analyses/base.py`)
+- **Post-hoc testing reference page.**  New documentation page at
+  `docs/source/reference/posthoc_testing.md` covering both post-hoc methods,
+  configuration, output fields, CLI significance markers, and edge cases.
+  Cross-linked from comparison YAML reference, statistics best practices,
+  comparison tutorial, and analysis comparison reference.
+- **Structured exception hierarchy.**  `AnalysisError`, `ReplicateError`,
+  `AggregationError`, `ComparisonError`, `PlotError`, and
+  `PluginContractError` in `analyses/exceptions.py` replace generic
+  `Exception` raises throughout the orchestrator.
+
+### Changed
+
+- **All analysis plugins are now packages.**  Each plugin lives in
+  `analyses/<name>/` with `__init__.py` (plugin class) and optional private
+  modules (`_plotters.py`, `_results.py`, `_comparison_results.py`,
+  `_formatters.py`, `_aggregator.py`) as needed.
+  Single-file plugins no longer exist.
+- **Plugin contract enforcement hardened.**  `compute_replicate()` returning
+  `None` is now a hard `PluginContractError` (not a soft skip).
+  `PluginContractError` propagates without being wrapped.  `compare()` and
+  `plot()` return values are validated (dict/BaseModel/None for compare;
+  `list[Path]` for plot).  `run_comparison()` fails fast on contract
+  violations.  (`analyses/orchestrator.py`)
+- **Discovery skip logic checks all path components.**  `_should_skip_module()`
+  now checks ALL path components (not just the last one), so
+  `shared.loader`, `shared.binding_preference`, etc. are properly skipped
+  instead of being probed as plugins.  (`analyses/discovery.py`)
+- **Settings fingerprint canonicalized.**  `settings_fingerprint()` now uses
+  `json.dumps(settings.model_dump(mode="json"), sort_keys=True)` for
+  deterministic hashing across Pydantic versions and Python dict ordering.
+  (`analyses/shared/config_hash.py`)
+- **`PlotContext.plot_settings` always materialised.**  `__post_init__`
+  now creates a real `PlotSettings()` when `None` is passed, eliminating
+  null-guard boilerplate in every plugin's `plot()` method.
+  (`analyses/base.py`)
+- **Plugin-specific code co-located.**  Result models, formatters, plotters, and
+  settings that were previously scattered across `compare/results/`,
+  `compare/formatters.py`, `compare/plotters/`, and `compare/comparators/` now
+  live inside each plugin's package.
+- **`compare/` package dissolved.**  Statistics moved to `analyses/stats.py` and
+  `analyses/shared/inferential_statistics.py`.  ComparisonConfig/PlotSettings/
+  PlotTheme moved to `config/comparison.py`.  CLI commands remain in `cli/`.
+  Per-analysis result models, formatters, and plotters now live in each plugin's
+  package.
+- **`submit --dry-run` is now preview-only.**  Validates configuration and
+  previews the submission plan without writing any files.  Use `--generate-only`
+  for script generation.  (`cli/main.py`, `workflow/daisy_chain.py`)
+- **RMSD cache identity.**  Per-replicate and aggregated cache filenames now
+  include a settings fingerprint, preventing stale results when analysis
+  parameters change.  (`analyses/rmsd/`)
+- **RMSD `overall_median` computation.**  Fixed to use `np.median()` instead of
+  `np.mean()` for correctness.  (`analyses/rmsd/`)
+- **RMSD comparison statistics.**  t-test and ANOVA are now guarded for
+  insufficient replicates (n < 2), reporting "not testable" instead of NaN
+  statistics.  (`analyses/rmsd/`)
+- **RMSD comparison resilience.**  Comparison now gracefully handles missing
+  run-condition combinations instead of raising `KeyError`.  (`analyses/rmsd/`)
+- **Convergence input validation.**  `find_convergence_time()` rejects NaN/inf
+  inputs with clear `ValueError` messages.  (`analyses/shared/convergence.py`)
+- **Job naming consistency.**  `create_job_name()` now uses rounding (matching
+  directory naming) instead of truncation for polymer percentages.
+  (`workflow/slurm.py`)
+- **`SubmissionResult` state model.**  Added `is_generated_only` field to
+  distinguish generate-only from dry-run submissions.
+  (`workflow/daisy_chain.py`)
+- **CLI exception handling.**  `run` and `submit` commands now catch specific
+  operational exceptions instead of broad `except Exception`.  (`cli/main.py`)
+- **`fdr_alpha` unified across both post-hoc methods.**  `fdr_alpha` is now
+  used as the significance threshold for both `"ttest_bh"` (BH FDR) and
+  `"tukey_hsd"` (FWER), and is also threaded to ANOVA significance.
+  Significance markers and formatter footnotes dynamically use
+  `result.fdr_alpha` instead of hardcoded `0.05`.  (`analyses/stats.py`)
+- **`ttest_method` scoped to `ttest_bh` only.**  `ttest_method` is now
+  explicitly documented and enforced as only relevant when `posthoc_method` is
+  `"ttest_bh"`.  Tukey HSD ignores `ttest_method` entirely.
+- **Tukey `p_value_adjusted` mirrors `p_value`.**  For Tukey HSD results,
+  `p_value_adjusted` is set to the same value as `p_value` (Tukey p-values are
+  already family-wise corrected) instead of being left `null`.
+  (`analyses/stats.py`)
+- **`PlotContext.plot_settings` typing strengthened.**  Field type changed from
+  `PlotSettings | None = None` to `PlotSettings = field(default_factory=...)`.
+  A `__post_init__` backstop materializes a default `PlotSettings()` if
+  explicit `None` is passed, guaranteeing non-null for all plugin code.
+  (`analyses/base.py`)
+- **`PluginContractError` propagation hardened.**  `run_all_comparisons()` now
+  has an explicit `except PluginContractError: raise` before the broader
+  `except AnalysisError` catch, ensuring contract violations fail fast.
+  (`analyses/orchestrator.py`)
+- **`save_result()` errors reclassified.**  All 5 `save_result()` call sites in
+  the orchestrator now wrap `OSError` as the appropriate lifecycle error
+  (`ReplicateError`, `AggregationError`, or `ComparisonError`).
+  (`analyses/orchestrator.py`)
+- **Foreign condition filtering in orchestrator.**  `_prepare_conditions_with_filter()`
+  now discards (not just warns about) foreign conditions returned by a plugin's
+  `filter_conditions()` method.  (`analyses/orchestrator.py`)
+- **Discovery import classification.**  `_OPTIONAL_HEAVY_DEPS` allowlist
+  (openmm, MDAnalysis, parmed, etc.) governs skip-vs-reraise for
+  `ImportError` during plugin discovery.  Known heavy deps are skip+warn;
+  unknown `ImportError`s re-raise immediately.  (`analyses/discovery.py`)
+- **Cache identity with settings fingerprint.**  Contact path resolver and
+  binding preference helpers now accept `settings_fp` parameter.
+  Fingerprinted files are searched first, legacy files as fallback.
+  `find_enzyme_pdb()` sorts glob results and warns on ambiguity.
+  (`analyses/contacts/_paths.py`, `analyses/shared/binding_preference_helpers.py`)
+
+### Removed
+
+- **Welch ANOVA removed entirely.**  Only classical one-way ANOVA
+  (`scipy.stats.f_oneway`) remains.  The `anova_method` field was removed
+  from all models and configuration.  Welch's ANOVA was deemed unnecessary
+  given that ANOVA is used only as an omnibus gate before post-hoc tests.
+
+- **`run-gromacs` command.**  Replaced by `polyzymd run --engine gromacs`.  All
+  references updated across CLI, docs, and configuration.  (`cli/main.py`)
+
+### Fixed
+
+- **`"default"` reaction template paths no longer rejected during config
+  loading.**  When a user specified `initiation: "default"` (or
+  `polymerization` / `termination`) in the YAML config, `_expand_paths()`
+  unconditionally treated the string as a relative filesystem path and
+  prepended the config directory, producing e.g.
+  `/ocean/projects/.../default`.  The Pydantic field validator in
+  `ReactionConfig` then rejected it because the path lacked a `.rxn`
+  extension.  The loader now recognises `"default"` as a sentinel value
+  and passes it through untouched so the validator can resolve it to the
+  bundled ATRP reaction templates.  (`config/loader.py`)
+- **Dead code removed.**  `catalytic_triad/_formatters.py` (427 lines, zero
+  imports), `rmsf/_comparison_results_legacy.py`, ghost `compare/plotters/`
+  directory, stale `__pycache__/` files.
+- **`validate_name()` exception handling narrowed.**  `except Exception:` changed
+  to `except ImportError:` in the scaffold's collision-check path.
+- **NPZ sidecar lookup.**  RMSD plotters now load NPZ paths from result metadata
+  instead of reconstructing filenames, preventing stale sidecar binding.
+  (`analyses/rmsd/_plotters.py`)
+- **File descriptor leaks.**  NPZ file loading in RMSD plotters now uses context
+  managers.  (`analyses/rmsd/_plotters.py`)
+- **Scaffold test path corrected.**  `new-analysis` now generates test files at
+  `tests/analyses/plugins/test_<name>.py` matching the project's test layout.
+  (`cli/scaffold.py`)
+- **Cache ambiguity detection.**  `contacts/_paths.py` and
+  `shared/binding_preference_helpers.py` now raise `ValueError` on ambiguous
+  glob matches (>1 file) instead of silently picking the last alphabetical
+  match.  (`analyses/contacts/_paths.py`,
+  `analyses/shared/binding_preference_helpers.py`)
+- **Unused imports removed.**  Cleaned up stale imports across `cli/main.py`,
+  `workflow/daisy_chain.py`, and several analysis plugins.
+- **`Optional[X]` → `X | None` migration.**  Updated type annotations in
+  `cli/main.py` and `workflow/daisy_chain.py` to use Python 3.10+ union syntax.
+- **Tukey HSD graceful degradation on n<2.**  `tukey_hsd()` now returns an
+  empty list instead of raising `ValueError` when fewer than 2 groups or
+  fewer than 2 observations per group are provided, matching the NaN-return
+  pattern used by other statistical functions.
+  (`analyses/shared/inferential_statistics.py`)
+- **Cohen's d direction for d==0.0.**  Now returns `direction="unchanged"`
+  instead of `"lower"` when the effect size is exactly zero.
+  (`analyses/shared/inferential_statistics.py`)
+- **ANOVA <2 groups guard.**  Explicit guard returns NaN result when fewer
+  than 2 groups are provided, instead of letting SciPy raise.
+  (`analyses/shared/inferential_statistics.py`)
+- **`ConditionSummary.n_replicates` validated across metrics.**  Now uses
+  the minimum replicate count across all metrics and warns on mismatch.
+  (`analyses/stats.py`)
+- **Control label log messages corrected.**  Orchestrator now uses
+  `original_control` in log messages before reassignment to prevent
+  misleading "not found" messages that name the wrong label.
+  (`analyses/orchestrator.py`)
+- **`fdr_alpha` validation for all post-hoc methods.**  `pairwise_comparisons()`
+  validates `fdr_alpha` is in `(0, 1]` and not `NaN` for both `"ttest_bh"`
+  and `"tukey_hsd"`, raising `ValueError` on invalid input.
+  (`analyses/stats.py`)
+
+### Documentation
+
+- Corrected `posthoc_testing.md` — Tukey HSD significance now documented as
+  using `fdr_alpha` (not hardcoded 0.05); `p_value_adjusted` accurately
+  described as mirroring `p_value` for Tukey results; ANOVA significance
+  documented as using `fdr_alpha`; Tukey n<2 edge case documented as graceful
+  empty-result return.
+- Corrected `comparison_yaml.md` — `fdr_alpha` description updated to reflect
+  unified behavior across both post-hoc methods.
+- Corrected `analysis_comparison_reference.md` — `rmsd` and `rg` correctly
+  listed as custom compare (not default); `fdr_alpha` description updated for
+  both post-hoc methods.
+- Corrected `analysis_statistics_best_practices.md` — added Tukey HSD
+  subsection alongside BH; `fdr_alpha` described as configurable at both
+  `defaults:` and per-plugin level; multiple comparisons table updated to
+  reference both correction methods.
+
+- Added `docs/source/reference/posthoc_testing.md` — post-hoc testing methods
+  reference page covering t-test+BH vs Tukey HSD, configuration, output fields,
+  CLI significance markers, and edge cases.
+- Added `posthoc_method` and `ttest_method` fields to `comparison_yaml.md`
+  defaults reference table.
+- Cross-linked post-hoc testing page from `analysis_comparison_reference.md`,
+  `analysis_statistics_best_practices.md`, and `analysis_compare_conditions.md`.
+- Updated `docs/source/contributor_guide/extending_analyses.md` with scaffold
+  command as the primary entry point for contributors.
+- Updated `AGENTS.md` and `.opencode/instructions/` for refactored layout.
+- Removed stale `api/compare.md` API page (module no longer exists).
+
+### Tests
+
+- 1,537 tests passing (6 skipped), up from 908 at branch start.
+- Added scaffold tests (name validation, class-name validation, file
+  generation, code quality, CliRunner integration).
+- Added Tukey HSD tests (basic operation, single-condition edge case,
+  insufficient-replicate edge case, format integration).
+- Added plugin contract enforcement tests (`TestContractEnforcement` in
+  `test_orchestrator.py`).
+- Added discovery robustness tests (shared descendant skip, getattr logging).
+- Added cache ambiguity tests (contacts paths, binding preference helpers).
+- Added settings fingerprint canonicalization tests (`test_config_hash.py`).
+- Added Phase 14 test hardening: exact Tukey pair assertions, BH/Tukey boundary
+  tests, ANOVA alpha threading tests, `fdr_alpha` validation tests, cache
+  precedence tests, fail-fast verification, and import classification tests.
+  (`tests/analyses/shared/`, `tests/analyses/test_stats.py`,
+  `tests/analyses/test_orchestrator.py`, `tests/analyses/test_discovery.py`,
+  `tests/analyses/plugins/test_contacts.py`)
+- Full test suite reorganized to mirror source layout (`tests/analyses/plugins/`,
+  `tests/analyses/shared/`, `tests/cli/`, etc.).
+- Removed obsolete registry and smoke tests.
+
+### Known Limitations
+
+- **Config hash mismatch warning prints 66+ times.**  The warning should print
+  once per analysis run but currently fires per-frame.  Does not affect results.
+- **Contact criteria cutoff not included in cache key.**  Changing the contacts
+  cutoff (e.g. 4.0 Å → 4.5 Å) does not invalidate cached results.  Clear the
+  analysis output directory manually when changing cutoff values.
+
 ## [1.2.1] - 2026-04-01
 
 ### Fixed
@@ -27,7 +349,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Analysis workflow and CLI.** Added the `polyzymd analyze` command family with
   YAML-driven setup and execution for RMSF, contacts, distances, catalytic triad,
   and secondary-structure analyses, plus shared loading, alignment, PBC handling,
-  result models, and aggregation helpers. (`src/polyzymd/analysis/`)
+  result models, and aggregation helpers. (`src/polyzymd/analyses/`)
 - **Comparison engine for multi-condition studies.** Added registry-based
   comparators, typed comparison result models, shared statistical utilities, and
   a generic `polyzymd compare run` workflow for RMSF, contacts, distances,
@@ -40,7 +362,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/polyzymd/compare/plotters/`)
 - **Secondary-structure comparison support.** Added DSSP-backed secondary
   structure analysis, comparison results, and plotting so secondary structure is
-  part of the stable release analysis stack. (`src/polyzymd/analysis/secondary_structure/`,
+  part of the stable release analysis stack. (`src/polyzymd/analyses/secondary_structure.py`,
   `src/polyzymd/compare/comparators/secondary_structure.py`,
   `src/polyzymd/compare/plotters/secondary_structure.py`)
 - **Comprehensive analysis documentation.** Added end-to-end tutorials,
@@ -69,8 +391,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result discovery, condition-specific result paths, partition-aware BFE plots,
   shared-path bugs in the plot orchestrator, contacts/distances comparison edge
   cases, and corrupted-trajectory handling in contacts/exposure workflows.
-  (`src/polyzymd/compare/`, `src/polyzymd/analysis/contacts/`,
-   `src/polyzymd/analysis/distances/`)
+   (`src/polyzymd/compare/`, `src/polyzymd/analyses/contacts.py`,
+    `src/polyzymd/analyses/distances.py`)
 
 ### Known Limitations
 
@@ -421,7 +743,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rewrote installation guide for pixi (replaces conda/mamba instructions).
 - Removed phantom `polyzymd run` and `polyzymd continue` CLI references
   (these commands never existed in the code).
-- Added `polyzymd run-gromacs` section to CLI reference.
+- Added `polyzymd run` section to CLI reference.
 - Updated HPC guide with pixi shell-hook activation examples.
 - Fixed stale `polymerist-env` environment name references.
 - Updated troubleshooting guide for pixi workflow.

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "polyzymd"
-version = "1.2.1"
+version = "1.3.0"
 description = "Molecular dynamics simulation toolkit for enzyme-polymer systems"
 readme = "README.md"
 license = "MIT"
@@ -110,6 +110,7 @@ docs = [
     "sphinx-rtd-theme>=1.0.0",
     "myst-parser>=1.0.0",
     "sphinx-click>=4.0.0",
+    "autodoc-pydantic>=2.1.0",
 ]
 
 # Full installation (for development) - still needs conda prereqs
@@ -132,7 +133,6 @@ packages = ["src/polyzymd"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/src",
-    "/configs",
     "/README.md",
     "/LICENSE",
 ]

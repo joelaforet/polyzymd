@@ -87,6 +87,8 @@ ambertools          = ">=23.3"        # relaxed: 23.3 lacks py311 on osx-arm64
 pytorch             = "2.6.*"
 pytest = ">=9.0.2,<10"
 pytest-cov = ">=4.0"
+black = ">=23.0"
+ruff = ">=0.1"
 
 # Analysis stack (MDAnalysis, plotting, stats)
 mdanalysis          = ">=2.4"
@@ -95,6 +97,15 @@ scikit-learn        = ">=1.0"
 pandas              = ">=2.0"
 matplotlib          = ">=3.5"
 seaborn             = ">=0.12"
+
+# Documentation toolchain
+sphinx              = ">=6.0"
+sphinx-rtd-theme    = ">=1.0"
+myst-parser         = ">=1.0"
+sphinx-copybutton   = ">=0.5"
+sphinx-design       = ">=0.5"
+sphinx-click        = ">=4.0"
+autodoc-pydantic    = ">=2.1"
 
 [feature.base.pypi-dependencies]
 polyzymd            = { path = ".", editable = true }
@@ -172,7 +183,7 @@ clean-pdb     = { cmd = "polyzymd clean-pdb" }
 [feature.cuda-12-6.tasks]
 submit         = { cmd = "polyzymd submit",         description = "Submit SLURM jobs (OpenMM 8.4, CUDA 12.6)" }
 run-segment    = { cmd = "polyzymd run-segment",    description = "Run next simulation segment" }
-run-gromacs    = { cmd = "polyzymd run-gromacs",     description = "Run GROMACS simulation" }
+run            = { cmd = "polyzymd run --engine gromacs", description = "Run local simulation (select engine)" }
 recover        = { cmd = "polyzymd recover",         description = "Resume stalled simulation" }
 check-progress = { cmd = "polyzymd check-progress", description = "Check simulation progress" }
 
@@ -180,6 +191,6 @@ check-progress = { cmd = "polyzymd check-progress", description = "Check simulat
 [feature.cuda-12-4.tasks]
 submit         = { cmd = "polyzymd submit",         description = "Submit SLURM jobs (OpenMM 8.1, CUDA 12.4)" }
 run-segment    = { cmd = "polyzymd run-segment",    description = "Run next simulation segment" }
-run-gromacs    = { cmd = "polyzymd run-gromacs",     description = "Run GROMACS simulation" }
+run            = { cmd = "polyzymd run --engine gromacs", description = "Run local simulation (select engine)" }
 recover        = { cmd = "polyzymd recover",         description = "Resume stalled simulation" }
 check-progress = { cmd = "polyzymd check-progress", description = "Check simulation progress" }

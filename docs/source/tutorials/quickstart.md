@@ -4,7 +4,14 @@ This tutorial walks through one complete first run: create a project scaffold,
 add an enzyme structure, write a minimal configuration, validate it, and make
 sure PolyzyMD can build the system.
 
-## What you need
+## What You Will Learn
+
+- How to create a project scaffold with `polyzymd init`
+- How to write a minimal `config.yaml` for an enzyme-only simulation
+- How to validate your configuration and run a system build
+- How to choose between local execution and HPC submission
+
+## Prerequisites
 
 - PolyzyMD installed with `pixi` as described in {doc}`installation`
 - a simulation-ready enzyme PDB file
@@ -143,37 +150,105 @@ If validation fails, fix the reported paths or field values before continuing.
 
 ## Step 5: Check that the system can build
 
-Start with a dry run:
+Start with a dry run to see the full validation report:
 
 ```bash
 pixi run -e build polyzymd build -c config.yaml --dry-run
 ```
 
-If that succeeds, run the actual build:
+If that succeeds, run the actual build. The commands differ depending on
+which simulation engine you plan to use:
+
+`````{tab-set}
+````{tab-item} OpenMM (default)
+Build the system for OpenMM simulation:
 
 ```bash
 pixi run -e build polyzymd build -c config.yaml
 ```
 
-This prepares the solvated system and runs the configured equilibration before
-production starts in later execution steps.
+This prepares the solvated system (PDB + OpenMM XML) for the configured
+equilibration and production phases.
+````
+
+````{tab-item} GROMACS
+Build the system and export GROMACS input files:
+
+```bash
+pixi run -e build polyzymd build -c config.yaml --format gromacs
+```
+
+This builds the solvated system and exports `.gro`, `.top`, `.itp`, `.mdp`, and
+a run script to `replicate_1/gromacs/`.
+
+```{tip}
+For the full GROMACS workflow, see {doc}`../how_to/gromacs_export`.
+`polyzymd submit` is OpenMM-only for now.
+Use `polyzymd build --format gromacs` when you only want input files.
+A full GROMACS engine workflow (`run --engine gromacs`, SLURM submission)
+is under active development on `feature/gromacs-engine-support`.
+```
+
+For multiple replicates (each with an independently built system):
+
+```bash
+pixi run -e build polyzymd build -c config.yaml --format gromacs --replicates 1-3
+```
+````
+`````
 
 ## Step 6: Decide how you want to run production
 
+`````{tab-set}
+````{tab-item} OpenMM — local
 For a local smoke test on a GPU-enabled workstation, you can run one segment:
 
 ```bash
 pixi run -e cuda-12-4 polyzymd run-segment -c config.yaml -r 1
 ```
+````
 
+````{tab-item} OpenMM — HPC
 For an HPC workflow, generate job scripts first:
 
 ```bash
-pixi run -e cuda-12-4 polyzymd submit -c config.yaml --preset aa100 --replicates 1 --dry-run
+pixi run -e cuda-12-4 polyzymd submit -c config.yaml --preset aa100 --replicates 1 --generate-only
 ```
 
-If the dry run looks right, submit for real with the CUDA environment that
+Use `--dry-run` instead if you only want a preview without creating files.
+
+If the generated scripts look right, submit for real with the CUDA environment that
 matches your cluster.
+````
+
+````{tab-item} GROMACS — local
+Run the full GROMACS workflow locally (build + EM + equilibration + production):
+
+```bash
+pixi run -e build polyzymd run -c config.yaml --engine gromacs --replicates 1
+```
+
+If you only need the input files without running GROMACS, use
+`build --format gromacs` instead (see Step 5 above).
+````
+
+````{tab-item} GROMACS — HPC
+Export GROMACS files and submit manually with your cluster's SLURM scripts:
+
+```bash
+pixi run -e build polyzymd build -c config.yaml --format gromacs --replicates 1-3
+```
+
+```{note}
+`polyzymd submit` does not yet support GROMACS as a simulation engine.
+Export files with `build --format gromacs` and submit manually via SLURM.
+Full GROMACS engine integration is under active development on
+`feature/gromacs-engine-support`.
+```
+
+See {doc}`../how_to/gromacs_export` for the full GROMACS HPC workflow.
+````
+`````
 
 ## What you should have now
 
@@ -186,10 +261,11 @@ At this point you should have:
 
 ## Where to go next
 
-- Add a substrate or polymers: {doc}`configuration`
-- Add distance restraints: {doc}`restraints`
-- Tune staged equilibration: {doc}`equilibration`
-- Run on a cluster: {doc}`hpc_slurm`
+- Add a substrate or polymers: {doc}`../reference/configuration`
+- Export to GROMACS: {doc}`../how_to/gromacs_export`
+- Add distance restraints: {doc}`../how_to/restraints`
+- Tune staged equilibration: {doc}`../how_to/equilibration`
+- Run on a cluster: {doc}`../how_to/hpc_slurm`
 
 <!-- IMAGE OPPORTUNITY: Add a screenshot of the generated project scaffold just
 after `polyzymd init`, with `config.yaml`, `structures/`, `job_scripts/`, and

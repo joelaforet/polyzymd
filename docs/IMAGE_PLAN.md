@@ -61,7 +61,7 @@ This file tracks where images should be added after the text overhaul is stable.
 
 - `docs/source/tutorials/analysis_compare_conditions.md`
   - Placement: after `Step 2: define a minimal comparison.yaml`
-  - Suggested image: annotated `comparison.yaml` snippet or a compact infographic showing `conditions + analysis_settings + comparison_settings + plot_settings`
+  - Suggested image: annotated `comparison.yaml` snippet or a compact infographic showing `conditions + plugins + plot_settings`
   - Purpose: help users parse the config without wading through raw YAML
 
 - `docs/source/reference/analysis_comparison_reference.md`

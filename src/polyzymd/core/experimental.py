@@ -10,6 +10,7 @@ EXPERIMENTAL_FEATURES: Final[dict[str, str]] = {
     "exposure": "Exposure dynamics",
     "binding_free_energy": "Binding free energy",
     "polymer_affinity": "Polymer affinity score",
+    "polymer_bridging_chemistry": "Polymer bridging chemistry profiling",
 }
 
 EXPERIMENTAL_COMPARISON_TYPES: Final[dict[str, tuple[str, ...]]] = {
