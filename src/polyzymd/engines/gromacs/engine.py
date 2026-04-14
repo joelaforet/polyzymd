@@ -282,6 +282,12 @@ class GromacsEngine(SimulationEngine):
         do **not** support ``-ntmpi`` — MPI rank count is controlled by the
         MPI launcher (``mpirun``/``srun``).
 
+        When ``gpu`` is enabled in the GROMACS config, the offload flags
+        ``-nb gpu``, ``-pme gpu``, ``-bonded gpu``, and ``-update gpu`` are
+        appended automatically. Each flag is skipped if the user already
+        specified that flag key (e.g., ``-nb cpu`` prevents auto-adding
+        ``-nb gpu``).
+
         Parameters
         ----------
         effective_slurm : SlurmConfig
@@ -305,6 +311,19 @@ class GromacsEngine(SimulationEngine):
             extras.append(f"-ntmpi {effective_slurm.ntasks}")
         if "-ntomp" not in token_set:
             extras.append(f"-ntomp {effective_slurm.cpus_per_task}")
+
+        # GPU offload flags — auto-add when gpu:true, skip if user already
+        # specified the flag key (e.g., user has "-nb cpu" → don't add "-nb gpu")
+        if self._config.gromacs.gpu:
+            _GPU_OFFLOAD_FLAGS = [
+                ("-nb", "gpu"),
+                ("-pme", "gpu"),
+                ("-bonded", "gpu"),
+                ("-update", "gpu"),
+            ]
+            for flag_key, flag_val in _GPU_OFFLOAD_FLAGS:
+                if flag_key not in token_set:
+                    extras.append(f"{flag_key} {flag_val}")
 
         parts = [raw] + extras
         return " ".join(part for part in parts if part).strip()

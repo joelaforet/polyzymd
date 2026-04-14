@@ -199,6 +199,104 @@ class TestResolveMdrunFlagsMPIBinary:
         assert "-ntmpi" not in flags
 
 
+class TestResolveMdrunFlagsGPU:
+    """Test GPU offload flag auto-composition in _resolve_mdrun_flags."""
+
+    def test_gpu_flags_auto_added(self):
+        """gpu:true should auto-add all four GPU offload flags."""
+        config = _make_config(gpu=True, ntmpi=1, ntomp=12, mdrun_flags="")
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=12)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert "-nb gpu" in flags
+        assert "-pme gpu" in flags
+        assert "-bonded gpu" in flags
+        assert "-update gpu" in flags
+
+    def test_gpu_flags_not_duplicated(self):
+        """User-provided GPU flags should not be duplicated."""
+        config = _make_config(
+            gpu=True,
+            ntmpi=1,
+            ntomp=12,
+            mdrun_flags="-nb gpu -pme gpu -bonded gpu -update gpu",
+        )
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=12)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert flags.count("-nb") == 1
+        assert flags.count("-pme") == 1
+        assert flags.count("-bonded") == 1
+        assert flags.count("-update") == 1
+
+    def test_user_override_nb_cpu_respected(self):
+        """User specifying -nb cpu should prevent auto-add of -nb gpu."""
+        config = _make_config(gpu=True, ntmpi=1, ntomp=12, mdrun_flags="-nb cpu")
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=12)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert "-nb cpu" in flags
+        assert "-nb gpu" not in flags
+        # Other GPU flags should still be auto-added
+        assert "-pme gpu" in flags
+        assert "-bonded gpu" in flags
+        assert "-update gpu" in flags
+
+    def test_user_override_update_cpu_respected(self):
+        """-update cpu should prevent -update gpu but leave others."""
+        config = _make_config(gpu=True, ntmpi=1, ntomp=12, mdrun_flags="-update cpu")
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=12)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert "-update cpu" in flags
+        assert "-update gpu" not in flags
+        assert "-nb gpu" in flags
+        assert "-pme gpu" in flags
+        assert "-bonded gpu" in flags
+
+    def test_cpu_mode_no_gpu_flags(self):
+        """gpu:false should not add any GPU offload flags."""
+        config = _make_config(gpu=False, ntmpi=1, ntomp=8, mdrun_flags="")
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=8)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert "-nb gpu" not in flags
+        assert "-pme gpu" not in flags
+        assert "-bonded gpu" not in flags
+        assert "-update gpu" not in flags
+        assert "-ntmpi 1" in flags
+        assert "-ntomp 8" in flags
+
+    def test_gpu_flags_with_thread_counts(self):
+        """GPU flags should coexist with -ntmpi and -ntomp."""
+        config = _make_config(gpu=True, ntmpi=1, ntomp=12, mdrun_flags="")
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=12)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert "-ntmpi 1" in flags
+        assert "-ntomp 12" in flags
+        assert "-nb gpu" in flags
+        assert "-pme gpu" in flags
+        assert "-bonded gpu" in flags
+        assert "-update gpu" in flags
+
+    def test_gpu_partial_user_override(self):
+        """User specifies some GPU flags; others auto-added."""
+        config = _make_config(gpu=True, ntmpi=1, ntomp=12, mdrun_flags="-nb gpu -bonded cpu")
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=12)
+        flags = engine._resolve_mdrun_flags(slurm)
+        # User-specified flags preserved
+        assert "-nb gpu" in flags
+        assert "-bonded cpu" in flags
+        # Non-specified GPU flags auto-added
+        assert "-pme gpu" in flags
+        assert "-update gpu" in flags
+        # No duplicates
+        assert flags.count("-nb") == 1
+        assert flags.count("-bonded") == 1
+
+
 class TestDiscoverLegacyReplicates:
     """Tests for GromacsEngine.discover_legacy_replicates()."""
 
