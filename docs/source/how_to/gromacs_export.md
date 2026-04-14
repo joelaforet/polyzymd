@@ -346,7 +346,8 @@ You can customize this script or use it as a template for HPC submission.
 ```{note}
 `polyzymd submit` does not yet support GROMACS as a simulation engine.
 The workflow below uses `build --format gromacs` to export files, then
-manual SLURM submission. Integrated GROMACS submission is planned for v1.4.0.
+manual SLURM submission. Full GROMACS engine integration is under active
+development on `feature/gromacs-engine-support`.
 ```
 
 ### Manual SLURM Submission

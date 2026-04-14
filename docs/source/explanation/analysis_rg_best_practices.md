@@ -446,7 +446,7 @@ atoms in the selection.
 
 ## Fragment Mode Best Practices
 
-```{versionadded} 1.4.0
+```{versionadded} 1.3.0
 ```
 
 When your selection contains multiple disconnected molecules (e.g., many

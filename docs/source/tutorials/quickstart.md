@@ -184,9 +184,9 @@ a run script to `replicate_1/gromacs/`.
 ```{tip}
 For the full GROMACS workflow, see {doc}`../how_to/gromacs_export`.
 `polyzymd submit` is OpenMM-only for now.
-Use `polyzymd build --format gromacs` when you only want input files,
-or `polyzymd run --engine gromacs` when you want PolyzyMD to build and run locally.
-Integrated GROMACS SLURM submission is planned for v1.4.0.
+Use `polyzymd build --format gromacs` when you only want input files.
+A full GROMACS engine workflow (`run --engine gromacs`, SLURM submission)
+is under active development on `feature/gromacs-engine-support`.
 ```
 
 For multiple replicates (each with an independently built system):
@@ -242,7 +242,8 @@ pixi run -e build polyzymd build -c config.yaml --format gromacs --replicates 1-
 ```{note}
 `polyzymd submit` does not yet support GROMACS as a simulation engine.
 Export files with `build --format gromacs` and submit manually via SLURM.
-Integrated GROMACS submission support is planned for v1.4.0.
+Full GROMACS engine integration is under active development on
+`feature/gromacs-engine-support`.
 ```
 
 See {doc}`../how_to/gromacs_export` for the full GROMACS HPC workflow.
