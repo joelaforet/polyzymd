@@ -9,6 +9,8 @@ from pathlib import Path
 from polyzymd.core.branding import FULL_CREDIT_LINE
 from polyzymd.workflow.slurm import SlurmConfig, _discover_manifest_path, _validate_script_value
 
+from .binary import is_mpi_binary
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -206,7 +208,7 @@ exit 0
         self._config = slurm_config
         self._pixi_env = pixi_env
         self._gmx_binary = gmx_binary
-        self._is_mpi_binary = "_mpi" in Path(self._gmx_binary).name
+        self._is_mpi_binary = is_mpi_binary(self._gmx_binary)
         self._grompp_flags = grompp_flags
         self._mdrun_flags = mdrun_flags
         self._module_load = module_load

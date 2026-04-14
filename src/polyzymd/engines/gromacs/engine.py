@@ -11,7 +11,7 @@ from polyzymd.engines.base import EngineSubmitRequest, SimulationEngine, Traject
 from polyzymd.simulation.progress import SimulationProgress
 from polyzymd.workflow.slurm import SlurmConfig
 
-from .binary import resolve_gromacs_binary
+from .binary import is_mpi_binary, resolve_gromacs_binary
 from .progress import load_or_scan_gromacs_progress
 from .slurm import GromacsSlurmScriptGenerator
 
@@ -89,8 +89,16 @@ class GromacsEngine(SimulationEngine):
         -------
         GromacsEngine
             Configured GROMACS engine instance.
+
+        Raises
+        ------
+        ValueError
+            If GPU mode is enabled but the resolved binary is a real-MPI
+            build (which typically lacks CUDA support).
         """
-        gmx_binary = resolve_gromacs_binary(config=config)
+        gromacs_cfg = getattr(config, "gromacs", None)
+        gpu = getattr(gromacs_cfg, "gpu", False) if gromacs_cfg else False
+        gmx_binary = resolve_gromacs_binary(config=config, gpu=gpu)
         return cls(config=config, gmx_binary=gmx_binary)
 
     def _generate_prefix(self) -> str:
@@ -285,19 +293,15 @@ class GromacsEngine(SimulationEngine):
             Complete mdrun flags string.
         """
         import shlex
-        from pathlib import Path
 
         raw = self._config.gromacs.mdrun_flags
         tokens = shlex.split(raw) if raw else []
         token_set = set(tokens)
 
-        # Detect whether the binary is an MPI build (gmx_mpi, gmx_mpi_d, ...)
-        # Thread-MPI builds use plain "gmx" or "gmx_d"; only they accept -ntmpi.
-        binary_name = Path(self._gmx_binary).name
-        is_mpi_build = "_mpi" in binary_name
+        mpi_build = is_mpi_binary(self._gmx_binary)
 
         extras: list[str] = []
-        if not is_mpi_build and "-ntmpi" not in token_set:
+        if not mpi_build and "-ntmpi" not in token_set:
             extras.append(f"-ntmpi {effective_slurm.ntasks}")
         if "-ntomp" not in token_set:
             extras.append(f"-ntomp {effective_slurm.cpus_per_task}")
