@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -342,16 +341,18 @@ class GromacsEngine(SimulationEngine):
             Submission metadata with script path and optional SLURM job id.
         """
         script_path = self.prepare_submission(request)
+        module_load = self._config.gromacs.module_load
 
-        if shutil.which("sbatch") is None:
+        if not module_load and shutil.which("sbatch") is None:
             return {
                 "submitted": False,
                 "script_path": script_path,
                 "reason": "sbatch_not_available",
             }
 
-        command = ["sbatch", str(script_path)]
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        from polyzymd.workflow.slurm_submit import run_sbatch
+
+        result = run_sbatch(script_path, module_load=module_load)
         if result.returncode != 0:
             raise RuntimeError(f"sbatch submission failed: {result.stderr.strip()}")
 

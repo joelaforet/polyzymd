@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
+from polyzymd.engines.base import EngineSubmitRequest
 from polyzymd.engines.gromacs.engine import GromacsEngine
 from polyzymd.workflow.slurm import SlurmConfig
 
@@ -378,3 +380,60 @@ class TestDiscoverLegacyReplicates:
 
         result = engine.discover_legacy_replicates(config)
         assert result == []
+
+
+class TestEngineSubmitModuleLoad:
+    """Tests that submit() passes module_load to run_sbatch."""
+
+    @patch("polyzymd.workflow.slurm_submit.run_sbatch")
+    def test_submit_passes_module_load(self, mock_run_sbatch):
+        """submit() should pass gromacs.module_load to run_sbatch."""
+        config = _make_config(module_load="module load slurm/blanca gromacs/2024.2")
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        script_path = Path("/tmp/run_rep1.sh")
+        engine.prepare_submission = MagicMock(return_value=script_path)
+
+        mock_run_sbatch.return_value = MagicMock(
+            returncode=0,
+            stdout="Submitted batch job 123",
+            stderr="",
+        )
+
+        request = EngineSubmitRequest(
+            replicate=1,
+            config_path=Path("/tmp/config.yaml"),
+            working_dir=Path("/tmp/work"),
+            slurm_config=SlurmConfig(),
+        )
+
+        result = engine.submit(request)
+
+        mock_run_sbatch.assert_called_once_with(script_path, module_load=config.gromacs.module_load)
+        assert result["submitted"] is True
+
+    @patch("polyzymd.workflow.slurm_submit.run_sbatch")
+    @patch("polyzymd.engines.gromacs.engine.shutil.which")
+    def test_submit_no_module_load(self, mock_which, mock_run_sbatch):
+        """submit() should pass module_load=None when not configured."""
+        config = _make_config(module_load=None)
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        script_path = Path("/tmp/run_rep2.sh")
+        engine.prepare_submission = MagicMock(return_value=script_path)
+        mock_which.return_value = "/usr/bin/sbatch"
+        mock_run_sbatch.return_value = MagicMock(
+            returncode=0,
+            stdout="Submitted batch job 456",
+            stderr="",
+        )
+
+        request = EngineSubmitRequest(
+            replicate=2,
+            config_path=Path("/tmp/config.yaml"),
+            working_dir=Path("/tmp/work"),
+            slurm_config=SlurmConfig(),
+        )
+
+        result = engine.submit(request)
+
+        mock_run_sbatch.assert_called_once_with(script_path, module_load=None)
+        assert result["submitted"] is True
