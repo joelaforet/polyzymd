@@ -818,7 +818,15 @@ class TestSubmitEngineAware:
         mock_config = _make_dry_run_config()
         mock_config.engine = "gromacs"
         mock_config.gromacs = SimpleNamespace(
-            grompp_flags="", mdrun_flags="", module_load=None, gmx_binary=None
+            grompp_flags="",
+            mdrun_flags="",
+            module_load=None,
+            gmx_binary=None,
+            ntmpi=1,
+            ntomp=4,
+            gpu=False,
+            gpus=1,
+            memory="16G",
         )
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
@@ -847,6 +855,17 @@ class TestSubmitEngineAware:
         """--openff-logs with --engine gromacs should warn."""
         mock_config = _make_dry_run_config()
         mock_config.engine = "gromacs"
+        mock_config.gromacs = SimpleNamespace(
+            grompp_flags="",
+            mdrun_flags="",
+            module_load=None,
+            gmx_binary=None,
+            ntmpi=1,
+            ntomp=4,
+            gpu=False,
+            gpus=1,
+            memory="16G",
+        )
         mock_from_yaml.return_value = mock_config
         config_path = tmp_path / "fake.yaml"
         config_path.write_text("name: test\n", encoding="utf-8")
