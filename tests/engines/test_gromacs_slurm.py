@@ -1,5 +1,7 @@
 """Tests for GROMACS SLURM script generation."""
 
+import re
+
 from polyzymd.engines.gromacs.slurm import GromacsSlurmScriptGenerator
 from polyzymd.workflow.slurm import SlurmConfig
 
@@ -358,7 +360,7 @@ class TestSignalInfrastructure:
         assert "#SBATCH --constraint=" not in script
 
     def test_script_contains_term_trap(self, monkeypatch) -> None:
-        """Script should trap SIGTERM and define forward_term function."""
+        """Script should trap SIGTERM and define handle_term function."""
         monkeypatch.setattr(
             "polyzymd.engines.gromacs.slurm._discover_manifest_path",
             lambda: "/tmp/pixi.toml",
@@ -370,8 +372,8 @@ class TestSignalInfrastructure:
             system_prefix="enzyme_polymer",
             equilibration_mdps=["eq_01_nvt.mdp"],
         )
-        assert "trap 'forward_term' TERM" in script
-        assert "forward_term()" in script
+        assert "trap 'handle_term' TERM" in script
+        assert "handle_term()" in script
 
     def test_script_does_not_include_usr1_signal_directive(self, monkeypatch) -> None:
         """GROMACS scripts should not use USR1 signal (that's OpenMM-only)."""
@@ -817,3 +819,133 @@ class TestSetEOrdering:
             equilibration_mdps=["eq_01_nvt.mdp"],
         )
         assert script.index("set -e") < script.index("module load")
+
+
+class TestGlobalTermHandling:
+    """Tests for script-global SIGTERM handling."""
+
+    def test_handle_term_function_defined(self, monkeypatch) -> None:
+        """Script must define handle_term with phase-aware logic."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert "handle_term()" in script
+        assert "CURRENT_PHASE=" in script
+        assert "JOB_COMPLETE=" in script
+
+    def test_trap_installed_before_simulation_work(self, monkeypatch) -> None:
+        """SIGTERM trap must be installed before any grompp or mdrun."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        trap_idx = script.index("trap 'handle_term' TERM")
+        assert trap_idx < script.index("run_foreground $GMX grompp")
+        assert trap_idx < script.index('run_mdrun_stage "energy minimization"')
+
+    def test_job_complete_flag_prevents_spurious_resubmit(self, monkeypatch) -> None:
+        """JOB_COMPLETE=1 must be set before final exit 0."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        complete_idx = script.index("JOB_COMPLETE=1")
+        done_idx = script.index("All done.")
+        assert complete_idx < done_idx
+
+    def test_run_foreground_wrapper_defined(self, monkeypatch) -> None:
+        """run_foreground wrapper must be defined for tracked foreground commands."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert "run_foreground()" in script
+        assert 'CURRENT_PHASE="foreground"' in script
+
+    def test_grompp_calls_use_run_foreground(self, monkeypatch) -> None:
+        """All grompp calls should be wrapped with run_foreground."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp", "eq_02_npt.mdp"],
+        )
+        grompp_calls = [m.start() for m in re.finditer(r"\$GMX grompp", script)]
+        assert len(grompp_calls) >= 3
+        for pos in grompp_calls:
+            line_start = script.rfind("\n", 0, pos) + 1
+            line = script[line_start : script.find("\n", pos)]
+            assert "run_foreground" in line, f"grompp call not wrapped: {line.strip()}"
+
+    def test_trjconv_calls_use_foreground_phase(self, monkeypatch) -> None:
+        """trjconv section should execute inside foreground phase tracking."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        post_idx = script.index("=== Post-processing ===")
+        start_idx = script.index('CURRENT_PHASE="foreground"', post_idx)
+        trjconv_idx = script.index("trjconv", post_idx)
+        end_idx = script.index('CURRENT_PHASE="idle"', trjconv_idx)
+        assert start_idx < trjconv_idx < end_idx
+
+    def test_progress_update_uses_foreground_phase(self, monkeypatch) -> None:
+        """Progress update calls should run inside foreground phase tracking."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        first_idx = script.index("_update-gromacs-progress")
+        pre_idx = script.rfind('CURRENT_PHASE="foreground"', 0, first_idx)
+        post_idx = script.find('CURRENT_PHASE="idle"', first_idx)
+        assert pre_idx != -1
+        assert post_idx != -1
+        assert pre_idx < first_idx < post_idx

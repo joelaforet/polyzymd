@@ -80,19 +80,39 @@ MDRUN_FLAGS_EM=$(echo "$MDRUN_FLAGS" | sed 's/-pme  *gpu//g; s/-update  *gpu//g;
 MDRUN="{mdrun_command}"
 
 # =========================================================================
-# Signal infrastructure: trap SIGTERM (preemption), forward to backgrounded
-# mdrun, and resubmit exactly once after checkpoint flush.
+# Signal infrastructure: script-global SIGTERM handling with state machine
+# On preemption (SIGTERM), behavior depends on current phase:
+#   - mdrun:      forward TERM to child, wait for checkpoint, resubmit
+#   - foreground: resubmit immediately (grompp/trjconv are fast & idempotent)
+#   - idle:       resubmit immediately
+# After successful completion, SIGTERM is ignored (no spurious resubmit)
 # =========================================================================
 CHILD_PID=""
 TERM_RECEIVED=0
 RESUBMITTED=0
+CURRENT_PHASE="idle"   # idle | foreground | mdrun
+JOB_COMPLETE=0
 
-forward_term() {{
-    TERM_RECEIVED=1
-    if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
-        echo "Forwarding TERM to mdrun process (PID $CHILD_PID)"
-        kill -TERM "$CHILD_PID"
+handle_term() {{
+    if [ "$JOB_COMPLETE" -eq 1 ]; then
+        echo "SIGTERM received after job completion — ignoring."
+        return 0
     fi
+    TERM_RECEIVED=1
+    case "$CURRENT_PHASE" in
+        mdrun)
+            if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+                echo "Forwarding TERM to mdrun (PID $CHILD_PID) — waiting for checkpoint flush..."
+                kill -TERM "$CHILD_PID"
+            fi
+            # run_mdrun_stage will detect TERM_RECEIVED and resubmit after wait
+            ;;
+        foreground|idle)
+            echo "SIGTERM during ${{CURRENT_PHASE}} phase — resubmitting immediately."
+            resubmit_once || true
+            exit 0
+            ;;
+    esac
 }}
 
 resubmit_once() {{
@@ -118,6 +138,7 @@ resubmit_once() {{
 run_mdrun_stage() {{
     local stage_name="$1"
     shift
+    CURRENT_PHASE="mdrun"
     echo "Launching ${{stage_name}}: $*"
     "$@" &
     CHILD_PID=$!
@@ -131,6 +152,7 @@ run_mdrun_stage() {{
     done
     set -e
     CHILD_PID=""
+    CURRENT_PHASE="idle"
     if [ "$TERM_RECEIVED" -eq 1 ]; then
         echo "SIGTERM received during ${{stage_name}} — resubmitting after checkpoint flush."
         resubmit_once || exit 1
@@ -142,7 +164,15 @@ run_mdrun_stage() {{
     fi
 }}
 
-trap 'forward_term' TERM
+# Run a foreground command with SIGTERM-aware phase tracking
+# If TERM arrives during execution, the trap handler resubmits immediately
+run_foreground() {{
+    CURRENT_PHASE="foreground"
+    "$@"
+    CURRENT_PHASE="idle"
+}}
+
+trap 'handle_term' TERM
 
 # Ensure working directory exists
 mkdir -p "$WORKING_DIR"
@@ -179,10 +209,10 @@ echo "=== Production MD ==="
 # Create TPR if needed
 if [ ! -f prod.tpr ]; then
     if [ -f ${{LAST_EQ}}.cpt ]; then
-        $GMX grompp -f prod.mdp -c ${{LAST_EQ}}.gro -r em.gro -t ${{LAST_EQ}}.cpt \\
+        run_foreground $GMX grompp -f prod.mdp -c ${{LAST_EQ}}.gro -r em.gro -t ${{LAST_EQ}}.cpt \\
             -p ${{PREFIX}}.top -o prod.tpr {grompp_flags}
     else
-        $GMX grompp -f prod.mdp -c ${{LAST_EQ}}.gro -r em.gro -p ${{PREFIX}}.top -o prod.tpr {grompp_flags}
+        run_foreground $GMX grompp -f prod.mdp -c ${{LAST_EQ}}.gro -r em.gro -p ${{PREFIX}}.top -o prod.tpr {grompp_flags}
     fi
 fi
 
@@ -199,6 +229,7 @@ fi
 # =========================================================================
 # Step 4: Update progress tracking
 # =========================================================================
+CURRENT_PHASE="foreground"
 set +e
 polyzymd _update-gromacs-progress \\
     --working-dir "$WORKING_DIR" \\
@@ -206,6 +237,7 @@ polyzymd _update-gromacs-progress \\
     --replicate "$REPLICATE"
 PROGRESS_RC=$?
 set -e
+CURRENT_PHASE="idle"
 
 if [ $PROGRESS_RC -ne 0 ]; then
     echo "WARNING: Progress update failed (exit code $PROGRESS_RC)"
@@ -220,16 +252,21 @@ if [ -f prod.log ]; then
 
         # Run post-processing (trajectory centering)
         echo "=== Post-processing ==="
+        CURRENT_PHASE="foreground"
         echo "System" | $GMX trjconv -s prod.tpr -f prod.xtc -o prod_nojump.xtc -pbc nojump 2>/dev/null || true
         echo -e "Protein\\nSystem" | $GMX trjconv -s prod.tpr -f prod_nojump.xtc -o prod_centered.xtc -center -pbc mol -ur compact 2>/dev/null || true
+        CURRENT_PHASE="idle"
 
         # Final progress update marking completion
+        CURRENT_PHASE="foreground"
         polyzymd _update-gromacs-progress \\
             --working-dir "$WORKING_DIR" \\
             --config-path "$CONFIG_PATH" \\
             --replicate "$REPLICATE" \\
             --mark-complete || true
+        CURRENT_PHASE="idle"
 
+        JOB_COMPLETE=1
         echo "All done."
         exit 0
     fi
@@ -441,7 +478,7 @@ exit 0
         lines = [
             "if [ ! -f em.gro ]; then",
             '    echo "=== Energy Minimization ==="',
-            "    $GMX grompp -f em.mdp -c ${{PREFIX}}.gro -r ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}",
+            "    run_foreground $GMX grompp -f em.mdp -c ${{PREFIX}}.gro -r ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}",
             '    run_mdrun_stage "energy minimization" $MDRUN -deffnm em $MDRUN_FLAGS_EM -v',
             "    if [ ! -f em.gro ]; then",
             '        echo "FATAL: Energy minimization failed — em.gro not produced"',
@@ -522,13 +559,13 @@ exit 0
             lines.append(f'    echo "=== Equilibration {idx}: {mdp_name} ==="')
             lines.append("    if [ -f ${LAST_EQ}.cpt ]; then")
             lines.append(
-                f"        $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro -r em.gro "
+                f"        run_foreground $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro -r em.gro "
                 f"-t ${{LAST_EQ}}.cpt "
                 f"-p ${{PREFIX}}.top -o {stage}.tpr {self._grompp_flags}"
             )
             lines.append("    else")
             lines.append(
-                f"        $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro -r em.gro "
+                f"        run_foreground $GMX grompp -f {mdp_name} -c ${{LAST_EQ}}.gro -r em.gro "
                 f"-p ${{PREFIX}}.top -o {stage}.tpr {self._grompp_flags}"
             )
             lines.append("    fi")
