@@ -678,6 +678,97 @@ def test_env_exports_accepts_valid_identifier(monkeypatch) -> None:
     assert 'export GMX_GPU_DD_COMMS="true"' in script
 
 
+def test_setup_command_shell_variable_accepted(monkeypatch) -> None:
+    """setup_commands should allow shell variable expansion syntax."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(),
+        setup_commands=["export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/lib"],
+    )
+
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/lib" in script
+
+
+def test_setup_command_command_substitution_accepted(monkeypatch) -> None:
+    """setup_commands should allow $(...) command substitution syntax."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(),
+        setup_commands=["cwd=$(pwd)"],
+    )
+
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert "cwd=$(pwd)" in script
+
+
+def test_setup_command_backtick_accepted(monkeypatch) -> None:
+    """setup_commands should allow backtick command substitution syntax."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(),
+        setup_commands=["cwd=`pwd`"],
+    )
+
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert "cwd=`pwd`" in script
+
+
+def test_setup_command_newline_rejected(monkeypatch) -> None:
+    """setup_commands should reject commands containing embedded newlines."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(),
+        setup_commands=["echo hello\nrm -rf /"],
+    )
+
+    with pytest.raises(ValueError, match="single-line"):
+        generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+
 class TestSignalInfrastructure:
     """Signal handling and preemption resilience tests."""
 

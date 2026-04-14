@@ -36,7 +36,6 @@ class GromacsSlurmScriptGenerator:
     """
 
     MAXH_SAFETY_FACTOR = 0.90
-    _PATH_EXPORT_PATTERN = re.compile(r"^export PATH=\$PATH:[A-Za-z0-9._/,:\-@%=+]+$")
     _COMMAND_PREFIX_PATTERN = re.compile(r"^[A-Za-z0-9._/,:\-@%=+ $]+$")
     _ENV_VAR_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -402,7 +401,11 @@ exit 0
         return f"#SBATCH --nodelist={self._config.nodelist}" if self._config.nodelist else ""
 
     def _validate_setup_command(self, command: str) -> None:
-        """Validate setup command content for script safety.
+        """Validate setup command content for script integrity.
+
+        Setup commands are rendered verbatim in the job script. They are treated as
+        trusted user input — the same trust level as writing SLURM scripts directly.
+        Only embedded newlines and NUL bytes are rejected to prevent script corruption.
 
         Parameters
         ----------
@@ -412,11 +415,14 @@ exit 0
         Raises
         ------
         ValueError
-            If the command contains unsafe characters.
+            If the command contains an embedded newline or NUL byte.
         """
-        if self._PATH_EXPORT_PATTERN.match(command):
-            return
-        _validate_script_value(command, "setup_commands")
+        if "\n" in command or "\r" in command:
+            raise ValueError(
+                "setup_commands entries must be single-line commands without embedded newlines"
+            )
+        if "\0" in command:
+            raise ValueError("setup_commands entries must not contain NUL bytes")
 
     def _validate_command_prefix(self, command_prefix: str) -> None:
         """Validate command prefix with support for shell variables.
