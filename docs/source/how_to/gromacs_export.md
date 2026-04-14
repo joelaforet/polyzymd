@@ -474,6 +474,14 @@ launcher (`srun`, profiling wrappers, or affinity tools). Use
 `mpi_launcher_flags` only when your selected GROMACS binary requires MPI
 launching.
 
+`env_exports` keys must be valid shell variable names that match
+`[A-Za-z_][A-Za-z0-9_]*` (for example, `GMX_GPU_DD_COMMS`). Keys containing
+spaces, punctuation, or a leading digit are rejected.
+
+When using a real-MPI GROMACS binary (`gmx_mpi`) with `command_prefix`, PolyzyMD
+treats `command_prefix` as the launcher and does not prepend `mpirun`. This
+prevents double-launch patterns such as `mpirun srun gmx_mpi ...`.
+
 ---
 
 ## Recovering Preempted Jobs
