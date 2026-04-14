@@ -84,7 +84,7 @@ class TestExportSystemValidation:
 
     def test_lammps_raises_not_implemented(self) -> None:
         """LAMMPS export raises NotImplementedError."""
-        with pytest.raises(NotImplementedError, match="LAMMPS export is planned"):
+        with pytest.raises(NotImplementedError, match="LAMMPS export is not yet implemented"):
             export_system(
                 interchange=None,
                 config=None,
@@ -94,7 +94,7 @@ class TestExportSystemValidation:
 
     def test_amber_raises_not_implemented(self) -> None:
         """AMBER export raises NotImplementedError."""
-        with pytest.raises(NotImplementedError, match="AMBER export is planned"):
+        with pytest.raises(NotImplementedError, match="AMBER export is not yet implemented"):
             export_system(
                 interchange=None,
                 config=None,
