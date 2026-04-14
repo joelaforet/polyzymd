@@ -783,3 +783,37 @@ class TestGPUSlurmScripts:
 
         assert "$MDRUN -deffnm em $MDRUN_FLAGS_EM -v" in script
         assert "MDRUN_FLAGS_EM=" in script
+
+
+class TestSetEOrdering:
+    """Tests for set -e placement relative to environment setup."""
+
+    def test_set_e_before_pixi_shell_hook(self, monkeypatch) -> None:
+        """set -e must appear before pixi shell-hook."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert script.index("set -e") < script.index("pixi shell-hook")
+
+    def test_set_e_before_module_load(self, monkeypatch) -> None:
+        """set -e must appear before module load."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert script.index("set -e") < script.index("module load")
