@@ -2129,7 +2129,7 @@ def check_progress(
         sys.exit(EXIT_CODE_CHECK_ERROR)
 
     engine_name = _resolve_engine_name(sim_config, override=engine)
-    engine_inst = create_engine(sim_config, override=engine_name)
+    engine_inst = create_engine(sim_config, override=engine_name, defer_binary=True)
 
     if scratch_dir:
         working_dir = Path(scratch_dir)
@@ -2200,7 +2200,7 @@ def status(config: str) -> None:
         sys.exit(1)
 
     engine_name = _resolve_engine_name(sim_config, override=None)
-    engine_inst = create_engine(sim_config, override=engine_name)
+    engine_inst = create_engine(sim_config, override=engine_name, defer_binary=True)
 
     # Total production metadata from config
     prod = sim_config.simulation_phases.production

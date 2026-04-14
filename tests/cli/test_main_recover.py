@@ -1420,3 +1420,65 @@ class TestRecoverGromacsEdgeCases:
             ],
         )
         assert result.exit_code != 0
+
+
+class TestCheckProgressDeferBinary:
+    """check-progress should not require gmx on PATH."""
+
+    @patch("polyzymd.engines.create_engine")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_check_progress_uses_defer_binary(self, mock_from_yaml, mock_create_engine, tmp_path):
+        """check-progress should pass defer_binary=True to create_engine."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test\n")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        sim_config = _mock_sim_config(working_dir)
+        mock_from_yaml.return_value = sim_config
+
+        mock_engine = MagicMock()
+        mock_engine.get_engine_working_directory.return_value = working_dir
+        mock_engine.load_or_scan_progress.return_value = _mock_progress(
+            total_steps=10000000,
+            completed_steps=10000000,
+            is_complete=True,
+            n_segments=1,
+        )
+        mock_create_engine.return_value = mock_engine
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["check-progress", "-c", str(config_file)])
+
+        assert result.exit_code == 0, result.output
+        _, kwargs = mock_create_engine.call_args
+        assert kwargs.get("defer_binary") is True
+
+
+class TestStatusDeferBinary:
+    """status should not require gmx on PATH."""
+
+    @patch("polyzymd.engines.create_engine")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_status_uses_defer_binary(self, mock_from_yaml, mock_create_engine, tmp_path):
+        """status should pass defer_binary=True to create_engine."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test\n")
+
+        mock_cfg = MagicMock()
+        mock_cfg.engine = "gromacs"
+        mock_cfg.simulation_phases.production.duration = 10.0
+        mock_cfg._format_run_directory_name.return_value = "test_run1"
+        mock_cfg.discover_replicate_dirs.return_value = []
+        mock_from_yaml.return_value = mock_cfg
+
+        mock_engine = MagicMock()
+        mock_engine.discover_legacy_replicates.return_value = []
+        mock_create_engine.return_value = mock_engine
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "-c", str(config_file)])
+
+        assert result.exit_code == 0, result.output
+        _, kwargs = mock_create_engine.call_args
+        assert kwargs.get("defer_binary") is True
