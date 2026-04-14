@@ -673,10 +673,39 @@ class TestSubmitEngineAware:
     """Tests for engine-aware submit command."""
 
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
-    def test_submit_dry_run_gromacs(self, mock_from_yaml, tmp_path: Path) -> None:
+    @patch("polyzymd.engines.create_engine")
+    def test_submit_dry_run_gromacs(
+        self,
+        mock_create_engine,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
         """submit --engine gromacs --dry-run should preview without files."""
+        mock_engine = SimpleNamespace()
+        mock_engine._resolve_slurm_config = lambda base: SimpleNamespace(
+            partition="aa100",
+            time_limit="04:00:00",
+            memory="8G",
+            account=None,
+            nodes=1,
+            ntasks=1,
+            cpus_per_task=4,
+            gpus=1,
+            constraint=None,
+            qos=None,
+        )
+        mock_engine._resolve_mdrun_flags = lambda _effective: "-pin on"
+        mock_create_engine.return_value = mock_engine
+
         mock_config = _make_dry_run_config()
         mock_config.engine = "gromacs"
+        mock_config.gromacs = SimpleNamespace(
+            gmx_binary=None,
+            gpu=True,
+            ntmpi=1,
+            ntomp=4,
+            module_load=None,
+        )
         mock_from_yaml.return_value = mock_config
         config_path = tmp_path / "fake.yaml"
         config_path.write_text("name: test\n", encoding="utf-8")
@@ -689,6 +718,72 @@ class TestSubmitEngineAware:
 
         assert result.exit_code == 0
         assert "DRY RUN" in result.output
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.engines.create_engine")
+    def test_submit_dry_run_gromacs_shows_effective_slurm_details(
+        self,
+        mock_create_engine,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """GROMACS dry-run should include effective SLURM and engine details."""
+        mock_engine = SimpleNamespace()
+        mock_engine._resolve_slurm_config = lambda base: SimpleNamespace(
+            partition="bridges2",
+            time_limit="12:00:00",
+            memory="16G",
+            account="mcb200029p",
+            nodes=1,
+            ntasks=2,
+            cpus_per_task=8,
+            gpus=1,
+            constraint="A40",
+            qos="normal",
+        )
+        mock_engine._resolve_mdrun_flags = lambda _effective: "-update gpu -bonded gpu"
+        mock_create_engine.return_value = mock_engine
+
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "gromacs"
+        mock_config.gromacs = SimpleNamespace(
+            gmx_binary="gmx_mpi",
+            gpu=True,
+            ntmpi=2,
+            ntomp=8,
+            module_load="gromacs/2024.1",
+        )
+        mock_from_yaml.return_value = mock_config
+
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli,
+            [
+                "submit",
+                "-c",
+                str(config_path),
+                "--engine",
+                "gromacs",
+                "--dry-run",
+                "--preset",
+                "bridges2",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "Engine:" in result.output
+        assert "gromacs" in result.output
+        assert "Partition:" in result.output
+        assert "Time limit:" in result.output
+        assert "Memory:" in result.output
+        assert "GPUs:" in result.output
+        assert "GPU mode:" in result.output
+        assert "ntmpi:" in result.output
+        assert "ntomp:" in result.output
+        assert "mdrun flags:" in result.output
 
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")

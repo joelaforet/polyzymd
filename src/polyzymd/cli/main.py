@@ -1070,6 +1070,94 @@ def _run_openmm_impl(
 # =============================================================================
 
 
+def _print_gromacs_dry_run_details(
+    sim_config: "SimulationConfig",
+    preset: str,
+    replicate_list: list[int],
+    time_limit: str | None,
+    memory: str | None,
+    account: str | None,
+    gpu_type: str | None,
+    constraint: str | None,
+) -> None:
+    """Print GROMACS-specific dry-run details with effective SLURM configuration.
+
+    Parameters
+    ----------
+    sim_config : SimulationConfig
+        Validated simulation configuration.
+    preset : str
+        SLURM partition preset name.
+    replicate_list : list[int]
+        Replicates that would be submitted.
+    time_limit : str or None
+        CLI time-limit override.
+    memory : str or None
+        CLI memory override.
+    account : str or None
+        CLI account override.
+    gpu_type : str or None
+        CLI GPU type override.
+    constraint : str or None
+        CLI constraint override.
+    """
+    from polyzymd.engines import create_engine
+    from polyzymd.workflow.slurm import SlurmConfig
+
+    phase = "workflow"
+    engine_impl = create_engine(sim_config, override="gromacs")
+    gromacs_cfg = sim_config.gromacs
+
+    base_slurm = SlurmConfig.from_preset(preset)
+    if time_limit:
+        base_slurm.time_limit = time_limit
+    if memory:
+        base_slurm.memory = memory
+    if account:
+        base_slurm.account = account
+    if gpu_type:
+        base_slurm.gpu_type = gpu_type
+    if constraint:
+        base_slurm.constraint = constraint
+
+    effective = engine_impl._resolve_slurm_config(base_slurm)
+    effective_flags = engine_impl._resolve_mdrun_flags(effective)
+
+    colored_echo("  SLURM configuration (effective):", phase=phase)
+    colored_echo(f"    Partition:      {effective.partition}", phase=phase)
+    colored_echo(f"    Time limit:     {effective.time_limit}", phase=phase)
+    colored_echo(f"    Memory:         {effective.memory}", phase=phase)
+    colored_echo(f"    Account:        {effective.account or '(none)'}", phase=phase)
+    colored_echo(f"    Nodes:          {effective.nodes}", phase=phase)
+    colored_echo(f"    Tasks:          {effective.ntasks}", phase=phase)
+    colored_echo(f"    CPUs/task:      {effective.cpus_per_task}", phase=phase)
+    colored_echo(f"    GPUs:           {effective.gpus}", phase=phase)
+    if effective.constraint:
+        colored_echo(f"    Constraint:     {effective.constraint}", phase=phase)
+    if effective.qos:
+        colored_echo(f"    QoS:            {effective.qos}", phase=phase)
+    colored_echo(phase=phase)
+
+    colored_echo("  GROMACS configuration:", phase=phase)
+    colored_echo(f"    Binary:         {gromacs_cfg.gmx_binary or '(auto-detect)'}", phase=phase)
+    colored_echo(f"    GPU mode:       {'yes' if gromacs_cfg.gpu else 'no'}", phase=phase)
+    colored_echo(f"    ntmpi:          {gromacs_cfg.ntmpi}", phase=phase)
+    colored_echo(f"    ntomp:          {gromacs_cfg.ntomp}", phase=phase)
+    colored_echo(f"    mdrun flags:    {effective_flags or '(none)'}", phase=phase)
+    if gromacs_cfg.module_load:
+        colored_echo(f"    Module load:    {gromacs_cfg.module_load}", phase=phase)
+    colored_echo(phase=phase)
+
+    colored_echo("  Per-replicate output:", phase=phase)
+    for rep in replicate_list:
+        working_dir = sim_config.get_working_directory(rep) / "gromacs"
+        script_dir = working_dir / "daisy_chain_scripts"
+        script_name = f"run_rep{rep}.sh"
+        colored_echo(f"    Rep {rep}:", phase=phase)
+        colored_echo(f"      Working dir: {working_dir}", phase=phase)
+        colored_echo(f"      Script:      {script_dir / script_name}", phase=phase)
+
+
 @cli.command(
     help=(
         "Submit self-resubmitting SLURM jobs for OpenMM or GROMACS. "
@@ -1272,22 +1360,35 @@ def submit(
                 level=logging.WARNING,
             )
 
-        script_dir = (
-            Path(output_dir) if output_dir else sim_config.output.get_job_scripts_directory()
-        )
-
         colored_echo("=" * 60, phase="workflow")
         colored_echo("DRY RUN — Submission Preview", phase="workflow")
         colored_echo("=" * 60, phase="workflow")
-        colored_echo(f"Simulation: {sim_config.name}", phase="workflow")
-        colored_echo(f"Preset: {preset}", phase="workflow")
-        colored_echo(f"Pixi environment: {resolved_pixi_env}", phase="workflow")
-        colored_echo(f"Replicates: {replicate_list}", phase="workflow")
-        colored_echo(f"Script output directory: {script_dir}", phase="workflow")
-        colored_echo(
-            "Planned action: generate one self-resubmitting script per replicate and submit with sbatch",
-            phase="workflow",
-        )
+        colored_echo(phase="workflow")
+        colored_echo(f"  Simulation:  {sim_config.name}", phase="workflow")
+        colored_echo(f"  Engine:      {engine_name}", phase="workflow")
+        colored_echo(f"  Preset:      {preset}", phase="workflow")
+        colored_echo(f"  Pixi env:    {resolved_pixi_env}", phase="workflow")
+        colored_echo(f"  Replicates:  {replicate_list}", phase="workflow")
+        colored_echo(phase="workflow")
+
+        if engine_name == "gromacs":
+            _print_gromacs_dry_run_details(
+                sim_config=sim_config,
+                preset=preset,
+                replicate_list=replicate_list,
+                time_limit=time_limit,
+                memory=memory,
+                account=account,
+                gpu_type=gpu_type,
+                constraint=constraint,
+            )
+        else:
+            script_dir = (
+                Path(output_dir) if output_dir else sim_config.output.get_job_scripts_directory()
+            )
+            colored_echo(f"  Script dir:  {script_dir}", phase="workflow")
+
+        colored_echo(phase="workflow")
         colored_echo("Dry run complete. No files were written.", phase="workflow")
         colored_echo("=" * 60, phase="workflow")
         return
