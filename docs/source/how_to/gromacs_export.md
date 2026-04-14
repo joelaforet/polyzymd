@@ -418,6 +418,93 @@ resolve in order.
 
 ---
 
+## Recovering Preempted Jobs
+
+If a GROMACS SLURM job is preempted, times out, or fails due to a node issue,
+use `polyzymd recover` to inspect progress and resubmit.
+
+### How checkpoint resume works
+
+GROMACS writes stage-local checkpoint files during simulation:
+
+| Stage | Checkpoint | Resume behavior |
+|-------|-----------|-----------------|
+| Energy minimization | `em.cpt` | Resumes from last EM step |
+| Equilibration stage N | `eq_XX.cpt` | Resumes from last equilibration step |
+| Production | `state.cpt` | Resumes from last production checkpoint |
+
+Completed stages (those with a `.gro` output file) are automatically skipped on
+resubmission. Partially completed stages resume from their checkpoint.
+
+### Check recovery status
+
+Inspect progress without submitting:
+
+```bash
+polyzymd recover -c config.yaml -r 1 --engine gromacs
+```
+
+This shows:
+- Current progress (steps completed / total)
+- Per-segment status (completed, interrupted, etc.)
+- How much simulation time remains
+
+### Submit a recovery job
+
+```bash
+polyzymd recover \
+    -c config.yaml \
+    -r 1 \
+    --engine gromacs \
+    --submit \
+    --preset blanca-shirts
+```
+
+Recovery reuses existing GROMACS input files (`.gro`, `.top`, `.mdp`, `.tpr`)
+— no system rebuild is triggered.
+
+### Recovery with GPU constraints
+
+On mixed-GPU clusters, include `--constraint` to ensure the recovery job
+lands on compatible hardware:
+
+```bash
+polyzymd recover \
+    -c config.yaml \
+    -r 1 \
+    --engine gromacs \
+    --submit \
+    --preset blanca-shirts \
+    --constraint "A40"
+```
+
+### Dry-run recovery preview
+
+Preview what would be submitted without actually submitting:
+
+```bash
+polyzymd recover \
+    -c config.yaml \
+    -r 1 \
+    --engine gromacs \
+    --submit \
+    --dry-run
+```
+
+:::{tip}
+The self-resubmitting SLURM script handles preemption automatically via
+SIGTERM trapping. When SLURM sends SIGTERM (120-second grace period on
+Blanca), the script:
+
+1. Forwards SIGTERM to the running `mdrun` process
+2. Waits for GROMACS to flush its checkpoint
+3. Resubmits itself with `sbatch`
+
+Manual recovery with `polyzymd recover` is only needed when the automatic
+resubmission fails (e.g., `sbatch` was unavailable, or the job was killed
+without a grace period).
+:::
+
 ## Troubleshooting
 
 ### "GROMACS executable not found"
