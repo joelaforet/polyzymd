@@ -7,10 +7,6 @@ Note:
     Per-residue comparisons have been removed. Contact data is mechanistic
     (explains WHY stability changes), not an observable. Per-residue
     contact-RMSF correlations are computed in ``polyzymd compare report``.
-
-.. note::
-    Originally part of the compare package and consolidated into the
-    contacts plugin package in v1.3.0.
 """
 
 from __future__ import annotations

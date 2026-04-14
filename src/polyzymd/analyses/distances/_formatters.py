@@ -9,10 +9,6 @@ fundamentally different physical quantities (e.g., H-bond vs lid-opening).
 For each pair:
 - Primary: Mean distance (lower = closer = better)
 - Secondary: Fraction below threshold (higher = more contact = better)
-
-.. note::
-    Originally part of the compare package and consolidated into the
-    distances plugin package in v1.3.0.
 """
 
 from __future__ import annotations
