@@ -7,11 +7,14 @@ providing validation, type safety, and YAML/JSON serialization support.
 
 from __future__ import annotations
 
+import logging
 from enum import Enum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ChargeMethod(str, Enum):
@@ -1176,6 +1179,25 @@ class GromacsEngineConfig(BaseModel):
         description="Number of GPUs to request via SLURM when gpu is True",
     )
     memory: str = Field("16G", description="SLURM --mem allocation for GROMACS jobs")
+
+    @model_validator(mode="after")
+    def _warn_gpu_ntmpi(self) -> Self:
+        """Warn when GPU mode is combined with multiple thread-MPI ranks.
+
+        Returns
+        -------
+        Self
+            The validated config instance
+        """
+        if self.gpu and self.ntmpi > 1:
+            LOGGER.warning(
+                "GPU GROMACS uses thread-MPI (gmx mdrun -ntmpi), not real MPI ranks. "
+                "With ntmpi=%d and gpus=%d, ensure enough GPUs are available or "
+                "accept GPU sharing.",
+                self.ntmpi,
+                self.gpus,
+            )
+        return self
 
 
 # =============================================================================

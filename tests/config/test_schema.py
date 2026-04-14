@@ -355,3 +355,39 @@ class TestEngineConfig:
         minimal_config_data.pop("engine", None)
         config = SimulationConfig(**minimal_config_data)
         assert config.engine == "openmm"
+
+
+class TestGromacsEngineConfigWarnings:
+    """Tests for GROMACS config warning validators."""
+
+    def test_gpu_ntmpi_warning(self, minimal_config_data, caplog):
+        """gpu=True + ntmpi>1 should log a warning."""
+        import logging
+
+        minimal_config_data["gromacs"] = {"gpu": True, "ntmpi": 4, "gpus": 2}
+        with caplog.at_level(logging.WARNING):
+            config = SimulationConfig(**minimal_config_data)
+
+        assert any("thread-MPI" in r.message for r in caplog.records)
+        assert config.gromacs.gpu is True
+        assert config.gromacs.ntmpi == 4
+
+    def test_no_warning_gpu_ntmpi_1(self, minimal_config_data, caplog):
+        """gpu=True + ntmpi=1 should not warn."""
+        import logging
+
+        minimal_config_data["gromacs"] = {"gpu": True, "ntmpi": 1}
+        with caplog.at_level(logging.WARNING):
+            SimulationConfig(**minimal_config_data)
+
+        assert not any("thread-MPI" in r.message for r in caplog.records)
+
+    def test_no_warning_cpu_ntmpi_high(self, minimal_config_data, caplog):
+        """gpu=False + ntmpi>1 should not warn."""
+        import logging
+
+        minimal_config_data["gromacs"] = {"gpu": False, "ntmpi": 4}
+        with caplog.at_level(logging.WARNING):
+            SimulationConfig(**minimal_config_data)
+
+        assert not any("thread-MPI" in r.message for r in caplog.records)
