@@ -437,3 +437,25 @@ class TestEngineSubmitModuleLoad:
 
         mock_run_sbatch.assert_called_once_with(script_path, module_load=None)
         assert result["submitted"] is True
+
+
+class TestFromConfigBinaryResolution:
+    """Tests for deferred GROMACS binary resolution."""
+
+    @patch("polyzymd.engines.gromacs.engine.resolve_gromacs_binary")
+    def test_from_config_deferred_uses_configured_binary(self, mock_resolve):
+        """defer_binary=True should skip PATH probing and use configured binary."""
+        config = _make_config(gmx_binary="gmx_mpi")
+        engine = GromacsEngine.from_config(config, defer_binary=True)
+
+        assert engine._gmx_binary == "gmx_mpi"
+        mock_resolve.assert_not_called()
+
+    @patch("polyzymd.engines.gromacs.engine.resolve_gromacs_binary")
+    def test_from_config_deferred_uses_default_when_missing(self, mock_resolve):
+        """defer_binary=True should fallback to gmx when unset in config."""
+        config = _make_config(gmx_binary=None)
+        engine = GromacsEngine.from_config(config, defer_binary=True)
+
+        assert engine._gmx_binary == "gmx"
+        mock_resolve.assert_not_called()

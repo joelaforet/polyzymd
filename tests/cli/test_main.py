@@ -718,6 +718,11 @@ class TestSubmitEngineAware:
 
         assert result.exit_code == 0
         assert "DRY RUN" in result.output
+        mock_create_engine.assert_called_once_with(
+            mock_config,
+            override="gromacs",
+            defer_binary=True,
+        )
 
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     @patch("polyzymd.engines.create_engine")

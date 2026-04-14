@@ -76,13 +76,18 @@ class GromacsEngine(SimulationEngine):
         self._gmx_binary = gmx_binary
 
     @classmethod
-    def from_config(cls, config: object) -> GromacsEngine:
+    def from_config(cls, config: object, defer_binary: bool = False) -> GromacsEngine:
         """Create a GROMACS engine from simulation config.
 
         Parameters
         ----------
         config : object
             Simulation configuration object.
+        defer_binary : bool, optional
+            When True, skip local PATH probing and use the configured
+            binary name directly (or ``"gmx"`` fallback). This is used
+            by scheduler submission paths where module loading happens
+            on compute nodes.
 
         Returns
         -------
@@ -97,7 +102,11 @@ class GromacsEngine(SimulationEngine):
         """
         gromacs_cfg = getattr(config, "gromacs", None)
         gpu = getattr(gromacs_cfg, "gpu", False) if gromacs_cfg else False
-        gmx_binary = resolve_gromacs_binary(config=config, gpu=gpu)
+        if defer_binary:
+            configured = getattr(gromacs_cfg, "gmx_binary", None) if gromacs_cfg else None
+            gmx_binary = configured or "gmx"
+        else:
+            gmx_binary = resolve_gromacs_binary(config=config, gpu=gpu)
         return cls(config=config, gmx_binary=gmx_binary)
 
     def _generate_prefix(self) -> str:

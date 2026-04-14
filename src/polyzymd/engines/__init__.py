@@ -34,7 +34,11 @@ def get_engine_class(name: str) -> type[SimulationEngine]:
             raise ValueError(f"Unknown engine: {name!r}. Available: openmm, gromacs")
 
 
-def create_engine(config: object, override: str | None = None) -> SimulationEngine:
+def create_engine(
+    config: object,
+    override: str | None = None,
+    defer_binary: bool = False,
+) -> SimulationEngine:
     """Create an engine instance from configuration.
 
     Parameters
@@ -43,6 +47,9 @@ def create_engine(config: object, override: str | None = None) -> SimulationEngi
         Simulation configuration object.
     override : str | None, optional
         CLI-provided engine override.
+    defer_binary : bool, optional
+        When True, allow engine-specific deferred binary resolution for
+        scheduler-only paths.
 
     Returns
     -------
@@ -51,6 +58,8 @@ def create_engine(config: object, override: str | None = None) -> SimulationEngi
     """
     engine_name = override or getattr(config, "engine", "openmm") or "openmm"
     cls = get_engine_class(engine_name)
+    if engine_name.lower() == "gromacs":
+        return cls.from_config(config, defer_binary=defer_binary)
     return cls.from_config(config)
 
 

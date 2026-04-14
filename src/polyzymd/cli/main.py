@@ -1105,7 +1105,7 @@ def _print_gromacs_dry_run_details(
     from polyzymd.workflow.slurm import SlurmConfig
 
     phase = "workflow"
-    engine_impl = create_engine(sim_config, override="gromacs")
+    engine_impl = create_engine(sim_config, override="gromacs", defer_binary=True)
     gromacs_cfg = sim_config.gromacs
 
     base_slurm = SlurmConfig.from_preset(preset)
@@ -1416,7 +1416,7 @@ def submit(
                 level=logging.WARNING,
             )
 
-        engine_impl = create_engine(sim_config, override="gromacs")
+        engine_impl = create_engine(sim_config, override="gromacs", defer_binary=True)
         replicate_list = _resolve_replicates_option(replicates, None, "submit")
         config_path_abs = Path(config).resolve()
 
@@ -2811,7 +2811,7 @@ def recover(
             extra={"pixi_env": resolved_pixi_env, "skip_build": gromacs_inputs_exist},
         )
 
-        engine_impl = create_engine(sim_config, override="gromacs")
+        engine_impl = create_engine(sim_config, override="gromacs", defer_binary=True)
         script_path = engine_impl.prepare_submission(request)
 
         recovery_dir = working_dir / "recovery_scripts"
