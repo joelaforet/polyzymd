@@ -135,6 +135,7 @@ class SlurmConfig:
         nodes: Number of nodes.
         ntasks: Number of tasks.  Ignored when ``gpu_directive_style == "gpus"``
             (Bridges2-style); those scripts emit ``#SBATCH -N {nodes}`` only.
+        cpus_per_task: Number of CPUs allocated per task.
         memory: Memory allocation (e.g. ``"3G"``).  Set to ``None`` to omit the
             ``--mem`` directive entirely (some clusters allocate memory per GPU
             and reject an explicit ``--mem`` request).
@@ -155,6 +156,7 @@ class SlurmConfig:
     email: str = ""
     nodes: int = 1
     ntasks: int = 1
+    cpus_per_task: int = 1
     memory: Optional[str] = "3G"
     gpus: int = 1
     exclude: Optional[str] = None
@@ -292,6 +294,7 @@ class SlurmScriptGenerator:
 #SBATCH --output={output_file}
 {qos_line}
 {nodes_line}
+{cpus_line}
 {mem_line}
 #SBATCH --time={time_limit}
 {gpu_line}
@@ -460,6 +463,8 @@ exit 0
         ``--gpus`` syntax (e.g. Bridges2), or ``#SBATCH --gres=gpu:<n>`` for
         clusters that use the classic Generic RESources syntax (Alpine).
         """
+        if self._config.gpus == 0:
+            return ""
         if self._config.gpu_directive_style == "gpus" and self._config.gpu_type:
             return f"#SBATCH --gpus={self._config.gpu_type}:{self._config.gpus}"
         return f"#SBATCH --gres=gpu:{self._config.gpus}"
@@ -477,9 +482,15 @@ exit 0
 
             #SBATCH -N N
         """
-        if self._config.gpu_directive_style == "gpus":
+        if self._config.gpu_directive_style == "gpus" and self._config.gpus > 0:
             return f"#SBATCH -N {self._config.nodes}"
         return f"#SBATCH --nodes={self._config.nodes}\n#SBATCH --ntasks={self._config.ntasks}"
+
+    def _cpus_line(self) -> str:
+        """Return the CPUs-per-task directive when requested."""
+        if self._config.cpus_per_task > 1:
+            return f"#SBATCH --cpus-per-task={self._config.cpus_per_task}"
+        return ""
 
     def _qos_line(self) -> str:
         """Return the QoS SBATCH directive, or an empty string to omit it."""
@@ -594,6 +605,7 @@ exit 0
             output_file=output_file,
             qos_line=self._qos_line(),
             nodes_line=self._nodes_line(),
+            cpus_line=self._cpus_line(),
             mem_line=self._mem_line(),
             time_limit=self._config.time_limit,
             gpu_line=self._gpu_line(),

@@ -1126,21 +1126,49 @@ class OpenMMEngineConfig(BaseModel):
 class GromacsEngineConfig(BaseModel):
     """GROMACS-specific engine settings.
 
-    These settings control how GROMACS binaries are located and invoked.
-    Only relevant when ``engine`` is ``"gromacs"``.
+    These settings control how GROMACS binaries are located and invoked,
+    and how SLURM resources are allocated for GROMACS jobs.
+
+    GROMACS users configure parallelism via ``ntmpi`` (MPI ranks) and
+    ``ntomp`` (OpenMP threads per rank). These map directly to the
+    ``gmx mdrun -ntmpi`` and ``-ntomp`` flags. The corresponding SLURM
+    resources (``ntasks``, ``cpus_per_task``, ``memory``) are set to
+    match.
+
+    Set ``gpu: true`` when running a CUDA-enabled GROMACS build on a
+    GPU node. When ``False`` (default), the SLURM script omits GPU
+    directives entirely.
 
     Attributes:
         gmx_binary: Path or name of the GROMACS binary.
             Resolved via config > $GMX_BIN > PATH discovery if None.
-        mdrun_flags: Additional flags passed to ``gmx mdrun``.
+        mdrun_flags: Additional flags passed to ``gmx mdrun`` (all stages).
         grompp_flags: Additional flags passed to ``gmx grompp``.
         module_load: Module load command for HPC (e.g. ``"module load gromacs/2024"``)
+        ntmpi: Number of MPI ranks for ``gmx mdrun -ntmpi``.
+            Also sets SLURM ``--ntasks``.
+        ntomp: Number of OpenMP threads per rank for ``gmx mdrun -ntomp``.
+            Also sets SLURM ``--cpus-per-task``.
+        gpu: Request a GPU via SLURM. When False, the ``--gres=gpu``
+            directive is omitted entirely.
+        memory: SLURM ``--mem`` allocation for GROMACS jobs.
     """
 
     gmx_binary: str | None = Field(None, description="GROMACS binary path or name")
-    mdrun_flags: str = Field("", description="Extra flags for gmx mdrun")
+    mdrun_flags: str = Field("", description="Extra flags for gmx mdrun (all stages)")
     grompp_flags: str = Field("-maxwarn 1", description="Extra flags for gmx grompp")
     module_load: str | None = Field(None, description="HPC module load command")
+    ntmpi: int = Field(1, ge=1, description="MPI ranks (-ntmpi); sets SLURM --ntasks")
+    ntomp: int = Field(
+        8,
+        ge=1,
+        description="OpenMP threads per rank (-ntomp); sets SLURM --cpus-per-task",
+    )
+    gpu: bool = Field(
+        False,
+        description="Request GPU via SLURM (set True for CUDA-enabled GROMACS)",
+    )
+    memory: str = Field("16G", description="SLURM --mem allocation for GROMACS jobs")
 
 
 # =============================================================================

@@ -127,3 +127,74 @@ def test_use_soft_em_default(monkeypatch) -> None:
     )
 
     assert "em_soft" in script
+
+
+def test_cpu_only_omits_gpu_directive(monkeypatch) -> None:
+    """CPU-only scripts should omit GPU SBATCH directives."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(
+            partition="aa100",
+            qos="normal",
+            account="ucb625_asc1",
+            time_limit="23:59:59",
+            email="",
+            nodes=1,
+            ntasks=1,
+            cpus_per_task=1,
+            memory="3G",
+            gpus=0,
+        ),
+        pixi_env="cuda-12-4",
+        gmx_binary="gmx",
+    )
+
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert "--gres" not in script
+    assert "--gpus" not in script
+
+
+def test_cpus_per_task_in_script(monkeypatch) -> None:
+    """Script should include cpus-per-task when configured."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(
+            partition="aa100",
+            qos="normal",
+            account="ucb625_asc1",
+            time_limit="23:59:59",
+            email="",
+            nodes=1,
+            ntasks=1,
+            cpus_per_task=16,
+            memory="3G",
+            gpus=0,
+        ),
+        pixi_env="cuda-12-4",
+        gmx_binary="gmx",
+    )
+
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert "#SBATCH --cpus-per-task=16" in script

@@ -321,6 +321,23 @@ class TestEngineConfig:
         config = SimulationConfig(**minimal_config_data)
         assert config.gromacs.gmx_binary is None
         assert config.gromacs.grompp_flags == "-maxwarn 1"
+        assert config.gromacs.ntmpi == 1
+        assert config.gromacs.ntomp == 8
+        assert config.gromacs.gpu is False
+        assert config.gromacs.memory == "16G"
+
+    def test_gromacs_engine_config_gpu_enabled(self, minimal_config_data):
+        """GROMACS config should accept explicit GPU settings."""
+        minimal_config_data["gromacs"] = {"gpu": True, "ntomp": 4}
+        config = SimulationConfig(**minimal_config_data)
+        assert config.gromacs.gpu is True
+        assert config.gromacs.ntomp == 4
+
+    def test_gromacs_ntomp_validation(self, minimal_config_data):
+        """GROMACS ntomp must be positive."""
+        minimal_config_data["gromacs"] = {"ntomp": 0}
+        with pytest.raises(ValidationError):
+            SimulationConfig(**minimal_config_data)
 
     def test_gromacs_engine_config_custom(self, minimal_config_data):
         """Custom GROMACS settings should be parsed."""

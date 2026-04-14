@@ -33,6 +33,7 @@ class GromacsSlurmScriptGenerator:
 #SBATCH --output={output_file}
 {qos_line}
 {nodes_line}
+{cpus_line}
 {mem_line}
 #SBATCH --time={time_limit}
 {gpu_line}
@@ -210,15 +211,23 @@ exit 0
 
     def _gpu_line(self) -> str:
         """Return the GPU SBATCH directive for the configured cluster style."""
+        if self._config.gpus == 0:
+            return ""
         if self._config.gpu_directive_style == "gpus" and self._config.gpu_type:
             return f"#SBATCH --gpus={self._config.gpu_type}:{self._config.gpus}"
         return f"#SBATCH --gres=gpu:{self._config.gpus}"
 
     def _nodes_line(self) -> str:
         """Return nodes and tasks directives for the configured cluster style."""
-        if self._config.gpu_directive_style == "gpus":
+        if self._config.gpu_directive_style == "gpus" and self._config.gpus > 0:
             return f"#SBATCH -N {self._config.nodes}"
         return f"#SBATCH --nodes={self._config.nodes}\n#SBATCH --ntasks={self._config.ntasks}"
+
+    def _cpus_line(self) -> str:
+        """Return CPUs-per-task SBATCH directive when greater than one."""
+        if self._config.cpus_per_task > 1:
+            return f"#SBATCH --cpus-per-task={self._config.cpus_per_task}"
+        return ""
 
     def _qos_line(self) -> str:
         """Return the optional QoS SBATCH directive."""
@@ -326,6 +335,7 @@ exit 0
             output_file=output_file,
             qos_line=self._qos_line(),
             nodes_line=self._nodes_line(),
+            cpus_line=self._cpus_line(),
             mem_line=self._mem_line(),
             time_limit=self._config.time_limit,
             gpu_line=self._gpu_line(),
