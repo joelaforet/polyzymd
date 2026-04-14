@@ -381,6 +381,31 @@ def test_command_prefix_wraps_gmx_commands(monkeypatch) -> None:
     assert 'GMX="singularity exec --rocm --bind /scratch /path/to/gromacs.sif gmx"' in script
 
 
+def test_command_prefix_with_mpi_binary_skips_mpirun(monkeypatch) -> None:
+    """command_prefix + real-MPI binary should not add mpirun."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(),
+        gmx_binary="gmx_mpi",
+        command_prefix="singularity exec /path/to/gromacs.sif",
+    )
+
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert 'MDRUN="$GMX mdrun"' in script
+    assert 'MDRUN="mpirun $GMX mdrun"' not in script
+
+
 def test_nodelist_and_typed_gres_render(monkeypatch) -> None:
     """typed --gres and nodelist should be rendered for gres style."""
     monkeypatch.setattr(

@@ -488,7 +488,7 @@ exit 0
         if self._command_prefix:
             gmx_base = f"{self._command_prefix} {self._gmx_binary}"
 
-        if self._is_mpi_binary:
+        if self._is_mpi_binary and not self._command_prefix:
             mpi_prefix = "mpirun"
             if self._mpi_launcher_flags:
                 mpi_prefix = f"mpirun {self._mpi_launcher_flags}"
