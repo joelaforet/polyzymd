@@ -21,6 +21,7 @@ from polyzymd.exporters.gromacs import (
     GromacsRunner,
     MDPGenerator,
     PositionRestraintGenerator,
+    RunScriptGenerator,
 )
 
 # ---------------------------------------------------------------------------
@@ -715,6 +716,25 @@ class TestFixGroMultiplePolymerTypes:
 
 class TestEnergyMinimizationHelpers:
     """Tests for EM health checks."""
+
+    def test_run_script_generator_uses_single_stage_em_with_health_check(self, tmp_path):
+        """Generated local run script should use single-stage EM and preserve health check."""
+        script_path = tmp_path / "run_test_gromacs.sh"
+        generator = RunScriptGenerator(prefix="system", equilibration_mdps=["eq_01_nvt.mdp"])
+
+        generator.generate(script_path)
+        script_content = script_path.read_text()
+
+        assert "em.mdp" in script_content
+        assert "em.gro" in script_content
+        assert "em.tpr" in script_content
+
+        assert "em_soft.mdp" not in script_content
+        assert "em_soft.gro" not in script_content
+        assert "em_soft.tpr" not in script_content
+
+        assert "grep -qi" in script_content
+        assert "force.*not finite" in script_content
 
     def test_em_health_check_in_runner(self, tmp_path):
         """Runner health check should fail on non-finite force signatures."""
