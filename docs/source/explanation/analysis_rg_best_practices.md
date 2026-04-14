@@ -567,8 +567,8 @@ that merits visual inspection of trajectories.
 
 Rg is a classical measure of protein folding state. The relationship between
 Rg and chain length follows distinct scaling laws
-([Flory, 1953](https://doi.org/10.1002/pol.1954.120146514);
-[de Gennes, 1979](https://doi.org/10.1002/actp.1980.010310113);
+(Flory, *Principles of Polymer Chemistry*, Cornell University Press, 1953;
+de Gennes, *Scaling Concepts in Polymer Physics*, Cornell University Press, 1979;
 [Kohn et al., 2004](https://doi.org/10.1073/pnas.0403643101)):
 
 | State | Scaling | Description | Source |
