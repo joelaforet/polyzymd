@@ -469,9 +469,7 @@ def build(
                 colored_echo(f"  Replicate {rep}:", phase="build")
                 colored_echo(f"    Working dir: {working_dir}", phase="build")
                 if export_format:
-                    export_dir = (
-                        sim_config.output.projects_directory / f"replicate_{rep}" / export_format
-                    )
+                    export_dir = sim_config.get_working_directory(rep) / export_format
                     colored_echo(f"    Export dir:  {export_dir}", phase="build")
             colored_echo(phase="build")
 
@@ -545,9 +543,7 @@ def build(
                 from polyzymd.exporters.interchange import export_system
 
                 colored_echo(f"Exporting to {export_format.upper()} format...", phase="export")
-                export_dir = (
-                    sim_config.output.projects_directory / f"replicate_{rep}" / export_format
-                )
+                export_dir = sim_config.get_working_directory(rep) / export_format
                 export_result = export_system(
                     interchange=interchange,
                     config=sim_config,
@@ -755,7 +751,7 @@ def _print_run_dry_run_report(
         colored_echo(f"  Replicate {rep}:", phase=phase)
         colored_echo(f"    Working dir: {working_dir}", phase=phase)
         if engine == "gromacs":
-            gromacs_dir = sim_config.output.projects_directory / f"replicate_{rep}" / "gromacs"
+            gromacs_dir = sim_config.get_working_directory(rep) / "gromacs"
             colored_echo(f"    GROMACS dir: {gromacs_dir}", phase=phase)
         else:
             colored_echo(
@@ -960,9 +956,9 @@ def _run_gromacs_impl(
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
 
-    # Determine output directory for GROMACS files
-    gromacs_dir = sim_config.output.projects_directory / f"replicate_{replicate}" / "gromacs"
     working_dir = sim_config.get_working_directory(replicate)
+    # Determine output directory for GROMACS files
+    gromacs_dir = working_dir / "gromacs"
 
     click.echo(f"Building system for replicate {replicate}...")
     builder = SystemBuilder.from_config(sim_config)
@@ -1325,7 +1321,7 @@ def submit(
             if gpu_type:
                 slurm_config.gpu_type = gpu_type
 
-            working_dir = sim_config.output.projects_directory / f"replicate_{rep}" / "gromacs"
+            working_dir = sim_config.get_working_directory(rep) / "gromacs"
             job_name = create_job_name(sim_config, rep)
 
             if not force:
