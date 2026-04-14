@@ -2792,9 +2792,10 @@ def recover(
             slurm_config.constraint = constraint
 
         prefix = _generate_system_prefix(sim_config)
-        gromacs_inputs_exist = (working_dir / f"{prefix}.top").exists() and (
-            working_dir / "prod.mdp"
-        ).exists()
+        gromacs_inputs_exist = all(
+            (working_dir / f).exists()
+            for f in [f"{prefix}.top", f"{prefix}.gro", "em.mdp", "prod.mdp"]
+        )
         if gromacs_inputs_exist:
             colored_echo(
                 "Detected existing GROMACS inputs — recovery will reuse them",
