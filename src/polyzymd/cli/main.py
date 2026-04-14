@@ -272,7 +272,7 @@ def build(
 
     By default, this prepares OpenMM inputs in the working directory. Use
     ``--format gromacs`` to export GROMACS files (``.gro``, ``.top``,
-    ``.itp``, ``.mdp``). AMBER and LAMMPS export are planned for v1.4.0.
+    ``.itp``, ``.mdp``). AMBER and LAMMPS export are not yet supported.
 
     Use ``run --engine gromacs`` if you want PolyzyMD to build and then
     execute the full local GROMACS workflow. Use ``run --engine openmm`` for
@@ -445,7 +445,7 @@ def build(
                     colored_echo("    - run_*_gromacs.sh (run script)", phase="build")
                 elif export_format in ("lammps", "amber"):
                     colored_echo(
-                        f"    ({export_format.upper()} export planned for v1.4.0)",
+                        f"    ({export_format.upper()} export is not yet supported)",
                         phase="build",
                     )
             else:
@@ -1026,8 +1026,7 @@ def _run_openmm_impl(
     help=(
         "Submit OpenMM self-resubmitting SLURM jobs. This command is "
         "OpenMM-only; GROMACS users should use run --engine gromacs locally "
-        "or build --format gromacs for manual cluster submission. "
-        "Integrated GROMACS SLURM submission is planned for v1.4.0."
+        "or build --format gromacs for manual cluster submission."
     )
 )
 @click.option(
@@ -1161,7 +1160,6 @@ def submit(
     This command does not yet support GROMACS as a simulation engine. GROMACS
     users should use ``run --engine gromacs`` for local execution or
     ``build --format gromacs`` to export files for manual SLURM submission.
-    Integrated GROMACS SLURM submission is planned for v1.4.0.
 
     \b
     Directory structure:
