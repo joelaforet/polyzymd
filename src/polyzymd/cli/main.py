@@ -2639,7 +2639,6 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 @click.option(
     "--engine",
     default=None,
-    hidden=True,
     help="Override simulation engine",
 )
 def recover(

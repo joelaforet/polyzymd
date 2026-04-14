@@ -984,6 +984,13 @@ class TestSubmitConstraintOption:
         assert result.exit_code == 0
         assert "--constraint" in result.output
 
+    def test_recover_help_shows_engine(self) -> None:
+        """'polyzymd recover --help' should show --engine option."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["recover", "--help"])
+        assert result.exit_code == 0
+        assert "--engine" in result.output
+
 
 class TestSubmitGromacsDuplicateGuard:
     """Tests for duplicate-job detection in GROMACS submit path."""
