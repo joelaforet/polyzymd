@@ -478,7 +478,7 @@ class SolventBuilder:
         Returns:
             3x3 transformation matrix.
         """
-        from openff.interchange.components import _packmol as packmol
+        import openff.packmol as packmol
 
         if shape == "cube":
             return packmol.UNIT_CUBE
