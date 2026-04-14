@@ -67,6 +67,7 @@ GMX="{gmx_binary}"
 PREFIX="{system_prefix}"
 MAXH={maxh_hours}
 MDRUN_FLAGS="{mdrun_flags}"
+MDRUN="{mdrun_command}"
 
 # Ensure working directory exists
 mkdir -p "$WORKING_DIR"
@@ -114,10 +115,10 @@ fi
 # -maxh limits wall time so we can cleanly resubmit
 if [ -f state.cpt ]; then
     echo "Resuming from checkpoint: state.cpt"
-    $GMX mdrun -deffnm prod -cpi state.cpt -cpo state.cpt -append -maxh $MAXH $MDRUN_FLAGS -v
+    $MDRUN -deffnm prod -cpi state.cpt -cpo state.cpt -append -maxh $MAXH $MDRUN_FLAGS -v
 else
     echo "Starting fresh production run"
-    $GMX mdrun -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v
+    $MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v
 fi
 
 MDRUN_RC=$?
@@ -205,6 +206,7 @@ exit 0
         self._config = slurm_config
         self._pixi_env = pixi_env
         self._gmx_binary = gmx_binary
+        self._is_mpi_binary = "_mpi" in Path(self._gmx_binary).name
         self._grompp_flags = grompp_flags
         self._mdrun_flags = mdrun_flags
         self._module_load = module_load
@@ -299,6 +301,7 @@ exit 0
         equilibration_block = self._generate_equilibration_block(equilibration_mdps)
         manifest_path = _discover_manifest_path()
         module_load_line = self._module_load if self._module_load else ""
+        mdrun_command = "mpirun $GMX mdrun" if self._is_mpi_binary else "$GMX mdrun"
 
         _validate_script_value(self._config.partition, "partition")
         _validate_script_value(job_name, "job_name")
@@ -352,6 +355,7 @@ exit 0
             maxh_hours=f"{maxh_hours:.2f}",
             grompp_flags=self._grompp_flags,
             mdrun_flags=self._mdrun_flags,
+            mdrun_command=mdrun_command,
             energy_minimization_block=energy_minimization_block,
             equilibration_block=equilibration_block,
             module_load_line=module_load_line,
@@ -377,7 +381,7 @@ exit 0
                 "if [ ! -f em_soft.gro ]; then",
                 '    echo "=== Energy Minimization Stage 1 (gentle) ==="',
                 "    $GMX grompp -f em_soft.mdp -c ${{PREFIX}}.gro -r ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em_soft.tpr {grompp_flags}",
-                "    $GMX mdrun -deffnm em_soft $MDRUN_FLAGS -v",
+                "    $MDRUN -deffnm em_soft $MDRUN_FLAGS -v",
                 "    if [ ! -f em_soft.gro ]; then",
                 '        echo "FATAL: Gentle energy minimization failed — em_soft.gro not produced"',
                 "        exit 1",
@@ -391,7 +395,7 @@ exit 0
                 "if [ ! -f em.gro ]; then",
                 '    echo "=== Energy Minimization Stage 2 (standard) ==="',
                 "    $GMX grompp -f em.mdp -c em_soft.gro -r em_soft.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}",
-                "    $GMX mdrun -deffnm em $MDRUN_FLAGS -v",
+                "    $MDRUN -deffnm em $MDRUN_FLAGS -v",
                 "    if [ ! -f em.gro ]; then",
                 '        echo "FATAL: Standard energy minimization failed — em.gro not produced"',
                 "        exit 1",
@@ -415,7 +419,7 @@ exit 0
             "if [ ! -f em.gro ]; then",
             '    echo "=== Energy Minimization ==="',
             "    $GMX grompp -f em.mdp -c ${{PREFIX}}.gro -r ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}",
-            "    $GMX mdrun -deffnm em $MDRUN_FLAGS -v",
+            "    $MDRUN -deffnm em $MDRUN_FLAGS -v",
             "    if [ ! -f em.gro ]; then",
             '        echo "FATAL: Energy minimization failed — em.gro not produced"',
             "        exit 1",
@@ -505,7 +509,7 @@ exit 0
                 f"-p ${{PREFIX}}.top -o {stage}.tpr {self._grompp_flags}"
             )
             lines.append("    fi")
-            lines.append(f"    $GMX mdrun -deffnm {stage} $MDRUN_FLAGS -v")
+            lines.append(f"    $MDRUN -deffnm {stage} $MDRUN_FLAGS -v")
             lines.append(f"    if [ ! -f {stage}.gro ]; then")
             lines.append(
                 f'        echo "FATAL: Equilibration stage {idx} failed — {stage}.gro not produced"'

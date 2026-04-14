@@ -217,11 +217,11 @@ def test_mdrun_flags_in_all_stages(monkeypatch) -> None:
         output_file="slurm_logs/gmx_r2.%j.out",
     )
 
-    assert "$GMX mdrun -deffnm em_soft $MDRUN_FLAGS -v" in script
-    assert "$GMX mdrun -deffnm em $MDRUN_FLAGS -v" in script
-    assert "$GMX mdrun -deffnm eq_01 $MDRUN_FLAGS -v" in script
-    assert "$GMX mdrun -deffnm eq_02 $MDRUN_FLAGS -v" in script
-    assert "$GMX mdrun -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm em_soft $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm em $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm eq_01 $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm eq_02 $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v" in script
     assert script.count("$MDRUN_FLAGS") >= 5
 
 
@@ -241,3 +241,100 @@ def test_mdrun_flags_variable_defined_before_em(monkeypatch) -> None:
     )
 
     assert script.index("MDRUN_FLAGS=") < script.index("em_soft.mdp")
+
+
+def test_mdrun_variable_uses_mpirun_for_mpi_binary(monkeypatch) -> None:
+    """MPI binaries should set MDRUN to use mpirun."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(
+            partition="aa100",
+            qos="normal",
+            account="ucb625_asc1",
+            time_limit="23:59:59",
+            email="",
+            nodes=1,
+            ntasks=1,
+            memory="3G",
+            gpus=1,
+        ),
+        pixi_env="cuda-12-4",
+        gmx_binary="gmx_mpi",
+        grompp_flags="-maxwarn 1",
+        mdrun_flags="-nb gpu",
+        module_load="module load gromacs/2024",
+    )
+
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert 'MDRUN="mpirun $GMX mdrun"' in script
+    assert "$MDRUN -deffnm em_soft $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm em $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm eq_01 $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v" in script
+
+
+def test_mdrun_variable_omits_mpirun_for_non_mpi_binary(monkeypatch) -> None:
+    """Non-MPI binaries should use direct GMX mdrun."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    script = _generator().generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert 'MDRUN="$GMX mdrun"' in script
+    assert 'MDRUN="mpirun $GMX mdrun"' not in script
+
+
+def test_grompp_calls_never_use_mpirun(monkeypatch) -> None:
+    """grompp commands should never be prefixed with mpirun."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=SlurmConfig(
+            partition="aa100",
+            qos="normal",
+            account="ucb625_asc1",
+            time_limit="23:59:59",
+            email="",
+            nodes=1,
+            ntasks=1,
+            memory="3G",
+            gpus=1,
+        ),
+        pixi_env="cuda-12-4",
+        gmx_binary="gmx_mpi",
+        grompp_flags="-maxwarn 1",
+        mdrun_flags="-nb gpu",
+        module_load="module load gromacs/2024",
+    )
+
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert "mpirun $GMX grompp" not in script
