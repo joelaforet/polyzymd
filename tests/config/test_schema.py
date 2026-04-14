@@ -391,3 +391,53 @@ class TestGromacsEngineConfigWarnings:
             SimulationConfig(**minimal_config_data)
 
         assert not any("thread-MPI" in r.message for r in caplog.records)
+
+    def test_mdrun_flags_ntmpi_conflict_warns(self, minimal_config_data, caplog):
+        """mdrun_flags with -ntmpi != config ntmpi should warn."""
+        import logging
+
+        minimal_config_data["gromacs"] = {"ntmpi": 1, "mdrun_flags": "-ntmpi 4"}
+        with caplog.at_level(logging.WARNING):
+            SimulationConfig(**minimal_config_data)
+
+        assert any("ntmpi" in r.message and "override" in r.message for r in caplog.records)
+
+    def test_mdrun_flags_ntomp_conflict_warns(self, minimal_config_data, caplog):
+        """mdrun_flags with -ntomp != config ntomp should warn."""
+        import logging
+
+        minimal_config_data["gromacs"] = {"ntomp": 8, "mdrun_flags": "-ntomp 16"}
+        with caplog.at_level(logging.WARNING):
+            SimulationConfig(**minimal_config_data)
+
+        assert any("ntomp" in r.message and "override" in r.message for r in caplog.records)
+
+    def test_mdrun_flags_matching_no_warning(self, minimal_config_data, caplog):
+        """mdrun_flags matching config fields should not warn."""
+        import logging
+
+        minimal_config_data["gromacs"] = {
+            "ntmpi": 1,
+            "ntomp": 12,
+            "mdrun_flags": "-ntmpi 1 -ntomp 12 -nb gpu",
+        }
+        with caplog.at_level(logging.WARNING):
+            SimulationConfig(**minimal_config_data)
+
+        assert not any("override" in r.message for r in caplog.records)
+
+    def test_mdrun_flags_malformed_no_crash(self, minimal_config_data):
+        """Malformed mdrun_flags should not crash validation."""
+        minimal_config_data["gromacs"] = {"mdrun_flags": "-ntmpi 'unclosed"}
+        config = SimulationConfig(**minimal_config_data)
+        assert config.gromacs.mdrun_flags == "-ntmpi 'unclosed"
+
+    def test_mdrun_flags_empty_no_warning(self, minimal_config_data, caplog):
+        """Empty mdrun_flags should not produce warnings."""
+        import logging
+
+        minimal_config_data["gromacs"] = {"mdrun_flags": ""}
+        with caplog.at_level(logging.WARNING):
+            SimulationConfig(**minimal_config_data)
+
+        assert not any("override" in r.message for r in caplog.records)

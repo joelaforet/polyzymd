@@ -8,6 +8,7 @@ providing validation, type safety, and YAML/JSON serialization support.
 from __future__ import annotations
 
 import logging
+import shlex
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, Self
@@ -1197,6 +1198,56 @@ class GromacsEngineConfig(BaseModel):
                 self.ntmpi,
                 self.gpus,
             )
+        return self
+
+    @model_validator(mode="after")
+    def _warn_mdrun_flags_conflict(self) -> Self:
+        """Warn when mdrun_flags conflict with explicit ntmpi or ntomp fields.
+
+        Returns
+        -------
+        Self
+            The validated config instance
+        """
+        if not self.mdrun_flags:
+            return self
+
+        try:
+            tokens = shlex.split(self.mdrun_flags)
+        except ValueError:
+            return self
+
+        flag_map: dict[str, str] = {}
+        for i, tok in enumerate(tokens):
+            if tok in ("-ntmpi", "-ntomp") and i + 1 < len(tokens):
+                flag_map[tok] = tokens[i + 1]
+
+        if "-ntmpi" in flag_map:
+            try:
+                flag_val = int(flag_map["-ntmpi"])
+                if flag_val != self.ntmpi:
+                    LOGGER.warning(
+                        "mdrun_flags contains '-ntmpi %s' but config field ntmpi=%d. "
+                        "The flag string will override at runtime.",
+                        flag_map["-ntmpi"],
+                        self.ntmpi,
+                    )
+            except ValueError:
+                pass
+
+        if "-ntomp" in flag_map:
+            try:
+                flag_val = int(flag_map["-ntomp"])
+                if flag_val != self.ntomp:
+                    LOGGER.warning(
+                        "mdrun_flags contains '-ntomp %s' but config field ntomp=%d. "
+                        "The flag string will override at runtime.",
+                        flag_map["-ntomp"],
+                        self.ntomp,
+                    )
+            except ValueError:
+                pass
+
         return self
 
 
