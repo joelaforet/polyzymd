@@ -169,7 +169,7 @@ def test_cpus_per_task_in_script(monkeypatch) -> None:
 
 
 def test_mdrun_flags_in_all_stages(monkeypatch) -> None:
-    """MDRUN_FLAGS should be used in EM, equilibration, and production."""
+    """EM should use filtered flags while equilibration and production use full flags."""
     monkeypatch.setattr(
         "polyzymd.engines.gromacs.slurm._discover_manifest_path",
         lambda: "/tmp/pixi.toml",
@@ -185,7 +185,7 @@ def test_mdrun_flags_in_all_stages(monkeypatch) -> None:
         output_file="slurm_logs/gmx_r2.%j.out",
     )
 
-    assert "$MDRUN -deffnm em $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm em $MDRUN_FLAGS_EM -v" in script
     assert "$MDRUN -deffnm eq_01 $MDRUN_FLAGS -v" in script
     assert "$MDRUN -deffnm eq_02 $MDRUN_FLAGS -v" in script
     assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v" in script
@@ -193,7 +193,7 @@ def test_mdrun_flags_in_all_stages(monkeypatch) -> None:
 
 
 def test_mdrun_flags_variable_defined_before_em(monkeypatch) -> None:
-    """MDRUN_FLAGS variable should be declared before EM block commands."""
+    """MDRUN flag variables should be declared before EM block commands."""
     monkeypatch.setattr(
         "polyzymd.engines.gromacs.slurm._discover_manifest_path",
         lambda: "/tmp/pixi.toml",
@@ -208,6 +208,7 @@ def test_mdrun_flags_variable_defined_before_em(monkeypatch) -> None:
     )
 
     assert script.index("MDRUN_FLAGS=") < script.index("em.mdp")
+    assert script.index("MDRUN_FLAGS_EM=") < script.index("em.mdp")
 
 
 def test_mdrun_variable_uses_mpirun_for_mpi_binary(monkeypatch) -> None:
@@ -245,7 +246,7 @@ def test_mdrun_variable_uses_mpirun_for_mpi_binary(monkeypatch) -> None:
     )
 
     assert 'MDRUN="mpirun $GMX mdrun"' in script
-    assert "$MDRUN -deffnm em $MDRUN_FLAGS -v" in script
+    assert "$MDRUN -deffnm em $MDRUN_FLAGS_EM -v" in script
     assert "$MDRUN -deffnm eq_01 $MDRUN_FLAGS -v" in script
     assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v" in script
 
@@ -557,3 +558,80 @@ class TestGPUSlurmScripts:
         )
 
         assert f'MDRUN_FLAGS="{mdrun_flags}"' in script
+
+    def test_em_uses_filtered_gpu_flags(self, monkeypatch) -> None:
+        """EM stage should use MDRUN_FLAGS_EM with unsupported GPU flags removed."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+
+        mdrun_flags = "-ntmpi 1 -ntomp 12 -nb gpu -pme gpu -bonded gpu -update gpu"
+        generator = GromacsSlurmScriptGenerator(
+            slurm_config=SlurmConfig(
+                partition="blanca-shirts",
+                qos="blanca-shirts",
+                account="blanca-shirts",
+                time_limit="23:59:59",
+                nodes=1,
+                ntasks=1,
+                cpus_per_task=12,
+                memory="64G",
+                gpus=1,
+            ),
+            pixi_env="cuda-12-4",
+            gmx_binary="gmx",
+            mdrun_flags=mdrun_flags,
+            module_load="module load gromacs/2024.2",
+        )
+
+        script = generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/rc_scratch/run1/gromacs",
+            system_prefix="CALB_PEG",
+            equilibration_mdps=["eq_01_nvt.mdp", "eq_02_npt.mdp"],
+        )
+
+        assert "$MDRUN -deffnm em $MDRUN_FLAGS_EM -v" in script
+        assert "$MDRUN -deffnm eq_01 $MDRUN_FLAGS -v" in script
+        assert "$MDRUN -deffnm eq_02 $MDRUN_FLAGS -v" in script
+        assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS -v" in script
+        assert "MDRUN_FLAGS_EM=" in script
+        assert "-pme" in script
+        assert "-update" in script
+
+    def test_cpu_only_em_flags_still_filtered(self, monkeypatch) -> None:
+        """CPU-only scripts should still define MDRUN_FLAGS_EM for a no-op filter."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+
+        generator = GromacsSlurmScriptGenerator(
+            slurm_config=SlurmConfig(
+                partition="aa100",
+                qos="normal",
+                account="ucb625_asc1",
+                time_limit="23:59:59",
+                nodes=1,
+                ntasks=1,
+                cpus_per_task=16,
+                memory="3G",
+                gpus=0,
+            ),
+            pixi_env="cuda-12-4",
+            gmx_binary="gmx_mpi",
+            mdrun_flags="-ntomp 16",
+        )
+
+        script = generator.generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+
+        assert "$MDRUN -deffnm em $MDRUN_FLAGS_EM -v" in script
+        assert "MDRUN_FLAGS_EM=" in script

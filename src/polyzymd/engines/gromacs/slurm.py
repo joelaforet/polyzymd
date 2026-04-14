@@ -69,6 +69,8 @@ GMX="{gmx_binary}"
 PREFIX="{system_prefix}"
 MAXH={maxh_hours}
 MDRUN_FLAGS="{mdrun_flags}"
+# EM-safe flags: strip -pme gpu and -update gpu (incompatible with non-dynamical integrators)
+MDRUN_FLAGS_EM=$(echo "$MDRUN_FLAGS" | sed 's/-pme  *gpu//g; s/-update  *gpu//g' | xargs)
 MDRUN="{mdrun_command}"
 
 # Ensure working directory exists
@@ -373,7 +375,7 @@ exit 0
             "if [ ! -f em.gro ]; then",
             '    echo "=== Energy Minimization ==="',
             "    $GMX grompp -f em.mdp -c ${{PREFIX}}.gro -r ${{PREFIX}}.gro -p ${{PREFIX}}.top -o em.tpr {grompp_flags}",
-            "    $MDRUN -deffnm em $MDRUN_FLAGS -v",
+            "    $MDRUN -deffnm em $MDRUN_FLAGS_EM -v",
             "    if [ ! -f em.gro ]; then",
             '        echo "FATAL: Energy minimization failed — em.gro not produced"',
             "        exit 1",
