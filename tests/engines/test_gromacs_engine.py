@@ -578,6 +578,28 @@ class TestPrepareSubmissionPassThrough:
         assert kwargs["mpi_launcher_flags"] == config.gromacs.mpi_launcher_flags
 
 
+class TestStageSpecificMdrunFlagResolution:
+    """Tests for stage-specific mdrun flag resolution behavior."""
+
+    def test_stage_specific_flags_do_not_mutate_global(self):
+        """Stage resolution must not mutate the global mdrun_flags on config."""
+        config = _make_config(mdrun_flags="-v -pin on", ntomp=8, ntmpi=1)
+        config.gromacs.mdrun_flags_equilibration = "-ntomp 4"
+        config.gromacs.mdrun_flags_production = "-ntomp 16"
+
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=8)
+        effective = engine._resolve_slurm_config(slurm)
+
+        eq_flags, prod_flags = engine._resolve_stage_mdrun_flags(effective)
+
+        assert config.gromacs.mdrun_flags == "-v -pin on"
+        assert eq_flags is not None
+        assert "-ntomp 4" in eq_flags
+        assert prod_flags is not None
+        assert "-ntomp 16" in prod_flags
+
+
 class TestFromConfigBinaryResolution:
     """Tests for deferred GROMACS binary resolution."""
 

@@ -286,7 +286,9 @@ class GromacsEngine(SimulationEngine):
             overrides["gpus"] = 0
         return replace(base, **overrides)
 
-    def _resolve_mdrun_flags(self, effective_slurm: SlurmConfig) -> str:
+    def _resolve_mdrun_flags(
+        self, effective_slurm: SlurmConfig, *, base_flags: str | None = None
+    ) -> str:
         """Compose final mdrun flags from config + hardware settings.
 
         Appends ``-ntmpi`` and ``-ntomp`` only if the user has not already
@@ -307,6 +309,9 @@ class GromacsEngine(SimulationEngine):
         ----------
         effective_slurm : SlurmConfig
             Resolved SLURM config with hardware overrides.
+        base_flags : str | None, optional
+            Override for base flags instead of
+            ``self._config.gromacs.mdrun_flags``.
 
         Returns
         -------
@@ -315,7 +320,7 @@ class GromacsEngine(SimulationEngine):
         """
         import shlex
 
-        raw = self._config.gromacs.mdrun_flags
+        raw = base_flags if base_flags is not None else self._config.gromacs.mdrun_flags
         tokens = shlex.split(raw) if raw else []
         token_set = set(tokens)
 
@@ -383,12 +388,7 @@ class GromacsEngine(SimulationEngine):
         str
             Fully resolved mdrun flags for one stage.
         """
-        original = self._config.gromacs.mdrun_flags
-        self._config.gromacs.mdrun_flags = raw_flags
-        try:
-            return self._resolve_mdrun_flags(effective_slurm)
-        finally:
-            self._config.gromacs.mdrun_flags = original
+        return self._resolve_mdrun_flags(effective_slurm, base_flags=raw_flags)
 
     def submit(self, request: EngineSubmitRequest) -> Any:
         """Submit GROMACS jobs to scheduler.
