@@ -67,7 +67,7 @@ class TestExposureGromacsSmoke:
 
         assert result is not None
         assert mock_sasa.call_count == 1
-        assert mock_sasa.call_args.kwargs["topology_path"].name == "test_system.pdb"
+        assert mock_sasa.call_args.kwargs["topology_path"].name == "solvated_system.pdb"
         assert mock_sasa.call_args.kwargs["trajectory_path"][0].name == "prod.xtc"
 
     def test_compare_path_handles_gromacs_condition(self, tmp_path: Path) -> None:

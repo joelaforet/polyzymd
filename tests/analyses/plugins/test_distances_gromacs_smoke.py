@@ -108,5 +108,5 @@ class TestDistancesGromacsSmoke:
         assert resolve_spy.call_count >= 1
         assert result.replicate == 1
         assert len(result.pair_results) == 1
-        assert result.trajectory_files == [str(tmp_path / "run_1" / "prod.xtc")]
-        assert str(tmp_path / "run_1" / "prod.xtc") in str(fake_mda.Universe.call_args)
+        assert result.trajectory_files == [str(tmp_path / "run_1" / "gromacs" / "prod.xtc")]
+        assert str(tmp_path / "run_1" / "gromacs" / "prod.xtc") in str(fake_mda.Universe.call_args)

@@ -122,8 +122,8 @@ class TestRMSFGromacsSmoke:
 
         assert result_1.replicate == 1
         assert result_2.replicate == 2
-        assert result_1.trajectory_files == [str(tmp_path / "run_1" / "prod.xtc")]
-        assert result_2.trajectory_files == [str(tmp_path / "run_2" / "prod.xtc")]
+        assert result_1.trajectory_files == [str(tmp_path / "run_1" / "gromacs" / "prod.xtc")]
+        assert result_2.trajectory_files == [str(tmp_path / "run_2" / "gromacs" / "prod.xtc")]
 
         assert aggregate_result.n_replicates == 2
         assert aggregate_result.per_replicate_mean_rmsf == [1.2, 1.7]

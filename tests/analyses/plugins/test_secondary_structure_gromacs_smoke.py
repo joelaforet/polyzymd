@@ -108,4 +108,4 @@ class TestSecondaryStructureGromacsSmoke:
         assert result.selection_string == "chainid 0 (chain A)"
         assert result.overall_helix_fraction == 0.4
         assert result.overall_strand_fraction == 0.2
-        assert str(tmp_path / "run_1" / "prod.xtc") in str(mdtraj_load.call_args)
+        assert str(tmp_path / "run_1" / "gromacs" / "prod.xtc") in str(mdtraj_load.call_args)

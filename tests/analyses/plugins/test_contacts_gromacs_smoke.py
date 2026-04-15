@@ -65,8 +65,8 @@ class TestContactsGromacsSmoke:
         assert result is mock_result
         assert resolve_spy.call_count >= 1
         topo_arg, traj_arg = fake_mda.Universe.call_args.args
-        assert topo_arg.endswith("run_1/test_system.pdb")
-        assert traj_arg == [str(tmp_path / "run_1" / "prod.xtc")]
+        assert topo_arg.endswith("run_1/gromacs/solvated_system.pdb")
+        assert traj_arg == [str(tmp_path / "run_1" / "gromacs" / "prod.xtc")]
 
     def test_find_topology_resolves_gromacs_pdb(self, tmp_path: Path) -> None:
         """find_topology(working_dir) resolves GROMACS PDB via engine."""
@@ -76,4 +76,4 @@ class TestContactsGromacsSmoke:
         loader = TrajectoryLoader(config)
         topo = loader.find_topology(tmp_path / "run_1")
 
-        assert topo.name == "test_system.pdb"
+        assert topo.name == "solvated_system.pdb"

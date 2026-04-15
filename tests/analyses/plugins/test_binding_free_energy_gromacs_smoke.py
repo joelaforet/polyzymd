@@ -97,7 +97,7 @@ class TestBindingFreeEnergyGromacsSmoke:
 
         assert result is agg_bp
         assert resolve_spy.call_count >= 1
-        assert fake_mda.Universe.call_args.args[0].endswith("run_1/test_system.pdb")
+        assert fake_mda.Universe.call_args.args[0].endswith("run_1/gromacs/solvated_system.pdb")
 
     def test_load_binding_preference_compute_path_with_gromacs_condition(
         self, tmp_path: Path

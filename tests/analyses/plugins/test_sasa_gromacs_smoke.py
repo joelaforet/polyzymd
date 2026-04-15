@@ -87,4 +87,4 @@ class TestSASAGromacsSmoke:
 
         assert resolve_spy.call_count >= 3
         assert result.replicate == 1
-        assert result.trajectory_files == [str(tmp_path / "run_1" / "prod.xtc")]
+        assert result.trajectory_files == [str(tmp_path / "run_1" / "gromacs" / "prod.xtc")]

@@ -124,4 +124,4 @@ class TestHydrogenBondsGromacsSmoke:
         assert resolve_spy.call_count >= 1
         assert result.replicate == 1
         assert hbond_cls.call_args.kwargs["donors_sel"] == "(chainid A) or (chainid C)"
-        assert str(tmp_path / "run_1" / "prod.xtc") in str(fake_mda.Universe.call_args)
+        assert str(tmp_path / "run_1" / "gromacs" / "prod.xtc") in str(fake_mda.Universe.call_args)

@@ -69,12 +69,13 @@ def _create_openmm_legacy(run_dir: Path) -> None:
 
 def _create_gromacs_flat(run_dir: Path, *, use_gro: bool = False) -> None:
     """Populate *run_dir* with a flat GROMACS production layout."""
-    run_dir.mkdir(parents=True, exist_ok=True)
+    gromacs_dir = run_dir / "gromacs"
+    gromacs_dir.mkdir(parents=True, exist_ok=True)
     if use_gro:
-        (run_dir / "test_system.gro").write_text("GRO content")
+        (gromacs_dir / "solvated_system.gro").write_text("GRO content")
     else:
-        (run_dir / "test_system.pdb").write_text("ATOM topology")
-    (run_dir / "prod.xtc").write_bytes(b"\x00")
+        (gromacs_dir / "solvated_system.pdb").write_text("ATOM topology")
+    (gromacs_dir / "prod.xtc").write_bytes(b"\x00")
 
 
 # ---------------------------------------------------------------------------

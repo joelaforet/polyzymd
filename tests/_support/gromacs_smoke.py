@@ -55,9 +55,10 @@ def create_gromacs_layout(run_dir: Path) -> None:
     run_dir : Path
         Replicate directory such as ``run_1``.
     """
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "test_system.pdb").write_bytes(b"\n")
-    (run_dir / "prod.xtc").write_bytes(b"\n")
+    gromacs_dir = run_dir / "gromacs"
+    gromacs_dir.mkdir(parents=True, exist_ok=True)
+    (gromacs_dir / "solvated_system.pdb").write_bytes(b"\n")
+    (gromacs_dir / "prod.xtc").write_bytes(b"\n")
 
 
 class MockTrajectory:

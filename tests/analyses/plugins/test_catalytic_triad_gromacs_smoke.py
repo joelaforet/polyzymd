@@ -115,7 +115,7 @@ class TestCatalyticTriadGromacsSmoke:
             pair_results=[pair_1, pair_2],
             n_frames_total=100,
             n_frames_used=100,
-            trajectory_files=[str(tmp_path / "run_1" / "prod.xtc")],
+            trajectory_files=[str(tmp_path / "run_1" / "gromacs" / "prod.xtc")],
         )
 
         original_resolve = GromacsEngine.resolve_trajectory_layout
@@ -152,4 +152,4 @@ class TestCatalyticTriadGromacsSmoke:
         assert result.pair_results[0].pair_label == "Asp133-His156"
         assert result.pair_results[1].pair_label == "His156-Ser77"
         assert result.simultaneous_contact_fraction == 1.0
-        assert str(tmp_path / "run_1" / "prod.xtc") in str(fake_mda.Universe.call_args)
+        assert str(tmp_path / "run_1" / "gromacs" / "prod.xtc") in str(fake_mda.Universe.call_args)

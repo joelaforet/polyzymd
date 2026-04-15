@@ -85,7 +85,7 @@ class TestPolymerBridgingGromacsSmoke:
 
         assert has_polymer is True
         assert resolve_spy.call_count >= 1
-        assert fake_mda.Universe.call_args.args[0].endswith("run_1/test_system.pdb")
+        assert fake_mda.Universe.call_args.args[0].endswith("run_1/gromacs/solvated_system.pdb")
 
     def test_find_topology_resolves_gromacs_pdb(self, tmp_path: Path) -> None:
         """find_topology(working_dir) resolves GROMACS PDB via engine."""
@@ -95,4 +95,4 @@ class TestPolymerBridgingGromacsSmoke:
         loader = TrajectoryLoader(config)
         topo = loader.find_topology(tmp_path / "run_1")
 
-        assert topo.name == "test_system.pdb"
+        assert topo.name == "solvated_system.pdb"
