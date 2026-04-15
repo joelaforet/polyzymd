@@ -173,10 +173,11 @@ def cohens_d(
     Notes
     -----
     Effect size interpretation (Cohen, 1988):
-    - |d| < 0.2: negligible
-    - 0.2 <= |d| < 0.5: small
-    - 0.5 <= |d| < 0.8: medium
-    - |d| >= 0.8: large
+
+    - ``|d|`` < 0.2: negligible
+    - 0.2 <= ``|d|`` < 0.5: small
+    - 0.5 <= ``|d|`` < 0.8: medium
+    - ``|d|`` >= 0.8: large
     """
     g1 = np.asarray(group1, dtype=np.float64)
     g2 = np.asarray(group2, dtype=np.float64)

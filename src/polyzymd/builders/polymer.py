@@ -6,8 +6,9 @@ polymer structures from SDF files, and optionally generating new polymers
 using Polymerist when cached structures are not available.
 
 Supports two generation modes:
-- Cached: Load pre-built SDF files from disk
-- Dynamic: Generate polymers on-the-fly using Polymerist from raw monomer SMILES
+
+- **Cached**: Load pre-built SDF files from disk
+- **Dynamic**: Generate polymers on-the-fly using Polymerist from raw monomer SMILES
 
 Made by PolyzyMD, by Joseph R. Laforet Jr.
 """
@@ -79,7 +80,7 @@ class PolymerBuilder:
 
     1. Cached mode (legacy): Load pre-built SDF files from disk
        - Requires sdf_directory with pre-built polymer files
-        - Filenames: {type_prefix}_seq={sequence}_{length}-mer_charged.sdf
+       - Filenames: ``{type_prefix}_seq={sequence}_{length}-mer_charged.sdf``
 
     2. Dynamic mode: Generate polymers on-the-fly using Polymerist
        - Requires monomer SMILES and ATRP reaction templates
