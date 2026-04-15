@@ -1535,7 +1535,6 @@ class TestStatusDeferBinary:
         mock_from_yaml.return_value = mock_cfg
 
         mock_engine = MagicMock()
-        mock_engine.discover_legacy_replicates.return_value = []
         mock_create_engine.return_value = mock_engine
 
         runner = CliRunner()

@@ -407,68 +407,11 @@ class TestStatusGromacs:
         assert result.exit_code == 0
 
 
-class TestStatusGromacsLegacyFallback:
-    """Tests for status command with legacy GROMACS directory layout."""
+class TestStatusGromacsReplicateDiscovery:
+    """Tests for status command GROMACS replicate directory discovery."""
 
     def setup_method(self):
         set_color_support(TerminalColorSupport.NONE)
-
-    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.load_or_scan_progress")
-    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
-    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
-    def test_legacy_fallback_finds_old_layout(
-        self, mock_from_yaml, mock_resolve, mock_load, tmp_path
-    ):
-        """status should fall back to projects_directory/replicate_N/gromacs/ for GROMACS."""
-        _ = mock_resolve
-        scratch = tmp_path / "scratch"
-        scratch.mkdir()
-
-        projects = tmp_path / "projects"
-        legacy_gromacs_dir = projects / "replicate_1" / "gromacs"
-        legacy_gromacs_dir.mkdir(parents=True)
-
-        mock_cfg = _mock_sim_config(scratch)
-        mock_cfg.engine = "gromacs"
-        mock_cfg.gromacs = SimpleNamespace(
-            gmx_binary=None,
-            grompp_flags="",
-            mdrun_flags="",
-            module_load=None,
-        )
-        mock_cfg.output.projects_directory = projects
-        mock_cfg.discover_replicate_dirs.return_value = []
-        mock_from_yaml.return_value = mock_cfg
-
-        progress = SimulationProgress(
-            config_path="/tmp/config.yaml",
-            total_steps_requested=50_000_000,
-            total_samples_requested=250,
-            timestep_fs=2.0,
-            segments=[
-                SegmentRecord(
-                    index=0,
-                    steps_completed=25_000_000,
-                    steps_requested=50_000_000,
-                    samples_written=125,
-                    status=SegmentStatus.RUNNING,
-                    duration_ns=50.0,
-                )
-            ],
-            status=SimulationStatus.RUNNING,
-            replicate=1,
-        )
-        mock_load.return_value = progress
-
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text("name: test\n")
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["status", "-c", str(config_path)])
-
-        assert result.exit_code == 0, f"Output: {result.output}"
-        assert "run1" in result.output
-        mock_load.assert_called_once()
 
     @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
