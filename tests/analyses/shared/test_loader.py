@@ -22,7 +22,6 @@ import pytest
 
 from polyzymd.analyses.shared.loader import TrajectoryLoader
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -231,7 +230,10 @@ class TestGROWarning:
         with caplog.at_level(logging.WARNING, logger="polyzymd.analyses.shared.loader"):
             loader.find_topology(run_dir)
 
-        assert any("GRO topology" in msg for msg in caplog.messages)
+        assert any(
+            "GRO topology" in record.message and record.name == "polyzymd.analyses.shared.loader"
+            for record in caplog.records
+        )
 
     def test_warns_only_once_for_same_path(self, tmp_path, caplog):
         run_dir = tmp_path / "run_1"
@@ -243,7 +245,11 @@ class TestGROWarning:
             loader.find_topology(run_dir)
             loader.find_topology(run_dir)
 
-        gro_warnings = [m for m in caplog.messages if "GRO topology" in m]
+        gro_warnings = [
+            record.message
+            for record in caplog.records
+            if "GRO topology" in record.message and record.name == "polyzymd.analyses.shared.loader"
+        ]
         assert len(gro_warnings) == 1
 
     def test_no_warning_for_pdb_topology(self, tmp_path, caplog):
