@@ -223,7 +223,11 @@ class TrajectoryLoader:
             replicate = self._infer_replicate(working_dir)
         engine = self._get_engine()
         try:
-            layout = engine.resolve_trajectory_layout(working_dir, replicate)
+            engine_dir = engine.resolve_engine_working_directory(working_dir)
+        except (AttributeError, TypeError):
+            engine_dir = working_dir
+        try:
+            layout = engine.resolve_trajectory_layout(engine_dir, replicate)
         except Exception as exc:
             # Pydantic ValidationError, TypeError, etc. when paths are
             # invalid (e.g. MagicMock in tests).  Translate to
