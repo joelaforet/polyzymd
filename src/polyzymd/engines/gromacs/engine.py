@@ -22,47 +22,6 @@ class GromacsEngine(SimulationEngine):
     name: ClassVar[str] = "gromacs"
     engine_subdir: ClassVar[str] = "gromacs"
 
-    def discover_legacy_replicates(self, sim_config: object) -> list[tuple[int, Path]]:
-        """Scan the old projects-based GROMACS layout for replicates.
-
-        The pre-v1.3.0 layout stored GROMACS files at
-        ``projects_directory/replicate_N/gromacs/``. This method provides
-        read-only fallback discovery for in-flight jobs that used that
-        layout.
-
-        Parameters
-        ----------
-        sim_config : object
-            Simulation configuration with ``output.projects_directory``.
-
-        Returns
-        -------
-        list[tuple[int, Path]]
-            Sorted list of ``(replicate_number, gromacs_working_dir)`` tuples.
-        """
-        import re
-
-        projects_dir = getattr(getattr(sim_config, "output", None), "projects_directory", None)
-        if projects_dir is None:
-            return []
-
-        projects_dir = Path(projects_dir)
-        if not projects_dir.exists():
-            return []
-
-        results: list[tuple[int, Path]] = []
-        for entry in projects_dir.iterdir():
-            if not entry.is_dir():
-                continue
-            match = re.match(r"replicate_(\d+)$", entry.name)
-            if match:
-                gromacs_dir = entry / "gromacs"
-                if gromacs_dir.is_dir():
-                    results.append((int(match.group(1)), gromacs_dir))
-
-        results.sort(key=lambda t: t[0])
-        return results
-
     def __init__(self, config: object, gmx_binary: str = "gmx"):
         """Initialize a GROMACS engine adapter.
 

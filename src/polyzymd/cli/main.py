@@ -2227,19 +2227,6 @@ def status(config: str) -> None:
     # Discover replicate directories (scratch-based, works for both engines)
     replicates = sim_config.discover_replicate_dirs()
 
-    # Legacy fallback: check old projects-based layout for GROMACS
-    if not replicates and engine_name == "gromacs":
-        legacy = engine_inst.discover_legacy_replicates(sim_config)
-        if legacy:
-            replicates = legacy
-            # Legacy dirs already point to the gromacs/ subdirectory,
-            # so skip resolve_engine_working_directory in the loop below.
-            _legacy_layout = True
-        else:
-            _legacy_layout = False
-    else:
-        _legacy_layout = False
-
     rep_map: dict[int, Path | None] = dict(replicates)
 
     # If no replicates found on disk, show a message
@@ -2278,11 +2265,7 @@ def status(config: str) -> None:
             status_str = "not_found"
             status_display = "not found"
         else:
-            if _legacy_layout:
-                # Legacy paths already point to gromacs/ subdirectory
-                engine_dir = rep_path
-            else:
-                engine_dir = engine_inst.resolve_engine_working_directory(rep_path)
+            engine_dir = engine_inst.resolve_engine_working_directory(rep_path)
             progress = engine_inst.load_or_scan_progress(engine_dir, rep_num)
             save_progress(engine_dir, progress)
 
