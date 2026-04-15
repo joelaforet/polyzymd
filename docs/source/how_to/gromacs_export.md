@@ -1,238 +1,602 @@
-# GROMACS Export and Simulation
+# Run GROMACS Simulations on HPC Clusters
 
-This guide explains how to run PolyzyMD simulations using GROMACS instead of the default OpenMM backend.
+This guide shows how to configure, submit, and manage GROMACS simulations on
+HPC clusters using PolyzyMD's self-resubmitting SLURM workflow.
 
-## Overview
-
-PolyzyMD can export your simulation system to GROMACS format, allowing you to:
-
-- Run simulations on HPC clusters where GROMACS is preferred
-- Use GROMACS-specific analysis tools
-- Leverage GROMACS performance optimizations
-- Integrate with existing GROMACS workflows
-
-The GROMACS export maintains **1:1 parity** with OpenMM simulations using OpenFF force field defaults.
-
-:::{admonition} Environment Setup
+:::{admonition} Prerequisites
 :class: tip
 
-All commands below assume you have activated the PolyzyMD pixi environment:
+- A working `config.yaml` validated with `polyzymd validate`
+- GROMACS installed on your cluster (via `module load` or container)
+- Familiarity with your cluster's SLURM partitions and GPU types
+- PolyzyMD installed with `pixi` (see {doc}`../tutorials/installation`)
 
-```bash
-pixi shell -e build
-```
-
-Alternatively, prefix each command with `pixi run -e build`.
+All commands below assume you prefix with `pixi run -e build` or have
+activated the environment with `pixi shell -e build`.
 :::
 
 ---
 
-## When to Use GROMACS vs OpenMM
+## Quick Start: CPU
 
-| Feature | OpenMM | GROMACS |
-|---------|--------|---------|
-| **GPU acceleration** | Excellent | Excellent |
-| **HPC availability** | Less common | Very common |
-| **Analysis tools** | MDTraj, MDAnalysis | Built-in + MDAnalysis |
-| **Restart/checkpoint** | Native in PolyzyMD | Standard .cpt files |
-| **Job management** | Self-resubmitting jobs | Self-resubmitting jobs |
-| **Learning curve** | Simpler | More complex |
-
-**Use GROMACS when:**
-- Your HPC cluster has optimized GROMACS installations
-- You need GROMACS-specific analysis tools
-- You want to integrate with existing GROMACS workflows
-- You prefer GROMACS file formats (.gro, .xtc, .edr)
-
-**Use OpenMM when:**
-- You want the simplest workflow
-- You're running locally or on a workstation
-
----
-
-## Quick Start
-
-### Export and Run with GROMACS
-
-```bash
-# Full workflow: build system + run GROMACS simulation
-polyzymd run -c config.yaml --engine gromacs --replicates 1
-
-# Preview the workflow without writing files
-polyzymd run -c config.yaml --engine gromacs --replicates 1 --dry-run
-
-# Build only (export GROMACS files, no simulation)
-polyzymd build -c config.yaml --format gromacs
-```
-
-### Using a Custom GROMACS Installation
-
-```bash
-# Specify custom GROMACS path
-polyzymd run -c config.yaml --engine gromacs --gmx-path /usr/local/gromacs/bin/gmx
-
-# Or with module system
-module load gromacs/2023.3
-polyzymd run -c config.yaml --engine gromacs --gmx-path $(which gmx)
-```
-
----
-
-## Complete Example: Multi-Component System
-
-Here's a complete workflow for running a simulation with enzyme, dynamically generated polymers, organic co-solvent, water, and substrate using GROMACS.
-
-### Step 1: Create Configuration
+Add a minimal `gromacs:` block to your `config.yaml` and submit:
 
 ```yaml
-# config_gromacs.yaml
-name: "LipA_polymer_gromacs"
-description: "Lipase A with SBMA-EGPMA polymers in DMS/water - GROMACS"
-
-# Enzyme
-enzyme:
-  name: "LipA"
-  pdb_path: "structures/enzyme.pdb"
-
-# Substrate (ligand)
-substrate:
-  name: "ResorufinButyrate"
-  sdf_path: "structures/substrate.sdf"
-  charge_method: "nagl"
-  residue_name: "RBY"
-
-# Dynamic Polymer Generation
-polymers:
-  enabled: true
-  generation_mode: "dynamic"
-  type_prefix: "SBMA-EGPMA"
-  
-  monomers:
-    - label: "A"
-      probability: 0.7
-      name: "SBMA"
-      smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
-      residue_name: "SBM"
-    - label: "B"
-      probability: 0.3
-      name: "EGPMA"
-      smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])Oc1c([H])c([H])c([H])c([H])c1[H])C([H])([H])[H]"
-      residue_name: "EGM"
-  
-  length: 5
-  count: 2
-  charger: "nagl"
-
-# Solvent: DMS/water mixture
-solvent:
-  primary:
-    type: "water"
-    model: "tip3p"
-  co_solvents:
-    - name: "dmso"
-      volume_fraction: 0.30
-      residue_name: "DMS"
-  ions:
-    neutralize: true
-    nacl_concentration: 0.0
-  box:
-    padding: 1.2
-    shape: "rhombic_dodecahedron"
-    target_density: 1.05
-    tolerance: 2.0
-
-# Thermodynamics
-thermodynamics:
-  temperature: 300.0
-  pressure: 1.0
-
-# Simulation phases
-simulation_phases:
-  equilibration_stages:
-    - name: "heating"
-      duration: 0.2
-      samples: 20
-      ensemble: "NVT"
-      temperature_start: 60.0
-      temperature_end: 300.0
-      temperature_increment: 1.0
-      temperature_interval: 1200.0
-      position_restraints:
-        - group: "protein_heavy"
-          force_constant: 4184.0
-        - group: "polymer_heavy"
-          force_constant: 4184.0
-    - name: "free_equilibration"
-      duration: 0.8
-      samples: 80
-      ensemble: "NPT"
-      temperature: 300.0
-  production:
-    ensemble: "NPT"
-    duration: 100.0
-    samples: 2500
-    time_step: 2.0
-    thermostat: "LangevinMiddle"
-    thermostat_timescale: 1.0
-    barostat: "MC"
-    barostat_frequency: 25
-# Output
-output:
-  projects_directory: "."
-  naming_template: "{enzyme}_{polymer_type}_gromacs_run{replicate}"
+# config.yaml (add this block alongside your existing config)
+gromacs:
+  module_load: "module load gcc/11.2.0 gromacs/2024.2"
+  ntmpi: 1
+  ntomp: 8
 ```
 
-### Step 2: Validate Configuration
-
 ```bash
-polyzymd validate -c config_gromacs.yaml
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset aa100 \
+    --replicates 1-3
 ```
 
-### Step 3: Run with GROMACS
+This generates self-resubmitting SLURM scripts that run EM, equilibration,
+and production with checkpoint-based restart.
+
+---
+
+## Quick Start: GPU
+
+For GPU-accelerated runs, set `gpu: true` and use the thread-MPI `gmx`
+binary (not `gmx_mpi`):
+
+```yaml
+# config.yaml
+gromacs:
+  gpu: true
+  gpus: 1
+  gmx_binary: "gmx"
+  ntmpi: 1
+  ntomp: 12
+  module_load: "module load gcc/11.2.0 gromacs/2024.2"
+  mdrun_flags: "-nb gpu -pme gpu -bonded gpu -update gpu -pin on"
+```
 
 ```bash
-# Full workflow (build + run)
-polyzymd run -c config_gromacs.yaml --engine gromacs --replicates 1
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset blanca-shirts \
+    --constraint "A40" \
+    --replicates 1-3
+```
 
-# Or dry-run to validate without building or running
-polyzymd run -c config_gromacs.yaml --engine gromacs --replicates 1 --dry-run
+:::{important}
+Use `--constraint` to pin your job to a compatible GPU architecture. GROMACS
+uses ahead-of-time compiled CUDA kernels, so a binary compiled for one GPU
+type may not run on another. OpenMM does not need this because it JIT-compiles
+kernels at launch.
+:::
 
-# To export files without running, use build instead:
-polyzymd build -c config_gromacs.yaml --format gromacs --replicates 1
+---
+
+## GROMACS Flag Glossary
+
+These flags are passed to `gmx mdrun` via the `mdrun_flags`,
+`mdrun_flags_equilibration`, and `mdrun_flags_production` config fields.
+
+### Parallelism flags
+
+| Flag | Description |
+|------|-------------|
+| `-ntmpi N` | Thread-MPI ranks. Used by thread-MPI builds (`gmx`). Set via `gromacs.ntmpi` in config. |
+| `-ntomp N` | OpenMP threads per rank. Set via `gromacs.ntomp` in config. |
+| `-npme N` | Dedicated PME ranks. Useful with multi-GPU runs (e.g., `-npme 1` with 3 GPUs). |
+
+### GPU offload flags
+
+| Flag | Description | Safe for EM? |
+|------|-------------|:---:|
+| `-nb gpu` | Offload nonbonded forces to GPU | Yes |
+| `-pme gpu` | Offload PME electrostatics to GPU | **No** |
+| `-bonded gpu` | Offload bonded forces to GPU | **No** |
+| `-update gpu` | Offload integration/constraints to GPU | **No** |
+
+### Performance flags
+
+| Flag | Description |
+|------|-------------|
+| `-pin on` | Pin threads to CPU cores (recommended for performance) |
+| `-pinstride N` | Stride between pinned threads |
+| `-dlb yes\|auto` | Dynamic load balancing |
+| `-gpu_id NNN` | Explicit GPU device IDs (e.g., `012` for 3 GPUs) |
+
+### Energy minimization restrictions
+
+:::{warning}
+Only `-nb gpu` is safe during energy minimization. GROMACS will fail
+with "Non-dynamical integrator" if `-pme gpu`, `-bonded gpu`, or
+`-update gpu` are used during EM.
+
+**PolyzyMD handles this automatically** — it strips unsafe GPU flags from
+the `mdrun` command during EM stages. You do not need separate EM-specific
+flag configuration.
+:::
+
+---
+
+## Understanding MPI vs OpenMP Parallelism in GROMACS
+
+GROMACS supports two parallelism models that are easy to confuse:
+
+| Concept | Thread-MPI | Real MPI |
+|---------|-----------|----------|
+| **Binary** | `gmx` | `gmx_mpi` |
+| **Launch** | Direct (`gmx mdrun -ntmpi N`) | Via launcher (`mpirun -np N gmx_mpi mdrun`) |
+| **GPU support** | Yes (CUDA thread-MPI) | Varies by build (often GPU-disabled) |
+| **Multi-node** | No (single node only) | Yes |
+| **Config field** | `gromacs.ntmpi` | `gromacs.ntmpi` + `gromacs.mpi_launcher_flags` |
+
+### Rule of thumb
+
+```
+ntmpi × ntomp = total CPU cores allocated
+```
+
+**GPU runs** typically use thread-MPI with 1 MPI rank and many OpenMP threads:
+
+```yaml
+gromacs:
+  gmx_binary: "gmx"       # thread-MPI build
+  ntmpi: 1                 # 1 rank = 1 GPU
+  ntomp: 12                # 12 OpenMP threads
+```
+
+**CPU runs** can use either model. For multi-node runs, use real MPI:
+
+```yaml
+gromacs:
+  gmx_binary: "gmx_mpi"   # real MPI build
+  ntmpi: 8                 # 8 MPI ranks
+  ntomp: 1                 # 1 OpenMP thread per rank
+```
+
+:::{tip}
+On most clusters, the `gmx` binary (thread-MPI) is the best choice for
+single-node GPU runs. Use `gmx_mpi` only when you need multi-node scaling.
+:::
+
+---
+
+## Complete `gromacs:` Config Reference
+
+All fields in the `gromacs:` block of your `config.yaml`:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `gmx_binary` | `str \| null` | `null` | GROMACS binary path or name. Resolved via config > `$GMX_BIN` > PATH if null. |
+| `mdrun_flags` | `str` | `""` | Extra flags for `gmx mdrun` (applied to all stages). |
+| `mdrun_flags_equilibration` | `str \| null` | `null` | Override `mdrun_flags` for equilibration only. Falls back to `mdrun_flags` if null. |
+| `mdrun_flags_production` | `str \| null` | `null` | Override `mdrun_flags` for production only. Falls back to `mdrun_flags` if null. |
+| `grompp_flags` | `str` | `"-maxwarn 1"` | Extra flags for `gmx grompp`. |
+| `command_prefix` | `str \| null` | `null` | Prefix prepended to all GROMACS commands (e.g., Singularity wrapper). |
+| `mpi_launcher_flags` | `str` | `""` | Extra flags for the MPI launcher (`mpirun`). Only used with real-MPI binaries. |
+| `module_load` | `str \| null` | `null` | Module load command inserted into SLURM scripts verbatim. |
+| `env_exports` | `dict[str, str]` | `{}` | Environment variables exported before GROMACS commands. |
+| `setup_commands` | `list[str]` | `[]` | Shell commands run after `module_load` and before GROMACS. |
+| `ntmpi` | `int` | `1` | MPI ranks (`-ntmpi`). Also sets SLURM `--ntasks` (unless `slurm_ntasks` overrides). |
+| `slurm_ntasks` | `int \| null` | `null` | Override SLURM `--ntasks` independently of `-ntmpi`. For multi-node MPI+GPU workflows. |
+| `ntomp` | `int` | `8` | OpenMP threads per rank (`-ntomp`). Sets SLURM `--cpus-per-task`. |
+| `gpu` | `bool` | `false` | Request GPU via SLURM. When false, `--gres=gpu` is omitted entirely. |
+| `gpus` | `int` | `1` | Number of GPUs to request when `gpu` is true. |
+| `memory` | `str` | `"16G"` | SLURM `--mem` allocation for GROMACS jobs. |
+
+### Stage-specific mdrun flags
+
+Use `mdrun_flags_equilibration` and `mdrun_flags_production` to apply
+different flags during different simulation phases. When set to `null`
+(default), they fall back to `mdrun_flags`.
+
+```yaml
+gromacs:
+  # Applied to all stages by default
+  mdrun_flags: "-pin on"
+
+  # Override for equilibration only (more conservative)
+  mdrun_flags_equilibration: "-pin on -dlb yes"
+
+  # Override for production only (full GPU offload)
+  mdrun_flags_production: "-pin on -dlb auto -nb gpu -pme gpu -bonded gpu -update gpu"
+```
+
+### command_prefix vs mpi_launcher_flags
+
+These two fields serve different purposes. Use **one** approach, not both:
+
+**`command_prefix`** — wraps all GROMACS commands with a prefix. Use for
+containers or site-specific launchers:
+
+```yaml
+gromacs:
+  command_prefix: "singularity exec --rocm --bind $PWD /path/to/gromacs.sif"
+```
+
+**`mpi_launcher_flags`** — passes extra flags to the `mpirun` launcher that
+PolyzyMD generates for real-MPI binaries:
+
+```yaml
+gromacs:
+  gmx_binary: "gmx_mpi"
+  mpi_launcher_flags: "-genv I_MPI_FABRICS shm:tcp"
+  # Result: mpirun -genv I_MPI_FABRICS shm:tcp gmx_mpi mdrun ...
+```
+
+:::{note}
+When `command_prefix` is set with a real-MPI binary (`gmx_mpi`), PolyzyMD
+skips automatic `mpirun` wrapping to avoid double-launching. Any
+`mpi_launcher_flags` are ignored (a warning is emitted).
+:::
+
+### env_exports
+
+Environment variables exported in the SLURM script before GROMACS commands.
+Keys must be valid shell variable names (`[A-Za-z_][A-Za-z0-9_]*`).
+
+```yaml
+gromacs:
+  env_exports:
+    GMX_GPU_DD_COMMS: "true"
+    GMX_GPU_PME_PP_COMMS: "true"
+    GMX_FORCE_UPDATE_DEFAULT_GPU: "true"
+    OMP_PLACES: "cores"
+    OMP_PROC_BIND: "close"
+```
+
+### setup_commands
+
+Shell commands run in order after `module_load` and `env_exports`, before
+any GROMACS commands:
+
+```yaml
+gromacs:
+  setup_commands:
+    - "ulimit -s unlimited"
+    - "source /opt/gromacs-2024/bin/GMXRC"
 ```
 
 ---
 
-### Multi-Replicate Builds
+## SBATCH to PolyzyMD YAML Mapping
 
-Each replicate gets an independently built system with a different polymer
-random seed:
+If you are translating an existing SLURM batch script to PolyzyMD, use this
+table to find where each directive goes:
+
+| SBATCH Directive | PolyzyMD Equivalent | Location |
+|-----------------|---------------------|----------|
+| `--partition` | `--partition` CLI or `--preset` | CLI override |
+| `--qos` | `--qos` CLI | CLI override |
+| `--time` | `--time-limit` CLI | CLI override |
+| `--gres=gpu:TYPE:N` | `gromacs.gpu` + `gromacs.gpus` + `--gpu-type` CLI | Config + CLI |
+| `--constraint` | `--constraint` CLI | CLI override |
+| `--nodelist` | `--nodelist` CLI | CLI override |
+| `--ntasks` | `gromacs.slurm_ntasks` or `gromacs.ntmpi` | Config |
+| `--cpus-per-task` | `gromacs.ntomp` | Config |
+| `--mem` | `gromacs.memory` or `--memory` CLI | Config + CLI |
+| `--mail-user` | `--email` CLI | CLI override |
+| `--account` | `--account` CLI | CLI override |
+| `module load ...` | `gromacs.module_load` | Config |
+| `export VAR=value` | `gromacs.env_exports` | Config |
+| Setup commands | `gromacs.setup_commands` | Config |
+| `mpirun` flags | `gromacs.mpi_launcher_flags` | Config |
+| `singularity exec` | `gromacs.command_prefix` | Config |
+
+---
+
+## Cluster Recipes
+
+Copy-pasteable configurations for common cluster setups. Each recipe shows
+the `gromacs:` YAML block and the CLI submit command.
+
+### Alpine AA100 (NVIDIA A100, 3 GPUs, real MPI)
+
+Multi-GPU run using real MPI (`gmx_mpi`) with Intel compiler stack.
+
+```yaml
+gromacs:
+  gmx_binary: "gmx_mpi"
+  gpu: true
+  gpus: 3
+  ntmpi: 3
+  ntomp: 4
+  memory: "64G"
+  module_load: "module load intel/2022.1.2 impi/2021.5.0 gromacs/2023.3"
+  mpi_launcher_flags: "-np 3"
+  env_exports:
+    GMX_GPU_DD_COMMS: "true"
+    GMX_GPU_PME_PP_COMMS: "true"
+    GMX_FORCE_UPDATE_DEFAULT_GPU: "true"
+  mdrun_flags: "-pme gpu -nb gpu -bonded gpu -npme 1 -gpu_id 012 -ntomp 4"
+```
 
 ```bash
-# Build 3 independent replicates for GROMACS
-polyzymd build -c config_gromacs.yaml --format gromacs --replicates 1-3
-
-# Run all 3 with GROMACS
-polyzymd run -c config_gromacs.yaml --engine gromacs --replicates 1-3
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset aa100 \
+    --replicates 1-3
 ```
 
-Output structure:
+:::{note}
+The original collaborator script used `mpirun -np 3 gmx_mpi mdrun ...`
+with custom GMXRC sourcing and Plumed integration. PolyzyMD translates this
+into the `mpi_launcher_flags` and `setup_commands` fields.
+:::
 
-```text
-replicate_1/gromacs/
-replicate_2/gromacs/
-replicate_3/gromacs/
+### Alpine AMI100 (AMD MI100, Singularity container)
+
+AMD GPU run using a ROCm container with Singularity.
+
+```yaml
+gromacs:
+  gmx_binary: "gmx"
+  command_prefix: "singularity exec --rocm --bind $PWD /projects/shared/gromacs-rocm.sif"
+  gpu: true
+  gpus: 3
+  ntmpi: 3
+  ntomp: 3
+  slurm_ntasks: 16
+  memory: "64G"
+  module_load: "module load singularity"
+  mdrun_flags: "-pme gpu -nb gpu -bonded gpu"
 ```
 
-Each replicate has its own coordinates, topology, and run script.
+```bash
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset aa100 \
+    --gpu-type mi100 \
+    --replicates 1-3
+```
+
+:::{note}
+`slurm_ntasks: 16` decouples the SLURM task count from the GROMACS
+thread-MPI rank count (`ntmpi: 3`). This is needed when the scheduler
+requires more tasks than GROMACS MPI ranks (e.g., for container overhead
+or multi-GPU resource allocation).
+:::
+
+### Alpine Amilan (CPU-only)
+
+CPU-only run with direct MPI.
+
+```yaml
+gromacs:
+  gmx_binary: "gmx_mpi"
+  ntmpi: 8
+  ntomp: 1
+  memory: "16G"
+  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
+  mdrun_flags: "-ntomp 8"
+```
+
+```bash
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset aa100 \
+    --partition amilan \
+    --time-limit 24:00:00 \
+    --replicates 1-3
+```
+
+:::{note}
+CPU-only runs do not need `gpu: true` or `--constraint`. The `--partition`
+CLI flag overrides the preset's default partition.
+:::
+
+### Blanca GPU (preemptable, Intel MPI, A40/A100)
+
+Multi-GPU run on Blanca's preemptable QoS with Intel MPI fabric settings.
+
+```yaml
+gromacs:
+  gmx_binary: "gmx_mpi"
+  gpu: true
+  gpus: 3
+  ntmpi: 3
+  ntomp: 4
+  memory: "64G"
+  module_load: "module load intel/2022.1.2 impi/2021.5.0 gromacs/2023.3"
+  mpi_launcher_flags: "-np 3 -genv I_MPI_FABRICS shm:tcp"
+  env_exports:
+    GMX_GPU_DD_COMMS: "true"
+    GMX_GPU_PME_PP_COMMS: "true"
+    GMX_FORCE_UPDATE_DEFAULT_GPU: "true"
+  mdrun_flags: "-pme gpu -nb gpu -bonded gpu -npme 1 -gpu_id 012 -ntomp 4"
+```
+
+```bash
+ml slurm/blanca  # required to see Blanca partitions
+
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset blanca-shirts \
+    --constraint "A40|A100" \
+    --replicates 1-3
+```
+
+:::{important}
+Blanca uses `qos=preemptable`, meaning jobs can be killed by the node owner.
+The generated SLURM scripts handle this gracefully — see
+[Preemption resilience](#gromacs-preemption-resilience) below.
+
+You must run `module load slurm/blanca` before `sbatch` to see Blanca
+partitions.
+:::
+
+### Sprenger Lab GPU (nodelist pinning, A40)
+
+Lab-specific GPU node with nodelist pinning.
+
+```yaml
+gromacs:
+  gmx_binary: "gmx_mpi"
+  gpu: true
+  gpus: 3
+  ntmpi: 3
+  ntomp: 4
+  memory: "64G"
+  module_load: "module load intel/2022.1.2 impi/2021.5.0 gromacs/2023.3"
+  mpi_launcher_flags: "-np 3 -genv I_MPI_FABRICS shm:tcp"
+  env_exports:
+    GMX_GPU_DD_COMMS: "true"
+    GMX_GPU_PME_PP_COMMS: "true"
+    GMX_FORCE_UPDATE_DEFAULT_GPU: "true"
+  mdrun_flags: "-pme gpu -nb gpu -bonded gpu -npme 1 -gpu_id 012 -ntomp 4"
+```
+
+```bash
+ml slurm/blanca
+
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset blanca-shirts \
+    --constraint "A40" \
+    --nodelist "bgpu-chbe-rdi1" \
+    --replicates 1-3
+```
+
+:::{note}
+`--nodelist` pins the job to a specific node. This is useful for lab-owned
+nodes where you know the hardware. Combined with `--constraint "A40"`, this
+ensures the GROMACS binary matches the GPU architecture.
+:::
+
+### Sprenger Lab CPU (cascadelake constraint)
+
+CPU-only run on Blanca with CPU architecture pinning.
+
+```yaml
+gromacs:
+  gmx_binary: "gmx_mpi"
+  ntmpi: 8
+  ntomp: 1
+  memory: "16G"
+  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
+  mdrun_flags: "-ntomp 8"
+```
+
+```bash
+ml slurm/blanca
+
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset blanca-shirts \
+    --constraint "cascadelake" \
+    --time-limit 7-00:00:00 \
+    --replicates 1-3
+```
+
+:::{note}
+CPU constraints like `cascadelake` ensure the job runs on nodes with
+a compatible instruction set. The original collaborator script used
+`--constraint="cascadelake"` and a 7-day wall time.
+:::
+
+---
+
+## GPU Constraints and Preemption
+
+### Why GPU constraints matter
+
+GROMACS uses ahead-of-time compiled CUDA kernels (unlike OpenMM, which
+JIT-compiles at launch). A binary compiled for one GPU architecture may
+crash on a different one. If your cluster has mixed GPU types, always use
+`--constraint`:
+
+```bash
+--constraint "A40"              # single GPU type
+--constraint "A40|A100"         # either type (OR)
+--constraint "avx2&rh8"         # feature AND (CPU + OS flags)
+```
+
+This maps directly to `#SBATCH --constraint` in the generated script.
+
+(gromacs-preemption-resilience)=
+### Preemption resilience
+
+GROMACS SLURM scripts trap `SIGTERM` (the signal SLURM sends before
+preempting a job). When the trap fires:
+
+1. The script forwards SIGTERM to `gmx mdrun`
+2. GROMACS flushes a `.cpt` checkpoint file
+3. The script waits for GROMACS to exit
+4. The script resubmits itself via `sbatch`
+
+Combined with `--constraint`, this ensures resumed jobs land on compatible
+GPU hardware. This is especially important on clusters with `qos=preemptable`
+(e.g., Blanca).
+
+The `-maxh` flag is automatically set so GROMACS exits cleanly before the
+SLURM wall-time limit.
+
+---
+
+## Recovering Preempted Jobs
+
+If automatic resubmission fails (e.g., `sbatch` was unavailable, or the job
+was killed without a grace period), use `polyzymd recover`:
+
+### Check recovery status
+
+```bash
+pixi run -e build polyzymd recover \
+    -c config.yaml -r 1 --engine gromacs
+```
+
+This shows per-stage progress without submitting anything.
+
+### Submit a recovery job
+
+```bash
+pixi run -e build polyzymd recover \
+    -c config.yaml -r 1 \
+    --engine gromacs \
+    --submit \
+    --preset blanca-shirts \
+    --constraint "A40"
+```
+
+### How checkpoint resume works
+
+| Stage | Checkpoint | Resume behavior |
+|-------|-----------|-----------------|
+| Energy minimization | `em.cpt` | Resumes from last EM step |
+| Equilibration stage N | `eq_XX.cpt` | Resumes from last equilibration step |
+| Production | `state.cpt` | Resumes from last production checkpoint |
+
+Completed stages (those with a `.gro` output file) are automatically skipped
+on resubmission. Partially completed stages resume from their checkpoint.
+
+### Dry-run recovery preview
+
+```bash
+pixi run -e build polyzymd recover \
+    -c config.yaml -r 1 \
+    --engine gromacs \
+    --submit \
+    --dry-run
+```
 
 ---
 
 ## GROMACS Output Files
 
-When using `--format gromacs`, files are created in `{projects_dir}/replicate_{N}/gromacs/`:
+When a GROMACS job completes, files are located in
+`{projects_dir}/replicate_{N}/gromacs/`:
 
-```
+```text
 gromacs/
 ├── {system}.gro              # Initial coordinates
 ├── {system}.top              # Topology (includes all molecule types)
@@ -243,15 +607,10 @@ gromacs/
 ├── eq_02_free_equilibration.mdp
 ├── prod.mdp                  # Production MD parameters
 │
-├── run_{system}_gromacs.sh   # Generated shell script to run everything
+├── run_{system}_gromacs.sh   # Generated shell script
 │
-├── em.tpr                    # Energy minimization run input
-├── em.gro                    # Minimized coordinates
-├── em.edr                    # Energy file
-├── em.log                    # Log file
-│
-├── eq_01.tpr, eq_01.gro, ... # Equilibration outputs
-├── eq_02.tpr, eq_02.gro, ... # (if multiple eq stages)
+├── em.tpr, em.gro, em.edr   # Energy minimization outputs
+├── eq_01.*, eq_02.*          # Equilibration outputs
 │
 ├── prod.tpr                  # Production run input
 ├── prod.xtc                  # Production trajectory
@@ -264,443 +623,70 @@ gromacs/
 ```
 
 Position restraints are appended as `#ifdef POSRES_*` blocks inside the
-molecule `.itp` files (not as separate `posre_*.itp` files). The MDP files
-use `-DPOSRES_PROTEIN`, `-DPOSRES_POLYMER`, etc. to activate them during
-equilibration stages.
+molecule `.itp` files. MDP files use `-DPOSRES_PROTEIN`, `-DPOSRES_POLYMER`,
+etc. to activate them during equilibration stages.
 
 ---
-
-## MDP Parameters
-
-PolyzyMD generates MDP files that match OpenFF/OpenMM defaults for consistency:
-
-### Key Parameters
-
-| Parameter | Value | Notes |
-|-----------|-------|-------|
-| `cutoff-scheme` | Verlet | Modern GROMACS default |
-| `rcoulomb` | 0.9 nm | OpenFF default |
-| `rvdw` | 0.9 nm | OpenFF default |
-| `coulombtype` | PME | Particle Mesh Ewald |
-| `vdwtype` | Cut-off | With potential-shift |
-| `constraints` | h-bonds | LINCS for hydrogen bonds |
-| `dt` | 0.002 ps | 2 fs timestep |
-
-### Thermostat/Barostat
-
-The MDP parameters are generated based on your config:
-
-```yaml
-simulation_phases:
-  production:
-    thermostat: "LangevinMiddle"    # Maps to sd integrator
-    thermostat_timescale: 1.0       # tau_t = 1.0 ps
-    barostat: "MC"                  # Maps to Parrinello-Rahman
-    barostat_frequency: 25          # nstpcouple
-```
-
----
-
-## Generated Run Script
-
-The `run_{system}_gromacs.sh` script automates the entire workflow:
-
-```bash
-#!/bin/bash
-# Generated by PolyzyMD
-# Run GROMACS simulation for: LipA_SBMA-EGPMA_gromacs_run1
-
-GMX="${GMX:-gmx}"
-set -e  # Exit on error
-
-# Energy minimization
-$GMX grompp -f em.mdp -c LipA_SBMA-EGPMA_gromacs_run1.gro -p LipA_SBMA-EGPMA_gromacs_run1.top -o em.tpr
-$GMX mdrun -deffnm em -v
-
-# Equilibration stage 1
-$GMX grompp -f eq_01_heating.mdp -c em.gro -p LipA_SBMA-EGPMA_gromacs_run1.top -r em.gro -o eq_01.tpr
-$GMX mdrun -deffnm eq_01 -v
-
-# Equilibration stage 2
-$GMX grompp -f eq_02_free_equilibration.mdp -c eq_01.gro -p LipA_SBMA-EGPMA_gromacs_run1.top -r em.gro -o eq_02.tpr
-$GMX mdrun -deffnm eq_02 -v
-
-# Production
-$GMX grompp -f prod.mdp -c eq_02.gro -p LipA_SBMA-EGPMA_gromacs_run1.top -o prod.tpr
-$GMX mdrun -deffnm prod -v
-
-# Post-processing
-echo "System" | $GMX trjconv -s prod.tpr -f prod.xtc -o prod_nojump.xtc -pbc nojump
-echo "System" | $GMX trjconv -s prod.tpr -f prod_nojump.xtc -o prod_centered.xtc -center -pbc mol
-
-echo "Simulation complete!"
-```
-
-You can customize this script or use it as a template for HPC submission.
-
----
-
-## Running on HPC Clusters
-
-:::{versionchanged} 1.4.0
-`polyzymd submit` now supports GROMACS as a simulation engine. The manual
-SLURM script approach below is no longer required but remains valid.
-:::
-
-Use `polyzymd submit` with `--engine gromacs` to generate self-resubmitting
-SLURM scripts, just like the OpenMM workflow. See {doc}`hpc_slurm` for full
-SLURM details.
-
-### CPU submission
-
-```bash
-polyzymd submit \
-    -c config.yaml \
-    --engine gromacs \
-    --preset aa100 \
-    --replicates 1-3
-```
-
-### GPU submission
-
-Add a `gromacs:` block to your config YAML to enable GPU acceleration:
-
-```yaml
-gromacs:
-  gpu: true
-  gpus: 1
-  gmx_binary: "gmx"            # NOT gmx_mpi for single-node GPU runs
-  ntmpi: 1
-  ntomp: 12
-  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
-```
-
-Then submit:
-
-```bash
-polyzymd submit \
-    -c config.yaml \
-    --engine gromacs \
-    --preset blanca-shirts \
-    --constraint "A40|A100" \
-    --replicates 1-3
-```
-
-### GPU constraints
-
-GROMACS uses ahead-of-time compiled CUDA kernels, so the binary must match the
-GPU architecture at runtime. If your cluster has mixed GPU types, use
-`--constraint` to ensure your job lands on compatible hardware:
-
-```bash
---constraint "A40"              # single GPU type
---constraint "A40|A100"         # either type (OR)
---constraint "avx2&rh8"         # feature AND (CPU + OS flags)
-```
-
-This is a standard SLURM feature (`#SBATCH --constraint`), not
-cluster-specific. OpenMM does not need this because it JIT-compiles CUDA
-kernels at launch.
-
-### Module loading
-
-GROMACS on HPC clusters typically requires loading prerequisite modules before
-the GROMACS module itself. The `gromacs.module_load` config field is inserted
-verbatim into the generated SLURM script:
-
-```yaml
-gromacs:
-  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
-```
-
-List prerequisites (compiler, MPI) before the GROMACS module so dependencies
-resolve in order.
-
-### Advanced runtime and scheduler customization
-
-For collaborator workflows on shared clusters, you can combine config-level
-GROMACS settings with CLI-level SLURM overrides.
-
-#### CLI overrides for submit and recover
-
-Both `polyzymd submit --engine gromacs` and `polyzymd recover --engine gromacs`
-support scheduler overrides:
-
-```bash
---partition <name>   # override SLURM partition
---qos <name>         # override SLURM QoS
---email <address>    # enable SLURM mail notifications
-```
-
-When `--email` is set, generated scripts include:
-
-- `#SBATCH --mail-type=FAIL,END`
-- `#SBATCH --mail-user=<address>`
-
-#### GROMACS config fields for launch behavior
-
-Use the `gromacs:` block to control environment preparation and stage-specific
-`mdrun` behavior:
-
-```yaml
-gromacs:
-  gmx_binary: "gmx"
-  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
-
-  # Inject export lines before execution
-  env_exports:
-    OMP_PLACES: "cores"
-    OMP_PROC_BIND: "close"
-
-  # Run extra shell setup lines in order
-  setup_commands:
-    - "ulimit -s unlimited"
-    - "export PATH=$PATH:/opt/site-tools/bin"
-
-  # Global mdrun flags
-  mdrun_flags: "-pin on"
-
-  # Optional per-stage overrides (fallback to mdrun_flags)
-  mdrun_flags_equilibration: "-pin on -dlb yes"
-  mdrun_flags_production: "-pin on -dlb auto"
-```
-
-Use `command_prefix` when your site requires wrapping GROMACS commands with a
-launcher (`srun`, profiling wrappers, or affinity tools). Use
-`mpi_launcher_flags` when your selected GROMACS binary is launched with
-PolyzyMD-managed `mpirun` wrapping.
-
-Example A — Container or wrapper launch (`command_prefix` only):
-
-```yaml
-gromacs:
-  command_prefix: "singularity exec --nv /path/to/gromacs.sif"
-  # No mpi_launcher_flags needed — command_prefix handles launching
-```
-
-Example B — Standard MPI launch (`mpi_launcher_flags` only):
-
-```yaml
-gromacs:
-  gmx_binary: "gmx_mpi"
-  mpi_launcher_flags: "--bind-to core"
-  # PolyzyMD prepends: mpirun --bind-to core gmx_mpi mdrun ...
-```
-
-> **Note:** When `command_prefix` is set with a real-MPI binary (for example,
-> `gmx_mpi`), PolyzyMD skips automatic `mpirun` wrapping to avoid
-> double-launching. Any `mpi_launcher_flags` are ignored in this case (a
-> warning is emitted). Use one approach or the other, not both.
-
-`env_exports` keys must be valid shell variable names that match
-`[A-Za-z_][A-Za-z0-9_]*` (for example, `GMX_GPU_DD_COMMS`). Keys containing
-spaces, punctuation, or a leading digit are rejected.
-
-When using a real-MPI GROMACS binary (`gmx_mpi`) with `command_prefix`, PolyzyMD
-treats `command_prefix` as the launcher and does not prepend `mpirun`. This
-prevents double-launch patterns such as `mpirun srun gmx_mpi ...`.
-
----
-
-## Recovering Preempted Jobs
-
-If a GROMACS SLURM job is preempted, times out, or fails due to a node issue,
-use `polyzymd recover` to inspect progress and resubmit.
-
-### How checkpoint resume works
-
-GROMACS writes stage-local checkpoint files during simulation:
-
-| Stage | Checkpoint | Resume behavior |
-|-------|-----------|-----------------|
-| Energy minimization | `em.cpt` | Resumes from last EM step |
-| Equilibration stage N | `eq_XX.cpt` | Resumes from last equilibration step |
-| Production | `state.cpt` | Resumes from last production checkpoint |
-
-Completed stages (those with a `.gro` output file) are automatically skipped on
-resubmission. Partially completed stages resume from their checkpoint.
-
-### Check recovery status
-
-Inspect progress without submitting:
-
-```bash
-polyzymd recover -c config.yaml -r 1 --engine gromacs
-```
-
-This shows:
-- Current progress (steps completed / total)
-- Per-segment status (completed, interrupted, etc.)
-- How much simulation time remains
-
-### Submit a recovery job
-
-```bash
-polyzymd recover \
-    -c config.yaml \
-    -r 1 \
-    --engine gromacs \
-    --submit \
-    --preset blanca-shirts
-```
-
-Recovery reuses existing GROMACS input files (`.gro`, `.top`, `.mdp`, `.tpr`)
-— no system rebuild is triggered.
-
-### Recovery with GPU constraints
-
-On mixed-GPU clusters, include `--constraint` to ensure the recovery job
-lands on compatible hardware:
-
-```bash
-polyzymd recover \
-    -c config.yaml \
-    -r 1 \
-    --engine gromacs \
-    --submit \
-    --preset blanca-shirts \
-    --constraint "A40"
-```
-
-### Dry-run recovery preview
-
-Preview what would be submitted without actually submitting:
-
-```bash
-polyzymd recover \
-    -c config.yaml \
-    -r 1 \
-    --engine gromacs \
-    --submit \
-    --dry-run
-```
-
-:::{tip}
-The self-resubmitting SLURM script handles preemption automatically via
-SIGTERM trapping. When SLURM sends SIGTERM (120-second grace period on
-Blanca), the script:
-
-1. Forwards SIGTERM to the running `mdrun` process
-2. Waits for GROMACS to flush its checkpoint
-3. Resubmits itself with `sbatch`
-
-Manual recovery with `polyzymd recover` is only needed when the automatic
-resubmission fails (e.g., `sbatch` was unavailable, or the job was killed
-without a grace period).
-:::
 
 ## Troubleshooting
 
 ### "GROMACS executable not found"
 
-**Cause**: `gmx` command not in PATH.
+**Cause**: `gmx` command not in PATH after module loading.
 
-**Solutions**:
-```bash
-# Option 1: Load module
-module load gromacs
+**Fix**: Check your `gromacs.module_load` field. List prerequisites
+(compiler, MPI) before the GROMACS module:
 
-# Option 2: Specify path explicitly
-polyzymd run -c config.yaml --engine gromacs --gmx-path /opt/gromacs/bin/gmx
-
-# Option 3: Add to PATH
-export PATH=$PATH:/opt/gromacs/bin
+```yaml
+gromacs:
+  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
 ```
+
+### "Non-dynamical integrator" error during EM
+
+**Cause**: GPU offload flags incompatible with energy minimization.
+
+**Fix**: This should not happen — PolyzyMD automatically strips unsafe GPU
+flags during EM. If it does, check that you are using PolyzyMD v1.3.0 or
+later.
 
 ### "grompp warnings about charge groups"
 
 **Cause**: OpenFF generates systems without charge groups.
 
-**Solution**: This is expected and safe to ignore. GROMACS works fine with Verlet cutoff scheme.
+**Fix**: This is expected and safe. The `grompp_flags: "-maxwarn 1"` default
+suppresses it.
 
-### "Fatal error: Number of atoms in [file] does not match"
+### "Fatal error: Number of atoms does not match"
 
-**Cause**: Topology/coordinate mismatch, often from interrupted build.
+**Cause**: Topology/coordinate mismatch from an interrupted build.
 
-**Solution**: Rebuild from scratch:
+**Fix**: Rebuild from scratch:
+
 ```bash
 rm -rf replicate_*/gromacs/
-polyzymd run -c config.yaml --engine gromacs --replicates 1
+pixi run -e build polyzymd build -c config.yaml --format gromacs
 ```
 
-### "Simulation crashes during equilibration"
+### Job dies with OOM
 
-**Cause**: Initial structure has clashes or bad contacts.
-
-**Solutions**:
-1. Use longer/more aggressive energy minimization
-2. Increase box padding
-3. Check your input structures for issues
-
-### "Trajectory has broken molecules"
-
-**Cause**: PBC artifacts in raw trajectory.
-
-**Solution**: Use the post-processed trajectories:
-- `prod_nojump.xtc` - Molecules don't jump across boundaries
-- `prod_centered.xtc` - System centered, good for visualization
-
----
-
-## Post-Processing and Analysis
-
-```{note}
-The `polyzymd compare` analysis workflow currently supports OpenMM-produced
-trajectories only (DCD format in PolyzyMD's standard directory layout).
-To analyze GROMACS trajectories, use native GROMACS tools as shown below,
-or MDAnalysis directly. GROMACS XTC trajectory support in `polyzymd compare`
-is planned for a future release (see [#47](https://github.com/joelaforet/polyzymd/issues/47)).
-```
-
-### Extract Energy Data
+**Fix**: Increase `gromacs.memory` in config or use `--memory` CLI override:
 
 ```bash
-# Extract temperature
-echo "Temperature" | gmx energy -f prod.edr -o temperature.xvg
-
-# Extract pressure
-echo "Pressure" | gmx energy -f prod.edr -o pressure.xvg
-
-# Extract potential energy
-echo "Potential" | gmx energy -f prod.edr -o potential.xvg
+polyzymd submit -c config.yaml --engine gromacs --memory 64G ...
 ```
 
-### Trajectory Analysis
+### Trajectory has broken molecules
 
-```bash
-# RMSD of protein
-echo "Backbone Backbone" | gmx rms -s prod.tpr -f prod_centered.xtc -o rmsd.xvg
-
-# RMSF per residue
-echo "Backbone" | gmx rmsf -s prod.tpr -f prod_centered.xtc -o rmsf.xvg -res
-
-# Radius of gyration
-echo "Protein" | gmx gyrate -s prod.tpr -f prod_centered.xtc -o gyrate.xvg
-```
-
-### Visualize with VMD
-
-```bash
-vmd replicate_1/gromacs/prod.gro replicate_1/gromacs/prod_centered.xtc
-```
-
----
-
-## Comparison with OpenMM Output
-
-| Metric | OpenMM | GROMACS | Notes |
-|--------|--------|---------|-------|
-| Coordinates | `.pdb` | `.gro` | Both readable by MDAnalysis |
-| Trajectory | `.dcd` | `.xtc` | XTC is compressed |
-| Energies | state_data.csv | `.edr` | Use `gmx energy` to extract |
-| Checkpoint | `.xml` | `.cpt` | For restarts |
-| Topology | `.xml` | `.top` | Different formats |
+**Fix**: Use the post-processed trajectories:
+- `prod_nojump.xtc` — molecules don't jump across PBC boundaries
+- `prod_centered.xtc` — system centered for visualization
 
 ---
 
 ## See Also
 
-- {doc}`../reference/cli_reference` - Complete CLI documentation including GROMACS options
-- {doc}`dynamic_polymers` - Dynamic polymer generation
-- {doc}`../reference/configuration` - Configuration file reference
-- {doc}`../tutorials/quickstart` - Getting started guide
+- {doc}`../reference/cli_reference` — CLI options for `submit` and `recover`
+- {doc}`../reference/configuration` — Full configuration reference including `gromacs:` block
+- {doc}`hpc_slurm` — General SLURM submission workflow (OpenMM and GROMACS)
+- {doc}`../tutorials/quickstart` — Getting started guide
