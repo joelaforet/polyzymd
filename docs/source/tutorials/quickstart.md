@@ -263,6 +263,19 @@ At this point you should have:
 - a successful build dry run or real build
 - a clear next step for local execution or SLURM submission
 
+## Step 7: Monitor progress
+
+After submitting jobs, check simulation progress across all replicates:
+
+```bash
+pixi run -e build polyzymd status -c config.yaml
+```
+
+This shows a compact dashboard with colored progress bars, completion
+percentages, and status for each replicate. If any replicate shows
+`interrupted`, use `polyzymd recover` to resume it — see
+{doc}`../how_to/hpc_slurm` for details.
+
 ## Where to go next
 
 - Add a substrate or polymers: {doc}`../reference/configuration`
