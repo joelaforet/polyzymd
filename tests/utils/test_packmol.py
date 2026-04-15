@@ -245,7 +245,7 @@ class TestSolvateAssemblyCoordinates:
         mock_create_molecule_pdbs = MagicMock(return_value=["water.pdb"])
         mock_load_positions = MagicMock(return_value=np.asarray(loaded_positions, dtype=float))
 
-        packmol_mod = types.ModuleType("openff.interchange.components._packmol")
+        packmol_mod = types.ModuleType("openff.packmol._packmol")
         packmol_mod._center_topology_at = mock_center
         packmol_mod._compute_brick_from_box_vectors = mock_compute_brick
         packmol_mod._create_molecule_pdbs = mock_create_molecule_pdbs
@@ -255,11 +255,8 @@ class TestSolvateAssemblyCoordinates:
         openff_pkg = types.ModuleType("openff")
         openff_pkg.__path__ = []
 
-        interchange_pkg = types.ModuleType("openff.interchange")
-        interchange_pkg.__path__ = []
-
-        components_pkg = types.ModuleType("openff.interchange.components")
-        components_pkg.__path__ = []
+        openff_packmol_pkg = types.ModuleType("openff.packmol")
+        openff_packmol_pkg.__path__ = []
 
         toolkit_mod = types.ModuleType("openff.toolkit")
 
@@ -274,9 +271,8 @@ class TestSolvateAssemblyCoordinates:
         units_mod.Quantity = lambda values, _unit: np.asarray(values, dtype=float)
 
         monkeypatch.setitem(sys.modules, "openff", openff_pkg)
-        monkeypatch.setitem(sys.modules, "openff.interchange", interchange_pkg)
-        monkeypatch.setitem(sys.modules, "openff.interchange.components", components_pkg)
-        monkeypatch.setitem(sys.modules, "openff.interchange.components._packmol", packmol_mod)
+        monkeypatch.setitem(sys.modules, "openff.packmol", openff_packmol_pkg)
+        monkeypatch.setitem(sys.modules, "openff.packmol._packmol", packmol_mod)
         monkeypatch.setitem(sys.modules, "openff.toolkit", toolkit_mod)
         monkeypatch.setitem(sys.modules, "openff.units", units_mod)
 
