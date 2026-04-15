@@ -682,6 +682,71 @@ For more details on this behavior, see the OpenFF Interchange documentation:
 
 ---
 
+## GROMACS Engine Configuration
+
+:::{versionadded} 1.3.0
+:::
+
+The optional `gromacs:` block configures how PolyzyMD invokes GROMACS and
+allocates SLURM resources for GROMACS jobs. This block is only used when
+`--engine gromacs` is passed to `submit`, `run`, or `recover`.
+
+### Minimal Example
+
+```yaml
+gromacs:
+  module_load: "module load gcc/11.2.0 gromacs/2024.2"
+  ntmpi: 1
+  ntomp: 8
+```
+
+### GPU Example
+
+```yaml
+gromacs:
+  gpu: true
+  gpus: 1
+  gmx_binary: "gmx"
+  ntmpi: 1
+  ntomp: 12
+  module_load: "module load gcc/11.2.0 gromacs/2024.2"
+  mdrun_flags: "-nb gpu -pme gpu -bonded gpu -update gpu -pin on"
+```
+
+### Full Field Reference
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `gmx_binary` | `str \| null` | `null` | GROMACS binary path or name. When null, resolved via `$GMX_BIN` environment variable or PATH discovery. |
+| `mdrun_flags` | `str` | `""` | Extra flags passed to `gmx mdrun` for all stages. |
+| `mdrun_flags_equilibration` | `str \| null` | `null` | Override `mdrun_flags` for equilibration stages only. Falls back to `mdrun_flags` when null. |
+| `mdrun_flags_production` | `str \| null` | `null` | Override `mdrun_flags` for production only. Falls back to `mdrun_flags` when null. |
+| `grompp_flags` | `str` | `"-maxwarn 1"` | Extra flags passed to `gmx grompp`. |
+| `command_prefix` | `str \| null` | `null` | Prefix prepended to all GROMACS commands. Use for container wrappers (e.g., `singularity exec ...`). When set with a real-MPI binary, automatic `mpirun` wrapping is skipped. |
+| `mpi_launcher_flags` | `str` | `""` | Extra flags for the MPI launcher (`mpirun`). Only used with real-MPI builds (`gmx_mpi`). |
+| `module_load` | `str \| null` | `null` | Module load command inserted verbatim into SLURM scripts. List prerequisites before the GROMACS module. |
+| `env_exports` | `dict[str, str]` | `{}` | Environment variables exported before GROMACS commands. Keys must be valid shell variable names. |
+| `setup_commands` | `list[str]` | `[]` | Shell commands run after `module_load` and before GROMACS commands. |
+| `ntmpi` | `int` | `1` | Number of MPI ranks for `gmx mdrun -ntmpi`. Also sets SLURM `--ntasks` unless `slurm_ntasks` overrides it. Must be >= 1. |
+| `slurm_ntasks` | `int \| null` | `null` | Override SLURM `--ntasks` independently of GROMACS `-ntmpi`. For multi-node MPI+GPU workflows where scheduler tasks differ from thread-MPI ranks. Must be >= 1 when set. |
+| `ntomp` | `int` | `8` | OpenMP threads per rank for `gmx mdrun -ntomp`. Sets SLURM `--cpus-per-task`. Must be >= 1. |
+| `gpu` | `bool` | `false` | Request GPU via SLURM. When false, the `--gres=gpu` directive is omitted entirely. |
+| `gpus` | `int` | `1` | Number of GPUs to request when `gpu` is true. Ignored when `gpu` is false. Must be >= 1. |
+| `memory` | `str` | `"16G"` | SLURM `--mem` allocation for GROMACS jobs. |
+
+### Notes
+
+- Unsafe GPU flags (`-pme gpu`, `-bonded gpu`, `-update gpu`) are automatically
+  stripped during energy minimization stages. Only `-nb gpu` is safe for EM.
+- When `gpu` is true and `ntmpi` > 1, a warning is emitted about GPU sharing.
+- If `mdrun_flags` contains `-ntmpi` or `-ntomp`, a warning is emitted when
+  those values conflict with the explicit `ntmpi`/`ntomp` fields.
+
+For practical usage examples and cluster-specific recipes, see
+{doc}`../how_to/gromacs_export`.
+
+---
+
 ## Complete Example
 
 See the example configurations in `src/polyzymd/templates/examples/`:
@@ -695,7 +760,7 @@ See the example configurations in `src/polyzymd/templates/examples/`:
 ## See Also
 
 - {doc}`../how_to/dynamic_polymers` - Dynamic polymer generation from SMILES
-- {doc}`../how_to/gromacs_export` - Running simulations with GROMACS
+- {doc}`../how_to/gromacs_export` - Running GROMACS simulations on HPC clusters
 - {doc}`../how_to/polymers` - Polymer setup guide
 - {doc}`../how_to/restraints` - Atom selection and restraints
 - {doc}`cli_reference` - CLI documentation
