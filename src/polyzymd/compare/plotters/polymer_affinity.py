@@ -11,16 +11,16 @@ Both plotters load a ``PolymerAffinityScoreResult`` JSON saved by the
 ``polyzymd compare polymer-affinity`` command (in ``results/`` adjacent to
 ``comparison.yaml``).
 
-Physics interpretation
-----------------------
+**Physics interpretation**
+
 Score < 0  →  net favorable polymer-protein affinity
 Score > 0  →  net unfavorable (avoidance dominates)
 Score = 0  →  contacts match the surface-availability reference
 
 Units are always kT (dimensionless, in units of k_bT).
 
-Sign convention
----------------
+**Sign convention**
+
 More negative = stronger polymer-protein interaction. Diverging colormap
 is not used here (unlike BFE heatmaps) because the primary display is
 bar charts where sign is visually obvious.

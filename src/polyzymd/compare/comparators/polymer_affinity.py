@@ -4,15 +4,16 @@ This module implements PolymerAffinityScoreComparator, which quantifies the
 total strength of polymer-protein interactions by summing per-contact free
 energy contributions weighted by the number of simultaneous contacts.
 
-Physics
--------
+**Physics**
+
 For each (polymer_type, protein_group) pair:
+
+::
 
     S_{p,g} = N_{p,g} × ΔG_sel(p,g)
 
-where:
-    N_{p,g}   = mean_contact_fraction × n_exposed_in_group
-    ΔG_sel(p,g) = -ln(contact_share / expected_share)  [kT]
+where ``N_{p,g} = mean_contact_fraction × n_exposed_in_group`` and
+``ΔG_sel(p,g) = -ln(contact_share / expected_share)`` (in kT).
 
 Because contact_share / expected_share = enrichment + 1:
 
@@ -26,28 +27,28 @@ The total affinity score for a condition is:
 
     S = Σ_p S_p
 
-Independence assumption
------------------------
+**Independence assumption**
+
 This formulation assumes contacts are thermodynamically independent — each
 contact contributes the same free energy regardless of what other contacts
 exist simultaneously.  The absolute values are NOT rigorous binding free
 energies.  Only the *relative differences* between polymer compositions are
 meaningful as a comparative scoring metric.
 
-Sign convention
----------------
-    S < 0  →  net favorable polymer-protein interaction
-    S > 0  →  net unfavorable (avoidance dominates)
-    S = 0  →  contacts match the surface-availability reference
+**Sign convention**
 
-Temperature handling
---------------------
+| ``S < 0`` →  net favorable polymer-protein interaction
+| ``S > 0`` →  net unfavorable (avoidance dominates)
+| ``S = 0`` →  contacts match the surface-availability reference
+
+**Temperature handling**
+
 All scores are in kT (dimensionless); the temperature factor cancels in the
 Boltzmann inversion ratio.  Pairwise statistics are suppressed between
 conditions at different simulation temperatures because N changes.
 
-Design
-------
+**Design**
+
 - Consumes cached binding preference files produced by the contacts analysis
   layer.  When cached data is missing, computes binding preference on-demand
   from per-replicate ``contacts_rep{N}.json`` files.

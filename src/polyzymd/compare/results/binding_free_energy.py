@@ -1,7 +1,7 @@
 """Result models for binding free energy comparison analysis.
 
-Physics background
-------------------
+**Physics background**
+
 In the NPT ensemble (constant pressure, as used in all polyzymd simulations)
 the correct thermodynamic potential is the **Gibbs free energy** G.
 
@@ -16,26 +16,29 @@ but receive 20% of the polymer's contacts, the polymer preferentially contacts
 aromatic residues. The reference (expected) distribution is simply proportional
 to surface availability — not any property of the polymer itself.
 
+::
+
     ΔG_sel(j) = -k_B·T · ln(contact_share_j / expected_share_j)
 
 where:
-    contact_share_j  = (contact frames involving residues in group j) /
-                       (total contact frames across all protein residues)
-                       — the observed fraction of polymer contacts directed
-                       at group j
-    expected_share_j = (number of solvent-exposed residues in group j) /
-                       (total number of solvent-exposed protein residues)
-                       — the fraction of the protein surface belonging to
-                       group j; this is the reference assuming contacts are
-                       distributed purely by surface area
-    k_B              = Boltzmann constant (0.0019872041 kcal mol⁻¹ K⁻¹)
-    T                = simulation temperature in Kelvin
+
+- ``contact_share_j`` = (contact frames involving residues in group j) /
+  (total contact frames across all protein residues)
+  — the observed fraction of polymer contacts directed at group j
+- ``expected_share_j`` = (number of solvent-exposed residues in group j) /
+  (total number of solvent-exposed protein residues)
+  — the fraction of the protein surface belonging to group j; this is the
+  reference assuming contacts are distributed purely by surface area
+- ``k_B`` = Boltzmann constant (0.0019872041 kcal mol⁻¹ K⁻¹)
+- ``T`` = simulation temperature in Kelvin
 
 Because both distributions are normalized over the same partition (they sum
 to 1 over all groups), there is no arbitrary additive constant — ΔG_sel is
 fully determined by the data.
 
 When units='kT' (default), the formula simplifies to:
+
+::
 
     ΔG_sel(j) / k_BT = -ln(contact_share_j / expected_share_j)
 
@@ -49,16 +52,17 @@ preference analysis). So ΔG_sel = -kT·ln(enrichment + 1), and the two
 representations are mathematically equivalent; ΔG_sel simply puts the
 enrichment score on a physically meaningful energy scale.
 
-Sign convention:
-    ΔG_sel < 0  →  preferential contact (observed > surface-availability reference)
-    ΔG_sel > 0  →  contact avoidance (observed < surface-availability reference)
-    ΔG_sel = 0  →  contacts match the surface-availability reference exactly
+**Sign convention**
+
+| ``ΔG_sel < 0`` →  preferential contact (observed > surface-availability reference)
+| ``ΔG_sel > 0`` →  contact avoidance (observed < surface-availability reference)
+| ``ΔG_sel = 0`` →  contacts match the surface-availability reference exactly
 
 Differences between conditions (ΔG_sel,B(j) − ΔG_sel,A(j)) give a true ΔΔG,
-stored in `FreeEnergyPairwiseEntry.delta_delta_G`.
+stored in ``FreeEnergyPairwiseEntry.delta_delta_G``.
 
-Uncertainty propagation
------------------------
+**Uncertainty propagation**
+
 When multiple independent replicates are available, two uncertainty estimates
 are reported:
 
@@ -70,7 +74,7 @@ are reported:
 2. **Delta-method propagation** (analytical approximation, stored for reference):
    For the mean contact_share and its SEM, uncertainty is propagated through
    the logarithm using first-order error propagation (Taylor 1997, ch. 3;
-   Bevington & Robinson 2003, ch. 3):
+   Bevington & Robinson 2003, ch. 3)::
 
        σ(ΔG_sel) ≈ k_B·T · √[(σ_cs / cs)² + (σ_es / es)²]
        (or simply √[...] when units='kT')
@@ -81,6 +85,7 @@ are reported:
    (or σ_cs / cs when units='kT').
 
    References:
+
    - Taylor, J. R. (1997). *An Introduction to Error Analysis*, 2nd ed.
      University Science Books. (Ch. 3: Error propagation for functions of
      one or more variables)
@@ -89,15 +94,17 @@ are reported:
    - Wikipedia: Delta method,
      https://en.wikipedia.org/wiki/Delta_method
 
-Temperature handling:
-    When units='kT', ΔG_sel = -ln(ratio) is temperature-independent (the same
-    ratio at any temperature gives the same dimensionless value). However,
-    the underlying contact probabilities ARE temperature-dependent, so cross-
-    temperature comparisons still require caution.
-    When units='kcal/mol' or 'kJ/mol', ΔG_sel computed at temperature T is NOT
-    directly comparable to ΔG_sel at temperature T'. Pairwise statistical
-    comparisons are only computed between conditions sharing the same
-    simulation temperature.
+**Temperature handling**
+
+When units='kT', ΔG_sel = -ln(ratio) is temperature-independent (the same
+ratio at any temperature gives the same dimensionless value). However,
+the underlying contact probabilities ARE temperature-dependent, so cross-
+temperature comparisons still require caution.
+
+When units='kcal/mol' or 'kJ/mol', ΔG_sel computed at temperature T is NOT
+directly comparable to ΔG_sel at temperature T'. Pairwise statistical
+comparisons are only computed between conditions sharing the same
+simulation temperature.
 """
 
 from __future__ import annotations

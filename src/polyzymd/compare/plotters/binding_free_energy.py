@@ -2,6 +2,7 @@
 
 This module provides registered plotters for ΔG_sel (selectivity free energy)
 analysis:
+
 - BFEHeatmapPlotter: ΔG_sel heatmap with rows = AA groups, columns = conditions
 - BFEBarPlotter: Grouped bar chart of ΔG_sel by AA residue class
 
@@ -9,8 +10,8 @@ Both plotters load a ``BindingFreeEnergyResult`` JSON saved by the
 ``polyzymd compare binding-free-energy`` command (in ``results/`` adjacent to
 ``comparison.yaml``) rather than per-condition analysis directories.
 
-Partition-aware plotting
-------------------------
+**Partition-aware plotting**
+
 Each ``FreeEnergyEntry`` carries a ``partition_name`` field (e.g., "aa_class",
 "lid_helices", "whole_lid_domain") that identifies which residue grouping
 scheme produced that entry.  Different partitions use different denominators
@@ -22,14 +23,15 @@ combination.  When only a single partition is present (the common case for
 datasets that only use default AA-class grouping), filenames and titles omit
 the partition name to preserve backward compatibility.
 
-Physics interpretation
-----------------------
-ΔG_sel < 0  →  preferential contact (polymer contacts this group more than
-             expected from surface availability alone)
-ΔG_sel > 0  →  contact avoidance (polymer contacts this group less than expected)
-ΔG_sel = 0  →  contacts match surface-availability reference exactly
+**Physics interpretation**
+
+| ``ΔG_sel < 0`` →  preferential contact (polymer contacts this group more than
+  expected from surface availability alone)
+| ``ΔG_sel > 0`` →  contact avoidance (polymer contacts this group less than expected)
+| ``ΔG_sel = 0`` →  contacts match surface-availability reference exactly
 
 Diverging colormap (RdBu_r by default) is centered at 0.0:
+
 - Blue (negative)  → preference
 - White (zero)     → neutral
 - Red  (positive)  → avoidance

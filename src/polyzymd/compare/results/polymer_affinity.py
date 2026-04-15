@@ -4,16 +4,16 @@ The polymer affinity score is a comparative metric that quantifies the total
 strength of polymer-protein interactions by summing per-contact free energy
 contributions weighted by the number of simultaneous contacts.
 
-Physics
--------
+**Physics**
+
 For each (polymer_type, protein_group) pair, the affinity score is:
+
+::
 
     S_{p,g} = N_{p,g} × ΔG_sel(p,g)
 
-where:
-    N_{p,g}   = mean number of simultaneous contacts per frame
-              = mean_contact_fraction × n_exposed_in_group
-    ΔG_sel(p,g) = -ln(contact_share / expected_share)  [in units of k_bT]
+where ``N_{p,g} = mean_contact_fraction × n_exposed_in_group`` and
+``ΔG_sel(p,g) = -ln(contact_share / expected_share)`` (in units of k_bT).
 
 The total affinity score for a polymer type is:
 
@@ -23,8 +23,8 @@ The total affinity score for a condition is:
 
     S = Σ_p S_p
 
-Independence assumption
------------------------
+**Independence assumption**
+
 This formulation assumes contacts are thermodynamically independent — each
 contact contributes the same free energy regardless of what other contacts
 exist simultaneously. This is the standard polyvalent binding approximation
@@ -35,20 +35,20 @@ However, the *relative differences* between polymer compositions are meaningful
 as a comparative scoring function, analogous to scoring functions in molecular
 docking or MM/PBSA decomposition.
 
-Sign convention
----------------
-    S < 0  →  net favorable polymer-protein interaction
-    S > 0  →  net unfavorable (avoidance dominates)
-    S = 0  →  contacts match the surface-availability reference
+**Sign convention**
 
-Interpretation
---------------
+| ``S < 0`` →  net favorable polymer-protein interaction
+| ``S > 0`` →  net unfavorable (avoidance dominates)
+| ``S = 0`` →  contacts match the surface-availability reference
+
+**Interpretation**
+
 More negative total score → stronger net polymer-protein affinity. When
 combined with structural stability metrics (RMSF, triad contacts), the
 affinity score helps rank polymer compositions by total interaction strength.
 
-Uncertainty propagation
------------------------
+**Uncertainty propagation**
+
 Per-replicate scores are computed independently:
 
     S_rep = N_rep × ΔG_sel,rep
