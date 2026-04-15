@@ -348,7 +348,7 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--qos` | - | No | - | Override SLURM QoS |
 | `--gpu-type` | - | No | - | GPU type for GRES (e.g., "a100", "a40", "mi100") |
 | `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
-| `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "bgpu-chbe-rdi1") |
+| `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
 | `--pixi-env` | - | No | from preset | Pixi environment for SLURM jobs (`cuda-12-4` or `cuda-12-6`) |
 | `--skip-build` | - | No | false | Skip system building (use pre-built system from `polyzymd build`) |
 | `--force` | - | No | false | Skip duplicate-job check |
@@ -368,7 +368,7 @@ generate SLURM scripts for inspection without submitting them to the scheduler.
 |--------|-----------|------------|-------------|
 | `aa100` | aa100 | 24:00:00 | NVIDIA A100 GPUs |
 | `al40` | al40 | 24:00:00 | NVIDIA L40 GPUs |
-| `blanca-shirts` | blanca-shirts | 7-00:00:00 | Shirts lab partition |
+| `blanca-shirts` | blanca-shirts | 7-00:00:00 | Blanca condo partition |
 | `bridges2` | GPU | 48:00:00 | PSC Bridges2 GPU |
 | `testing` | atesting | 01:00:00 | Quick tests |
 
@@ -585,7 +585,7 @@ polyzymd recover -c CONFIG [OPTIONS]
 | `--partition` | - | No | from preset | Override SLURM partition |
 | `--qos` | - | No | - | Override SLURM QoS |
 | `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
-| `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "bgpu-chbe-rdi1") |
+| `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
 | `--pixi-env` | - | No | from preset | Pixi environment for recovery job |
 | `--force` | - | No | false | Skip duplicate-job check |
 

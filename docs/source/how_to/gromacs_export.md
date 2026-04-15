@@ -324,9 +324,9 @@ pixi run -e build polyzymd submit \
 ```
 
 :::{note}
-The original collaborator script used `mpirun -np 3 gmx_mpi mdrun ...`
-with custom GMXRC sourcing and Plumed integration. PolyzyMD translates this
-into the `mpi_launcher_flags` and `setup_commands` fields.
+If your existing workflow uses `mpirun -np 3 gmx_mpi mdrun ...` with custom
+GMXRC sourcing or Plumed integration, translate those into the
+`mpi_launcher_flags` and `setup_commands` config fields.
 :::
 
 ### Alpine AMI100 (AMD MI100, Singularity container)
@@ -433,9 +433,10 @@ You must run `module load slurm/blanca` before `sbatch` to see Blanca
 partitions.
 :::
 
-### Sprenger Lab GPU (nodelist pinning, A40)
+### Dedicated GPU Node (nodelist pinning, A40)
 
-Lab-specific GPU node with nodelist pinning.
+Pin a job to a specific GPU node using `--nodelist`. Useful for lab-owned or
+reserved nodes where you know the hardware.
 
 ```yaml
 gromacs:
@@ -462,17 +463,17 @@ pixi run -e build polyzymd submit \
     --engine gromacs \
     --preset blanca-shirts \
     --constraint "A40" \
-    --nodelist "bgpu-chbe-rdi1" \
+    --nodelist "gpu-node-001" \
     --replicates 1-3
 ```
 
 :::{note}
-`--nodelist` pins the job to a specific node. This is useful for lab-owned
-nodes where you know the hardware. Combined with `--constraint "A40"`, this
-ensures the GROMACS binary matches the GPU architecture.
+`--nodelist` pins the job to a specific node. This is useful when you have
+dedicated or reserved nodes with known GPU hardware. Replace `gpu-node-001`
+with your actual node hostname.
 :::
 
-### Sprenger Lab CPU (cascadelake constraint)
+### CPU-Only with Architecture Constraint (cascadelake)
 
 CPU-only run on Blanca with CPU architecture pinning.
 
@@ -500,8 +501,8 @@ pixi run -e build polyzymd submit \
 
 :::{note}
 CPU constraints like `cascadelake` ensure the job runs on nodes with
-a compatible instruction set. The original collaborator script used
-`--constraint="cascadelake"` and a 7-day wall time.
+a compatible instruction set. A 7-day wall time (`7-00:00:00`) is common
+for long production runs on condo partitions.
 :::
 
 ---

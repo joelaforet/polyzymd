@@ -74,7 +74,7 @@ pixi shell -e cuda-12-6
 polyzymd info
 ```
 
-Supported presets currently target CU Boulder Alpine/Blanca and PSC Bridges2.
+Built-in presets include configurations for CU Boulder Alpine/Blanca and PSC Bridges2.
 For submission details and cluster-specific notes, see
 {doc}`../how_to/hpc_slurm`.
 
@@ -88,10 +88,10 @@ nvidia-smi | head -1
 
 Use this mapping:
 
-| Cluster | CUDA driver | Environment |
-|---------|-------------|-------------|
-| PSC Bridges2 | 12.6 | `cuda-12-6` |
-| CU Boulder Blanca | 12.4 | `cuda-12-4` |
+| CUDA driver version | Environment | Example clusters |
+|---------------------|-------------|------------------|
+| 12.6 | `cuda-12-6` | PSC Bridges2 |
+| 12.4 | `cuda-12-4` | CU Boulder Blanca |
 
 ## 4. Verify the Commands You Can Use
 

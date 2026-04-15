@@ -41,9 +41,9 @@ PolyzyMD includes presets for common clusters:
 
 | Preset | Cluster style | Typical use |
 |--------|---------------|-------------|
-| `aa100` | CU Boulder Alpine A100 | main production runs |
-| `al40` | CU Boulder Alpine L40 | production runs on L40 nodes |
-| `blanca-shirts` | CU Boulder Blanca | preemptable or lab-specific runs |
+| `aa100` | NVIDIA A100 partition | main production runs |
+| `al40` | NVIDIA L40 partition | production runs on L40 nodes |
+| `blanca-shirts` | Blanca condo partition | preemptable or condo runs |
 | `testing` | short queue | smoke tests only |
 | `bridges2` | PSC Bridges2 | Bridges2 GPU jobs |
 

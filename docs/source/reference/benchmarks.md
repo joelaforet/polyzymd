@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-This page contains performance benchmarks for PolyzyMD simulations on various GPU hardware available at CU Boulder. Use these benchmarks to estimate simulation throughput and plan your computational resource needs.
+This page contains performance benchmarks for PolyzyMD simulations on various GPU hardware. Use these benchmarks to estimate simulation throughput and plan your computational resource needs.
 
 ## How to Read These Tables
 
@@ -27,7 +27,7 @@ Each GPU has a table mapping **system size (atoms)** to **simulation speed (ns/d
 |--------------------:|-------:|:------|
 | | | |
 
-## Blanca Cluster (Shirts Lab)
+## Blanca Cluster
 
 ### NVIDIA A40 (blanca-shirts partition)
 
