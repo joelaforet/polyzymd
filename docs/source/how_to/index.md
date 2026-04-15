@@ -9,7 +9,7 @@ already know your goal and need the shortest practical route to it.
 - [Generate Polymers from SMILES](dynamic_polymers.md)
 - [Add Distance Restraints](restraints.md)
 - [Set Up Equilibration Stages](equilibration.md)
-- [Export a System to GROMACS](gromacs_export.md)
+- [Run GROMACS Simulations on HPC Clusters](gromacs_export.md)
 
 ## HPC and Job Submission
 
@@ -65,7 +65,7 @@ Add Polymers to a Simulation <polymers>
 Generate Polymers from SMILES <dynamic_polymers>
 Add Distance Restraints <restraints>
 Set Up Equilibration Stages <equilibration>
-Export a System to GROMACS <gromacs_export>
+Run GROMACS Simulations on HPC Clusters <gromacs_export>
 Run Simulations on SLURM Clusters <hpc_slurm>
 Submit Analysis Jobs to SLURM <hpc_execution>
 Which Analysis Should I Run? <analysis_chooser>

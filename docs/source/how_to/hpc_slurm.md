@@ -214,9 +214,14 @@ For GROMACS jobs the scripts additionally:
 
 ## GROMACS engine
 
-:::{versionchanged} 1.4.0
+:::{versionchanged} 1.3.0
 `polyzymd submit` now supports `--engine gromacs` for GROMACS SLURM
 submission with the same self-resubmitting workflow used by OpenMM.
+:::
+
+:::{seealso}
+For the complete GROMACS HPC guide including cluster recipes, flag glossary,
+config reference, and troubleshooting, see {doc}`gromacs_export`.
 :::
 
 ### CPU GROMACS
@@ -316,6 +321,7 @@ scancel --signal=KILL <job_id>
 
 - command details: {doc}`../reference/cli_reference`
 - configuration fields: {doc}`../reference/configuration`
+- GROMACS HPC guide: {doc}`gromacs_export`
 - first-run setup: {doc}`../tutorials/quickstart`
 
 <!-- IMAGE OPPORTUNITY: Add a simple lifecycle diagram showing `submit ->
