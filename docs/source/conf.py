@@ -4,11 +4,26 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import os
+import re
 import sys
-from importlib.metadata import version as _get_version
 
 # Add the source directory to the path so autodoc can find modules
 sys.path.insert(0, os.path.abspath("../../src"))
+
+
+def _get_version() -> str:
+    """Read the project version, preferring installed metadata with __init__.py fallback."""
+    try:
+        from importlib.metadata import version
+
+        return version("polyzymd")
+    except Exception:
+        # Fallback: parse __init__.py directly (works without pip install)
+        init = os.path.join(os.path.dirname(__file__), "..", "..", "src", "polyzymd", "__init__.py")
+        with open(init) as f:
+            match = re.search(r'__version__\s*=\s*"([^"]+)"', f.read())
+        return match.group(1) if match else "unknown"
+
 
 # Mock imports for packages that may not be available during doc build
 # This allows autodoc to generate documentation without actually importing these
@@ -39,7 +54,7 @@ autodoc_mock_imports = [
 project = "PolyzyMD"
 copyright = "2026, Joseph R. Laforet Jr."
 author = "Joseph R. Laforet Jr."
-release = _get_version("polyzymd")
+release = _get_version()
 version = ".".join(release.split(".")[:2])  # short X.Y version for Sphinx
 
 # -- General configuration ---------------------------------------------------
@@ -67,7 +82,7 @@ napoleon_include_special_with_doc = True
 napoleon_use_admonition_for_examples = True
 napoleon_use_admonition_for_notes = True
 napoleon_use_admonition_for_references = False
-napoleon_use_ivar = False
+napoleon_use_ivar = True
 napoleon_use_param = True
 napoleon_use_rtype = True
 napoleon_type_aliases = None
@@ -85,7 +100,10 @@ autodoc_typehints = "description"
 autodoc_typehints_description_target = "documented"
 
 # Autosummary settings
-autosummary_generate = True
+# Stub generation is disabled because all API docs use automodule directives
+# directly.  Enabling it would generate stub pages that duplicate every
+# class/attribute already documented in the api/*.md pages.
+autosummary_generate = False
 
 # Intersphinx mapping to external documentation
 intersphinx_mapping = {
