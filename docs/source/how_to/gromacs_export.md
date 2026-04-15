@@ -544,6 +544,19 @@ GPU hardware. This is especially important on clusters with `qos=preemptable`
 The `-maxh` flag is automatically set so GROMACS exits cleanly before the
 SLURM wall-time limit.
 
+```{note}
+**Stopping a job permanently.**
+A plain `scancel <job_id>` sends SIGTERM, which triggers the resubmission
+logic described above — the job will restart automatically. To cancel a job
+**without** resubmission, send SIGKILL instead:
+
+    scancel --signal=KILL <job_id>
+
+This bypasses the trap entirely so no checkpoint flush or resubmission occurs.
+See also: {ref}`need to stop a job permanently <hpc-slurm-stop-permanently>`
+in the general SLURM guide.
+```
+
 ---
 
 ## Recovering Preempted Jobs

@@ -309,6 +309,7 @@ Increase `--memory`, reduce system size, or test with fewer polymers.
 The generated script stores the config path it was given at submission time. If
 you move the config, regenerate the scripts and resubmit.
 
+(hpc-slurm-stop-permanently)=
 ### need to stop a job permanently
 
 Because standard cancellation can trigger graceful restart behavior, use:
