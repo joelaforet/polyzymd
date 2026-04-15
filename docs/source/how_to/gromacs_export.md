@@ -421,6 +421,7 @@ pixi run -e build polyzymd submit \
     --engine gromacs \
     --preset blanca-shirts \
     --constraint "A40|A100" \
+    --email you@university.edu \
     --replicates 1-3
 ```
 
@@ -464,6 +465,7 @@ pixi run -e build polyzymd submit \
     --preset blanca-shirts \
     --constraint "A40" \
     --nodelist "gpu-node-001" \
+    --email you@university.edu \
     --replicates 1-3
 ```
 
@@ -566,7 +568,8 @@ pixi run -e build polyzymd recover \
     --engine gromacs \
     --submit \
     --preset blanca-shirts \
-    --constraint "A40"
+    --constraint "A40" \
+    --email you@university.edu
 ```
 
 ### How checkpoint resume works
