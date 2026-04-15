@@ -245,6 +245,12 @@ pixi run -e build polyzymd submit \
 Add a `gromacs:` block to your `config.yaml` for GPU acceleration and module
 loading. See {doc}`../how_to/gromacs_export` for the full GROMACS HPC workflow
 with cluster-specific recipes.
+
+:::{tip}
+**CU Boulder Blanca users:** Replace `--preset aa100` with
+`--preset blanca-shirts --constraint "A40"` and run `ml slurm/blanca` first.
+See the Blanca GPU recipe in {doc}`../how_to/gromacs_export`.
+:::
 ````
 `````
 
