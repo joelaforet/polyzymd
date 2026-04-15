@@ -349,7 +349,7 @@ def pack_polymers(
         Packed topology with solute + all polymer chains and box vectors set.
     """
     import numpy as np
-    from openff.interchange.components._packmol import (
+    from openff.packmol._packmol import (
         _center_topology_at,
         _compute_brick_from_box_vectors,
         _create_molecule_pdbs,
@@ -569,7 +569,7 @@ def solvate_with_packmol(
         Solvated topology with solute + solvent and box vectors set.
     """
     import numpy as np
-    from openff.interchange.components._packmol import (
+    from openff.packmol._packmol import (
         _center_topology_at,
         _compute_brick_from_box_vectors,
         _create_molecule_pdbs,
@@ -730,7 +730,7 @@ def _check_ignore_conect_supported() -> bool:
     return False (safe default — CONECT stripping handles the issue).
     """
     try:
-        from openff.interchange.components._packmol import _get_packmol_version
+        from openff.packmol._packmol import _get_packmol_version
         from packaging.version import Version
 
         return _get_packmol_version() > Version("21.1.3")
@@ -742,7 +742,7 @@ def _check_pbc_available(box_vectors) -> bool:
     """Return True if the box is rectangular and Packmol supports PBC."""
     try:
         import numpy as np
-        from openff.interchange.components._packmol import _get_packmol_version
+        from openff.packmol._packmol import _get_packmol_version
         from packaging.version import Version
 
         box_arr = np.asarray(box_vectors.m)
