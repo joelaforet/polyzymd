@@ -1,49 +1,56 @@
 # Explanation
 
-Explanation pages help you understand why PolyzyMD works the way it does, how
+Explanation pages help you understand *why* PolyzyMD works the way it does, how
 to interpret outputs, and what assumptions or tradeoffs matter.
+
+```{tip}
+Looking for step-by-step instructions? Go to {doc}`../how_to/index`.
+Need to look up a setting or option? Go to {doc}`../reference/index`.
+```
+
+::::{grid} 2
+:gutter: 3
+
+:::{grid-item-card} Concepts and Design
+:link: analysis_concepts
+:link-type: doc
+
+How the analysis pipeline, chain conventions, and plugin architecture fit
+together.
+:::
+
+:::{grid-item-card} Interpretation and Best Practices
+:link: analysis_statistics_best_practices
+:link-type: doc
+
+Replication, convergence, multiple testing, and per-plugin best practices.
+:::
+
+:::{grid-item-card} Experimental Analysis Concepts
+:link: polymer_bridging_interpretation
+:link-type: doc
+
+Interpretation guidance for experimental analysis workflows.
+:::
+
+::::
 
 ## Concepts and Design
 
-- [Analysis System Concepts](analysis_concepts.md) — How the analysis pipeline, comparison.yaml, conditions, replicates, and plugins fit together.
-- [Architecture](architecture.md)
-- [Residue Assignment and Chain Conventions](residue_assignment.md)
-- [Colored Logging](colored_logging.md)
-
-## Analysis Interpretation and Best Practices
-
-- [Statistical Best Practices for Analysis](analysis_statistics_best_practices.md)
-- [RMSD Best Practices](analysis_rmsd_best_practices.md)
-- [Establishing Convergence in MD Simulations](convergence_detection.md) — Conceptual guide to convergence detection: what it means, how PolyzyMD's sliding-window heuristic works, and when to tune parameters.
-- [Rg Best Practices](analysis_rg_best_practices.md)
-- [RMSF Best Practices](analysis_rmsf_best_practices.md)
-- [RMSF Reference Selection](analysis_reference_selection.md)
-- [RMSF Verification](analysis_rmsf_verification.md)
-- [Catalytic Triad Best Practices](analysis_triad_best_practices.md)
-
-## Experimental Analysis Concepts
-
-These workflows remain available in PolyzyMD, but their interpretation is still
-evolving and they should be treated as experimental:
-
-- [Binding Preference](../how_to/analysis_binding_preference.md)
-- [Binding Free Energy](../how_to/analysis_binding_free_energy.md)
-- [Polymer Affinity](../how_to/analysis_polymer_affinity.md)
-- [Polymer Bridging Interpretation](polymer_bridging_interpretation.md)
-- [Exposure Dynamics](../how_to/analysis_exposure_dynamics.md)
-
-<!-- IMAGE OPPORTUNITY: Add a chain-convention figure (A/B/C/D+), plus a simple
-stable-vs-experimental analysis map to orient users before they dive into the
-longer conceptual pages. -->
-
 ```{toctree}
-:hidden:
 :maxdepth: 1
 
-Architecture <architecture>
 Analysis System Concepts <analysis_concepts>
+Architecture <architecture>
 Residue Assignment and Chain Conventions <residue_assignment>
 Colored Logging <colored_logging>
+```
+
+## Interpretation and Best Practices
+
+```{toctree}
+:maxdepth: 1
+
 Statistical Best Practices for Analysis <analysis_statistics_best_practices>
 RMSD Best Practices <analysis_rmsd_best_practices>
 Convergence Detection <convergence_detection>
@@ -52,5 +59,19 @@ RMSF Best Practices <analysis_rmsf_best_practices>
 RMSF Reference Selection <analysis_reference_selection>
 RMSF Verification <analysis_rmsf_verification>
 Catalytic Triad Best Practices <analysis_triad_best_practices>
+```
+
+## Experimental Analysis Concepts
+
+These workflows remain available in PolyzyMD, but their interpretation is still
+evolving and they should be treated as experimental. See also the how-to guides
+for {doc}`../how_to/analysis_binding_preference`,
+{doc}`../how_to/analysis_binding_free_energy`,
+{doc}`../how_to/analysis_polymer_affinity`, and
+{doc}`../how_to/analysis_exposure_dynamics`.
+
+```{toctree}
+:maxdepth: 1
+
 Polymer Bridging Interpretation <polymer_bridging_interpretation>
 ```
