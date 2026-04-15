@@ -291,6 +291,21 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   glob matches (>1 file) instead of silently picking the last alphabetical
   match.  (`analyses/contacts/_paths.py`,
   `analyses/shared/binding_preference_helpers.py`)
+- **GROMACS trajectory resolution order corrected.**  `resolve_trajectory_layout()`
+  now prefers post-processed trajectories: `prod_centered.xtc` (whole molecules,
+  centered protein) before `prod_nojump.xtc` before raw `prod.xtc`.
+  Previously the raw trajectory could be selected first, breaking analyses that
+  expect unwrapped coordinates.  (`engines/gromacs/engine.py`)
+- **GROMACS topology resolution skips build artifacts.**  Generic `*.pdb` glob
+  removed from topology search; resolver now uses explicit candidates
+  (`solvated_system.pdb`, `<prefix>.pdb`, `<prefix>.gro`) to avoid selecting
+  `_PACKING_MOLECULE*.pdb` build artifacts left by Packmol.
+  (`engines/gromacs/engine.py`)
+- **TrajectoryLoader resolves engine subdirectory.**  `_resolve_layout()` now
+  calls `engine.resolve_engine_working_directory()` before layout resolution,
+  so GROMACS files in the `gromacs/` subdirectory are found correctly.
+  Previously the loader passed the run-level directory directly, missing the
+  engine-specific subdirectory.  (`analyses/shared/loader.py`)
 - **Unused imports removed.**  Cleaned up stale imports across `cli/main.py`,
   `workflow/daisy_chain.py`, and several analysis plugins.
 - **`Optional[X]` → `X | None` migration.**  Updated type annotations in
@@ -358,7 +373,7 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 
 ### Tests
 
-- 2,130 tests collected (up from 908 at branch start).
+- 2,134 tests collected (up from 908 at branch start).
 - Added GROMACS engine tests: binary resolution (`test_gromacs_binary.py`),
   engine adapter (`test_gromacs_engine.py`), SLURM script generation
   (`test_gromacs_slurm.py`), progress tracking (`test_gromacs_progress.py`),
