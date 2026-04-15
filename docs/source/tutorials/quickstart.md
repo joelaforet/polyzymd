@@ -183,10 +183,9 @@ a run script to `replicate_1/gromacs/`.
 
 ```{tip}
 For the full GROMACS workflow, see {doc}`../how_to/gromacs_export`.
-`polyzymd submit` is OpenMM-only for now.
-Use `polyzymd build --format gromacs` when you only want input files.
-A full GROMACS engine workflow (`run --engine gromacs`, SLURM submission)
-is under active development on `feature/gromacs-engine-support`.
+Use `polyzymd build --format gromacs` when you only want input files,
+`polyzymd run --engine gromacs` when you want PolyzyMD to build and run locally,
+or `polyzymd submit --engine gromacs` to submit self-resubmitting SLURM jobs.
 ```
 
 For multiple replicates (each with an independently built system):
@@ -233,20 +232,25 @@ If you only need the input files without running GROMACS, use
 ````
 
 ````{tab-item} GROMACS — HPC
-Export GROMACS files and submit manually with your cluster's SLURM scripts:
+Submit GROMACS jobs to SLURM with self-resubmitting checkpoint-based restart:
 
 ```bash
-pixi run -e build polyzymd build -c config.yaml --format gromacs --replicates 1-3
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset aa100 \
+    --replicates 1-3
 ```
 
-```{note}
-`polyzymd submit` does not yet support GROMACS as a simulation engine.
-Export files with `build --format gromacs` and submit manually via SLURM.
-Full GROMACS engine integration is under active development on
-`feature/gromacs-engine-support`.
-```
+Add a `gromacs:` block to your `config.yaml` for GPU acceleration and module
+loading. See {doc}`../how_to/gromacs_export` for the full GROMACS HPC workflow
+with cluster-specific recipes.
 
-See {doc}`../how_to/gromacs_export` for the full GROMACS HPC workflow.
+:::{tip}
+**CU Boulder Blanca users:** Replace `--preset aa100` with
+`--preset blanca-shirts --constraint "A40"` and run `ml slurm/blanca` first.
+See the Blanca GPU recipe in {doc}`../how_to/gromacs_export`.
+:::
 ````
 `````
 
@@ -258,6 +262,19 @@ At this point you should have:
 - a minimal, validated `config.yaml`
 - a successful build dry run or real build
 - a clear next step for local execution or SLURM submission
+
+## Step 7: Monitor progress
+
+After submitting jobs, check simulation progress across all replicates:
+
+```bash
+pixi run -e build polyzymd status -c config.yaml
+```
+
+This shows a compact dashboard with colored progress bars, completion
+percentages, and status for each replicate. If any replicate shows
+`interrupted`, use `polyzymd recover` to resume it — see
+{doc}`../how_to/hpc_slurm` for details.
 
 ## Where to go next
 

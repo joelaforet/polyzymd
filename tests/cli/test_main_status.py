@@ -1,6 +1,9 @@
 """Tests for the ``polyzymd status`` command and supporting helpers."""
 
+from __future__ import annotations
+
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
@@ -145,12 +148,307 @@ def _write_progress_json(
 def _mock_sim_config(scratch_dir: Path) -> MagicMock:
     """Create a mock SimulationConfig for status tests."""
     mock = MagicMock()
+    mock.engine = "openmm"
     mock.simulation_phases.production.duration = 100.0
     mock.simulation_phases.production.time_step = 2.0
     mock.simulation_phases.production.samples = 250
     mock._format_run_directory_name.return_value = "fnIII_apo_none_100ns_310K_run1"
     mock.output.effective_scratch_directory = scratch_dir
     return mock
+
+
+class TestCheckProgressEngineAware:
+    """Tests for engine-aware check-progress command."""
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
+    def test_check_progress_uses_engine_dispatch(
+        self, mock_load_progress, mock_from_yaml, tmp_path
+    ):
+        """check-progress should use engine dispatch for progress loading."""
+        mock_cfg = _mock_sim_config(tmp_path / "scratch")
+        mock_cfg.engine = "openmm"
+        mock_from_yaml.return_value = mock_cfg
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=50_000_000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=50_000_000,
+                    steps_requested=50_000_000,
+                    samples_written=250,
+                    status=SegmentStatus.COMPLETED,
+                    duration_ns=100.0,
+                )
+            ],
+            status=SimulationStatus.COMPLETED,
+            replicate=1,
+        )
+        mock_load_progress.return_value = progress
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("name: test\n")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["check-progress", "-c", str(config_path)])
+
+        assert result.exit_code == 0
+        assert "COMPLETE" in result.output
+        mock_load_progress.assert_called_once()
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
+    def test_check_progress_incomplete_exits_1(self, mock_load_progress, mock_from_yaml, tmp_path):
+        """check-progress should exit 1 when work remains."""
+        mock_cfg = _mock_sim_config(tmp_path / "scratch")
+        mock_cfg.engine = "openmm"
+        mock_from_yaml.return_value = mock_cfg
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=50_000_000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=25_000_000,
+                    steps_requested=50_000_000,
+                    samples_written=125,
+                    status=SegmentStatus.INTERRUPTED,
+                    duration_ns=50.0,
+                )
+            ],
+            status=SimulationStatus.INTERRUPTED,
+            replicate=1,
+        )
+        mock_load_progress.return_value = progress
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("name: test\n")
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["check-progress", "-c", str(config_path)])
+
+        assert result.exit_code == 1
+        assert "remaining" in result.output.lower()
+
+
+class TestCheckProgressGromacs:
+    """Tests for check-progress with GROMACS engine."""
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.load_or_scan_progress")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_check_progress_gromacs_complete(
+        self,
+        mock_from_yaml,
+        mock_resolve,
+        mock_load,
+        tmp_path,
+    ):
+        """check-progress --engine gromacs should exit 0 when complete."""
+        _ = mock_resolve
+        mock_cfg = _mock_sim_config(tmp_path / "scratch")
+        mock_cfg.engine = "gromacs"
+        mock_cfg.gromacs = SimpleNamespace(
+            gmx_binary=None,
+            grompp_flags="",
+            mdrun_flags="",
+            module_load=None,
+        )
+        mock_from_yaml.return_value = mock_cfg
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=50_000_000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=50_000_000,
+                    steps_requested=50_000_000,
+                    samples_written=0,
+                    status=SegmentStatus.COMPLETED,
+                    duration_ns=100.0,
+                )
+            ],
+            status=SimulationStatus.COMPLETED,
+            replicate=1,
+        )
+        mock_load.return_value = progress
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("name: test\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["check-progress", "-c", str(config_path), "--engine", "gromacs"],
+        )
+
+        assert result.exit_code == 0
+        assert "COMPLETE" in result.output
+        mock_load.assert_called_once()
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.load_or_scan_progress")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_check_progress_gromacs_incomplete_exits_1(
+        self,
+        mock_from_yaml,
+        mock_resolve,
+        mock_load,
+        tmp_path,
+    ):
+        """check-progress --engine gromacs should exit 1 when work remains."""
+        _ = mock_resolve
+        mock_cfg = _mock_sim_config(tmp_path / "scratch")
+        mock_cfg.engine = "gromacs"
+        mock_cfg.gromacs = SimpleNamespace(
+            gmx_binary=None,
+            grompp_flags="",
+            mdrun_flags="",
+            module_load=None,
+        )
+        mock_from_yaml.return_value = mock_cfg
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=50_000_000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=25_000_000,
+                    steps_requested=50_000_000,
+                    samples_written=0,
+                    status=SegmentStatus.INTERRUPTED,
+                    duration_ns=50.0,
+                )
+            ],
+            status=SimulationStatus.INTERRUPTED,
+            replicate=1,
+        )
+        mock_load.return_value = progress
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("name: test\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["check-progress", "-c", str(config_path), "--engine", "gromacs"],
+        )
+
+        assert result.exit_code == 1
+        assert "remaining" in result.output.lower()
+
+
+class TestStatusGromacs:
+    """Tests for status command with GROMACS engine."""
+
+    def setup_method(self):
+        set_color_support(TerminalColorSupport.NONE)
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.load_or_scan_progress")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_status_gromacs_shows_progress(self, mock_from_yaml, mock_resolve, mock_load, tmp_path):
+        """status should work with engine=gromacs in config."""
+        _ = mock_resolve
+        scratch = tmp_path / "scratch"
+        rep_dir = scratch / "system_run1"
+        rep_dir.mkdir(parents=True)
+
+        mock_cfg = _mock_sim_config(scratch)
+        mock_cfg.engine = "gromacs"
+        mock_cfg.gromacs = SimpleNamespace(
+            gmx_binary=None,
+            grompp_flags="",
+            mdrun_flags="",
+            module_load=None,
+        )
+        mock_cfg.discover_replicate_dirs.return_value = [(1, rep_dir)]
+        mock_from_yaml.return_value = mock_cfg
+
+        progress = SimulationProgress(
+            config_path="/tmp/config.yaml",
+            total_steps_requested=50_000_000,
+            total_samples_requested=250,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=50_000_000,
+                    steps_requested=50_000_000,
+                    samples_written=0,
+                    status=SegmentStatus.COMPLETED,
+                    duration_ns=100.0,
+                )
+            ],
+            status=SimulationStatus.COMPLETED,
+            replicate=1,
+        )
+        mock_load.return_value = progress
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("name: test\n")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "-c", str(config_path)])
+
+        assert result.exit_code == 0
+
+
+class TestStatusGromacsReplicateDiscovery:
+    """Tests for status command GROMACS replicate directory discovery."""
+
+    def setup_method(self):
+        set_color_support(TerminalColorSupport.NONE)
+
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_no_fallback_when_scratch_has_replicates(self, mock_from_yaml, mock_resolve, tmp_path):
+        """Legacy fallback should NOT be used when scratch has replicates."""
+        _ = mock_resolve
+        scratch = tmp_path / "scratch"
+        rep_dir = scratch / "system_run1"
+        rep_dir.mkdir(parents=True)
+        gromacs_dir = rep_dir / "gromacs"
+        gromacs_dir.mkdir()
+
+        projects = tmp_path / "projects"
+        (projects / "replicate_1" / "gromacs").mkdir(parents=True)
+
+        mock_cfg = _mock_sim_config(scratch)
+        mock_cfg.engine = "gromacs"
+        mock_cfg.gromacs = SimpleNamespace(
+            gmx_binary=None,
+            grompp_flags="",
+            mdrun_flags="",
+            module_load=None,
+        )
+        mock_cfg.output.projects_directory = projects
+        mock_cfg.discover_replicate_dirs.return_value = [(1, rep_dir)]
+        mock_from_yaml.return_value = mock_cfg
+
+        _write_progress_json(gromacs_dir)
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("name: test\n")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "-c", str(config_path)])
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        assert "run1" in result.output
 
 
 class TestStatusCli:

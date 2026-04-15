@@ -2,10 +2,13 @@
 
 This module provides config-aware trajectory loading that understands
 PolyzyMD's directory structure and daisy-chain continuation patterns.
+File discovery is delegated to the active simulation engine so that
+both OpenMM and GROMACS directory layouts are handled transparently.
 
 Key Features
 ------------
 - Config-based path resolution (config.yaml is single source of truth)
+- Engine-aware file discovery (OpenMM daisy-chain, GROMACS flat layout)
 - Automatic detection of daisy-chain trajectory segments
 - Support for both scratch and projects directories
 - Lazy loading and memory-efficient iteration
@@ -26,6 +29,7 @@ if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
     from polyzymd.config.schema import SimulationConfig
+    from polyzymd.engines.base import SimulationEngine, TrajectoryLayout
 
 LOGGER = logging.getLogger(__name__)
 
@@ -98,14 +102,23 @@ class TrajectoryLoader:
 
     This class handles the complexity of finding and loading trajectories
     from PolyzyMD's output structure, including:
-    - Daisy-chain continuation segments
+
+    - Daisy-chain continuation segments (OpenMM)
+    - Flat production directories (GROMACS)
     - Scratch vs projects directory resolution
     - Multiple replicates
+
+    File discovery is delegated to the simulation engine resolved from the
+    config's ``engine`` field.  The engine is created lazily on the first
+    call that needs it, so construction remains cheap.
 
     Parameters
     ----------
     config : SimulationConfig
-        PolyzyMD simulation configuration
+        PolyzyMD simulation configuration.
+    engine_override : str or None, optional
+        Force a specific engine name (``"openmm"`` or ``"gromacs"``)
+        instead of reading ``config.engine``.
 
     Examples
     --------
@@ -125,6 +138,9 @@ class TrajectoryLoader:
     >>> for rep in range(1, 6):
     ...     u = loader.load_universe(replicate=rep)
     ...     # ... analyze
+    >>>
+    >>> # Explicit engine override for GROMACS directories
+    >>> loader = TrajectoryLoader(config, engine_override="gromacs")
 
     Notes
     -----
@@ -132,10 +148,150 @@ class TrajectoryLoader:
     add 1 to follow PyMOL convention (1-indexed frames).
     """
 
-    def __init__(self, config: "SimulationConfig") -> None:
+    def __init__(
+        self,
+        config: "SimulationConfig",
+        engine_override: str | None = None,
+    ) -> None:
         _require_mdanalysis()
         self.config = config
+        self._engine_override = engine_override
+        self._engine: SimulationEngine | None = None
         self._universe_cache: dict[int, "Universe"] = {}
+        self._warned_gro_topologies: set[Path] = set()
+
+    # ------------------------------------------------------------------
+    # Engine delegation helpers
+    # ------------------------------------------------------------------
+
+    def _get_engine(self) -> "SimulationEngine":
+        """Lazily create and cache the simulation engine.
+
+        Falls back to OpenMM when the config's ``engine`` field is
+        unrecognised (e.g. a mock object in tests).
+
+        Returns
+        -------
+        SimulationEngine
+            Engine instance resolved from config.
+        """
+        if self._engine is None:
+            from polyzymd.engines import create_engine
+
+            try:
+                self._engine = create_engine(self.config, override=self._engine_override)
+            except (ValueError, TypeError):
+                # Unrecognised engine name (e.g. MagicMock in tests) —
+                # fall back to OpenMM which works with any directory layout.
+                LOGGER.debug(
+                    "Could not resolve engine from config (%s); "
+                    "falling back to OpenMM layout resolver.",
+                    getattr(self.config, "engine", "<no engine attr>"),
+                )
+                from polyzymd.engines.openmm import OpenMMEngine
+
+                self._engine = OpenMMEngine.from_config(self.config)
+        return self._engine
+
+    def _resolve_layout(
+        self,
+        working_dir: Path,
+        replicate: int | None = None,
+    ) -> "TrajectoryLayout":
+        """Resolve trajectory layout via the engine.
+
+        Parameters
+        ----------
+        working_dir : Path
+            Replicate working directory.
+        replicate : int or None, optional
+            Replicate index.  When ``None`` (e.g. from
+            ``find_topology(working_dir)``), the replicate is inferred
+            from the directory name (``run_<N>``) with a fallback to 1.
+
+        Returns
+        -------
+        TrajectoryLayout
+            Engine-resolved file layout.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the engine cannot resolve the layout (e.g. invalid paths).
+        """
+        if replicate is None:
+            replicate = self._infer_replicate(working_dir)
+        engine = self._get_engine()
+        try:
+            engine_dir = engine.resolve_engine_working_directory(working_dir)
+        except (AttributeError, TypeError):
+            engine_dir = working_dir
+        try:
+            layout = engine.resolve_trajectory_layout(engine_dir, replicate)
+        except Exception as exc:
+            # Pydantic ValidationError, TypeError, etc. when paths are
+            # invalid (e.g. MagicMock in tests).  Translate to
+            # FileNotFoundError so callers' existing handlers work.
+            if isinstance(exc, FileNotFoundError):
+                raise
+            raise FileNotFoundError(
+                f"Engine could not resolve trajectory layout in {working_dir}: {exc}"
+            ) from exc
+        self._warn_gro_topology(layout)
+        return layout
+
+    @staticmethod
+    def _infer_replicate(working_dir: Path) -> int:
+        """Best-effort replicate number from a ``run_<N>`` directory name.
+
+        Parameters
+        ----------
+        working_dir : Path
+            Directory whose name may encode the replicate index.
+
+        Returns
+        -------
+        int
+            Parsed replicate number or ``1`` as a safe fallback.
+        """
+        try:
+            dir_name = str(Path(working_dir).name)
+        except (TypeError, ValueError):
+            return 1
+        match = re.match(r"run_(\d+)", dir_name)
+        if match:
+            return int(match.group(1))
+        return 1
+
+    def _warn_gro_topology(self, layout: "TrajectoryLayout") -> None:
+        """Emit a one-time warning when the resolved topology is a GRO file.
+
+        GRO files do not reliably preserve chain identifiers, which can
+        break chain-based selections (``chainid A/B/C``) used by many
+        analysis plugins.
+
+        Parameters
+        ----------
+        layout : TrajectoryLayout
+            Resolved layout from the engine.
+        """
+        if (
+            layout.topology_path is not None
+            and layout.topology_format.lower() == "gro"
+            and layout.topology_path not in self._warned_gro_topologies
+        ):
+            self._warned_gro_topologies.add(layout.topology_path)
+            LOGGER.warning(
+                "Using GRO topology %s — GRO files may not preserve chain "
+                "identifiers.  Chain-based selections (chainid A/B/C) used "
+                "by analysis plugins may be unreliable.  Prefer a PDB "
+                "topology when available.",
+                layout.topology_path,
+            )
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def get_trajectory_info(self, replicate: int) -> TrajectoryInfo:
         """Get trajectory file information for a replicate.
@@ -167,15 +323,18 @@ class TrajectoryLoader:
                 f"Available replicates: {available_str}"
             )
 
-        # Find topology and trajectories
-        # Methods handle both new (production_N/) and legacy (production/) structures
-        topology_file = self.find_topology(working_dir)
-        trajectory_files = self._find_trajectories(working_dir)
+        # Delegate file discovery to the simulation engine
+        layout = self._resolve_layout(working_dir, replicate=replicate)
+
+        if layout.topology_path is None:
+            raise FileNotFoundError(f"No topology file found in {working_dir}")
+        if not layout.trajectory_paths:
+            raise FileNotFoundError(f"No production trajectory files found in {working_dir}")
 
         return TrajectoryInfo(
-            topology_file=topology_file,
-            trajectory_files=trajectory_files,
-            n_segments=len(trajectory_files),
+            topology_file=layout.topology_path,
+            trajectory_files=layout.trajectory_paths,
+            n_segments=len(layout.trajectory_paths),
             working_directory=working_dir,
             replicate=replicate,
         )
@@ -353,78 +512,57 @@ class TrajectoryLoader:
     def find_topology(self, working_dir: Path) -> Path:
         """Find topology file in working directory.
 
-        Search order:
-        1. solvated_system.pdb (primary - always exists after build)
-        2. production_0/production_0_topology.pdb (daisy-chain structure)
-        3. production/production_topology.pdb (legacy pre-daisy-chain)
-        4. Glob fallback for any topology PDB
+        Delegates file discovery to the simulation engine.  The engine
+        applies its own search order (e.g. PDB preference for GROMACS,
+        ``solvated_system.pdb`` preference for OpenMM).
+
+        This method is used by several plugins that pass an explicit
+        ``working_dir`` unrelated to the current replicate.  The
+        replicate index is inferred from the directory name when
+        possible (``run_<N>``), falling back to ``1``.
+
+        Parameters
+        ----------
+        working_dir : Path
+            Directory to search for topology files.
+
+        Returns
+        -------
+        Path
+            Path to the topology file.
+
+        Raises
+        ------
+        FileNotFoundError
+            If no topology file is found.
         """
-        # Primary: solvated_system.pdb in working_dir root
-        topology = working_dir / "solvated_system.pdb"
-        if topology.exists():
-            return topology
-
-        # Daisy-chain structure: production_0/production_0_topology.pdb
-        topology = working_dir / "production_0" / "production_0_topology.pdb"
-        if topology.exists():
-            return topology
-
-        # Legacy structure: production/production_topology.pdb
-        topology = working_dir / "production" / "production_topology.pdb"
-        if topology.exists():
-            return topology
-
-        # Glob fallback: search for any topology PDB
-        for pattern in [
-            "production_*/*_topology.pdb",  # daisy-chain
-            "production/*_topology.pdb",  # legacy with segments (unlikely)
-            "*.pdb",  # any PDB in root
-        ]:
-            pdbs = sorted(working_dir.glob(pattern))
-            if pdbs:
-                return pdbs[0]
-
-        raise FileNotFoundError(f"No topology file found in {working_dir}")
+        layout = self._resolve_layout(working_dir, replicate=None)
+        if layout.topology_path is None:
+            raise FileNotFoundError(f"No topology file found in {working_dir}")
+        return layout.topology_path
 
     def _find_trajectories(self, working_dir: Path) -> list[Path]:
-        """Find trajectory files, handling daisy-chain segments.
+        """Find trajectory files via the simulation engine.
 
-        Search order:
-        1. production_N/production_N_trajectory.dcd (daisy-chain, multiple segments)
-        2. production/production_trajectory.dcd (legacy single file, deprecated)
-        3. Glob fallback for any production DCD files
+        Parameters
+        ----------
+        working_dir : Path
+            Working directory to search.
+
+        Returns
+        -------
+        list[Path]
+            Ordered trajectory file paths.
+
+        Raises
+        ------
+        FileNotFoundError
+            If no trajectory files are found.
         """
-        # New daisy-chain structure: production_N/production_N_trajectory.dcd
-        # Use OS-agnostic pattern matching
-        pattern = re.compile(r"production_(\d+)[/\\]production_\d+_trajectory\.dcd$")
-
-        segments: dict[int, Path] = {}
-        for f in working_dir.glob("production_*/production_*_trajectory.dcd"):
-            match = pattern.search(str(f))
-            if match:
-                idx = int(match.group(1))
-                segments[idx] = f
-
-        if segments:
-            # Return in segment order
-            return [segments[i] for i in sorted(segments.keys())]
-
-        # Legacy structure: production/production_trajectory.dcd (single file, no segments)
-        legacy_traj = working_dir / "production" / "production_trajectory.dcd"
-        if legacy_traj.exists():
-            LOGGER.warning(
-                f"Using deprecated trajectory structure: {legacy_traj}. "
-                "This format (production/production_trajectory.dcd) is deprecated. "
-                "Re-run simulation with current PolyzyMD to use production_N/ structure."
-            )
-            return [legacy_traj]
-
-        # Last resort: any production DCD files (excluding equilibration)
-        dcds = sorted(working_dir.glob("**/production*trajectory.dcd"))
-        if dcds:
-            return dcds
-
-        raise FileNotFoundError(f"No production trajectory files found in {working_dir}")
+        layout = self._resolve_layout(working_dir, replicate=None)
+        if not layout.trajectory_paths:
+            raise FileNotFoundError(f"No production trajectory files found in {working_dir}")
+        return layout.trajectory_paths
 
 
 def parse_time_string(time_str: str) -> tuple[float, str]:

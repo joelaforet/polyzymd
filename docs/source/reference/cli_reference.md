@@ -336,12 +336,22 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--config` | `-c` | Yes | - | Path to YAML configuration file |
 | `--replicates` | `-r` | No | "1" | Replicate range (e.g., "1-5", "1,3,5") |
 | `--preset` | - | No | aa100 | SLURM partition preset |
+| `--engine` | - | No | from config or openmm | Simulation engine: `gromacs` or `openmm` |
 | `--email` | - | No | "" | Email for job notifications |
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--output-dir` | - | No | auto | Directory for job scripts |
 | `--time-limit` | - | No | from preset | Override SLURM time limit (HH:MM:SS) |
 | `--memory` | - | No | 3G | Override SLURM memory allocation |
+| `--account` | - | No | - | Override SLURM account / allocation ID |
+| `--partition` | - | No | from preset | Override SLURM partition |
+| `--qos` | - | No | - | Override SLURM QoS |
+| `--gpu-type` | - | No | - | GPU type for GRES (e.g., "a100", "a40", "mi100") |
+| `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
+| `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
+| `--pixi-env` | - | No | from preset | Pixi environment for SLURM jobs (`cuda-12-4` or `cuda-12-6`) |
+| `--skip-build` | - | No | false | Skip system building (use pre-built system from `polyzymd build`) |
+| `--force` | - | No | false | Skip duplicate-job check |
 | `--openff-logs` | - | No | false | Enable verbose OpenFF logs in job scripts |
 | `--dry-run` | - | No | false | Preview submission plan only (no files written, no submission) |
 | `--generate-only` | - | No | false | Generate SLURM scripts without submitting (the previous `--dry-run` behavior) |
@@ -358,7 +368,8 @@ generate SLURM scripts for inspection without submitting them to the scheduler.
 |--------|-----------|------------|-------------|
 | `aa100` | aa100 | 24:00:00 | NVIDIA A100 GPUs |
 | `al40` | al40 | 24:00:00 | NVIDIA L40 GPUs |
-| `blanca-shirts` | blanca-shirts | 7-00:00:00 | Shirts lab partition |
+| `blanca-shirts` | blanca-shirts | 7-00:00:00 | Blanca condo partition |
+| `bridges2` | GPU | 48:00:00 | PSC Bridges2 GPU |
 | `testing` | atesting | 01:00:00 | Quick tests |
 
 ### Example
@@ -380,6 +391,18 @@ polyzymd submit -c config.yaml -r 1 --preset testing --time-limit 0:05:00
 polyzymd submit -c config.yaml -r 1-3 --preset aa100 \
     --scratch-dir /scratch/alpine/$USER/sims \
     --projects-dir /projects/$USER/polyzymd
+
+# GROMACS GPU submission with constraint
+polyzymd submit -c config.yaml -r 1-3 \
+    --engine gromacs \
+    --preset blanca-shirts \
+    --constraint "A40" \
+    --email you@university.edu
+
+# GROMACS CPU submission
+polyzymd submit -c config.yaml -r 1-3 \
+    --engine gromacs \
+    --preset aa100
 ```
 
 ### Self-Resubmitting Jobs
@@ -554,9 +577,17 @@ polyzymd recover -c CONFIG [OPTIONS]
 | `--replicate` | `-r` | No | 1 | Replicate number |
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--preset` | - | No | aa100 | SLURM preset for recovery job |
+| `--engine` | - | No | from config | Override simulation engine (`gromacs` or `openmm`) |
 | `--submit / --no-submit` | - | No | --no-submit | Submit a recovery job (default: status only) |
 | `--dry-run` | - | No | false | Show what would be submitted without submitting |
+| `--email` | - | No | "" | Email for job notifications |
 | `--memory` | - | No | 3G | Override SLURM memory allocation (e.g. '4G', '8G') |
+| `--partition` | - | No | from preset | Override SLURM partition |
+| `--qos` | - | No | - | Override SLURM QoS |
+| `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
+| `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
+| `--pixi-env` | - | No | from preset | Pixi environment for recovery job |
+| `--force` | - | No | false | Skip duplicate-job check |
 
 ### Example
 
@@ -566,6 +597,13 @@ polyzymd recover -c config.yaml -r 1
 
 # Submit a recovery job
 polyzymd recover -c config.yaml -r 1 --submit --preset blanca-shirts
+
+# GROMACS recovery with GPU constraint
+polyzymd recover -c config.yaml -r 1 \
+    --engine gromacs \
+    --submit \
+    --preset blanca-shirts \
+    --constraint "A40"
 
 # Dry-run (show what would be submitted)
 polyzymd recover -c config.yaml -r 1 --submit --dry-run

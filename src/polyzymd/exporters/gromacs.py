@@ -1314,16 +1314,30 @@ class RunScriptGenerator:
             "# ========================================",
             'echo "=== Step 1: Energy Minimization ==="',
             "",
-            "$GMX grompp -f em.mdp -c ${PREFIX}.gro -p ${PREFIX}.top -o em.tpr -maxwarn 1",
-            "$GMX mdrun -deffnm em -v",
-            "",
-            "# Check if minimization succeeded",
             "if [ ! -f em.gro ]; then",
-            '    echo "ERROR: Energy minimization failed!"',
-            "    exit 1",
+            '    echo "=== Step 1: Energy Minimization ==="',
+            "",
+            "    $GMX grompp -f em.mdp -c ${PREFIX}.gro -r ${PREFIX}.gro -p ${PREFIX}.top -o em.tpr -maxwarn 1",
+            "    $GMX mdrun -deffnm em -v",
+            "",
+            "    # Check if standard minimization succeeded",
+            "    if [ ! -f em.gro ]; then",
+            '        echo "ERROR: Energy minimization failed!"',
+            "        exit 1",
+            "    fi",
+            "",
+            "    # Verify energy minimization health",
+            '    if grep -qi "force.*not finite\\|inf.*atom" em.log 2>/dev/null; then',
+            '        echo "FATAL: Energy minimization failed — infinite forces detected in em.log"',
+            '        echo "This usually indicates severe atomic overlaps in the initial structure."',
+            '        echo "Try increasing packing padding or box size."',
+            "        exit 1",
+            "    fi",
+            '    echo "Minimization complete: em.gro"',
+            '    echo ""',
+            "else",
+            '    echo "Skipping energy minimization (em.gro exists)."',
             "fi",
-            'echo "Minimization complete: em.gro"',
-            'echo ""',
             "",
         ]
 
@@ -2140,21 +2154,25 @@ class GromacsRunner:
         self._print_banner("Step 1: Energy Minimization")
 
         # grompp
+        grompp_cmd = [
+            self._gmx,
+            "grompp",
+            "-f",
+            "em.mdp",
+            "-c",
+            f"{self._prefix}.gro",
+            "-r",
+            f"{self._prefix}.gro",
+            "-p",
+            f"{self._prefix}.top",
+            "-o",
+            "em.tpr",
+            "-maxwarn",
+            "1",
+        ]
+
         self._run_command(
-            [
-                self._gmx,
-                "grompp",
-                "-f",
-                "em.mdp",
-                "-c",
-                f"{self._prefix}.gro",
-                "-p",
-                f"{self._prefix}.top",
-                "-o",
-                "em.tpr",
-                "-maxwarn",
-                "1",
-            ],
+            grompp_cmd,
             "Preparing energy minimization (grompp)",
         )
 
@@ -2170,6 +2188,28 @@ class GromacsRunner:
                 command="mdrun -deffnm em",
                 returncode=1,
                 message="Energy minimization failed: em.gro not produced",
+            )
+
+        self._check_energy_minimization_health()
+
+    def _check_energy_minimization_health(self) -> None:
+        """Check EM log for non-finite force failures.
+
+        Raises
+        ------
+        RuntimeError
+            If the EM log reports non-finite forces.
+        """
+        em_log_path = self._working_dir / "em.log"
+        if not em_log_path.exists():
+            return
+
+        em_log_text = em_log_path.read_text(errors="ignore")
+        if re.search(r"force.*not finite|inf.*atom", em_log_text, flags=re.IGNORECASE):
+            raise RuntimeError(
+                "Energy minimization failed — infinite forces detected in em.log. "
+                "This usually indicates severe atomic overlaps in the initial structure. "
+                "Try increasing packing padding or box size."
             )
 
     def _run_equilibration(self) -> None:

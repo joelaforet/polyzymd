@@ -14,8 +14,15 @@ Covers:
 
 from pathlib import Path
 
+import pytest
 
-from polyzymd.exporters.gromacs import GromacsExporter, PositionRestraintGenerator
+from polyzymd.exporters.gromacs import (
+    GromacsExporter,
+    GromacsRunner,
+    MDPGenerator,
+    PositionRestraintGenerator,
+    RunScriptGenerator,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures — synthetic ITP content
@@ -705,3 +712,40 @@ class TestFixGroMultiplePolymerTypes:
 
         # polyB copy 1: 12,12,12,13,13,13,13,14,14,14
         assert resids[36:46] == [12, 12, 12, 13, 13, 13, 13, 14, 14, 14]
+
+
+class TestEnergyMinimizationHelpers:
+    """Tests for EM health checks."""
+
+    def test_run_script_generator_uses_single_stage_em_with_health_check(self, tmp_path):
+        """Generated local run script should use single-stage EM and preserve health check."""
+        script_path = tmp_path / "run_test_gromacs.sh"
+        generator = RunScriptGenerator(prefix="system", equilibration_mdps=["eq_01_nvt.mdp"])
+
+        generator.generate(script_path)
+        script_content = script_path.read_text()
+
+        assert "em.mdp" in script_content
+        assert "em.gro" in script_content
+        assert "em.tpr" in script_content
+
+        assert "em_soft.mdp" not in script_content
+        assert "em_soft.gro" not in script_content
+        assert "em_soft.tpr" not in script_content
+
+        assert "grep -qi" in script_content
+        assert "force.*not finite" in script_content
+
+    def test_em_health_check_in_runner(self, tmp_path):
+        """Runner health check should fail on non-finite force signatures."""
+        em_log = tmp_path / "em.log"
+        em_log.write_text("force on at least one atom is not finite\n")
+
+        runner = GromacsRunner(
+            working_dir=tmp_path,
+            prefix="system",
+            equilibration_mdps=[],
+        )
+
+        with pytest.raises(RuntimeError, match="infinite forces"):
+            runner._check_energy_minimization_health()

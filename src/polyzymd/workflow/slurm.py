@@ -46,6 +46,9 @@ PRESET_DEFAULT_PIXI_ENV: Dict[str, str] = {
 # Pattern allowing alphanumerics, common path chars, and SLURM-safe punctuation
 # Intentionally excludes shell metacharacters: ; | & $ ` ( ) { } < > ' " \ !
 _SAFE_SCRIPT_VALUE = _re.compile(r"^[A-Za-z0-9._/,:\-@%=+ ]+$")
+_SAFE_CONSTRAINT_VALUE = _re.compile(r"^[A-Za-z0-9._\-|&]+$")
+_SAFE_NODELIST_VALUE = _re.compile(r"^[A-Za-z0-9._,\-\[\]]+$")
+_SAFE_GPU_TYPE_VALUE = _re.compile(r"^[A-Za-z0-9._\-]+$")
 
 
 def _validate_script_value(value: str, field_name: str) -> str:
@@ -68,10 +71,100 @@ def _validate_script_value(value: str, field_name: str) -> str:
     ValueError
         If the value contains unsafe characters.
     """
-    if not _SAFE_SCRIPT_VALUE.match(value):
+    if value and not _SAFE_SCRIPT_VALUE.match(value):
         raise ValueError(
             f"SLURM script field '{field_name}' contains unsafe characters: {value!r}. "
             "Only alphanumerics and -_./:,@%=+ are allowed."
+        )
+    return value
+
+
+def _validate_constraint_value(value: str, field_name: str) -> str:
+    """Validate a SLURM --constraint value, allowing ``|`` (OR) and ``&`` (AND).
+
+    SLURM constraint expressions use ``|`` and ``&`` as boolean operators
+    (e.g. ``"A40|A100"``), which are deliberately forbidden by
+    ``_validate_script_value``.  This helper uses a separate regex that
+    permits those two characters while still rejecting dangerous shell
+    metacharacters (``; $ ` ( ) { } < > ' " \\ !``).
+
+    Parameters
+    ----------
+    value : str
+        The constraint value to validate.
+    field_name : str
+        Name of the field for error messages.
+
+    Returns
+    -------
+    str
+        The validated value unchanged.
+
+    Raises
+    ------
+    ValueError
+        If the value contains unsafe characters.
+    """
+    if value and not _SAFE_CONSTRAINT_VALUE.match(value):
+        raise ValueError(
+            f"SLURM constraint field '{field_name}' contains unsafe characters: {value!r}. "
+            "Only alphanumerics, hyphens, dots, underscores, | (OR), and & (AND) are allowed."
+        )
+    return value
+
+
+def _validate_nodelist_value(value: str, field_name: str = "nodelist") -> str:
+    """Validate a SLURM nodelist value, allowing bracket hostlist syntax.
+
+    Parameters
+    ----------
+    value : str
+        The nodelist string to validate.
+    field_name : str, optional
+        Field name for error messages, by default "nodelist".
+
+    Returns
+    -------
+    str
+        The validated value.
+
+    Raises
+    ------
+    ValueError
+        If the value contains unsafe characters.
+    """
+    if value and not _SAFE_NODELIST_VALUE.match(value):
+        raise ValueError(
+            f"{field_name} contains unsafe characters: {value!r}. "
+            "Only alphanumeric, '.', '_', '-', ',', '[', ']' are allowed."
+        )
+    return value
+
+
+def _validate_gpu_type_value(value: str, field_name: str = "gpu_type") -> str:
+    """Validate a GPU type string for SBATCH GRES rendering.
+
+    Parameters
+    ----------
+    value : str
+        GPU type value to validate.
+    field_name : str, optional
+        Field name used in validation error messages.
+
+    Returns
+    -------
+    str
+        The validated value.
+
+    Raises
+    ------
+    ValueError
+        If the value contains unsafe characters.
+    """
+    if value and not _SAFE_GPU_TYPE_VALUE.match(value):
+        raise ValueError(
+            f"{field_name} contains unsafe characters: {value!r}. "
+            "Only alphanumeric, '.', '_', '-' are allowed."
         )
     return value
 
@@ -135,17 +228,22 @@ class SlurmConfig:
         nodes: Number of nodes.
         ntasks: Number of tasks.  Ignored when ``gpu_directive_style == "gpus"``
             (Bridges2-style); those scripts emit ``#SBATCH -N {nodes}`` only.
+        cpus_per_task: Number of CPUs allocated per task.
         memory: Memory allocation (e.g. ``"3G"``).  Set to ``None`` to omit the
             ``--mem`` directive entirely (some clusters allocate memory per GPU
             and reject an explicit ``--mem`` request).
         gpus: Number of GPUs.
         exclude: Nodes to exclude (omitted when ``None``).
+        nodelist: Optional SLURM ``--nodelist`` value.
         gpu_type: Optional GPU type string used with the ``--gpus`` directive
             (e.g. ``"v100-32"`` for Bridges2).  When ``None`` the classic
             ``--gres=gpu:<N>`` directive is emitted instead.
         gpu_directive_style: ``"gres"`` (default, Alpine-style) or ``"gpus"``
             (Bridges2-style).  Controls which SBATCH GPU directive is written.
             Also governs which nodes/ntasks format is emitted.
+        constraint: Optional SLURM ``--constraint`` expression. Supports
+            boolean expressions with ``|`` (OR) and ``&`` (AND), such as
+            ``"A40|A100"``.
     """
 
     partition: str = "aa100"
@@ -155,12 +253,15 @@ class SlurmConfig:
     email: str = ""
     nodes: int = 1
     ntasks: int = 1
+    cpus_per_task: int = 1
     memory: Optional[str] = "3G"
     gpus: int = 1
     exclude: Optional[str] = None
+    nodelist: Optional[str] = None
     # --- GPU directive fields ---
     gpu_type: Optional[str] = None
     gpu_directive_style: str = "gres"
+    constraint: Optional[str] = None
 
     @classmethod
     def from_preset(cls, preset: PresetType, email: str = "") -> "SlurmConfig":
@@ -292,12 +393,15 @@ class SlurmScriptGenerator:
 #SBATCH --output={output_file}
 {qos_line}
 {nodes_line}
+{cpus_line}
 {mem_line}
 #SBATCH --time={time_limit}
 {gpu_line}
 {mail_line}
 {account_line}
 {exclude_line}
+{nodelist_line}
+{constraint_line}
 #SBATCH --signal=B:USR1@300
 #SBATCH --no-requeue
 
@@ -460,8 +564,12 @@ exit 0
         ``--gpus`` syntax (e.g. Bridges2), or ``#SBATCH --gres=gpu:<n>`` for
         clusters that use the classic Generic RESources syntax (Alpine).
         """
+        if self._config.gpus == 0:
+            return ""
         if self._config.gpu_directive_style == "gpus" and self._config.gpu_type:
             return f"#SBATCH --gpus={self._config.gpu_type}:{self._config.gpus}"
+        if self._config.gpu_type:
+            return f"#SBATCH --gres=gpu:{self._config.gpu_type}:{self._config.gpus}"
         return f"#SBATCH --gres=gpu:{self._config.gpus}"
 
     def _nodes_line(self) -> str:
@@ -477,9 +585,15 @@ exit 0
 
             #SBATCH -N N
         """
-        if self._config.gpu_directive_style == "gpus":
+        if self._config.gpu_directive_style == "gpus" and self._config.gpus > 0:
             return f"#SBATCH -N {self._config.nodes}"
         return f"#SBATCH --nodes={self._config.nodes}\n#SBATCH --ntasks={self._config.ntasks}"
+
+    def _cpus_line(self) -> str:
+        """Return the CPUs-per-task directive when requested."""
+        if self._config.cpus_per_task > 1:
+            return f"#SBATCH --cpus-per-task={self._config.cpus_per_task}"
+        return ""
 
     def _qos_line(self) -> str:
         """Return the QoS SBATCH directive, or an empty string to omit it."""
@@ -510,6 +624,14 @@ exit 0
     def _exclude_line(self) -> str:
         """Return the exclude SBATCH directive, or an empty string to omit it."""
         return f"#SBATCH --exclude={self._config.exclude}" if self._config.exclude else ""
+
+    def _nodelist_line(self) -> str:
+        """Return the nodelist SBATCH directive, or empty string when unset."""
+        return f"#SBATCH --nodelist={self._config.nodelist}" if self._config.nodelist else ""
+
+    def _constraint_line(self) -> str:
+        """Return the constraint SBATCH directive, or an empty string to omit it."""
+        return f"#SBATCH --constraint={self._config.constraint}" if self._config.constraint else ""
 
     # ------------------------------------------------------------------
     # Self-resubmitting job generation
@@ -585,8 +707,12 @@ exit 0
             _validate_script_value(self._config.email, "email")
         if self._config.exclude:
             _validate_script_value(self._config.exclude, "exclude")
+        if self._config.nodelist:
+            _validate_nodelist_value(self._config.nodelist, "nodelist")
+        if self._config.constraint:
+            _validate_constraint_value(self._config.constraint, "constraint")
         if self._config.gpu_type:
-            _validate_script_value(self._config.gpu_type, "gpu_type")
+            _validate_gpu_type_value(self._config.gpu_type, "gpu_type")
 
         return self.JOB_TEMPLATE.format(
             partition=self._config.partition,
@@ -594,12 +720,15 @@ exit 0
             output_file=output_file,
             qos_line=self._qos_line(),
             nodes_line=self._nodes_line(),
+            cpus_line=self._cpus_line(),
             mem_line=self._mem_line(),
             time_limit=self._config.time_limit,
             gpu_line=self._gpu_line(),
             mail_line=self._mail_line(),
             account_line=self._account_line(),
             exclude_line=self._exclude_line(),
+            nodelist_line=self._nodelist_line(),
+            constraint_line=self._constraint_line(),
             pixi_env=self._pixi_env,
             manifest_path=manifest_path,
             config_path=config_path,

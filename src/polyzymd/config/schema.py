@@ -7,11 +7,15 @@ providing validation, type safety, and YAML/JSON serialization support.
 
 from __future__ import annotations
 
+import logging
+import shlex
 from enum import Enum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ChargeMethod(str, Enum):
@@ -1102,6 +1106,199 @@ class ForceFieldConfig(BaseModel):
 
 
 # =============================================================================
+# Engine Configuration
+# =============================================================================
+
+
+class OpenMMEngineConfig(BaseModel):
+    """OpenMM-specific engine settings.
+
+    These settings control OpenMM platform selection and device configuration.
+    Only relevant when ``engine`` is ``"openmm"``.
+
+    Attributes:
+        platform: OpenMM platform to use for computation.
+        device_index: GPU device index (platform-specific).
+        precision: Floating-point precision mode.
+    """
+
+    platform: str = Field("CUDA", description="OpenMM compute platform")
+    device_index: str | None = Field(None, description="GPU device index")
+    precision: str = Field("mixed", description="Floating-point precision")
+
+
+class GromacsEngineConfig(BaseModel):
+    """GROMACS-specific engine settings.
+
+    These settings control how GROMACS binaries are located and invoked,
+    and how SLURM resources are allocated for GROMACS jobs.
+
+    GROMACS users configure parallelism via ``ntmpi`` (MPI ranks) and
+    ``ntomp`` (OpenMP threads per rank). These map directly to the
+    ``gmx mdrun -ntmpi`` and ``-ntomp`` flags. The corresponding SLURM
+    resources (``ntasks``, ``cpus_per_task``, ``memory``) are set to
+    match.
+
+    Set ``gpu: true`` when running a CUDA-enabled GROMACS build on a
+    GPU node. When ``False`` (default), the SLURM script omits GPU
+    directives entirely.
+
+    Attributes:
+        gmx_binary: Path or name of the GROMACS binary.
+            Resolved via config > $GMX_BIN > PATH discovery if None.
+        mdrun_flags: Additional flags passed to ``gmx mdrun`` (all stages).
+        grompp_flags: Additional flags passed to ``gmx grompp``.
+        module_load: Module load command for HPC (e.g. ``"module load gromacs/2024"``)
+        ntmpi: Number of MPI ranks for ``gmx mdrun -ntmpi``.
+            Also sets SLURM ``--ntasks``.
+        ntomp: Number of OpenMP threads per rank for ``gmx mdrun -ntomp``.
+            Also sets SLURM ``--cpus-per-task``.
+        gpu: Request a GPU via SLURM. When False, the ``--gres=gpu``
+            directive is omitted entirely.
+        gpus: Number of GPUs to request when ``gpu`` is True. Ignored
+            when ``gpu`` is False.
+        memory: SLURM ``--mem`` allocation for GROMACS jobs.
+    """
+
+    gmx_binary: str | None = Field(None, description="GROMACS binary path or name")
+    mdrun_flags: str = Field("", description="Extra flags for gmx mdrun (all stages)")
+    grompp_flags: str = Field("-maxwarn 1", description="Extra flags for gmx grompp")
+    mdrun_flags_equilibration: str | None = Field(
+        None,
+        description=(
+            "Override mdrun_flags for equilibration stages only. "
+            "When None, falls back to mdrun_flags."
+        ),
+    )
+    mdrun_flags_production: str | None = Field(
+        None,
+        description=(
+            "Override mdrun_flags for production only. When None, falls back to mdrun_flags."
+        ),
+    )
+    command_prefix: str | None = Field(
+        None,
+        description=(
+            "Prefix prepended to all GROMACS commands. "
+            "Use for container wrappers, e.g. "
+            "'singularity exec --rocm --bind $PWD /path/to/gromacs.sif'"
+        ),
+    )
+    mpi_launcher_flags: str = Field(
+        "",
+        description=(
+            "Extra flags passed to the MPI launcher (mpirun). "
+            "Only used when the binary is a real-MPI build. "
+            "E.g. '-genv I_MPI_FABRICS shm:tcp' for Intel MPI."
+        ),
+    )
+    module_load: str | None = Field(None, description="HPC module load command")
+    env_exports: dict[str, str] = Field(
+        default_factory=dict,
+        description=("Environment variables exported before GROMACS commands (key=value pairs)"),
+    )
+    setup_commands: list[str] = Field(
+        default_factory=list,
+        description="Shell commands run after module_load and before GROMACS commands",
+    )
+    ntmpi: int = Field(1, ge=1, description="MPI ranks (-ntmpi); sets SLURM --ntasks")
+    slurm_ntasks: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Override SLURM --ntasks independently of GROMACS -ntmpi. "
+            "Advanced option for multi-node MPI+GPU workflows where scheduler "
+            "tasks differ from GROMACS thread-MPI ranks. When None, SLURM ntasks "
+            "is set from ntmpi (default behavior)."
+        ),
+    )
+    ntomp: int = Field(
+        8,
+        ge=1,
+        description="OpenMP threads per rank (-ntomp); sets SLURM --cpus-per-task",
+    )
+    gpu: bool = Field(
+        False,
+        description="Request GPU via SLURM (set True for CUDA-enabled GROMACS)",
+    )
+    gpus: int = Field(
+        1,
+        ge=1,
+        description="Number of GPUs to request via SLURM when gpu is True",
+    )
+    memory: str = Field("16G", description="SLURM --mem allocation for GROMACS jobs")
+
+    @model_validator(mode="after")
+    def _warn_gpu_ntmpi(self) -> Self:
+        """Warn when GPU mode is combined with multiple thread-MPI ranks.
+
+        Returns
+        -------
+        Self
+            The validated config instance
+        """
+        if self.gpu and self.ntmpi > 1:
+            LOGGER.warning(
+                "GPU GROMACS uses thread-MPI (gmx mdrun -ntmpi), not real MPI ranks. "
+                "With ntmpi=%d and gpus=%d, ensure enough GPUs are available or "
+                "accept GPU sharing.",
+                self.ntmpi,
+                self.gpus,
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _warn_mdrun_flags_conflict(self) -> Self:
+        """Warn when mdrun_flags conflict with explicit ntmpi or ntomp fields.
+
+        Returns
+        -------
+        Self
+            The validated config instance
+        """
+        if not self.mdrun_flags:
+            return self
+
+        try:
+            tokens = shlex.split(self.mdrun_flags)
+        except ValueError:
+            return self
+
+        flag_map: dict[str, str] = {}
+        for i, tok in enumerate(tokens):
+            if tok in ("-ntmpi", "-ntomp") and i + 1 < len(tokens):
+                flag_map[tok] = tokens[i + 1]
+
+        if "-ntmpi" in flag_map:
+            try:
+                flag_val = int(flag_map["-ntmpi"])
+                if flag_val != self.ntmpi:
+                    LOGGER.warning(
+                        "mdrun_flags contains '-ntmpi %s' but config field ntmpi=%d. "
+                        "The flag string will override at runtime.",
+                        flag_map["-ntmpi"],
+                        self.ntmpi,
+                    )
+            except ValueError:
+                pass
+
+        if "-ntomp" in flag_map:
+            try:
+                flag_val = int(flag_map["-ntomp"])
+                if flag_val != self.ntomp:
+                    LOGGER.warning(
+                        "mdrun_flags contains '-ntomp %s' but config field ntomp=%d. "
+                        "The flag string will override at runtime.",
+                        flag_map["-ntomp"],
+                        self.ntomp,
+                    )
+            except ValueError:
+                pass
+
+        return self
+
+
+# =============================================================================
 # Main Simulation Configuration
 # =============================================================================
 
@@ -1148,6 +1345,13 @@ class SimulationConfig(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig, description="Output settings")
     force_field: ForceFieldConfig = Field(
         default_factory=ForceFieldConfig, description="Force field settings"
+    )
+    engine: Literal["openmm", "gromacs"] = Field("openmm", description="Simulation engine to use")
+    openmm: OpenMMEngineConfig = Field(
+        default_factory=OpenMMEngineConfig, description="OpenMM engine settings"
+    )
+    gromacs: GromacsEngineConfig = Field(
+        default_factory=GromacsEngineConfig, description="GROMACS engine settings"
     )
 
     @classmethod

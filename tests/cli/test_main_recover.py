@@ -7,6 +7,8 @@ Covers:
 - Self-resubmitting model (no afterany dependencies)
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -68,10 +70,29 @@ class TestFindTopologyPdb:
 def _mock_sim_config(working_dir: Path):
     """Create a mock SimulationConfig that returns working_dir."""
     mock = MagicMock()
+    mock.engine = "openmm"
     mock.get_working_directory.return_value = working_dir
     mock.simulation_phases.production.time_step = 2.0
     mock.simulation_phases.production.duration = 20.0  # ns
     mock.simulation_phases.production.samples = 250
+    return mock
+
+
+def _mock_sim_config_gromacs(working_dir: Path):
+    """Create a mock GROMACS SimulationConfig for recover tests."""
+    mock = MagicMock()
+    mock.engine = "gromacs"
+    mock.get_working_directory.return_value = working_dir
+    mock.simulation_phases.production.time_step = 2.0
+    mock.simulation_phases.production.duration = 20.0
+    mock.simulation_phases.production.samples = 250
+    mock.output.slurm_logs_subdir = "slurm_logs"
+    mock.enzyme.name = "CALB"
+    mock.thermodynamics.temperature = 310
+    mock.polymers = None
+    mock.gromacs.grompp_flags = ""
+    mock.gromacs.mdrun_flags = ""
+    mock.gromacs.module_load = None
     return mock
 
 
@@ -181,7 +202,7 @@ class TestRecoverStatusReport:
 class TestCheckProgress:
     """check-progress reports status and exits with correct code."""
 
-    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_complete_exits_zero(self, mock_from_yaml, mock_load, tmp_path):
         """check-progress should exit 0 when simulation is complete."""
@@ -201,7 +222,7 @@ class TestCheckProgress:
         assert result.exit_code == 0
         assert "COMPLETE" in result.output
 
-    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_incomplete_exits_one(self, mock_from_yaml, mock_load, tmp_path):
         """check-progress should exit 1 when work remains."""
@@ -221,7 +242,7 @@ class TestCheckProgress:
         assert result.exit_code == 1
         assert "remaining" in result.output.lower()
 
-    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_shows_segment_count(self, mock_from_yaml, mock_load, tmp_path):
         """check-progress should report the number of segments."""
@@ -256,7 +277,7 @@ class TestCheckProgress:
         result = runner.invoke(cli, ["check-progress", "-c", str(config_file), "-r", "1"])
         assert result.exit_code == 3
 
-    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.engines.openmm.engine.OpenMMEngine.load_or_scan_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_progress_load_error_exits_three(self, mock_from_yaml, mock_load, tmp_path):
         """check-progress should exit 3 on progress load failure."""
@@ -337,6 +358,7 @@ def _mock_sim_config_for_submit(working_dir: Path):
     SlurmScriptGenerator, and the script-generation path.
     """
     mock = MagicMock()
+    mock.engine = "openmm"
     mock.get_working_directory.return_value = working_dir
     mock.simulation_phases.production.time_step = 2.0
     mock.simulation_phases.production.duration = 20.0
@@ -822,7 +844,702 @@ class TestBuildDryRunGromacs:
             cli, ["build", "-c", str(config_file), "--dry-run", "--gromacs", "-r", "1"]
         )
         assert result.exit_code == 0, result.output
-        assert (
-            "{projects_dir}" not in result.output
-        ), "Output path must be interpolated, not literal {projects_dir}"
+        assert "{projects_dir}" not in result.output, (
+            "Output path must be interpolated, not literal {projects_dir}"
+        )
         assert str(tmp_path / "projects") in result.output
+
+
+class TestRecoverEngineAware:
+    """recover dispatches progress loading by engine."""
+
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_recover_openmm_default_uses_direct_progress(
+        self, mock_from_yaml, mock_load, mock_save, tmp_path
+    ):
+        """OpenMM recover path should use direct progress helper."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        mock_from_yaml.return_value = _mock_sim_config(working_dir)
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["recover", "-c", str(config_file), "-r", "1"])
+
+        assert result.exit_code == 0, result.output
+        mock_load.assert_called_once()
+
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_recover_gromacs_uses_engine_dispatch(
+        self,
+        mock_from_yaml,
+        mock_gromacs_load,
+        mock_resolve_binary,
+        mock_openmm_load,
+        mock_save,
+        tmp_path,
+    ):
+        """GROMACS recover path should dispatch through engine interface."""
+        _ = mock_resolve_binary
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+        gromacs_dir = working_dir / "gromacs"
+        gromacs_dir.mkdir()
+
+        mock_from_yaml.return_value = _mock_sim_config_gromacs(working_dir)
+        mock_gromacs_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["recover", "-c", str(config_file), "-r", "1", "--engine", "gromacs"],
+        )
+
+        assert result.exit_code == 0, result.output
+        mock_gromacs_load.assert_called_once_with(gromacs_dir, 1)
+        mock_openmm_load.assert_not_called()
+
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.engines.gromacs.binary.shutil.which", return_value=None)
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_recover_gromacs_status_only_works_without_gmx_on_path(
+        self,
+        mock_from_yaml,
+        mock_gromacs_load,
+        mock_which,
+        mock_openmm_load,
+        mock_save,
+        tmp_path,
+    ):
+        """Status-only recover should not require gmx to exist on PATH."""
+        _ = mock_which, mock_save
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+        gromacs_dir = working_dir / "gromacs"
+        gromacs_dir.mkdir()
+
+        mock_from_yaml.return_value = _mock_sim_config_gromacs(working_dir)
+        mock_gromacs_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["recover", "-c", str(config_file), "-r", "1", "--engine", "gromacs"],
+        )
+
+        assert result.exit_code == 0, result.output
+        mock_gromacs_load.assert_called_once_with(gromacs_dir, 1)
+        mock_openmm_load.assert_not_called()
+
+
+class TestRecoverGromacsSubmit:
+    """recover --submit supports GROMACS engine submission flow."""
+
+    @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
+    @patch("polyzymd.engines.create_engine")
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_gromacs_recover_dry_run_creates_script(
+        self,
+        mock_from_yaml,
+        mock_save,
+        mock_create_engine,
+        mock_squeue,
+        tmp_path,
+    ):
+        """Dry-run recover should stage a recovery script for GROMACS."""
+        _ = mock_save, mock_squeue
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        sim_config = _mock_sim_config_gromacs(working_dir)
+        mock_from_yaml.return_value = sim_config
+
+        engine_mock = MagicMock()
+        engine_mock.get_engine_working_directory.return_value = working_dir
+        engine_mock.load_or_scan_progress.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        def _prepare_submission_side_effect(request):
+            daisy_dir = request.working_dir / "daisy_chain_scripts"
+            daisy_dir.mkdir(parents=True, exist_ok=True)
+            script = daisy_dir / f"run_rep{request.replicate}.sh"
+            script.write_text("#!/bin/bash\n")
+            return script
+
+        engine_mock.prepare_submission.side_effect = _prepare_submission_side_effect
+        mock_create_engine.return_value = engine_mock
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "recover",
+                "-c",
+                str(config_file),
+                "-r",
+                "1",
+                "--engine",
+                "gromacs",
+                "--submit",
+                "--dry-run",
+                "--preset",
+                "aa100",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert (working_dir / "recovery_scripts" / "recover_rep1.sh").exists()
+
+    @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
+    @patch("polyzymd.engines.create_engine")
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_gromacs_recover_detects_existing_inputs(
+        self,
+        mock_from_yaml,
+        mock_save,
+        mock_create_engine,
+        mock_squeue,
+        tmp_path,
+    ):
+        """Recover should report reuse when GROMACS inputs already exist."""
+        _ = mock_save, mock_squeue
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        (working_dir / "CALB.top").write_text("[ system ]\n")
+        (working_dir / "CALB.gro").write_text("generated by test\n")
+        (working_dir / "em.mdp").write_text("integrator = steep\n")
+        (working_dir / "prod.mdp").write_text("integrator = md\n")
+
+        sim_config = _mock_sim_config_gromacs(working_dir)
+        mock_from_yaml.return_value = sim_config
+
+        engine_mock = MagicMock()
+        engine_mock.get_engine_working_directory.return_value = working_dir
+        engine_mock.load_or_scan_progress.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        def _prepare_submission_side_effect(request):
+            daisy_dir = request.working_dir / "daisy_chain_scripts"
+            daisy_dir.mkdir(parents=True, exist_ok=True)
+            script = daisy_dir / f"run_rep{request.replicate}.sh"
+            script.write_text("#!/bin/bash\n")
+            return script
+
+        engine_mock.prepare_submission.side_effect = _prepare_submission_side_effect
+        mock_create_engine.return_value = engine_mock
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "recover",
+                "-c",
+                str(config_file),
+                "-r",
+                "1",
+                "--engine",
+                "gromacs",
+                "--submit",
+                "--dry-run",
+                "--preset",
+                "aa100",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "reuse" in result.output.lower()
+
+    @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
+    @patch("polyzymd.engines.create_engine")
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_gromacs_recover_partial_inputs_do_not_enable_skip_build(
+        self,
+        mock_from_yaml,
+        mock_save,
+        mock_create_engine,
+        mock_squeue,
+        tmp_path,
+    ):
+        """Recover should only skip build when all required inputs exist."""
+        _ = mock_save, mock_squeue
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        # Intentionally partial input set (missing CALB.gro and em.mdp)
+        (working_dir / "CALB.top").write_text("[ system ]\n")
+        (working_dir / "prod.mdp").write_text("integrator = md\n")
+
+        sim_config = _mock_sim_config_gromacs(working_dir)
+        mock_from_yaml.return_value = sim_config
+
+        engine_mock = MagicMock()
+        engine_mock.get_engine_working_directory.return_value = working_dir
+        engine_mock.load_or_scan_progress.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        captured_request = {}
+
+        def _prepare_submission_side_effect(request):
+            captured_request["request"] = request
+            daisy_dir = request.working_dir / "daisy_chain_scripts"
+            daisy_dir.mkdir(parents=True, exist_ok=True)
+            script = daisy_dir / f"run_rep{request.replicate}.sh"
+            script.write_text("#!/bin/bash\n")
+            return script
+
+        engine_mock.prepare_submission.side_effect = _prepare_submission_side_effect
+        mock_create_engine.return_value = engine_mock
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "recover",
+                "-c",
+                str(config_file),
+                "-r",
+                "1",
+                "--engine",
+                "gromacs",
+                "--submit",
+                "--dry-run",
+                "--preset",
+                "aa100",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "reuse" not in result.output.lower()
+        assert captured_request["request"].extra["skip_build"] is False
+
+    @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
+    @patch("polyzymd.engines.create_engine")
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_gromacs_recover_warns_when_equilibration_mdps_missing(
+        self,
+        mock_from_yaml,
+        mock_save,
+        mock_create_engine,
+        mock_squeue,
+        tmp_path,
+    ):
+        """Recover should warn when skip-build inputs exist without eq_*.mdp files."""
+        _ = mock_save, mock_squeue
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        (working_dir / "CALB.top").write_text("[ system ]\n")
+        (working_dir / "CALB.gro").write_text("generated by test\n")
+        (working_dir / "em.mdp").write_text("integrator = steep\n")
+        (working_dir / "prod.mdp").write_text("integrator = md\n")
+
+        sim_config = _mock_sim_config_gromacs(working_dir)
+        mock_from_yaml.return_value = sim_config
+
+        engine_mock = MagicMock()
+        engine_mock.get_engine_working_directory.return_value = working_dir
+        engine_mock.load_or_scan_progress.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        captured_request = {}
+
+        def _prepare_submission_side_effect(request):
+            captured_request["request"] = request
+            daisy_dir = request.working_dir / "daisy_chain_scripts"
+            daisy_dir.mkdir(parents=True, exist_ok=True)
+            script = daisy_dir / f"run_rep{request.replicate}.sh"
+            script.write_text("#!/bin/bash\n")
+            return script
+
+        engine_mock.prepare_submission.side_effect = _prepare_submission_side_effect
+        mock_create_engine.return_value = engine_mock
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "recover",
+                "-c",
+                str(config_file),
+                "-r",
+                "1",
+                "--engine",
+                "gromacs",
+                "--submit",
+                "--dry-run",
+                "--preset",
+                "aa100",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert captured_request["request"].extra["skip_build"] is True
+        assert "no equilibration mdps" in result.output.lower()
+
+    @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
+    @patch("polyzymd.engines.create_engine")
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_gromacs_recover_email_override_sets_slurm_email(
+        self,
+        mock_from_yaml,
+        mock_save,
+        mock_create_engine,
+        mock_squeue,
+        tmp_path,
+    ):
+        """recover --email should set SlurmConfig.email for GROMACS submissions."""
+        _ = mock_save, mock_squeue
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        sim_config = _mock_sim_config_gromacs(working_dir)
+        mock_from_yaml.return_value = sim_config
+
+        engine_mock = MagicMock()
+        engine_mock.get_engine_working_directory.return_value = working_dir
+        engine_mock.load_or_scan_progress.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        captured_request = {}
+
+        def _prepare_submission_side_effect(request):
+            captured_request["request"] = request
+            daisy_dir = request.working_dir / "daisy_chain_scripts"
+            daisy_dir.mkdir(parents=True, exist_ok=True)
+            script = daisy_dir / f"run_rep{request.replicate}.sh"
+            script.write_text("#!/bin/bash\n")
+            return script
+
+        engine_mock.prepare_submission.side_effect = _prepare_submission_side_effect
+        mock_create_engine.return_value = engine_mock
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "recover",
+                "-c",
+                str(config_file),
+                "-r",
+                "1",
+                "--engine",
+                "gromacs",
+                "--submit",
+                "--dry-run",
+                "--email",
+                "user@example.com",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert captured_request["request"].slurm_config.email == "user@example.com"
+
+    @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
+    @patch("polyzymd.engines.create_engine")
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_gromacs_recover_nodelist_override_sets_slurm_nodelist(
+        self,
+        mock_from_yaml,
+        mock_save,
+        mock_create_engine,
+        mock_squeue,
+        tmp_path,
+    ):
+        """recover --nodelist should set SlurmConfig.nodelist for GROMACS recovery."""
+        _ = mock_save, mock_squeue
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        sim_config = _mock_sim_config_gromacs(working_dir)
+        mock_from_yaml.return_value = sim_config
+
+        engine_mock = MagicMock()
+        engine_mock.get_engine_working_directory.return_value = working_dir
+        engine_mock.load_or_scan_progress.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        captured_request = {}
+
+        def _prepare_submission_side_effect(request):
+            captured_request["request"] = request
+            daisy_dir = request.working_dir / "daisy_chain_scripts"
+            daisy_dir.mkdir(parents=True, exist_ok=True)
+            script = daisy_dir / f"run_rep{request.replicate}.sh"
+            script.write_text("#!/bin/bash\n")
+            return script
+
+        engine_mock.prepare_submission.side_effect = _prepare_submission_side_effect
+        mock_create_engine.return_value = engine_mock
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "recover",
+                "-c",
+                str(config_file),
+                "-r",
+                "1",
+                "--engine",
+                "gromacs",
+                "--submit",
+                "--dry-run",
+                "--nodelist",
+                "bgpu-shirts3",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert captured_request["request"].slurm_config.nodelist == "bgpu-shirts3"
+
+
+class TestUpdateGromacsProgressCmd:
+    """Hidden command updates GROMACS progress state from logs."""
+
+    def test_update_gromacs_progress_basic(self, tmp_path):
+        """Progress command should create progress.json from prod.log."""
+        from polyzymd.simulation.progress import load_progress
+
+        working_dir = tmp_path / "gromacs"
+        working_dir.mkdir()
+        (working_dir / "prod.log").write_text("nsteps = 5000\n1000 2.0\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "_update-gromacs-progress",
+                "--working-dir",
+                str(working_dir),
+                "--config-path",
+                str(tmp_path / "config.yaml"),
+                "--replicate",
+                "1",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert (working_dir / "progress.json").exists()
+        progress = load_progress(working_dir)
+        assert progress is not None
+        assert progress.total_steps_completed == 1000
+
+    def test_update_gromacs_progress_mark_complete(self, tmp_path):
+        """mark-complete should force COMPLETED status in saved progress."""
+        from polyzymd.simulation.progress import SimulationStatus, load_progress
+
+        working_dir = tmp_path / "gromacs"
+        working_dir.mkdir()
+        (working_dir / "prod.log").write_text("nsteps = 5000\n1000 2.0\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "_update-gromacs-progress",
+                "--working-dir",
+                str(working_dir),
+                "--config-path",
+                str(tmp_path / "config.yaml"),
+                "--replicate",
+                "1",
+                "--mark-complete",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        progress = load_progress(working_dir)
+        assert progress is not None
+        assert progress.status == SimulationStatus.COMPLETED
+
+
+class TestRecoverGromacsEdgeCases:
+    """Edge case tests for GROMACS recover path."""
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.load_or_scan_progress")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_recover_gromacs_complete_nothing_to_recover(
+        self,
+        mock_from_yaml,
+        mock_resolve,
+        mock_load,
+        tmp_path,
+    ):
+        """recover --engine gromacs when simulation is complete should say nothing to recover."""
+        _ = mock_resolve
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+        (working_dir / "gromacs").mkdir()
+
+        mock_cfg = _mock_sim_config_gromacs(working_dir)
+        mock_from_yaml.return_value = mock_cfg
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000,
+            completed_steps=10000000,
+            is_complete=True,
+            n_segments=2,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["recover", "-c", str(config_file), "-r", "1", "--engine", "gromacs"],
+        )
+        assert result.exit_code == 0
+        assert "nothing to recover" in result.output.lower()
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsEngine.load_or_scan_progress")
+    @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_recover_gromacs_shows_progress_report(
+        self,
+        mock_from_yaml,
+        mock_resolve,
+        mock_load,
+        tmp_path,
+    ):
+        """recover --engine gromacs should show a progress report."""
+        _ = mock_resolve
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+        (working_dir / "gromacs").mkdir()
+
+        mock_cfg = _mock_sim_config_gromacs(working_dir)
+        mock_from_yaml.return_value = mock_cfg
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["recover", "-c", str(config_file), "-r", "1", "--engine", "gromacs"],
+        )
+        assert result.exit_code == 0
+        assert "5000000/10000000" in result.output
+        assert "50.0%" in result.output
+
+    def test_update_gromacs_progress_missing_dir_fails(self):
+        """_update-gromacs-progress should fail with non-existent directory."""
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "_update-gromacs-progress",
+                "--working-dir",
+                "/nonexistent/path",
+            ],
+        )
+        assert result.exit_code != 0
+
+
+class TestCheckProgressDeferBinary:
+    """check-progress should not require gmx on PATH."""
+
+    @patch("polyzymd.engines.create_engine")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_check_progress_uses_defer_binary(self, mock_from_yaml, mock_create_engine, tmp_path):
+        """check-progress should pass defer_binary=True to create_engine."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test\n")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+
+        sim_config = _mock_sim_config(working_dir)
+        mock_from_yaml.return_value = sim_config
+
+        mock_engine = MagicMock()
+        mock_engine.get_engine_working_directory.return_value = working_dir
+        mock_engine.load_or_scan_progress.return_value = _mock_progress(
+            total_steps=10000000,
+            completed_steps=10000000,
+            is_complete=True,
+            n_segments=1,
+        )
+        mock_create_engine.return_value = mock_engine
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["check-progress", "-c", str(config_file)])
+
+        assert result.exit_code == 0, result.output
+        _, kwargs = mock_create_engine.call_args
+        assert kwargs.get("defer_binary") is True
+
+
+class TestStatusDeferBinary:
+    """status should not require gmx on PATH."""
+
+    @patch("polyzymd.engines.create_engine")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_status_uses_defer_binary(self, mock_from_yaml, mock_create_engine, tmp_path):
+        """status should pass defer_binary=True to create_engine."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test\n")
+
+        mock_cfg = MagicMock()
+        mock_cfg.engine = "gromacs"
+        mock_cfg.simulation_phases.production.duration = 10.0
+        mock_cfg._format_run_directory_name.return_value = "test_run1"
+        mock_cfg.discover_replicate_dirs.return_value = []
+        mock_from_yaml.return_value = mock_cfg
+
+        mock_engine = MagicMock()
+        mock_create_engine.return_value = mock_engine
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "-c", str(config_file)])
+
+        assert result.exit_code == 0, result.output
+        _, kwargs = mock_create_engine.call_args
+        assert kwargs.get("defer_binary") is True

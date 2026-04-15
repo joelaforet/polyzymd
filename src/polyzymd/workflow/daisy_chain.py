@@ -643,7 +643,11 @@ def submit_daisy_chain(
     time_limit: str | None = None,
     memory: str | None = None,
     account: str | None = None,
+    partition: str | None = None,
+    qos: str | None = None,
     gpu_type: str | None = None,
+    constraint: str | None = None,
+    nodelist: str | None = None,
     openff_logs: bool = False,
     skip_build: bool = False,
 ) -> Dict[int, List[SubmissionResult]]:
@@ -683,8 +687,16 @@ def submit_daisy_chain(
         Override SLURM memory allocation (e.g. ``"4G"``).
     account : str or None
         Override SLURM account / allocation ID.
+    partition : str or None
+        Override SLURM partition.
+    qos : str or None
+        Override SLURM QoS value.
     gpu_type : str or None
         Override GPU type for presets that use ``--gpus`` directive.
+    constraint : str or None
+        SLURM ``--constraint`` expression (e.g. ``"A40|A100"``).
+    nodelist : str or None
+        Optional SLURM ``--nodelist`` override.
     openff_logs : bool
         Enable verbose OpenFF logs in generated scripts.
     skip_build : bool
@@ -729,8 +741,16 @@ def submit_daisy_chain(
         slurm_config.memory = memory
     if account:
         slurm_config.account = account
+    if partition:
+        slurm_config.partition = partition
+    if qos:
+        slurm_config.qos = qos
     if gpu_type:
         slurm_config.gpu_type = gpu_type
+    if constraint:
+        slurm_config.constraint = constraint
+    if nodelist is not None:
+        slurm_config.nodelist = nodelist
 
     # Guard: an empty account on presets that require one (e.g. Alpine) will
     # produce an invalid SBATCH script.  Skip the guard when the preset itself

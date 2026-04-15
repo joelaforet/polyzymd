@@ -151,6 +151,12 @@ class TestConditionalDirectives:
         gen = _make_generator(cfg)
         assert gen._gpu_line() == "#SBATCH --gres=gpu:1"
 
+    def test_gpu_line_gres_style_with_gpu_type_emits_typed_gres(self):
+        """gres style with gpu_type should emit typed --gres directive."""
+        cfg = SlurmConfig(gpu_directive_style="gres", gpu_type="a100", gpus=2)
+        gen = _make_generator(cfg)
+        assert gen._gpu_line() == "#SBATCH --gres=gpu:a100:2"
+
     # --- Nodes line ---
 
     def test_nodes_line_alpine_emits_two_directives(self):
@@ -257,6 +263,52 @@ class TestConditionalDirectives:
         cfg = SlurmConfig.from_preset("aa100")
         gen = _make_generator(cfg)
         assert gen._exclude_line() == ""
+
+    def test_nodelist_line_present(self):
+        """Configured nodelist should render as SBATCH directive."""
+        cfg = SlurmConfig(nodelist="node123")
+        gen = _make_generator(cfg)
+        assert gen._nodelist_line() == "#SBATCH --nodelist=node123"
+
+    def test_nodelist_line_absent(self):
+        """nodelist SBATCH line should be omitted when unset."""
+        cfg = SlurmConfig(nodelist=None)
+        gen = _make_generator(cfg)
+        assert gen._nodelist_line() == ""
+
+
+class TestConstraintDirective:
+    """Tests for the --constraint SBATCH directive."""
+
+    def test_constraint_none_omits_line(self):
+        """When constraint is None, no --constraint line appears."""
+        cfg = SlurmConfig(constraint=None)
+        gen = _make_generator(cfg)
+        assert gen._constraint_line() == ""
+
+    def test_constraint_single_value(self):
+        """A single constraint value renders correctly."""
+        cfg = SlurmConfig(constraint="A40")
+        gen = _make_generator(cfg)
+        assert gen._constraint_line() == "#SBATCH --constraint=A40"
+
+    def test_constraint_or_expression(self):
+        """SLURM OR expressions (pipe) are accepted."""
+        cfg = SlurmConfig(constraint="A40|A100")
+        gen = _make_generator(cfg)
+        assert gen._constraint_line() == "#SBATCH --constraint=A40|A100"
+
+    def test_constraint_and_expression(self):
+        """SLURM AND expressions (ampersand) are accepted."""
+        cfg = SlurmConfig(constraint="avx2&rh8")
+        gen = _make_generator(cfg)
+        assert gen._constraint_line() == "#SBATCH --constraint=avx2&rh8"
+
+    def test_constraint_complex_expression(self):
+        """Mixed constraint expressions are accepted."""
+        cfg = SlurmConfig(constraint="A40|A100|H100")
+        gen = _make_generator(cfg)
+        assert gen._constraint_line() == "#SBATCH --constraint=A40|A100|H100"
 
 
 # ---------------------------------------------------------------------------
@@ -372,9 +424,138 @@ class TestScriptValueValidation:
             == "/home/user/project/config.yaml"
         )
 
-    def test_empty_string_rejected(self):
-        """Empty strings should be rejected with the safe pattern."""
+    def test_empty_string_accepted(self):
+        """Empty strings should pass validation (e.g. empty mdrun_flags)."""
         from polyzymd.workflow.slurm import _validate_script_value
 
+        assert _validate_script_value("", "mdrun_flags") == ""
+
+    def test_constraint_pipe_accepted(self):
+        """Pipe is valid in constraint expressions (OR)."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        assert _validate_constraint_value("A40|A100", "constraint") == "A40|A100"
+
+    def test_constraint_ampersand_accepted(self):
+        """Ampersand is valid in constraint expressions (AND)."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        assert _validate_constraint_value("avx2&rh8", "constraint") == "avx2&rh8"
+
+    def test_constraint_semicolon_rejected(self):
+        """Semicolons are still rejected in constraint values."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
         with pytest.raises(ValueError, match="unsafe characters"):
-            _validate_script_value("", "partition")
+            _validate_constraint_value("A40; rm -rf /", "constraint")
+
+    def test_constraint_dollar_rejected(self):
+        """Dollar signs are rejected in constraint values."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_constraint_value("$HOME", "constraint")
+
+    def test_constraint_backtick_rejected(self):
+        """Backticks are rejected in constraint values."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_constraint_value("`whoami`", "constraint")
+
+    def test_constraint_space_rejected(self):
+        """Spaces are rejected in constraint values (not valid in SLURM constraints)."""
+        from polyzymd.workflow.slurm import _validate_constraint_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_constraint_value("A40 A100", "constraint")
+
+
+class TestNodelistValidation:
+    """Tests for SLURM nodelist validation."""
+
+    def test_simple_nodename_accepted(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        assert _validate_nodelist_value("bgpu-shirts3") == "bgpu-shirts3"
+
+    def test_bracket_hostlist_accepted(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        assert _validate_nodelist_value("node[01-04]") == "node[01-04]"
+
+    def test_comma_hostlist_accepted(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        assert _validate_nodelist_value("node01,node02,node03") == "node01,node02,node03"
+
+    def test_complex_bracket_hostlist_accepted(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        assert _validate_nodelist_value("gpu[01-04,07]") == "gpu[01-04,07]"
+
+    def test_semicolon_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node01;rm -rf /")
+
+    def test_pipe_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node01|cat /etc/passwd")
+
+    def test_backtick_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node`whoami`")
+
+    def test_dollar_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node${HOME}")
+
+    def test_space_rejected(self):
+        from polyzymd.workflow.slurm import _validate_nodelist_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_nodelist_value("node01 node02")
+
+
+class TestGpuTypeValidation:
+    """Tests for GPU type value validation used in SBATCH rendering."""
+
+    def test_gpu_type_a100_accepted(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        assert _validate_gpu_type_value("a100") == "a100"
+
+    def test_gpu_type_a40_accepted(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        assert _validate_gpu_type_value("a40") == "a40"
+
+    def test_gpu_type_mi100_accepted(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        assert _validate_gpu_type_value("mi100") == "mi100"
+
+    def test_gpu_type_v100_32_accepted(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        assert _validate_gpu_type_value("v100-32") == "v100-32"
+
+    def test_gpu_type_semicolon_rejected(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_gpu_type_value("a100;rm -rf /")
+
+    def test_gpu_type_dollar_rejected(self):
+        from polyzymd.workflow.slurm import _validate_gpu_type_value
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _validate_gpu_type_value("$HOME")

@@ -3,6 +3,34 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
+
+from polyzymd.config.schema import SimulationConfig
+
+
+@pytest.fixture
+def minimal_config_data():
+    """Provide minimal valid SimulationConfig input data."""
+    return {
+        "name": "test_simulation",
+        "enzyme": {"name": "TestEnzyme", "pdb_path": "test.pdb"},
+        "thermodynamics": {"temperature": 300.0},
+        "simulation_phases": {
+            "equilibration_stages": [
+                {
+                    "name": "eq1",
+                    "duration": 0.1,
+                    "temperature": 300.0,
+                    "ensemble": "NVT",
+                }
+            ],
+            "production": {
+                "ensemble": "NPT",
+                "duration": 1.0,
+                "samples": 10,
+            },
+        },
+    }
 
 
 class TestImports:
@@ -260,3 +288,201 @@ class TestStatepointCoSolventExport:
         # Should not raise
         sp = _to_statepoint(cfg)
         assert "cosolvent_urea_molarity" in sp
+
+
+class TestEngineConfig:
+    """Tests for engine configuration fields."""
+
+    def test_default_engine_is_openmm(self, minimal_config_data):
+        """Default engine should be openmm for backward compatibility."""
+        config = SimulationConfig(**minimal_config_data)
+        assert config.engine == "openmm"
+
+    def test_gromacs_engine_parses(self, minimal_config_data):
+        """Setting engine to gromacs should work."""
+        minimal_config_data["engine"] = "gromacs"
+        config = SimulationConfig(**minimal_config_data)
+        assert config.engine == "gromacs"
+
+    def test_invalid_engine_rejected(self, minimal_config_data):
+        """Invalid engine names should be rejected."""
+        minimal_config_data["engine"] = "lammps"
+        with pytest.raises(ValidationError):
+            SimulationConfig(**minimal_config_data)
+
+    def test_openmm_engine_config_defaults(self, minimal_config_data):
+        """OpenMM engine config should have sensible defaults."""
+        config = SimulationConfig(**minimal_config_data)
+        assert config.openmm.platform == "CUDA"
+        assert config.openmm.precision == "mixed"
+
+    def test_gromacs_engine_config_defaults(self, minimal_config_data):
+        """GROMACS engine config should have sensible defaults."""
+        config = SimulationConfig(**minimal_config_data)
+        assert config.gromacs.gmx_binary is None
+        assert config.gromacs.grompp_flags == "-maxwarn 1"
+        assert config.gromacs.mdrun_flags_equilibration is None
+        assert config.gromacs.mdrun_flags_production is None
+        assert config.gromacs.command_prefix is None
+        assert config.gromacs.mpi_launcher_flags == ""
+        assert config.gromacs.env_exports == {}
+        assert config.gromacs.setup_commands == []
+        assert config.gromacs.ntmpi == 1
+        assert config.gromacs.slurm_ntasks is None
+        assert config.gromacs.ntomp == 8
+        assert config.gromacs.gpu is False
+        assert config.gromacs.memory == "16G"
+
+    def test_gromacs_slurm_ntasks_default_none(self, minimal_config_data):
+        """GROMACS slurm_ntasks should default to None."""
+        config = SimulationConfig(**minimal_config_data)
+        assert config.gromacs.slurm_ntasks is None
+
+    def test_gromacs_slurm_ntasks_override(self, minimal_config_data):
+        """GROMACS slurm_ntasks should accept explicit override values."""
+        minimal_config_data["gromacs"] = {"slurm_ntasks": 16}
+        config = SimulationConfig(**minimal_config_data)
+        assert config.gromacs.slurm_ntasks == 16
+
+    def test_gromacs_slurm_ntasks_zero_rejected(self, minimal_config_data):
+        """GROMACS slurm_ntasks must be a positive integer."""
+        minimal_config_data["gromacs"] = {"slurm_ntasks": 0}
+        with pytest.raises(ValidationError):
+            SimulationConfig(**minimal_config_data)
+
+    def test_gromacs_engine_config_gpu_enabled(self, minimal_config_data):
+        """GROMACS config should accept explicit GPU settings."""
+        minimal_config_data["gromacs"] = {"gpu": True, "ntomp": 4}
+        config = SimulationConfig(**minimal_config_data)
+        assert config.gromacs.gpu is True
+        assert config.gromacs.ntomp == 4
+
+    def test_gromacs_ntomp_validation(self, minimal_config_data):
+        """GROMACS ntomp must be positive."""
+        minimal_config_data["gromacs"] = {"ntomp": 0}
+        with pytest.raises(ValidationError):
+            SimulationConfig(**minimal_config_data)
+
+    def test_gromacs_engine_config_custom(self, minimal_config_data):
+        """Custom GROMACS settings should be parsed."""
+        minimal_config_data["engine"] = "gromacs"
+        minimal_config_data["gromacs"] = {
+            "gmx_binary": "gmx_mpi",
+            "mdrun_flags": "-ntmpi 1 -ntomp 8",
+            "mdrun_flags_equilibration": "-ntomp 4",
+            "mdrun_flags_production": "-ntomp 8 -plumed plumed_setup.dat",
+            "command_prefix": "singularity exec --rocm --bind /scratch /path/to/gromacs.sif",
+            "mpi_launcher_flags": "-genv I_MPI_FABRICS shm:tcp",
+            "env_exports": {
+                "GMX_GPU_DD_COMMS": "true",
+                "GMX_FORCE_UPDATE_DEFAULT_GPU": "true",
+            },
+            "setup_commands": [
+                "source /opt/gromacs/bin/GMXRC",
+                "export PATH=$PATH:/opt/plumed/bin",
+            ],
+        }
+        config = SimulationConfig(**minimal_config_data)
+        assert config.gromacs.gmx_binary == "gmx_mpi"
+        assert config.gromacs.mdrun_flags == "-ntmpi 1 -ntomp 8"
+        assert config.gromacs.mdrun_flags_equilibration == "-ntomp 4"
+        assert config.gromacs.mdrun_flags_production == "-ntomp 8 -plumed plumed_setup.dat"
+        assert (
+            config.gromacs.command_prefix
+            == "singularity exec --rocm --bind /scratch /path/to/gromacs.sif"
+        )
+        assert config.gromacs.mpi_launcher_flags == "-genv I_MPI_FABRICS shm:tcp"
+        assert config.gromacs.env_exports["GMX_GPU_DD_COMMS"] == "true"
+        assert config.gromacs.setup_commands[0] == "source /opt/gromacs/bin/GMXRC"
+
+    def test_old_config_without_engine_field(self, minimal_config_data):
+        """Old configs without engine field should default to openmm."""
+        minimal_config_data.pop("engine", None)
+        config = SimulationConfig(**minimal_config_data)
+        assert config.engine == "openmm"
+
+
+class TestGromacsEngineConfigWarnings:
+    """Tests for GROMACS config warning validators."""
+
+    def test_gpu_ntmpi_warning(self, minimal_config_data, caplog):
+        """gpu=True + ntmpi>1 should log a warning."""
+        import logging
+
+        minimal_config_data["gromacs"] = {"gpu": True, "ntmpi": 4, "gpus": 2}
+        with caplog.at_level(logging.WARNING):
+            config = SimulationConfig(**minimal_config_data)
+
+        assert any("thread-MPI" in r.message for r in caplog.records)
+        assert config.gromacs.gpu is True
+        assert config.gromacs.ntmpi == 4
+
+    def test_no_warning_gpu_ntmpi_1(self, minimal_config_data, caplog):
+        """gpu=True + ntmpi=1 should not warn."""
+        import logging
+
+        minimal_config_data["gromacs"] = {"gpu": True, "ntmpi": 1}
+        with caplog.at_level(logging.WARNING):
+            SimulationConfig(**minimal_config_data)
+
+        assert not any("thread-MPI" in r.message for r in caplog.records)
+
+    def test_no_warning_cpu_ntmpi_high(self, minimal_config_data, caplog):
+        """gpu=False + ntmpi>1 should not warn."""
+        import logging
+
+        minimal_config_data["gromacs"] = {"gpu": False, "ntmpi": 4}
+        with caplog.at_level(logging.WARNING):
+            SimulationConfig(**minimal_config_data)
+
+        assert not any("thread-MPI" in r.message for r in caplog.records)
+
+    def test_mdrun_flags_ntmpi_conflict_warns(self, minimal_config_data, caplog):
+        """mdrun_flags with -ntmpi != config ntmpi should warn."""
+        import logging
+
+        minimal_config_data["gromacs"] = {"ntmpi": 1, "mdrun_flags": "-ntmpi 4"}
+        with caplog.at_level(logging.WARNING):
+            SimulationConfig(**minimal_config_data)
+
+        assert any("ntmpi" in r.message and "override" in r.message for r in caplog.records)
+
+    def test_mdrun_flags_ntomp_conflict_warns(self, minimal_config_data, caplog):
+        """mdrun_flags with -ntomp != config ntomp should warn."""
+        import logging
+
+        minimal_config_data["gromacs"] = {"ntomp": 8, "mdrun_flags": "-ntomp 16"}
+        with caplog.at_level(logging.WARNING):
+            SimulationConfig(**minimal_config_data)
+
+        assert any("ntomp" in r.message and "override" in r.message for r in caplog.records)
+
+    def test_mdrun_flags_matching_no_warning(self, minimal_config_data, caplog):
+        """mdrun_flags matching config fields should not warn."""
+        import logging
+
+        minimal_config_data["gromacs"] = {
+            "ntmpi": 1,
+            "ntomp": 12,
+            "mdrun_flags": "-ntmpi 1 -ntomp 12 -nb gpu",
+        }
+        with caplog.at_level(logging.WARNING):
+            SimulationConfig(**minimal_config_data)
+
+        assert not any("override" in r.message for r in caplog.records)
+
+    def test_mdrun_flags_malformed_no_crash(self, minimal_config_data):
+        """Malformed mdrun_flags should not crash validation."""
+        minimal_config_data["gromacs"] = {"mdrun_flags": "-ntmpi 'unclosed"}
+        config = SimulationConfig(**minimal_config_data)
+        assert config.gromacs.mdrun_flags == "-ntmpi 'unclosed"
+
+    def test_mdrun_flags_empty_no_warning(self, minimal_config_data, caplog):
+        """Empty mdrun_flags should not produce warnings."""
+        import logging
+
+        minimal_config_data["gromacs"] = {"mdrun_flags": ""}
+        with caplog.at_level(logging.WARNING):
+            SimulationConfig(**minimal_config_data)
+
+        assert not any("override" in r.message for r in caplog.records)

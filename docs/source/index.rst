@@ -14,7 +14,7 @@ Use this site by *need*:
 - Start here if you need to install PolyzyMD or run a first simulation.
 - Use Tutorials for guided, end-to-end learning.
 - Use How-To Guides for specific tasks such as SLURM submission, restraints,
-  polymers, GROMACS export, or condition comparisons.
+  polymers, GROMACS simulations, or condition comparisons.
 - Use Reference for command lookup, configuration details, benchmarks, and API
   docs.
 - Use Explanation for concepts, rationale, interpretation, and best practices.

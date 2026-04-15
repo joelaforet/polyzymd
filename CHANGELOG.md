@@ -62,9 +62,59 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
 - **`cohens_d()` default corrected.**  `rmsf_mode` default changed from `True`
   to `False` in `analyses/shared/inferential_statistics.py` so the
   general-purpose function is not biased toward one analysis type.
+- **Multi-engine simulation architecture.**  New `SimulationEngine` ABC
+  (`engines/base.py`) and `match/case` dispatch (`engines/__init__.py`) allow
+  multiple MD engines to coexist behind a shared interface.  Each engine
+  provides trajectory layout resolution, SLURM script generation, submission,
+  progress tracking, and recovery.  OpenMM is wrapped as the default engine
+  (`engines/openmm/`).
+- **GROMACS engine with GPU support.**  Full GROMACS simulation lifecycle —
+  energy minimization, multi-stage equilibration with checkpoint resume,
+  production MD, and trajectory post-processing — driven entirely from the
+  existing `config.yaml`.  GPU acceleration is enabled via `gpu: true` in
+  `GromacsEngineConfig`, which auto-composes `-nb gpu -pme gpu -update gpu`
+  offload flags and requests GPU GRES in SLURM scripts.  Supports both
+  thread-MPI (`gmx`) and real-MPI (`gmx_mpi`) binaries with automatic flag
+  adjustment.  (`engines/gromacs/engine.py`, `engines/gromacs/slurm.py`,
+  `engines/gromacs/binary.py`, `engines/gromacs/progress.py`)
+- **GROMACS configuration model.**  `GromacsEngineConfig` Pydantic v2 model
+  with 16 validated fields covering binary selection, GPU/MPI hardware,
+  thread counts, mdrun flags (global, equilibration-only, production-only),
+  environment exports, setup commands, and `command_prefix` for custom
+  launchers.  Includes cross-field validators that warn on contradictory
+  settings (e.g., `gpu: true` with `gmx_mpi`, explicit `ntmpi` conflicting
+  with `mdrun_flags`).  (`config/schema.py`)
+- **GROMACS SLURM script generator.**  Self-resubmitting Bash scripts with
+  `SIGTERM` trap for preemption resilience.  On receiving SIGTERM the script
+  forwards the signal to `gmx mdrun`, waits for checkpoint flush, then
+  resubmits itself via `sbatch`.  Generates EM, equilibration, and production
+  stages with checkpoint-aware resume.  Supports `env_exports`,
+  `setup_commands`, `module_load`, and `-maxh` wall-time safety.
+  (`engines/gromacs/slurm.py`)
+- **`--constraint` CLI option.**  Maps to `#SBATCH --constraint` in generated
+  scripts, supporting single values (`"A40"`), OR expressions (`"A40|A100"`),
+  and AND expressions (`"avx2&rh8"`).  Available on both `submit` and
+  `recover`.  (`cli/main.py`, `workflow/slurm.py`)
+- **`--nodelist` CLI option.**  Pins jobs to specific SLURM nodes.  Validates
+  bracket-style hostlists (e.g., `node[01-04]`).  (`cli/main.py`,
+  `workflow/slurm.py`)
+- **`--partition`, `--qos`, `--email` CLI overrides.**  Runtime overrides for
+  SLURM partition, QoS, and email notifications on `submit` and `recover`
+  commands.  (`cli/main.py`)
+- **Engine-aware CLI commands.**  `submit`, `recover`, `status`, and
+  `check-progress` all accept `--engine gromacs|openmm` and resolve
+  engine-specific working directories, progress files, and recovery logic
+  automatically.  (`cli/main.py`)
 - **Unified `run` command.**  `polyzymd run --engine gromacs|openmm` replaces the
   old `run-gromacs` command.  OpenMM engine runs simulations locally using the
   existing runner infrastructure.  (`cli/main.py`)
+- **`TrajectoryLayout` model.**  Engine-neutral description of topology and
+  trajectory file locations, consumed by `TrajectoryLoader` for analysis.
+  Each engine provides its own resolver.  (`engines/base.py`,
+  `analyses/shared/loader.py`)
+- **Shared `run_sbatch()` helper.**  Centralizes `sbatch` invocation with
+  optional `module load` preloading (e.g., `slurm/blanca`), used by both
+  `submit` and `recover`.  (`workflow/slurm_submit.py`)
 - **`submit --generate-only` flag.**  Generates SLURM scripts without submitting,
   replacing the previous `--dry-run` behavior for script generation.
   (`cli/main.py`, `workflow/daisy_chain.py`)
@@ -241,6 +291,21 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   glob matches (>1 file) instead of silently picking the last alphabetical
   match.  (`analyses/contacts/_paths.py`,
   `analyses/shared/binding_preference_helpers.py`)
+- **GROMACS trajectory resolution order corrected.**  `resolve_trajectory_layout()`
+  now prefers post-processed trajectories: `prod_centered.xtc` (whole molecules,
+  centered protein) before `prod_nojump.xtc` before raw `prod.xtc`.
+  Previously the raw trajectory could be selected first, breaking analyses that
+  expect unwrapped coordinates.  (`engines/gromacs/engine.py`)
+- **GROMACS topology resolution skips build artifacts.**  Generic `*.pdb` glob
+  removed from topology search; resolver now uses explicit candidates
+  (`solvated_system.pdb`, `<prefix>.pdb`, `<prefix>.gro`) to avoid selecting
+  `_PACKING_MOLECULE*.pdb` build artifacts left by Packmol.
+  (`engines/gromacs/engine.py`)
+- **TrajectoryLoader resolves engine subdirectory.**  `_resolve_layout()` now
+  calls `engine.resolve_engine_working_directory()` before layout resolution,
+  so GROMACS files in the `gromacs/` subdirectory are found correctly.
+  Previously the loader passed the run-level directory directly, missing the
+  engine-specific subdirectory.  (`analyses/shared/loader.py`)
 - **Unused imports removed.**  Cleaned up stale imports across `cli/main.py`,
   `workflow/daisy_chain.py`, and several analysis plugins.
 - **`Optional[X]` → `X | None` migration.**  Updated type annotations in
@@ -296,10 +361,30 @@ dropping a package in `analyses/<name>/` with no modifications to core code.
   command as the primary entry point for contributors.
 - Updated `AGENTS.md` and `.opencode/instructions/` for refactored layout.
 - Removed stale `api/compare.md` API page (module no longer exists).
+- Added `docs/source/how_to/gromacs_export.md` — comprehensive GROMACS HPC
+  how-to covering GPU/CPU configuration, SLURM submission, preemption
+  resilience, constraint-based GPU targeting, recovery, and monitoring.
+  (~700 lines with copy-paste recipes for common HPC workflows.)
+- Added GROMACS engine config and CLI options to `cli_reference.md` and
+  `configuration.md` reference pages.
+- Updated `quickstart.md` with GROMACS-tabbed submission and monitoring steps.
+- Added `scancel --signal=KILL` warning to both `gromacs_export.md` and
+  `hpc_slurm.md` for stopping preemption-resilient jobs permanently.
 
 ### Tests
 
-- 1,537 tests passing (6 skipped), up from 908 at branch start.
+- 2,134 tests collected (up from 908 at branch start).
+- Added GROMACS engine tests: binary resolution (`test_gromacs_binary.py`),
+  engine adapter (`test_gromacs_engine.py`), SLURM script generation
+  (`test_gromacs_slurm.py`), progress tracking (`test_gromacs_progress.py`),
+  trajectory layout (`test_gromacs_layout.py`), and engine dispatch
+  (`test_dispatch.py`, `test_base.py`).  667 engine/workflow/cli/config tests
+  total.  (`tests/engines/`)
+- Added GROMACS smoke tests for all 13 analysis plugins, verifying that each
+  plugin resolves trajectory layouts from the GROMACS engine correctly.
+  (`tests/analyses/plugins/test_*_gromacs_smoke.py`)
+- Added `run_sbatch()` tests (`test_slurm_submit.py`) and engine-aware CLI
+  tests for submit, recover, status, and check-progress.
 - Added scaffold tests (name validation, class-name validation, file
   generation, code quality, CliRunner integration).
 - Added Tukey HSD tests (basic operation, single-condition edge case,

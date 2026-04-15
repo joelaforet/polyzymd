@@ -37,7 +37,7 @@ PolyzyMD provides a streamlined workflow for setting up and running MD simulatio
 - Stable comparison and plotting workflows: RMSF, contacts, distances, catalytic triad, and secondary structure
 - Experimental but still available: contacts binding preference, exposure dynamics, binding free energy, and polymer affinity score
 - Experimental analyses remain callable from the CLI, but PolyzyMD labels their text output and generated figures as experimental because definitions and interpretation may change in a later release
-- Analysis currently supports OpenMM-produced trajectories (DCD format) only; GROMACS XTC trajectory support is planned for v1.2.1 ([#47](https://github.com/joelaforet/polyzymd/issues/47))
+- Analysis supports both OpenMM (DCD) and GROMACS (XTC) trajectories via engine-aware trajectory resolution
 
 ## Installation
 
