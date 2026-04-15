@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from polyzymd.analysis.config import AnalysisDefaults
 from polyzymd.analysis.core.registry import (
@@ -107,7 +107,8 @@ class AnalysisSettingsContainer(BaseModel):
     without hardcoding field names.
     """
 
-    model_config = {"extra": "allow"}
+    model_config = ConfigDict(extra="allow")
+    __pydantic_extra__: dict[str, Any]
 
     def __init__(self, **data: Any):
         """Initialize with dynamic analysis settings.
@@ -204,7 +205,8 @@ class ComparisonSettingsContainer(BaseModel):
     here (can be empty dict) to enable comparison.
     """
 
-    model_config = {"extra": "allow"}
+    model_config = ConfigDict(extra="allow")
+    __pydantic_extra__: dict[str, Any]
 
     def __init__(self, **data: Any):
         """Initialize with dynamic comparison settings.
@@ -792,7 +794,8 @@ class PlotSettings(BaseModel):
             generate_2d_kde: true
     """
 
-    model_config = {"extra": "allow"}
+    model_config = ConfigDict(extra="allow")
+    __pydantic_extra__: dict[str, Any]
 
     _GLOBAL_FIELDS: ClassVar[set[str]] = {
         "output_dir",
