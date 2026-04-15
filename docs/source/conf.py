@@ -5,6 +5,7 @@
 
 import os
 import sys
+from importlib.metadata import version as _get_version
 
 # Add the source directory to the path so autodoc can find modules
 sys.path.insert(0, os.path.abspath("../../src"))
@@ -38,7 +39,8 @@ autodoc_mock_imports = [
 project = "PolyzyMD"
 copyright = "2026, Joseph R. Laforet Jr."
 author = "Joseph R. Laforet Jr."
-release = "1.2.0"
+release = _get_version("polyzymd")
+version = ".".join(release.split(".")[:2])  # short X.Y version for Sphinx
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
