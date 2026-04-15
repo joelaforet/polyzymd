@@ -670,18 +670,6 @@ Example configs: polyzymd/templates/examples/
 
 ---
 
-## Analysis command migration note
-
-The legacy `polyzymd analyze` command group was removed in **v1.3.0**.
-Use the `polyzymd compare` workflow instead:
-
-- `polyzymd compare init`
-- `polyzymd compare validate`
-- `polyzymd compare run <analysis>`
-- `polyzymd compare run-all`
-
----
-
 ## polyzymd compare
 
 Compare analysis results across multiple simulation conditions with statistical testing.

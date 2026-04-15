@@ -162,8 +162,8 @@ All configured runs are evaluated for each available replicate.
 
 ## Key Mode: Fragment-Aware Rg
 
-```{versionadded} 1.4.0
-Fragment-aware Rg calculation was added in PolyzyMD 1.4.0.
+```{versionadded} 1.3.0
+Fragment-aware Rg calculation was added in PolyzyMD 1.3.0.
 ```
 
 Use fragment mode when a selection contains many disconnected molecules (for

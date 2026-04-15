@@ -378,9 +378,9 @@ project/
 └── condition_name/
     └── analysis/
         └── contacts/
-            ├── contacts_eq10.00ns_cut4.5_s<fp>_rep1.json
-            ├── contacts_eq10.00ns_cut4.5_s<fp>_rep2.json
-            ├── contacts_eq10.00ns_cut4.5_s<fp>_rep3.json
+            ├── contacts_eq10ns_cut4.5_s<fp>_rep1.json
+            ├── contacts_eq10ns_cut4.5_s<fp>_rep2.json
+            ├── contacts_eq10ns_cut4.5_s<fp>_rep3.json
             ├── binding_preference_s<fp>_rep1.json               # Per-replicate
             ├── binding_preference_s<fp>_rep2.json
             ├── binding_preference_s<fp>_rep3.json

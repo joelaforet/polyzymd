@@ -206,3 +206,7 @@ inspection alone.
 - {doc}`/how_to/analysis_rmsd_quickstart` — RMSD quick start with convergence configuration
 - {doc}`/explanation/analysis_rmsd_best_practices` — RMSD interpretation and best practices
 - {doc}`/explanation/analysis_statistics_best_practices` — Statistical foundations for MD analysis
+- [pymbar timeseries](https://pymbar.readthedocs.io/en/latest/timeseries.html)
+  — `detectEquilibration()` and `statisticalInefficiency()` provide
+  statistically rigorous alternatives to heuristic convergence detection.
+  Integration with PolyzyMD is under consideration for a future release.

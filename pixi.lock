@@ -258,6 +258,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-0.5.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-base-0.5.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-models-2025.9.0-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/openff-packmol-0.1-pyhc364b38_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-toolkit-0.18.0-pyhd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-toolkit-base-0.18.0-pyhd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-units-0.3.2-pyhd8ed1ab_0.conda
@@ -648,6 +649,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-0.5.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-base-0.5.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-models-2025.9.0-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/openff-packmol-0.1-pyhc364b38_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-toolkit-0.18.0-pyhd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-toolkit-base-0.18.0-pyhd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-units-0.3.2-pyhd8ed1ab_0.conda
@@ -1067,6 +1069,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-0.5.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-base-0.5.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-models-2025.9.0-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/openff-packmol-0.1-pyhc364b38_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-toolkit-0.18.0-pyhd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-toolkit-base-0.18.0-pyhd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-units-0.3.2-pyhd8ed1ab_0.conda
@@ -1457,6 +1460,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-0.5.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-base-0.5.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-models-2025.9.0-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/openff-packmol-0.1-pyhc364b38_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-toolkit-0.18.0-pyhd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-toolkit-base-0.18.0-pyhd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-units-0.3.2-pyhd8ed1ab_0.conda
@@ -1876,6 +1880,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-0.5.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-base-0.5.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-models-2025.9.0-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/openff-packmol-0.1-pyhc364b38_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-toolkit-0.18.0-pyhd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-toolkit-base-0.18.0-pyhd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-units-0.3.2-pyhd8ed1ab_0.conda
@@ -2267,6 +2272,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-0.5.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-base-0.5.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-nagl-models-2025.9.0-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/openff-packmol-0.1-pyhc364b38_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-toolkit-0.18.0-pyhd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-toolkit-base-0.18.0-pyhd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/openff-units-0.3.2-pyhd8ed1ab_0.conda
@@ -7683,6 +7689,22 @@ packages:
   - pkg:pypi/openff-nagl-models?source=hash-mapping
   size: 53380163
   timestamp: 1757448697983
+- conda: https://conda.anaconda.org/conda-forge/noarch/openff-packmol-0.1-pyhc364b38_1.conda
+  sha256: 3731be50dd16e2dc4bc8a48aabe0b88cbe3fa541a6aff364f9aa7c4b5fa072ae
+  md5: ece7dd54da782bdb3d946b594af7f1f2
+  depends:
+  - python >=3.11
+  - numpy
+  - scipy
+  - packaging
+  - openff-toolkit-base >=0.18
+  - python
+  license: MIT
+  license_family: MIT
+  purls:
+  - pkg:pypi/openff-packmol?source=hash-mapping
+  size: 26643
+  timestamp: 1775065370824
 - conda: https://conda.anaconda.org/conda-forge/noarch/openff-toolkit-0.18.0-pyhd8ed1ab_3.conda
   sha256: 4e7b9c31083727470518ddec9cf5edc569de22bf8e18c09e27b9905805ce8ca3
   md5: b71429982dee66c51f68e99eff602d3a

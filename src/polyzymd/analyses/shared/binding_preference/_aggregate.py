@@ -491,5 +491,3 @@ def aggregate_system_coverage(
         polymer_types_included=sorted(all_polymer_types),
         has_overlapping_custom_groups=has_overlaps,
     )
-
-

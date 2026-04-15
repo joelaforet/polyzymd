@@ -324,7 +324,7 @@ def build(
 
     By default, this prepares OpenMM inputs in the working directory. Use
     ``--format gromacs`` to export GROMACS files (``.gro``, ``.top``,
-    ``.itp``, ``.mdp``). AMBER and LAMMPS export are planned for v1.4.0.
+    ``.itp``, ``.mdp``). AMBER and LAMMPS export are not yet supported.
 
     Use ``run --engine gromacs`` if you want PolyzyMD to build and then
     execute the full local GROMACS workflow. Use ``run --engine openmm`` for
@@ -495,7 +495,7 @@ def build(
                     colored_echo("    - run_*_gromacs.sh (run script)", phase="build")
                 elif export_format in ("lammps", "amber"):
                     colored_echo(
-                        f"    ({export_format.upper()} export planned for v1.4.0)",
+                        f"    ({export_format.upper()} export is not yet supported)",
                         phase="build",
                     )
             else:

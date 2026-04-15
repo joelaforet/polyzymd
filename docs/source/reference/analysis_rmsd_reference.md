@@ -41,17 +41,17 @@ Results are saved in your project's analysis directory:
 └── analysis/
     └── rmsd/
         ├── run_1/
-        │   ├── rmsd_eq10.00ns.json
+        │   ├── rmsd_eq10ns.json
         │   ├── rmsd_Protein Backbone_timeseries.npz
         │   └── rmsd_Active Site_timeseries.npz
         ├── run_2/
-        │   ├── rmsd_eq10.00ns.json
+        │   ├── rmsd_eq10ns.json
         │   ├── rmsd_Protein Backbone_timeseries.npz
         │   └── rmsd_Active Site_timeseries.npz
         ├── run_3/
         │   └── ...
         └── aggregated/
-            └── rmsd_reps1-3_eq10.00ns.json
+            └── rmsd_reps1-3_eq10ns.json
 ```
 
 Each replicate directory contains:

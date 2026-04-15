@@ -56,34 +56,24 @@ the current conformation.
 
 ## Interpreting Rg Values
 
-### Typical Ranges for Enzyme Systems
-
-| Rg (Å) | Interpretation | Typical Origin |
-|---------|----------------|----------------|
-| 12 – 16 | Small, compact globular protein | Well-folded enzyme, ~100–150 residues |
-| 16 – 20 | Medium globular protein | Typical for 150–300 residue enzymes |
-| 20 – 25 | Large globular protein | Multi-domain enzyme, 300–500 residues |
-| 25 – 35 | Extended or multi-domain | Large enzymes, partially extended |
-| > 35 | Very extended or unfolded | Significant unfolding or elongated topology |
-
-```{note}
-These ranges assume whole-protein Rg for globular enzymes. The actual value
-depends strongly on protein size, shape, and which atoms are included in the
-selection. Backbone-only (Cα) Rg will be somewhat smaller than all-atom Rg.
-Always compare like-with-like: same selection, same atom types.
+```{important}
+Rg is highly system-specific — it depends on protein size, shape, fold topology,
+and which atoms are included in the selection. There are no universal "good" or
+"bad" Rg values. Always compare Rg across conditions using the **same selection
+and atom types** rather than comparing against generic reference ranges.
 ```
 
 ### Selection Matters
 
 The choice of atoms for Rg calculation affects the result:
 
-| Selection | Typical Rg | Best For |
-|-----------|-----------|----------|
-| `protein` | 15–25 Å | Overall protein compactness (all atoms) |
-| `protein and name CA` | 14–23 Å | Backbone compactness (less noise) |
-| `protein and name CA and resid 20:250` | 12–20 Å | Core region, excluding flexible termini |
-| `chainID C` | Variable | Polymer compactness/extension |
-| `protein or chainID C` | Variable | Combined enzyme-polymer system size |
+| Selection | Best For |
+|-----------|----------|
+| `protein` | Overall protein compactness (all atoms) |
+| `protein and name CA` | Backbone compactness (less noise from sidechains) |
+| `protein and name CA and resid 20:250` | Core region, excluding flexible termini |
+| `chainID C` | Polymer compactness/extension |
+| `protein or chainID C` | Combined enzyme-polymer system size |
 
 ### Rg Scales with Protein Size
 
@@ -91,12 +81,17 @@ Unlike RMSD (which is relatively size-independent for similar fold types), Rg
 scales roughly as:
 
 $$
-R_g \propto N^{0.4}
+R_g \propto N^{\nu}
 $$
 
-for globular proteins (where $N$ is the number of residues). This means larger
-proteins have inherently larger Rg values. When comparing Rg across different
-proteins, normalize by the expected Rg for the protein size.
+for proteins, where $N$ is the number of residues and $\nu$ is the Flory
+exponent. For compact globular proteins, the theoretical expectation is
+$\nu = 1/3$ (solid sphere packing), though empirical fits to PDB structures
+give $\nu \approx 0.38$–$0.40$ due to imperfect packing, voids, and surface
+roughness ([Dima & Thirumalai, 2004](https://doi.org/10.1021/jp037128y)).
+This means larger proteins have inherently larger Rg values. When comparing
+Rg across different proteins, normalize by the expected Rg for the protein
+size.
 
 ## Rg vs Time: What to Look For
 
@@ -446,7 +441,7 @@ atoms in the selection.
 
 ## Fragment Mode Best Practices
 
-```{versionadded} 1.4.0
+```{versionadded} 1.3.0
 ```
 
 When your selection contains multiple disconnected molecules (e.g., many
@@ -571,13 +566,16 @@ that merits visual inspection of trajectories.
 ## Rg as a Folding Diagnostic
 
 Rg is a classical measure of protein folding state. The relationship between
-Rg and chain length follows distinct scaling laws:
+Rg and chain length follows distinct scaling laws
+(Flory, *Principles of Polymer Chemistry*, Cornell University Press, 1953;
+de Gennes, *Scaling Concepts in Polymer Physics*, Cornell University Press, 1979;
+[Kohn et al., 2004](https://doi.org/10.1073/pnas.0403643101)):
 
-| State | Scaling | Description |
-|-------|---------|-------------|
-| Folded globular | $R_g \propto N^{0.4}$ | Compact, well-packed interior |
-| Random coil | $R_g \propto N^{0.6}$ | Unfolded, random chain |
-| Fully extended | $R_g \propto N^{1.0}$ | Stretched, all-trans backbone |
+| State | Scaling | Description | Source |
+|-------|---------|-------------|--------|
+| Folded globular | $R_g \propto N^{1/3}$ | Compact, well-packed interior (empirical: $\nu \approx 0.38$–$0.40$) | [Dima & Thirumalai, 2004](https://doi.org/10.1021/jp037128y) |
+| Random coil | $R_g \propto N^{0.588}$ | Unfolded, self-avoiding random walk (Flory: $\approx 3/5$) | [Kohn et al., 2004](https://doi.org/10.1073/pnas.0403643101) |
+| Fully extended | $R_g \propto N^{1.0}$ | Stretched, all-trans backbone (geometric limit) | — |
 
 Monitoring Rg during simulation can detect:
 - **Unfolding**: Rg increases from globular-like to coil-like values

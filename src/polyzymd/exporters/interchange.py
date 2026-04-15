@@ -197,13 +197,13 @@ def _export_lammps(
     Raises
     ------
     NotImplementedError
-        LAMMPS export is planned for v1.4.0
+        LAMMPS export is not yet implemented
     """
 
     _ = (interchange, config, output_dir, prefix)
     raise NotImplementedError(
-        "LAMMPS export is planned for v1.4.0. "
-        "See https://github.com/Shirts-Lab-Linux/polyzymd/issues for updates."
+        "LAMMPS export is not yet implemented. "
+        "See https://github.com/joelaforet/polyzymd/issues for updates."
     )
 
 
@@ -234,11 +234,11 @@ def _export_amber(
     Raises
     ------
     NotImplementedError
-        AMBER export is planned for v1.4.0
+        AMBER export is not yet implemented
     """
 
     _ = (interchange, config, output_dir, prefix)
     raise NotImplementedError(
-        "AMBER export is planned for v1.4.0. "
-        "See https://github.com/Shirts-Lab-Linux/polyzymd/issues for updates."
+        "AMBER export is not yet implemented. "
+        "See https://github.com/joelaforet/polyzymd/issues for updates."
     )

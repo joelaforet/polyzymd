@@ -35,8 +35,8 @@ each run.
 
 ## Fragment Mode Reference
 
-```{versionadded} 1.4.0
-Fragment-aware Rg calculation was added in PolyzyMD 1.4.0.
+```{versionadded} 1.3.0
+Fragment-aware Rg calculation was added in PolyzyMD 1.3.0.
 ```
 
 Standard selection mode computes one Rg value per frame for the full atom
@@ -96,17 +96,17 @@ Results are saved in your project analysis directory:
 └── analysis/
     └── rg/
         ├── run_1/
-        │   ├── rg_eq10.00ns.json
+        │   ├── rg_eq10ns.json
         │   ├── rg_Whole Protein_timeseries.npz
         │   └── rg_Protein Backbone_timeseries.npz
         ├── run_2/
-        │   ├── rg_eq10.00ns.json
+        │   ├── rg_eq10ns.json
         │   ├── rg_Whole Protein_timeseries.npz
         │   └── rg_Protein Backbone_timeseries.npz
         ├── run_3/
         │   └── ...
         └── aggregated/
-            └── rg_reps1-3_eq10.00ns.json
+            └── rg_reps1-3_eq10ns.json
 ```
 
 Each replicate directory contains:
