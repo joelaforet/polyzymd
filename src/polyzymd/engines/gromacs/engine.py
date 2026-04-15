@@ -477,15 +477,17 @@ class GromacsEngine(SimulationEngine):
 
         Topology search order:
 
-        1. ``<prefix>.pdb`` (from system name)
-        2. Any ``*.pdb`` (sorted, first match)
+        1. ``solvated_system.pdb`` (preferred system topology with chain IDs)
+        2. ``<prefix>.pdb`` (from system name)
         3. ``<prefix>.gro``
         4. Any ``*.gro`` (sorted, first match)
 
         Trajectory search order:
 
-        1. ``prod.xtc`` (standard GROMACS production output)
-        2. Any ``*.xtc`` (sorted)
+        1. ``prod_centered.xtc`` (whole molecules, centered protein)
+        2. ``prod_nojump.xtc`` (nojump only)
+        3. ``prod.xtc`` (raw production output)
+        4. Any ``*.xtc`` (sorted)
 
         Parameters
         ----------
@@ -497,29 +499,38 @@ class GromacsEngine(SimulationEngine):
         Returns
         -------
         TrajectoryLayout
-            Resolved XTC layout with PDB topology preferred over GRO.
+            Resolved XTC layout with preferred post-processed trajectories
+            and PDB topology preferred over GRO.
         """
         _ = replicate
+        logger = logging.getLogger(__name__)
 
-        prod_xtc = working_dir / "prod.xtc"
-        if prod_xtc.exists():
-            trajectory_paths = [prod_xtc]
-        else:
+        trajectory_paths: list[Path] = []
+        preferred_trajectories = ["prod_centered.xtc", "prod_nojump.xtc", "prod.xtc"]
+        for filename in preferred_trajectories:
+            candidate = working_dir / filename
+            if candidate.exists():
+                trajectory_paths = [candidate]
+                logger.info("Resolved trajectory for analysis: %s", candidate.name)
+                break
+
+        if not trajectory_paths:
             trajectory_paths = sorted(working_dir.glob("*.xtc"))
+            if trajectory_paths:
+                logger.info("Resolved trajectory for analysis: %s", trajectory_paths[0].name)
 
         topology_path: Path | None = None
         topology_format = "pdb"
 
         prefix = self._generate_prefix()
-        if prefix:
+        solvated_system_pdb = working_dir / "solvated_system.pdb"
+        if solvated_system_pdb.exists():
+            topology_path = solvated_system_pdb
+
+        if topology_path is None and prefix:
             named_pdb = working_dir / f"{prefix}.pdb"
             if named_pdb.exists():
                 topology_path = named_pdb
-
-        if topology_path is None:
-            pdb_candidates = sorted(working_dir.glob("*.pdb"))
-            if pdb_candidates:
-                topology_path = pdb_candidates[0]
 
         if topology_path is None and prefix:
             named_gro = working_dir / f"{prefix}.gro"
@@ -532,6 +543,16 @@ class GromacsEngine(SimulationEngine):
             if gro_candidates:
                 topology_path = gro_candidates[0]
                 topology_format = "gro"
+
+        if topology_path is not None:
+            logger.info("Resolved topology for analysis: %s", topology_path.name)
+            if topology_format == "gro":
+                logger.warning(
+                    "Using GRO topology for analysis: %s. GRO format does not preserve chain IDs; "
+                    "chain-based selections (chainID A/B/C) will fail. Regenerate "
+                    "solvated_system.pdb to restore chain IDs.",
+                    topology_path.name,
+                )
 
         return TrajectoryLayout(
             topology_path=topology_path,
