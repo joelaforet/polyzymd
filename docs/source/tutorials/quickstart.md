@@ -183,10 +183,9 @@ a run script to `replicate_1/gromacs/`.
 
 ```{tip}
 For the full GROMACS workflow, see {doc}`../how_to/gromacs_export`.
-`polyzymd submit` is OpenMM-only for now.
 Use `polyzymd build --format gromacs` when you only want input files,
-or `polyzymd run --engine gromacs` when you want PolyzyMD to build and run locally.
-Integrated GROMACS SLURM submission is planned for v1.4.0.
+`polyzymd run --engine gromacs` when you want PolyzyMD to build and run locally,
+or `polyzymd submit --engine gromacs` to submit self-resubmitting SLURM jobs.
 ```
 
 For multiple replicates (each with an independently built system):
@@ -233,19 +232,19 @@ If you only need the input files without running GROMACS, use
 ````
 
 ````{tab-item} GROMACS — HPC
-Export GROMACS files and submit manually with your cluster's SLURM scripts:
+Submit GROMACS jobs to SLURM with self-resubmitting checkpoint-based restart:
 
 ```bash
-pixi run -e build polyzymd build -c config.yaml --format gromacs --replicates 1-3
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset aa100 \
+    --replicates 1-3
 ```
 
-```{note}
-`polyzymd submit` does not yet support GROMACS as a simulation engine.
-Export files with `build --format gromacs` and submit manually via SLURM.
-Integrated GROMACS submission support is planned for v1.4.0.
-```
-
-See {doc}`../how_to/gromacs_export` for the full GROMACS HPC workflow.
+Add a `gromacs:` block to your `config.yaml` for GPU acceleration and module
+loading. See {doc}`../how_to/gromacs_export` for the full GROMACS HPC workflow
+with cluster-specific recipes.
 ````
 `````
 
