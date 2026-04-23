@@ -31,6 +31,8 @@ selections
     Extended selection syntax (midpoint, COM), position retrieval.
 diagnostics
     Selection diagnostics, equilibration validation.
+window
+    Centralized trajectory window resolution for runner-based analyses.
 config_hash
     Config hashing for cache validation.
 constants
@@ -111,6 +113,11 @@ from polyzymd.analyses.shared.statistics import (
     compute_sem,
     weighted_mean_with_sem,
 )
+from polyzymd.analyses.shared.window import (
+    TrajectoryWindow,
+    resolve_replicate_trajectory_window,
+    resolve_trajectory_window,
+)
 
 __all__ = [
     # Loader
@@ -119,6 +126,9 @@ __all__ = [
     "parse_time_string",
     "convert_time",
     "time_to_frame",
+    "TrajectoryWindow",
+    "resolve_trajectory_window",
+    "resolve_replicate_trajectory_window",
     # Alignment
     "AlignmentConfig",
     "ReferenceMode",

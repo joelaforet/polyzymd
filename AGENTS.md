@@ -98,7 +98,7 @@ in `src/polyzymd/analyses/<name>/` and subclass `Analysis`:
 Key rules:
 
 - **Required class variables**: `name` (str) and `Settings` (Pydantic BaseModel)
-- **Required methods**: `compute_replicate(ctx, replicate)` and `aggregate(ctx, results)`
+- **Lifecycle contract**: when `has_compute_stage=True`, use legacy `compute_replicate(ctx, replicate)` or runner-backed `build_runner()` + `summarize_replicate()`; the runner path keeps MDAnalysis-first per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow. For compare-only plugins, set `has_compute_stage=False`. `aggregate(ctx, results)` is required only when `has_aggregate_stage=True`
 - **Optional overrides**: `compare()`, `plot()`, `format()`, `extract_metrics()`, `filter_conditions()`
 - **Default compare path**: Implement `extract_metrics()` — the framework loads results automatically (via `AggregatedResultClass` or `json.loads()`) and does t-tests, ANOVA, ranking
 - **Custom compare path**: Override `compare()` entirely for multi-metric or entry-table analyses
@@ -154,8 +154,9 @@ def compute_replicate(self, ctx, replicate):
 
 | Method | When Called | Input | Output |
 |--------|-----------|-------|--------|
-| `compute_replicate()` | Once per replicate per condition | `ReplicateContext` + replicate int | Pydantic model or dict |
-| `aggregate()` | Once per condition (after all replicates) | `AggregateContext` + list of replicate results | Aggregated model or dict |
+| `compute_replicate()` | Once per replicate per condition on the legacy compute path | `ReplicateContext` + replicate int | Pydantic model or dict |
+| `build_runner()` + `summarize_replicate()` | Once per replicate per condition on the runner-backed compute path; MDAnalysis owns per-trajectory iteration there while PolyzyMD owns ensemble workflow | `ReplicateContext` + replicate int | Runner + summarized replicate result |
+| `aggregate()` | Once per condition after all replicates, only when `has_aggregate_stage=True` | `AggregateContext` + list of replicate results | Aggregated model or dict |
 | `extract_metrics()` | During default `compare()` | Aggregated result | `dict[str, MetricValue]` |
 | `compare()` | Once per analysis (cross-condition) | `ComparisonContext` | `ComparisonResult` or custom Pydantic model |
 | `plot()` | Once per analysis | `PlotContext` | `list[Path]` of figures |
@@ -167,7 +168,7 @@ def compute_replicate(self, ctx, replicate):
 2. **Read `analyses/base.py`** — the class docstring defines the full contract
 3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
 4. **Study a matching example**: start with scaffold output (`polyzymd new-analysis <name>`), then use `rmsf/` for default compare with plots or `contacts/` for custom compare
-5. **Write your plugin** in `analyses/<name>/` — start with all logic in `__init__.py`; extract plotting to `_plotters.py` as complexity grows
+5. **Write your plugin** in `analyses/<name>/` — keep plugin and lifecycle wiring in `__init__.py`; for trajectory-native runner-backed plugins, isolate MDAnalysis runner logic in a dedicated module such as `_runner.py`, and extract plotting to `_plotters.py` as complexity grows
 6. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
 
 ## Code Style

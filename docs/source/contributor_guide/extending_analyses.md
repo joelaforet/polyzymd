@@ -26,23 +26,37 @@ lives in a package under `src/polyzymd/analyses/<name>/`. The framework discover
 plugins automatically — no registry edits, no imports, no boilerplate. You drop
 a package, and the CLI can run it.
 
-The lifecycle for each analysis is:
+The lifecycle depends on the plugin mode:
 
 ```text
-For each condition:
-  For each replicate:
-    result = compute_replicate(ctx, replicate)       # your code
-  aggregated = aggregate(ctx, [replicate_results])   # your code
+Per-condition work
 
-filter_conditions(conditions)  →  filtered list
-compare(ctx)                   →  ComparisonResult
-plot(ctx)                      →  [figure paths]
-format(result, "text")         →  CLI output string
+legacy compute plugin
+  for each replicate:
+    result = compute_replicate(ctx, replicate)
+  aggregated = aggregate(ctx, [replicate_results])   # if has_aggregate_stage=True
+
+runner-backed plugin
+  for each replicate:
+    runner = build_runner(...)
+    runner.run(...)            # MDAnalysis owns per-trajectory iteration
+    result = summarize_replicate(...)
+  aggregated = aggregate(ctx, [replicate_results])   # if has_aggregate_stage=True
+
+compare-only plugin
+  has_compute_stage = False
+  no per-replicate or aggregate stage
+
+Cross-condition work
+  filter_conditions(conditions)  →  filtered list
+  compare(ctx)                   →  ComparisonResult
+  plot(ctx)                      →  [figure paths]
+  format(result, "text")         →  CLI output string
 ```
 
-You implement the science (compute, aggregate). The framework provides
-discovery, replicate iteration, result saving, comparison statistics, and CLI
-wiring.
+PolyzyMD owns discovery, caching, ensemble aggregation, comparison statistics,
+plotting, and CLI wiring. In runner-backed mode, MDAnalysis owns the
+per-trajectory frame loop while PolyzyMD still owns the ensemble workflow.
 
 ## Anatomy of a Plugin
 
@@ -60,23 +74,49 @@ the `plugins:` section of `comparison.yaml`, and the framework deserializes
 those settings into your `Settings` model. Provide sensible defaults for every
 field so the analysis works out of the box.
 
-### `compute_replicate(ctx, replicate)` (required)
+### Compute stage (`has_compute_stage=True`)
 
-Runs once per replicate per condition. The framework passes a
-`ReplicateContext` containing everything you need: the loaded
+Plugins with a compute stage must choose **one** of these paths:
+
+- **Legacy compute path:** override `compute_replicate(ctx, replicate)`
+- **Runner-backed path:** implement `build_runner(...)` and
+  `summarize_replicate(...)`
+
+For the legacy path, `compute_replicate()` runs once per replicate per
+condition. The framework passes a `ReplicateContext` containing the loaded
 `SimulationConfig`, your `Settings`, output paths, and equilibration time. Use
 `TrajectoryLoader` from `analyses/shared/` to load trajectories — it handles
-topology discovery, trajectory segment daisy-chaining, timestep detection, and
-equilibration skipping.
+topology discovery, trajectory segment daisy-chaining, and timestep detection.
 
-Return a dict or Pydantic model. The framework collects these for `aggregate()`.
+For the runner-backed path, keep `compute_replicate()` inherited from
+`Analysis`. Implement `build_runner(...)`, optionally override
+`get_trajectory_window(...)`, and finish with `summarize_replicate(...)`.
+PolyzyMD resolves the trajectory window and handles caching, while MDAnalysis
+owns per-trajectory iteration through `runner.run(...)`.
 
-### `aggregate(ctx, results)` (required)
+In either path, return a dict or Pydantic model describing one replicate.
 
-Runs once per condition after all replicates complete. Receives the list of
-objects your `compute_replicate()` returned. Compute summary statistics
-(mean, SEM) and return the aggregated result. The framework auto-saves this
-to `ctx.result_path`.
+Responsibility split:
+
+- `TrajectoryLoader`: topology/trajectory discovery and timestep access
+- `resolve_trajectory_window()` / `resolve_replicate_trajectory_window()`:
+  equilibration-aware slicing
+- MDAnalysis runner or explicit trajectory loop: per-frame iteration
+- PolyzyMD: replicate orchestration, caching, aggregation, and comparison
+
+### Compare-only plugins (`has_compute_stage=False`)
+
+Some analyses operate only on already-produced outputs or perform pure
+cross-condition work. Those plugins set `has_compute_stage = False` and do not
+implement `compute_replicate()`, `build_runner()`, or
+`summarize_replicate()`.
+
+### `aggregate(ctx, results)` (`has_aggregate_stage=True` only)
+
+`aggregate()` is required only when `has_aggregate_stage = True`. It runs once
+per condition after all replicate results are available, receives the list of
+per-replicate outputs, and returns the condition-level summary. The framework
+auto-saves this to `ctx.result_path`.
 
 ### `extract_metrics(summary)` (optional, but recommended)
 
@@ -265,7 +305,7 @@ from polyzymd.analyses.base import (
     PlotContext,
     ReplicateContext,
 )
-from polyzymd.analyses.shared import TrajectoryLoader, convert_time, parse_time_string
+from polyzymd.analyses.shared import TrajectoryLoader, resolve_replicate_trajectory_window
 from polyzymd.analyses.stats import format_scalar_comparison
 
 logger = logging.getLogger(__name__)
@@ -306,8 +346,8 @@ class SolventContactsAnalysis(Analysis):
     def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, Any]:
         """Compute solvent contact fraction for one replicate.
 
-        Uses TrajectoryLoader for topology discovery, trajectory segment
-        daisy-chaining, and equilibration frame skipping
+        Uses TrajectoryLoader for topology discovery and trajectory loading,
+        then resolves an equilibration-aware analysis window
         """
         # Lazy-import heavy third-party dependency
         import MDAnalysis as mda  # noqa: F401
@@ -315,16 +355,17 @@ class SolventContactsAnalysis(Analysis):
 
         loader = TrajectoryLoader(ctx.sim_config)
         u = loader.load_universe(replicate)
-
-        eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        timestep_ps = loader.get_timestep(replicate, unit="ps")
-        eq_time_ps = convert_time(eq_value, eq_unit, "ps")
-        start_frame = int(eq_time_ps / timestep_ps)
+        window = resolve_replicate_trajectory_window(
+            loader=loader,
+            replicate=replicate,
+            equilibration=ctx.equilibration,
+            n_frames_total=len(u.trajectory),
+        )
 
         target_atoms = u.select_atoms(ctx.settings.selection)
         solvent_atoms = u.select_atoms(ctx.settings.solvent_selection)
         contact_fractions = []
-        for _ts in u.trajectory[start_frame:]:
+        for _ts in u.trajectory[window.start : window.stop : window.step]:
             if len(target_atoms) == 0 or len(solvent_atoms) == 0:
                 contact_fractions.append(0.0)
                 continue
@@ -540,7 +581,7 @@ wrong causes subtle test failures, so follow these rules:
 - NumPy — imported at module level because it is available in project
   environments
 - Framework utilities from `analyses/shared/` (`TrajectoryLoader`,
-  `parse_time_string`, `convert_time`, `AlignmentConfig`, etc.)
+  `resolve_replicate_trajectory_window`, `AlignmentConfig`, etc.)
 - Framework base classes from `analyses/base` and `analyses/stats`
 
 **Lazy imports inside methods** (inside `compute_replicate`, `plot`, etc.):
@@ -551,7 +592,7 @@ wrong causes subtle test failures, so follow these rules:
 
 ```python
 # At module level — always available, needed for patch targets in tests
-from polyzymd.analyses.shared import TrajectoryLoader, convert_time, parse_time_string
+from polyzymd.analyses.shared import TrajectoryLoader, resolve_replicate_trajectory_window
 
 
 # Inside methods — heavy deps that may not be installed
@@ -802,8 +843,11 @@ def format(self, result: Any, output_format: str = "text") -> str:
 (return-types)=
 ## Return Types: Dicts vs Pydantic Models
 
-Plugins can return either plain dicts or typed Pydantic models from
-`compute_replicate()` and `aggregate()`. Both paths are fully supported.
+Plugins can return either plain dicts or typed Pydantic models from the hooks
+that produce results. On the replicate stage, that is `compute_replicate()` on
+the legacy path or `summarize_replicate()` on the runner-backed path. If
+`has_aggregate_stage = True`, `aggregate()` can return the same kinds of
+condition-level summaries.
 
 **For new plugins, start with dicts.** They require no extra imports, no extra
 classes, and they work with the default comparison pipeline out of the box.
@@ -814,8 +858,8 @@ complexity.
 
 Dict plugins are the simplest way to get a working analysis:
 
-- `compute_replicate()` returns `dict`
-- `aggregate()` returns `dict`
+- Replicate-stage hook (`compute_replicate()` or `summarize_replicate()`) returns `dict`
+- `aggregate()` returns `dict` when `has_aggregate_stage = True`
 - No `AggregatedResultClass` class variable needed
 - Framework saves/loads JSON using standard `json.dumps()` / `json.loads()`
 
@@ -932,9 +976,11 @@ replace `BaseModel` with `BaseAnalysisResult` in those result classes.
 ```{important}
 **Gotcha: `AggregatedResultClass` requires model returns**
 
-When you set `AggregatedResultClass`, your `compute_replicate()` and
-`aggregate()` should return instances of the corresponding Pydantic result
-models. Do not return plain dicts in this mode.
+When you set `AggregatedResultClass`, your result-producing hooks should return
+instances of the corresponding Pydantic result models. That means
+`compute_replicate()` or `summarize_replicate()` at the replicate stage, and
+`aggregate()` when your plugin has an aggregate stage. Do not return plain
+dicts in this mode.
 
 Why: `_load_aggregated_result()` / `_deserialize_result()` uses the declared
 class for deserialization. If on-disk JSON represents dict-shaped data that does
@@ -969,8 +1015,10 @@ Shared comparison infrastructure now lives across the core packages:
 
 **You do NOT need to create new top-level comparison modules for a plugin.** Keep your
 plotting logic in your plugin's `plot()` method and your formatting in
-`format()`. Start with all logic in `__init__.py`; as your plugin grows, extract
-plotting functions into a `_plotters.py` module within the package (see
+`format()`. Keep plugin and lifecycle wiring in `__init__.py`; for
+runner-backed, trajectory-native plugins, place MDAnalysis trajectory logic in
+a dedicated runner module such as `_runner.py`. Plotting functions can still be
+extracted into a `_plotters.py` module within the package (see
 {ref}`plotters-extraction` below).
 
 ### Canonical comparison base classes
@@ -1002,27 +1050,52 @@ plugins all subclass them for their multi-run comparison results.
 ## Shared Utilities (`analyses/shared/`)
 
 The `analyses/shared/` package provides reusable infrastructure for plugin
-authors. The example above uses `TrajectoryLoader`, `parse_time_string`, and
-`convert_time`. The package now also re-exports plotting and config-hash helper
-symbols for direct plugin use.
+authors. The example above uses `TrajectoryLoader` and
+`resolve_replicate_trajectory_window()`. The package now also re-exports
+plotting and config-hash helper symbols for direct plugin use.
 
 ### TrajectoryLoader
 
-The most important shared utility. Handles topology discovery, daisy-chain
-trajectory segments, timestep detection, and equilibration frame skipping:
+The most important shared utility for locating trajectory data. It handles
+topology discovery, daisy-chain trajectory segments, and timestep detection:
 
 ```python
-from polyzymd.analyses.shared import TrajectoryLoader, convert_time, parse_time_string
+from polyzymd.analyses.shared import TrajectoryLoader, resolve_replicate_trajectory_window
 
 loader = TrajectoryLoader(ctx.sim_config)
 u = loader.load_universe(replicate)
 
-# Convert equilibration time to frame offset
-eq_value, eq_unit = parse_time_string(ctx.equilibration)
-timestep_ps = loader.get_timestep(replicate, unit="ps")
-eq_time_ps = convert_time(eq_value, eq_unit, "ps")
-start_frame = int(eq_time_ps / timestep_ps)
+# Resolve an equilibration-aware slice for the loaded trajectory
+window = resolve_replicate_trajectory_window(
+    loader=loader,
+    replicate=replicate,
+    equilibration=ctx.equilibration,
+    n_frames_total=len(u.trajectory),
+)
 ```
+
+### Trajectory windows
+
+Use `resolve_trajectory_window()` or `resolve_replicate_trajectory_window()`
+when you need the first frame at or after equilibration and a validated
+`start`/`stop`/`step` slice:
+
+```python
+from polyzymd.analyses.shared import resolve_replicate_trajectory_window
+
+window = resolve_replicate_trajectory_window(
+    loader=loader,
+    replicate=replicate,
+    equilibration=ctx.equilibration,
+    n_frames_total=len(u.trajectory),
+)
+
+for _ts in u.trajectory[window.start : window.stop : window.step]:
+    ...
+```
+
+For runner-backed plugins, `Analysis.compute_replicate()` calls
+`window.run_kwargs()` and lets the MDAnalysis runner own the frame loop.
 
 ### Available re-exports
 
@@ -1032,6 +1105,7 @@ convenient one-line imports:
 | Source module | Re-exported symbols |
 |---------------|---------------------|
 | `shared.loader` | `TrajectoryLoader`, `TrajectoryInfo`, `parse_time_string`, `convert_time`, `time_to_frame` |
+| `shared.window` | `TrajectoryWindow`, `resolve_trajectory_window`, `resolve_replicate_trajectory_window` |
 | `shared.alignment` | `AlignmentConfig`, `ReferenceMode`, `align_trajectory`, `get_alignment_description` |
 | `shared.statistics` | `compute_sem`, `aggregate_per_residue_stats`, `aggregate_region_stats`, `weighted_mean_with_sem`, `StatResult`, `PerResidueStats` |
 | `shared.autocorrelation` | `compute_acf`, `estimate_correlation_time`, `statistical_inefficiency`, `statistical_inefficiency_multiple`, `n_effective`, `get_independent_indices`, `check_statistical_reliability`, `ACFResult`, `CorrelationTimeResult` |
@@ -1172,8 +1246,10 @@ When creating a new analysis plugin:
 - [ ] File: `src/polyzymd/analyses/<name>/` (use `polyzymd new-analysis <name>` to scaffold; add `--style pydantic` for typed result models)
 - [ ] `name: ClassVar[str]` — unique, lowercase, used in CLI
 - [ ] `Settings` class — Pydantic v2 BaseModel with defaults
-- [ ] `compute_replicate()` — uses `TrajectoryLoader`, returns dict or Pydantic model
-- [ ] `aggregate()` — returns dict or Pydantic model; framework auto-saves to `ctx.result_path`
+- [ ] Replicate-stage hook — choose one valid path:
+  - [ ] Legacy `compute_replicate()` using `TrajectoryLoader` for discovery/loading and window helpers for equilibration-aware slicing
+  - [ ] Runner-backed `build_runner()` + `summarize_replicate()` using `TrajectoryLoader` and window helpers for equilibration-aware slicing
+- [ ] `aggregate()` — when `has_aggregate_stage = True`, returns dict or Pydantic model; framework auto-saves to `ctx.result_path`
 - [ ] Choose comparison path:
   - [ ] Default: implement `extract_metrics()`
   - [ ] Custom: override `compare()` returning a model with `.save()`
@@ -1207,7 +1283,8 @@ plugin package:
 
 ```text
 analyses/rmsf/
-├── __init__.py      # Analysis lifecycle (compute, aggregate, compare, plot)
+├── __init__.py      # Analysis lifecycle wiring
+├── _runner.py       # Optional MDAnalysis trajectory runner logic
 ├── _plotters.py     # Plotting functions called by plot()
 ├── _results.py      # Result models
 └── ...
@@ -1227,8 +1304,10 @@ def plot(self, ctx: PlotContext) -> list[Path]:
 ```
 
 **When to extract:** Consider extracting when your plugin has 3+ plot
-functions or `__init__.py` exceeds ~500 lines. For simple plugins (like
-`catalytic_triad/`), keeping plotting inline is fine.
+functions or `__init__.py` exceeds ~500 lines. For simple legacy plugins,
+keeping plotting inline is fine. For runner-backed plugins, keep lifecycle
+wiring in `__init__.py` and move MDAnalysis trajectory iteration into a
+dedicated `_runner.py` module.
 
 **All 6 established plugins have `_plotters.py`:** rmsf, secondary_structure,
 distances, contacts, catalytic_triad, hydrogen_bonds.
@@ -1413,6 +1492,7 @@ class TestSolventContactsCompute:
         mock_universe.select_atoms.side_effect = [mock_target, mock_solvent]
 
         mock_trajectory = MagicMock()
+        mock_trajectory.__len__.return_value = 50
         mock_trajectory.__getitem__.return_value = range(50)
         mock_universe.trajectory = mock_trajectory
 

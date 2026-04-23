@@ -10,7 +10,7 @@ import pytest
 from pydantic import BaseModel
 
 from polyzymd.analyses.base import Analysis, Condition, MetricValue
-from polyzymd.analyses.exceptions import ReplicateError
+from polyzymd.analyses.exceptions import PluginContractError, ReplicateError
 from polyzymd.analyses.orchestrator import (
     aggregate_condition_from_disk,
     finalize_comparison_from_disk,
@@ -65,6 +65,129 @@ class _FailingWorkerAnalysis(_WorkerAnalysis):
         raise RuntimeError("test error")
 
 
+class _RunnerSettings(BaseModel):
+    step: int = 2
+
+
+class _FakeTrajectory:
+    def __len__(self) -> int:
+        return 10
+
+
+class _FakeUniverse:
+    def __init__(self) -> None:
+        self.trajectory = _FakeTrajectory()
+
+
+class _FakeLoader:
+    def __init__(self, sim_config: Any) -> None:
+        self.sim_config = sim_config
+
+    def load_universe(self, replicate: int) -> _FakeUniverse:
+        self.replicate = replicate
+        return _FakeUniverse()
+
+    def get_timestep(self, replicate: int, unit: str = "ps") -> float:
+        assert replicate == 1
+        assert unit == "ps"
+        return 100.0
+
+
+class _FakeRunner:
+    def __init__(self) -> None:
+        self.results = SimpleNamespace(values=[])
+
+    def run(self, *, start: int, stop: int, step: int) -> "_FakeRunner":
+        self.results.values = list(range(start, stop, step))
+        self.results.window = {"start": start, "stop": stop, "step": step}
+        return self
+
+
+class _RunnerWorkerAnalysis(Analysis):
+    name: ClassVar[str] = "runner_worker"
+    Settings: ClassVar[type] = _RunnerSettings
+    min_replicates: ClassVar[int] = 1
+
+    def build_runner(self, ctx: Any, replicate: int, universe: Any, window: Any) -> _FakeRunner:
+        assert replicate == 1
+        assert len(universe.trajectory) == 10
+        assert window.step == ctx.settings.step
+        return _FakeRunner()
+
+    def get_trajectory_window(self, ctx: Any, replicate: int, loader: Any, universe: Any) -> Any:
+        from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
+
+        return resolve_replicate_trajectory_window(
+            loader=loader,
+            replicate=replicate,
+            equilibration=ctx.equilibration,
+            n_frames_total=len(universe.trajectory),
+            step=ctx.settings.step,
+        )
+
+    def summarize_replicate(
+        self, ctx: Any, replicate: int, runner: Any, window: Any
+    ) -> dict[str, Any]:
+        return {
+            "replicate": replicate,
+            "selected_frames": runner.results.values,
+            "window": runner.results.window,
+            "n_frames_selected": window.n_frames_selected,
+        }
+
+    def aggregate(self, ctx: Any, results: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "n_replicates": len(results),
+            "replicate_values": [len(result["selected_frames"]) for result in results],
+        }
+
+
+class _RunnerWithoutRunAnalysis(Analysis):
+    name: ClassVar[str] = "runner_without_run"
+    Settings: ClassVar[type] = _RunnerSettings
+    min_replicates: ClassVar[int] = 1
+
+    def build_runner(self, ctx: Any, replicate: int, universe: Any, window: Any) -> Any:
+        del ctx, replicate, universe, window
+        return SimpleNamespace()
+
+    def summarize_replicate(
+        self, ctx: Any, replicate: int, runner: Any, window: Any
+    ) -> dict[str, Any]:
+        del ctx, replicate, runner, window
+        return {"ok": True}
+
+    def aggregate(self, ctx: Any, results: list[dict[str, Any]]) -> dict[str, Any]:
+        del ctx
+        return {"n_replicates": len(results)}
+
+
+class _RunnerWithoutResults:
+    def run(self, *, start: int, stop: int, step: int) -> "_RunnerWithoutResults":
+        del start, stop, step
+        return self
+
+
+class _RunnerWithoutResultsAnalysis(Analysis):
+    name: ClassVar[str] = "runner_without_results"
+    Settings: ClassVar[type] = _RunnerSettings
+    min_replicates: ClassVar[int] = 1
+
+    def build_runner(self, ctx: Any, replicate: int, universe: Any, window: Any) -> Any:
+        del ctx, replicate, universe, window
+        return _RunnerWithoutResults()
+
+    def summarize_replicate(
+        self, ctx: Any, replicate: int, runner: Any, window: Any
+    ) -> dict[str, Any]:
+        del ctx, replicate, runner, window
+        return {"ok": True}
+
+    def aggregate(self, ctx: Any, results: list[dict[str, Any]]) -> dict[str, Any]:
+        del ctx
+        return {"n_replicates": len(results)}
+
+
 def test_run_replicate_once_saves_canonical_result(tmp_path: Path) -> None:
     """run_replicate_once should save result.json in the run directory."""
     analysis = _WorkerAnalysis()
@@ -83,6 +206,86 @@ def test_run_replicate_once_saves_canonical_result(tmp_path: Path) -> None:
     )
     assert result["value"] == 2.0
     assert (run_dir / "result.json").exists()
+
+
+def test_run_replicate_once_supports_runner_based_compute(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """run_replicate_once should support the runner-based seam."""
+
+    monkeypatch.setattr("polyzymd.analyses.shared.loader.TrajectoryLoader", _FakeLoader)
+
+    analysis = _RunnerWorkerAnalysis()
+    condition = Condition("Cond", tmp_path / "cfg.yaml", (1,), cast(Any, SimpleNamespace()))
+    settings = _RunnerSettings(step=2)
+    run_dir = tmp_path / "analysis" / "cond" / "runner_worker" / "run_1"
+
+    result = run_replicate_once(
+        analysis,
+        condition,
+        settings,
+        "200ps",
+        run_dir,
+        replicate=1,
+        recompute=False,
+    )
+
+    assert result["replicate"] == 1
+    assert result["selected_frames"] == [2, 4, 6, 8]
+    assert result["window"] == {"start": 2, "stop": 10, "step": 2}
+    assert result["n_frames_selected"] == 4
+    assert (run_dir / "result.json").exists()
+
+
+def test_run_replicate_once_rejects_runner_without_callable_run(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Runner seam should reject objects without a callable run()."""
+
+    monkeypatch.setattr("polyzymd.analyses.shared.loader.TrajectoryLoader", _FakeLoader)
+
+    analysis = _RunnerWithoutRunAnalysis()
+    condition = Condition("Cond", tmp_path / "cfg.yaml", (1,), cast(Any, SimpleNamespace()))
+    settings = _RunnerSettings(step=2)
+    run_dir = tmp_path / "analysis" / "cond" / "runner_without_run" / "run_1"
+
+    with pytest.raises(PluginContractError, match="must return an object with callable run"):
+        run_replicate_once(
+            analysis,
+            condition,
+            settings,
+            "200ps",
+            run_dir,
+            replicate=1,
+            recompute=False,
+        )
+
+
+def test_run_replicate_once_rejects_runner_without_results(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Runner seam should reject executed runners without results."""
+
+    monkeypatch.setattr("polyzymd.analyses.shared.loader.TrajectoryLoader", _FakeLoader)
+
+    analysis = _RunnerWithoutResultsAnalysis()
+    condition = Condition("Cond", tmp_path / "cfg.yaml", (1,), cast(Any, SimpleNamespace()))
+    settings = _RunnerSettings(step=2)
+    run_dir = tmp_path / "analysis" / "cond" / "runner_without_results" / "run_1"
+
+    with pytest.raises(PluginContractError, match="must expose results after run"):
+        run_replicate_once(
+            analysis,
+            condition,
+            settings,
+            "200ps",
+            run_dir,
+            replicate=1,
+            recompute=False,
+        )
 
 
 def test_run_analysis_raises_structured_replicate_error_on_worker_exception(tmp_path: Path) -> None:

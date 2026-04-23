@@ -166,6 +166,53 @@ class TestAnalysisABC:
         # Should not raise — AbstractMiddle still has __abstractmethods__
         assert hasattr(AbstractMiddle, "__abstractmethods__")
 
+    def test_concrete_subclass_requires_compute_contract(self) -> None:
+        """Concrete plugins must provide legacy compute or a full runner contract."""
+
+        with pytest.raises(
+            TypeError,
+            match=r"must implement compute_replicate\(\) or both build_runner\(\) and "
+            r"summarize_replicate\(\)",
+        ):
+
+            class BadComputeContractAnalysis(Analysis):
+                name: ClassVar[str] = "bad_compute_contract"
+                Settings: ClassVar[type] = ToySettings
+
+                def aggregate(self, ctx, results):
+                    return {"dummy": True}
+
+    def test_runner_subclass_requires_complete_runner_contract(self) -> None:
+        """Runner-backed plugins must implement summarize_replicate()."""
+
+        with pytest.raises(
+            TypeError,
+            match=r"must implement both build_runner\(\) and summarize_replicate\(\)",
+        ):
+
+            class IncompleteRunnerAnalysis(Analysis):
+                name: ClassVar[str] = "incomplete_runner"
+                Settings: ClassVar[type] = ToySettings
+
+                def build_runner(self, ctx, replicate, universe, window):
+                    return object()
+
+                def aggregate(self, ctx, results):
+                    return {"dummy": True}
+
+    def test_compare_only_subclass_can_disable_compute_stage(self) -> None:
+        """Compare-only plugins should remain valid with compute disabled."""
+
+        class CompareOnlyAnalysis(Analysis):
+            name: ClassVar[str] = "compare_only"
+            Settings: ClassVar[type] = ToySettings
+            has_compute_stage: ClassVar[bool] = False
+            has_aggregate_stage: ClassVar[bool] = False
+
+        plugin = CompareOnlyAnalysis()
+        assert plugin.has_compute_stage is False
+        assert plugin.has_aggregate_stage is False
+
     def test_concrete_subclass_valid(self, toy_analysis):
         """ToyAnalysis should instantiate without error."""
         assert toy_analysis.name == "toy"

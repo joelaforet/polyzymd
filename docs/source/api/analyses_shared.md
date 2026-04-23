@@ -23,6 +23,16 @@ submodules.
    :no-index:
 ```
 
+## `polyzymd.analyses.shared.window`
+
+```{eval-rst}
+.. automodule:: polyzymd.analyses.shared.window
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :no-index:
+```
+
 ## `polyzymd.analyses.shared.alignment`
 
 ```{eval-rst}

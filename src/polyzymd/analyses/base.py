@@ -9,15 +9,24 @@ How to Add a New Analysis
 -------------------------
 1. Create ``src/polyzymd/analyses/<name>/`` as a sub-package.
 2. Define a ``Settings`` model (Pydantic v2 ``BaseModel``) as a class attribute.
-3. Subclass :class:`Analysis` and implement the required methods.
+3. Subclass :class:`Analysis` and implement the lifecycle for your plugin mode.
 4. Done — the framework discovers it via ``pkgutil``.
 
-Required methods::
+Valid lifecycle modes
+---------------------
+When ``has_compute_stage = True``, choose one compute path:
 
-    compute_replicate(ctx, replicate) -> dict | BaseModel
-    aggregate(ctx, results)           -> dict | BaseModel | None
+- Legacy compute plugins override ``compute_replicate(ctx, replicate)``
+- Runner-backed plugins implement ``build_runner()`` and
+  ``summarize_replicate()``; MDAnalysis owns per-trajectory iteration there,
+  while PolyzyMD owns caching, ensemble aggregation, and comparison workflow
+- Compare-only plugins disable compute entirely with
+  ``has_compute_stage = False``
 
-Optional overrides (sensible defaults provided)::
+``aggregate(ctx, results)`` is required only when
+``has_aggregate_stage = True``
+
+Other optional overrides (sensible defaults provided)::
 
     filter_conditions(conditions)     -> list[Condition]
     compare(ctx)                      -> ComparisonResult | BaseModel | None
@@ -58,6 +67,8 @@ if TYPE_CHECKING:
     from polyzymd.config.schema import SimulationConfig
 
 logger = logging.getLogger("polyzymd.analyses")
+
+_RUNNER_NOT_CONFIGURED = object()
 
 
 class BasePlotSettings(BaseModel):
@@ -944,14 +955,22 @@ class Analysis(ABC):
 
         Notes
         -----
-        The orchestrator has a **fallback** that saves the return value
-        to ``ctx.result_path`` only if the file doesn't already exist.
-        Existing plugins save explicitly for custom per-replicate
-        caching (e.g. ``rmsf_eq10ns.json``).  Simple plugins can skip
-        manual saves and rely on the fallback.
+        The orchestrator also handles result persistence for serializable
+        return values. Existing plugins still save explicitly when they need
+        custom per-replicate caching (e.g. ``rmsf_eq10ns.json``). Simple
+        plugins can skip manual saves and rely on the framework path.
+
+        Subclasses can also opt into a runner-based path by implementing
+        :meth:`build_runner` and :meth:`summarize_replicate` without
+        overriding :meth:`compute_replicate`. In that mode, PolyzyMD
+        resolves the trajectory window and invokes ``runner.run(...)``
+        while MDAnalysis owns the per-frame loop.
         """
         if not type(self).has_compute_stage:
             return None
+        result = self._compute_replicate_via_runner(ctx, replicate)
+        if result is not _RUNNER_NOT_CONFIGURED:
+            return result
         raise NotImplementedError(
             f"{type(self).__name__} must implement compute_replicate() "
             "or set has_compute_stage = False."
@@ -981,16 +1000,134 @@ class Analysis(ABC):
 
         Notes
         -----
-        The orchestrator has a **fallback** that saves the return value
-        to ``ctx.result_path`` only if the file doesn't already exist.
-        Existing plugins save to ``ctx.result_path`` explicitly in
-        ``aggregate()`` (see ``rmsf.py``, ``contacts.py``).  Simple
-        plugins can skip manual saves and rely on the fallback.
+        The orchestrator also handles result persistence for serializable
+        return values. Existing plugins still save explicitly in
+        ``aggregate()`` when they need custom filenames or aggregation-side
+        control (see ``rmsf.py``, ``contacts.py``). Simple plugins can skip
+        manual saves and rely on the framework path.
         """
         if not type(self).has_aggregate_stage:
             return None
         raise NotImplementedError(
             f"{type(self).__name__} must implement aggregate() or set has_aggregate_stage = False."
+        )
+
+    def build_runner(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        universe: Any,
+        window: Any,
+    ) -> Any | None:
+        """Build a trajectory-native runner for one replicate.
+
+        The base implementation returns ``None`` to indicate that the plugin is
+        not runner-backed and should continue to use the legacy
+        :meth:`compute_replicate` path. Subclasses that opt into the
+        runner-backed path by overriding this method must return an MDAnalysis
+        analysis object or other compatible runner with a callable
+        ``run(...)`` method. Returning ``None`` from an override is treated as
+        a plugin contract violation at runtime.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        universe : Any
+            Loaded MDAnalysis Universe for the replicate.
+        window : Any
+            Resolved trajectory window, typically a
+            ``polyzymd.analyses.shared.window.TrajectoryWindow``.
+
+        Returns
+        -------
+        Any | None
+            ``None`` in the base implementation to indicate that the plugin is
+            not runner-backed. Overriding implementations must return a runner
+            instance with a callable ``run(...)`` method.
+        """
+
+        del ctx, replicate, universe, window
+        return None
+
+    def get_trajectory_window(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        loader: Any,
+        universe: Any,
+    ) -> Any:
+        """Resolve the frame window for a runner-based replicate analysis.
+
+        Override this when a runner-backed plugin needs custom ``start``,
+        ``stop``, or ``step`` behavior. Implementations should delegate to
+        :func:`polyzymd.analyses.shared.window.resolve_trajectory_window` or
+        :func:`polyzymd.analyses.shared.window.resolve_replicate_trajectory_window`
+        so equilibration and timestep validation stays centralized.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        loader : Any
+            Trajectory loader used for the replicate.
+        universe : Any
+            Loaded MDAnalysis Universe.
+
+        Returns
+        -------
+        Any
+            Resolved trajectory window object.
+        """
+
+        from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
+
+        return resolve_replicate_trajectory_window(
+            loader=loader,
+            replicate=replicate,
+            equilibration=ctx.equilibration,
+            n_frames_total=len(universe.trajectory),
+        )
+
+    def summarize_replicate(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        runner: Any,
+        window: Any,
+    ) -> Any:
+        """Convert runner output into a PolyzyMD replicate result.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        runner : Any
+            Executed runner object. It must expose a ``results`` attribute.
+        window : Any
+            Resolved trajectory window used for the run.
+
+        Returns
+        -------
+        Any
+            PolyzyMD replicate result model or dict.
+
+        Raises
+        ------
+        PluginContractError
+            Raised when a subclass opts into :meth:`build_runner` without also
+            implementing :meth:`summarize_replicate`.
+        """
+
+        del ctx, replicate, runner, window
+        raise PluginContractError(
+            f"{type(self).__name__} must implement summarize_replicate() when using build_runner()."
         )
 
     # === Optional methods (have sensible defaults) ===
@@ -1222,6 +1359,67 @@ class Analysis(ABC):
             len(json_files),
         )
         return self._deserialize_result(chosen)
+
+    def _compute_replicate_via_runner(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+    ) -> Any:
+        """Execute the opt-in runner-based replicate path.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+
+        Returns
+        -------
+        Any
+            Replicate result, or a private sentinel when the subclass did not
+            opt into the runner-based path.
+        """
+
+        if type(self).build_runner is Analysis.build_runner:
+            return _RUNNER_NOT_CONFIGURED
+
+        from polyzymd.analyses.shared.loader import TrajectoryLoader
+
+        loader = TrajectoryLoader(ctx.sim_config)
+        universe = loader.load_universe(replicate)
+        window = self.get_trajectory_window(ctx, replicate, loader, universe)
+        if getattr(window, "warning_message", None):
+            logger.warning(
+                "%s: %s [condition=%s, replicate=%d]",
+                self.name,
+                window.warning_message,
+                ctx.condition.label,
+                replicate,
+            )
+
+        runner = self.build_runner(ctx, replicate, universe, window)
+        if runner is None:
+            raise PluginContractError(
+                f"{type(self).__name__}.build_runner() returned None. "
+                "Implement compute_replicate() for the legacy path or return a runner."
+            )
+        run_method = getattr(runner, "run", None)
+        if not callable(run_method):
+            raise PluginContractError(
+                f"{type(self).__name__}.build_runner() must return an object with callable run(), "
+                f"got {type(runner).__name__}"
+            )
+
+        executed_runner = run_method(**window.run_kwargs())
+        if not hasattr(executed_runner, "results"):
+            executed_runner = runner
+        if not hasattr(executed_runner, "results"):
+            raise PluginContractError(
+                f"Runner returned by {type(self).__name__}.build_runner() must expose results "
+                "after run()."
+            )
+        return self.summarize_replicate(ctx, replicate, executed_runner, window)
 
     def _deserialize_result(self, path: Path) -> Any:
         """Load a result from a JSON file.
@@ -1522,7 +1720,7 @@ class Analysis(ABC):
         super().__init_subclass__(**kwargs)
         if cls is Analysis:
             return
-        if any(
+        if getattr(cls, "__abstractmethods__", False) or any(
             getattr(getattr(cls, name, None), "__isabstractmethod__", False) for name in dir(cls)
         ):
             return
@@ -1546,6 +1744,23 @@ class Analysis(ABC):
                 f"Analysis subclass {cls.__name__} cannot set has_aggregate_stage=True "
                 "when has_compute_stage=False."
             )
+
+        uses_legacy_compute = cls.compute_replicate is not Analysis.compute_replicate
+        uses_runner_build = cls.build_runner is not Analysis.build_runner
+        uses_runner_summary = cls.summarize_replicate is not Analysis.summarize_replicate
+
+        if cls.has_compute_stage and not uses_legacy_compute:
+            if uses_runner_build != uses_runner_summary:
+                raise TypeError(
+                    f"Analysis subclass {cls.__name__} must implement both build_runner() and "
+                    "summarize_replicate() when using the runner-based compute path."
+                )
+            if not uses_runner_build:
+                raise TypeError(
+                    f"Analysis subclass {cls.__name__} must implement compute_replicate() or "
+                    "both build_runner() and summarize_replicate() when "
+                    "has_compute_stage=True."
+                )
 
     def __repr__(self) -> str:
         return f"<{type(self).__name__}(name={self.name!r})>"

@@ -60,12 +60,36 @@ generation, resubmission, and recovery flows.
 ### `analyses/`
 
 The **plugin system** — the primary extension point for contributors. Each
-analysis plugin contains its own compute logic, aggregation, comparison,
-plotting, and formatting in a unified lifecycle:
+analysis plugin participates in a unified lifecycle, but not every plugin uses
+every stage:
 compute → aggregate → compare → plot → format.
+
+Within that lifecycle, PolyzyMD now draws a sharper boundary between
+trajectory-level work and ensemble-level work:
+
+- **MDAnalysis owns per-trajectory analysis** when a plugin can be expressed as
+  an MDAnalysis runner or compatible ``run(...)`` object
+- **PolyzyMD owns ensemble/comparison workflow** including replicate discovery,
+  caching, aggregation, cross-condition statistics, plotting, and CLI output
+- **Composition is preferred over mixins or deep inheritance** so trajectory-
+  native plugins can provide small hooks instead of re-implementing the full
+  framework lifecycle
+- **Trajectory-native plugins should keep per-trajectory logic in dedicated
+  runner modules**
+- **Derived analyses stay outside `Analysis` unless they truly process
+  trajectories**; post-processing of already-aggregated outputs should remain a
+  higher-level PolyzyMD concern
 
 To add a new analysis, create a package in `analyses/<name>/` that subclasses
 `Analysis`, or use `polyzymd new-analysis <name>` to scaffold one automatically.
+Contributors choose the lifecycle mode that matches the analysis:
+
+- override `compute_replicate()` for legacy compute plugins
+- implement `build_runner(...)` and `summarize_replicate(...)` for
+  trajectory-native, runner-backed plugins
+- set `has_compute_stage = False` for compare-only plugins
+- implement `aggregate()` only when `has_aggregate_stage = True`
+
 See {doc}`../contributor_guide/extending_analyses` for the full guide.
 
 ### Comparison infrastructure (distributed)
@@ -128,11 +152,22 @@ scaffold the package structure automatically.
 
 ### Separation between per-condition and cross-condition work
 
-The unified `analyses/` lifecycle handles both scopes in one plugin contract.
-Each plugin computes per-replicate results with `compute_replicate()`,
-aggregates per-condition outputs with `aggregate()`, and then compares across
-conditions with `compare()` before generating plots with `plot()`. This keeps
-the full scientific workflow explicit while preserving clear lifecycle stages.
+The unified `analyses/` lifecycle still handles both scopes in one plugin
+contract, but the per-condition stage is now mode-dependent. A plugin may:
+
+- override `compute_replicate()` directly
+- use the runner-backed path with `build_runner(...)` and
+  `summarize_replicate(...)`
+- skip compute entirely with `has_compute_stage = False`
+
+Per-condition aggregation is likewise optional and is required only when
+`has_aggregate_stage = True`. Cross-condition work still happens through
+`compare()`, `plot()`, and `format()`.
+
+The important migration rule is that PolyzyMD does not own the per-frame loop
+in runner-backed mode. MDAnalysis owns per-trajectory iteration through the
+runner, while PolyzyMD owns replicate discovery, caching, ensemble
+aggregation, cross-condition statistics, plotting, and CLI output.
 
 ## Where contributors usually need to look
 
@@ -141,7 +176,7 @@ the full scientific workflow explicit while preserving clear lifecycle stages.
 | add or validate config fields | `src/polyzymd/config/` |
 | change build behavior | `src/polyzymd/builders/` |
 | change run or restart behavior | `src/polyzymd/simulation/` and `src/polyzymd/workflow/` |
-| add an analysis type | `src/polyzymd/analyses/` (plugin package — subclass `Analysis` and implement `compute_replicate()` / `aggregate()`) |
+| add an analysis type | `src/polyzymd/analyses/` (plugin package — subclass `Analysis` and choose the appropriate lifecycle mode) |
 | add comparison statistics | `src/polyzymd/analyses/shared/inferential_statistics.py` |
 | add or change CLI commands | `src/polyzymd/cli/` |
 

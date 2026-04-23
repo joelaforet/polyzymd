@@ -31,7 +31,11 @@ src/polyzymd/
 
 New analysis types are added as **packages in `analyses/<name>/`**. All existing
 plugins are packages (no single-file plugins exist). New plugins can compute
-directly in `compute_replicate()` — no private calculator modules needed.
+directly in `compute_replicate()` or use `build_runner()` +
+`summarize_replicate()` for MDAnalysis-first trajectory iteration. For
+runner-backed plugins, keep PolyzyMD lifecycle orchestration in the plugin
+package and isolate MDAnalysis trajectory logic in a dedicated runner module
+such as `_runner.py`.
 
 ## Chain Convention (Critical)
 
@@ -114,16 +118,21 @@ class AnalysisConfig(BaseModel):
 ### Adding a new analysis type (primary path)
 
 1. Run `polyzymd new-analysis <name>` to scaffold the plugin, OR create `src/polyzymd/analyses/<name>/` manually
-2. Subclass `Analysis` with `name`, `Settings`, `compute_replicate()`, `aggregate()`
-3. For default comparison: implement `extract_metrics()`
-4. Implement `plot()` using `_build_plot_data()` and shared plotting helpers
-5. Optionally implement `format()`
-6. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
-7. The CLI automatically discovers it via `polyzymd compare run <name>`
+2. Subclass `Analysis` with `name` and `Settings`
+3. Choose the lifecycle mode:
+   - Legacy compute plugin: implement `compute_replicate()` when `has_compute_stage=True`
+   - Runner-backed plugin: implement `build_runner()` + `summarize_replicate()` when `has_compute_stage=True`; MDAnalysis owns per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow
+   - Compare-only plugin: set `has_compute_stage=False`
+4. Implement `aggregate()` only when `has_aggregate_stage=True`
+5. For default comparison: implement `extract_metrics()`
+6. Implement `plot()` using `_build_plot_data()` and shared plotting helpers
+7. Optionally implement `format()`
+8. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
+9. The CLI automatically discovers it via `polyzymd compare run <name>`
 
 See `analyses/base.py` for the full contract, `analysis-module.md` for
-detailed patterns, and `docs/source/tutorials/extending_analyses.md` for the
-contributor tutorial.
+detailed patterns, and `docs/source/contributor_guide/extending_analyses.md`
+for the contributor tutorial.
 
 ### Adding comparison statistics or formatters
 

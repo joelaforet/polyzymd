@@ -44,16 +44,23 @@ src/polyzymd/analyses/
 
 Each plugin is a self-contained package. All established plugins extract
 plotting functions into a `_plotters.py` module to keep `__init__.py` focused
-on the Analysis lifecycle. New plugins can start with all logic in
-`__init__.py` and extract plotting later as complexity grows.
+on Analysis lifecycle wiring. Simple legacy plugins may keep small compute
+logic in `__init__.py`, but runner-backed plugins should isolate MDAnalysis
+trajectory logic in a dedicated module such as `_runner.py`.
 
 ### How to Add a New Analysis
 
 1. Run `polyzymd new-analysis <name>` to scaffold the plugin package and tests, OR
    create `src/polyzymd/analyses/<name>/` sub-package manually
 2. Define a `Settings` class (Pydantic v2 `BaseModel`)
-3. Subclass `Analysis` and implement `compute_replicate()` and `aggregate()`
-4. Done — framework discovers it via `pkgutil` (no registries, no imports)
+3. Subclass `Analysis` and choose the lifecycle mode for your plugin
+4. When `has_compute_stage=True`, either override `compute_replicate()` or
+   implement `build_runner()` + `summarize_replicate()` for the MDAnalysis-first
+   runner path; keep lifecycle wiring in `__init__.py` and put runner logic in
+   a dedicated module such as `_runner.py`
+5. If the plugin is compare-only, set `has_compute_stage=False`
+6. Implement `aggregate()` only when `has_aggregate_stage=True`
+7. Done — framework discovers it via `pkgutil` (no registries, no imports)
 
 ### Required Class Variables
 
@@ -63,12 +70,18 @@ class MyAnalysis(Analysis):
     Settings: ClassVar[type] = MySettings      # Or as inner class
 ```
 
-### Required Methods
+### Lifecycle Hooks
 
-| Method | When Called | Signature |
-|--------|-----------|-----------|
-| `compute_replicate()` | Once per replicate per condition | `(ctx: ReplicateContext, replicate: int) -> Any` |
-| `aggregate()` | Once per condition (after all replicates) | `(ctx: AggregateContext, results: Sequence[Any]) -> Any` |
+Required hooks depend on the plugin mode:
+
+| Hook | When Used | Signature / Notes |
+|------|-----------|-------------------|
+| `compute_replicate()` | Legacy compute plugins with `has_compute_stage=True` | `(ctx: ReplicateContext, replicate: int) -> Any` |
+| `build_runner()` + `summarize_replicate()` | Runner-backed plugins with `has_compute_stage=True` | Use this when MDAnalysis should own per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow |
+| `aggregate()` | Only when `has_aggregate_stage=True` | `(ctx: AggregateContext, results: Sequence[Any]) -> Any` |
+
+Compare-only or no-compute plugins set `has_compute_stage=False` and skip both
+compute paths.
 
 ### Optional Overrides
 
@@ -84,8 +97,8 @@ class MyAnalysis(Analysis):
 
 Established plugins separate plotting functions into a `_plotters.py` module
 within the plugin package. This keeps `__init__.py` focused on the lifecycle
-methods (`compute_replicate`, `aggregate`, `compare`) while plotting functions
-live in a dedicated file.
+methods for the chosen plugin mode while plotting functions live in a dedicated
+file.
 
 **Current state** (all 5 established plugins have `_plotters.py`):
 - `rmsf/_plotters.py` — 8 plotting functions
@@ -129,7 +142,7 @@ Plugins receive framework-provided context objects — never load configs yourse
 
 | Context | Passed To | Key Attributes |
 |---------|-----------|----------------|
-| `ReplicateContext` | `compute_replicate()` | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute`, `.result_path` |
+| `ReplicateContext` | `compute_replicate()`, `build_runner()`, `summarize_replicate()` | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute`, `.result_path` |
 | `AggregateContext` | `aggregate()` | `.condition`, `.replicates`, `.output_dir`, `.settings`, `.result_path` |
 | `ComparisonContext` | `compare()` | `.conditions`, `.analysis_dirs`, `.results_dir`, `.effective_control`, `.settings` |
 | `PlotContext` | `plot()` | `.conditions`, `.analysis_dirs`, `.output_dir`, `.settings`, `.plot_settings` |
@@ -138,8 +151,8 @@ Plugins receive framework-provided context objects — never load configs yourse
 
 Existing plugins save results to disk explicitly — using custom filenames
 for per-replicate caching (e.g. `rmsf_eq10ns.json`) and `ctx.result_path`
-for aggregated results. The orchestrator has a **fallback** auto-save that
-writes to `ctx.result_path` only if the file doesn't already exist.
+for aggregated results. The orchestrator also provides fallback result saving
+for plugins that return serializable outputs without writing them manually.
 
 Simple plugins can skip manual saves and rely on the fallback. Plugins that
 want equilibration-aware caching should save explicitly (see `rmsf/` for the
@@ -147,12 +160,11 @@ pattern).
 
 ### Return Types: Pydantic Models vs Dicts
 
-**Recommended:** Return typed Pydantic `BaseModel` instances from
-`compute_replicate()` and `aggregate()`. This gives you validation, type
-safety, and IDE autocomplete. Plain dicts are also supported for rapid
-prototyping.
-
-The orchestrator issues a warning if return types are not `BaseModel` or `dict`.
+Lifecycle hooks must return a Pydantic `BaseModel` instance or a plain `dict`
+(`compute_replicate()` / `summarize_replicate()`, plus `aggregate()` when
+used). `compare()` may also return `None` when no comparison result is
+produced. Invalid return types are enforced as plugin contract failures and
+raise `PluginContractError`.
 
 ### Result Deserialization
 
