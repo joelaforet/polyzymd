@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from polyzymd.analyses.base import Condition
+from polyzymd.analyses.base import Condition, PlotContext
 from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.rmsd import RMSDAnalysis, RMSDRunSettings, RMSDSettings
 from polyzymd.analyses.rmsd._comparison_results import (
@@ -28,11 +29,17 @@ from polyzymd.analyses.rmsd._results import (
     RMSDRunAggregatedResult,
     RMSDRunResult,
 )
+from polyzymd.analyses.rmsd._runner import RMSDRunnerPayload, RMSDRunPayload
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
+from polyzymd.config.comparison import PlotSettings
 from tests._support.analysis_testkit import (
+    FakeAtomGroup,
+    FakeUniverse,
     make_aggregate_context,
     make_comparison_context,
     make_condition,
     make_replicate_context,
+    patch_trajectory_loader,
 )
 
 
@@ -42,6 +49,11 @@ def _make_run_settings() -> list[RMSDRunSettings]:
         RMSDRunSettings(label="protein_backbone"),
         RMSDRunSettings(label="polymer_core", selection="segid C and backbone"),
     ]
+
+
+def _settings_hash(settings: RMSDSettings) -> str:
+    """Return the shared settings fingerprint used by RMSD caches."""
+    return settings_fingerprint(settings)
 
 
 def _make_run_result(
@@ -108,6 +120,12 @@ def _make_aggregated_run(
         per_replicate_means=per_replicate_means,
         per_replicate_stds=[0.2 for _ in per_replicate_means],
         per_replicate_medians=per_replicate_means,
+        per_replicate_convergence_times_ns=[None for _ in per_replicate_means],
+        per_replicate_convergence_assessable=[True for _ in per_replicate_means],
+        n_converged_replicates=0,
+        n_assessable_replicates=len(per_replicate_means),
+        convergence_fraction=0.0,
+        all_converged=False,
     )
 
 
@@ -328,6 +346,162 @@ def test_aggregated_cache_filename_includes_settings_tag() -> None:
     filename = analysis._make_aggregated_filename((1, 2, 3), first_result, settings_tag)
 
     assert filename == f"rmsd_reps1-3_eq10ns_{settings_tag}.json"
+
+
+def test_summarize_replicate_writes_npz_sidecar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """summarize_replicate should preserve legacy NPZ sidecar naming."""
+    import numpy as np
+
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
+    condition = make_condition(label="Control", replicates=(1,), sim_config=MagicMock())
+    ctx = make_replicate_context(
+        condition=condition,
+        replicate=1,
+        output_dir=tmp_path / "run_1",
+        settings=settings,
+        equilibration="10ns",
+        recompute=True,
+    )
+    ctx.output_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "polyzymd.analyses.rmsd.compute_config_hash",
+        lambda _sim_config: "hash123",
+    )
+    monkeypatch.setattr(
+        "polyzymd.analyses._results_base.get_polyzymd_version",
+        lambda: "1.2.1",
+    )
+
+    convergence = SimpleNamespace(
+        window_start_times_ns=[0.0],
+        window_mean_values=[1.2],
+        slope_times_ns=[5.0],
+        slopes=[0.0],
+        converged=True,
+        assessable=True,
+        convergence_time_ns=5.0,
+        message="Converged at 5 ns",
+    )
+    payload = RMSDRunPayload(
+        run_label="protein_backbone",
+        selection="protein and name CA",
+        alignment_selection="protein and name CA",
+        reference_mode="centroid",
+        reference_frame=1,
+        reference_file=None,
+        rmsd_values=np.asarray([1.0, 1.2], dtype=np.float64),
+        frames=np.asarray([1000, 1001], dtype=np.int64),
+        time_ns=np.asarray([10.0, 10.01], dtype=np.float64),
+        mean_rmsd=1.1,
+        std_rmsd=0.1,
+        median_rmsd=1.1,
+        min_rmsd=1.0,
+        max_rmsd=1.2,
+        final_rmsd=1.2,
+        sem_rmsd=0.05,
+        correlation_time=20.0,
+        correlation_time_unit="ps",
+        n_independent_frames=2,
+        statistical_inefficiency=1.0,
+        autocorrelation_warning=None,
+        convergence_result=convergence,
+    )
+    runner = MagicMock(results=RMSDRunnerPayload(n_frames_total=1200, run_payloads=[payload]))
+    window = SimpleNamespace(
+        n_frames_selected=200,
+        timestep_ps=10.0,
+        trajectory_files=(Path("/fake/traj.dcd"),),
+    )
+
+    result = analysis.summarize_replicate(ctx, 1, runner, window)
+
+    expected_tag = analysis._make_settings_cache_tag(settings)
+    expected_npz = ctx.output_dir / f"rmsd_protein_backbone_eq10ns_{expected_tag}_timeseries.npz"
+    assert expected_npz.exists()
+    assert result.run_results[0].npz_path == str(expected_npz)
+
+
+def test_compute_replicate_raises_before_writing_partial_results(
+    condition: Condition,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """compute_replicate should fail before writing partial outputs for invalid runs."""
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(
+        runs=[
+            RMSDRunSettings(label="protein_backbone", selection="protein and name CA"),
+            RMSDRunSettings(label="missing", selection="resname SBM"),
+        ]
+    )
+    output_dir = tmp_path / "run_1"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ctx = make_replicate_context(
+        condition=condition,
+        replicate=1,
+        output_dir=output_dir,
+        settings=settings,
+        equilibration="10ns",
+    )
+
+    universe = FakeUniverse(
+        n_frames=1200,
+        selection_map={
+            "protein and name CA": FakeAtomGroup(n_atoms=5),
+            "resname SBM": FakeAtomGroup(n_atoms=0),
+        },
+    )
+    patch_trajectory_loader(monkeypatch, "polyzymd.analyses.shared.loader", universe=universe)
+    patch_trajectory_loader(monkeypatch, "polyzymd.analyses.rmsd", universe=universe)
+
+    def fake_compute_rmsd_run(**kwargs):
+        run = kwargs["run"]
+        if run.label == "missing":
+            raise ValueError(f"Run '{run.label}' selection matched no atoms: {run.selection!r}")
+        return SimpleNamespace(
+            run_label=run.label,
+            selection=run.selection,
+            alignment_selection=run.alignment_selection,
+            reference_mode=run.reference_mode,
+            reference_frame=1,
+            reference_file=run.reference_file,
+            rmsd_values=[],
+            frames=[],
+            time_ns=[],
+            mean_rmsd=1.0,
+            std_rmsd=0.1,
+            median_rmsd=1.0,
+            min_rmsd=0.9,
+            max_rmsd=1.1,
+            final_rmsd=1.0,
+            sem_rmsd=0.05,
+            correlation_time=None,
+            correlation_time_unit=None,
+            n_independent_frames=None,
+            statistical_inefficiency=None,
+            autocorrelation_warning=None,
+            convergence_result=SimpleNamespace(
+                window_start_times_ns=[],
+                window_mean_values=[],
+                slope_times_ns=[],
+                slopes=[],
+                converged=False,
+                assessable=False,
+                convergence_time_ns=None,
+                message="not assessed",
+            ),
+        )
+
+    monkeypatch.setattr("polyzymd.analyses.rmsd._runner.compute_rmsd_run", fake_compute_rmsd_run)
+
+    with pytest.raises(ValueError, match="selection matched no atoms"):
+        analysis.compute_replicate(ctx, 1)
+
+    assert list(output_dir.iterdir()) == []
 
 
 def test_plotter_resolves_npz_with_specific_settings_tag(tmp_path: Path) -> None:
@@ -789,6 +963,126 @@ def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> 
     assert backbone.median_convergence_time_ns == pytest.approx(35.0)
 
 
+def test_aggregate_orders_complete_out_of_order_inputs(
+    condition: Condition, tmp_path: Path
+) -> None:
+    """aggregate should align per-replicate arrays to declared replicate order."""
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2, 3),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+    results = [
+        RMSDResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=rep,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            run_results=[
+                _make_run_result(rep, "protein_backbone", mean_rmsd=1.0 + 0.1 * rep),
+            ],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=["/fake/traj.dcd"],
+        )
+        for rep in (3, 1, 2)
+    ]
+
+    aggregated = analysis.aggregate(ctx, results)
+
+    backbone = aggregated.run_results[0]
+    assert backbone.replicates == [1, 2, 3]
+    assert backbone.per_replicate_means == pytest.approx([1.1, 1.2, 1.3])
+    assert backbone.per_replicate_medians == pytest.approx([1.1, 1.2, 1.3])
+
+
+def test_aggregate_empty_results_raises(condition: Condition, tmp_path: Path) -> None:
+    """aggregate should fail clearly when replicate inputs are missing."""
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(runs=_make_run_settings())
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2, 3),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"RMSD aggregation for condition '.+' requires at least one replicate result",
+    ):
+        analysis.aggregate(ctx, [])
+
+
+def test_aggregate_missing_configured_run_raises(condition: Condition, tmp_path: Path) -> None:
+    """aggregate should fail when a configured run is missing for any replicate."""
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(runs=_make_run_settings())
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2, 3),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+    results = [
+        RMSDResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=1,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA; segid C and backbone",
+            run_results=[
+                _make_run_result(1, "protein_backbone", 1.1),
+                _make_run_result(1, "polymer_core", 2.1),
+            ],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=["/fake/traj.dcd"],
+        ),
+        RMSDResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=2,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA",
+            run_results=[
+                _make_run_result(2, "protein_backbone", 1.2),
+            ],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=["/fake/traj.dcd"],
+        ),
+        RMSDResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=3,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA; segid C and backbone",
+            run_results=[
+                _make_run_result(3, "protein_backbone", 1.3),
+                _make_run_result(3, "polymer_core", 2.3),
+            ],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=["/fake/traj.dcd"],
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="Configured RMSD run 'polymer_core' is missing"):
+        analysis.aggregate(ctx, results)
+
+
 def test_aggregate_overall_median_uses_median(condition: Condition, tmp_path: Path) -> None:
     """aggregate should compute overall_median using np.median."""
     analysis = RMSDAnalysis()
@@ -859,6 +1153,7 @@ def test_compare_two_conditions(tmp_path: Path) -> None:
     """compare with two conditions should produce pairwise results without ANOVA."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=_make_run_settings())
+    settings_hash = _settings_hash(settings)
     control = make_condition(label="Control")
     treated = make_condition(label="Treated")
 
@@ -875,6 +1170,7 @@ def test_compare_two_conditions(tmp_path: Path) -> None:
             _make_aggregated_run("protein_backbone", "protein and name CA", [1.20, 1.25, 1.15]),
             _make_aggregated_run("polymer_core", "segid C and backbone", [2.00, 2.05, 1.95]),
         ],
+        settings_fingerprint=settings_hash,
         source_result_files=[],
     )
     treated_agg = RMSDAggregatedResult(
@@ -890,6 +1186,7 @@ def test_compare_two_conditions(tmp_path: Path) -> None:
             _make_aggregated_run("protein_backbone", "protein and name CA", [1.00, 1.05, 0.95]),
             _make_aggregated_run("polymer_core", "segid C and backbone", [1.80, 1.85, 1.75]),
         ],
+        settings_fingerprint=settings_hash,
         source_result_files=[],
     )
 
@@ -916,6 +1213,7 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
     """compare with three conditions should include ANOVA per run."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=_make_run_settings())
+    settings_hash = _settings_hash(settings)
     conditions = [
         make_condition(label="Control"),
         make_condition(label="A"),
@@ -936,6 +1234,7 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
                 _make_aggregated_run("protein_backbone", "protein and name CA", [1.20, 1.25, 1.15]),
                 _make_aggregated_run("polymer_core", "segid C and backbone", [2.00, 2.05, 1.95]),
             ],
+            settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
         "A": RMSDAggregatedResult(
@@ -951,6 +1250,7 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
                 _make_aggregated_run("protein_backbone", "protein and name CA", [1.00, 1.05, 0.95]),
                 _make_aggregated_run("polymer_core", "segid C and backbone", [1.80, 1.85, 1.75]),
             ],
+            settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
         "B": RMSDAggregatedResult(
@@ -966,6 +1266,7 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
                 _make_aggregated_run("protein_backbone", "protein and name CA", [1.35, 1.40, 1.30]),
                 _make_aggregated_run("polymer_core", "segid C and backbone", [2.15, 2.20, 2.10]),
             ],
+            settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
     }
@@ -993,6 +1294,7 @@ def test_compare_single_replicate_not_testable(tmp_path: Path) -> None:
     """Pairwise and ANOVA results should be marked not testable for n < 2."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
+    settings_hash = _settings_hash(settings)
     conditions = [
         make_condition(label="Control", replicates=(1,)),
         make_condition(label="A", replicates=(1,)),
@@ -1012,6 +1314,7 @@ def test_compare_single_replicate_not_testable(tmp_path: Path) -> None:
             run_results=[
                 _make_aggregated_run("protein_backbone", "protein and name CA", [1.20]),
             ],
+            settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
         "A": RMSDAggregatedResult(
@@ -1026,6 +1329,7 @@ def test_compare_single_replicate_not_testable(tmp_path: Path) -> None:
             run_results=[
                 _make_aggregated_run("protein_backbone", "protein and name CA", [1.00]),
             ],
+            settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
         "B": RMSDAggregatedResult(
@@ -1040,6 +1344,7 @@ def test_compare_single_replicate_not_testable(tmp_path: Path) -> None:
             run_results=[
                 _make_aggregated_run("protein_backbone", "protein and name CA", [1.40]),
             ],
+            settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
     }
@@ -1065,12 +1370,11 @@ def test_compare_single_replicate_not_testable(tmp_path: Path) -> None:
     assert comparison.anova_by_run[0].testable is False
 
 
-def test_compare_missing_run_logs_warning_and_skips(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Missing runs in one condition should not crash compare."""
+def test_compare_missing_configured_run_raises(tmp_path: Path) -> None:
+    """compare should fail when an aggregated condition omits a configured run."""
     analysis = RMSDAnalysis()
     settings = RMSDSettings(runs=_make_run_settings())
+    settings_hash = _settings_hash(settings)
     control = make_condition(label="Control")
     treated = make_condition(label="Treated")
 
@@ -1087,6 +1391,7 @@ def test_compare_missing_run_logs_warning_and_skips(
             _make_aggregated_run("protein_backbone", "protein and name CA", [1.2, 1.25, 1.15]),
             _make_aggregated_run("polymer_core", "segid C and backbone", [2.0, 2.05, 1.95]),
         ],
+        settings_fingerprint=settings_hash,
         source_result_files=[],
     )
     treated_agg = RMSDAggregatedResult(
@@ -1101,6 +1406,7 @@ def test_compare_missing_run_logs_warning_and_skips(
         run_results=[
             _make_aggregated_run("protein_backbone", "protein and name CA", [1.0, 1.05, 0.95]),
         ],
+        settings_fingerprint=settings_hash,
         source_result_files=[],
     )
 
@@ -1116,9 +1422,247 @@ def test_compare_missing_run_logs_warning_and_skips(
         aggregated_results={"Control": control_agg, "Treated": treated_agg},
     )
 
-    with caplog.at_level("WARNING"):
-        comparison = analysis.compare(ctx)
+    with pytest.raises(
+        ValueError, match="Aggregated RMSD result for condition 'Treated' is incomplete"
+    ):
+        analysis.compare(ctx)
 
-    assert comparison is not None
-    assert len(comparison.pairwise_comparisons) == 1
-    assert "missing for condition 'Treated'" in caplog.text
+
+def test_compare_missing_condition_aggregated_result_raises(tmp_path: Path) -> None:
+    """compare should fail when any configured condition lacks an aggregated result."""
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(runs=_make_run_settings())
+    settings_hash = _settings_hash(settings)
+    control = make_condition(label="Control")
+    treated = make_condition(label="Treated")
+
+    control_agg = RMSDAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA; segid C and backbone",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[
+            _make_aggregated_run("protein_backbone", "protein and name CA", [1.2, 1.25, 1.15]),
+            _make_aggregated_run("polymer_core", "segid C and backbone", [2.0, 2.05, 1.95]),
+        ],
+        settings_fingerprint=settings_hash,
+        source_result_files=[],
+    )
+
+    ctx = make_comparison_context(
+        name="rmsd_compare",
+        conditions=[control, treated],
+        analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
+        results_dir=tmp_path / "comparison",
+        settings=settings,
+        control_label="Control",
+        equilibration="10ns",
+        recompute=False,
+        aggregated_results={"Control": control_agg},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Missing aggregated RMSD result for condition 'Treated'",
+    ):
+        analysis.compare(ctx)
+
+
+def test_compare_incomplete_run_replicate_values_raise(tmp_path: Path) -> None:
+    """compare should fail when a configured run has partial replicate values."""
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
+    settings_hash = _settings_hash(settings)
+    control = make_condition(label="Control")
+    treated = make_condition(label="Treated")
+
+    control_agg = RMSDAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[
+            _make_aggregated_run("protein_backbone", "protein and name CA", [1.2, 1.25, 1.15]),
+        ],
+        settings_fingerprint=settings_hash,
+        source_result_files=[],
+    )
+    treated_run = _make_aggregated_run("protein_backbone", "protein and name CA", [1.0, 1.05])
+    treated_agg = RMSDAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[treated_run],
+        settings_fingerprint=settings_hash,
+        source_result_files=[],
+    )
+
+    ctx = make_comparison_context(
+        name="rmsd_compare",
+        conditions=[control, treated],
+        analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
+        results_dir=tmp_path / "comparison",
+        settings=settings,
+        control_label="Control",
+        equilibration="10ns",
+        recompute=False,
+        aggregated_results={"Control": control_agg, "Treated": treated_agg},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Aggregated RMSD run 'protein_backbone' for condition 'Treated' has incomplete replicate metadata",
+    ):
+        analysis.compare(ctx)
+
+
+@pytest.mark.parametrize(
+    ("result_kind", "error_match"),
+    [
+        pytest.param("stale", "current settings require", id="stale-fingerprint"),
+        pytest.param(
+            "legacy",
+            "missing a settings fingerprint",
+            id="missing-fingerprint",
+        ),
+    ],
+)
+def test_compare_rejects_preloaded_invalid_aggregated_results(
+    result_kind: str,
+    error_match: str,
+    tmp_path: Path,
+) -> None:
+    """compare should validate preloaded aggregated RMSD results."""
+    analysis = RMSDAnalysis()
+    current_settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
+    stale_settings = RMSDSettings(
+        runs=[RMSDRunSettings(label="protein_backbone", selection="protein")]
+    )
+    condition = make_condition(label="CondA", replicates=(1, 2))
+
+    selection = "protein" if result_kind == "stale" else "protein and name CA"
+    settings_fingerprint = (
+        _settings_hash(stale_settings) if result_kind == "stale" else None
+    )
+    preloaded_result = RMSDAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string=selection,
+        replicates=[1, 2],
+        n_replicates=2,
+        run_results=[_make_aggregated_run("protein_backbone", selection, [1.1, 1.2])],
+        settings_fingerprint=settings_fingerprint,
+        source_result_files=[],
+    ).model_dump()
+
+    ctx = make_comparison_context(
+        name="rmsd_compare",
+        conditions=[condition],
+        analysis_dirs={"CondA": tmp_path / "analysis" / "conda" / "rmsd"},
+        results_dir=tmp_path / "comparison",
+        settings=current_settings,
+        control_label="CondA",
+        equilibration="10ns",
+        recompute=False,
+        aggregated_results={"CondA": preloaded_result},
+    )
+
+    with pytest.raises(ValueError, match=error_match):
+        analysis.compare(ctx)
+
+
+def test_compare_rejects_stale_aggregated_result_from_disk(tmp_path: Path) -> None:
+    """compare should fail loudly when aggregated RMSD cache settings are stale."""
+    analysis = RMSDAnalysis()
+    current_settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
+    stale_settings = RMSDSettings(
+        runs=[RMSDRunSettings(label="protein_backbone", selection="protein")]
+    )
+    condition = make_condition(label="CondA", replicates=(1, 2))
+    analysis_dir = tmp_path / "analysis" / "conda" / "rmsd"
+    aggregated_dir = analysis_dir / "aggregated"
+    aggregated_dir.mkdir(parents=True)
+
+    RMSDAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein",
+        replicates=[1, 2],
+        n_replicates=2,
+        run_results=[_make_aggregated_run("protein_backbone", "protein", [1.1, 1.2])],
+        settings_fingerprint=_settings_hash(stale_settings),
+        source_result_files=[],
+    ).save(aggregated_dir / "result.json")
+
+    ctx = make_comparison_context(
+        name="rmsd_compare",
+        conditions=[condition],
+        analysis_dirs={"CondA": analysis_dir},
+        results_dir=tmp_path / "comparison",
+        settings=current_settings,
+        control_label="CondA",
+        equilibration="10ns",
+        recompute=False,
+    )
+
+    with pytest.raises(ValueError, match="current settings require"):
+        analysis.compare(ctx)
+
+
+def test_plot_rejects_legacy_aggregated_result_from_disk(tmp_path: Path) -> None:
+    """plot should fail loudly when aggregated RMSD cache lacks settings identity."""
+    analysis = RMSDAnalysis()
+    settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
+    condition = make_condition(label="CondA", replicates=(1, 2))
+    analysis_dir = tmp_path / "analysis" / "conda" / "rmsd"
+    aggregated_dir = analysis_dir / "aggregated"
+    aggregated_dir.mkdir(parents=True)
+
+    RMSDAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA",
+        replicates=[1, 2],
+        n_replicates=2,
+        run_results=[_make_aggregated_run("protein_backbone", "protein and name CA", [1.1, 1.2])],
+        source_result_files=[],
+    ).save(aggregated_dir / "result.json")
+
+    results_dir = tmp_path / "comparison"
+    results_dir.mkdir(parents=True)
+    _make_comparison_result().save(results_dir / "result.json")
+
+    ctx = PlotContext(
+        conditions=[condition],
+        analysis_dirs={"CondA": analysis_dir},
+        results_dir=results_dir,
+        output_dir=tmp_path / "figures",
+        settings=settings,
+        plot_settings=PlotSettings(),
+        equilibration="10ns",
+    )
+
+    with pytest.raises(ValueError, match="missing a settings fingerprint"):
+        analysis.plot(ctx)

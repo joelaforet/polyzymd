@@ -95,6 +95,10 @@ class HydrogenBondResult(BaseAnalysisResult):
 
     analysis_type: ClassVar[str] = "hydrogen_bonds"
 
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Short fingerprint of hydrogen-bond settings for cache validation",
+    )
     timestep_ps: float | None = None
     summaries: list[HydrogenBondReplicateSummary]
     composition_entries: list[CompositionEntry] = Field(default_factory=list)
@@ -187,6 +191,10 @@ class HydrogenBondAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
 
     analysis_type: ClassVar[str] = "hydrogen_bonds_aggregated"
 
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Short fingerprint of hydrogen-bond settings for cache validation",
+    )
     timestep_ps: float | None = None
     replicates: list[int]
     n_replicates: int

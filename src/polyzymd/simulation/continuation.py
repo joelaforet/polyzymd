@@ -12,21 +12,52 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
-import openmm
-from openmm import XmlSerializer
-from openmm import unit as u
-from openmm.app import (
-    CheckpointReporter,
-    DCDReporter,
-    PDBFile,
-    Simulation,
-    StateDataReporter,
-)
-from openmm.unit import Quantity
+if TYPE_CHECKING:
+    import openmm
+    from openmm.app import Simulation
+    from openmm.unit import Quantity
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _get_openmm_module() -> Any:
+    """Import and return the OpenMM top-level module lazily."""
+
+    import openmm
+
+    return openmm
+
+
+def _get_openmm_app_classes() -> tuple[Any, Any, Any, Any, Any]:
+    """Import and return OpenMM app classes lazily."""
+
+    from openmm.app import (
+        CheckpointReporter,
+        DCDReporter,
+        PDBFile,
+        Simulation,
+        StateDataReporter,
+    )
+
+    return CheckpointReporter, DCDReporter, PDBFile, Simulation, StateDataReporter
+
+
+def _get_xml_serializer() -> Any:
+    """Import and return the OpenMM XML serializer lazily."""
+
+    from openmm import XmlSerializer
+
+    return XmlSerializer
+
+
+def _get_openmm_unit_module() -> Any:
+    """Import and return the OpenMM unit module lazily."""
+
+    from openmm import unit as u
+
+    return u
 
 
 def quantity_from_dict(qdict: Dict[str, Any]) -> Quantity:
@@ -38,6 +69,8 @@ def quantity_from_dict(qdict: Dict[str, Any]) -> Quantity:
     Returns:
         OpenMM Quantity with appropriate units.
     """
+    u = _get_openmm_unit_module()
+
     value = qdict["__values__"]["value"]
     unit_str = qdict["__values__"]["unit"]
 
@@ -290,6 +323,8 @@ class ContinuationManager:
 
         # Load system (either normal or interrupted system XML)
         LOGGER.info(f"Loading system from {paths['system']}")
+        XmlSerializer = _get_xml_serializer()
+        _, _, PDBFile, _, _ = _get_openmm_app_classes()
         with open(paths["system"], "r") as f:
             self._system = XmlSerializer.deserialize(f.read())
 
@@ -319,6 +354,8 @@ class ContinuationManager:
         if self._param_dict is None:
             raise RuntimeError("Parameters not loaded. Call load_previous_state first.")
 
+        openmm = _get_openmm_module()
+
         integ_raw = self._param_dict["__values__"]["integ_params"]["__values__"]
         time_step = quantity_from_dict(integ_raw["time_step"])
 
@@ -334,6 +371,8 @@ class ContinuationManager:
         """Add barostat to the system if parameters specify NPT."""
         if self._system is None or self._param_dict is None:
             raise RuntimeError("System/parameters not loaded")
+
+        openmm = _get_openmm_module()
 
         thermo_raw = self._param_dict["__values__"]["thermo_params"]["__values__"]
 
@@ -377,6 +416,8 @@ class ContinuationManager:
         if self._simulation is None:
             raise RuntimeError("Simulation not created")
 
+        CheckpointReporter, DCDReporter, _, _, StateDataReporter = _get_openmm_app_classes()
+
         # Trajectory reporter
         traj_path = output_dir / f"production_{self._segment_index}_trajectory.dcd"
         self._simulation.reporters.append(DCDReporter(str(traj_path), report_interval))
@@ -415,6 +456,8 @@ class ContinuationManager:
         """
         if self._simulation is None:
             raise RuntimeError("Simulation not available")
+
+        XmlSerializer = _get_xml_serializer()
 
         # Save state (no enforcePeriodicBox to preserve molecular continuity)
         state_path = output_dir / f"production_{self._segment_index}_state.xml"
@@ -689,15 +732,16 @@ class ContinuationManager:
                 "__class__": "Quantity",
                 "__values__": {"value": duration_ns, "unit": "nanosecond"},
             }
-            self._param_dict["__values__"]["integ_params"]["__values__"]["num_samples"] = (
-                num_samples
-            )
+            self._param_dict["__values__"]["integ_params"]["__values__"][
+                "num_samples"
+            ] = num_samples
 
         # Add barostat if needed
         self._add_barostat_if_needed()
 
         # Create integrator and simulation
         integrator = self._create_integrator()
+        _, _, _, Simulation, _ = _get_openmm_app_classes()
         self._simulation = Simulation(self._topology, self._system, integrator)
 
         # Load state from previous segment
@@ -721,6 +765,7 @@ class ContinuationManager:
         # recovery: loadCheckpoint() needs a matching System object.  The file
         # is overwritten at segment completion by _save_final_state().
         system_xml_path = output_dir / f"production_{self._segment_index}_system.xml"
+        XmlSerializer = _get_xml_serializer()
         with open(system_xml_path, "w") as f:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved initial system to {system_xml_path}")

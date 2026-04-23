@@ -17,12 +17,15 @@ import pytest
 
 from polyzymd.analyses.base import (
     AggregateContext,
+    ComparisonContext,
     Condition,
     MetricValue,
     PlotContext,
     ReplicateContext,
 )
 from polyzymd.analyses.rmsf import RMSFAnalysis, RMSFSettings
+from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
+from polyzymd.analyses.rmsf._runner import RMSFReplicateRunner
 
 # ============================================================================
 # Fixtures
@@ -68,7 +71,44 @@ def _make_mock_rmsf_result(replicate: int, mean_rmsf: float = 1.5) -> MagicMock:
     result.equilibration_unit = "ns"
     result.selection_string = "protein and name CA"
     result.n_independent_frames = 50
+    result.settings_fingerprint = RMSFAnalysis._make_settings_cache_tag(RMSFSettings())
     return result
+
+
+def _make_aggregated_rmsf_result(
+    *,
+    replicates: tuple[int, ...] = (1, 2, 3),
+    per_replicate_mean_rmsf: list[float] | None = None,
+    settings: RMSFSettings | None = None,
+    settings_fingerprint: str | None = None,
+) -> RMSFAggregatedResult:
+    """Create a minimal aggregated RMSF result for comparison tests."""
+    active_settings = settings or RMSFSettings()
+    replicate_values = per_replicate_mean_rmsf or [1.2, 1.3, 1.4][: len(replicates)]
+    if settings_fingerprint is None:
+        settings_fingerprint = RMSFAnalysis._make_settings_cache_tag(active_settings)
+
+    return RMSFAggregatedResult(
+        config_hash="abc123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string=active_settings.selection,
+        replicates=list(replicates),
+        n_replicates=len(replicates),
+        residue_ids=[1, 2, 3],
+        residue_names=["ALA", "GLY", "VAL"],
+        mean_rmsf_per_residue=[1.0, 1.2, 1.4],
+        sem_rmsf_per_residue=[0.1, 0.1, 0.1],
+        per_replicate_mean_rmsf=replicate_values,
+        overall_mean_rmsf=float(np.mean(replicate_values)),
+        overall_sem_rmsf=0.05,
+        overall_min_rmsf=1.0,
+        overall_max_rmsf=1.4,
+        settings_fingerprint=settings_fingerprint,
+        source_result_files=[],
+    )
 
 
 # ============================================================================
@@ -117,6 +157,25 @@ class TestRMSFClassVars:
 
     def test_repr(self, rmsf_analysis):
         assert repr(rmsf_analysis) == "<RMSFAnalysis(name='rmsf')>"
+
+
+def test_build_runner_returns_runner_instance(rmsf_analysis, condition) -> None:
+    """build_runner should return the dedicated RMSF runner."""
+    ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=condition.sim_config,
+        output_dir=Path("/tmp/run_1"),
+        equilibration="0ns",
+        recompute=True,
+        settings=RMSFSettings(),
+    )
+    universe = MagicMock()
+    window = MagicMock(timestep_ps=10.0)
+
+    runner = rmsf_analysis.build_runner(ctx, 1, universe, window)
+
+    assert isinstance(runner, RMSFReplicateRunner)
 
 
 class TestRMSFSettings:
@@ -201,7 +260,7 @@ class TestComputeReplicate:
         return mock_u
 
     @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
-    @patch("polyzymd.analyses.rmsf.validate_equilibration_time", return_value=(True, ""))
+    @patch("polyzymd.analyses.shared.window.validate_equilibration_time", return_value=(True, ""))
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
     @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
@@ -237,7 +296,7 @@ class TestComputeReplicate:
             replicate=1,
             sim_config=condition.sim_config,
             output_dir=tmp_path / "run_1",
-            equilibration="10ns",
+            equilibration="0ns",
             recompute=False,
             settings=settings,
         )
@@ -264,7 +323,7 @@ class TestComputeReplicate:
         mock_loader_inst.load_universe.assert_called_once_with(1)
 
     @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
-    @patch("polyzymd.analyses.rmsf.validate_equilibration_time", return_value=(True, ""))
+    @patch("polyzymd.analyses.shared.window.validate_equilibration_time", return_value=(True, ""))
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
     @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
@@ -301,7 +360,7 @@ class TestComputeReplicate:
             replicate=2,
             sim_config=condition.sim_config,
             output_dir=tmp_path / "run_2",
-            equilibration="5ns",
+            equilibration="0ns",
             recompute=True,
             settings=settings,
         )
@@ -327,7 +386,7 @@ class TestComputeReplicate:
         assert alignment_config.reference_mode == "average"
 
     @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
-    @patch("polyzymd.analyses.rmsf.validate_equilibration_time", return_value=(True, ""))
+    @patch("polyzymd.analyses.shared.window.validate_equilibration_time", return_value=(True, ""))
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
     @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
@@ -369,7 +428,7 @@ class TestComputeReplicate:
             replicate=1,
             sim_config=condition.sim_config,
             output_dir=tmp_path / "run_1",
-            equilibration="10ns",
+            equilibration="0ns",
             recompute=False,
             settings=legacy_settings,
         )
@@ -389,6 +448,30 @@ class TestComputeReplicate:
         # Verify it completed successfully with legacy settings
         assert result.replicate == 1
         assert result.selection_string == "protein and name CA"
+
+    def test_uses_settings_sensitive_cache_filename(self, rmsf_analysis, condition, tmp_path):
+        """compute_replicate should key caches by equilibration and settings fingerprint."""
+        settings = RMSFSettings(selection="backbone")
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="0ns",
+            recompute=False,
+            settings=settings,
+        )
+        expected_tag = RMSFAnalysis._make_settings_cache_tag(settings)
+        cached_result = MagicMock()
+
+        with patch.object(
+            rmsf_analysis, "_check_cache", return_value=cached_result
+        ) as mock_check_cache:
+            result = rmsf_analysis.compute_replicate(ctx, 1)
+
+        assert result is cached_result
+        cache_path = mock_check_cache.call_args.args[1]
+        assert cache_path.name == f"rmsf_eq0ns_{expected_tag}.json"
 
 
 class TestComputeReplicateNegativePaths:
@@ -418,10 +501,12 @@ class TestComputeReplicateNegativePaths:
         MockLoader.return_value = mock_loader_inst
 
         mock_u = MagicMock()
+        mock_u.trajectory.__len__ = MagicMock(return_value=100)
         mock_atoms = MagicMock()
         mock_atoms.__len__ = MagicMock(return_value=0)
         mock_u.select_atoms = MagicMock(return_value=mock_atoms)
         mock_loader_inst.load_universe.return_value = mock_u
+        mock_loader_inst.get_timestep.return_value = 10.0
 
         traj_info = MagicMock()
         traj_info.trajectory_files = [Path("/fake/traj.dcd")]
@@ -432,7 +517,7 @@ class TestComputeReplicateNegativePaths:
             replicate=1,
             sim_config=condition.sim_config,
             output_dir=tmp_path / "run_1",
-            equilibration="10ns",
+            equilibration="0ns",
             recompute=True,
             settings=RMSFSettings(selection="protein and name ZZ"),
         )
@@ -444,7 +529,7 @@ class TestComputeReplicateNegativePaths:
             with pytest.raises(ValueError, match="matched no atoms"):
                 rmsf_analysis.compute_replicate(ctx, 1)
 
-    @patch("polyzymd.analyses.rmsf.validate_equilibration_time")
+    @patch("polyzymd.analyses.shared.window.validate_equilibration_time")
     @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
     def test_raises_when_equilibration_invalid(
         self,
@@ -562,6 +647,59 @@ class TestComputeReplicateNegativePaths:
 class TestAggregate:
     """Test RMSFAnalysis.aggregate."""
 
+    def test_rejects_empty_results(self, rmsf_analysis, condition, tmp_path):
+        """aggregate should fail loudly when no replicate payloads are provided."""
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="10ns",
+            settings=RMSFSettings(),
+        )
+
+        with pytest.raises(ValueError, match="requires at least one replicate result"):
+            rmsf_analysis.aggregate(ctx, [])
+
+    def test_rejects_misidentified_replicates(self, rmsf_analysis, condition, tmp_path):
+        """aggregate should reject missing or unexpected replicate identities."""
+        results = [_make_mock_rmsf_result(rep) for rep in (1, 2, 4)]
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2, 3),
+            output_dir=tmp_path / "aggregated",
+            equilibration="10ns",
+            settings=RMSFSettings(),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"missing replicates \[3\].*unexpected replicates \[4\]",
+        ):
+            rmsf_analysis.aggregate(ctx, results)
+
+    def test_rejects_legacy_replicate_results_missing_settings_fingerprint(
+        self,
+        rmsf_analysis,
+        condition,
+        tmp_path,
+    ):
+        """aggregate should fail loudly on legacy replicate caches without settings fingerprints."""
+        results = [_make_mock_rmsf_result(rep) for rep in (1, 2, 3)]
+        for result in results:
+            result.settings_fingerprint = None
+            result.settings_fp = None
+
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2, 3),
+            output_dir=tmp_path / "aggregated",
+            equilibration="10ns",
+            settings=RMSFSettings(),
+        )
+
+        with pytest.raises(ValueError, match="missing settings fingerprints"):
+            rmsf_analysis.aggregate(ctx, results)
+
     def test_aggregates_results(self, rmsf_analysis, condition, tmp_path):
         """Test aggregate produces an RMSFAggregatedResult with correct stats."""
         results = [_make_mock_rmsf_result(i, mean_rmsf=1.0 + 0.1 * i) for i in range(1, 4)]
@@ -625,6 +763,34 @@ class TestAggregate:
 
         assert result.per_replicate_mean_rmsf == [1.1, 1.2, 1.3]
 
+    def test_aggregate_orders_complete_results_by_declared_replicates(
+        self,
+        rmsf_analysis,
+        condition,
+        tmp_path,
+    ):
+        """aggregate should align per-replicate outputs to ``ctx.replicates`` order."""
+        results = [
+            _make_mock_rmsf_result(3, mean_rmsf=1.3),
+            _make_mock_rmsf_result(1, mean_rmsf=1.1),
+            _make_mock_rmsf_result(2, mean_rmsf=1.2),
+        ]
+
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2, 3),
+            output_dir=tmp_path / "aggregated",
+            equilibration="10ns",
+            settings=RMSFSettings(),
+        )
+
+        with patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"):
+            result = rmsf_analysis.aggregate(ctx, results)
+
+        assert result.replicates == [1, 2, 3]
+        assert result.per_replicate_mean_rmsf == [1.1, 1.2, 1.3]
+        assert result.per_replicate_mean_rmsf != [1.3, 1.1, 1.2]
+
 
 # ============================================================================
 # Test: extract_metrics
@@ -661,6 +827,85 @@ class TestExtractMetrics:
 
         metrics = rmsf_analysis.extract_metrics(summary)
         assert len(metrics) == 1
+
+
+class TestCompare:
+    """Test RMSF compare fail-loud completeness checks."""
+
+    def test_compare_requires_aggregated_results_for_all_conditions(self, rmsf_analysis, tmp_path):
+        """compare should fail when any configured condition lacks aggregated output."""
+        control = Condition(
+            label="Control",
+            config_path=Path("/fake/control.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        treated = Condition(
+            label="Treated",
+            config_path=Path("/fake/treated.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+
+        ctx = ComparisonContext(
+            name="rmsf_compare",
+            conditions=[control, treated],
+            excluded_conditions=[],
+            control_label="Control",
+            analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
+            results_dir=tmp_path / "comparison",
+            equilibration="10ns",
+            settings=RMSFSettings(),
+            recompute=False,
+            aggregated_results={"Control": _make_aggregated_rmsf_result()},
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="RMSF comparison requires an aggregated result for condition 'Treated'",
+        ):
+            rmsf_analysis.compare(ctx)
+
+    def test_compare_rejects_incomplete_aggregated_replicate_coverage(
+        self,
+        rmsf_analysis,
+        tmp_path,
+    ):
+        """compare should fail when an aggregated RMSF result omits configured replicates."""
+        control = Condition(
+            label="Control",
+            config_path=Path("/fake/control.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        treated = Condition(
+            label="Treated",
+            config_path=Path("/fake/treated.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+
+        ctx = ComparisonContext(
+            name="rmsf_compare",
+            conditions=[control, treated],
+            excluded_conditions=[],
+            control_label="Control",
+            analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
+            results_dir=tmp_path / "comparison",
+            equilibration="10ns",
+            settings=RMSFSettings(),
+            recompute=False,
+            aggregated_results={
+                "Control": _make_aggregated_rmsf_result(replicates=(1, 2)),
+                "Treated": _make_aggregated_rmsf_result(replicates=(1, 2, 3)),
+            },
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Aggregated RMSF result for condition 'Control' has incomplete replicate coverage",
+        ):
+            rmsf_analysis.compare(ctx)
 
 
 # ============================================================================
@@ -848,7 +1093,7 @@ class TestRMSFLifecycle:
     """
 
     @patch("polyzymd.analyses.rmsf.align_trajectory", return_value=0)
-    @patch("polyzymd.analyses.rmsf.validate_equilibration_time", return_value=(True, ""))
+    @patch("polyzymd.analyses.shared.window.validate_equilibration_time", return_value=(True, ""))
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.rmsf.compute_config_hash", return_value="abc123")
     @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
@@ -939,7 +1184,7 @@ class TestRMSFLifecycle:
                 rmsf_analysis,
                 condition,
                 settings=RMSFSettings(),
-                equilibration="10ns",
+                equilibration="0ns",
                 output_dir=output_dir,
             )
 

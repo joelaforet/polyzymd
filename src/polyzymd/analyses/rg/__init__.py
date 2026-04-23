@@ -8,6 +8,8 @@ and exposes plotting/formatting hooks.
 from __future__ import annotations
 
 import logging
+from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Sequence
@@ -24,25 +26,84 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.rg._plot_settings import RgPlotSettings
 from polyzymd.analyses.rg._results import RgAggregatedResult, RgResult
+from polyzymd.analyses.rg._runner import RgReplicateRunner, compute_rg_run
 from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
-from polyzymd.analyses.shared.loader import (
-    TrajectoryLoader,
-    convert_time,
-    parse_time_string,
-    time_to_frame,
-)
+from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
-    filter_summaries_with_run,
 )
 from polyzymd.analyses.shared.statistics import compute_sem
 
 if TYPE_CHECKING:
     from polyzymd.analyses.rg._comparison_results import RgComparisonResult
-    from polyzymd.analyses.rg._results import RgRunResult
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _RgTrajectoryWindow:
+    """Rg trajectory window that carries loader-derived file metadata.
+
+    This keeps summarize-time metadata lookup on the same loader seam used by
+    the base runner orchestration.
+    """
+
+    start: int
+    stop: int
+    step: int
+    equilibration_start: int
+    n_frames_total: int
+    n_frames_selected: int
+    timestep_ps: float
+    equilibration_ps: float
+    warning_message: str | None = None
+    trajectory_files: tuple[Path, ...] = ()
+
+    @classmethod
+    def from_window(
+        cls,
+        window: Any,
+        trajectory_files: Sequence[Path],
+    ) -> _RgTrajectoryWindow:
+        """Build an Rg window wrapper from the shared trajectory window.
+
+        Parameters
+        ----------
+        window : Any
+            Shared trajectory window returned by the centralized resolver.
+        trajectory_files : Sequence[Path]
+            Trajectory files resolved by the existing loader instance.
+
+        Returns
+        -------
+        _RgTrajectoryWindow
+            Rg window wrapper that preserves run arguments and file metadata.
+        """
+
+        return cls(
+            start=window.start,
+            stop=window.stop,
+            step=window.step,
+            equilibration_start=window.equilibration_start,
+            n_frames_total=window.n_frames_total,
+            n_frames_selected=window.n_frames_selected,
+            timestep_ps=window.timestep_ps,
+            equilibration_ps=window.equilibration_ps,
+            warning_message=window.warning_message,
+            trajectory_files=tuple(trajectory_files),
+        )
+
+    def run_kwargs(self) -> dict[str, int]:
+        """Return keyword arguments for the runner ``run()`` call.
+
+        Returns
+        -------
+        dict[str, int]
+            ``start``, ``stop``, and ``step`` values for ``run()``.
+        """
+
+        return {"start": self.start, "stop": self.stop, "step": self.step}
 
 
 class RgRunSettings(BaseModel):
@@ -161,6 +222,405 @@ class RgAnalysis(Analysis):
         """
         return settings_fingerprint(settings)
 
+    @classmethod
+    def _coerce_and_validate_aggregated_result(
+        cls,
+        result: Any,
+        settings: RgSettings,
+        *,
+        condition_label: str | None = None,
+        source: Path | None = None,
+    ) -> RgAggregatedResult:
+        """Coerce an aggregated result and validate its settings identity.
+
+        Parameters
+        ----------
+        result : Any
+            Aggregated result loaded from disk or supplied in memory.
+        settings : RgSettings
+            Current Rg settings for comparison or plotting.
+        condition_label : str | None, optional
+            Condition label for error reporting.
+        source : Path | None, optional
+            Source file path for diagnostics.
+
+        Returns
+        -------
+        RgAggregatedResult
+            Validated aggregated result.
+
+        Raises
+        ------
+        ValueError
+            Raised when the aggregated result is missing a settings
+            fingerprint or was computed with different settings.
+        """
+        if isinstance(result, dict):
+            result = RgAggregatedResult.model_validate(result)
+
+        if not isinstance(result, RgAggregatedResult):
+            raise TypeError(
+                f"Rg aggregated result loader expected RgAggregatedResult, got "
+                f"{type(result).__name__}"
+            )
+
+        stored_fingerprint = getattr(result, "settings_fingerprint", None)
+        if stored_fingerprint is None:
+            stored_fingerprint = getattr(result, "settings_fp", None)
+
+        current_fingerprint = cls._make_settings_cache_tag(settings)
+        condition_text = (
+            f" for condition '{condition_label}'" if condition_label is not None else ""
+        )
+        source_text = f" at {source}" if source is not None else ""
+        if stored_fingerprint is None:
+            raise ValueError(
+                "Aggregated Rg result"
+                f"{condition_text} is missing a settings fingerprint{source_text}. "
+                "Legacy Rg aggregated caches are not compatible with "
+                "settings-sensitive compare/plot loading. Recompute the condition before "
+                "comparing or plotting."
+            )
+        if stored_fingerprint != current_fingerprint:
+            raise ValueError(
+                "Aggregated Rg result"
+                f"{condition_text} was computed with settings fingerprint "
+                f"{stored_fingerprint}, but current settings require {current_fingerprint}"
+                f"{source_text}. Recompute the condition or clear stale caches before "
+                "comparing or plotting."
+            )
+        return result
+
+    def _resolve_aggregated_result_path(self, aggregated_dir: Path) -> Path | None:
+        """Resolve the aggregated Rg result path.
+
+        Parameters
+        ----------
+        aggregated_dir : Path
+            Directory containing aggregated result files.
+
+        Returns
+        -------
+        Path | None
+            Path to the selected JSON result, or ``None`` when no result file
+            exists.
+        """
+        if not aggregated_dir.exists():
+            return None
+        canonical = self.aggregate_result_path(aggregated_dir)
+        if canonical.exists():
+            return canonical
+
+        json_files = sorted(aggregated_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
+        if not json_files:
+            return None
+
+        chosen = json_files[-1]
+        logger.warning(
+            "%s: canonical result.json not found in %s — falling back to %s "
+            "(%d JSON file(s) present)",
+            self.name,
+            aggregated_dir,
+            chosen.name,
+            len(json_files),
+        )
+        return chosen
+
+    def _load_aggregated_result(
+        self,
+        aggregated_dir: Path,
+        *,
+        settings: RgSettings | None = None,
+        condition_label: str | None = None,
+    ) -> Any:
+        """Load and optionally validate an aggregated Rg result.
+
+        Parameters
+        ----------
+        aggregated_dir : Path
+            Directory containing aggregated result files.
+        settings : RgSettings | None, optional
+            Current settings used to validate settings-sensitive aggregated
+            caches. When omitted, the result is loaded without settings
+            identity validation.
+        condition_label : str | None, optional
+            Condition label for validation diagnostics.
+
+        Returns
+        -------
+        Any
+            Loaded aggregated result, or ``None`` when no result file exists.
+        """
+        result_path = self._resolve_aggregated_result_path(aggregated_dir)
+        if result_path is None:
+            return None
+
+        result = self._deserialize_result(result_path)
+        if settings is None:
+            return result
+
+        return self._coerce_and_validate_aggregated_result(
+            result,
+            settings,
+            condition_label=condition_label,
+            source=result_path,
+        )
+
+    @staticmethod
+    def _validate_aggregate_input_completeness(
+        ctx: AggregateContext,
+        results: Sequence[Any],
+        configured_run_labels: Sequence[str],
+    ) -> None:
+        """Validate that aggregation inputs cover all configured replicates and runs.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        results : Sequence[Any]
+            Per-replicate Rg results.
+        configured_run_labels : Sequence[str]
+            Run labels defined in the Rg settings.
+
+        Raises
+        ------
+        ValueError
+            Raised when configured replicates or runs are missing from the
+            aggregation inputs.
+        """
+        if not results:
+            raise ValueError(
+                f"Rg aggregation for condition '{ctx.condition.label}' requires at least one "
+                "replicate result. No replicate inputs were provided."
+            )
+
+        expected_replicates = sorted(ctx.replicates)
+        observed_replicates = [
+            result.replicate for result in results if getattr(result, "replicate", None) is not None
+        ]
+        observed_counter = Counter(observed_replicates)
+        duplicate_replicates = sorted(
+            replicate for replicate, count in observed_counter.items() if count > 1
+        )
+        missing_replicates = sorted(set(expected_replicates) - set(observed_replicates))
+        unexpected_replicates = sorted(set(observed_replicates) - set(expected_replicates))
+        missing_metadata_count = len(results) - len(observed_replicates)
+        if (
+            missing_replicates
+            or unexpected_replicates
+            or duplicate_replicates
+            or missing_metadata_count
+        ):
+            details: list[str] = []
+            if missing_replicates:
+                details.append(f"missing replicates {missing_replicates}")
+            if unexpected_replicates:
+                details.append(f"unexpected replicates {unexpected_replicates}")
+            if duplicate_replicates:
+                details.append(f"duplicate replicates {duplicate_replicates}")
+            if missing_metadata_count:
+                details.append(f"results without replicate identifiers {missing_metadata_count}")
+            detail_text = "; ".join(details)
+            raise ValueError(
+                f"Rg aggregation for condition '{ctx.condition.label}' is incomplete. Expected "
+                f"replicate results for {expected_replicates}; observed {sorted(observed_replicates)} "
+                f"({detail_text}). Recompute missing replicates or clear stale caches before "
+                "aggregating."
+            )
+
+        for run_label in configured_run_labels:
+            missing_run_replicates: list[int] = []
+            duplicate_run_replicates: list[int] = []
+            for result in results:
+                replicate = getattr(result, "replicate", None)
+                matches = [
+                    run_result
+                    for run_result in result.run_results
+                    if run_result.run_label == run_label
+                ]
+                if not matches:
+                    if replicate is not None:
+                        missing_run_replicates.append(replicate)
+                    continue
+                if len(matches) > 1 and replicate is not None:
+                    duplicate_run_replicates.append(replicate)
+
+            if missing_run_replicates:
+                raise ValueError(
+                    f"Configured Rg run '{run_label}' is missing replicate entries in condition "
+                    f"'{ctx.condition.label}'. Missing replicates: "
+                    f"{sorted(missing_run_replicates)}. Recompute missing replicates or clear "
+                    "stale caches before aggregating."
+                )
+
+            if duplicate_run_replicates:
+                raise ValueError(
+                    f"Configured Rg run '{run_label}' has duplicate replicate entries in "
+                    f"condition '{ctx.condition.label}' for replicates "
+                    f"{sorted(duplicate_run_replicates)}. Clear stale caches and recompute "
+                    "before aggregating."
+                )
+
+    @staticmethod
+    def _order_results_by_replicate(
+        ctx: AggregateContext,
+        results: Sequence[Any],
+    ) -> list[Any]:
+        """Return aggregate inputs ordered to match ``ctx.replicates``.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        results : Sequence[Any]
+            Per-replicate Rg results that already passed completeness checks.
+
+        Returns
+        -------
+        list[Any]
+            Replicate results in the declared replicate order.
+
+        Raises
+        ------
+        ValueError
+            Raised when a replicate identifier is missing or duplicated while
+            normalizing the aggregate inputs.
+        """
+        ordered_results: dict[int, Any] = {}
+        for result in results:
+            replicate = getattr(result, "replicate", None)
+            if replicate is None:
+                raise ValueError(
+                    f"Rg aggregation for condition '{ctx.condition.label}' encountered a "
+                    "replicate result without a replicate identifier while normalizing "
+                    "aggregate inputs."
+                )
+            if replicate in ordered_results:
+                raise ValueError(
+                    f"Rg aggregation for condition '{ctx.condition.label}' encountered "
+                    f"duplicate replicate {replicate} while normalizing aggregate inputs."
+                )
+            ordered_results[replicate] = result
+
+        missing_replicates = [
+            replicate for replicate in ctx.replicates if replicate not in ordered_results
+        ]
+        if missing_replicates:
+            raise ValueError(
+                f"Rg aggregation for condition '{ctx.condition.label}' cannot order aggregate "
+                f"inputs because replicates {missing_replicates} are missing."
+            )
+
+        return [ordered_results[replicate] for replicate in ctx.replicates]
+
+    @staticmethod
+    def _validate_aggregated_result_completeness(
+        condition: Any,
+        agg_result: RgAggregatedResult,
+        configured_run_labels: Sequence[str],
+    ) -> None:
+        """Validate that an aggregated Rg result is complete for comparison.
+
+        Parameters
+        ----------
+        condition : Any
+            Condition associated with the aggregated result.
+        agg_result : RgAggregatedResult
+            Aggregated Rg result to validate.
+        configured_run_labels : Sequence[str]
+            Run labels defined in the Rg settings.
+
+        Raises
+        ------
+        ValueError
+            Raised when the aggregated result omits configured runs or contains
+            incomplete replicate data.
+        """
+        expected_run_labels = set(configured_run_labels)
+        observed_run_labels = {run_result.run_label for run_result in agg_result.run_results}
+        missing_runs = sorted(expected_run_labels - observed_run_labels)
+        unexpected_runs = sorted(observed_run_labels - expected_run_labels)
+        if missing_runs or unexpected_runs:
+            details: list[str] = []
+            if missing_runs:
+                details.append(f"missing runs {missing_runs}")
+            if unexpected_runs:
+                details.append(f"unexpected runs {unexpected_runs}")
+            detail_text = "; ".join(details)
+            raise ValueError(
+                f"Aggregated Rg result for condition '{condition.label}' is incomplete: "
+                f"{detail_text}. Recompute the condition or clear stale caches before "
+                "comparing."
+            )
+
+        expected_replicates = sorted(condition.replicates)
+        observed_replicates = sorted(agg_result.replicates)
+        if (
+            agg_result.n_replicates != len(expected_replicates)
+            or observed_replicates != expected_replicates
+        ):
+            raise ValueError(
+                f"Aggregated Rg result for condition '{condition.label}' has incomplete "
+                f"replicate coverage. Expected replicates {expected_replicates}, found "
+                f"{observed_replicates} with n_replicates={agg_result.n_replicates}. Recompute "
+                "the condition or clear stale caches before comparing."
+            )
+
+        for run_result in agg_result.run_results:
+            run_replicates = sorted(run_result.replicates)
+            counts = {
+                "per_replicate_means": len(run_result.per_replicate_means),
+                "per_replicate_stds": len(run_result.per_replicate_stds),
+                "per_replicate_medians": len(run_result.per_replicate_medians),
+            }
+            if run_result.per_replicate_mean_fragments_per_frame is not None:
+                counts["per_replicate_mean_fragments_per_frame"] = len(
+                    run_result.per_replicate_mean_fragments_per_frame
+                )
+            mismatched_fields = {
+                name: count for name, count in counts.items() if count != len(expected_replicates)
+            }
+            if (
+                run_result.n_replicates != len(expected_replicates)
+                or run_replicates != expected_replicates
+            ):
+                raise ValueError(
+                    f"Aggregated Rg run '{run_result.run_label}' for condition "
+                    f"'{condition.label}' has incomplete replicate metadata. Expected "
+                    f"replicates {expected_replicates}, found {run_replicates} with "
+                    f"n_replicates={run_result.n_replicates}. Recompute the condition or clear "
+                    "stale caches before comparing."
+                )
+
+            if mismatched_fields:
+                raise ValueError(
+                    f"Aggregated Rg run '{run_result.run_label}' for condition "
+                    f"'{condition.label}' has incomplete replicate values: {mismatched_fields}. "
+                    f"Expected {len(expected_replicates)} entries per field. Recompute the "
+                    "condition or clear stale caches before comparing."
+                )
+
+    @staticmethod
+    def _describe_sidecar_aggregation_contract(run: RgRunSettings) -> str:
+        """Describe sidecar-backed aggregate outputs required for a configured run.
+
+        Parameters
+        ----------
+        run : RgRunSettings
+            Configured Rg run definition.
+
+        Returns
+        -------
+        str
+            Human-readable description of the aggregate outputs that require
+            NPZ sidecars for every replicate.
+        """
+        required_outputs = ["reduced-series histograms"]
+        if run.calculation_mode == "fragments" and run.save_fragment_distribution:
+            required_outputs.append("fragment distributions")
+        return " and ".join(required_outputs)
+
     def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
         """Compute Rg for all configured runs for a single replicate.
 
@@ -176,11 +636,7 @@ class RgAnalysis(Analysis):
         RgResult
             Per-replicate Rg result containing all run outputs.
         """
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.rg._results import RgResult
-
         settings = ctx.settings
-        sim_config = ctx.sim_config
 
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
         eq_str = f"eq{eq_value:g}{eq_unit}"
@@ -191,67 +647,192 @@ class RgAnalysis(Analysis):
             RgResult,
             result_file,
             recompute=ctx.recompute,
-            sim_config=sim_config,
+            sim_config=ctx.sim_config,
             settings=ctx.settings,
         )
         if cached is not None:
             return cached
 
-        loader = TrajectoryLoader(sim_config)
-        config_hash = compute_config_hash(sim_config)
+        result = super().compute_replicate(ctx, replicate)
+        result.save(result_file)
+        logger.info("Saved Rg result to %s", result_file)
+        return result
 
-        u0 = loader.load_universe(replicate, cache=False)
+    def _trajectory_loader_factory(self) -> type[Any]:
+        """Return the Rg loader class for the shared runner seam.
+
+        Returns
+        -------
+        type[Any]
+            Loader class patched by Rg unit tests.
+        """
+
+        return TrajectoryLoader
+
+    def get_trajectory_window(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        loader: Any,
+        universe: Any,
+    ) -> Any:
+        """Resolve the Rg window and retain trajectory file metadata.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        loader : Any
+            Trajectory loader already constructed for this replicate.
+        universe : Any
+            Loaded universe for the replicate.
+
+        Returns
+        -------
+        Any
+            Shared trajectory window augmented with trajectory file metadata.
+        """
+
+        window = super().get_trajectory_window(ctx, replicate, loader, universe)
         traj_info = loader.get_trajectory_info(replicate)
-        timestep_ps = loader.get_timestep(replicate, unit="ps")
+        return _RgTrajectoryWindow.from_window(window, traj_info.trajectory_files)
 
-        n_frames_total = len(u0.trajectory)
-        eq_time_ps = convert_time(eq_value, eq_unit, "ps")
-        start_frame = time_to_frame(eq_time_ps, "ps", timestep_ps, "ps")
-        n_frames_used = n_frames_total - start_frame
+    def build_runner(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        universe: Any,
+        window: Any,
+    ) -> Any:
+        """Build the runner-backed Rg execution object.
 
-        if n_frames_used <= 0:
-            raise ValueError(
-                "Equilibration removed all frames for Rg analysis. "
-                f"Got start_frame={start_frame}, n_frames_total={n_frames_total}."
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        universe : Any
+            Loaded universe for the replicate.
+        window : Any
+            Resolved trajectory window.
+
+        Returns
+        -------
+        Any
+            Runner object compatible with the trajectory seam.
+        """
+
+        return RgReplicateRunner(
+            sim_config=ctx.sim_config,
+            replicate=replicate,
+            runs=list(ctx.settings.runs),
+            loader_factory=self._trajectory_loader_factory(),
+            n_frames_total=len(universe.trajectory),
+            timestep_ps=window.timestep_ps,
+        )
+
+    def summarize_replicate(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        runner: Any,
+        window: Any,
+    ) -> Any:
+        """Serialize runner output into the legacy Rg result schema.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        runner : Any
+            Executed Rg runner.
+        window : Any
+            Resolved trajectory window.
+
+        Returns
+        -------
+        RgResult
+            Cache-compatible per-replicate Rg result.
+        """
+        import numpy as np
+
+        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses.rg._results import RgResult, RgRunResult
+
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+        eq_str = f"eq{eq_value:g}{eq_unit}"
+        settings_tag = self._make_settings_cache_tag(ctx.settings)
+        config_hash = compute_config_hash(ctx.sim_config)
+        trajectory_files = getattr(window, "trajectory_files", ())
+
+        run_results: list[RgRunResult] = []
+        for payload in runner.results.run_payloads:
+            npz_filename = f"rg_{payload.run_label}_{eq_str}_{settings_tag}_timeseries.npz"
+            npz_path = ctx.output_dir / npz_filename
+            npz_data: dict[str, np.ndarray] = {
+                "rg_values": payload.rg_values,
+                "time_ns": payload.time_ns,
+                "frames": payload.frames,
+            }
+            if payload.fragment_rg_values is not None:
+                npz_data["fragment_rg_values"] = payload.fragment_rg_values
+            if payload.fragment_counts_per_frame is not None:
+                npz_data["fragment_counts_per_frame"] = payload.fragment_counts_per_frame
+            if payload.fragment_masses is not None:
+                npz_data["fragment_masses"] = payload.fragment_masses
+            np.savez_compressed(npz_path, **npz_data)
+
+            run_results.append(
+                RgRunResult(
+                    config_hash=config_hash,
+                    polyzymd_version=get_polyzymd_version(),
+                    replicate=replicate,
+                    equilibration_time=eq_value,
+                    equilibration_unit=eq_unit,
+                    selection_string=payload.selection,
+                    correlation_time=payload.correlation_time,
+                    n_independent_frames=payload.n_independent_frames,
+                    run_label=payload.run_label,
+                    selection=payload.selection,
+                    calculation_mode=payload.calculation_mode,
+                    fragment_weighting=payload.fragment_weighting,
+                    mean_rg=payload.mean_rg,
+                    std_rg=payload.std_rg,
+                    median_rg=payload.median_rg,
+                    min_rg=payload.min_rg,
+                    max_rg=payload.max_rg,
+                    final_rg=payload.final_rg,
+                    sem_rg=payload.sem_rg,
+                    correlation_time_unit=payload.correlation_time_unit,
+                    statistical_inefficiency=payload.statistical_inefficiency,
+                    autocorrelation_warning=payload.autocorrelation_warning,
+                    n_frames_total=runner.results.n_frames_total,
+                    n_frames_used=window.n_frames_selected,
+                    npz_path=str(npz_path),
+                    time_unit="ns",
+                    timestep_ps=window.timestep_ps,
+                    **payload.frag_metadata,
+                )
             )
 
-        run_results = []
-        for run in settings.runs:
-            run_result = self._compute_single_run(
-                ctx=ctx,
-                replicate=replicate,
-                run=run,
-                loader=loader,
-                config_hash=config_hash,
-                eq_value=eq_value,
-                eq_unit=eq_unit,
-                eq_str=eq_str,
-                settings_tag=settings_tag,
-                start_frame=start_frame,
-                n_frames_total=n_frames_total,
-                n_frames_used=n_frames_used,
-                timestep_ps=timestep_ps,
-            )
-            if run_result is not None:
-                run_results.append(run_result)
-
-        result = RgResult(
+        return RgResult(
             config_hash=config_hash,
             polyzymd_version=get_polyzymd_version(),
             replicate=replicate,
             equilibration_time=eq_value,
             equilibration_unit=eq_unit,
-            selection_string="; ".join(run.selection for run in settings.runs),
+            selection_string="; ".join(run.selection for run in ctx.settings.runs),
             run_results=run_results,
-            n_frames_total=n_frames_total,
-            n_frames_used=n_frames_used,
-            trajectory_files=[str(path) for path in traj_info.trajectory_files],
+            settings_fingerprint=settings_tag,
+            n_frames_total=runner.results.n_frames_total,
+            n_frames_used=window.n_frames_selected,
+            trajectory_files=[str(path) for path in trajectory_files],
         )
-
-        result.save(result_file)
-        logger.info("Saved Rg result to %s", result_file)
-
-        return result
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
         """Aggregate Rg results across replicates for one condition.
@@ -273,8 +854,12 @@ class RgAnalysis(Analysis):
         from polyzymd.analyses._results_base import get_polyzymd_version
         from polyzymd.analyses.rg._results import RgAggregatedResult, RgRunAggregatedResult
 
-        first = results[0]
         run_labels = [run.label for run in ctx.settings.runs]
+        self._validate_aggregate_input_completeness(ctx, results, run_labels)
+        ordered_results = self._order_results_by_replicate(ctx, results)
+        replicate_order = list(ctx.replicates)
+
+        first = ordered_results[0]
 
         if len(ctx.replicates) == 1:
             logger.warning(
@@ -287,20 +872,19 @@ class RgAnalysis(Analysis):
         for run in ctx.settings.runs:
             run_label = run.label
             run_entries = []
-            for result in results:
-                for run_result in result.run_results:
-                    if run_result.run_label == run_label:
-                        run_entries.append(run_result)
-                        break
-
-            if not run_entries:
-                logger.warning(
-                    "No Rg entries found for run '%s' in condition '%s' — selection may "
-                    "match no atoms in this condition; skipping in aggregate",
-                    run_label,
-                    ctx.condition.label,
-                )
-                continue
+            for result in ordered_results:
+                matches = [
+                    run_result
+                    for run_result in result.run_results
+                    if run_result.run_label == run_label
+                ]
+                if len(matches) != 1:
+                    raise ValueError(
+                        f"Configured Rg run '{run_label}' has invalid aggregate inputs in "
+                        f"condition '{ctx.condition.label}'. Expected one entry per replicate, "
+                        f"found {len(matches)} for replicate {result.replicate}."
+                    )
+                run_entries.append(matches[0])
 
             per_means = [entry.mean_rg for entry in run_entries]
             per_stds = [entry.std_rg for entry in run_entries]
@@ -320,45 +904,105 @@ class RgAnalysis(Analysis):
             reduced_histogram_density_mean: list[float] | None = None
             reduced_histogram_density_sem: list[float] | None = None
 
-            # --- Load NPZ sidecars for histogram aggregation (both modes) ---
             all_reduced_rg_per_rep: list[np.ndarray] = []
             all_fragment_rg_per_rep: list[np.ndarray] = []
-            for entry in run_entries:
-                if entry.npz_path is None:
-                    continue
-                npz_path = Path(entry.npz_path)
+            requires_fragment_distribution = (
+                run.calculation_mode == "fragments" and run.save_fragment_distribution
+            )
+            required_sidecar_outputs = self._describe_sidecar_aggregation_contract(run)
+            missing_sidecar_replicates = [
+                replicate
+                for replicate, entry in zip(replicate_order, run_entries)
+                if entry.npz_path is None
+            ]
+            if missing_sidecar_replicates:
+                raise ValueError(
+                    f"Rg aggregation for run '{run_label}' in condition "
+                    f"'{ctx.condition.label}' requires NPZ sidecar metadata for "
+                    f"{required_sidecar_outputs} in replicates "
+                    f"{missing_sidecar_replicates}. Recompute those replicates or clear "
+                    "stale caches before aggregating."
+                )
+
+            for replicate, entry in zip(replicate_order, run_entries):
+                npz_path_value = entry.npz_path
+                if npz_path_value is None:
+                    raise ValueError(
+                        f"Rg aggregation for run '{run_label}' in condition "
+                        f"'{ctx.condition.label}' is missing NPZ sidecar metadata for "
+                        f"replicate {replicate}."
+                    )
+                npz_path = Path(npz_path_value)
                 if not npz_path.exists():
-                    continue
+                    raise ValueError(
+                        f"Rg aggregation for run '{run_label}' in condition "
+                        f"'{ctx.condition.label}' expected NPZ sidecar {npz_path} for "
+                        f"replicate {replicate}, but the file is missing. Recompute that "
+                        "replicate or clear stale caches before aggregating."
+                    )
 
                 with np.load(npz_path) as npz_data:
-                    if "rg_values" in npz_data:
-                        reduced_values = np.asarray(npz_data["rg_values"], dtype=np.float64)
-                        if reduced_values.size > 0:
-                            all_reduced_rg_per_rep.append(reduced_values)
-
-                    if "fragment_rg_values" in npz_data:
-                        fragment_values = np.asarray(
-                            npz_data["fragment_rg_values"], dtype=np.float64
+                    if "rg_values" not in npz_data:
+                        raise ValueError(
+                            f"Rg aggregation for run '{run_label}' in condition "
+                            f"'{ctx.condition.label}' expected 'rg_values' in NPZ sidecar "
+                            f"{npz_path} for replicate {replicate}."
                         )
-                        if fragment_values.size > 0:
-                            all_fragment_rg_per_rep.append(fragment_values)
 
-            # --- Fragment-specific aggregation (counts + fragment histogram) ---
-            if template.calculation_mode == "fragments":
-                per_replicate_mean_fragments_per_frame = [
-                    entry.mean_fragments_per_frame
-                    for entry in run_entries
-                    if entry.mean_fragments_per_frame is not None
-                ]
-                if per_replicate_mean_fragments_per_frame:
-                    overall_mean_fragments_per_frame = float(
-                        np.mean(
-                            np.asarray(
-                                per_replicate_mean_fragments_per_frame,
-                                dtype=np.float64,
+                    reduced_values = np.asarray(npz_data["rg_values"], dtype=np.float64)
+                    if reduced_values.size == 0:
+                        raise ValueError(
+                            f"Rg aggregation for run '{run_label}' in condition "
+                            f"'{ctx.condition.label}' found empty reduced-series data in "
+                            f"NPZ sidecar {npz_path} for replicate {replicate}."
+                        )
+                    all_reduced_rg_per_rep.append(reduced_values)
+
+                    if requires_fragment_distribution:
+                        if "fragment_rg_values" not in npz_data:
+                            raise ValueError(
+                                f"Rg aggregation for run '{run_label}' in condition "
+                                f"'{ctx.condition.label}' expected 'fragment_rg_values' in "
+                                f"NPZ sidecar {npz_path} for replicate {replicate}."
                             )
+
+                        fragment_values = np.asarray(
+                            npz_data["fragment_rg_values"],
+                            dtype=np.float64,
+                        )
+                        if fragment_values.size == 0:
+                            raise ValueError(
+                                f"Rg aggregation for run '{run_label}' in condition "
+                                f"'{ctx.condition.label}' found empty fragment distribution "
+                                f"data in NPZ sidecar {npz_path} for replicate {replicate}."
+                            )
+                        all_fragment_rg_per_rep.append(fragment_values)
+
+            if template.calculation_mode == "fragments":
+                missing_fragment_metrics = [
+                    replicate
+                    for replicate, entry in zip(replicate_order, run_entries)
+                    if entry.mean_fragments_per_frame is None
+                ]
+                if missing_fragment_metrics:
+                    raise ValueError(
+                        f"Rg aggregation for run '{run_label}' in condition "
+                        f"'{ctx.condition.label}' is missing mean_fragments_per_frame for "
+                        f"replicates {missing_fragment_metrics}. Recompute those replicates or "
+                        "clear stale caches before aggregating."
+                    )
+
+                per_replicate_mean_fragments_per_frame = [
+                    float(entry.mean_fragments_per_frame) for entry in run_entries
+                ]
+                overall_mean_fragments_per_frame = float(
+                    np.mean(
+                        np.asarray(
+                            per_replicate_mean_fragments_per_frame,
+                            dtype=np.float64,
                         )
                     )
+                )
 
                 if all_fragment_rg_per_rep:
                     pooled_fragment_rg = np.concatenate(all_fragment_rg_per_rep)
@@ -435,8 +1079,8 @@ class RgAnalysis(Analysis):
                     equilibration_time=first.equilibration_time,
                     equilibration_unit=first.equilibration_unit,
                     selection_string=template.selection,
-                    replicates=list(ctx.replicates),
-                    n_replicates=len(ctx.replicates),
+                    replicates=replicate_order,
+                    n_replicates=len(replicate_order),
                     run_label=run_label,
                     selection=template.selection,
                     overall_mean=mean_stats.mean,
@@ -465,9 +1109,10 @@ class RgAnalysis(Analysis):
             equilibration_time=first.equilibration_time,
             equilibration_unit=first.equilibration_unit,
             selection_string=first.selection_string,
-            replicates=list(ctx.replicates),
-            n_replicates=len(ctx.replicates),
+            replicates=replicate_order,
+            n_replicates=len(replicate_order),
             run_results=aggregated_runs,
+            settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
             source_result_files=[],
         )
 
@@ -511,15 +1156,35 @@ class RgAnalysis(Analysis):
         summaries: list[RgConditionSummary] = []
         for condition in ctx.conditions:
             agg_result = ctx.aggregated_results.get(condition.label)
-            if agg_result is None:
+            if agg_result is not None:
+                agg_result = self._coerce_and_validate_aggregated_result(
+                    agg_result,
+                    ctx.settings,
+                    condition_label=condition.label,
+                    source=self._resolve_aggregated_result_path(
+                        ctx.analysis_dirs[condition.label] / "aggregated"
+                    ),
+                )
+            else:
                 agg_dir = ctx.analysis_dirs[condition.label] / "aggregated"
-                agg_result = self._load_aggregated_result(agg_dir)
+                agg_result = self._load_aggregated_result(
+                    agg_dir,
+                    settings=ctx.settings,
+                    condition_label=condition.label,
+                )
 
             if agg_result is None:
-                logger.warning(
-                    "No aggregated Rg result for condition '%s'; skipping", condition.label
+                raise ValueError(
+                    f"Rg comparison requires an aggregated result for condition "
+                    f"'{condition.label}'. Recompute the condition or clear stale caches "
+                    "before comparing."
                 )
-                continue
+
+            self._validate_aggregated_result_completeness(
+                condition,
+                agg_result,
+                configured_run_labels,
+            )
 
             run_summaries = [
                 RgRunSummary(
@@ -558,29 +1223,16 @@ class RgAnalysis(Analysis):
         anova_by_run: list[RgRunANOVA] | None = []
 
         for run_label in configured_run_labels:
-            summaries_with_run = filter_summaries_with_run(
-                summaries_by_label,
-                run_label,
-                lambda summary, label: summary.get_run(label),
-                logger=logger,
-            )
-            if not summaries_with_run:
-                logger.warning(
-                    "Run '%s' has no condition data; skipping run-level comparison",
-                    run_label,
-                )
-                continue
-
             run_labels.append(run_label)
             ranked = sorted(
-                summaries_with_run,
-                key=lambda label: summaries_with_run[label].get_run(run_label).mean_rg,
+                summaries_by_label,
+                key=lambda label: summaries_by_label[label].get_run(run_label).mean_rg,
             )
             ranking_by_run[run_label] = ranked
 
-            if len(summaries_with_run) >= 2:
+            if len(summaries_by_label) >= 2:
                 condition_pairs = build_condition_pairs(
-                    list(summaries_with_run.keys()),
+                    list(summaries_by_label.keys()),
                     effective_control,
                     on_control_missing="all_pairs",
                     logger=logger,
@@ -591,15 +1243,15 @@ class RgAnalysis(Analysis):
                             run_label=run_label,
                             condition_a=condition_a,
                             condition_b=condition_b,
-                            run_a=summaries_with_run[condition_a].get_run(run_label),
-                            run_b=summaries_with_run[condition_b].get_run(run_label),
+                            run_a=summaries_by_label[condition_a].get_run(run_label),
+                            run_b=summaries_by_label[condition_b].get_run(run_label),
                         )
                     )
 
-            if len(summaries_with_run) >= 3:
+            if len(summaries_by_label) >= 3:
                 groups = [
                     summary.get_run(run_label).per_replicate_means
-                    for summary in summaries_with_run.values()
+                    for summary in summaries_by_label.values()
                 ]
                 if any(len(group) < 2 for group in groups):
                     anova_by_run.append(
@@ -621,10 +1273,6 @@ class RgAnalysis(Analysis):
                         significant=anova_result.significant,
                     )
                 )
-
-        if not run_labels:
-            logger.warning("Rg comparison skipped because no runs had data in any condition")
-            return None
 
         if not anova_by_run:
             anova_by_run = None
@@ -658,6 +1306,15 @@ class RgAnalysis(Analysis):
         comparison_result = self._deserialize_comparison(comparison_path)
         if comparison_result is None:
             return []
+
+        data, labels = self._build_plot_data(ctx)
+        for label in labels:
+            aggregated_dir = data[label]["aggregated_dir"]
+            self._load_aggregated_result(
+                aggregated_dir,
+                settings=ctx.settings,
+                condition_label=label,
+            )
 
         try:
             from polyzymd.analyses.rg._plotters import (
@@ -701,198 +1358,25 @@ class RgAnalysis(Analysis):
         n_frames_total: int,
         n_frames_used: int,
         timestep_ps: float,
-    ) -> RgRunResult | None:
-        """Compute one Rg run for a single replicate.
+    ) -> Any:
+        """Compatibility shim for one Rg run.
 
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            1-indexed replicate number.
-        run : RgRunSettings
-            Run definition containing label and selection.
-        loader : TrajectoryLoader
-            Trajectory loader for this simulation condition.
-        config_hash : str
-            Hash of simulation configuration.
-        eq_value : float
-            Equilibration value.
-        eq_unit : str
-            Equilibration unit.
-        start_frame : int
-            First frame to include (0-indexed).
-        n_frames_total : int
-            Total number of frames in trajectory.
-        n_frames_used : int
-            Number of frames analyzed after equilibration.
-        timestep_ps : float
-            Trajectory timestep in picoseconds.
-
-        Returns
-        -------
-        RgRunResult | None
-            Per-run Rg result for this replicate, or ``None`` when the
-            selection matches no atoms.
+        This helper remains for focused unit tests while delegating the actual
+        trajectory-native work to ``rg._runner``. Empty selections now fail
+        immediately so the replicate exits before any partial result files are
+        written.
         """
-        import numpy as np
 
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.rg._results import RgRunResult
-        from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
-
-        u = loader.load_universe(replicate, cache=False)
-        atom_group = u.select_atoms(run.selection)
-        if len(atom_group) == 0:
-            logger.warning(
-                "Run '%s' selection matched no atoms for replicate %d: %r — skipping run",
-                run.label,
-                replicate,
-                run.selection,
-            )
-            return None
-
-        rg_values = np.empty(n_frames_used, dtype=np.float64)
-        all_fragment_rg: list[float] = []
-        fragment_counts: list[int] = []
-        frag_masses: np.ndarray | None = None
-        frag_metadata: dict[str, float | int] = {}
-
-        if run.calculation_mode == "fragments":
-            fragments = list(atom_group.fragments) if atom_group.fragments else [atom_group]
-            if len(fragments) == 1:
-                logger.warning(
-                    "Run '%s' selection produced only 1 fragment; fragment mode will behave "
-                    "identically to selection mode",
-                    run.label,
-                )
-
-            if run.fragment_weighting == "mass":
-                frag_masses = np.asarray(
-                    [frag.total_mass() for frag in fragments], dtype=np.float64
-                )
-                if np.any(frag_masses <= 0) or np.any(np.isnan(frag_masses)):
-                    raise ValueError(
-                        f"Run '{run.label}': fragment masses contain zero or NaN values. "
-                        "This suggests a problem with the MDAnalysis universe topology. "
-                        f"Fragment masses: {frag_masses.tolist()}"
-                    )
-
-            for idx, frame_idx in enumerate(range(start_frame, n_frames_total)):
-                u.trajectory[frame_idx]
-                frag_rg = np.asarray(
-                    [frag.radius_of_gyration() for frag in fragments], dtype=np.float64
-                )
-                fragment_counts.append(len(fragments))
-                if run.save_fragment_distribution:
-                    all_fragment_rg.extend(frag_rg.tolist())
-                if frag_masses is not None:
-                    rg_values[idx] = float(np.average(frag_rg, weights=frag_masses))
-                else:
-                    rg_values[idx] = float(np.mean(frag_rg))
-
-            if all_fragment_rg:
-                frag_arr = np.asarray(all_fragment_rg, dtype=np.float64)
-                frag_metadata = {
-                    "fragment_mean_rg": float(np.mean(frag_arr)),
-                    "fragment_std_rg": float(np.std(frag_arr, ddof=0)),
-                    "fragment_median_rg": float(np.median(frag_arr)),
-                    "fragment_min_rg": float(np.min(frag_arr)),
-                    "fragment_max_rg": float(np.max(frag_arr)),
-                    "fragment_rg_p10": float(np.percentile(frag_arr, 10)),
-                    "fragment_rg_p25": float(np.percentile(frag_arr, 25)),
-                    "fragment_rg_p50": float(np.percentile(frag_arr, 50)),
-                    "fragment_rg_p75": float(np.percentile(frag_arr, 75)),
-                    "fragment_rg_p90": float(np.percentile(frag_arr, 90)),
-                }
-
-            frag_metadata["mean_fragments_per_frame"] = float(np.mean(fragment_counts))
-            frag_metadata["min_fragments_per_frame"] = int(np.min(fragment_counts))
-            frag_metadata["max_fragments_per_frame"] = int(np.max(fragment_counts))
-        else:
-            for idx, frame_idx in enumerate(range(start_frame, n_frames_total)):
-                u.trajectory[frame_idx]
-                rg_values[idx] = float(atom_group.radius_of_gyration())
-
-        frames = np.arange(start_frame, n_frames_total, dtype=np.int64)
-        time_ns = (frames.astype(np.float64) * timestep_ps) / 1000.0
-
-        mean_rg = float(np.mean(rg_values))
-        std_rg = float(np.std(rg_values, ddof=0))
-        median_rg = float(np.median(rg_values))
-        min_rg = float(np.min(rg_values))
-        max_rg = float(np.max(rg_values))
-        final_rg = float(rg_values[-1])
-
-        sem_rg: float | None = None
-        correlation_time: float | None = None
-        correlation_time_unit: str | None = None
-        n_independent_frames: int | None = None
-        statistical_inefficiency: float | None = None
-        autocorrelation_warning: str | None = None
-
-        if len(rg_values) >= 20:
-            tau_result = estimate_correlation_time(
-                rg_values,
-                timestep=timestep_ps,
-                timestep_unit="ps",
-                method="integration",
-                n_frames=len(rg_values),
-            )
-            correlation_time = tau_result.tau
-            correlation_time_unit = tau_result.tau_unit
-            n_independent_frames = tau_result.n_independent
-            statistical_inefficiency = tau_result.statistical_inefficiency
-            autocorrelation_warning = tau_result.warning
-            if n_independent_frames > 0:
-                sem_rg = float(std_rg / np.sqrt(float(n_independent_frames)))
-
-        npz_filename = f"rg_{run.label}_{eq_str}_{settings_tag}_timeseries.npz"
-        npz_path = ctx.output_dir / npz_filename
-        npz_data: dict[str, np.ndarray] = {
-            "rg_values": rg_values,
-            "time_ns": time_ns,
-            "frames": frames,
-        }
-        if run.calculation_mode == "fragments" and run.save_fragment_distribution:
-            npz_data["fragment_rg_values"] = np.asarray(all_fragment_rg, dtype=np.float64)
-            npz_data["fragment_counts_per_frame"] = np.asarray(fragment_counts, dtype=np.int64)
-            if frag_masses is not None:
-                npz_data["fragment_masses"] = frag_masses
-
-        np.savez_compressed(npz_path, **npz_data)
-
-        return RgRunResult(
-            config_hash=config_hash,
-            polyzymd_version=get_polyzymd_version(),
+        del ctx, config_hash, eq_value, eq_unit, eq_str, settings_tag, n_frames_used
+        universe = loader.load_universe(replicate, cache=False)
+        return compute_rg_run(
+            universe=universe,
+            run=run,
             replicate=replicate,
-            equilibration_time=eq_value,
-            equilibration_unit=eq_unit,
-            selection_string=run.selection,
-            correlation_time=correlation_time,
-            n_independent_frames=n_independent_frames,
-            run_label=run.label,
-            selection=run.selection,
-            calculation_mode=run.calculation_mode,
-            fragment_weighting=(
-                run.fragment_weighting if run.calculation_mode == "fragments" else None
-            ),
-            mean_rg=mean_rg,
-            std_rg=std_rg,
-            median_rg=median_rg,
-            min_rg=min_rg,
-            max_rg=max_rg,
-            final_rg=final_rg,
-            sem_rg=sem_rg,
-            correlation_time_unit=correlation_time_unit,
-            statistical_inefficiency=statistical_inefficiency,
-            autocorrelation_warning=autocorrelation_warning,
-            n_frames_total=n_frames_total,
-            n_frames_used=n_frames_used,
-            npz_path=str(npz_path),
-            time_unit="ns",
+            start=start_frame,
+            stop=n_frames_total,
+            step=1,
             timestep_ps=timestep_ps,
-            **frag_metadata,
         )
 
     @staticmethod

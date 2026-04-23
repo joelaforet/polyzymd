@@ -15,6 +15,7 @@ from polyzymd.analyses import get_analysis, list_analyses
 from polyzymd.analyses.base import (
     AggregateContext,
     ANOVAResult,
+    ComparisonContext,
     ComparisonResult,
     Condition,
     ConditionSummary,
@@ -266,6 +267,36 @@ def test_settings_hash_stable_and_cache_name_stable() -> None:
     assert f"hbonds_eq0ns_{hash_a}.json" == f"hbonds_eq0ns_{hash_b}.json"
 
 
+def test_get_trajectory_window_uses_timestep_override(tmp_path: Path) -> None:
+    """Runner window resolution should honor settings.timestep_ps overrides."""
+    analysis = HydrogenBondsAnalysis()
+    condition = Condition(
+        label="test",
+        config_path=Path("/tmp/config.yaml"),
+        replicates=(1,),
+        sim_config=MagicMock(),
+    )
+    settings = HydrogenBondSettings(timestep_ps=50.0)
+    ctx = ReplicateContext(
+        condition=condition,
+        replicate=1,
+        sim_config=condition.sim_config,
+        output_dir=tmp_path / "run_1",
+        equilibration="1ns",
+        recompute=True,
+        settings=settings,
+    )
+    loader = MagicMock()
+    loader.get_timestep.return_value = 10.0
+    universe = MagicMock()
+    universe.trajectory = [object()] * 100
+
+    window = analysis.get_trajectory_window(ctx, 1, loader, universe)
+
+    assert window.start == 20
+    assert window.timestep_ps == pytest.approx(50.0)
+
+
 def test_angle_cutoff_validation() -> None:
     """Angle cutoff must be in the range (0, 180]."""
     with pytest.raises(ValidationError):
@@ -276,8 +307,10 @@ def test_angle_cutoff_validation() -> None:
 
 def test_replicate_result_save_load(tmp_path: Path) -> None:
     """Replicate result models should round-trip with save/load."""
+    settings = HydrogenBondSettings()
     result = HydrogenBondResult(
         replicate=1,
+        settings_fingerprint=_settings_hash(settings),
         summaries=[
             HydrogenBondReplicateSummary(
                 name="protein_polymer",
@@ -295,13 +328,16 @@ def test_replicate_result_save_load(tmp_path: Path) -> None:
     loaded = HydrogenBondResult.load(path)
 
     assert loaded.replicate == 1
+    assert loaded.settings_fingerprint == _settings_hash(settings)
     assert loaded.summaries[0].name == "protein_polymer"
     assert loaded.summaries[0].mean_hbonds_per_frame == pytest.approx(3.2)
 
 
 def test_aggregated_result_save_load(tmp_path: Path) -> None:
     """Aggregated result models should round-trip with save/load."""
+    settings = HydrogenBondSettings()
     result = HydrogenBondAggregatedResult(
+        settings_fingerprint=_settings_hash(settings),
         replicates=[1, 2],
         n_replicates=2,
         summaries=[
@@ -325,7 +361,31 @@ def test_aggregated_result_save_load(tmp_path: Path) -> None:
 
     assert loaded.n_replicates == 2
     assert loaded.replicates == [1, 2]
+    assert loaded.settings_fingerprint == _settings_hash(settings)
     assert loaded.summaries[0].name == "protein_polymer"
+
+
+def test_load_aggregated_result_rejects_stale_settings_fingerprint(tmp_path: Path) -> None:
+    """Aggregated cache loads should reject results from different settings."""
+    analysis = HydrogenBondsAnalysis()
+    current_settings = HydrogenBondSettings()
+    stale_settings = HydrogenBondSettings(distance_cutoff=3.5)
+
+    aggregated_dir = tmp_path / "aggregated"
+    aggregated_dir.mkdir()
+    HydrogenBondAggregatedResult(
+        settings_fingerprint=_settings_hash(stale_settings),
+        replicates=[1, 2],
+        n_replicates=2,
+        summaries=[_make_aggregated_summary("protein_polymer", 3.0, 0.2, [2.8, 3.2])],
+    ).save(aggregated_dir / "result.json")
+
+    with pytest.raises(ValueError, match="current settings require"):
+        analysis._load_aggregated_result(
+            aggregated_dir,
+            settings=current_settings,
+            condition_label="CondA",
+        )
 
 
 def test_aggregated_summary_deserializes_legacy_std_unique_pairs_field() -> None:
@@ -809,8 +869,13 @@ def test_equilibration_exceeds_trajectory_raises(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        with pytest.raises(ValueError, match="trajectory only has 3 frames"):
+        with pytest.raises(ValueError) as exc_info:
             analysis.compute_replicate(ctx, 1)
+
+    message = str(exc_info.value)
+    assert "Equilibration time" in message
+    assert "trajectory length" in message
+    assert "Reduce --eq-time or check your trajectory" in message
 
 
 def test_equilibration_leaves_one_frame_warns(
@@ -875,7 +940,16 @@ def test_equilibration_leaves_one_frame_warns(
 
     assert isinstance(result, HydrogenBondResult)
     assert result.summaries[0].counts_per_frame == [1]
-    assert "Only 1 frame(s) remain after equilibration 40ps" in caplog.text
+
+    warning_messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "Warning: Skipping" in message and "trajectory for equilibration" in message
+        for message in warning_messages
+    )
+    assert any(
+        "Only 1 frame(s) remain after equilibration window [4:5:1]" in message
+        for message in warning_messages
+    )
 
 
 def test_intra_residue_exclusion(tmp_path: Path) -> None:
@@ -1133,6 +1207,41 @@ def test_load_replicate_timeseries_corrupt_json(
     assert "Could not load replicate result" in caplog.text
 
 
+def test_load_replicate_timeseries_rejects_stale_settings_fingerprint(tmp_path: Path) -> None:
+    """Timeseries loading should reject stale replicate caches during plotting."""
+    analysis = HydrogenBondsAnalysis()
+    current_settings = HydrogenBondSettings()
+    stale_settings = HydrogenBondSettings(distance_cutoff=3.5)
+    analysis_dir = tmp_path / "analysis" / "conda" / "hydrogen_bonds"
+    run_dir = analysis_dir / "run_1"
+    run_dir.mkdir(parents=True)
+
+    HydrogenBondResult(
+        config_hash="cfg123",
+        settings_fingerprint=_settings_hash(stale_settings),
+        replicate=1,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="chainid A",
+        summaries=[
+            HydrogenBondReplicateSummary(
+                name="protein_polymer",
+                mode="between",
+                group_names=["protein", "polymer"],
+                n_frames_used=3,
+                mean_hbonds_per_frame=2.0,
+                fraction_frames_with_any_hbond=0.5,
+                counts_per_frame=[1, 2, 3],
+            )
+        ],
+    ).save(run_dir / "hbonds_eq10ns_deadbeef.json")
+
+    data = {"CondA": {"analysis_dir": analysis_dir, "replicates": [1]}}
+
+    with pytest.raises(ValueError, match="current settings require"):
+        analysis._load_replicate_timeseries(data, ["CondA"], settings=current_settings)
+
+
 def test_aggregate_composition() -> None:
     """Composition aggregation should compute mean and SEM with zero-fill."""
     analysis = HydrogenBondsAnalysis()
@@ -1279,14 +1388,11 @@ def _make_replicate_result(
     fraction_with_any: float,
     directed_pairs: list[DirectedResiduePairResult] | None = None,
     undirected_pairs: list[UndirectedResiduePairResult] | None = None,
+    summaries: list[HydrogenBondReplicateSummary] | None = None,
+    settings: HydrogenBondSettings | None = None,
 ) -> HydrogenBondResult:
-    return HydrogenBondResult(
-        config_hash="cfg123",
-        replicate=replicate,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="(chainid A) or (chainid C)",
-        summaries=[
+    if summaries is None:
+        summaries = [
             HydrogenBondReplicateSummary(
                 name="protein_polymer",
                 mode="between",
@@ -1298,7 +1404,16 @@ def _make_replicate_result(
                 directed_residue_pairs=directed_pairs or [],
                 undirected_residue_pairs=undirected_pairs or [],
             )
-        ],
+        ]
+
+    return HydrogenBondResult(
+        config_hash="cfg123",
+        settings_fingerprint=_settings_hash(settings or HydrogenBondSettings()),
+        replicate=replicate,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="(chainid A) or (chainid C)",
+        summaries=summaries,
     )
 
 
@@ -1438,9 +1553,30 @@ def test_aggregate_top_n_truncation(tmp_path: Path) -> None:
     ]
 
     results = [
-        _make_replicate_result(1, 2.0, 0.4, directed_pairs=directed, undirected_pairs=undirected),
-        _make_replicate_result(2, 2.0, 0.4, directed_pairs=directed, undirected_pairs=undirected),
-        _make_replicate_result(3, 2.0, 0.4, directed_pairs=directed, undirected_pairs=undirected),
+        _make_replicate_result(
+            1,
+            2.0,
+            0.4,
+            directed_pairs=directed,
+            undirected_pairs=undirected,
+            settings=ctx.settings,
+        ),
+        _make_replicate_result(
+            2,
+            2.0,
+            0.4,
+            directed_pairs=directed,
+            undirected_pairs=undirected,
+            settings=ctx.settings,
+        ),
+        _make_replicate_result(
+            3,
+            2.0,
+            0.4,
+            directed_pairs=directed,
+            undirected_pairs=undirected,
+            settings=ctx.settings,
+        ),
     ]
 
     aggregated = analysis.aggregate(ctx, results)
@@ -1455,8 +1591,44 @@ def test_aggregate_error_message_includes_replicate_details(tmp_path: Path) -> N
     """Aggregate mismatch errors should include expected replicate IDs."""
     analysis = HydrogenBondsAnalysis()
     ctx = _make_aggregate_context(tmp_path, replicates=(1, 2, 3))
-    with pytest.raises(ValueError, match=r"replicates \[1, 2, 3\]"):
+    with pytest.raises(ValueError, match=r"Expected replicate results for \[1, 2, 3\]"):
         _ = analysis.aggregate(ctx, [_make_replicate_result(1, 1.0, 0.2)])
+
+
+def test_aggregate_rejects_duplicate_replicate_ids(tmp_path: Path) -> None:
+    """Aggregate should reject duplicate replicate IDs even when result count matches."""
+    analysis = HydrogenBondsAnalysis()
+    ctx = _make_aggregate_context(tmp_path, replicates=(1, 2, 3))
+
+    results = [
+        _make_replicate_result(1, 1.0, 0.2),
+        _make_replicate_result(2, 1.2, 0.3),
+        _make_replicate_result(2, 1.4, 0.4),
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match=r"missing replicates \[3\].*duplicate replicates \[2\]",
+    ):
+        _ = analysis.aggregate(ctx, results)
+
+
+def test_aggregate_rejects_unexpected_replicate_ids(tmp_path: Path) -> None:
+    """Aggregate should reject unexpected replicate IDs instead of trusting list order."""
+    analysis = HydrogenBondsAnalysis()
+    ctx = _make_aggregate_context(tmp_path, replicates=(1, 2, 3))
+
+    results = [
+        _make_replicate_result(1, 1.0, 0.2),
+        _make_replicate_result(2, 1.2, 0.3),
+        _make_replicate_result(4, 1.4, 0.4),
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match=r"missing replicates \[3\].*unexpected replicates \[4\]",
+    ):
+        _ = analysis.aggregate(ctx, results)
 
 
 def test_aggregate_saves_result(tmp_path: Path) -> None:
@@ -1475,31 +1647,20 @@ def test_aggregate_saves_result(tmp_path: Path) -> None:
     assert ctx.result_path.exists()
 
 
-def test_aggregate_missing_summary_in_one_replicate(tmp_path: Path) -> None:
-    """Missing summary in one replicate should be zero-filled at correct index."""
+def test_aggregate_rejects_missing_summary_in_one_replicate(tmp_path: Path) -> None:
+    """Aggregate should fail loudly on stale replicate outputs missing summaries."""
     analysis = HydrogenBondsAnalysis()
     ctx = _make_aggregate_context(tmp_path, replicates=(1, 2, 3))
 
     rep1 = _make_replicate_result(1, 2.0, 0.4)
-    rep2 = HydrogenBondResult(
-        config_hash="cfg123",
-        replicate=2,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="(chainid A) or (chainid C)",
-        summaries=[],
-    )
+    rep2 = _make_replicate_result(2, 0.0, 0.0, summaries=[])
     rep3 = _make_replicate_result(3, 4.0, 0.6)
 
-    aggregated = analysis.aggregate(ctx, [rep1, rep2, rep3])
-
-    assert len(aggregated.summaries) == 1
-    summary = aggregated.summaries[0]
-    assert summary.per_replicate_mean_hbonds == pytest.approx([2.0, 0.0, 4.0])
-    assert summary.per_replicate_fraction_with_any == pytest.approx([0.4, 0.0, 0.6])
-    assert len(summary.per_replicate_mean_hbonds) == 3
-    assert len(summary.per_replicate_fraction_with_any) == 3
-    assert summary.mean_hbonds_per_frame == pytest.approx((2.0 + 0.0 + 4.0) / 3.0)
+    with pytest.raises(
+        ValueError,
+        match=r"condition 'test'.*summary 'protein_polymer'.*replicate results \[2\]",
+    ):
+        _ = analysis.aggregate(ctx, [rep1, rep2, rep3])
 
 
 def test_aggregate_single_replicate(tmp_path: Path) -> None:
@@ -1563,14 +1724,7 @@ def test_aggregate_pair_alignment(tmp_path: Path) -> None:
             _make_directed_pair(donor_a, acceptor_b, occupancy=0.5, events_per_frame=0.5)
         ],
     )
-    rep2 = HydrogenBondResult(
-        config_hash="cfg123",
-        replicate=2,
-        equilibration_time=10.0,
-        equilibration_unit="ns",
-        selection_string="(chainid A) or (chainid C)",
-        summaries=[],
-    )
+    rep2 = _make_replicate_result(2, 0.0, 0.0, directed_pairs=[])
     rep3 = _make_replicate_result(
         3,
         1.0,
@@ -2011,6 +2165,131 @@ def test_format_non_comparison_result() -> None:
     text = analysis.format(payload, output_format="text")
 
     assert text == str(payload)
+
+
+def test_compare_rejects_stale_preloaded_aggregated_result(tmp_path: Path) -> None:
+    """compare should fail loudly when aggregated results use stale settings."""
+    analysis = HydrogenBondsAnalysis()
+    current_settings = HydrogenBondSettings()
+    stale_settings = HydrogenBondSettings(angle_cutoff=140.0)
+    condition = Condition(
+        label="CondA",
+        config_path=Path("/tmp/config.yaml"),
+        replicates=(1, 2),
+        sim_config=MagicMock(),
+    )
+
+    ctx = ComparisonContext(
+        name="hbonds_compare",
+        conditions=[condition],
+        excluded_conditions=[],
+        control_label="CondA",
+        analysis_dirs={"CondA": tmp_path / "analysis" / "conda" / "hydrogen_bonds"},
+        results_dir=tmp_path / "comparison",
+        equilibration="10ns",
+        settings=current_settings,
+        recompute=False,
+        aggregated_results={
+            "CondA": HydrogenBondAggregatedResult(
+                settings_fingerprint=_settings_hash(stale_settings),
+                replicates=[1, 2],
+                n_replicates=2,
+                summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [1.8, 2.2])],
+            )
+        },
+    )
+
+    with pytest.raises(ValueError, match="current settings require"):
+        analysis.compare(ctx)
+
+
+def test_plot_rejects_stale_aggregated_result_from_disk(tmp_path: Path) -> None:
+    """plot should fail loudly instead of silently plotting stale aggregated caches."""
+    analysis = HydrogenBondsAnalysis()
+    current_settings = HydrogenBondSettings()
+    stale_settings = HydrogenBondSettings(groups={"protein": "chainid A", "polymer": "chainid B"})
+    condition = Condition(
+        label="CondA",
+        config_path=Path("/tmp/config.yaml"),
+        replicates=(1, 2),
+        sim_config=MagicMock(),
+    )
+    analysis_dir = tmp_path / "analysis" / "conda" / "hydrogen_bonds"
+    aggregated_dir = analysis_dir / "aggregated"
+    aggregated_dir.mkdir(parents=True)
+    HydrogenBondAggregatedResult(
+        settings_fingerprint=_settings_hash(stale_settings),
+        replicates=[1, 2],
+        n_replicates=2,
+        summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [1.8, 2.2])],
+    ).save(aggregated_dir / "result.json")
+
+    ctx = PlotContext(
+        conditions=[condition],
+        analysis_dirs={"CondA": analysis_dir},
+        results_dir=tmp_path / "comparison",
+        output_dir=tmp_path / "figures",
+        settings=current_settings,
+        plot_settings=PlotSettings(),
+    )
+
+    with pytest.raises(ValueError, match="current settings require"):
+        analysis.plot(ctx)
+
+
+def test_plot_rejects_legacy_replicate_cache_from_disk(tmp_path: Path) -> None:
+    """plot should fail loudly instead of silently plotting legacy replicate caches."""
+    analysis = HydrogenBondsAnalysis()
+    current_settings = HydrogenBondSettings()
+    condition = Condition(
+        label="CondA",
+        config_path=Path("/tmp/config.yaml"),
+        replicates=(1,),
+        sim_config=MagicMock(),
+    )
+    analysis_dir = tmp_path / "analysis" / "conda" / "hydrogen_bonds"
+    aggregated_dir = analysis_dir / "aggregated"
+    run_dir = analysis_dir / "run_1"
+    aggregated_dir.mkdir(parents=True)
+    run_dir.mkdir(parents=True)
+
+    HydrogenBondAggregatedResult(
+        settings_fingerprint=_settings_hash(current_settings),
+        replicates=[1],
+        n_replicates=1,
+        summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.2, [2.0])],
+    ).save(aggregated_dir / "result.json")
+
+    HydrogenBondResult(
+        config_hash="cfg123",
+        replicate=1,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="chainid A",
+        summaries=[
+            HydrogenBondReplicateSummary(
+                name="protein_polymer",
+                mode="between",
+                group_names=["protein", "polymer"],
+                n_frames_used=3,
+                mean_hbonds_per_frame=2.0,
+                fraction_frames_with_any_hbond=0.5,
+                counts_per_frame=[1, 2, 3],
+            )
+        ],
+    ).save(run_dir / "hbonds_eq10ns_deadbeef.json")
+
+    ctx = PlotContext(
+        conditions=[condition],
+        analysis_dirs={"CondA": analysis_dir},
+        results_dir=tmp_path / "comparison",
+        output_dir=tmp_path / "figures",
+        settings=current_settings,
+        plot_settings=PlotSettings(),
+    )
+
+    with pytest.raises(ValueError, match="missing a settings fingerprint"):
+        analysis.plot(ctx)
 
 
 def test_plot_returns_paths(tmp_path: Path) -> None:
@@ -2725,6 +3004,7 @@ def test_aggregate_all_summaries_present(tmp_path: Path) -> None:
 
     rep1 = HydrogenBondResult(
         replicate=1,
+        settings_fingerprint=_settings_hash(settings),
         summaries=[
             HydrogenBondReplicateSummary(
                 name="protein_polymer",
@@ -2748,6 +3028,7 @@ def test_aggregate_all_summaries_present(tmp_path: Path) -> None:
     )
     rep2 = HydrogenBondResult(
         replicate=2,
+        settings_fingerprint=_settings_hash(settings),
         summaries=[
             HydrogenBondReplicateSummary(
                 name="protein_polymer",

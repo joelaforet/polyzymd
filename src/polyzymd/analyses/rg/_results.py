@@ -214,6 +214,12 @@ class RgResult(BaseAnalysisResult):
     # Collection of run results
     run_results: list[RgRunResult] = Field(..., description="Results for each Rg run")
 
+    # Cache identity
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Settings fingerprint used to validate cached Rg results",
+    )
+
     # Trajectory info (shared across runs)
     n_frames_total: int = Field(..., description="Total frames in trajectory")
     n_frames_used: int = Field(..., description="Frames used after equilibration")
@@ -372,6 +378,12 @@ class RgAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     # Collection of aggregated run results
     run_results: list[RgRunAggregatedResult] = Field(
         ..., description="Aggregated results for each run"
+    )
+
+    # Cache identity
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Settings fingerprint used to validate aggregated Rg caches",
     )
 
     # Source files

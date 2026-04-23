@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from polyzymd.analyses.base import Condition
+from polyzymd.analyses.base import Condition, PlotContext
 from polyzymd.analyses.discovery import get_analysis
 from polyzymd.analyses.rg import RgAnalysis, RgRunSettings, RgSettings
 from polyzymd.analyses.rg._comparison_results import (
@@ -27,7 +27,10 @@ from polyzymd.analyses.rg._results import (
     RgRunAggregatedResult,
     RgRunResult,
 )
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
+from polyzymd.config.comparison import PlotSettings
 from tests._support.analysis_testkit import (
+    FakeAtomGroup,
     FakeUniverse,
     make_aggregate_context,
     make_comparison_context,
@@ -45,7 +48,18 @@ def _make_run_settings() -> list[RgRunSettings]:
     ]
 
 
-def _make_run_result(replicate: int, run_label: str, mean_rg: float) -> RgRunResult:
+def _settings_hash(settings: RgSettings) -> str:
+    """Return the shared settings fingerprint used by Rg caches."""
+    return settings_fingerprint(settings)
+
+
+def _make_run_result(
+    replicate: int,
+    run_label: str,
+    mean_rg: float,
+    *,
+    npz_path: str | None = None,
+) -> RgRunResult:
     """Create a minimal, valid RgRunResult for test fixtures."""
     return RgRunResult(
         config_hash="hash123",
@@ -65,10 +79,37 @@ def _make_run_result(replicate: int, run_label: str, mean_rg: float) -> RgRunRes
         sem_rg=0.1,
         n_frames_total=100,
         n_frames_used=90,
-        npz_path=f"/fake/{run_label}_rep{replicate}.npz",
+        npz_path=npz_path,
         time_unit="ns",
         timestep_ps=10.0,
     )
+
+
+def _write_rg_sidecar(
+    tmp_path: Path,
+    run_label: str,
+    replicate: int,
+    *,
+    rg_values: list[float],
+    fragment_rg_values: list[float] | None = None,
+) -> Path:
+    """Write a minimal NPZ sidecar for Rg aggregation tests."""
+    import numpy as np
+
+    npz_path = tmp_path / f"run_{replicate}" / f"rg_{run_label}_timeseries.npz"
+    npz_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rg_array = np.asarray(rg_values, dtype=np.float64)
+    payload: dict[str, np.ndarray] = {
+        "rg_values": rg_array,
+        "time_ns": np.arange(rg_array.size, dtype=np.float64),
+        "frames": np.arange(rg_array.size, dtype=np.int64),
+    }
+    if fragment_rg_values is not None:
+        payload["fragment_rg_values"] = np.asarray(fragment_rg_values, dtype=np.float64)
+
+    np.savez(npz_path, **payload)
+    return npz_path
 
 
 def _make_aggregated_run(
@@ -498,12 +539,11 @@ def test_rg_plot_settings_defaults() -> None:
     assert settings.timeseries_figsize == (12, 5)
 
 
-def test_compute_single_run_zero_atoms_returns_none(
+def test_compute_single_run_zero_atoms_raises(
     condition: Condition,
     tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """_compute_single_run should skip zero-atom selections with warning."""
+    """_compute_single_run should fail immediately for zero-atom selections."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=[RgRunSettings(label="polymer_blob_rg", selection="resname SBM")])
     ctx = make_replicate_context(
@@ -522,8 +562,8 @@ def test_compute_single_run_zero_atoms_returns_none(
     loader.load_universe.return_value = universe
 
     run = settings.runs[0]
-    with caplog.at_level("WARNING"):
-        result = analysis._compute_single_run(
+    with pytest.raises(ValueError, match="selection matched no atoms"):
+        analysis._compute_single_run(
             ctx=ctx,
             replicate=1,
             run=run,
@@ -539,23 +579,15 @@ def test_compute_single_run_zero_atoms_returns_none(
             timestep_ps=10.0,
         )
 
-    assert result is None
-    assert "selection matched no atoms" in caplog.text
 
-
-def test_compute_replicate_skips_none_runs(
-    condition: Condition, tmp_path: Path, monkeypatch
+def test_compute_replicate_raises_before_writing_partial_results(
+    condition: Condition,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """compute_replicate should omit runs that returned None."""
-    import polyzymd.analyses.rg as rg_module
-
+    """compute_replicate should fail before writing partial outputs for missing runs."""
     analysis = RgAnalysis()
-    settings = RgSettings(
-        runs=[
-            RgRunSettings(label="protein_rg", selection="protein and name CA"),
-            RgRunSettings(label="polymer_blob_rg", selection="resname SBM"),
-        ]
-    )
+    settings = RgSettings(runs=[RgRunSettings(label="polymer_blob_rg", selection="resname SBM")])
     output_dir = tmp_path / "run_1"
     output_dir.mkdir(parents=True, exist_ok=True)
     ctx = make_replicate_context(
@@ -563,25 +595,20 @@ def test_compute_replicate_skips_none_runs(
         replicate=1,
         output_dir=output_dir,
         settings=settings,
-        equilibration="0ps",
+        equilibration="10ns",
     )
 
-    fake_universe = FakeUniverse(n_atoms=50, n_frames=100, n_residues=10)
-    loader = patch_trajectory_loader(monkeypatch, "polyzymd.analyses.rg", fake_universe)
-    monkeypatch.setattr(rg_module, "compute_config_hash", lambda _sim_config: "hash123")
-    monkeypatch.setattr(analysis, "_check_cache", lambda *args, **kwargs: None)
+    universe = FakeUniverse(
+        n_frames=1200,
+        selection_map={"resname SBM": FakeAtomGroup(n_atoms=0)},
+    )
+    patch_trajectory_loader(monkeypatch, "polyzymd.analyses.shared.loader", universe=universe)
+    patch_trajectory_loader(monkeypatch, "polyzymd.analyses.rg", universe=universe)
 
-    def _mock_compute_single_run(*, run: RgRunSettings, **kwargs):
-        if run.label == "polymer_blob_rg":
-            return None
-        return _make_run_result(1, "protein_rg", 15.0)
+    with pytest.raises(ValueError, match="selection matched no atoms"):
+        analysis.compute_replicate(ctx, 1)
 
-    monkeypatch.setattr(analysis, "_compute_single_run", _mock_compute_single_run)
-
-    result = analysis.compute_replicate(ctx, 1)
-
-    assert len(result.run_results) == 1
-    assert result.run_results[0].run_label == "protein_rg"
+    assert list(output_dir.iterdir()) == []
 
 
 def test_settings_cache_tag_changes_with_settings() -> None:
@@ -630,9 +657,8 @@ def test_compute_replicate_cache_includes_settings_tag(
 def test_aggregate_handles_missing_run(
     condition: Condition,
     tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """aggregate should skip runs with no replicate entries."""
+    """aggregate should fail when a configured run has no replicate entries."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
     ctx = make_aggregate_context(
@@ -658,12 +684,14 @@ def test_aggregate_handles_missing_run(
         for rep in (1, 2)
     ]
 
-    with caplog.at_level("WARNING"):
-        aggregated = analysis.aggregate(ctx, results)
-
-    assert len(aggregated.run_results) == 1
-    assert aggregated.run_results[0].run_label == "protein_backbone"
-    assert "selection may match no atoms in this condition" in caplog.text
+    with pytest.raises(
+        ValueError,
+        match=(
+            rf"Configured Rg run 'polymer_core' is missing replicate entries in "
+            rf"condition '{condition.label}'. Missing replicates: \[1, 2\]"
+        ),
+    ):
+        analysis.aggregate(ctx, results)
 
 
 def test_aggregate_single_replicate(
@@ -672,6 +700,18 @@ def test_aggregate_single_replicate(
     """aggregate should handle a single replicate and log SEM warning."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
+    backbone_npz = _write_rg_sidecar(
+        tmp_path,
+        "protein_backbone",
+        1,
+        rg_values=[14.9, 15.0, 15.1],
+    )
+    polymer_npz = _write_rg_sidecar(
+        tmp_path,
+        "polymer_core",
+        1,
+        rg_values=[21.9, 22.0, 22.1],
+    )
     ctx = make_aggregate_context(
         condition=condition,
         replicates=(1,),
@@ -687,8 +727,8 @@ def test_aggregate_single_replicate(
         equilibration_unit="ns",
         selection_string="protein and name CA; segid C and backbone",
         run_results=[
-            _make_run_result(1, "protein_backbone", 15.0),
-            _make_run_result(1, "polymer_core", 22.0),
+            _make_run_result(1, "protein_backbone", 15.0, npz_path=str(backbone_npz)),
+            _make_run_result(1, "polymer_core", 22.0, npz_path=str(polymer_npz)),
         ],
         n_frames_total=100,
         n_frames_used=90,
@@ -703,8 +743,27 @@ def test_aggregate_single_replicate(
     assert "Only one replicate available for Rg aggregation" in caplog.text
 
 
-def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> None:
-    """aggregate should compute expected means and preserve run structure."""
+def test_aggregate_rejects_empty_results(condition: Condition, tmp_path: Path) -> None:
+    """aggregate should fail loudly when no replicate payloads are provided."""
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=_make_run_settings())
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="requires at least one replicate result",
+    ):
+        analysis.aggregate(ctx, [])
+
+
+def test_aggregate_rejects_misidentified_replicates(condition: Condition, tmp_path: Path) -> None:
+    """aggregate should reject missing or unexpected replicate identities."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
     ctx = make_aggregate_context(
@@ -730,6 +789,75 @@ def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> 
             n_frames_used=90,
             trajectory_files=["/fake/traj.dcd"],
         )
+        for rep in (1, 2, 4)
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match=r"missing replicates \[3\].*unexpected replicates \[4\]",
+    ):
+        analysis.aggregate(ctx, results)
+
+
+def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> None:
+    """aggregate should compute expected means and preserve run structure."""
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=_make_run_settings())
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2, 3),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+    results = [
+        RgResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=rep,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein and name CA; segid C and backbone",
+            run_results=[
+                _make_run_result(
+                    rep,
+                    "protein_backbone",
+                    14.0 + 0.5 * rep,
+                    npz_path=str(
+                        _write_rg_sidecar(
+                            tmp_path,
+                            "protein_backbone",
+                            rep,
+                            rg_values=[
+                                14.0 + 0.5 * rep - 0.1,
+                                14.0 + 0.5 * rep,
+                                14.0 + 0.5 * rep + 0.1,
+                            ],
+                        )
+                    ),
+                ),
+                _make_run_result(
+                    rep,
+                    "polymer_core",
+                    21.0 + 0.5 * rep,
+                    npz_path=str(
+                        _write_rg_sidecar(
+                            tmp_path,
+                            "polymer_core",
+                            rep,
+                            rg_values=[
+                                21.0 + 0.5 * rep - 0.1,
+                                21.0 + 0.5 * rep,
+                                21.0 + 0.5 * rep + 0.1,
+                            ],
+                        )
+                    ),
+                ),
+            ],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=["/fake/traj.dcd"],
+        )
         for rep in (1, 2, 3)
     ]
 
@@ -739,6 +867,61 @@ def test_aggregate_multiple_replicates(condition: Condition, tmp_path: Path) -> 
     backbone = next(run for run in aggregated.run_results if run.run_label == "protein_backbone")
     assert backbone.overall_mean == pytest.approx(15.0)
     assert backbone.per_replicate_means == pytest.approx([14.5, 15.0, 15.5])
+
+
+def test_aggregate_orders_complete_out_of_order_inputs(
+    condition: Condition, tmp_path: Path
+) -> None:
+    """aggregate should align per-replicate arrays to declared replicate order."""
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=[RgRunSettings(label="protein_backbone", selection="protein")])
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2, 3),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+    results = [
+        RgResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=rep,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein",
+            run_results=[
+                _make_run_result(
+                    rep,
+                    "protein_backbone",
+                    14.0 + 0.5 * rep,
+                    npz_path=str(
+                        _write_rg_sidecar(
+                            tmp_path,
+                            "protein_backbone",
+                            rep,
+                            rg_values=[
+                                14.0 + 0.5 * rep - 0.1,
+                                14.0 + 0.5 * rep,
+                                14.0 + 0.5 * rep + 0.1,
+                            ],
+                        )
+                    ),
+                ),
+            ],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=["/fake/traj.dcd"],
+        )
+        for rep in (3, 1, 2)
+    ]
+
+    aggregated = analysis.aggregate(ctx, results)
+
+    backbone = aggregated.run_results[0]
+    assert backbone.replicates == [1, 2, 3]
+    assert backbone.per_replicate_means == pytest.approx([14.5, 15.0, 15.5])
+    assert backbone.per_replicate_medians == pytest.approx([14.5, 15.0, 15.5])
 
 
 def test_aggregate_uses_median_for_overall_median(condition: Condition, tmp_path: Path) -> None:
@@ -764,9 +947,23 @@ def test_aggregate_uses_median_for_overall_median(condition: Condition, tmp_path
             equilibration_unit="ns",
             selection_string="protein and name CA",
             run_results=[
-                _make_run_result(rep, "protein_backbone", 10.0 + float(rep)).model_copy(
-                    update={"median_rg": median}
-                )
+                _make_run_result(
+                    rep,
+                    "protein_backbone",
+                    10.0 + float(rep),
+                    npz_path=str(
+                        _write_rg_sidecar(
+                            tmp_path,
+                            "protein_backbone",
+                            rep,
+                            rg_values=[
+                                10.0 + float(rep) - 0.1,
+                                10.0 + float(rep),
+                                10.0 + float(rep) + 0.1,
+                            ],
+                        )
+                    ),
+                ).model_copy(update={"median_rg": median})
             ],
             n_frames_total=100,
             n_frames_used=90,
@@ -786,6 +983,7 @@ def test_compare_two_conditions(tmp_path: Path) -> None:
     """compare with two conditions should produce pairwise results without ANOVA."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
+    settings_hash = _settings_hash(settings)
     control = make_condition(label="Control")
     treated = make_condition(label="Treated")
 
@@ -802,6 +1000,7 @@ def test_compare_two_conditions(tmp_path: Path) -> None:
             _make_aggregated_run("protein_backbone", "protein and name CA", [15.0, 15.1, 14.9]),
             _make_aggregated_run("polymer_core", "segid C and backbone", [22.0, 22.1, 21.9]),
         ],
+        settings_fingerprint=settings_hash,
         source_result_files=[],
     )
     treated_agg = RgAggregatedResult(
@@ -817,6 +1016,7 @@ def test_compare_two_conditions(tmp_path: Path) -> None:
             _make_aggregated_run("protein_backbone", "protein and name CA", [14.0, 14.1, 13.9]),
             _make_aggregated_run("polymer_core", "segid C and backbone", [20.0, 20.1, 19.9]),
         ],
+        settings_fingerprint=settings_hash,
         source_result_files=[],
     )
 
@@ -843,6 +1043,7 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
     """compare with three conditions should include ANOVA per run."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
+    settings_hash = _settings_hash(settings)
     conditions = [
         make_condition(label="Control"),
         make_condition(label="A"),
@@ -863,6 +1064,7 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
                 _make_aggregated_run("protein_backbone", "protein and name CA", [15.0, 15.1, 14.9]),
                 _make_aggregated_run("polymer_core", "segid C and backbone", [22.0, 22.1, 21.9]),
             ],
+            settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
         "A": RgAggregatedResult(
@@ -878,6 +1080,7 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
                 _make_aggregated_run("protein_backbone", "protein and name CA", [14.0, 14.1, 13.9]),
                 _make_aggregated_run("polymer_core", "segid C and backbone", [20.0, 20.1, 19.9]),
             ],
+            settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
         "B": RgAggregatedResult(
@@ -893,6 +1096,7 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
                 _make_aggregated_run("protein_backbone", "protein and name CA", [16.0, 16.1, 15.9]),
                 _make_aggregated_run("polymer_core", "segid C and backbone", [23.0, 23.1, 22.9]),
             ],
+            settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
     }
@@ -916,12 +1120,13 @@ def test_compare_three_conditions(tmp_path: Path) -> None:
     assert len(comparison.anova_by_run) == 2
 
 
-def test_compare_marks_untestable_with_single_replicates(tmp_path: Path) -> None:
-    """compare should mark pairwise and ANOVA as untestable for n<2 groups."""
+def test_compare_rejects_incomplete_aggregated_replicate_coverage(tmp_path: Path) -> None:
+    """compare should fail fast when aggregated replicate coverage is incomplete."""
     analysis = RgAnalysis()
     settings = RgSettings(
         runs=[RgRunSettings(label="protein_backbone", selection="protein and name CA")]
     )
+    settings_hash = _settings_hash(settings)
     conditions = [
         make_condition(label="Control"),
         make_condition(label="A"),
@@ -941,6 +1146,7 @@ def test_compare_marks_untestable_with_single_replicates(tmp_path: Path) -> None
             run_results=[
                 _make_aggregated_run("protein_backbone", "protein and name CA", [15.0]),
             ],
+            settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
         "A": RgAggregatedResult(
@@ -955,6 +1161,7 @@ def test_compare_marks_untestable_with_single_replicates(tmp_path: Path) -> None
             run_results=[
                 _make_aggregated_run("protein_backbone", "protein and name CA", [14.0]),
             ],
+            settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
         "B": RgAggregatedResult(
@@ -969,6 +1176,7 @@ def test_compare_marks_untestable_with_single_replicates(tmp_path: Path) -> None
             run_results=[
                 _make_aggregated_run("protein_backbone", "protein and name CA", [16.0]),
             ],
+            settings_fingerprint=settings_hash,
             source_result_files=[],
         ),
     }
@@ -985,25 +1193,62 @@ def test_compare_marks_untestable_with_single_replicates(tmp_path: Path) -> None
         aggregated_results=aggregated_results,
     )
 
-    comparison = analysis.compare(ctx)
-
-    assert comparison is not None
-    assert comparison.anova_by_run is not None
-    assert len(comparison.pairwise_comparisons) == 2
-    for pair in comparison.pairwise_comparisons:
-        assert pair.testable is False
-        assert pair.p_value is None
-        assert pair.cohens_d is None
-
-    for anova in comparison.anova_by_run:
-        assert anova.testable is False
-        assert anova.p_value is None
+    with pytest.raises(
+        ValueError,
+        match="Aggregated Rg result for condition 'Control' has incomplete replicate coverage",
+    ):
+        analysis.compare(ctx)
 
 
-def test_compare_skips_run_missing_in_some_conditions(tmp_path: Path) -> None:
-    """compare should keep rankings for partially available runs."""
+def test_compare_requires_aggregated_results_for_all_conditions(tmp_path: Path) -> None:
+    """compare should fail when any configured condition lacks aggregated output."""
     analysis = RgAnalysis()
     settings = RgSettings(runs=_make_run_settings())
+    settings_hash = _settings_hash(settings)
+    control = make_condition(label="Control")
+    treated = make_condition(label="Treated")
+
+    control_agg = RgAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA; segid C and backbone",
+        replicates=[1, 2, 3],
+        n_replicates=3,
+        run_results=[
+            _make_aggregated_run("protein_backbone", "protein and name CA", [15.0, 15.1, 14.9]),
+            _make_aggregated_run("polymer_core", "segid C and backbone", [22.0, 22.1, 21.9]),
+        ],
+        settings_fingerprint=settings_hash,
+        source_result_files=[],
+    )
+
+    ctx = make_comparison_context(
+        name="rg_compare",
+        conditions=[control, treated],
+        analysis_dirs={"Control": tmp_path / "control", "Treated": tmp_path / "treated"},
+        results_dir=tmp_path / "comparison",
+        settings=settings,
+        control_label="Control",
+        equilibration="10ns",
+        recompute=False,
+        aggregated_results={"Control": control_agg},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="requires an aggregated result for condition 'Treated'",
+    ):
+        analysis.compare(ctx)
+
+
+def test_compare_requires_configured_runs_in_all_conditions(tmp_path: Path) -> None:
+    """compare should fail when a configured run is absent from a condition."""
+    analysis = RgAnalysis()
+    settings = RgSettings(runs=_make_run_settings())
+    settings_hash = _settings_hash(settings)
     control = make_condition(label="Control")
     treated = make_condition(label="Treated")
 
@@ -1019,6 +1264,7 @@ def test_compare_skips_run_missing_in_some_conditions(tmp_path: Path) -> None:
         run_results=[
             _make_aggregated_run("protein_backbone", "protein and name CA", [15.0, 15.1, 14.9]),
         ],
+        settings_fingerprint=settings_hash,
         source_result_files=[],
     )
     treated_agg = RgAggregatedResult(
@@ -1034,6 +1280,7 @@ def test_compare_skips_run_missing_in_some_conditions(tmp_path: Path) -> None:
             _make_aggregated_run("protein_backbone", "protein and name CA", [14.0, 14.1, 13.9]),
             _make_aggregated_run("polymer_core", "segid C and backbone", [20.0, 20.1, 19.9]),
         ],
+        settings_fingerprint=settings_hash,
         source_result_files=[],
     )
 
@@ -1049,11 +1296,152 @@ def test_compare_skips_run_missing_in_some_conditions(tmp_path: Path) -> None:
         aggregated_results={"Control": control_agg, "Treated": treated_agg},
     )
 
-    comparison = analysis.compare(ctx)
+    with pytest.raises(
+        ValueError,
+        match=r"Aggregated Rg result for condition 'Control' is incomplete: missing runs \['polymer_core'\]",
+    ):
+        analysis.compare(ctx)
 
-    assert comparison is not None
-    assert comparison.run_labels == ["protein_backbone", "polymer_core"]
-    assert len(comparison.pairwise_comparisons) == 1
+
+@pytest.mark.parametrize(
+    ("result_kind", "error_match"),
+    [
+        pytest.param("stale", "current settings require", id="stale-fingerprint"),
+        pytest.param(
+            "legacy",
+            "missing a settings fingerprint",
+            id="missing-fingerprint",
+        ),
+    ],
+)
+def test_compare_rejects_preloaded_invalid_aggregated_results(
+    result_kind: str,
+    error_match: str,
+    tmp_path: Path,
+) -> None:
+    """compare should validate preloaded aggregated Rg results."""
+    analysis = RgAnalysis()
+    current_settings = RgSettings(
+        runs=[RgRunSettings(label="protein_backbone", selection="protein and name CA")]
+    )
+    stale_settings = RgSettings(runs=[RgRunSettings(label="protein_backbone", selection="protein")])
+    condition = make_condition(label="CondA", replicates=(1, 2))
+
+    selection = "protein" if result_kind == "stale" else "protein and name CA"
+    settings_fingerprint = (
+        _settings_hash(stale_settings) if result_kind == "stale" else None
+    )
+    preloaded_result = RgAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string=selection,
+        replicates=[1, 2],
+        n_replicates=2,
+        run_results=[_make_aggregated_run("protein_backbone", selection, [15.1, 14.9])],
+        settings_fingerprint=settings_fingerprint,
+        source_result_files=[],
+    ).model_dump()
+
+    ctx = make_comparison_context(
+        name="rg_compare",
+        conditions=[condition],
+        analysis_dirs={"CondA": tmp_path / "analysis" / "conda" / "rg"},
+        results_dir=tmp_path / "comparison",
+        settings=current_settings,
+        control_label="CondA",
+        equilibration="10ns",
+        recompute=False,
+        aggregated_results={"CondA": preloaded_result},
+    )
+
+    with pytest.raises(ValueError, match=error_match):
+        analysis.compare(ctx)
+
+
+def test_compare_rejects_stale_aggregated_result_from_disk(tmp_path: Path) -> None:
+    """compare should fail loudly when aggregated Rg cache settings are stale."""
+    analysis = RgAnalysis()
+    current_settings = RgSettings(
+        runs=[RgRunSettings(label="protein_backbone", selection="protein and name CA")]
+    )
+    stale_settings = RgSettings(runs=[RgRunSettings(label="protein_backbone", selection="protein")])
+    condition = make_condition(label="CondA", replicates=(1, 2))
+    analysis_dir = tmp_path / "analysis" / "conda" / "rg"
+    aggregated_dir = analysis_dir / "aggregated"
+    aggregated_dir.mkdir(parents=True)
+
+    RgAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein",
+        replicates=[1, 2],
+        n_replicates=2,
+        run_results=[_make_aggregated_run("protein_backbone", "protein", [15.1, 14.9])],
+        settings_fingerprint=_settings_hash(stale_settings),
+        source_result_files=[],
+    ).save(aggregated_dir / "result.json")
+
+    ctx = make_comparison_context(
+        name="rg_compare",
+        conditions=[condition],
+        analysis_dirs={"CondA": analysis_dir},
+        results_dir=tmp_path / "comparison",
+        settings=current_settings,
+        control_label="CondA",
+        equilibration="10ns",
+        recompute=False,
+    )
+
+    with pytest.raises(ValueError, match="current settings require"):
+        analysis.compare(ctx)
+
+
+def test_plot_rejects_legacy_aggregated_result_from_disk(tmp_path: Path) -> None:
+    """plot should fail loudly when aggregated Rg cache lacks settings identity."""
+    analysis = RgAnalysis()
+    settings = RgSettings(
+        runs=[RgRunSettings(label="protein_backbone", selection="protein and name CA")]
+    )
+    condition = make_condition(label="CondA", replicates=(1, 2))
+    analysis_dir = tmp_path / "analysis" / "conda" / "rg"
+    aggregated_dir = analysis_dir / "aggregated"
+    aggregated_dir.mkdir(parents=True)
+
+    RgAggregatedResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=None,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="protein and name CA",
+        replicates=[1, 2],
+        n_replicates=2,
+        run_results=[_make_aggregated_run("protein_backbone", "protein and name CA", [15.1, 14.9])],
+        source_result_files=[],
+    ).save(aggregated_dir / "result.json")
+
+    results_dir = tmp_path / "comparison"
+    results_dir.mkdir(parents=True)
+    _make_comparison_result().save(results_dir / "result.json")
+
+    ctx = PlotContext(
+        conditions=[condition],
+        analysis_dirs={"CondA": analysis_dir},
+        results_dir=results_dir,
+        output_dir=tmp_path / "figures",
+        settings=settings,
+        plot_settings=PlotSettings(),
+        equilibration="10ns",
+    )
+
+    with pytest.raises(ValueError, match="missing a settings fingerprint"):
+        analysis.plot(ctx)
 
 
 def test_rg_run_settings_fragment_mode_defaults() -> None:
@@ -1311,6 +1699,7 @@ def test_compare_passes_fragment_metadata_to_summaries(tmp_path: Path) -> None:
             RgRunSettings(label="polymer_frags", selection="segid C", calculation_mode="fragments")
         ]
     )
+    settings_hash = _settings_hash(settings)
     control = make_condition(label="Control")
     treated = make_condition(label="Treatment")
 
@@ -1324,6 +1713,7 @@ def test_compare_passes_fragment_metadata_to_summaries(tmp_path: Path) -> None:
         replicates=[1, 2, 3],
         n_replicates=3,
         run_results=[_make_fragment_aggregated_run("polymer_frags", "segid C", [8.0, 8.1, 7.9])],
+        settings_fingerprint=settings_hash,
         source_result_files=[],
     )
     treated_agg = RgAggregatedResult(
@@ -1336,6 +1726,7 @@ def test_compare_passes_fragment_metadata_to_summaries(tmp_path: Path) -> None:
         replicates=[1, 2, 3],
         n_replicates=3,
         run_results=[_make_fragment_aggregated_run("polymer_frags", "segid C", [7.5, 7.6, 7.4])],
+        settings_fingerprint=settings_hash,
         source_result_files=[],
     )
 
@@ -1442,6 +1833,316 @@ def test_aggregate_fragment_mode_builds_histograms(condition: Condition, tmp_pat
     assert len(run_agg.fragment_histogram_density_mean) == 50
     assert run_agg.reduced_histogram_edges is not None
     assert run_agg.overall_mean_fragments_per_frame == pytest.approx(5.0)
+
+
+def test_aggregate_fails_when_expected_sidecar_is_missing(
+    condition: Condition, tmp_path: Path
+) -> None:
+    """aggregate should reject subset histogram aggregation after sidecar loss."""
+    import numpy as np
+
+    analysis = RgAnalysis()
+    run_label = "protein_rg"
+    present_path = tmp_path / "run_1" / "rg_protein_rg_timeseries.npz"
+    present_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        present_path,
+        rg_values=np.asarray([14.5, 14.6], dtype=np.float64),
+        time_ns=np.asarray([0.0, 1.0], dtype=np.float64),
+        frames=np.asarray([0, 1], dtype=np.int64),
+    )
+
+    missing_path = tmp_path / "run_2" / "rg_protein_rg_timeseries.npz"
+    settings = RgSettings(runs=[RgRunSettings(label=run_label, selection="protein")])
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+    results = [
+        RgResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=1,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein",
+            run_results=[
+                _make_run_result(1, run_label, 14.5, npz_path=str(present_path)),
+            ],
+            n_frames_total=2,
+            n_frames_used=2,
+            trajectory_files=["/fake/traj_1.dcd"],
+        ),
+        RgResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=2,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein",
+            run_results=[
+                _make_run_result(2, run_label, 15.0, npz_path=str(missing_path)),
+            ],
+            n_frames_total=2,
+            n_frames_used=2,
+            trajectory_files=["/fake/traj_2.dcd"],
+        ),
+    ]
+
+    with pytest.raises(ValueError, match=r"expected NPZ sidecar .* replicate 2"):
+        analysis.aggregate(ctx, results)
+
+
+def test_aggregate_fragment_mode_without_distribution_skips_fragment_histogram(
+    condition: Condition, tmp_path: Path
+) -> None:
+    """aggregate should treat fragment distribution sidecars as optional when disabled."""
+    import numpy as np
+
+    analysis = RgAnalysis()
+    run_label = "polymer_frags"
+    results: list[RgResult] = []
+    for rep, mean_rg in ((1, 8.0), (2, 8.2)):
+        npz_path = tmp_path / f"run_{rep}" / f"rg_{run_label}_timeseries.npz"
+        npz_path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            npz_path,
+            rg_values=np.asarray([mean_rg - 0.1, mean_rg, mean_rg + 0.1], dtype=np.float64),
+            time_ns=np.asarray([0.0, 1.0, 2.0], dtype=np.float64),
+            frames=np.asarray([0, 1, 2], dtype=np.int64),
+        )
+        results.append(
+            RgResult(
+                config_hash="hash123",
+                polyzymd_version="1.2.1",
+                replicate=rep,
+                equilibration_time=10.0,
+                equilibration_unit="ns",
+                selection_string="segid C",
+                run_results=[
+                    _make_run_result(rep, run_label, mean_rg, npz_path=str(npz_path)).model_copy(
+                        update={
+                            "selection": "segid C",
+                            "selection_string": "segid C",
+                            "calculation_mode": "fragments",
+                            "fragment_weighting": "equal",
+                            "mean_fragments_per_frame": 5.0,
+                            "min_fragments_per_frame": 5,
+                            "max_fragments_per_frame": 5,
+                        }
+                    )
+                ],
+                n_frames_total=3,
+                n_frames_used=3,
+                trajectory_files=[f"/fake/traj_{rep}.dcd"],
+            )
+        )
+
+    settings = RgSettings(
+        runs=[
+            RgRunSettings(
+                label=run_label,
+                selection="segid C",
+                calculation_mode="fragments",
+                save_fragment_distribution=False,
+            )
+        ]
+    )
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+
+    aggregated = analysis.aggregate(ctx, results)
+
+    run_agg = aggregated.run_results[0]
+    assert run_agg.fragment_histogram_edges is None
+    assert run_agg.fragment_histogram_density_mean is None
+    assert run_agg.reduced_histogram_edges is not None
+    assert run_agg.per_replicate_mean_fragments_per_frame == pytest.approx([5.0, 5.0])
+
+
+def test_aggregate_fragment_mode_rejects_missing_fragment_count_metric(
+    condition: Condition, tmp_path: Path
+) -> None:
+    """aggregate should fail when fragment-count metadata is missing for any replicate."""
+    analysis = RgAnalysis()
+    run_label = "polymer_frags"
+    settings = RgSettings(
+        runs=[RgRunSettings(label=run_label, selection="segid C", calculation_mode="fragments")]
+    )
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+    results = [
+        RgResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=1,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="segid C",
+            run_results=[
+                _make_run_result(1, run_label, 8.0).model_copy(
+                    update={
+                        "selection": "segid C",
+                        "selection_string": "segid C",
+                        "npz_path": str(
+                            _write_rg_sidecar(
+                                tmp_path,
+                                run_label,
+                                1,
+                                rg_values=[7.9, 8.0, 8.1],
+                                fragment_rg_values=[7.5, 8.0, 8.5],
+                            )
+                        ),
+                        "calculation_mode": "fragments",
+                        "fragment_weighting": "equal",
+                        "mean_fragments_per_frame": 5.0,
+                        "min_fragments_per_frame": 5,
+                        "max_fragments_per_frame": 5,
+                    }
+                )
+            ],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=["/fake/traj_1.dcd"],
+        ),
+        RgResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=2,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="segid C",
+            run_results=[
+                _make_run_result(2, run_label, 8.2).model_copy(
+                    update={
+                        "selection": "segid C",
+                        "selection_string": "segid C",
+                        "npz_path": str(
+                            _write_rg_sidecar(
+                                tmp_path,
+                                run_label,
+                                2,
+                                rg_values=[8.1, 8.2, 8.3],
+                                fragment_rg_values=[7.8, 8.2, 8.6],
+                            )
+                        ),
+                        "calculation_mode": "fragments",
+                        "fragment_weighting": "equal",
+                    }
+                )
+            ],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=["/fake/traj_2.dcd"],
+        ),
+    ]
+
+    with pytest.raises(ValueError, match=r"missing mean_fragments_per_frame.*\[2\]"):
+        analysis.aggregate(ctx, results)
+
+
+def test_aggregate_selection_mode_rejects_all_missing_sidecar_metadata(
+    condition: Condition, tmp_path: Path
+) -> None:
+    """aggregate should fail when selection-mode caches omit all NPZ sidecar metadata."""
+    analysis = RgAnalysis()
+    run_label = "protein_rg"
+    settings = RgSettings(runs=[RgRunSettings(label=run_label, selection="protein")])
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+    results = [
+        RgResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=rep,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="protein",
+            run_results=[_make_run_result(rep, run_label, 14.0 + 0.5 * rep)],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=[f"/fake/traj_{rep}.dcd"],
+        )
+        for rep in (1, 2)
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match=r"requires NPZ sidecar metadata for reduced-series histograms in replicates \[1, 2\]",
+    ):
+        analysis.aggregate(ctx, results)
+
+
+def test_aggregate_fragment_mode_rejects_all_missing_sidecar_metadata(
+    condition: Condition, tmp_path: Path
+) -> None:
+    """aggregate should fail when fragment-mode caches omit all NPZ sidecar metadata."""
+    analysis = RgAnalysis()
+    run_label = "polymer_frags"
+    settings = RgSettings(
+        runs=[RgRunSettings(label=run_label, selection="segid C", calculation_mode="fragments")]
+    )
+    ctx = make_aggregate_context(
+        condition=condition,
+        replicates=(1, 2),
+        output_dir=tmp_path / "aggregated",
+        settings=settings,
+        equilibration="10ns",
+    )
+    results = [
+        RgResult(
+            config_hash="hash123",
+            polyzymd_version="1.2.1",
+            replicate=rep,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            selection_string="segid C",
+            run_results=[
+                _make_run_result(rep, run_label, 8.0 + 0.2 * rep).model_copy(
+                    update={
+                        "selection": "segid C",
+                        "selection_string": "segid C",
+                        "calculation_mode": "fragments",
+                        "fragment_weighting": "equal",
+                        "mean_fragments_per_frame": 5.0,
+                        "min_fragments_per_frame": 5,
+                        "max_fragments_per_frame": 5,
+                    }
+                )
+            ],
+            n_frames_total=100,
+            n_frames_used=90,
+            trajectory_files=[f"/fake/traj_{rep}.dcd"],
+        )
+        for rep in (1, 2)
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"requires NPZ sidecar metadata for reduced-series histograms and fragment "
+            r"distributions in replicates \[1, 2\]"
+        ),
+    ):
+        analysis.aggregate(ctx, results)
 
 
 def test_rg_plot_settings_distribution_defaults() -> None:

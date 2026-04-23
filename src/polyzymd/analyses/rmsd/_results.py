@@ -175,6 +175,12 @@ class RMSDResult(BaseAnalysisResult):
     # Collection of run results
     run_results: list[RMSDRunResult] = Field(..., description="Results for each RMSD run")
 
+    # Cache identity
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Settings fingerprint used to validate cached RMSD results",
+    )
+
     # Trajectory info (shared across runs)
     n_frames_total: int = Field(..., description="Total frames in trajectory")
     n_frames_used: int = Field(..., description="Frames used after equilibration")
@@ -288,6 +294,12 @@ class RMSDAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     # Collection of aggregated run results
     run_results: list[RMSDRunAggregatedResult] = Field(
         ..., description="Aggregated results for each run"
+    )
+
+    # Cache identity
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Settings fingerprint used to validate aggregated RMSD caches",
     )
 
     # Source files

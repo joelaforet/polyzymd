@@ -101,6 +101,10 @@ class RMSFResult(BaseAnalysisResult):
     # Trajectory info
     n_frames_total: int = Field(..., description="Total frames in trajectory")
     n_frames_used: int = Field(..., description="Frames used after equilibration cutoff")
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Short fingerprint of RMSF settings for cache validation",
+    )
     trajectory_files: list[str] = Field(
         default_factory=list, description="Trajectory files analyzed"
     )
@@ -208,6 +212,10 @@ class RMSFAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     overall_max_rmsf: float = Field(..., description="Max of per-residue means")
 
     # Source files
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Short fingerprint of RMSF settings for cache validation",
+    )
     source_result_files: list[str] = Field(
         default_factory=list, description="Paths to individual replicate result files"
     )

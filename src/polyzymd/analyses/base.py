@@ -1052,6 +1052,24 @@ class Analysis(ABC):
         del ctx, replicate, universe, window
         return None
 
+    def _trajectory_loader_factory(self) -> type[Any]:
+        """Return the trajectory-loader class used by the runner seam.
+
+        Runner-backed plugins can override this narrow seam when tests need to
+        patch a plugin-local ``TrajectoryLoader`` symbol without reimplementing
+        the full runner orchestration path.
+
+        Returns
+        -------
+        type[Any]
+            Loader class used to construct a trajectory loader for the current
+            simulation configuration.
+        """
+
+        from polyzymd.analyses.shared.loader import TrajectoryLoader
+
+        return TrajectoryLoader
+
     def get_trajectory_window(
         self,
         ctx: ReplicateContext,
@@ -1384,9 +1402,7 @@ class Analysis(ABC):
         if type(self).build_runner is Analysis.build_runner:
             return _RUNNER_NOT_CONFIGURED
 
-        from polyzymd.analyses.shared.loader import TrajectoryLoader
-
-        loader = TrajectoryLoader(ctx.sim_config)
+        loader = self._trajectory_loader_factory()(ctx.sim_config)
         universe = loader.load_universe(replicate)
         window = self.get_trajectory_window(ctx, replicate, loader, universe)
         if getattr(window, "warning_message", None):

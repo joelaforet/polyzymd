@@ -10,46 +10,42 @@ All heavy computation is self-contained within this plugin package.
 from __future__ import annotations
 
 import logging
+from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 import numpy as np
-from numpy.typing import NDArray
 from pydantic import BaseModel, Field, field_validator
 
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
     BasePlotSettings,
+    ComparisonContext,
     MetricValue,
     PlotContext,
     ReplicateContext,
 )
+from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.rmsf._plot_settings import RMSFPlotSettings
 from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison, _plot_rmsf_profile
 from polyzymd.analyses.rmsf._results import RMSFAggregatedResult, RMSFResult
-from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
-from polyzymd.analyses.shared.autocorrelation import (
-    compute_acf,
-    estimate_correlation_time,
-    get_independent_indices,
+from polyzymd.analyses.rmsf._runner import (
+    RMSFReplicateRunner,
+    aggregate_per_residue,
+    compute_rmsd_timeseries,
+    compute_rmsf,
 )
+from polyzymd.analyses.shared.alignment import align_trajectory
 from polyzymd.analyses.shared.centroid import ReferenceMode
-from polyzymd.analyses.shared.config_hash import compute_config_hash
-from polyzymd.analyses.shared.diagnostics import (
-    get_selection_diagnostics,
-    validate_equilibration_time,
-)
-from polyzymd.analyses.shared.loader import (
-    TrajectoryLoader,
-    convert_time,
-    parse_time_string,
-    time_to_frame,
-)
+from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
+from polyzymd.analyses.shared.diagnostics import get_selection_diagnostics
+from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
 from polyzymd.analyses.shared.statistics import aggregate_per_residue_stats, compute_sem
 
 if TYPE_CHECKING:
-    from MDAnalysis.core.universe import Universe
+    from numpy.typing import NDArray
 
 logger = logging.getLogger("polyzymd.analyses.rmsf")
 
@@ -112,6 +108,67 @@ class RMSFSettings(BaseModel):
         return v
 
 
+@dataclass(frozen=True)
+class _RMSFTrajectoryWindow:
+    """RMSF trajectory window that carries loader-derived file metadata."""
+
+    start: int
+    stop: int
+    step: int
+    equilibration_start: int
+    n_frames_total: int
+    n_frames_selected: int
+    timestep_ps: float
+    equilibration_ps: float
+    warning_message: str | None = None
+    trajectory_files: tuple[Path, ...] = ()
+
+    @classmethod
+    def from_window(
+        cls,
+        window: Any,
+        trajectory_files: Sequence[Path],
+    ) -> _RMSFTrajectoryWindow:
+        """Build an RMSF window wrapper from the shared trajectory window.
+
+        Parameters
+        ----------
+        window : Any
+            Shared trajectory window returned by the centralized resolver.
+        trajectory_files : Sequence[Path]
+            Trajectory files resolved by the existing loader instance.
+
+        Returns
+        -------
+        _RMSFTrajectoryWindow
+            RMSF window wrapper that preserves run arguments and file metadata.
+        """
+
+        return cls(
+            start=window.start,
+            stop=window.stop,
+            step=window.step,
+            equilibration_start=window.equilibration_start,
+            n_frames_total=window.n_frames_total,
+            n_frames_selected=window.n_frames_selected,
+            timestep_ps=window.timestep_ps,
+            equilibration_ps=window.equilibration_ps,
+            warning_message=window.warning_message,
+            trajectory_files=tuple(trajectory_files),
+        )
+
+    def run_kwargs(self) -> dict[str, int]:
+        """Return keyword arguments for the runner ``run()`` call.
+
+        Returns
+        -------
+        dict[str, int]
+            ``start``, ``stop``, and ``step`` values for ``run()``.
+        """
+
+        return {"start": self.start, "stop": self.stop, "step": self.step}
+
+
 # ---------------------------------------------------------------------------
 # Plugin
 # ---------------------------------------------------------------------------
@@ -120,7 +177,8 @@ class RMSFSettings(BaseModel):
 class RMSFAnalysis(Analysis):
     """RMSF analysis: per-residue flexibility from MD trajectories.
 
-    Performs the complete RMSF workflow inline:
+    Performs RMSF through the runner seam while preserving the historical
+    cache layout:
 
     1. Load trajectories from config
     2. Apply equilibration offset
@@ -129,10 +187,9 @@ class RMSFAnalysis(Analysis):
     5. Calculate per-residue RMSF
     6. Aggregate across replicates with SEM
 
-    The ``compare()`` method is NOT overridden — it uses the default
-    implementation which calls ``extract_metrics()`` to get ``mean_rmsf``
-    as a single scalar metric with ``higher_is_better=False`` (lower RMSF
-    = more stable = better ranking).
+    The ``compare()`` method adds RMSF-specific completeness guards before
+    delegating to the default scalar comparison path so missing or incomplete
+    condition results fail loudly.
 
     Plots
     -----
@@ -151,6 +208,234 @@ class RMSFAnalysis(Analysis):
 
     # === Required methods ===
 
+    @staticmethod
+    def _make_settings_cache_tag(settings: BaseModel | Any) -> str:
+        """Build a short cache tag from RMSF settings.
+
+        Parameters
+        ----------
+        settings : BaseModel or Any
+            RMSF settings model or a legacy settings-like object.
+
+        Returns
+        -------
+        str
+            First 8 hex characters from shared settings fingerprinting.
+        """
+        if isinstance(settings, BaseModel):
+            return settings_fingerprint(settings)
+
+        normalized = RMSFSettings(
+            selection=settings.selection,
+            reference_mode=settings.reference_mode,
+            reference_frame=settings.reference_frame,
+            reference_file=settings.reference_file,
+            alignment_selection=settings.alignment_selection,
+            centroid_selection=settings.centroid_selection,
+        )
+        return settings_fingerprint(normalized)
+
+    @staticmethod
+    def _validate_aggregate_input_completeness(
+        ctx: AggregateContext,
+        results: Sequence[Any],
+    ) -> None:
+        """Validate that aggregation inputs cover the configured replicates.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        results : Sequence[Any]
+            Per-replicate RMSF results.
+
+        Raises
+        ------
+        ValueError
+            Raised when configured replicates are missing, duplicated, or
+            unexpected in the aggregation inputs.
+        """
+        if not results:
+            raise ValueError(
+                f"RMSF aggregation for condition '{ctx.condition.label}' requires at least one "
+                "replicate result. No replicate inputs were provided."
+            )
+
+        expected_replicates = sorted(ctx.replicates)
+        observed_replicates = [
+            result.replicate for result in results if getattr(result, "replicate", None) is not None
+        ]
+        observed_counter = Counter(observed_replicates)
+        duplicate_replicates = sorted(
+            replicate for replicate, count in observed_counter.items() if count > 1
+        )
+        missing_replicates = sorted(set(expected_replicates) - set(observed_replicates))
+        unexpected_replicates = sorted(set(observed_replicates) - set(expected_replicates))
+        missing_metadata_count = len(results) - len(observed_replicates)
+        if (
+            missing_replicates
+            or unexpected_replicates
+            or duplicate_replicates
+            or missing_metadata_count
+        ):
+            details: list[str] = []
+            if missing_replicates:
+                details.append(f"missing replicates {missing_replicates}")
+            if unexpected_replicates:
+                details.append(f"unexpected replicates {unexpected_replicates}")
+            if duplicate_replicates:
+                details.append(f"duplicate replicates {duplicate_replicates}")
+            if missing_metadata_count:
+                details.append(f"results without replicate identifiers {missing_metadata_count}")
+            detail_text = "; ".join(details)
+            raise ValueError(
+                f"RMSF aggregation for condition '{ctx.condition.label}' is incomplete. "
+                f"Expected replicate results for {expected_replicates}; observed "
+                f"{sorted(observed_replicates)} ({detail_text}). Recompute missing replicates "
+                "or clear stale caches before aggregating."
+            )
+
+    @staticmethod
+    def _order_aggregate_results_by_replicate(
+        ctx: AggregateContext,
+        results: Sequence[Any],
+    ) -> list[Any]:
+        """Return aggregate inputs in declared replicate order.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        results : Sequence[Any]
+            Per-replicate RMSF results that already passed completeness checks.
+
+        Returns
+        -------
+        list[Any]
+            Replicate results ordered to match ``ctx.replicates`` exactly.
+        """
+        replicate_to_result = {result.replicate: result for result in results}
+        return [replicate_to_result[replicate] for replicate in ctx.replicates]
+
+    @classmethod
+    def _validate_replicate_result_settings_identity(
+        cls,
+        ctx: AggregateContext,
+        results: Sequence[Any],
+    ) -> None:
+        """Validate settings fingerprints on per-replicate RMSF results.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        results : Sequence[Any]
+            Per-replicate RMSF results.
+
+        Raises
+        ------
+        ValueError
+            Raised when replicate results are missing settings fingerprints or
+            were computed with different settings.
+        """
+        expected_fingerprint = cls._make_settings_cache_tag(ctx.settings)
+        missing_fingerprint_replicates: list[int] = []
+        mismatched_fingerprints: list[str] = []
+
+        for result in results:
+            replicate = getattr(result, "replicate", None)
+            stored_fingerprint = getattr(result, "settings_fingerprint", None)
+            if stored_fingerprint is None:
+                stored_fingerprint = getattr(result, "settings_fp", None)
+
+            if stored_fingerprint is None:
+                if replicate is not None:
+                    missing_fingerprint_replicates.append(replicate)
+                continue
+
+            if stored_fingerprint != expected_fingerprint:
+                mismatched_fingerprints.append(
+                    f"replicate {replicate}: stored={stored_fingerprint} current={expected_fingerprint}"
+                )
+
+        if missing_fingerprint_replicates:
+            raise ValueError(
+                f"RMSF aggregation for condition '{ctx.condition.label}' cannot use legacy cached "
+                "replicate results missing settings fingerprints. Affected replicates: "
+                f"{sorted(missing_fingerprint_replicates)}. Recompute the condition to refresh "
+                "settings-sensitive caches before aggregating."
+            )
+
+        if mismatched_fingerprints:
+            mismatch_text = "; ".join(mismatched_fingerprints)
+            raise ValueError(
+                f"RMSF aggregation for condition '{ctx.condition.label}' detected settings "
+                f"fingerprint mismatches ({mismatch_text}). Recompute the condition or clear "
+                "stale caches before aggregating."
+            )
+
+    @classmethod
+    def _validate_aggregated_result_completeness(
+        cls,
+        condition: Any,
+        agg_result: Any,
+        settings: BaseModel | Any,
+    ) -> None:
+        """Validate that an aggregated RMSF result is complete for comparison.
+
+        Parameters
+        ----------
+        condition : Any
+            Condition associated with the aggregated result.
+        agg_result : Any
+            Aggregated RMSF result to validate.
+        settings : BaseModel or Any
+            Current RMSF settings used for comparison.
+
+        Raises
+        ------
+        ValueError
+            Raised when the aggregated result is missing settings identity or
+            replicate coverage required for comparison.
+        """
+        expected_replicates = sorted(condition.replicates)
+        observed_replicates = sorted(getattr(agg_result, "replicates", []))
+        n_replicates = getattr(agg_result, "n_replicates", None)
+        if n_replicates != len(expected_replicates) or observed_replicates != expected_replicates:
+            raise ValueError(
+                f"Aggregated RMSF result for condition '{condition.label}' has incomplete "
+                f"replicate coverage. Expected replicates {expected_replicates}, found "
+                f"{observed_replicates} with n_replicates={n_replicates}. Recompute the "
+                "condition or clear stale caches before comparing."
+            )
+
+        per_replicate_values = list(getattr(agg_result, "per_replicate_mean_rmsf", []))
+        if len(per_replicate_values) != len(expected_replicates):
+            raise ValueError(
+                f"Aggregated RMSF result for condition '{condition.label}' has incomplete "
+                f"replicate values: per_replicate_mean_rmsf has {len(per_replicate_values)} "
+                f"entries, expected {len(expected_replicates)}. Recompute the condition or "
+                "clear stale caches before comparing."
+            )
+
+        stored_fingerprint = getattr(agg_result, "settings_fingerprint", None)
+        if stored_fingerprint is None:
+            stored_fingerprint = getattr(agg_result, "settings_fp", None)
+        current_fingerprint = cls._make_settings_cache_tag(settings)
+        if stored_fingerprint is None:
+            raise ValueError(
+                f"Aggregated RMSF result for condition '{condition.label}' is missing a settings "
+                "fingerprint. Legacy RMSF aggregated caches are not compatible with "
+                "settings-sensitive comparison. Recompute the condition before comparing."
+            )
+        if stored_fingerprint != current_fingerprint:
+            raise ValueError(
+                f"Aggregated RMSF result for condition '{condition.label}' was computed with "
+                f"settings fingerprint {stored_fingerprint}, but current settings require "
+                f"{current_fingerprint}. Recompute the condition or clear stale caches before "
+                "comparing."
+            )
+
     def compute_replicate(
         self,
         ctx: ReplicateContext,
@@ -158,8 +443,8 @@ class RMSFAnalysis(Analysis):
     ) -> Any:
         """Compute RMSF for a single replicate.
 
-        Performs trajectory loading, alignment, autocorrelation-based
-        subsampling, and per-residue RMSF calculation inline.
+        Performs settings validation and delegates trajectory-native execution
+        through the runner seam.
 
         Parameters
         ----------
@@ -173,11 +458,7 @@ class RMSFAnalysis(Analysis):
         RMSFResult
             Per-replicate RMSF result.
         """
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.rmsf._results import RMSFResult
-
         settings = ctx.settings
-        sim_config = ctx.sim_config
 
         selection = settings.selection
         reference_mode: ReferenceMode = settings.reference_mode
@@ -202,191 +483,176 @@ class RMSFAnalysis(Analysis):
                     "Provide a valid path to the external PDB reference structure."
                 )
 
-        # Parse equilibration time
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
-
-        # Initialize loader and config hash
-        loader = TrajectoryLoader(sim_config)
-        config_hash = compute_config_hash(sim_config)
-
-        # Determine output path and check cache
         output_dir = ctx.output_dir
         eq_str = f"eq{eq_value:g}{eq_unit}"
-        result_filename = f"rmsf_{eq_str}.json"
+        settings_tag = self._make_settings_cache_tag(ctx.settings)
+        result_filename = f"rmsf_{eq_str}_{settings_tag}.json"
         result_file = output_dir / result_filename
+        legacy_result_file = output_dir / f"rmsf_{eq_str}.json"
+
+        if not ctx.recompute and legacy_result_file.exists() and not result_file.exists():
+            logger.info(
+                "Ignoring legacy RMSF cache without settings fingerprint at %s and recomputing "
+                "with settings-sensitive cache identity",
+                legacy_result_file,
+            )
 
         cached = self._check_cache(
             RMSFResult,
             result_file,
             recompute=ctx.recompute,
-            sim_config=sim_config,
+            sim_config=ctx.sim_config,
             settings=ctx.settings,
         )
         if cached is not None:
             return cached
 
-        logger.info(f"Computing RMSF for replicate {replicate}")
+        result = super().compute_replicate(ctx, replicate)
+        result.save(result_file)
+        logger.info(f"Saved result to {result_file}")
+        return result
 
-        # Load universe
-        u = loader.load_universe(replicate)
+    def _trajectory_loader_factory(self) -> type[Any]:
+        """Return the RMSF loader class for the shared runner seam.
+
+        Returns
+        -------
+        type[Any]
+            Loader class patched by RMSF unit tests.
+        """
+
+        return TrajectoryLoader
+
+    def build_runner(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        universe: Any,
+        window: Any,
+    ) -> Any:
+        """Build the runner-backed RMSF execution object.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        universe : Any
+            Loaded universe for the replicate.
+        window : Any
+            Resolved trajectory window.
+
+        Returns
+        -------
+        Any
+            Runner object compatible with the trajectory seam.
+        """
+
+        del replicate
+        return RMSFReplicateRunner(
+            universe=universe,
+            settings=ctx.settings,
+            timestep_ps=window.timestep_ps,
+            align_trajectory_func=align_trajectory,
+            get_selection_diagnostics_func=get_selection_diagnostics,
+            compute_rmsd_timeseries_func=_compute_rmsd_timeseries,
+            compute_rmsf_func=_compute_rmsf,
+            aggregate_per_residue_func=_aggregate_per_residue,
+        )
+
+    def get_trajectory_window(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        loader: Any,
+        universe: Any,
+    ) -> Any:
+        """Resolve the RMSF window and retain trajectory file metadata.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        loader : Any
+            Trajectory loader already constructed for this replicate.
+        universe : Any
+            Loaded universe for the replicate.
+
+        Returns
+        -------
+        Any
+            Shared trajectory window augmented with trajectory file metadata.
+        """
+
+        window = super().get_trajectory_window(ctx, replicate, loader, universe)
         traj_info = loader.get_trajectory_info(replicate)
+        return _RMSFTrajectoryWindow.from_window(window, traj_info.trajectory_files)
 
-        # Get atom selection for RMSF
-        atoms = u.select_atoms(selection)
-        if len(atoms) == 0:
-            diag = get_selection_diagnostics(u, selection)
-            raise ValueError(f"Selection '{selection}' matched no atoms.\n\n{diag}")
+    def summarize_replicate(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        runner: Any,
+        window: Any,
+    ) -> Any:
+        """Serialize runner output into the legacy RMSF result schema.
 
-        logger.info(f"Selected {len(atoms)} atoms with '{selection}'")
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        runner : Any
+            Executed RMSF runner.
+        window : Any
+            Resolved trajectory window.
 
-        # Get timestep
-        timestep = loader.get_timestep(replicate, unit="ps")
+        Returns
+        -------
+        RMSFResult
+            Cache-compatible per-replicate RMSF result.
+        """
 
-        # Determine start frame after equilibration
-        eq_time_ps = convert_time(eq_value, eq_unit, "ps")
-        start_frame = time_to_frame(eq_time_ps, "ps", timestep, "ps")
+        from polyzymd.analyses._results_base import get_polyzymd_version
 
-        n_frames_total = len(u.trajectory)
-        n_frames_after_eq = n_frames_total - start_frame
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+        settings_tag = self._make_settings_cache_tag(ctx.settings)
+        trajectory_files = getattr(window, "trajectory_files", None)
+        if trajectory_files is None:
+            trajectory_files = getattr(runner, "trajectory_files", ())
+        payload = runner.results
 
-        # Validate equilibration time against trajectory length
-        eq_time_ns = convert_time(eq_value, eq_unit, "ns")
-        traj_time_ns = (n_frames_total * timestep) / 1000.0
-        is_valid, eq_message = validate_equilibration_time(eq_time_ns, traj_time_ns)
-        if not is_valid:
-            raise ValueError(eq_message)
-        if eq_message:
-            logger.warning(eq_message)
-
-        logger.info(
-            f"Trajectory: {n_frames_total} frames, skipping first {start_frame} for equilibration"
-        )
-
-        # ===== ALIGNMENT STEP =====
-        alignment_config = AlignmentConfig(
-            enabled=True,
-            reference_mode=reference_mode,
-            reference_frame=reference_frame,
-            selection=alignment_selection,
-            centroid_selection=centroid_selection,
-            reference_file=(Path(reference_file) if reference_file is not None else None),
-        )
-        ref_frame_idx = align_trajectory(
-            u, alignment_config, start_frame=start_frame, stop_frame=n_frames_total
-        )
-        ref_frame_1indexed = ref_frame_idx + 1 if ref_frame_idx is not None else None
-
-        logger.info(
-            f"Alignment: mode='{reference_mode}', "
-            f"reference_frame={ref_frame_1indexed}, "
-            f"selection='{alignment_selection}'"
-        )
-
-        # ===== AUTOCORRELATION & FRAME SELECTION =====
-        correlation_time: float | None = None
-        correlation_time_unit: str | None = None
-        n_independent: int | None = None
-        frame_indices: NDArray[np.int64]
-
-        if n_frames_after_eq > 100:
-            rmsd_timeseries = _compute_rmsd_timeseries(u, atoms, start_frame)
-            acf_result = compute_acf(rmsd_timeseries, timestep=timestep, timestep_unit="ps")
-            tau_result = estimate_correlation_time(acf_result, n_frames=n_frames_after_eq)
-
-            correlation_time = tau_result.tau
-            correlation_time_unit = tau_result.tau_unit
-            n_independent = tau_result.n_independent
-
-            logger.info(
-                f"Correlation time: {correlation_time:.2f} {correlation_time_unit}, "
-                f"~{n_independent} independent frames"
-            )
-
-            frame_indices = get_independent_indices(
-                n_frames=n_frames_total,
-                correlation_time=correlation_time,
-                timestep=timestep,
-                start_frame=start_frame,
-            )
-        else:
-            frame_indices = np.arange(start_frame, n_frames_total, dtype=np.int64)
-
-        n_frames_used = len(frame_indices)
-        logger.info(f"Using {n_frames_used} frames for RMSF calculation")
-
-        # ===== RMSF CALCULATION =====
-        # Load external reference positions if needed
-        external_ref_positions: NDArray[np.float64] | None = None
-        if reference_mode == "external" and reference_file is not None:
-            import MDAnalysis as mda_ext
-
-            ref_path = Path(reference_file)
-            logger.info(f"Loading external reference positions from: {ref_path}")
-            ref_universe = mda_ext.Universe(str(ref_path))
-            ref_atoms = ref_universe.select_atoms(selection)
-
-            if len(ref_atoms) != len(atoms):
-                raise ValueError(
-                    f"External PDB atom count ({len(ref_atoms)}) does not match "
-                    f"trajectory selection ({len(atoms)}) for '{selection}'. "
-                    f"Cannot use external PDB positions as RMSF reference."
-                )
-            external_ref_positions = ref_atoms.positions.copy().astype(np.float64)
-            logger.info(
-                f"Using external PDB positions as RMSF reference "
-                f"({len(ref_atoms)} atoms from '{selection}')"
-            )
-
-        rmsf_values = _compute_rmsf(u, atoms, frame_indices, external_ref_positions)
-
-        # Get residue information
-        residue_ids = [int(r.resid) for r in atoms.residues]
-        residue_names = [r.resname for r in atoms.residues]
-
-        if "NAME CA" in selection.upper():
-            per_residue_rmsf = rmsf_values
-        else:
-            per_residue_rmsf = _aggregate_per_residue(atoms, rmsf_values)
-            unique_residues = atoms.residues
-            residue_ids = [int(r.resid) for r in unique_residues]
-            residue_names = [r.resname for r in unique_residues]
-
-        # Summary statistics
-        mean_rmsf = float(np.mean(per_residue_rmsf))
-        std_rmsf = float(np.std(per_residue_rmsf))
-        min_rmsf = float(np.min(per_residue_rmsf))
-        max_rmsf = float(np.max(per_residue_rmsf))
-
-        result = RMSFResult(
-            config_hash=config_hash,
+        return RMSFResult(
+            config_hash=compute_config_hash(ctx.sim_config),
             polyzymd_version=get_polyzymd_version(),
             replicate=replicate,
             equilibration_time=eq_value,
             equilibration_unit=eq_unit,
-            selection_string=selection,
-            correlation_time=correlation_time,
-            correlation_time_unit=correlation_time_unit,
-            n_independent_frames=n_independent,
-            residue_ids=residue_ids,
-            residue_names=residue_names,
-            rmsf_values=per_residue_rmsf.tolist(),
-            mean_rmsf=mean_rmsf,
-            std_rmsf=std_rmsf,
-            min_rmsf=min_rmsf,
-            max_rmsf=max_rmsf,
-            reference_mode=reference_mode,
-            reference_frame=ref_frame_1indexed,
-            alignment_selection=alignment_selection,
-            reference_file=(str(reference_file) if reference_file is not None else None),
-            n_frames_total=n_frames_total,
-            n_frames_used=n_frames_used,
-            trajectory_files=[str(f) for f in traj_info.trajectory_files],
+            selection_string=payload.selection,
+            correlation_time=payload.correlation_time,
+            correlation_time_unit=payload.correlation_time_unit,
+            n_independent_frames=payload.n_independent_frames,
+            residue_ids=payload.residue_ids,
+            residue_names=payload.residue_names,
+            rmsf_values=payload.rmsf_values.tolist(),
+            mean_rmsf=payload.mean_rmsf,
+            std_rmsf=payload.std_rmsf,
+            min_rmsf=payload.min_rmsf,
+            max_rmsf=payload.max_rmsf,
+            reference_mode=payload.reference_mode,
+            reference_frame=payload.reference_frame,
+            alignment_selection=payload.alignment_selection,
+            reference_file=payload.reference_file,
+            n_frames_total=payload.n_frames_total,
+            n_frames_used=payload.n_frames_used,
+            settings_fingerprint=settings_tag,
+            trajectory_files=[str(path) for path in trajectory_files],
         )
-
-        result.save(result_file)
-        logger.info(f"Saved result to {result_file}")
-
-        return result
 
     def aggregate(
         self,
@@ -414,33 +680,37 @@ class RMSFAnalysis(Analysis):
         from polyzymd.analyses.rmsf._results import RMSFAggregatedResult
 
         settings = ctx.settings
+        self._validate_aggregate_input_completeness(ctx, results)
+        self._validate_replicate_result_settings_identity(ctx, results)
+        ordered_results = self._order_aggregate_results_by_replicate(ctx, results)
+        settings_tag = self._make_settings_cache_tag(settings)
 
         # Collect per-residue RMSF arrays from each replicate
-        per_replicate_rmsf = [np.array(r.rmsf_values) for r in results]
+        per_replicate_rmsf = [np.array(result.rmsf_values) for result in ordered_results]
 
         # Aggregate per-residue statistics
         per_residue_stats = aggregate_per_residue_stats(
             per_replicate_rmsf,
-            residue_ids=np.array(results[0].residue_ids),
+            residue_ids=np.array(ordered_results[0].residue_ids),
         )
 
         # Aggregate whole-protein statistics
-        per_replicate_means = [r.mean_rmsf for r in results]
+        per_replicate_means = [result.mean_rmsf for result in ordered_results]
         overall_stats = compute_sem(per_replicate_means)
 
-        config_hash = results[0].config_hash
+        config_hash = ordered_results[0].config_hash
 
         agg_result = RMSFAggregatedResult(
             config_hash=config_hash,
             polyzymd_version=get_polyzymd_version(),
             replicate=None,
-            equilibration_time=results[0].equilibration_time,
-            equilibration_unit=results[0].equilibration_unit,
+            equilibration_time=ordered_results[0].equilibration_time,
+            equilibration_unit=ordered_results[0].equilibration_unit,
             selection_string=settings.selection,
             replicates=list(ctx.replicates),
             n_replicates=len(ctx.replicates),
-            residue_ids=results[0].residue_ids,
-            residue_names=results[0].residue_names,
+            residue_ids=ordered_results[0].residue_ids,
+            residue_names=ordered_results[0].residue_names,
             mean_rmsf_per_residue=per_residue_stats.means.tolist(),
             sem_rmsf_per_residue=per_residue_stats.sems.tolist(),
             per_replicate_mean_rmsf=per_replicate_means,
@@ -448,12 +718,13 @@ class RMSFAnalysis(Analysis):
             overall_sem_rmsf=overall_stats.sem,
             overall_min_rmsf=float(np.min(per_residue_stats.means)),
             overall_max_rmsf=float(np.max(per_residue_stats.means)),
+            settings_fingerprint=settings_tag,
             source_result_files=[],
         )
 
         target_path = ctx.result_path
         if target_path is None:
-            filename = self._make_aggregated_filename(ctx.replicates, results[0])
+            filename = self._make_aggregated_filename(ctx.replicates, ordered_results[0])
             target_path = ctx.output_dir / filename
         self.save_result(agg_result, target_path)
         logger.info(f"Saved aggregated RMSF to {target_path}")
@@ -486,6 +757,78 @@ class RMSFAnalysis(Analysis):
                 direction_labels=("stabilizing", "unchanged", "destabilizing"),
             ),
         }
+
+    def compare(self, ctx: ComparisonContext) -> Any:
+        """Compare RMSF across conditions with fail-loud completeness checks.
+
+        Parameters
+        ----------
+        ctx : ComparisonContext
+            Framework-provided comparison context.
+
+        Returns
+        -------
+        Any
+            Default scalar comparison result, or ``None`` when no conditions are
+            available.
+        """
+        from polyzymd.analyses.stats import default_scalar_comparison
+
+        metrics_by_condition: dict[str, dict[str, MetricValue]] = {}
+        for condition in ctx.conditions:
+            summary = ctx.aggregated_results.get(condition.label)
+            if summary is None:
+                analysis_dir = ctx.analysis_dirs.get(condition.label)
+                if analysis_dir is None:
+                    raise ValueError(
+                        f"RMSF comparison requires an aggregated result for condition "
+                        f"'{condition.label}', but no analysis directory was found. Recompute "
+                        "the condition or clear stale caches before comparing."
+                    )
+
+                summary = self._load_aggregated_result(analysis_dir / "aggregated")
+
+            if summary is None:
+                raise ValueError(
+                    f"RMSF comparison requires an aggregated result for condition "
+                    f"'{condition.label}'. Recompute the condition or clear stale caches before "
+                    "comparing."
+                )
+
+            self._validate_aggregated_result_completeness(condition, summary, ctx.settings)
+
+            extracted = self.extract_metrics(summary)
+            if not isinstance(extracted, dict):
+                raise PluginContractError(
+                    f"RMSF compare expected extract_metrics() to return dict[str, MetricValue] "
+                    f"for condition '{condition.label}', got {type(extracted).__name__}."
+                )
+            if not extracted:
+                raise PluginContractError(
+                    f"RMSF compare expected at least one metric for condition '{condition.label}'."
+                )
+            for metric_key, metric_value in extracted.items():
+                if not isinstance(metric_value, MetricValue):
+                    raise PluginContractError(
+                        f"RMSF compare expected MetricValue for key '{metric_key}' in condition "
+                        f"'{condition.label}', got {type(metric_value).__name__}."
+                    )
+            metrics_by_condition[condition.label] = extracted
+
+        if not metrics_by_condition:
+            logger.warning("%s: no conditions have metrics — skipping comparison.", self.name)
+            return None
+
+        return default_scalar_comparison(
+            analysis_name=self.name,
+            project_name=ctx.name,
+            metrics_by_condition=metrics_by_condition,
+            control_label=ctx.effective_control,
+            equilibration=ctx.equilibration,
+            fdr_alpha=ctx.fdr_alpha,
+            ttest_method=ctx.ttest_method,
+            posthoc_method=ctx.posthoc_method,
+        )
 
     def format(self, result: Any, output_format: str = "text") -> str:
         """Format RMSF comparison result for CLI display.
@@ -565,81 +908,40 @@ class RMSFAnalysis(Analysis):
 
 
 def _compute_rmsd_timeseries(
-    u: "Universe",
+    u: Any,
     atoms: Any,
     start_frame: int,
+    stop_frame: int | None = None,
+    step: int = 1,
 ) -> NDArray[np.float64]:
     """Compute RMSD timeseries for autocorrelation analysis.
 
-    Parameters
-    ----------
-    u : Universe
-        MDAnalysis universe (should be aligned).
-    atoms : AtomGroup
-        Atom selection for RMSD calculation.
-    start_frame : int
-        First frame to include (0-indexed).
-
-    Returns
-    -------
-    NDArray[np.float64]
-        RMSD values for each frame from *start_frame* onward.
+    This compatibility wrapper preserves the historical helper name while the
+    implementation lives in ``rmsf._runner``.
     """
-    u.trajectory[start_frame]
-    ref_pos = atoms.positions.copy()
 
-    rmsd_values = []
-    for _ts in u.trajectory[start_frame:]:
-        diff = atoms.positions - ref_pos
-        rmsd = np.sqrt(np.mean(np.sum(diff**2, axis=1)))
-        rmsd_values.append(rmsd)
-
-    return np.array(rmsd_values, dtype=np.float64)
+    return compute_rmsd_timeseries(
+        u,
+        atoms,
+        start_frame=start_frame,
+        stop_frame=stop_frame,
+        step=step,
+    )
 
 
 def _compute_rmsf(
-    u: "Universe",
+    u: Any,
     atoms: Any,
     frame_indices: NDArray[np.int64],
     reference_positions: NDArray[np.float64] | None = None,
 ) -> NDArray[np.float64]:
     """Compute RMSF using selected frames.
 
-    Parameters
-    ----------
-    u : Universe
-        Aligned MDAnalysis Universe.
-    atoms : AtomGroup
-        Atom selection for RMSF calculation.
-    frame_indices : NDArray[np.int64]
-        Frame indices to use for the calculation.
-    reference_positions : NDArray[np.float64] or None
-        External reference positions (n_atoms, 3) to use instead of the
-        trajectory average.
-
-    Returns
-    -------
-    NDArray[np.float64]
-        Per-atom RMSF values in Angstroms.
+    This compatibility wrapper preserves the historical helper name while the
+    implementation lives in ``rmsf._runner``.
     """
-    n_frames = len(frame_indices)
 
-    if reference_positions is not None:
-        avg_positions = reference_positions
-    else:
-        positions_sum = np.zeros_like(atoms.positions)
-        for idx in frame_indices:
-            u.trajectory[int(idx)]
-            positions_sum += atoms.positions
-        avg_positions = positions_sum / n_frames
-
-    sq_diff_sum = np.zeros(len(atoms), dtype=np.float64)
-    for idx in frame_indices:
-        u.trajectory[int(idx)]
-        diff = atoms.positions - avg_positions
-        sq_diff_sum += np.sum(diff**2, axis=1)
-
-    return np.sqrt(sq_diff_sum / n_frames)
+    return compute_rmsf(u, atoms, frame_indices, reference_positions)
 
 
 def _aggregate_per_residue(
@@ -648,28 +950,8 @@ def _aggregate_per_residue(
 ) -> NDArray[np.float64]:
     """Aggregate per-atom RMSF to per-residue (mean within residue).
 
-    Parameters
-    ----------
-    atoms : AtomGroup
-        MDAnalysis atom selection.
-    atom_rmsf : NDArray[np.float64]
-        Per-atom RMSF values.
-
-    Returns
-    -------
-    NDArray[np.float64]
-        Per-residue mean RMSF values.
+    This compatibility wrapper preserves the historical helper name while the
+    implementation lives in ``rmsf._runner``.
     """
-    residues = atoms.residues
-    n_residues = len(residues)
-    per_residue = np.zeros(n_residues, dtype=np.float64)
 
-    atom_indices_set = set(atoms.indices)
-    for i, res in enumerate(residues):
-        # Keep residue grouping chain-aware when resid values repeat across chains
-        res_atom_indices = [idx for idx in res.atoms.indices if idx in atom_indices_set]
-        if res_atom_indices:
-            mask = np.isin(atoms.indices, res_atom_indices)
-            per_residue[i] = np.mean(atom_rmsf[mask])
-
-    return per_residue
+    return aggregate_per_residue(atoms, atom_rmsf)

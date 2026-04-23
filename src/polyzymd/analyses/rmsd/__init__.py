@@ -8,6 +8,7 @@ and exposes plotting/formatting hooks.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
@@ -24,27 +25,84 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
 from polyzymd.analyses.rmsd._results import RMSDAggregatedResult, RMSDResult
-from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
+from polyzymd.analyses.rmsd._runner import RMSDReplicateRunner, compute_rmsd_run
 from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
-from polyzymd.analyses.shared.loader import (
-    TrajectoryLoader,
-    convert_time,
-    parse_time_string,
-    time_to_frame,
-)
+from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
-    filter_summaries_with_run,
 )
 from polyzymd.analyses.shared.statistics import compute_sem
 
 if TYPE_CHECKING:
-    from numpy.typing import NDArray
-
     from polyzymd.analyses.rmsd._comparison_results import RMSDComparisonResult
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _RMSDTrajectoryWindow:
+    """RMSD trajectory window that carries loader-derived file metadata.
+
+    This keeps summarize-time metadata lookup on the same loader seam used by
+    the base runner orchestration.
+    """
+
+    start: int
+    stop: int
+    step: int
+    equilibration_start: int
+    n_frames_total: int
+    n_frames_selected: int
+    timestep_ps: float
+    equilibration_ps: float
+    warning_message: str | None = None
+    trajectory_files: tuple[Path, ...] = ()
+
+    @classmethod
+    def from_window(
+        cls,
+        window: Any,
+        trajectory_files: Sequence[Path],
+    ) -> _RMSDTrajectoryWindow:
+        """Build an RMSD window wrapper from the shared trajectory window.
+
+        Parameters
+        ----------
+        window : Any
+            Shared trajectory window returned by the centralized resolver.
+        trajectory_files : Sequence[Path]
+            Trajectory files resolved by the existing loader instance.
+
+        Returns
+        -------
+        _RMSDTrajectoryWindow
+            RMSD window wrapper that preserves run arguments and file metadata.
+        """
+
+        return cls(
+            start=window.start,
+            stop=window.stop,
+            step=window.step,
+            equilibration_start=window.equilibration_start,
+            n_frames_total=window.n_frames_total,
+            n_frames_selected=window.n_frames_selected,
+            timestep_ps=window.timestep_ps,
+            equilibration_ps=window.equilibration_ps,
+            warning_message=window.warning_message,
+            trajectory_files=tuple(trajectory_files),
+        )
+
+    def run_kwargs(self) -> dict[str, int]:
+        """Return keyword arguments for the runner ``run()`` call.
+
+        Returns
+        -------
+        dict[str, int]
+            ``start``, ``stop``, and ``step`` values for ``run()``.
+        """
+
+        return {"start": self.start, "stop": self.stop, "step": self.step}
 
 
 class RMSDRunSettings(BaseModel):
@@ -214,6 +272,357 @@ class RMSDAnalysis(Analysis):
         """
         return settings_fingerprint(settings)
 
+    @classmethod
+    def _coerce_and_validate_aggregated_result(
+        cls,
+        result: Any,
+        settings: RMSDSettings,
+        *,
+        condition_label: str | None = None,
+        source: Path | None = None,
+    ) -> RMSDAggregatedResult:
+        """Coerce an aggregated result and validate its settings identity.
+
+        Parameters
+        ----------
+        result : Any
+            Aggregated result loaded from disk or supplied in memory.
+        settings : RMSDSettings
+            Current RMSD settings for comparison or plotting.
+        condition_label : str | None, optional
+            Condition label for error reporting.
+        source : Path | None, optional
+            Source file path for diagnostics.
+
+        Returns
+        -------
+        RMSDAggregatedResult
+            Validated aggregated result.
+
+        Raises
+        ------
+        ValueError
+            Raised when the aggregated result is missing a settings
+            fingerprint or was computed with different settings.
+        """
+        if isinstance(result, dict):
+            result = RMSDAggregatedResult.model_validate(result)
+
+        if not isinstance(result, RMSDAggregatedResult):
+            raise TypeError(
+                f"RMSD aggregated result loader expected RMSDAggregatedResult, got "
+                f"{type(result).__name__}"
+            )
+
+        stored_fingerprint = getattr(result, "settings_fingerprint", None)
+        if stored_fingerprint is None:
+            stored_fingerprint = getattr(result, "settings_fp", None)
+
+        current_fingerprint = cls._make_settings_cache_tag(settings)
+        condition_text = (
+            f" for condition '{condition_label}'" if condition_label is not None else ""
+        )
+        source_text = f" at {source}" if source is not None else ""
+        if stored_fingerprint is None:
+            raise ValueError(
+                "Aggregated RMSD result"
+                f"{condition_text} is missing a settings fingerprint{source_text}. "
+                "Legacy RMSD aggregated caches are not compatible with "
+                "settings-sensitive compare/plot loading. Recompute the condition before "
+                "comparing or plotting."
+            )
+        if stored_fingerprint != current_fingerprint:
+            raise ValueError(
+                "Aggregated RMSD result"
+                f"{condition_text} was computed with settings fingerprint "
+                f"{stored_fingerprint}, but current settings require {current_fingerprint}"
+                f"{source_text}. Recompute the condition or clear stale caches before "
+                "comparing or plotting."
+            )
+        return result
+
+    def _resolve_aggregated_result_path(self, aggregated_dir: Path) -> Path | None:
+        """Resolve the aggregated RMSD result path.
+
+        Parameters
+        ----------
+        aggregated_dir : Path
+            Directory containing aggregated result files.
+
+        Returns
+        -------
+        Path | None
+            Path to the selected JSON result, or ``None`` when no result file
+            exists.
+        """
+        if not aggregated_dir.exists():
+            return None
+        canonical = self.aggregate_result_path(aggregated_dir)
+        if canonical.exists():
+            return canonical
+
+        json_files = sorted(aggregated_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
+        if not json_files:
+            return None
+
+        chosen = json_files[-1]
+        logger.warning(
+            "%s: canonical result.json not found in %s — falling back to %s "
+            "(%d JSON file(s) present)",
+            self.name,
+            aggregated_dir,
+            chosen.name,
+            len(json_files),
+        )
+        return chosen
+
+    def _load_aggregated_result(
+        self,
+        aggregated_dir: Path,
+        *,
+        settings: RMSDSettings | None = None,
+        condition_label: str | None = None,
+    ) -> Any:
+        """Load and optionally validate an aggregated RMSD result.
+
+        Parameters
+        ----------
+        aggregated_dir : Path
+            Directory containing aggregated result files.
+        settings : RMSDSettings | None, optional
+            Current settings used to validate settings-sensitive aggregated
+            caches. When omitted, the result is loaded without settings
+            identity validation.
+        condition_label : str | None, optional
+            Condition label for validation diagnostics.
+
+        Returns
+        -------
+        Any
+            Loaded aggregated result, or ``None`` when no result file exists.
+        """
+        result_path = self._resolve_aggregated_result_path(aggregated_dir)
+        if result_path is None:
+            return None
+
+        result = self._deserialize_result(result_path)
+        if settings is None:
+            return result
+
+        return self._coerce_and_validate_aggregated_result(
+            result,
+            settings,
+            condition_label=condition_label,
+            source=result_path,
+        )
+
+    @staticmethod
+    def _validate_aggregate_input_completeness(
+        ctx: AggregateContext,
+        results: Sequence[Any],
+        configured_run_labels: Sequence[str],
+    ) -> None:
+        """Validate that aggregation inputs cover all configured replicates and runs.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        results : Sequence[Any]
+            Per-replicate RMSD results.
+        configured_run_labels : Sequence[str]
+            Run labels defined in the RMSD settings.
+
+        Raises
+        ------
+        ValueError
+            Raised when configured replicates or runs are missing from the
+            aggregation inputs.
+        """
+        expected_replicates = sorted(ctx.replicates)
+        observed_replicates = sorted(
+            result.replicate for result in results if getattr(result, "replicate", None) is not None
+        )
+        if observed_replicates != expected_replicates:
+            raise ValueError(
+                f"RMSD aggregation for condition '{ctx.condition.label}' is incomplete. Expected "
+                f"replicate results for {expected_replicates}, found {observed_replicates}. "
+                "Recompute missing replicates or clear stale caches before aggregating."
+            )
+
+        for run_label in configured_run_labels:
+            missing_replicates: list[int] = []
+            duplicate_replicates: list[int] = []
+            for result in results:
+                replicate = getattr(result, "replicate", None)
+                matches = [
+                    run_result
+                    for run_result in result.run_results
+                    if run_result.run_label == run_label
+                ]
+                if not matches:
+                    if replicate is not None:
+                        missing_replicates.append(replicate)
+                    continue
+                if len(matches) > 1 and replicate is not None:
+                    duplicate_replicates.append(replicate)
+
+            if missing_replicates:
+                raise ValueError(
+                    f"Configured RMSD run '{run_label}' is missing replicate entries in condition "
+                    f"'{ctx.condition.label}'. Missing replicates: {sorted(missing_replicates)}. "
+                    "Recompute missing replicates or clear stale caches before aggregating."
+                )
+
+            if duplicate_replicates:
+                raise ValueError(
+                    f"Configured RMSD run '{run_label}' has duplicate replicate entries in "
+                    f"condition '{ctx.condition.label}' for replicates "
+                    f"{sorted(duplicate_replicates)}. Clear stale caches and recompute before "
+                    "aggregating."
+                )
+
+    @staticmethod
+    def _order_results_by_replicate(
+        ctx: AggregateContext,
+        results: Sequence[Any],
+    ) -> list[Any]:
+        """Return aggregate inputs ordered to match ``ctx.replicates``.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        results : Sequence[Any]
+            Per-replicate RMSD results that already passed completeness checks.
+
+        Returns
+        -------
+        list[Any]
+            Replicate results in the declared replicate order.
+
+        Raises
+        ------
+        ValueError
+            Raised when a replicate identifier is missing or duplicated while
+            normalizing the aggregate inputs.
+        """
+        ordered_results: dict[int, Any] = {}
+        for result in results:
+            replicate = getattr(result, "replicate", None)
+            if replicate is None:
+                raise ValueError(
+                    f"RMSD aggregation for condition '{ctx.condition.label}' encountered a "
+                    "replicate result without a replicate identifier while normalizing "
+                    "aggregate inputs."
+                )
+            if replicate in ordered_results:
+                raise ValueError(
+                    f"RMSD aggregation for condition '{ctx.condition.label}' encountered "
+                    f"duplicate replicate {replicate} while normalizing aggregate inputs."
+                )
+            ordered_results[replicate] = result
+
+        missing_replicates = [
+            replicate for replicate in ctx.replicates if replicate not in ordered_results
+        ]
+        if missing_replicates:
+            raise ValueError(
+                f"RMSD aggregation for condition '{ctx.condition.label}' cannot order aggregate "
+                f"inputs because replicates {missing_replicates} are missing."
+            )
+
+        return [ordered_results[replicate] for replicate in ctx.replicates]
+
+    @staticmethod
+    def _validate_aggregated_result_completeness(
+        condition: Any,
+        agg_result: RMSDAggregatedResult,
+        configured_run_labels: Sequence[str],
+    ) -> None:
+        """Validate that an aggregated RMSD result is complete for comparison.
+
+        Parameters
+        ----------
+        condition : Any
+            Condition associated with the aggregated result.
+        agg_result : RMSDAggregatedResult
+            Aggregated RMSD result to validate.
+        configured_run_labels : Sequence[str]
+            Run labels defined in the RMSD settings.
+
+        Raises
+        ------
+        ValueError
+            Raised when the aggregated result omits configured runs or contains
+            incomplete per-run replicate data.
+        """
+        expected_run_labels = set(configured_run_labels)
+        observed_run_labels = {run_result.run_label for run_result in agg_result.run_results}
+        missing_runs = sorted(expected_run_labels - observed_run_labels)
+        unexpected_runs = sorted(observed_run_labels - expected_run_labels)
+        if missing_runs or unexpected_runs:
+            details: list[str] = []
+            if missing_runs:
+                details.append(f"missing runs {missing_runs}")
+            if unexpected_runs:
+                details.append(f"unexpected runs {unexpected_runs}")
+            detail_text = "; ".join(details)
+            raise ValueError(
+                f"Aggregated RMSD result for condition '{condition.label}' is incomplete: "
+                f"{detail_text}. Recompute the condition or clear stale caches before "
+                "comparing."
+            )
+
+        expected_replicates = sorted(condition.replicates)
+        observed_replicates = sorted(agg_result.replicates)
+        if (
+            agg_result.n_replicates != len(expected_replicates)
+            or observed_replicates != expected_replicates
+        ):
+            raise ValueError(
+                f"Aggregated RMSD result for condition '{condition.label}' has incomplete "
+                f"replicate coverage. Expected replicates {expected_replicates}, found "
+                f"{observed_replicates} with n_replicates={agg_result.n_replicates}. Recompute "
+                "the condition or clear stale caches before comparing."
+            )
+
+        for run_result in agg_result.run_results:
+            run_replicates = sorted(run_result.replicates)
+            counts = {
+                "per_replicate_means": len(run_result.per_replicate_means),
+                "per_replicate_stds": len(run_result.per_replicate_stds),
+                "per_replicate_medians": len(run_result.per_replicate_medians),
+                "per_replicate_convergence_times_ns": len(
+                    run_result.per_replicate_convergence_times_ns
+                ),
+                "per_replicate_convergence_assessable": len(
+                    run_result.per_replicate_convergence_assessable
+                ),
+            }
+            mismatched_fields = {
+                name: count for name, count in counts.items() if count != len(expected_replicates)
+            }
+            if (
+                run_result.n_replicates != len(expected_replicates)
+                or run_replicates != expected_replicates
+            ):
+                raise ValueError(
+                    f"Aggregated RMSD run '{run_result.run_label}' for condition "
+                    f"'{condition.label}' has incomplete replicate metadata. Expected "
+                    f"replicates {expected_replicates}, found {run_replicates} with "
+                    f"n_replicates={run_result.n_replicates}. Recompute the condition or "
+                    "clear stale caches before comparing."
+                )
+
+            if mismatched_fields:
+                raise ValueError(
+                    f"Aggregated RMSD run '{run_result.run_label}' for condition "
+                    f"'{condition.label}' has incomplete replicate values: {mismatched_fields}. "
+                    f"Expected {len(expected_replicates)} entries per field. Recompute the "
+                    "condition or clear stale caches before comparing."
+                )
+
     def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
         """Compute RMSD for all configured runs for a single replicate.
 
@@ -229,14 +638,8 @@ class RMSDAnalysis(Analysis):
         RMSDResult
             Per-replicate RMSD result containing all run outputs.
         """
-        import numpy as np
-
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.rmsd._results import RMSDResult
 
         settings = ctx.settings
-        sim_config = ctx.sim_config
-
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
         eq_str = f"eq{eq_value:g}{eq_unit}"
         settings_tag = self._make_settings_cache_tag(settings)
@@ -246,66 +649,215 @@ class RMSDAnalysis(Analysis):
             RMSDResult,
             result_file,
             recompute=ctx.recompute,
-            sim_config=sim_config,
+            sim_config=ctx.sim_config,
             settings=ctx.settings,
         )
         if cached is not None:
             return cached
 
-        loader = TrajectoryLoader(sim_config)
-        config_hash = compute_config_hash(sim_config)
+        result = super().compute_replicate(ctx, replicate)
+        result.save(result_file)
+        logger.info("Saved RMSD result to %s", result_file)
+        return result
 
-        u0 = loader.load_universe(replicate, cache=False)
+    def _trajectory_loader_factory(self) -> type[Any]:
+        """Return the RMSD loader class for the shared runner seam.
+
+        Returns
+        -------
+        type[Any]
+            Loader class patched by RMSD unit tests.
+        """
+
+        return TrajectoryLoader
+
+    def get_trajectory_window(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        loader: Any,
+        universe: Any,
+    ) -> Any:
+        """Resolve the RMSD window and retain trajectory file metadata.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        loader : Any
+            Trajectory loader already constructed for this replicate.
+        universe : Any
+            Loaded universe for the replicate.
+
+        Returns
+        -------
+        Any
+            Shared trajectory window augmented with trajectory file metadata.
+        """
+
+        window = super().get_trajectory_window(ctx, replicate, loader, universe)
         traj_info = loader.get_trajectory_info(replicate)
-        timestep_ps = loader.get_timestep(replicate, unit="ps")
+        return _RMSDTrajectoryWindow.from_window(window, traj_info.trajectory_files)
 
-        n_frames_total = len(u0.trajectory)
-        eq_time_ps = convert_time(eq_value, eq_unit, "ps")
-        start_frame = time_to_frame(eq_time_ps, "ps", timestep_ps, "ps")
-        n_frames_used = n_frames_total - start_frame
+    def build_runner(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        universe: Any,
+        window: Any,
+    ) -> Any:
+        """Build the runner-backed RMSD execution object.
 
-        if n_frames_used <= 0:
-            raise ValueError(
-                "Equilibration removed all frames for RMSD analysis. "
-                f"Got start_frame={start_frame}, n_frames_total={n_frames_total}."
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        universe : Any
+            Loaded universe for the replicate.
+        window : Any
+            Resolved trajectory window.
+
+        Returns
+        -------
+        Any
+            Runner object compatible with the trajectory seam.
+        """
+
+        return RMSDReplicateRunner(
+            sim_config=ctx.sim_config,
+            replicate=replicate,
+            runs=list(ctx.settings.runs),
+            loader_factory=self._trajectory_loader_factory(),
+            n_frames_total=len(universe.trajectory),
+            timestep_ps=window.timestep_ps,
+        )
+
+    def summarize_replicate(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        runner: Any,
+        window: Any,
+    ) -> Any:
+        """Serialize runner output into the legacy RMSD result schema.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        runner : Any
+            Executed RMSD runner.
+        window : Any
+            Resolved trajectory window.
+
+        Returns
+        -------
+        RMSDResult
+            Cache-compatible per-replicate RMSD result.
+        """
+        import numpy as np
+
+        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses.rmsd._results import RMSDResult, RMSDRunResult
+
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+        eq_str = f"eq{eq_value:g}{eq_unit}"
+        settings_tag = self._make_settings_cache_tag(ctx.settings)
+        config_hash = compute_config_hash(ctx.sim_config)
+        trajectory_files = getattr(window, "trajectory_files", ())
+
+        run_results: list[RMSDRunResult] = []
+        for payload in runner.results.run_payloads:
+            npz_filename = f"rmsd_{payload.run_label}_{eq_str}_{settings_tag}_timeseries.npz"
+            npz_path = ctx.output_dir / npz_filename
+            np.savez_compressed(
+                npz_path,
+                rmsd_values=payload.rmsd_values,
+                time_ns=payload.time_ns,
+                frames=payload.frames,
+                convergence_window_start_ns=np.asarray(
+                    payload.convergence_result.window_start_times_ns,
+                    dtype=np.float64,
+                ),
+                convergence_window_mean_rmsd=np.asarray(
+                    payload.convergence_result.window_mean_values,
+                    dtype=np.float64,
+                ),
+                convergence_slope_time_ns=np.asarray(
+                    payload.convergence_result.slope_times_ns,
+                    dtype=np.float64,
+                ),
+                convergence_slope=np.asarray(payload.convergence_result.slopes, dtype=np.float64),
+                convergence_converged=np.asarray(
+                    payload.convergence_result.converged,
+                    dtype=np.bool_,
+                ),
+                convergence_time_ns=np.asarray(
+                    (
+                        np.nan
+                        if payload.convergence_result.convergence_time_ns is None
+                        else payload.convergence_result.convergence_time_ns
+                    ),
+                    dtype=np.float64,
+                ),
+            )
+            run_results.append(
+                RMSDRunResult(
+                    config_hash=config_hash,
+                    polyzymd_version=get_polyzymd_version(),
+                    replicate=replicate,
+                    equilibration_time=eq_value,
+                    equilibration_unit=eq_unit,
+                    selection_string=payload.selection,
+                    correlation_time=payload.correlation_time,
+                    n_independent_frames=payload.n_independent_frames,
+                    run_label=payload.run_label,
+                    selection=payload.selection,
+                    alignment_selection=payload.alignment_selection,
+                    reference_mode=payload.reference_mode,
+                    reference_frame=payload.reference_frame,
+                    reference_file=payload.reference_file,
+                    mean_rmsd=payload.mean_rmsd,
+                    std_rmsd=payload.std_rmsd,
+                    median_rmsd=payload.median_rmsd,
+                    min_rmsd=payload.min_rmsd,
+                    max_rmsd=payload.max_rmsd,
+                    final_rmsd=payload.final_rmsd,
+                    sem_rmsd=payload.sem_rmsd,
+                    correlation_time_unit=payload.correlation_time_unit,
+                    statistical_inefficiency=payload.statistical_inefficiency,
+                    autocorrelation_warning=payload.autocorrelation_warning,
+                    converged=payload.convergence_result.converged,
+                    convergence_assessable=payload.convergence_result.assessable,
+                    convergence_time_ns=payload.convergence_result.convergence_time_ns,
+                    convergence_message=payload.convergence_result.message,
+                    n_frames_total=runner.results.n_frames_total,
+                    n_frames_used=window.n_frames_selected,
+                    npz_path=str(npz_path),
+                    time_unit="ns",
+                    timestep_ps=window.timestep_ps,
+                )
             )
 
-        run_results = []
-        for run in settings.runs:
-            run_result = self._compute_single_run(
-                ctx=ctx,
-                replicate=replicate,
-                run=run,
-                loader=loader,
-                config_hash=config_hash,
-                eq_value=eq_value,
-                eq_unit=eq_unit,
-                eq_str=eq_str,
-                settings_tag=settings_tag,
-                start_frame=start_frame,
-                n_frames_total=n_frames_total,
-                n_frames_used=n_frames_used,
-                timestep_ps=timestep_ps,
-            )
-            run_results.append(run_result)
-
-        result = RMSDResult(
+        return RMSDResult(
             config_hash=config_hash,
             polyzymd_version=get_polyzymd_version(),
             replicate=replicate,
             equilibration_time=eq_value,
             equilibration_unit=eq_unit,
-            selection_string="; ".join(run.selection for run in settings.runs),
+            selection_string="; ".join(run.selection for run in ctx.settings.runs),
             run_results=run_results,
-            n_frames_total=n_frames_total,
-            n_frames_used=n_frames_used,
-            trajectory_files=[str(path) for path in traj_info.trajectory_files],
+            settings_fingerprint=settings_tag,
+            n_frames_total=runner.results.n_frames_total,
+            n_frames_used=window.n_frames_selected,
+            trajectory_files=[str(path) for path in trajectory_files],
         )
-
-        result.save(result_file)
-        logger.info("Saved RMSD result to %s", result_file)
-
-        return result
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
         """Aggregate RMSD results across replicates for one condition.
@@ -327,8 +879,17 @@ class RMSDAnalysis(Analysis):
         from polyzymd.analyses._results_base import get_polyzymd_version
         from polyzymd.analyses.rmsd._results import RMSDAggregatedResult, RMSDRunAggregatedResult
 
-        first = results[0]
+        if not results:
+            raise ValueError(
+                f"RMSD aggregation for condition '{ctx.condition.label}' requires at least one "
+                "replicate result. No replicate inputs were provided."
+            )
+
         run_labels = [run.label for run in ctx.settings.runs]
+        self._validate_aggregate_input_completeness(ctx, results, run_labels)
+        ordered_results = self._order_results_by_replicate(ctx, results)
+        first = ordered_results[0]
+        replicate_order = list(ctx.replicates)
 
         if len(ctx.replicates) == 1:
             logger.warning(
@@ -340,17 +901,19 @@ class RMSDAnalysis(Analysis):
         aggregated_runs: list[RMSDRunAggregatedResult] = []
         for run_label in run_labels:
             run_entries = []
-            for result in results:
-                for run_result in result.run_results:
-                    if run_result.run_label == run_label:
-                        run_entries.append(run_result)
-                        break
-
-            if not run_entries:
-                logger.warning(
-                    "No RMSD entries found for run '%s'; skipping in aggregate", run_label
-                )
-                continue
+            for result in ordered_results:
+                matches = [
+                    run_result
+                    for run_result in result.run_results
+                    if run_result.run_label == run_label
+                ]
+                if len(matches) != 1:
+                    raise ValueError(
+                        f"Configured RMSD run '{run_label}' has invalid aggregate inputs in "
+                        f"condition '{ctx.condition.label}'. Expected one entry per replicate, "
+                        f"found {len(matches)} for replicate {result.replicate}."
+                    )
+                run_entries.append(matches[0])
 
             per_means = [entry.mean_rmsd for entry in run_entries]
             per_stds = [entry.std_rmsd for entry in run_entries]
@@ -388,8 +951,8 @@ class RMSDAnalysis(Analysis):
                     equilibration_time=first.equilibration_time,
                     equilibration_unit=first.equilibration_unit,
                     selection_string=template.selection,
-                    replicates=list(ctx.replicates),
-                    n_replicates=len(ctx.replicates),
+                    replicates=replicate_order,
+                    n_replicates=len(replicate_order),
                     run_label=run_label,
                     selection=template.selection,
                     alignment_selection=template.alignment_selection,
@@ -417,9 +980,10 @@ class RMSDAnalysis(Analysis):
             equilibration_time=first.equilibration_time,
             equilibration_unit=first.equilibration_unit,
             selection_string=first.selection_string,
-            replicates=list(ctx.replicates),
-            n_replicates=len(ctx.replicates),
+            replicates=replicate_order,
+            n_replicates=len(replicate_order),
             run_results=aggregated_runs,
+            settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
             source_result_files=[],
         )
 
@@ -447,7 +1011,7 @@ class RMSDAnalysis(Analysis):
         Returns
         -------
         RMSDComparisonResult | None
-            Comparison result, or ``None`` if no conditions have data.
+            Comparison result, or ``None`` if no conditions are available to compare.
         """
         from polyzymd import __version__
         from polyzymd.analyses.rmsd._comparison_results import (
@@ -464,15 +1028,32 @@ class RMSDAnalysis(Analysis):
         summaries: list[RMSDConditionSummary] = []
         for condition in ctx.conditions:
             agg_result = ctx.aggregated_results.get(condition.label)
-            if agg_result is None:
+            if agg_result is not None:
+                agg_result = self._coerce_and_validate_aggregated_result(
+                    agg_result,
+                    ctx.settings,
+                    condition_label=condition.label,
+                    source=self._resolve_aggregated_result_path(
+                        ctx.analysis_dirs[condition.label] / "aggregated"
+                    ),
+                )
+            else:
                 agg_dir = ctx.analysis_dirs[condition.label] / "aggregated"
-                agg_result = self._load_aggregated_result(agg_dir)
+                agg_result = self._load_aggregated_result(
+                    agg_dir,
+                    settings=ctx.settings,
+                    condition_label=condition.label,
+                )
 
             if agg_result is None:
-                logger.warning(
-                    "No aggregated RMSD result for condition '%s'; skipping", condition.label
+                raise ValueError(
+                    f"Missing aggregated RMSD result for condition '{condition.label}'. "
+                    "Comparison requires aggregated results for every configured "
+                    "condition. Recompute the condition or clear stale caches before "
+                    "comparing."
                 )
-                continue
+
+            self._validate_aggregated_result_completeness(condition, agg_result, run_labels)
 
             run_summaries = [
                 RMSDRunSummary(
@@ -509,38 +1090,17 @@ class RMSDAnalysis(Analysis):
 
         ranking_by_run: dict[str, list[str]] = {}
         for run_label in run_labels:
-            summaries_with_run = filter_summaries_with_run(
-                summaries_by_label,
-                run_label,
-                lambda summary, label: summary.get_run(label),
-                logger=logger,
-            )
-
             ranked_labels = sorted(
-                summaries_with_run,
-                key=lambda label: summaries_with_run[label].get_run(run_label).mean_rmsd,
+                summaries_by_label,
+                key=lambda label: summaries_by_label[label].get_run(run_label).mean_rmsd,
             )
             ranking_by_run[run_label] = ranked_labels
 
         pairwise_comparisons: list[RMSDRunPairwiseComparison] = []
         if len(summaries) >= 2:
             for run_label in run_labels:
-                summaries_with_run = filter_summaries_with_run(
-                    summaries_by_label,
-                    run_label,
-                    lambda summary, label: summary.get_run(label),
-                    logger=logger,
-                )
-
-                if len(summaries_with_run) < 2:
-                    logger.warning(
-                        "Run '%s' has fewer than two conditions with data; skipping pairwise comparison",
-                        run_label,
-                    )
-                    continue
-
                 condition_pairs = build_condition_pairs(
-                    list(summaries_with_run.keys()),
+                    list(summaries_by_label.keys()),
                     effective_control,
                     on_control_missing="skip",
                     logger=logger,
@@ -552,8 +1112,8 @@ class RMSDAnalysis(Analysis):
                             run_label=run_label,
                             condition_a=condition_a,
                             condition_b=condition_b,
-                            run_a=summaries_with_run[condition_a].get_run(run_label),
-                            run_b=summaries_with_run[condition_b].get_run(run_label),
+                            run_a=summaries_by_label[condition_a].get_run(run_label),
+                            run_b=summaries_by_label[condition_b].get_run(run_label),
                         )
                     )
 
@@ -561,15 +1121,9 @@ class RMSDAnalysis(Analysis):
         if len(summaries) >= 3:
             anova_by_run = []
             for run_label in run_labels:
-                summaries_with_run = filter_summaries_with_run(
-                    summaries_by_label,
-                    run_label,
-                    lambda summary, label: summary.get_run(label),
-                    logger=logger,
-                )
                 groups = [
                     summary.get_run(run_label).per_replicate_means
-                    for summary in summaries_with_run.values()
+                    for summary in summaries_by_label.values()
                 ]
 
                 if len(groups) < 3 or any(len(group) < 2 for group in groups):
@@ -625,6 +1179,15 @@ class RMSDAnalysis(Analysis):
         if comparison_result is None:
             return []
 
+        data, labels = self._build_plot_data(ctx)
+        for label in labels:
+            aggregated_dir = data[label]["aggregated_dir"]
+            self._load_aggregated_result(
+                aggregated_dir,
+                settings=ctx.settings,
+                condition_label=label,
+            )
+
         try:
             from polyzymd.analyses.rmsd._plotters import (
                 plot_rmsd_comparison_bars,
@@ -668,247 +1231,28 @@ class RMSDAnalysis(Analysis):
         n_frames_used: int,
         timestep_ps: float,
     ) -> Any:
-        """Compute one RMSD run for a single replicate."""
-        import numpy as np
-        from MDAnalysis.analysis.rms import RMSD
+        """Compatibility shim for one RMSD run.
 
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.rmsd._results import RMSDRunResult
-        from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
-        from polyzymd.analyses.shared.convergence import find_convergence_time
+        This helper remains for focused unit tests while delegating the actual
+        trajectory-native work to ``rmsd._runner``.
+        """
 
-        u = loader.load_universe(replicate, cache=False)
-
-        centroid_selection = run.centroid_selection
-        if run.reference_mode == "centroid" and centroid_selection is None:
-            centroid_selection = run.alignment_selection
-            logger.info(
-                "Run '%s': centroid_selection not set, using alignment_selection='%s'",
-                run.label,
-                centroid_selection,
+        del ctx, config_hash, eq_value, eq_unit, eq_str, settings_tag, n_frames_used
+        universe = loader.load_universe(replicate, cache=False)
+        try:
+            return compute_rmsd_run(
+                universe=universe,
+                run=run,
+                start=start_frame,
+                stop=n_frames_total,
+                step=1,
+                timestep_ps=timestep_ps,
             )
-
-        reference_frame_1indexed: int | None
-        if run.reference_mode == "frame":
-            reference_frame_1indexed = run.reference_frame + 1
-        else:
-            reference_frame_1indexed = None
-
-        alignment_config = AlignmentConfig(
-            enabled=True,
-            reference_mode=run.reference_mode,
-            reference_frame=reference_frame_1indexed,
-            selection=run.alignment_selection,
-            centroid_selection=centroid_selection or run.alignment_selection,
-            reference_file=(Path(run.reference_file) if run.reference_file is not None else None),
-        )
-        ref_frame_idx = align_trajectory(
-            u,
-            alignment_config,
-            start_frame=start_frame,
-            stop_frame=n_frames_total,
-        )
-
-        # Build RMSD reference according to requested mode
-        atom_group = u.select_atoms(run.selection)
-        if len(atom_group) == 0:
-            raise ValueError(f"Run '{run.label}' selection matched no atoms: {run.selection!r}")
-
-        reference_universe, reference_atom_group = self._build_reference_structure(
-            universe=u,
-            atom_group=atom_group,
-            run=run,
-            start_frame=start_frame,
-            stop_frame=n_frames_total,
-            ref_frame_idx=ref_frame_idx,
-        )
-
-        rmsd_analysis = RMSD(
-            atom_group,
-            reference=reference_atom_group,
-            select="all",
-            ref_frame=0,
-        ).run(start=start_frame, stop=n_frames_total)
-
-        rmsd_values = rmsd_analysis.results.rmsd[:, 2].astype(np.float64)
-        frames = np.arange(start_frame, n_frames_total, dtype=np.int64)
-        time_ns = (frames.astype(np.float64) * timestep_ps) / 1000.0
-
-        mean_rmsd = float(np.mean(rmsd_values))
-        std_rmsd = float(np.std(rmsd_values, ddof=0))
-        median_rmsd = float(np.median(rmsd_values))
-        min_rmsd = float(np.min(rmsd_values))
-        max_rmsd = float(np.max(rmsd_values))
-        final_rmsd = float(rmsd_values[-1])
-
-        sem_rmsd: float | None = None
-        correlation_time: float | None = None
-        correlation_time_unit: str | None = None
-        n_independent_frames: int | None = None
-        statistical_inefficiency: float | None = None
-        autocorrelation_warning: str | None = None
-
-        if len(rmsd_values) >= 20:
-            tau_result = estimate_correlation_time(
-                rmsd_values,
-                timestep=timestep_ps,
-                timestep_unit="ps",
-                method="integration",
-                n_frames=len(rmsd_values),
-            )
-            correlation_time = tau_result.tau
-            correlation_time_unit = tau_result.tau_unit
-            n_independent_frames = tau_result.n_independent
-            statistical_inefficiency = tau_result.statistical_inefficiency
-            autocorrelation_warning = tau_result.warning
-            if n_independent_frames > 0:
-                sem_rmsd = float(std_rmsd / np.sqrt(float(n_independent_frames)))
-
-        convergence_result = find_convergence_time(
-            time_ns,
-            rmsd_values,
-            window_size_ns=run.convergence_window_size_ns,
-            step_size_ns=run.convergence_step_size_ns,
-            slope_threshold=run.convergence_slope_threshold,
-            sustained_for_ns=run.convergence_sustained_for_ns,
-        )
-
-        npz_filename = f"rmsd_{run.label}_{eq_str}_{settings_tag}_timeseries.npz"
-        npz_path = ctx.output_dir / npz_filename
-        np.savez_compressed(
-            npz_path,
-            rmsd_values=rmsd_values,
-            time_ns=time_ns,
-            frames=frames,
-            convergence_window_start_ns=np.asarray(
-                convergence_result.window_start_times_ns,
-                dtype=np.float64,
-            ),
-            convergence_window_mean_rmsd=np.asarray(
-                convergence_result.window_mean_values,
-                dtype=np.float64,
-            ),
-            convergence_slope_time_ns=np.asarray(
-                convergence_result.slope_times_ns,
-                dtype=np.float64,
-            ),
-            convergence_slope=np.asarray(convergence_result.slopes, dtype=np.float64),
-            convergence_converged=np.asarray(convergence_result.converged, dtype=np.bool_),
-            convergence_time_ns=np.asarray(
-                (
-                    np.nan
-                    if convergence_result.convergence_time_ns is None
-                    else convergence_result.convergence_time_ns
-                ),
-                dtype=np.float64,
-            ),
-        )
-
-        return RMSDRunResult(
-            config_hash=config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=replicate,
-            equilibration_time=eq_value,
-            equilibration_unit=eq_unit,
-            selection_string=run.selection,
-            correlation_time=correlation_time,
-            n_independent_frames=n_independent_frames,
-            run_label=run.label,
-            selection=run.selection,
-            alignment_selection=run.alignment_selection,
-            reference_mode=run.reference_mode,
-            reference_frame=(ref_frame_idx + 1 if ref_frame_idx is not None else None),
-            reference_file=run.reference_file,
-            mean_rmsd=mean_rmsd,
-            std_rmsd=std_rmsd,
-            median_rmsd=median_rmsd,
-            min_rmsd=min_rmsd,
-            max_rmsd=max_rmsd,
-            final_rmsd=final_rmsd,
-            sem_rmsd=sem_rmsd,
-            correlation_time_unit=correlation_time_unit,
-            statistical_inefficiency=statistical_inefficiency,
-            autocorrelation_warning=autocorrelation_warning,
-            converged=convergence_result.converged,
-            convergence_assessable=convergence_result.assessable,
-            convergence_time_ns=convergence_result.convergence_time_ns,
-            convergence_message=convergence_result.message,
-            n_frames_total=n_frames_total,
-            n_frames_used=n_frames_used,
-            npz_path=str(npz_path),
-            time_unit="ns",
-            timestep_ps=timestep_ps,
-        )
-
-    def _build_reference_structure(
-        self,
-        *,
-        universe: Any,
-        atom_group: Any,
-        run: RMSDRunSettings,
-        start_frame: int,
-        stop_frame: int,
-        ref_frame_idx: int | None,
-    ) -> tuple[Any, Any]:
-        """Build reference universe and atom group for RMSD calculations."""
-        import MDAnalysis as mda
-        import numpy as np
-        from MDAnalysis.coordinates.memory import MemoryReader
-
-        if run.reference_mode in {"centroid", "frame"}:
-            if ref_frame_idx is None:
-                raise ValueError(
-                    f"Run '{run.label}' expected a reference frame for mode '{run.reference_mode}'"
-                )
-            universe.trajectory[ref_frame_idx]
-            ref_positions = atom_group.positions.copy().astype(np.float64)
-        elif run.reference_mode == "average":
-            positions = []
-            for frame_idx in range(start_frame, stop_frame):
-                universe.trajectory[frame_idx]
-                positions.append(atom_group.positions.copy().astype(np.float64))
-            ref_positions = np.mean(np.stack(positions, axis=0), axis=0)
-        elif run.reference_mode == "external":
-            if run.reference_file is None:
-                raise ValueError(
-                    f"Run '{run.label}' requires reference_file when reference_mode='external'"
-                )
-
-            ref_path = Path(run.reference_file)
-            logger.info("Using external reference from: %s", ref_path)
-
-            ref_universe = mda.Universe(str(ref_path))
-            ref_atoms = ref_universe.select_atoms(run.selection)
-
-            if len(ref_atoms) == 0:
-                raise ValueError(
-                    f"Run '{run.label}' external PDB '{ref_path.name}' has no atoms matching "
-                    f"selection {run.selection!r}."
-                )
-
-            if len(ref_atoms) != len(atom_group):
-                logger.warning(
-                    "Run '%s' external reference atom count mismatch for selection %r "
-                    "(trajectory=%d, external=%d)",
-                    run.label,
-                    run.selection,
-                    len(atom_group),
-                    len(ref_atoms),
-                )
-                raise ValueError(
-                    f"Run '{run.label}' atom count mismatch between trajectory "
-                    f"({len(atom_group)}) and external PDB ({len(ref_atoms)}) for "
-                    f"selection {run.selection!r}."
-                )
-
-            ref_positions = ref_atoms.positions.copy().astype(np.float64)
-        else:
-            raise ValueError(f"Unsupported RMSD reference_mode: {run.reference_mode!r}")
-
-        reference_universe = mda.Merge(atom_group)
-        reference_universe.load_new(ref_positions[np.newaxis, :, :], format=MemoryReader)
-        reference_atom_group = reference_universe.atoms
-        return reference_universe, reference_atom_group
+        except ValueError as exc:
+            if "selection matched no atoms" not in str(exc):
+                raise
+            logger.warning("%s", exc)
+            return None
 
     @staticmethod
     def _compare_run(
