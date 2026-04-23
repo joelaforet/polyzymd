@@ -39,7 +39,10 @@ class SASARunResult(BaseAnalysisResult):
     )
 
     n_frames_total: int = Field(..., description="Total frames in trajectory")
-    n_frames_used: int = Field(..., description="Frames used after equilibration")
+    n_frames_used: int = Field(
+        ...,
+        description="Frames sampled for this run after equilibration and stride",
+    )
     n_target_atoms: int = Field(..., description="Number of selected target atoms")
     n_context_atoms: int = Field(..., description="Number of selected context atoms")
     n_target_residues: int = Field(..., description="Number of selected target residues")
@@ -80,7 +83,7 @@ class SASARunResult(BaseAnalysisResult):
         return (
             f"SASA Run: {self.run_label}\n"
             f"Mean SASA: {self.mean_sasa:.3f} A^2\n"
-            f"Frames used: {self.n_frames_used}/{self.n_frames_total}"
+            f"Frames sampled: {self.n_frames_used}/{self.n_frames_total}"
         )
 
 
@@ -91,7 +94,10 @@ class SASAResult(BaseAnalysisResult):
 
     run_results: list[SASARunResult] = Field(..., description="Results for each SASA run")
     n_frames_total: int = Field(..., description="Total frames in trajectory")
-    n_frames_used: int = Field(..., description="Frames used after equilibration")
+    n_frames_used: int = Field(
+        ...,
+        description="Unique frames sampled across all configured runs",
+    )
     trajectory_files: list[str] = Field(
         default_factory=list, description="Trajectory files analyzed"
     )
@@ -101,7 +107,7 @@ class SASAResult(BaseAnalysisResult):
         return (
             f"SASA Analysis (replicate {self.replicate})\n"
             f"Runs analyzed: {len(self.run_results)}\n"
-            f"Frames used: {self.n_frames_used}/{self.n_frames_total}"
+            f"Frames sampled across runs: {self.n_frames_used}/{self.n_frames_total}"
         )
 
 

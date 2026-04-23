@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence, cast
@@ -22,7 +23,9 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
 from polyzymd.analyses.sasa._results import SASAAggregatedResult, SASAResult
+from polyzymd.analyses.sasa._runner import SASAReplicateRunner
 from polyzymd.analyses.shared.config_hash import compute_config_hash
+from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.multi_run_comparison import (
     apply_fdr_correction,
     build_condition_pairs,
@@ -35,6 +38,48 @@ if TYPE_CHECKING:
     from polyzymd.analyses.sasa._comparison_results import SASAComparisonResult
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _SASATrajectoryWindow:
+    """SASA trajectory window that carries loader-derived file metadata."""
+
+    start: int
+    stop: int
+    step: int
+    equilibration_start: int
+    n_frames_total: int
+    n_frames_selected: int
+    timestep_ps: float
+    equilibration_ps: float
+    warning_message: str | None = None
+    trajectory_files: tuple[Path, ...] = ()
+
+    @classmethod
+    def from_window(
+        cls,
+        window: Any,
+        trajectory_files: Sequence[Path],
+    ) -> _SASATrajectoryWindow:
+        """Build an SASA window wrapper from the shared trajectory window."""
+
+        return cls(
+            start=int(window.start),
+            stop=int(window.stop),
+            step=int(window.step),
+            equilibration_start=int(window.equilibration_start),
+            n_frames_total=int(window.n_frames_total),
+            n_frames_selected=int(window.n_frames_selected),
+            timestep_ps=float(window.timestep_ps),
+            equilibration_ps=float(window.equilibration_ps),
+            warning_message=getattr(window, "warning_message", None),
+            trajectory_files=tuple(trajectory_files),
+        )
+
+    def run_kwargs(self) -> dict[str, int]:
+        """Return keyword arguments for the runner ``run()`` call."""
+
+        return {"start": self.start, "stop": self.stop, "step": self.step}
 
 
 class SASARunSettings(BaseModel):
@@ -159,21 +204,8 @@ class SASAAnalysis(Analysis):
 
     def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
         """Compute SASA for all configured runs for a single replicate."""
-        import numpy as np
-
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.sasa._results import SASAResult, SASARunResult
-        from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
-        from polyzymd.analyses.shared.loader import (
-            TrajectoryLoader,
-            convert_time,
-            parse_time_string,
-            time_to_frame,
-        )
 
         settings = cast(SASASettings, ctx.settings)
-        sim_config = ctx.sim_config
-
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
         eq_str = f"eq{eq_value:g}{eq_unit}"
         settings_token = self._settings_cache_token(settings)
@@ -183,157 +215,116 @@ class SASAAnalysis(Analysis):
             SASAResult,
             result_file,
             recompute=ctx.recompute,
-            sim_config=sim_config,
+            sim_config=ctx.sim_config,
             settings=ctx.settings,
         )
         if cached is not None:
             return cached
 
-        loader = TrajectoryLoader(sim_config)
-        config_hash = compute_config_hash(sim_config)
+        result = super().compute_replicate(ctx, replicate)
+        result.save(result_file)
+        return result
 
-        universe = loader.load_universe(replicate, cache=False)
+    def get_trajectory_window(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        loader: Any,
+        universe: Any,
+    ) -> Any:
+        """Resolve the SASA window and retain trajectory file metadata."""
+
+        window = super().get_trajectory_window(ctx, replicate, loader, universe)
         traj_info = loader.get_trajectory_info(replicate)
-        timestep_ps = loader.get_timestep(replicate, unit="ps")
+        return _SASATrajectoryWindow.from_window(window, traj_info.trajectory_files)
 
-        n_frames_total = len(universe.trajectory)
-        eq_time_ps = convert_time(eq_value, eq_unit, "ps")
-        start_frame = time_to_frame(eq_time_ps, "ps", timestep_ps, "ps")
-        n_frames_used = n_frames_total - start_frame
-        if n_frames_used <= 0:
-            raise ValueError(
-                "Equilibration removed all frames for SASA analysis. "
-                f"Got start_frame={start_frame}, n_frames_total={n_frames_total}."
+    def build_runner(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        universe: Any,
+        window: Any,
+    ) -> Any:
+        """Build the runner-backed SASA execution object."""
+
+        from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
+
+        del replicate
+        settings = cast(SASASettings, ctx.settings)
+        return SASAReplicateRunner(
+            universe=universe,
+            runs=settings.runs,
+            probe_radius_nm=settings.probe_radius_nm,
+            n_sphere_points=settings.n_sphere_points,
+            chunk_size=settings.chunk_size,
+            timestep_ps=window.timestep_ps,
+            output_dir=ctx.output_dir,
+            equilibration=ctx.equilibration,
+            trajectory_files=getattr(window, "trajectory_files", ()),
+            compute_sasa_func=compute_sasa,
+            save_sasa_artifacts_func=save_sasa_artifacts,
+            estimate_correlation_time_func=estimate_correlation_time,
+            run_cache_token_func=self._run_cache_token,
+        )
+
+    def summarize_replicate(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        runner: Any,
+        window: Any,
+    ) -> Any:
+        """Serialize runner output into the legacy SASA result schema."""
+
+        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses.sasa._results import SASARunResult
+
+        settings = cast(SASASettings, ctx.settings)
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+        config_hash = compute_config_hash(ctx.sim_config)
+        payload = runner.results
+
+        run_results = [
+            SASARunResult(
+                config_hash=config_hash,
+                polyzymd_version=get_polyzymd_version(),
+                replicate=replicate,
+                equilibration_time=eq_value,
+                equilibration_unit=eq_unit,
+                selection_string=run_payload.target_selection,
+                correlation_time=run_payload.correlation_time,
+                correlation_time_unit=run_payload.correlation_time_unit,
+                n_independent_frames=run_payload.n_independent_frames,
+                statistical_inefficiency=run_payload.statistical_inefficiency,
+                autocorrelation_warning=run_payload.autocorrelation_warning,
+                run_label=run_payload.run_label,
+                target_selection=run_payload.target_selection,
+                context_selection=run_payload.context_selection,
+                mean_sasa=run_payload.mean_sasa,
+                std_sasa=run_payload.std_sasa,
+                median_sasa=run_payload.median_sasa,
+                min_sasa=run_payload.min_sasa,
+                max_sasa=run_payload.max_sasa,
+                final_sasa=run_payload.final_sasa,
+                sem_sasa=run_payload.sem_sasa,
+                n_frames_total=run_payload.n_frames_total,
+                n_frames_used=run_payload.n_frames_used,
+                n_target_atoms=run_payload.n_target_atoms,
+                n_context_atoms=run_payload.n_context_atoms,
+                n_target_residues=run_payload.n_target_residues,
+                zero_atom_selection=run_payload.zero_atom_selection,
+                raw_npz_path=run_payload.raw_npz_path,
+                raw_metadata_path=run_payload.raw_metadata_path,
+                npz_path=run_payload.npz_path,
+                metadata_path=run_payload.metadata_path,
+                time_unit=run_payload.time_unit,
+                timestep_ps=run_payload.timestep_ps,
             )
+            for run_payload in payload.run_payloads
+        ]
 
-        run_results: list[SASARunResult] = []
-        ctx.output_dir.mkdir(parents=True, exist_ok=True)
-        for run in settings.runs:
-            run_token = self._run_cache_token(
-                label=run.label,
-                target_selection=run.target_selection,
-                context_selection=run.context_selection or run.target_selection,
-                probe_radius_nm=settings.probe_radius_nm,
-                n_sphere_points=settings.n_sphere_points,
-                stride=run.stride,
-                equilibration=ctx.equilibration,
-            )
-            npz_path = ctx.output_dir / f"sasa_{run_token}.npz"
-            metadata_path = ctx.output_dir / f"sasa_{run_token}.json"
-
-            raw = compute_sasa(
-                universe,
-                run_label=run.label,
-                target_selection=run.target_selection,
-                context_selection=run.context_selection or run.target_selection,
-                probe_radius_nm=settings.probe_radius_nm,
-                n_sphere_points=settings.n_sphere_points,
-                start_frame=start_frame,
-                stop_frame=n_frames_total,
-                timestep_ps=timestep_ps,
-                chunk_size=settings.chunk_size,
-                stride=run.stride,
-            )
-
-            save_sasa_artifacts(
-                npz_path=npz_path,
-                metadata_path=metadata_path,
-                result=raw,
-                run_label=run.label,
-                target_selection=run.target_selection,
-                context_selection=run.context_selection or run.target_selection,
-                probe_radius_nm=settings.probe_radius_nm,
-                n_sphere_points=settings.n_sphere_points,
-                equilibration=ctx.equilibration,
-            )
-
-            total = raw.total_sasa_a2
-            finite_total = total[np.isfinite(total)]
-            zero_atom = raw.target_atom_indices.size == 0 or raw.context_atom_indices.size == 0
-            if zero_atom:
-                LOGGER.warning(
-                    "Run '%s' selection matched zero atoms in replicate %d; "
-                    "recording NaN SASA metrics",
-                    run.label,
-                    replicate,
-                )
-
-            if finite_total.size:
-                mean_sasa = float(np.mean(finite_total))
-                std_sasa = float(np.std(finite_total, ddof=0))
-                median_sasa = float(np.median(finite_total))
-                min_sasa = float(np.min(finite_total))
-                max_sasa = float(np.max(finite_total))
-                final_sasa = float(total[-1]) if np.isfinite(total[-1]) else float("nan")
-            else:
-                mean_sasa = float("nan")
-                std_sasa = float("nan")
-                median_sasa = float("nan")
-                min_sasa = float("nan")
-                max_sasa = float("nan")
-                final_sasa = float("nan")
-
-            sem_sasa: float | None = None
-            correlation_time: float | None = None
-            correlation_time_unit: str | None = None
-            n_independent_frames: int | None = None
-            statistical_inefficiency: float | None = None
-            autocorrelation_warning: str | None = None
-            if finite_total.size >= 20:
-                tau = estimate_correlation_time(
-                    finite_total,
-                    timestep=timestep_ps,
-                    timestep_unit="ps",
-                    method="integration",
-                    n_frames=len(finite_total),
-                )
-                correlation_time = tau.tau
-                correlation_time_unit = tau.tau_unit
-                n_independent_frames = tau.n_independent
-                statistical_inefficiency = tau.statistical_inefficiency
-                autocorrelation_warning = tau.warning
-                if n_independent_frames > 0 and np.isfinite(std_sasa):
-                    sem_sasa = float(std_sasa / np.sqrt(float(n_independent_frames)))
-
-            run_results.append(
-                SASARunResult(
-                    config_hash=config_hash,
-                    polyzymd_version=get_polyzymd_version(),
-                    replicate=replicate,
-                    equilibration_time=eq_value,
-                    equilibration_unit=eq_unit,
-                    selection_string=run.target_selection,
-                    correlation_time=correlation_time,
-                    correlation_time_unit=correlation_time_unit,
-                    n_independent_frames=n_independent_frames,
-                    statistical_inefficiency=statistical_inefficiency,
-                    autocorrelation_warning=autocorrelation_warning,
-                    run_label=run.label,
-                    target_selection=run.target_selection,
-                    context_selection=run.context_selection or run.target_selection,
-                    mean_sasa=mean_sasa,
-                    std_sasa=std_sasa,
-                    median_sasa=median_sasa,
-                    min_sasa=min_sasa,
-                    max_sasa=max_sasa,
-                    final_sasa=final_sasa,
-                    sem_sasa=sem_sasa,
-                    n_frames_total=n_frames_total,
-                    n_frames_used=n_frames_used,
-                    n_target_atoms=int(raw.target_atom_indices.size),
-                    n_context_atoms=int(raw.context_atom_indices.size),
-                    n_target_residues=len(raw.residue_keys),
-                    zero_atom_selection=zero_atom,
-                    raw_npz_path=str(npz_path),
-                    raw_metadata_path=str(metadata_path),
-                    npz_path=str(npz_path),
-                    metadata_path=str(metadata_path),
-                    time_unit="ns",
-                    timestep_ps=timestep_ps,
-                )
-            )
-
-        result = SASAResult(
+        del window
+        return SASAResult(
             config_hash=config_hash,
             polyzymd_version=get_polyzymd_version(),
             replicate=replicate,
@@ -344,12 +335,10 @@ class SASAAnalysis(Analysis):
                 for run in settings.runs
             ),
             run_results=run_results,
-            n_frames_total=n_frames_total,
-            n_frames_used=n_frames_used,
-            trajectory_files=[str(path) for path in traj_info.trajectory_files],
+            n_frames_total=payload.n_frames_total,
+            n_frames_used=payload.n_frames_used,
+            trajectory_files=[str(path) for path in payload.trajectory_files],
         )
-        result.save(result_file)
-        return result
 
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
         """Aggregate SASA results across replicates for one condition."""
@@ -357,7 +346,6 @@ class SASAAnalysis(Analysis):
 
         from polyzymd.analyses._results_base import get_polyzymd_version
         from polyzymd.analyses.sasa._results import SASAAggregatedResult, SASARunAggregatedResult
-        from polyzymd.analyses.shared.sasa import load_sasa_artifacts
 
         first = results[0]
         aggregated_runs: list[SASARunAggregatedResult] = []
@@ -369,17 +357,13 @@ class SASAAnalysis(Analysis):
             )
 
         settings = cast(SASASettings, ctx.settings)
+        self._validate_replicate_run_coverage(ctx, results, settings)
         for run in settings.runs:
-            entries = []
-            for result in results:
-                match = next(
-                    (entry for entry in result.run_results if entry.run_label == run.label), None
-                )
-                if match is not None:
-                    entries.append(match)
-            if not entries:
-                LOGGER.warning("No SASA entries found for run '%s'; skipping", run.label)
-                continue
+            entries = [
+                next(entry for entry in result.run_results if entry.run_label == run.label)
+                for result in results
+            ]
+            self._validate_structural_metadata_consistency(ctx, run.label, entries)
 
             per_means = np.asarray([entry.mean_sasa for entry in entries], dtype=np.float64)
             per_stds = [float(entry.std_sasa) for entry in entries]
@@ -402,31 +386,13 @@ class SASAAnalysis(Analysis):
             overall_max = float(np.nanmax(np.asarray(per_maxs, dtype=np.float64)))
             overall_final = float(np.nanmean(np.asarray(per_finals, dtype=np.float64)))
 
-            residue_matrix: list[np.ndarray] = []
-            residue_keys: list[str] = []
-            residue_chainids: list[str] = []
-            residue_resids: list[int] = []
-            residue_resnames: list[str] = []
-            for entry in entries:
-                if (
-                    entry.zero_atom_selection
-                    or entry.raw_npz_path is None
-                    or entry.raw_metadata_path is None
-                ):
-                    continue
-                npz_file = Path(entry.raw_npz_path)
-                metadata_file = Path(entry.raw_metadata_path)
-                if not npz_file.exists() or not metadata_file.exists():
-                    continue
-                raw, _metadata = load_sasa_artifacts(npz_file, metadata_file)
-                if raw.residue_sasa_a2.size == 0:
-                    continue
-                if not residue_keys:
-                    residue_keys = raw.residue_keys
-                    residue_chainids = raw.residue_chainids
-                    residue_resids = raw.residue_resids
-                    residue_resnames = raw.residue_resnames
-                residue_matrix.append(np.nanmean(raw.residue_sasa_a2, axis=0))
+            (
+                residue_keys,
+                residue_chainids,
+                residue_resids,
+                residue_resnames,
+                residue_matrix,
+            ) = self._load_per_residue_contributions(ctx, run.label, entries)
 
             if residue_matrix:
                 stacked = np.stack(residue_matrix, axis=0)
@@ -498,6 +464,217 @@ class SASAAnalysis(Analysis):
             target_path = ctx.output_dir / self._make_aggregated_filename(ctx.replicates, first)
         self.save_result(agg_result, target_path)
         return agg_result
+
+    @staticmethod
+    def _load_per_residue_contributions(
+        ctx: AggregateContext,
+        run_label: str,
+        entries: Sequence[Any],
+    ) -> tuple[list[str], list[str], list[int], list[str], list[Any]]:
+        """Load per-residue SASA contributions with strict sidecar validation.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        run_label : str
+            SASA run label being aggregated.
+        entries : Sequence[Any]
+            Replicate-level run results for the current run.
+
+        Returns
+        -------
+        tuple[list[str], list[str], list[int], list[str], list[Any]]
+            Residue metadata and per-replicate mean residue SASA arrays.
+
+        Raises
+        ------
+        ValueError
+            Raised when an expected residue-level sidecar is missing or when
+            residue metadata differs between contributing replicates.
+        """
+
+        import numpy as np
+
+        from polyzymd.analyses.shared.sasa import load_sasa_artifacts
+
+        residue_keys: list[str] = []
+        residue_chainids: list[str] = []
+        residue_resids: list[int] = []
+        residue_resnames: list[str] = []
+        residue_matrix: list[Any] = []
+
+        for entry in entries:
+            if entry.zero_atom_selection or entry.n_target_residues == 0:
+                continue
+
+            if entry.raw_npz_path is None or entry.raw_metadata_path is None:
+                raise ValueError(
+                    f"SASA aggregation for condition '{ctx.condition.label}' run '{run_label}' "
+                    f"requires residue-level sidecars for replicate {entry.replicate}, "
+                    "but the run result does not record them."
+                )
+
+            npz_file = Path(entry.raw_npz_path)
+            metadata_file = Path(entry.raw_metadata_path)
+            if not npz_file.exists() or not metadata_file.exists():
+                raise ValueError(
+                    f"SASA aggregation for condition '{ctx.condition.label}' run '{run_label}' "
+                    f"requires residue-level sidecars for replicate {entry.replicate}, "
+                    f"but at least one sidecar is missing: npz={npz_file}, metadata={metadata_file}."
+                )
+
+            raw, _metadata = load_sasa_artifacts(npz_file, metadata_file)
+            if raw.residue_sasa_a2.size == 0:
+                raise ValueError(
+                    f"SASA aggregation for condition '{ctx.condition.label}' run '{run_label}' "
+                    f"requires residue-level SASA data for replicate {entry.replicate}, "
+                    "but the stored sidecar payload is empty."
+                )
+
+            current_keys = list(raw.residue_keys)
+            current_chainids = list(raw.residue_chainids)
+            current_resids = list(raw.residue_resids)
+            current_resnames = list(raw.residue_resnames)
+            residue_mean = np.nanmean(raw.residue_sasa_a2, axis=0).astype(np.float64)
+
+            if residue_mean.shape[0] != len(current_keys):
+                raise ValueError(
+                    f"SASA aggregation for condition '{ctx.condition.label}' run '{run_label}' "
+                    f"found inconsistent residue SASA array width for replicate {entry.replicate}."
+                )
+
+            if not residue_keys:
+                residue_keys = current_keys
+                residue_chainids = current_chainids
+                residue_resids = current_resids
+                residue_resnames = current_resnames
+            elif (
+                current_keys != residue_keys
+                or current_chainids != residue_chainids
+                or current_resids != residue_resids
+                or current_resnames != residue_resnames
+            ):
+                raise ValueError(
+                    f"SASA aggregation for condition '{ctx.condition.label}' run '{run_label}' "
+                    f"found residue metadata mismatch in replicate {entry.replicate}."
+                )
+
+            residue_matrix.append(residue_mean)
+
+        return residue_keys, residue_chainids, residue_resids, residue_resnames, residue_matrix
+
+    @staticmethod
+    def _validate_replicate_run_coverage(
+        ctx: AggregateContext,
+        results: Sequence[Any],
+        settings: SASASettings,
+    ) -> None:
+        """Require every configured SASA run in every replicate result.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        results : Sequence[Any]
+            Per-replicate SASA results.
+        settings : SASASettings
+            Current SASA settings with configured run labels.
+
+        Raises
+        ------
+        ValueError
+            Raised when any replicate result is missing a configured run or
+            contains duplicate configured run labels.
+        """
+
+        expected_labels = [run.label for run in settings.runs]
+        expected_set = set(expected_labels)
+        coverage_issues: list[str] = []
+
+        for result in results:
+            run_labels = [entry.run_label for entry in result.run_results]
+            missing = [label for label in expected_labels if label not in run_labels]
+            duplicates = sorted(
+                {
+                    label
+                    for label in run_labels
+                    if label in expected_set and run_labels.count(label) > 1
+                }
+            )
+            if not missing and not duplicates:
+                continue
+
+            issue_parts: list[str] = []
+            if missing:
+                issue_parts.append(f"missing runs {missing}")
+            if duplicates:
+                issue_parts.append(f"duplicate runs {duplicates}")
+            coverage_issues.append(
+                f"replicate {getattr(result, 'replicate', None)}: {', '.join(issue_parts)}"
+            )
+
+        if coverage_issues:
+            issue_text = "; ".join(coverage_issues)
+            raise ValueError(
+                f"SASA aggregation for condition '{ctx.condition.label}' requires complete "
+                f"configured run coverage for every replicate. Problems detected: {issue_text}."
+            )
+
+    @staticmethod
+    def _validate_structural_metadata_consistency(
+        ctx: AggregateContext,
+        run_label: str,
+        entries: Sequence[Any],
+    ) -> None:
+        """Require structural SASA counts to match across contributing replicates.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        run_label : str
+            SASA run label being aggregated.
+        entries : Sequence[Any]
+            Replicate-level run results contributing to the aggregated run.
+
+        Raises
+        ------
+        ValueError
+            Raised when target atom, context atom, or target residue counts do
+            not match across contributing replicates.
+        """
+
+        first = entries[0]
+        expected_counts = (
+            int(first.n_target_atoms),
+            int(first.n_context_atoms),
+            int(first.n_target_residues),
+        )
+        mismatch_details: list[str] = []
+
+        for entry in entries[1:]:
+            current_counts = (
+                int(entry.n_target_atoms),
+                int(entry.n_context_atoms),
+                int(entry.n_target_residues),
+            )
+            if current_counts == expected_counts:
+                continue
+
+            mismatch_details.append(
+                "replicate "
+                f"{entry.replicate}: counts {current_counts} != {expected_counts} "
+                f"(replicate {first.replicate})"
+            )
+
+        if mismatch_details:
+            issue_text = "; ".join(mismatch_details)
+            raise ValueError(
+                f"SASA aggregation for condition '{ctx.condition.label}' run '{run_label}' "
+                f"found structural metadata mismatch across replicates. Problems detected: "
+                f"{issue_text}."
+            )
 
     def compare(self, ctx: ComparisonContext) -> Any:
         """Compare SASA runs across conditions."""

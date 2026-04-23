@@ -15,25 +15,26 @@ averaging unrelated distances (e.g. H-bond distance + lid-opening distance)
 is not semantically meaningful.  Therefore ``compare()`` is overridden
 entirely and ``extract_metrics()`` is not used.
 
-Cross-plugin API
-----------------
-The :class:`DistanceCalculator` class is also used by the catalytic triad
-plugin (``analyses/catalytic_triad/``) for computing inter-residue
-distances of the catalytic triad.  Import it as::
+Compatibility API
+-----------------
+The :class:`DistanceCalculator` class remains available for callers that rely
+on the legacy public API. Import it as::
 
     from polyzymd.analyses.distances import DistanceCalculator
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 import numpy as np
-from numpy.typing import NDArray
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.analyses.base import (
@@ -51,16 +52,13 @@ from polyzymd.analyses.distances._plotters import (
     _plot_distance_threshold_bars,
 )
 from polyzymd.analyses.distances._results import DistanceAggregatedResult, DistanceResult
-from polyzymd.analyses.shared.config_hash import settings_fingerprint
+from polyzymd.analyses.distances._runner import DistancesReplicateRunner, compute_distance_payloads
+from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
+from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
 
 if TYPE_CHECKING:
-    from MDAnalysis.core.universe import Universe
-
     from polyzymd.analyses.distances._comparison_results import (
         DistanceComparisonResult,
-    )
-    from polyzymd.analyses.distances._results import (
-        DistancePairResult,
     )
     from polyzymd.config.schema import SimulationConfig
 
@@ -68,6 +66,61 @@ logger = logging.getLogger("polyzymd.analyses.distances")
 
 # Default threshold from the existing settings module
 DEFAULT_DISTANCE_THRESHOLD = 3.5
+
+
+@dataclass(frozen=True)
+class _DistancesTrajectoryWindow:
+    """Distances trajectory window that carries loader-derived file metadata."""
+
+    start: int
+    stop: int
+    step: int
+    equilibration_start: int
+    n_frames_total: int
+    n_frames_selected: int
+    timestep_ps: float
+    equilibration_ps: float
+    warning_message: str | None = None
+    trajectory_files: tuple[Path, ...] = ()
+
+    @classmethod
+    def from_window(
+        cls,
+        window: Any,
+        trajectory_files: Sequence[Path],
+    ) -> _DistancesTrajectoryWindow:
+        """Build a distances window wrapper from the shared trajectory window.
+
+        Parameters
+        ----------
+        window : Any
+            Shared trajectory window returned by the centralized resolver.
+        trajectory_files : Sequence[Path]
+            Trajectory files resolved by the existing loader instance.
+
+        Returns
+        -------
+        _DistancesTrajectoryWindow
+            Distances window wrapper that preserves run arguments and file metadata.
+        """
+
+        return cls(
+            start=int(window.start),
+            stop=int(window.stop),
+            step=int(window.step),
+            equilibration_start=int(window.equilibration_start),
+            n_frames_total=int(window.n_frames_total),
+            n_frames_selected=int(window.n_frames_selected),
+            timestep_ps=float(window.timestep_ps),
+            equilibration_ps=float(window.equilibration_ps),
+            warning_message=getattr(window, "warning_message", None),
+            trajectory_files=tuple(trajectory_files),
+        )
+
+    def run_kwargs(self) -> dict[str, int]:
+        """Return keyword arguments for the runner ``run()`` call."""
+
+        return {"start": self.start, "stop": self.stop, "step": self.step}
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +179,161 @@ def _make_pair_label(sel1: str, sel2: str) -> str:
     l1 = _selection_to_label(sel1)
     l2 = _selection_to_label(sel2)
     return f"{l1}-{l2}"
+
+
+def _make_distance_result_filename(
+    *,
+    pairs: Sequence[tuple[str, str]],
+    equilibration_time: float,
+    equilibration_unit: str,
+    use_pbc: bool,
+    alignment: Any,
+    settings_tag: str | None,
+) -> str:
+    """Build the legacy distances replicate filename.
+
+    Parameters
+    ----------
+    pairs : Sequence[tuple[str, str]]
+        Distance pairs included in the run.
+    equilibration_time : float
+        Equilibration offset value.
+    equilibration_unit : str
+        Equilibration offset unit.
+    use_pbc : bool
+        Whether minimum-image distances are enabled.
+    alignment : Any
+        Alignment configuration object.
+    settings_tag : str | None
+        Settings fingerprint suffix. ``None`` preserves the legacy tag.
+
+    Returns
+    -------
+    str
+        Cache-compatible result filename.
+    """
+
+    eq_str = f"eq{equilibration_time:g}{equilibration_unit}"
+
+    if pairs:
+        pair_label = _make_pair_label(*pairs[0])
+        if len(pairs) > 1:
+            pair_label += f"_and{len(pairs) - 1}more"
+    else:
+        pair_label = "nopairs"
+
+    settings_parts = ["pbc" if use_pbc else "nopbc"]
+    if getattr(alignment, "enabled", False):
+        settings_parts.append(f"align-{alignment.reference_mode}")
+    else:
+        settings_parts.append("noalign")
+
+    settings_suffix = "_".join(settings_parts)
+    tag = settings_tag or "legacy"
+    return f"distances_{pair_label}_{eq_str}_{settings_suffix}_s{tag}.json"
+
+
+def _make_distance_calculator_settings_payload(
+    *,
+    pairs: Sequence[tuple[str, str]],
+    thresholds: Sequence[float | None],
+    use_pbc: bool,
+    alignment: Any,
+    equilibration_time: float,
+    equilibration_unit: str,
+) -> dict[str, Any]:
+    """Build a canonical cache-identity payload for ``DistanceCalculator``.
+
+    Parameters
+    ----------
+    pairs : Sequence[tuple[str, str]]
+        Ordered distance-pair selections.
+    thresholds : Sequence[float | None]
+        Per-pair thresholds aligned with ``pairs``.
+    use_pbc : bool
+        Whether minimum-image distances are enabled.
+    alignment : Any
+        Alignment configuration object.
+    equilibration_time : float
+        Equilibration offset value.
+    equilibration_unit : str
+        Equilibration offset unit.
+
+    Returns
+    -------
+    dict[str, Any]
+        JSON-serializable payload covering the effective cache identity.
+    """
+
+    if hasattr(alignment, "to_dict"):
+        alignment_payload = alignment.to_dict()
+    elif isinstance(alignment, BaseModel):
+        alignment_payload = alignment.model_dump(mode="json")
+    else:
+        alignment_payload = {
+            "enabled": getattr(alignment, "enabled", False),
+            "reference_mode": getattr(alignment, "reference_mode", None),
+            "reference_frame": getattr(alignment, "reference_frame", None),
+            "selection": getattr(alignment, "selection", None),
+            "centroid_selection": getattr(alignment, "centroid_selection", None),
+            "reference_file": str(getattr(alignment, "reference_file", None)),
+        }
+
+    pair_payloads = [
+        {
+            "selection_a": selection_a,
+            "selection_b": selection_b,
+            "threshold": threshold,
+        }
+        for (selection_a, selection_b), threshold in zip(pairs, thresholds, strict=True)
+    ]
+
+    return {
+        "pairs": pair_payloads,
+        "use_pbc": use_pbc,
+        "alignment": alignment_payload,
+        "equilibration": {
+            "time": equilibration_time,
+            "unit": equilibration_unit,
+        },
+    }
+
+
+def _make_distance_calculator_settings_fingerprint(settings_payload: dict[str, Any]) -> str:
+    """Build a short deterministic fingerprint for calculator cache identity.
+
+    Parameters
+    ----------
+    settings_payload : dict[str, Any]
+        Canonical cache-identity payload from
+        :func:`_make_distance_calculator_settings_payload`.
+
+    Returns
+    -------
+    str
+        First 8 hexadecimal characters of the SHA-256 digest.
+    """
+
+    canonical = json.dumps(settings_payload, sort_keys=True, default=str)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return digest[:8]
+
+
+def _distance_calculator_metadata_path(result_path: Path) -> Path:
+    """Return the cache-metadata sidecar path for a result file.
+
+    Parameters
+    ----------
+    result_path : Path
+        Result JSON path.
+
+    Returns
+    -------
+    Path
+        Sidecar metadata path that stores strict cache identity.
+    """
+
+    return result_path.with_suffix(f"{result_path.suffix}.meta.json")
 
 
 # ---------------------------------------------------------------------------
@@ -288,14 +496,16 @@ class DistanceCalculator:
     """Calculator for distance analysis with proper statistics.
 
     This class handles the distance analysis workflow:
-    1. Load trajectories from config
-    2. Apply equilibration offset
-    3. Optionally align trajectory to remove rotational drift
-    4. Compute PBC-aware distances for specified atom pairs
-    5. Calculate distributions and statistics
 
-    This is the authoritative implementation, used both by the distances
-    plugin's ``compute_replicate()`` and by the catalytic triad plugin.
+    - Load trajectories from config
+    - Apply the equilibration offset
+    - Optionally align the trajectory to remove rotational drift
+    - Compute PBC-aware distances for specified atom pairs
+    - Calculate distributions and statistics
+
+    This compatibility façade preserves the legacy public API while delegating
+    trajectory-native work to the same runner-backed compute kernel used by the
+    plugin path.
 
     Parameters
     ----------
@@ -324,12 +534,7 @@ class DistanceCalculator:
         settings_tag: str | None = None,
     ) -> None:
         from polyzymd.analyses.shared.alignment import AlignmentConfig
-        from polyzymd.analyses.shared.config_hash import compute_config_hash
-        from polyzymd.analyses.shared.loader import (
-            TrajectoryLoader,
-            _require_mdanalysis,
-            parse_time_string,
-        )
+        from polyzymd.analyses.shared.loader import _require_mdanalysis
 
         _require_mdanalysis("distance analysis")
 
@@ -359,10 +564,173 @@ class DistanceCalculator:
         self.equilibration_time = eq_value
         self.equilibration_unit = eq_unit
 
+        self._cache_settings_payload = _make_distance_calculator_settings_payload(
+            pairs=self.pairs,
+            thresholds=self.thresholds,
+            use_pbc=self._use_pbc,
+            alignment=self._alignment,
+            equilibration_time=self.equilibration_time,
+            equilibration_unit=self.equilibration_unit,
+        )
+        self._settings_fingerprint = _make_distance_calculator_settings_fingerprint(
+            self._cache_settings_payload
+        )
+
         # Initialize loader
         self._loader = TrajectoryLoader(config)
         self._config_hash = compute_config_hash(config)
-        self._settings_tag = settings_tag
+        self._settings_tag = settings_tag or self._settings_fingerprint
+
+    def _write_cache_metadata(self, result_file: Path) -> None:
+        """Persist strict cache-identity metadata next to a result file.
+
+        Parameters
+        ----------
+        result_file : Path
+            Result JSON path.
+        """
+
+        metadata_path = _distance_calculator_metadata_path(result_file)
+        metadata = {
+            "settings_fingerprint": self._settings_fingerprint,
+            "settings_payload": self._cache_settings_payload,
+        }
+        metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+    def _load_cached_settings_fingerprint(self, result_file: Path) -> str | None:
+        """Load the cached settings fingerprint for a result file.
+
+        Parameters
+        ----------
+        result_file : Path
+            Result JSON path.
+
+        Returns
+        -------
+        str | None
+            Stored settings fingerprint, or ``None`` when strict cache
+            identity metadata is unavailable.
+        """
+
+        from polyzymd.analyses.shared.config_hash import extract_settings_fingerprint_from_path
+
+        metadata_path = _distance_calculator_metadata_path(result_file)
+        if metadata_path.exists():
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning(
+                    "Could not read distance cache metadata %s: %s",
+                    metadata_path,
+                    exc,
+                )
+                return None
+
+            stored = metadata.get("settings_fingerprint")
+            if isinstance(stored, str) and stored:
+                return stored
+
+        return extract_settings_fingerprint_from_path(result_file)
+
+    def _cached_result_matches_settings(self, result: "DistanceResult", result_file: Path) -> bool:
+        """Validate that a cached result matches current calculator settings.
+
+        Parameters
+        ----------
+        result : DistanceResult
+            Cached result loaded from disk.
+        result_file : Path
+            Result JSON path.
+
+        Returns
+        -------
+        bool
+            ``True`` when the cached result is safe to reuse.
+        """
+
+        stored_fingerprint = self._load_cached_settings_fingerprint(result_file)
+        if stored_fingerprint is None:
+            logger.info(
+                "Skipping distances cache without strict settings identity: %s",
+                result_file,
+            )
+            return False
+
+        if stored_fingerprint != self._settings_fingerprint:
+            logger.info(
+                "Skipping distances cache with mismatched settings fingerprint %s "
+                "(expected %s): %s",
+                stored_fingerprint,
+                self._settings_fingerprint,
+                result_file,
+            )
+            return False
+
+        if result.equilibration_time != self.equilibration_time:
+            logger.info(
+                "Skipping distances cache with mismatched equilibration time: %s",
+                result_file,
+            )
+            return False
+
+        if result.equilibration_unit != self.equilibration_unit:
+            logger.info(
+                "Skipping distances cache with mismatched equilibration unit: %s",
+                result_file,
+            )
+            return False
+
+        if len(result.pair_results) != len(self.pairs):
+            logger.info(
+                "Skipping distances cache with mismatched pair count: %s",
+                result_file,
+            )
+            return False
+
+        for idx, (pair_result, pair, threshold) in enumerate(
+            zip(result.pair_results, self.pairs, self.thresholds, strict=True),
+            start=1,
+        ):
+            selection_a, selection_b = pair
+            if pair_result.selection1 != selection_a or pair_result.selection2 != selection_b:
+                logger.info(
+                    "Skipping distances cache with mismatched pair %d selections: %s",
+                    idx,
+                    result_file,
+                )
+                return False
+            if pair_result.threshold != threshold:
+                logger.info(
+                    "Skipping distances cache with mismatched pair %d threshold: %s",
+                    idx,
+                    result_file,
+                )
+                return False
+
+        return True
+
+    def _load_cached_result(self, result_file: Path) -> "DistanceResult" | None:
+        """Load a cached result when both config and settings identity match.
+
+        Parameters
+        ----------
+        result_file : Path
+            Result JSON path.
+
+        Returns
+        -------
+        DistanceResult | None
+            Cached result on a strict cache hit, otherwise ``None``.
+        """
+
+        from polyzymd.analyses.shared.config_hash import validate_config_hash
+
+        logger.info("Loading cached result from %s", result_file)
+        result = DistanceResult.load(result_file)
+        validate_config_hash(result.config_hash, self.config)
+        if not self._cached_result_matches_settings(result, result_file):
+            return None
+        return result
 
     def compute(
         self,
@@ -393,10 +761,7 @@ class DistanceCalculator:
             Distance analysis results.
         """
         from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.distances._results import DistanceResult
-        from polyzymd.analyses.shared.config_hash import validate_config_hash
-        from polyzymd.analyses.shared.diagnostics import validate_equilibration_time
-        from polyzymd.analyses.shared.loader import convert_time, time_to_frame
+        from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
 
         if output_dir is None:
             output_dir = (
@@ -410,68 +775,79 @@ class DistanceCalculator:
 
         # Check cache
         if not recompute and result_file.exists():
-            logger.info(f"Loading cached result from {result_file}")
-            result = DistanceResult.load(result_file)
-            validate_config_hash(result.config_hash, self.config)
-            result = self._update_threshold_if_needed(result)
-            return result
+            result = self._load_cached_result(result_file)
+            if result is not None:
+                result = self._update_threshold_if_needed(result)
+                return result
 
         logger.info(f"Computing distances for replicate {replicate}")
 
-        # Load universe
         u = self._loader.load_universe(replicate)
         traj_info = self._loader.get_trajectory_info(replicate)
-
-        # Get timestep and determine start frame
-        timestep = self._loader.get_timestep(replicate, unit="ps")
-        eq_time_ps = convert_time(self.equilibration_time, self.equilibration_unit, "ps")
-        start_frame = time_to_frame(eq_time_ps, "ps", timestep, "ps")
-
-        n_frames_total = len(u.trajectory)
-        n_frames_used = n_frames_total - start_frame
-
-        # Validate equilibration time against trajectory length
-        eq_time_ns = convert_time(self.equilibration_time, self.equilibration_unit, "ns")
-        traj_time_ns = (n_frames_total * timestep) / 1000.0
-        is_valid, eq_message = validate_equilibration_time(eq_time_ns, traj_time_ns)
-        if not is_valid:
-            raise ValueError(eq_message)
-        if eq_message:
-            logger.warning(eq_message)
+        window = resolve_replicate_trajectory_window(
+            loader=self._loader,
+            replicate=replicate,
+            equilibration=f"{self.equilibration_time:g}{self.equilibration_unit}",
+            n_frames_total=len(u.trajectory),
+        )
+        if window.warning_message:
+            logger.warning(window.warning_message)
 
         logger.info(
-            f"Trajectory: {n_frames_total} frames, using {n_frames_used} after equilibration"
+            "Trajectory: %d frames, using %d after equilibration",
+            window.n_frames_total,
+            window.n_frames_selected,
         )
 
-        # Apply trajectory alignment if configured
-        from polyzymd.analyses.shared.alignment import align_trajectory
+        payload = compute_distance_payloads(
+            universe=u,
+            pairs=self.pairs,
+            thresholds=self.thresholds,
+            start=window.start,
+            stop=window.stop,
+            step=window.step,
+            timestep_ps=window.timestep_ps,
+            use_pbc=self._use_pbc,
+            alignment=self._alignment,
+            pair_label_func=_make_pair_label,
+        )
 
-        ref_frame = None
-        if self._alignment.enabled:
-            ref_frame = align_trajectory(
-                u,
-                self._alignment,
-                start_frame=start_frame,
-                stop_frame=n_frames_total,
-            )
+        from polyzymd.analyses.distances._results import DistancePairResult
 
-        # Log PBC status
-        if self._use_pbc:
-            logger.info("Using PBC-aware distance calculation (minimum image convention)")
-        else:
-            logger.debug("PBC disabled; using simple Euclidean distances")
-
-        # Compute distances for each pair
         pair_results = []
-        for idx, (sel1, sel2) in enumerate(self.pairs):
-            pr = self._compute_pair(
-                u,
-                sel1,
-                sel2,
-                start_frame,
-                timestep=timestep,
-                store_distribution=store_distributions,
-                threshold=self.thresholds[idx],
+        for pair_payload in payload.pair_payloads:
+            pr = DistancePairResult(
+                config_hash=self._config_hash,
+                polyzymd_version=get_polyzymd_version(),
+                replicate=None,
+                equilibration_time=self.equilibration_time,
+                equilibration_unit=self.equilibration_unit,
+                selection_string=f"{pair_payload.selection1} : {pair_payload.selection2}",
+                pair_label=pair_payload.pair_label,
+                selection1=pair_payload.selection1,
+                selection2=pair_payload.selection2,
+                distances=(pair_payload.distances.tolist() if store_distributions else None),
+                mean_distance=pair_payload.mean_distance,
+                std_distance=pair_payload.std_distance,
+                median_distance=pair_payload.median_distance,
+                min_distance=pair_payload.min_distance,
+                max_distance=pair_payload.max_distance,
+                sem_distance=pair_payload.sem_distance,
+                correlation_time=pair_payload.correlation_time,
+                correlation_time_unit=pair_payload.correlation_time_unit,
+                n_independent_frames=pair_payload.n_independent_frames,
+                statistical_inefficiency=pair_payload.statistical_inefficiency,
+                autocorrelation_warning=pair_payload.autocorrelation_warning,
+                threshold=pair_payload.threshold,
+                fraction_below_threshold=pair_payload.fraction_below_threshold,
+                histogram_edges=pair_payload.histogram_edges.tolist(),
+                histogram_counts=pair_payload.histogram_counts.tolist(),
+                kde_x=(pair_payload.kde_x.tolist() if pair_payload.kde_x is not None else None),
+                kde_y=(pair_payload.kde_y.tolist() if pair_payload.kde_y is not None else None),
+                kde_peak=pair_payload.kde_peak,
+                kde_bandwidth=pair_payload.kde_bandwidth,
+                n_frames_total=pair_payload.n_frames_total,
+                n_frames_used=pair_payload.n_frames_used,
             )
             pair_results.append(pr)
 
@@ -496,13 +872,14 @@ class DistanceCalculator:
             equilibration_unit=self.equilibration_unit,
             selection_string=combined_selection,
             pair_results=pair_results,
-            n_frames_total=n_frames_total,
-            n_frames_used=n_frames_used,
+            n_frames_total=payload.n_frames_total,
+            n_frames_used=payload.n_frames_used,
             trajectory_files=[str(f) for f in traj_info.trajectory_files],
         )
 
         if save:
             result.save(result_file)
+            self._write_cache_metadata(result_file)
             logger.info(f"Saved result to {result_file}")
 
         return result
@@ -563,244 +940,20 @@ class DistanceCalculator:
 
         return result
 
-    def _compute_pair(
-        self,
-        u: "Universe",
-        sel1: str,
-        sel2: str,
-        start_frame: int,
-        timestep: float = 1.0,
-        store_distribution: bool = True,
-        threshold: float | None = None,
-    ) -> "DistancePairResult":
-        """Compute distances for a single pair with KDE and autocorrelation.
-
-        Parameters
-        ----------
-        u : Universe
-            MDAnalysis Universe.
-        sel1 : str
-            First selection (supports midpoint() and com() syntax).
-        sel2 : str
-            Second selection (supports midpoint() and com() syntax).
-        start_frame : int
-            First frame to use (after equilibration).
-        timestep : float
-            Time between frames in ps.
-        store_distribution : bool
-            Whether to store full distance array.
-        threshold : float, optional
-            Distance threshold for contact analysis (Angstroms).
-
-        Returns
-        -------
-        DistancePairResult
-            Distance analysis results with KDE and autocorrelation statistics.
-        """
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.distances._results import DistancePairResult
-        from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
-        from polyzymd.analyses.shared.diagnostics import (
-            get_selection_diagnostics,
-            warn_if_multi_chain_selection,
-        )
-        from polyzymd.analyses.shared.pbc import minimum_image_distance
-        from polyzymd.analyses.shared.selections import (
-            get_position,
-            parse_selection_string,
-        )
-
-        # Parse selections (handle midpoint/com syntax)
-        parsed1 = parse_selection_string(sel1)
-        parsed2 = parse_selection_string(sel2)
-
-        atoms1 = u.select_atoms(parsed1.selection)
-        atoms2 = u.select_atoms(parsed2.selection)
-
-        if len(atoms1) == 0:
-            diag = get_selection_diagnostics(u, sel1)
-            raise ValueError(f"Selection '{sel1}' matched no atoms.\n\n{diag}")
-        if len(atoms2) == 0:
-            diag = get_selection_diagnostics(u, sel2)
-            raise ValueError(f"Selection '{sel2}' matched no atoms.\n\n{diag}")
-
-        # Warn if selections span multiple chains (common user error)
-        pair_label = _make_pair_label(sel1, sel2)
-        warn_if_multi_chain_selection(atoms1, sel1, f"for distance pair '{pair_label}'")
-        warn_if_multi_chain_selection(atoms2, sel2, f"for distance pair '{pair_label}'")
-
-        # Compute distances over trajectory
-        distances: list[float] = []
-        n_frames_total = len(u.trajectory)
-
-        for i, ts in enumerate(u.trajectory):
-            if i < start_frame:
-                continue
-
-            pos1 = get_position(atoms1, parsed1.mode)
-            pos2 = get_position(atoms2, parsed2.mode)
-
-            if self._use_pbc:
-                box = ts.dimensions
-                dist = minimum_image_distance(pos1, pos2, box)
-            else:
-                dist = float(np.linalg.norm(pos2 - pos1))
-            distances.append(dist)
-
-        distances_arr = np.array(distances, dtype=np.float64)
-        n_frames_used = len(distances_arr)
-
-        # Compute basic statistics
-        mean_dist = float(np.mean(distances_arr))
-        std_dist = float(np.std(distances_arr))
-        median_dist = float(np.median(distances_arr))
-        min_dist = float(np.min(distances_arr))
-        max_dist = float(np.max(distances_arr))
-
-        # Threshold analysis
-        fraction_below = None
-        if threshold is not None:
-            fraction_below = float(np.mean(distances_arr < threshold))
-
-        # Compute histogram
-        hist_counts, hist_edges = np.histogram(distances_arr, bins=50)
-
-        # ========================================
-        # KDE analysis for mode estimation
-        # ========================================
-        kde_x = None
-        kde_y = None
-        kde_peak = None
-        kde_bandwidth = None
-
-        try:
-            from scipy.stats import gaussian_kde
-
-            has_scipy = True
-        except ImportError:
-            has_scipy = False
-
-        if has_scipy and len(distances_arr) > 10:
-            try:
-                kde = gaussian_kde(distances_arr)
-                std_val = float(np.std(distances_arr))
-                kde_bandwidth = float(kde.factor) * std_val
-
-                x_min = max(0, min_dist - 0.5)
-                x_max = max_dist + 0.5
-                kde_x_arr = np.linspace(x_min, x_max, 200)
-                kde_y_arr = kde(kde_x_arr)
-
-                kde_x = kde_x_arr.tolist()
-                kde_y = kde_y_arr.tolist()
-
-                peak_idx = int(np.argmax(kde_y_arr))
-                kde_peak = float(kde_x_arr[peak_idx])
-
-                logger.debug(f"KDE peak (mode): {kde_peak:.2f} Å")
-            except (ValueError, np.linalg.LinAlgError, RuntimeError) as e:
-                logger.warning(f"KDE computation failed: {e}")
-
-        # ========================================
-        # Autocorrelation analysis
-        # ========================================
-        sem_distance = None
-        correlation_time = None
-        correlation_time_unit = None
-        n_independent_frames = None
-        statistical_inefficiency = None
-        autocorrelation_warning = None
-
-        if len(distances_arr) >= 20:
-            try:
-                tau_result = estimate_correlation_time(
-                    distances_arr,
-                    timestep=timestep,
-                    timestep_unit="ps",
-                    method="integration",
-                    n_frames=n_frames_used,
-                )
-
-                correlation_time = tau_result.tau
-                correlation_time_unit = tau_result.tau_unit
-                n_independent_frames = tau_result.n_independent
-                statistical_inefficiency = tau_result.statistical_inefficiency
-                autocorrelation_warning = tau_result.warning
-
-                if n_independent_frames > 0:
-                    sem_distance = float(std_dist / np.sqrt(n_independent_frames))
-
-                logger.debug(
-                    f"Autocorrelation: τ={correlation_time:.1f} "
-                    f"{correlation_time_unit}, n_ind={n_independent_frames}, "
-                    f"SEM={sem_distance:.3f} Å"
-                )
-            except (ValueError, np.linalg.LinAlgError, RuntimeError) as e:
-                logger.warning(f"Autocorrelation analysis failed: {e}")
-                sem_distance = float(std_dist / np.sqrt(n_frames_used))
-
-        return DistancePairResult(
-            config_hash=self._config_hash,
-            polyzymd_version=get_polyzymd_version(),
-            replicate=None,
-            equilibration_time=self.equilibration_time,
-            equilibration_unit=self.equilibration_unit,
-            selection_string=f"{sel1} : {sel2}",
-            pair_label=_make_pair_label(sel1, sel2),
-            selection1=sel1,
-            selection2=sel2,
-            distances=distances if store_distribution else None,
-            mean_distance=mean_dist,
-            std_distance=std_dist,
-            median_distance=median_dist,
-            min_distance=min_dist,
-            max_distance=max_dist,
-            sem_distance=sem_distance,
-            correlation_time=correlation_time,
-            correlation_time_unit=correlation_time_unit,
-            n_independent_frames=n_independent_frames,
-            statistical_inefficiency=statistical_inefficiency,
-            autocorrelation_warning=autocorrelation_warning,
-            threshold=threshold,
-            fraction_below_threshold=fraction_below,
-            histogram_edges=hist_edges.tolist(),
-            histogram_counts=hist_counts.tolist(),
-            kde_x=kde_x,
-            kde_y=kde_y,
-            kde_peak=kde_peak,
-            kde_bandwidth=kde_bandwidth,
-            n_frames_total=n_frames_total,
-            n_frames_used=n_frames_used,
-        )
-
     def _make_result_filename(self) -> str:
         """Generate filename for result JSON.
 
         Includes analysis settings that affect results to ensure cache
         invalidation when settings change.
         """
-        eq_str = f"eq{self.equilibration_time:g}{self.equilibration_unit}"
-
-        if self.pairs:
-            pair_label = _make_pair_label(*self.pairs[0])
-            if len(self.pairs) > 1:
-                pair_label += f"_and{len(self.pairs) - 1}more"
-        else:
-            pair_label = "nopairs"
-
-        settings_parts = []
-        pbc_str = "pbc" if self._use_pbc else "nopbc"
-        settings_parts.append(pbc_str)
-
-        if self._alignment.enabled:
-            align_str = f"align-{self._alignment.reference_mode}"
-        else:
-            align_str = "noalign"
-        settings_parts.append(align_str)
-
-        settings_suffix = "_".join(settings_parts)
-        tag = self._settings_tag or "legacy"
-        return f"distances_{pair_label}_{eq_str}_{settings_suffix}_s{tag}.json"
+        return _make_distance_result_filename(
+            pairs=self.pairs,
+            equilibration_time=self.equilibration_time,
+            equilibration_unit=self.equilibration_unit,
+            use_pbc=self._use_pbc,
+            alignment=self._alignment,
+            settings_tag=self._settings_tag,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -863,48 +1016,150 @@ class DistancesAnalysis(Analysis):
         ctx: ReplicateContext,
         replicate: int,
     ) -> Any:
-        """Compute distances for a single replicate.
-
-        Constructs a :class:`DistanceCalculator` from the framework context
-        and delegates to its ``compute()`` method.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided context.
-        replicate : int
-            1-indexed replicate number.
-
-        Returns
-        -------
-        DistanceResult
-            Per-replicate distance result.
-        """
+        """Compute distances for a single replicate through the runner seam."""
         settings = ctx.settings
         settings_tag = self._make_settings_cache_tag(settings)
-
-        pairs = settings.get_pair_selections()
-        thresholds = settings.get_pair_thresholds()
-        alignment = settings.get_alignment_config()
-
-        calc = DistanceCalculator(
-            config=ctx.sim_config,
-            pairs=pairs,
-            equilibration=ctx.equilibration,
-            thresholds=thresholds,
-            use_pbc=getattr(settings, "use_pbc", True),
-            alignment=alignment,
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+        result_file = ctx.output_dir / _make_distance_result_filename(
+            pairs=settings.get_pair_selections(),
+            equilibration_time=eq_value,
+            equilibration_unit=eq_unit,
+            use_pbc=settings.use_pbc,
+            alignment=settings.get_alignment_config(),
             settings_tag=settings_tag,
         )
 
-        result = calc.compute(
-            replicate=replicate,
-            save=True,
-            output_dir=ctx.output_dir,
+        cached = self._check_cache(
+            DistanceResult,
+            result_file,
             recompute=ctx.recompute,
+            sim_config=ctx.sim_config,
+            settings=ctx.settings,
         )
+        if cached is not None:
+            return cached
+
+        result = super().compute_replicate(ctx, replicate)
+        result.save(result_file)
+        logger.info("Saved result to %s", result_file)
 
         return result
+
+    def _trajectory_loader_factory(self) -> type[Any]:
+        """Return the distances loader class for the shared runner seam.
+
+        Returns
+        -------
+        type[Any]
+            Loader class patched by distances unit tests.
+        """
+
+        return TrajectoryLoader
+
+    def get_trajectory_window(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        loader: Any,
+        universe: Any,
+    ) -> Any:
+        """Resolve the distances window and retain trajectory file metadata."""
+
+        window = super().get_trajectory_window(ctx, replicate, loader, universe)
+        traj_info = loader.get_trajectory_info(replicate)
+        return _DistancesTrajectoryWindow.from_window(window, traj_info.trajectory_files)
+
+    def build_runner(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        universe: Any,
+        window: Any,
+    ) -> Any:
+        """Build the runner-backed distances execution object."""
+
+        del replicate
+        settings = ctx.settings
+        return DistancesReplicateRunner(
+            universe=universe,
+            pairs=settings.get_pair_selections(),
+            thresholds=settings.get_pair_thresholds(),
+            use_pbc=settings.use_pbc,
+            alignment=settings.get_alignment_config(),
+            timestep_ps=window.timestep_ps,
+            pair_label_func=_make_pair_label,
+        )
+
+    def summarize_replicate(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        runner: Any,
+        window: Any,
+    ) -> Any:
+        """Serialize runner output into the legacy distances result schema."""
+
+        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses.distances._results import DistancePairResult
+
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+        payload = runner.results
+
+        pair_results = [
+            DistancePairResult(
+                config_hash=compute_config_hash(ctx.sim_config),
+                polyzymd_version=get_polyzymd_version(),
+                replicate=None,
+                equilibration_time=eq_value,
+                equilibration_unit=eq_unit,
+                selection_string=f"{pair_payload.selection1} : {pair_payload.selection2}",
+                pair_label=pair_payload.pair_label,
+                selection1=pair_payload.selection1,
+                selection2=pair_payload.selection2,
+                distances=pair_payload.distances.tolist(),
+                mean_distance=pair_payload.mean_distance,
+                std_distance=pair_payload.std_distance,
+                median_distance=pair_payload.median_distance,
+                min_distance=pair_payload.min_distance,
+                max_distance=pair_payload.max_distance,
+                sem_distance=pair_payload.sem_distance,
+                correlation_time=pair_payload.correlation_time,
+                correlation_time_unit=pair_payload.correlation_time_unit,
+                n_independent_frames=pair_payload.n_independent_frames,
+                statistical_inefficiency=pair_payload.statistical_inefficiency,
+                autocorrelation_warning=pair_payload.autocorrelation_warning,
+                threshold=pair_payload.threshold,
+                fraction_below_threshold=pair_payload.fraction_below_threshold,
+                histogram_edges=pair_payload.histogram_edges.tolist(),
+                histogram_counts=pair_payload.histogram_counts.tolist(),
+                kde_x=(pair_payload.kde_x.tolist() if pair_payload.kde_x is not None else None),
+                kde_y=(pair_payload.kde_y.tolist() if pair_payload.kde_y is not None else None),
+                kde_peak=pair_payload.kde_peak,
+                kde_bandwidth=pair_payload.kde_bandwidth,
+                n_frames_total=pair_payload.n_frames_total,
+                n_frames_used=pair_payload.n_frames_used,
+            )
+            for pair_payload in payload.pair_payloads
+        ]
+
+        combined_selection = "; ".join(
+            f"({selection1} : {selection2})"
+            for selection1, selection2 in ctx.settings.get_pair_selections()
+        )
+        trajectory_files = [str(path) for path in getattr(window, "trajectory_files", ())]
+
+        return DistanceResult(
+            config_hash=compute_config_hash(ctx.sim_config),
+            polyzymd_version=get_polyzymd_version(),
+            replicate=replicate,
+            equilibration_time=eq_value,
+            equilibration_unit=eq_unit,
+            selection_string=combined_selection,
+            pair_results=pair_results,
+            n_frames_total=payload.n_frames_total,
+            n_frames_used=payload.n_frames_used,
+            trajectory_files=trajectory_files,
+        )
 
     def aggregate(
         self,
@@ -937,6 +1192,7 @@ class DistancesAnalysis(Analysis):
         from polyzymd.analyses.shared.aggregation import aggregate_distance_pair_stats
 
         settings = ctx.settings
+        self._validate_replicate_pair_schema(ctx, results, settings)
         first = results[0]
 
         n_pairs = len(first.pair_results)
@@ -1009,6 +1265,80 @@ class DistancesAnalysis(Analysis):
         logger.info(f"Saved aggregated distances to {target_path}")
 
         return agg_result
+
+    @staticmethod
+    def _validate_replicate_pair_schema(
+        ctx: AggregateContext,
+        results: Sequence[Any],
+        settings: DistancesSettings,
+    ) -> None:
+        """Require all replicate pair results to match the configured schema.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        results : Sequence[Any]
+            Per-replicate distance results.
+        settings : DistancesSettings
+            Current distances settings that define the canonical pair schema.
+
+        Raises
+        ------
+        ValueError
+            Raised when any replicate result has a mismatched pair count, pair
+            ordering, selections, labels, or effective threshold.
+        """
+
+        expected_thresholds = settings.get_pair_thresholds()
+        schema_issues: list[str] = []
+
+        for result in results:
+            replicate = getattr(result, "replicate", None)
+            pair_results = list(getattr(result, "pair_results", []))
+
+            if len(pair_results) != len(settings.pairs):
+                schema_issues.append(
+                    f"replicate {replicate}: pair count {len(pair_results)} != {len(settings.pairs)}"
+                )
+                continue
+
+            for pair_idx, (pair_result, pair_setting, threshold) in enumerate(
+                zip(pair_results, settings.pairs, expected_thresholds, strict=True),
+                start=1,
+            ):
+                mismatch_parts: list[str] = []
+                expected_pair_label = _make_pair_label(
+                    pair_setting.selection_a,
+                    pair_setting.selection_b,
+                )
+                if pair_result.pair_label != expected_pair_label:
+                    mismatch_parts.append(
+                        f"label {pair_result.pair_label!r} != {expected_pair_label!r}"
+                    )
+                if pair_result.selection1 != pair_setting.selection_a:
+                    mismatch_parts.append(
+                        f"selection1 {pair_result.selection1!r} != {pair_setting.selection_a!r}"
+                    )
+                if pair_result.selection2 != pair_setting.selection_b:
+                    mismatch_parts.append(
+                        f"selection2 {pair_result.selection2!r} != {pair_setting.selection_b!r}"
+                    )
+                if pair_result.threshold != threshold:
+                    mismatch_parts.append(f"threshold {pair_result.threshold!r} != {threshold!r}")
+
+                if mismatch_parts:
+                    schema_issues.append(
+                        f"replicate {replicate} pair {pair_idx}: {', '.join(mismatch_parts)}"
+                    )
+
+        if schema_issues:
+            issue_text = "; ".join(schema_issues)
+            raise ValueError(
+                f"Distances aggregation for condition '{ctx.condition.label}' requires every "
+                f"replicate result to match the configured pair schema. Problems detected: "
+                f"{issue_text}."
+            )
 
     # === compare() — fully overridden ===
 

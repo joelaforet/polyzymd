@@ -1,17 +1,9 @@
 """Catalytic triad analysis plugin.
 
 Analyses active-site geometry from MD trajectories by computing per-pair
-distances and a simultaneous contact fraction (all pairs below threshold
-in the same frame).  Aggregates across replicates with SEM and uses the
-default scalar comparison pipeline.
-
-All heavy computation is now inlined:
-- Per-pair distance computation delegates to ``DistanceCalculator``.
-- Simultaneous contact fraction and autocorrelation analysis are computed
-  directly in this plugin.
-- Aggregation uses utilities from ``analyses.shared``.
-- Plotting delegates to ``_plotters`` (standalone functions, orchestration
-  wrappers, and data loading helpers).
+distances and a simultaneous contact fraction (all pairs below threshold in the
+same frame). Aggregation, comparison, and plotting remain in the plugin while
+trajectory-native pair distances flow through the runner seam.
 """
 
 from __future__ import annotations
@@ -37,6 +29,10 @@ from polyzymd.analyses.catalytic_triad._plotters import (
     plot_triad_threshold_bars_from_data,
 )
 from polyzymd.analyses.catalytic_triad._results import TriadAggregatedResult, TriadResult
+from polyzymd.analyses.catalytic_triad._runner import CatalyticTriadReplicateRunner
+from polyzymd.analyses.distances import _make_pair_label
+from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
+from polyzymd.analyses.shared.loader import TrajectoryLoader, parse_time_string
 
 logger = logging.getLogger("polyzymd.analyses.catalytic_triad")
 
@@ -123,9 +119,9 @@ class CatalyticTriadSettings(BaseModel):
 class CatalyticTriadAnalysis(Analysis):
     """Catalytic triad analysis: active-site geometry from MD trajectories.
 
-    Computes per-pair distances (delegated to ``DistanceCalculator``) and
-    derives a simultaneous contact fraction — the percentage of frames
-    where ALL pairs are below the threshold at the same time.
+    Computes per-pair distances through the shared runner seam and derives a
+    simultaneous contact fraction — the percentage of frames where ALL pairs are
+    below the threshold at the same time.
 
     The ``compare()`` method is NOT overridden — it uses the default
     implementation which calls ``extract_metrics()`` to get
@@ -154,192 +150,235 @@ class CatalyticTriadAnalysis(Analysis):
         ctx: ReplicateContext,
         replicate: int,
     ) -> Any:
-        """Compute triad analysis for a single replicate.
+        """Compute triad analysis for a single replicate through the runner seam."""
 
-        Creates a ``DistanceCalculator`` with the triad pair selections,
-        computes per-pair distances, then derives the simultaneous contact
-        fraction and applies autocorrelation analysis.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided context.
-        replicate : int
-            1-indexed replicate number.
-
-        Returns
-        -------
-        TriadResult
-            Per-replicate triad result.
-        """
-        from polyzymd.analyses._results_base import get_polyzymd_version
-        from polyzymd.analyses.catalytic_triad._results import TriadResult
-        from polyzymd.analyses.distances import DistanceCalculator
-        from polyzymd.analyses.shared import (
-            TrajectoryLoader,
-            estimate_correlation_time,
-            parse_time_string,
-        )
-        from polyzymd.analyses.shared.config_hash import (
-            compute_config_hash,
-        )
-        from polyzymd.analyses.shared.diagnostics import (
-            get_selection_diagnostics,
-            warn_if_multi_chain_selection,
-        )
-        from polyzymd.analyses.shared.selections import parse_selection_string
-
-        settings = ctx.settings
-        sim_config = ctx.sim_config
-        output_dir = ctx.output_dir
-
-        # Parse equilibration time
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
-
-        # Initialise loader and config hash
-        loader = TrajectoryLoader(sim_config)
-        config_hash = compute_config_hash(sim_config)
-
-        # Check cache
-        result_file = output_dir / _make_result_filename(settings, eq_value, eq_unit)
+        result_file = ctx.output_dir / _make_result_filename(ctx.settings, eq_value, eq_unit)
         cached = self._check_cache(
             TriadResult,
             result_file,
             recompute=ctx.recompute,
-            sim_config=sim_config,
+            sim_config=ctx.sim_config,
             settings=ctx.settings,
         )
         if cached is not None:
             return cached
 
-        logger.info(f"Computing triad analysis '{settings.name}' for replicate {replicate}")
+        result = super().compute_replicate(ctx, replicate)
+        result.save(result_file)
+        logger.info("Saved triad result to %s", result_file)
+        return result
 
-        # Validate selections upfront
-        u = loader.load_universe(replicate)
-        for pair in settings.pairs:
-            for sel_label, selection in [
-                ("selection_a", pair.selection_a),
-                ("selection_b", pair.selection_b),
-            ]:
-                parsed = parse_selection_string(selection)
-                atoms = u.select_atoms(parsed.selection)
-                if len(atoms) == 0:
-                    diag = get_selection_diagnostics(
-                        u, selection, context=f"For pair '{pair.label}' ({sel_label})"
-                    )
-                    raise ValueError(f"Selection '{selection}' matched no atoms.\n\n{diag}")
-                warn_if_multi_chain_selection(
-                    atoms, selection, f"for triad pair '{pair.label}' ({sel_label})"
+    @staticmethod
+    def _settings_cache_tag(settings: BaseModel) -> str:
+        """Return the catalytic-triad settings fingerprint."""
+
+        return settings_fingerprint(settings)
+
+    @classmethod
+    def _validate_replicate_result_settings_identity(
+        cls,
+        ctx: AggregateContext,
+        results: Sequence[TriadResult],
+    ) -> None:
+        """Validate settings fingerprints on per-replicate triad results.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        results : Sequence[TriadResult]
+            Per-replicate catalytic-triad results.
+
+        Raises
+        ------
+        ValueError
+            Raised when replicate results are missing settings fingerprints or
+            were computed with different settings.
+        """
+
+        expected_fingerprint = cls._settings_cache_tag(ctx.settings)
+        missing_fingerprint_replicates: list[int] = []
+        mismatched_fingerprints: list[str] = []
+
+        for result in results:
+            replicate = getattr(result, "replicate", None)
+            stored_fingerprint = getattr(result, "settings_fingerprint", None)
+
+            if stored_fingerprint is None:
+                if replicate is not None:
+                    missing_fingerprint_replicates.append(replicate)
+                continue
+
+            if stored_fingerprint != expected_fingerprint:
+                mismatched_fingerprints.append(
+                    f"replicate {replicate}: stored={stored_fingerprint} current={expected_fingerprint}"
                 )
-        del u  # release universe; DistanceCalculator will reload
 
-        # Build DistanceCalculator with the triad pair selections
-        pair_selections = settings.get_pair_selections()
-        distance_calc = DistanceCalculator(
-            config=sim_config,
-            pairs=pair_selections,
-            equilibration=ctx.equilibration,
-            thresholds=settings.threshold,
-        )
-
-        # Compute per-pair distances (don't save individual pair result files)
-        distance_result = distance_calc.compute(
-            replicate=replicate,
-            save=False,
-            recompute=ctx.recompute,
-            store_distributions=True,  # Need full arrays for simultaneous contact
-        )
-
-        # Update pair labels from triad config and collect distance arrays
-        pair_results = []
-        pair_distances_arrays = []
-
-        for i, pr in enumerate(distance_result.pair_results):
-            pr_updated = pr.model_copy(
-                update={
-                    "pair_label": settings.pairs[i].label,
-                    "replicate": replicate,
-                }
+        if missing_fingerprint_replicates:
+            raise ValueError(
+                f"Catalytic-triad aggregation for condition '{ctx.condition.label}' cannot use "
+                "legacy cached replicate results missing settings fingerprints. Affected "
+                f"replicates: {sorted(missing_fingerprint_replicates)}. Recompute the "
+                "condition to refresh settings-sensitive caches before aggregating."
             )
-            pair_results.append(pr_updated)
 
-            if pr.distances is not None:
-                pair_distances_arrays.append(np.array(pr.distances))
-            else:
-                raise ValueError(
-                    f"Distance array not available for pair {i}. "
-                    "This shouldn't happen — store_distributions=True was set."
+        if mismatched_fingerprints:
+            mismatch_text = "; ".join(mismatched_fingerprints)
+            raise ValueError(
+                f"Catalytic-triad aggregation for condition '{ctx.condition.label}' detected "
+                f"settings fingerprint mismatches ({mismatch_text}). Recompute the condition "
+                "or clear stale caches before aggregating."
+            )
+
+    def _trajectory_loader_factory(self) -> type[Any]:
+        """Return the triad loader class for the shared runner seam.
+
+        Returns
+        -------
+        type[Any]
+            Loader class patched by catalytic-triad unit tests.
+        """
+
+        return TrajectoryLoader
+
+    def build_runner(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        universe: Any,
+        window: Any,
+    ) -> Any:
+        """Build the runner-backed catalytic-triad execution object."""
+
+        del replicate
+        return CatalyticTriadReplicateRunner(
+            universe=universe,
+            pair_selections=ctx.settings.get_pair_selections(),
+            threshold=ctx.settings.threshold,
+            timestep_ps=window.timestep_ps,
+            pair_label_func=_make_pair_label,
+        )
+
+    def summarize_replicate(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        runner: Any,
+        window: Any,
+    ) -> Any:
+        """Serialize runner output into the legacy triad result schema."""
+
+        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses.distances._results import DistancePairResult
+        from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
+
+        settings = ctx.settings
+        settings_tag = self._settings_cache_tag(settings)
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+        config_hash = compute_config_hash(ctx.sim_config)
+        payload = runner.results
+
+        pair_results: list[DistancePairResult] = []
+        pair_distance_arrays: list[np.ndarray] = []
+        for pair_setting, pair_payload in zip(settings.pairs, payload.pair_payloads, strict=True):
+            pair_results.append(
+                DistancePairResult(
+                    config_hash=config_hash,
+                    polyzymd_version=get_polyzymd_version(),
+                    replicate=replicate,
+                    equilibration_time=eq_value,
+                    equilibration_unit=eq_unit,
+                    selection_string=f"{pair_payload.selection1} : {pair_payload.selection2}",
+                    pair_label=pair_setting.label,
+                    selection1=pair_payload.selection1,
+                    selection2=pair_payload.selection2,
+                    distances=pair_payload.distances.tolist(),
+                    mean_distance=pair_payload.mean_distance,
+                    std_distance=pair_payload.std_distance,
+                    median_distance=pair_payload.median_distance,
+                    min_distance=pair_payload.min_distance,
+                    max_distance=pair_payload.max_distance,
+                    sem_distance=pair_payload.sem_distance,
+                    correlation_time=pair_payload.correlation_time,
+                    correlation_time_unit=pair_payload.correlation_time_unit,
+                    n_independent_frames=pair_payload.n_independent_frames,
+                    statistical_inefficiency=pair_payload.statistical_inefficiency,
+                    autocorrelation_warning=pair_payload.autocorrelation_warning,
+                    threshold=pair_payload.threshold,
+                    fraction_below_threshold=pair_payload.fraction_below_threshold,
+                    histogram_edges=pair_payload.histogram_edges.tolist(),
+                    histogram_counts=pair_payload.histogram_counts.tolist(),
+                    kde_x=(pair_payload.kde_x.tolist() if pair_payload.kde_x is not None else None),
+                    kde_y=(pair_payload.kde_y.tolist() if pair_payload.kde_y is not None else None),
+                    kde_peak=pair_payload.kde_peak,
+                    kde_bandwidth=pair_payload.kde_bandwidth,
+                    n_frames_total=pair_payload.n_frames_total,
+                    n_frames_used=pair_payload.n_frames_used,
                 )
+            )
+            pair_distance_arrays.append(np.asarray(pair_payload.distances, dtype=np.float64))
 
-        # ----- Simultaneous contact fraction -----
-        n_frames_used = distance_result.n_frames_used
-        threshold = settings.threshold
-
-        # Frame-by-frame AND of all pairs below threshold
-        all_below = np.ones(n_frames_used, dtype=bool)
-        for dist_arr in pair_distances_arrays:
-            all_below &= dist_arr < threshold
+        all_below = np.ones(payload.n_frames_used, dtype=bool)
+        for distance_array in pair_distance_arrays:
+            all_below &= distance_array < settings.threshold
 
         simultaneous_fraction = float(all_below.mean())
         n_frames_simultaneous = int(all_below.sum())
-
         logger.info(
-            f"  Simultaneous contact: {simultaneous_fraction * 100:.1f}% "
-            f"({n_frames_simultaneous}/{n_frames_used} frames)"
+            "  Simultaneous contact: %.1f%% (%d/%d frames)",
+            simultaneous_fraction * 100.0,
+            n_frames_simultaneous,
+            payload.n_frames_used,
         )
 
-        # ----- Autocorrelation analysis for contact timeseries -----
         contact_timeseries = all_below.astype(np.float64)
-
-        sim_contact_sem = None
-        sim_contact_tau = None
-        sim_contact_tau_unit = None
-        sim_contact_n_ind = None
-        sim_contact_warning = None
-
-        if n_frames_used >= 20:
+        sim_contact_sem: float | None = None
+        sim_contact_tau: float | None = None
+        sim_contact_tau_unit: str | None = None
+        sim_contact_n_ind: int | None = None
+        sim_contact_warning: str | None = None
+        if payload.n_frames_used >= 20:
             try:
-                timestep = loader.get_timestep(replicate, unit="ps")
                 tau_result = estimate_correlation_time(
                     contact_timeseries,
-                    timestep=timestep,
+                    timestep=window.timestep_ps * window.step,
                     timestep_unit="ps",
                     method="integration",
-                    n_frames=n_frames_used,
+                    n_frames=payload.n_frames_used,
                 )
                 sim_contact_tau = tau_result.tau
                 sim_contact_tau_unit = tau_result.tau_unit
                 sim_contact_n_ind = tau_result.n_independent
                 sim_contact_warning = tau_result.warning
-
-                if sim_contact_n_ind > 0:
-                    p = simultaneous_fraction
-                    sim_contact_sem = float(np.sqrt(p * (1 - p) / sim_contact_n_ind))
-
-                logger.debug(
-                    f"  Contact autocorrelation: τ={sim_contact_tau:.1f} "
-                    f"{sim_contact_tau_unit}, n_ind={sim_contact_n_ind}, "
-                    f"SEM={sim_contact_sem:.3f}"
+                if sim_contact_n_ind and sim_contact_n_ind > 0:
+                    probability = simultaneous_fraction
+                    sim_contact_sem = float(
+                        np.sqrt(probability * (1.0 - probability) / float(sim_contact_n_ind))
+                    )
+            except (ValueError, FloatingPointError, np.linalg.LinAlgError) as exc:
+                logger.warning(
+                    "Autocorrelation analysis for contact timeseries failed: %s",
+                    exc,
                 )
-            except Exception as e:
-                logger.warning(f"Autocorrelation analysis for contact timeseries failed: {e}")
-                p = simultaneous_fraction
-                sim_contact_sem = float(np.sqrt(p * (1 - p) / n_frames_used))
+                probability = simultaneous_fraction
+                sim_contact_sem = float(
+                    np.sqrt(probability * (1.0 - probability) / float(payload.n_frames_used))
+                )
 
-        # ----- Build result -----
-        result = TriadResult(
+        return TriadResult(
             config_hash=config_hash,
             polyzymd_version=get_polyzymd_version(),
             replicate=replicate,
             equilibration_time=eq_value,
             equilibration_unit=eq_unit,
             selection_string="; ".join(
-                f"({p.selection_a} : {p.selection_b})" for p in settings.pairs
+                f"({pair.selection_a} : {pair.selection_b})" for pair in settings.pairs
             ),
             triad_name=settings.name,
             triad_description=settings.description,
             pair_results=pair_results,
-            threshold=threshold,
+            threshold=settings.threshold,
             simultaneous_contact_fraction=simultaneous_fraction,
             n_frames_simultaneous=n_frames_simultaneous,
             simultaneous_contact_timeseries=None,
@@ -348,15 +387,10 @@ class CatalyticTriadAnalysis(Analysis):
             sim_contact_correlation_time_unit=sim_contact_tau_unit,
             sim_contact_n_independent=sim_contact_n_ind,
             sim_contact_warning=sim_contact_warning,
-            n_frames_total=distance_result.n_frames_total,
-            n_frames_used=n_frames_used,
+            n_frames_total=payload.n_frames_total,
+            n_frames_used=payload.n_frames_used,
+            settings_fingerprint=settings_tag,
         )
-
-        # Save
-        result.save(result_file)
-        logger.info(f"Saved triad result to {result_file}")
-
-        return result
 
     def aggregate(
         self,
@@ -388,7 +422,10 @@ class CatalyticTriadAnalysis(Analysis):
         from polyzymd.analyses.shared.statistics import compute_sem
 
         settings = ctx.settings
+        self._validate_replicate_result_settings_identity(ctx, results)
+        self._validate_replicate_pair_schema(ctx, results, settings)
         first = results[0]
+        settings_tag = self._settings_cache_tag(settings)
 
         # Aggregate per-pair distance statistics
         n_pairs = len(first.pair_results)
@@ -460,6 +497,7 @@ class CatalyticTriadAnalysis(Analysis):
             sem_simultaneous_contact=sim_stats.sem,
             per_replicate_simultaneous=per_rep_simultaneous,
             source_result_files=[],  # Not tracked in plugin mode
+            settings_fingerprint=settings_tag,
         )
 
         target_path = ctx.result_path
@@ -470,6 +508,82 @@ class CatalyticTriadAnalysis(Analysis):
         logger.info(f"Saved aggregated triad result to {target_path}")
 
         return agg_result
+
+    @staticmethod
+    def _validate_replicate_pair_schema(
+        ctx: AggregateContext,
+        results: Sequence[TriadResult],
+        settings: CatalyticTriadSettings,
+    ) -> None:
+        """Require all replicate triad pair results to match the configured schema.
+
+        Parameters
+        ----------
+        ctx : AggregateContext
+            Framework-provided aggregation context.
+        results : Sequence[TriadResult]
+            Per-replicate catalytic-triad results.
+        settings : CatalyticTriadSettings
+            Current triad settings that define the canonical ordered pair schema.
+
+        Raises
+        ------
+        ValueError
+            Raised when any replicate result has a mismatched threshold, pair
+            count, ordering, labels, or selections.
+        """
+
+        schema_issues: list[str] = []
+
+        for result in results:
+            replicate = getattr(result, "replicate", None)
+            pair_results = list(result.pair_results)
+
+            if result.threshold != settings.threshold:
+                schema_issues.append(
+                    f"replicate {replicate}: threshold {result.threshold!r} != {settings.threshold!r}"
+                )
+
+            if len(pair_results) != len(settings.pairs):
+                schema_issues.append(
+                    f"replicate {replicate}: pair count {len(pair_results)} != {len(settings.pairs)}"
+                )
+                continue
+
+            for pair_idx, (pair_result, pair_setting) in enumerate(
+                zip(pair_results, settings.pairs, strict=True),
+                start=1,
+            ):
+                mismatch_parts: list[str] = []
+                if pair_result.pair_label != pair_setting.label:
+                    mismatch_parts.append(
+                        f"label {pair_result.pair_label!r} != {pair_setting.label!r}"
+                    )
+                if pair_result.selection1 != pair_setting.selection_a:
+                    mismatch_parts.append(
+                        f"selection1 {pair_result.selection1!r} != {pair_setting.selection_a!r}"
+                    )
+                if pair_result.selection2 != pair_setting.selection_b:
+                    mismatch_parts.append(
+                        f"selection2 {pair_result.selection2!r} != {pair_setting.selection_b!r}"
+                    )
+                if pair_result.threshold != settings.threshold:
+                    mismatch_parts.append(
+                        f"pair threshold {pair_result.threshold!r} != {settings.threshold!r}"
+                    )
+
+                if mismatch_parts:
+                    schema_issues.append(
+                        f"replicate {replicate} pair {pair_idx}: {', '.join(mismatch_parts)}"
+                    )
+
+        if schema_issues:
+            issue_text = "; ".join(schema_issues)
+            raise ValueError(
+                f"Catalytic-triad aggregation for condition '{ctx.condition.label}' requires "
+                f"every replicate result to match the configured pair schema. Problems "
+                f"detected: {issue_text}."
+            )
 
     # === Optional methods ===
 
@@ -588,4 +702,5 @@ def _make_result_filename(settings: CatalyticTriadSettings, eq_value: float, eq_
     """Generate filename for single-replicate result JSON."""
     eq_str = f"eq{eq_value:g}{eq_unit}"
     name_safe = settings.name.replace(" ", "_").replace("/", "-")
-    return f"triad_{name_safe}_{eq_str}.json"
+    settings_tag = settings_fingerprint(settings)
+    return f"triad_{name_safe}_{eq_str}_s{settings_tag}.json"

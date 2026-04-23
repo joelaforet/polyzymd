@@ -204,7 +204,11 @@ class TestSettings:
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_distance_result(replicate: int = 1, n_pairs: int = 2):
+def _make_mock_distance_result(
+    replicate: int = 1,
+    n_pairs: int = 2,
+    pair_schemas: list[tuple[str, str, str]] | None = None,
+):
     """Create a mock DistanceResult."""
     mock = MagicMock()
     mock.replicate = replicate
@@ -215,9 +219,16 @@ def _make_mock_distance_result(replicate: int = 1, n_pairs: int = 2):
     pair_results = []
     for i in range(n_pairs):
         pr = MagicMock()
-        pr.pair_label = f"pair{i}"
-        pr.selection1 = f"sel_a_{i}"
-        pr.selection2 = f"sel_b_{i}"
+        if pair_schemas is None:
+            pair_label = f"pair{i}"
+            selection1 = f"sel_a_{i}"
+            selection2 = f"sel_b_{i}"
+        else:
+            pair_label, selection1, selection2 = pair_schemas[i]
+
+        pr.pair_label = pair_label
+        pr.selection1 = selection1
+        pr.selection2 = selection2
         pr.mean_distance = 3.5 + i * 0.5
         pr.std_distance = 0.5
         pr.median_distance = 3.4 + i * 0.5
@@ -234,15 +245,80 @@ def _make_mock_distance_result(replicate: int = 1, n_pairs: int = 2):
     return mock
 
 
-class TestComputeReplicate:
-    """compute_replicate delegates to DistanceCalculator."""
+def _make_distance_cache_result(
+    *,
+    config_hash: str,
+    pairs: list[tuple[str, str]],
+    thresholds: list[float | None],
+):
+    """Create a concrete ``DistanceResult`` for cache-identity tests."""
+    from polyzymd.analyses.distances._results import DistancePairResult, DistanceResult
 
-    def test_delegates_to_calculator(self):
+    pair_results = []
+    for idx, ((selection1, selection2), threshold) in enumerate(
+        zip(pairs, thresholds, strict=True)
+    ):
+        pair_results.append(
+            DistancePairResult(
+                config_hash=config_hash,
+                polyzymd_version="1.0.0",
+                replicate=1,
+                equilibration_time=0.0,
+                equilibration_unit="ns",
+                selection_string=f"{selection1} : {selection2}",
+                pair_label=f"pair{idx}",
+                selection1=selection1,
+                selection2=selection2,
+                distances=[3.0, 3.1, 3.2],
+                mean_distance=3.1,
+                std_distance=0.1,
+                median_distance=3.1,
+                min_distance=3.0,
+                max_distance=3.2,
+                sem_distance=0.05,
+                correlation_time=None,
+                correlation_time_unit=None,
+                n_independent_frames=None,
+                statistical_inefficiency=None,
+                autocorrelation_warning=None,
+                threshold=threshold,
+                fraction_below_threshold=1.0,
+                histogram_edges=[3.0, 3.1, 3.2],
+                histogram_counts=[1, 2],
+                kde_x=None,
+                kde_y=None,
+                kde_peak=None,
+                kde_bandwidth=None,
+                n_frames_total=3,
+                n_frames_used=3,
+            )
+        )
+
+    return DistanceResult(
+        config_hash=config_hash,
+        polyzymd_version="1.0.0",
+        replicate=1,
+        equilibration_time=0.0,
+        equilibration_unit="ns",
+        selection_string="; ".join(f"({a} : {b})" for a, b in pairs),
+        pair_results=pair_results,
+        n_frames_total=3,
+        n_frames_used=3,
+        trajectory_files=["/fake/traj.dcd"],
+    )
+
+
+class TestComputeReplicate:
+    """compute_replicate delegates to the runner seam."""
+
+    def test_delegates_to_runner_seam_and_saves_result(self, tmp_path):
+        from polyzymd.analyses import base as analyses_base
         from polyzymd.analyses.base import Condition, ReplicateContext
         from polyzymd.analyses.distances import (
             DistancePairSettings,
             DistancesAnalysis,
             DistancesSettings,
+            _make_distance_result_filename,
         )
 
         analysis = DistancesAnalysis()
@@ -268,28 +344,33 @@ class TestComputeReplicate:
             settings=settings,
         )
 
-        mock_result = _make_mock_distance_result(replicate=1, n_pairs=1)
+        mock_result = MagicMock()
 
-        with patch("polyzymd.analyses.distances.DistanceCalculator") as MockCalc:
-            MockCalc.return_value.compute.return_value = mock_result
+        with patch.object(
+            analyses_base.Analysis, "compute_replicate", return_value=mock_result
+        ) as mock_super:
             result = analysis.compute_replicate(ctx, 1)
 
         assert result is mock_result
-        MockCalc.assert_called_once()
-        MockCalc.return_value.compute.assert_called_once_with(
-            replicate=1,
-            save=True,
-            output_dir=Path("/tmp/out/run_1"),
-            recompute=False,
+        mock_super.assert_called_once_with(ctx, 1)
+        expected_path = Path("/tmp/out/run_1") / _make_distance_result_filename(
+            pairs=settings.get_pair_selections(),
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            use_pbc=settings.use_pbc,
+            alignment=settings.get_alignment_config(),
+            settings_tag=analysis._make_settings_cache_tag(settings),
         )
+        mock_result.save.assert_called_once_with(expected_path)
 
-    def test_passes_settings_to_calculator(self):
+    def test_build_runner_returns_distances_runner(self):
         from polyzymd.analyses.base import Condition, ReplicateContext
         from polyzymd.analyses.distances import (
             DistancePairSettings,
             DistancesAnalysis,
             DistancesSettings,
         )
+        from polyzymd.analyses.distances._runner import DistancesReplicateRunner
 
         analysis = DistancesAnalysis()
 
@@ -322,18 +403,88 @@ class TestComputeReplicate:
             recompute=False,
             settings=settings,
         )
+        universe = MagicMock()
+        window = MagicMock(timestep_ps=10.0)
 
-        mock_result = _make_mock_distance_result(replicate=1, n_pairs=1)
+        runner = analysis.build_runner(ctx, 1, universe, window)
 
-        with patch("polyzymd.analyses.distances.DistanceCalculator") as MockCalc:
-            MockCalc.return_value.compute.return_value = mock_result
-            analysis.compute_replicate(ctx, 1)
+        assert isinstance(runner, DistancesReplicateRunner)
 
-        # Verify settings were passed correctly
-        call_kwargs = MockCalc.call_args[1]
-        assert call_kwargs["pairs"] == [("resid 10", "resid 20")]
-        assert call_kwargs["thresholds"] == [4.0]  # per-pair threshold, not global
-        assert call_kwargs["use_pbc"] is False
+    def test_summarize_replicate_preserves_legacy_schema(self, tmp_path):
+        import numpy as np
+
+        from polyzymd.analyses.base import Condition, ReplicateContext
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesAnalysis,
+            DistancesSettings,
+        )
+        from polyzymd.analyses.distances._runner import DistancePairPayload, DistancesRunnerPayload
+
+        analysis = DistancesAnalysis()
+        settings = DistancesSettings(
+            pairs=[DistancePairSettings(label="P1", selection_a="sel_a", selection_b="sel_b")]
+        )
+        condition = Condition(
+            label="test",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1,),
+            sim_config=MagicMock(),
+        )
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="10ns",
+            recompute=True,
+            settings=settings,
+        )
+        runner = MagicMock(
+            results=DistancesRunnerPayload(
+                n_frames_total=100,
+                n_frames_used=90,
+                pair_payloads=[
+                    DistancePairPayload(
+                        pair_label="pair0",
+                        selection1="sel_a",
+                        selection2="sel_b",
+                        distances=np.asarray([3.0, 3.2, 3.4], dtype=np.float64),
+                        mean_distance=3.2,
+                        std_distance=0.1,
+                        median_distance=3.2,
+                        min_distance=3.0,
+                        max_distance=3.4,
+                        sem_distance=0.05,
+                        correlation_time=20.0,
+                        correlation_time_unit="ps",
+                        n_independent_frames=12,
+                        statistical_inefficiency=1.5,
+                        autocorrelation_warning=None,
+                        threshold=3.5,
+                        fraction_below_threshold=1.0,
+                        histogram_edges=np.asarray([3.0, 3.2, 3.4], dtype=np.float64),
+                        histogram_counts=np.asarray([1, 2], dtype=np.int64),
+                        kde_x=np.asarray([3.0, 3.1, 3.2], dtype=np.float64),
+                        kde_y=np.asarray([0.1, 0.2, 0.1], dtype=np.float64),
+                        kde_peak=3.1,
+                        kde_bandwidth=0.2,
+                        n_frames_total=100,
+                        n_frames_used=90,
+                    )
+                ],
+            )
+        )
+        window = MagicMock(trajectory_files=(Path("/fake/traj.dcd"),))
+
+        result = analysis.summarize_replicate(ctx, 1, runner, window)
+
+        assert result.replicate == 1
+        assert result.n_frames_total == 100
+        assert result.n_frames_used == 90
+        assert result.trajectory_files == ["/fake/traj.dcd"]
+        assert result.pair_results[0].distances == [3.0, 3.2, 3.4]
+        assert result.pair_results[0].histogram_counts == [1, 2]
 
 
 # ---------------------------------------------------------------------------
@@ -344,8 +495,11 @@ class TestComputeReplicate:
 class TestAggregate:
     """aggregate produces a DistanceAggregatedResult."""
 
-    def _make_mock_results(self, n_reps: int = 3, n_pairs: int = 2):
+    def _make_mock_results(self, settings, n_reps: int = 3):
         """Create mock per-replicate results for aggregation."""
+        from polyzymd.analyses.distances import _make_pair_label
+
+        thresholds = settings.get_pair_thresholds()
         results = []
         for rep in range(1, n_reps + 1):
             mock = MagicMock()
@@ -355,15 +509,17 @@ class TestAggregate:
             mock.equilibration_unit = "ns"
 
             pair_results = []
-            for pair_idx in range(n_pairs):
+            for pair_idx, (pair_setting, threshold) in enumerate(
+                zip(settings.pairs, thresholds, strict=True)
+            ):
                 pr = MagicMock()
-                pr.pair_label = f"pair{pair_idx}"
-                pr.selection1 = f"sel_a_{pair_idx}"
-                pr.selection2 = f"sel_b_{pair_idx}"
+                pr.pair_label = _make_pair_label(pair_setting.selection_a, pair_setting.selection_b)
+                pr.selection1 = pair_setting.selection_a
+                pr.selection2 = pair_setting.selection_b
                 pr.mean_distance = 3.5 + pair_idx * 0.5 + rep * 0.01
                 pr.std_distance = 0.5
                 pr.median_distance = 3.4 + pair_idx * 0.5 + rep * 0.01
-                pr.threshold = 3.5
+                pr.threshold = threshold
                 pr.fraction_below_threshold = 0.6 - pair_idx * 0.1
                 pr.kde_peak = 3.3 + pair_idx * 0.5 + rep * 0.01
                 pair_results.append(pr)
@@ -404,7 +560,7 @@ class TestAggregate:
             settings=settings,
         )
 
-        mock_results = self._make_mock_results(n_reps=3, n_pairs=2)
+        mock_results = self._make_mock_results(settings, n_reps=3)
 
         with patch(
             "polyzymd.analyses.shared.aggregation.aggregate_distance_pair_stats"
@@ -468,7 +624,7 @@ class TestAggregate:
             settings=settings,
         )
 
-        mock_results = self._make_mock_results(n_reps=2, n_pairs=1)
+        mock_results = self._make_mock_results(settings, n_reps=2)
 
         with patch(
             "polyzymd.analyses.shared.aggregation.aggregate_distance_pair_stats"
@@ -495,6 +651,84 @@ class TestAggregate:
         # Check that output file was created
         json_files = list(output_dir.glob("*.json"))
         assert len(json_files) == 1
+
+    def test_aggregate_rejects_pair_count_mismatch(self, tmp_path):
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesAnalysis,
+            DistancesSettings,
+        )
+
+        analysis = DistancesAnalysis()
+        settings = DistancesSettings(
+            pairs=[
+                DistancePairSettings(label="P0", selection_a="sel_a_0", selection_b="sel_b_0"),
+                DistancePairSettings(label="P1", selection_a="sel_a_1", selection_b="sel_b_1"),
+            ]
+        )
+        condition = Condition(
+            label="test",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="100ns",
+            settings=settings,
+        )
+        results = self._make_mock_results(settings, n_reps=2)
+        results[1].pair_results = results[1].pair_results[:1]
+
+        with pytest.raises(ValueError, match="configured pair schema"):
+            analysis.aggregate(ctx, results)
+
+    def test_aggregate_rejects_pair_order_and_threshold_mismatch(self, tmp_path):
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesAnalysis,
+            DistancesSettings,
+        )
+
+        analysis = DistancesAnalysis()
+        settings = DistancesSettings(
+            pairs=[
+                DistancePairSettings(
+                    label="P0",
+                    selection_a="sel_a_0",
+                    selection_b="sel_b_0",
+                    threshold=3.0,
+                ),
+                DistancePairSettings(
+                    label="P1",
+                    selection_a="sel_a_1",
+                    selection_b="sel_b_1",
+                    threshold=4.0,
+                ),
+            ]
+        )
+        condition = Condition(
+            label="test",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="100ns",
+            settings=settings,
+        )
+        results = self._make_mock_results(settings, n_reps=2)
+        results[1].pair_results = list(reversed(results[1].pair_results))
+
+        with pytest.raises(ValueError, match="configured pair schema"):
+            analysis.aggregate(ctx, results)
 
 
 # ---------------------------------------------------------------------------
@@ -926,6 +1160,77 @@ class TestSettingsCacheTag:
         assert tag_a != tag_b
 
 
+class TestDistanceCalculatorCacheIdentity:
+    """DistanceCalculator should enforce strict cache identity."""
+
+    def test_default_cache_filename_changes_when_only_later_pair_changes(self):
+        from polyzymd.analyses.distances import DistanceCalculator
+
+        config = MagicMock()
+        with (
+            patch("polyzymd.analyses.shared.loader._require_mdanalysis"),
+            patch("polyzymd.analyses.distances.TrajectoryLoader"),
+        ):
+            calc_a = DistanceCalculator(
+                config,
+                pairs=[("resid 1 and name CA", "resid 2 and name CA"), ("resid 3", "resid 4")],
+            )
+            calc_b = DistanceCalculator(
+                config,
+                pairs=[("resid 1 and name CA", "resid 2 and name CA"), ("resid 30", "resid 40")],
+            )
+
+        assert calc_a._settings_tag != "legacy"
+        assert calc_a._make_result_filename() != calc_b._make_result_filename()
+
+    def test_stale_legacy_named_cache_is_rejected_when_settings_change(self, tmp_path):
+        from polyzymd.analyses.distances import DistanceCalculator
+
+        config = MagicMock()
+        original_pairs = [
+            ("resid 1 and name CA", "resid 2 and name CA"),
+            ("resid 3 and name CA", "resid 4 and name CA"),
+        ]
+        changed_pairs = [
+            ("resid 1 and name CA", "resid 2 and name CA"),
+            ("resid 30 and name CA", "resid 40 and name CA"),
+        ]
+        thresholds = [3.5, 4.0]
+
+        with (
+            patch("polyzymd.analyses.shared.loader._require_mdanalysis"),
+            patch("polyzymd.analyses.distances.TrajectoryLoader"),
+        ):
+            calc_old = DistanceCalculator(
+                config,
+                pairs=original_pairs,
+                thresholds=thresholds,
+                settings_tag="legacy",
+            )
+            calc_new = DistanceCalculator(
+                config,
+                pairs=changed_pairs,
+                thresholds=thresholds,
+                settings_tag="legacy",
+            )
+
+        result_file = tmp_path / calc_old._make_result_filename()
+        assert result_file.name == calc_new._make_result_filename()
+
+        cached_result = _make_distance_cache_result(
+            config_hash=calc_old._config_hash,
+            pairs=original_pairs,
+            thresholds=thresholds,
+        )
+        cached_result.save(result_file)
+        calc_old._write_cache_metadata(result_file)
+
+        with patch("polyzymd.analyses.shared.config_hash.validate_config_hash"):
+            reused = calc_new._load_cached_result(result_file)
+
+        assert reused is None
+
+
 # ---------------------------------------------------------------------------
 # plot
 # ---------------------------------------------------------------------------
@@ -1220,23 +1525,61 @@ class TestLifecycle:
             sim_config=mock_sim_config,
         )
 
+        mock_loader_inst = MagicMock()
+        mock_universe = MagicMock()
+        mock_traj = MagicMock()
+        mock_traj.__len__ = MagicMock(return_value=2000)
+        mock_universe.trajectory = mock_traj
+        mock_loader_inst.load_universe.return_value = mock_universe
+        mock_loader_inst.get_timestep.return_value = 10.0
+        mock_loader_inst.get_trajectory_info.return_value = MagicMock(
+            trajectory_files=[Path("/fake/traj.dcd")]
+        )
+
+        mock_runner = MagicMock()
+        mock_runner.results = object()
+        mock_runner.run.return_value = mock_runner
+
         # 1. Compute replicates
         rep_results = []
-        for rep in [1, 2]:
-            ctx = ReplicateContext(
-                condition=cond,
-                replicate=rep,
-                sim_config=mock_sim_config,
-                output_dir=tmp_path / f"run_{rep}",
-                equilibration="10ns",
-                recompute=False,
-                settings=settings,
-            )
-            mock_result = _make_mock_distance_result(replicate=rep, n_pairs=1)
-            with patch("polyzymd.analyses.distances.DistanceCalculator") as MockCalc:
-                MockCalc.return_value.compute.return_value = mock_result
+        with (
+            patch("polyzymd.analyses.distances.TrajectoryLoader") as MockLoader,
+            patch.object(analysis, "build_runner", return_value=mock_runner) as mock_build_runner,
+            patch.object(
+                analysis,
+                "summarize_replicate",
+                side_effect=[
+                    _make_mock_distance_result(
+                        replicate=1,
+                        n_pairs=1,
+                        pair_schemas=[("sel_a-sel_b", "sel_a", "sel_b")],
+                    ),
+                    _make_mock_distance_result(
+                        replicate=2,
+                        n_pairs=1,
+                        pair_schemas=[("sel_a-sel_b", "sel_a", "sel_b")],
+                    ),
+                ],
+            ) as mock_summarize,
+        ):
+            MockLoader.return_value = mock_loader_inst
+
+            for rep in [1, 2]:
+                ctx = ReplicateContext(
+                    condition=cond,
+                    replicate=rep,
+                    sim_config=mock_sim_config,
+                    output_dir=tmp_path / f"run_{rep}",
+                    equilibration="10ns",
+                    recompute=False,
+                    settings=settings,
+                )
                 result = analysis.compute_replicate(ctx, rep)
                 rep_results.append(result)
+
+        assert MockLoader.call_count == 2
+        assert mock_build_runner.call_count == 2
+        assert mock_summarize.call_count == 2
 
         assert len(rep_results) == 2
 

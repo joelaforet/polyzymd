@@ -106,6 +106,10 @@ class TriadResult(BaseAnalysisResult):
     # Trajectory info
     n_frames_total: int = Field(..., description="Total frames in trajectory")
     n_frames_used: int = Field(..., description="Frames used after equilibration")
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Settings fingerprint used for settings-sensitive cache validation",
+    )
 
     @model_validator(mode="after")
     def _check_triad_consistency(self) -> "TriadResult":
@@ -248,6 +252,10 @@ class TriadAggregatedResult(BaseAnalysisResult, AggregatedResultMixin):
     # Source files
     source_result_files: list[str] = Field(
         default_factory=list, description="Paths to individual replicate result files"
+    )
+    settings_fingerprint: str | None = Field(
+        default=None,
+        description="Settings fingerprint used for settings-sensitive cache validation",
     )
 
     @model_validator(mode="after")

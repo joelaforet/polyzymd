@@ -27,6 +27,9 @@ from polyzymd.analyses.catalytic_triad import (
     CatalyticTriadSettings,
     TriadPairSettings,
 )
+from polyzymd.analyses.catalytic_triad._results import TriadResult
+from polyzymd.analyses.distances._results import DistancePairResult
+from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
 # ============================================================================
 # Fixtures
@@ -72,46 +75,65 @@ def condition():
     )
 
 
-def _make_mock_pair_result(pair_idx: int, replicate: int) -> MagicMock:
-    """Create a mock DistancePairResult for one pair in one replicate."""
-    pr = MagicMock()
-    pr.pair_label = f"Pair_{pair_idx}"
-    pr.selection1 = f"resid {100 + pair_idx} and name OD1"
-    pr.selection2 = f"resid {200 + pair_idx} and name ND1"
-    pr.mean_distance = 3.0 + 0.1 * pair_idx
-    pr.std_distance = 0.5
-    pr.sem_distance = 0.1
-    pr.median_distance = 3.0 + 0.1 * pair_idx
-    pr.min_distance = 2.0
-    pr.max_distance = 5.0
-    pr.replicate = replicate
-    pr.threshold = 3.5
-    pr.fraction_below_threshold = 0.7 - 0.05 * pair_idx
-    pr.kde_peak = 2.8 + 0.1 * pair_idx
-    pr.distances = [3.0, 3.2, 2.8, 3.5, 2.9]  # Needed for aggregation stats
-    return pr
-
-
-def _make_mock_triad_result(replicate: int, sim_contact: float = 0.65) -> MagicMock:
-    """Create a mock TriadResult with realistic fields."""
-    result = MagicMock()
-    result.replicate = replicate
-    result.triad_name = "LipA_triad"
-    result.triad_description = "Ser-His-Asp catalytic triad"
-    result.pair_results = [
-        _make_mock_pair_result(0, replicate),
-        _make_mock_pair_result(1, replicate),
+def _make_mock_pair_result(pair_idx: int, replicate: int) -> DistancePairResult:
+    """Create a valid DistancePairResult for one pair in one replicate."""
+    pair_schemas = [
+        ("Asp133-His156", "resid 133 and name OD1", "resid 156 and name ND1"),
+        ("His156-Ser77", "resid 156 and name NE2", "resid 77 and name OG"),
     ]
-    result.threshold = 3.5
-    result.simultaneous_contact_fraction = sim_contact
-    result.n_frames_simultaneous = int(sim_contact * 1000)
-    result.n_frames_total = 1200
-    result.n_frames_used = 1000
-    result.config_hash = "hash123"
-    result.equilibration_time = 10.0
-    result.equilibration_unit = "ns"
-    result.selection_string = "(resid 133 : resid 156); (resid 156 : resid 77)"
-    return result
+    pair_label, selection1, selection2 = pair_schemas[pair_idx]
+    return DistancePairResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=replicate,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string=f"{selection1} : {selection2}",
+        pair_label=pair_label,
+        selection1=selection1,
+        selection2=selection2,
+        mean_distance=3.0 + 0.1 * pair_idx,
+        std_distance=0.5,
+        sem_distance=0.1,
+        median_distance=3.0 + 0.1 * pair_idx,
+        min_distance=2.0,
+        max_distance=5.0,
+        threshold=3.5,
+        fraction_below_threshold=0.7 - 0.05 * pair_idx,
+        kde_peak=2.8 + 0.1 * pair_idx,
+        distances=[3.0, 3.2, 2.8, 3.5, 2.9],
+        n_frames_total=1200,
+        n_frames_used=1000,
+    )
+
+
+def _make_mock_triad_result(
+    replicate: int,
+    sim_contact: float = 0.65,
+    *,
+    settings_fp: str | None = None,
+) -> TriadResult:
+    """Create a valid TriadResult with realistic fields."""
+    return TriadResult(
+        config_hash="hash123",
+        polyzymd_version="1.2.1",
+        replicate=replicate,
+        equilibration_time=10.0,
+        equilibration_unit="ns",
+        selection_string="(resid 133 : resid 156); (resid 156 : resid 77)",
+        triad_name="LipA_triad",
+        triad_description="Ser-His-Asp catalytic triad",
+        pair_results=[
+            _make_mock_pair_result(0, replicate),
+            _make_mock_pair_result(1, replicate),
+        ],
+        threshold=3.5,
+        simultaneous_contact_fraction=sim_contact,
+        n_frames_simultaneous=int(sim_contact * 1000),
+        n_frames_total=1200,
+        n_frames_used=1000,
+        settings_fingerprint=settings_fp,
+    )
 
 
 # ============================================================================
@@ -299,43 +321,16 @@ def _make_mock_distance_result(n_pairs: int = 2, n_frames: int = 1000):
 
 
 class TestComputeReplicate:
-    """Test CatalyticTriadAnalysis.compute_replicate with inlined computation."""
+    """Test catalytic-triad runner seam behavior."""
 
-    @patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1")
-    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
-    @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
-    @patch("polyzymd.analyses.shared.TrajectoryLoader")
-    @patch("polyzymd.analyses.distances.DistanceCalculator")
-    def test_computes_triad_inline(
+    def test_compute_replicate_delegates_to_runner_seam(
         self,
-        MockDistCalc,
-        MockLoader,
-        mock_hash,
-        mock_validate_hash,
-        mock_version,
         triad_analysis,
         condition,
         tmp_path,
         default_settings,
     ):
-        """compute_replicate should use DistanceCalculator and compute simultaneous contact."""
-
-        # Mock TrajectoryLoader
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-        mock_u = MagicMock()
-        # Make select_atoms return non-empty for validation
-        mock_atoms = MagicMock()
-        mock_atoms.__len__ = MagicMock(return_value=1)
-        mock_u.select_atoms.return_value = mock_atoms
-        mock_loader_inst.load_universe.return_value = mock_u
-        mock_loader_inst.get_timestep.return_value = 10.0
-
-        # Mock DistanceCalculator
-        mock_dist_result = _make_mock_distance_result(n_pairs=2, n_frames=1000)
-        mock_dist_inst = MagicMock()
-        mock_dist_inst.compute.return_value = mock_dist_result
-        MockDistCalc.return_value = mock_dist_inst
+        from polyzymd.analyses.base import Analysis as AnalysisBase
 
         ctx = ReplicateContext(
             condition=condition,
@@ -343,130 +338,366 @@ class TestComputeReplicate:
             sim_config=condition.sim_config,
             output_dir=tmp_path / "run_1",
             equilibration="10ns",
-            recompute=True,  # skip cache check
+            recompute=True,
             settings=default_settings,
         )
+        mock_result = MagicMock()
 
-        result = triad_analysis.compute_replicate(ctx, 1)
+        with patch.object(
+            AnalysisBase, "compute_replicate", return_value=mock_result
+        ) as mock_super:
+            result = triad_analysis.compute_replicate(ctx, 1)
 
-        # Verify DistanceCalculator was created with correct args
-        MockDistCalc.assert_called_once()
-        call_kwargs = MockDistCalc.call_args
-        assert call_kwargs.kwargs["config"] is condition.sim_config
-        assert len(call_kwargs.kwargs["pairs"]) == 2
+        assert result is mock_result
+        mock_super.assert_called_once_with(ctx, 1)
+        mock_result.save.assert_called_once()
+        assert mock_result.save.call_args[0][0].name == (
+            f"triad_LipA_triad_eq10ns_s{settings_fingerprint(default_settings)}.json"
+        )
 
-        # Verify result has expected triad fields
-        assert result.replicate == 1
-        assert result.triad_name == "LipA_triad"
-        assert result.threshold == 3.5
-        assert len(result.pair_results) == 2
-        # Pair labels should be updated from settings
-        assert result.pair_results[0].pair_label == "Asp133-His156"
-        assert result.pair_results[1].pair_label == "His156-Ser77"
-        # Simultaneous contact fraction should be computed
-        assert 0.0 <= result.simultaneous_contact_fraction <= 1.0
-        assert result.n_frames_used == 1000
-
-    @patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1")
-    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
-    @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
-    @patch("polyzymd.analyses.shared.TrajectoryLoader")
-    @patch("polyzymd.analyses.distances.DistanceCalculator")
-    def test_passes_recompute_flag(
+    def test_compute_replicate_cache_filename_changes_when_settings_change(
         self,
-        MockDistCalc,
-        MockLoader,
-        mock_hash,
-        mock_validate_hash,
-        mock_version,
         triad_analysis,
         condition,
         tmp_path,
         default_settings,
     ):
-        """recompute flag should be passed to DistanceCalculator.compute()."""
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-        mock_u = MagicMock()
-        mock_atoms = MagicMock()
-        mock_atoms.__len__ = MagicMock(return_value=1)
-        mock_u.select_atoms.return_value = mock_atoms
-        mock_loader_inst.load_universe.return_value = mock_u
-        mock_loader_inst.get_timestep.return_value = 10.0
+        """Replicate cache filenames should change when triad settings change."""
 
-        mock_dist_result = _make_mock_distance_result(n_pairs=2, n_frames=500)
-        mock_dist_inst = MagicMock()
-        mock_dist_inst.compute.return_value = mock_dist_result
-        MockDistCalc.return_value = mock_dist_inst
+        seen_paths: list[Path] = []
 
-        ctx = ReplicateContext(
+        def _fake_check_cache(result_cls, cache_path, **kwargs):  # noqa: ARG001
+            seen_paths.append(cache_path)
+            return {"cached": True}
+
+        threshold_settings = default_settings.model_copy(update={"threshold": 4.0})
+        triad_analysis._check_cache = _fake_check_cache
+
+        ctx_a = ReplicateContext(
             condition=condition,
-            replicate=2,
+            replicate=1,
             sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_2",
-            equilibration="5ns",
-            recompute=True,
+            output_dir=tmp_path / "run_1a",
+            equilibration="10ns",
+            recompute=False,
             settings=default_settings,
         )
-
-        triad_analysis.compute_replicate(ctx, 2)
-
-        mock_dist_inst.compute.assert_called_once_with(
-            replicate=2,
-            save=False,
-            recompute=True,
-            store_distributions=True,
+        ctx_b = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1b",
+            equilibration="10ns",
+            recompute=False,
+            settings=threshold_settings,
         )
 
-    @patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1")
-    @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
-    @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
-    @patch("polyzymd.analyses.shared.TrajectoryLoader")
-    @patch("polyzymd.analyses.distances.DistanceCalculator")
-    def test_caches_result_file(
-        self,
-        MockDistCalc,
-        MockLoader,
-        mock_hash,
-        mock_validate_hash,
-        mock_version,
-        triad_analysis,
-        condition,
-        tmp_path,
-        default_settings,
-    ):
-        """Result should be saved to the output directory."""
-        mock_loader_inst = MagicMock()
-        MockLoader.return_value = mock_loader_inst
-        mock_u = MagicMock()
-        mock_atoms = MagicMock()
-        mock_atoms.__len__ = MagicMock(return_value=1)
-        mock_u.select_atoms.return_value = mock_atoms
-        mock_loader_inst.load_universe.return_value = mock_u
-        mock_loader_inst.get_timestep.return_value = 10.0
+        assert triad_analysis.compute_replicate(ctx_a, 1) == {"cached": True}
+        assert triad_analysis.compute_replicate(ctx_b, 1) == {"cached": True}
+        assert len(seen_paths) == 2
+        assert seen_paths[0].name != seen_paths[1].name
 
-        mock_dist_result = _make_mock_distance_result(n_pairs=2, n_frames=100)
-        mock_dist_inst = MagicMock()
-        mock_dist_inst.compute.return_value = mock_dist_result
-        MockDistCalc.return_value = mock_dist_inst
+    def test_build_runner_returns_triad_runner(self, triad_analysis, condition, default_settings):
+        from polyzymd.analyses.catalytic_triad._runner import CatalyticTriadReplicateRunner
 
-        output_dir = tmp_path / "run_1"
         ctx = ReplicateContext(
             condition=condition,
             replicate=1,
             sim_config=condition.sim_config,
-            output_dir=output_dir,
+            output_dir=Path("/tmp/run_1"),
             equilibration="10ns",
             recompute=True,
             settings=default_settings,
         )
 
-        triad_analysis.compute_replicate(ctx, 1)
+        runner = triad_analysis.build_runner(ctx, 1, MagicMock(), MagicMock(timestep_ps=10.0))
 
-        # Check that result JSON was written
-        json_files = list(output_dir.glob("*.json"))
-        assert len(json_files) == 1
-        assert "triad_LipA_triad_eq10ns.json" in json_files[0].name
+        assert isinstance(runner, CatalyticTriadReplicateRunner)
+
+    @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
+    @patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1")
+    def test_summarize_replicate_computes_simultaneous_contact(
+        self,
+        mock_version,
+        mock_hash,
+        triad_analysis,
+        condition,
+        tmp_path,
+        default_settings,
+    ):
+        import numpy as np
+
+        from polyzymd.analyses.distances._runner import DistancePairPayload, DistancesRunnerPayload
+
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="10ns",
+            recompute=True,
+            settings=default_settings,
+        )
+        runner = MagicMock(
+            results=DistancesRunnerPayload(
+                n_frames_total=12,
+                n_frames_used=4,
+                pair_payloads=[
+                    DistancePairPayload(
+                        pair_label="auto0",
+                        selection1="resid 133 and name OD1",
+                        selection2="resid 156 and name ND1",
+                        distances=np.asarray([3.0, 3.8, 3.1, 3.2], dtype=np.float64),
+                        mean_distance=3.275,
+                        std_distance=0.0,
+                        median_distance=3.15,
+                        min_distance=3.0,
+                        max_distance=3.8,
+                        sem_distance=None,
+                        correlation_time=None,
+                        correlation_time_unit=None,
+                        n_independent_frames=None,
+                        statistical_inefficiency=None,
+                        autocorrelation_warning=None,
+                        threshold=3.5,
+                        fraction_below_threshold=0.75,
+                        histogram_edges=np.asarray([3.0, 3.4, 3.8], dtype=np.float64),
+                        histogram_counts=np.asarray([3, 1], dtype=np.int64),
+                        kde_x=None,
+                        kde_y=None,
+                        kde_peak=None,
+                        kde_bandwidth=None,
+                        n_frames_total=12,
+                        n_frames_used=4,
+                    ),
+                    DistancePairPayload(
+                        pair_label="auto1",
+                        selection1="resid 156 and name NE2",
+                        selection2="resid 77 and name OG",
+                        distances=np.asarray([3.1, 3.0, 3.7, 3.2], dtype=np.float64),
+                        mean_distance=3.25,
+                        std_distance=0.0,
+                        median_distance=3.15,
+                        min_distance=3.0,
+                        max_distance=3.7,
+                        sem_distance=None,
+                        correlation_time=None,
+                        correlation_time_unit=None,
+                        n_independent_frames=None,
+                        statistical_inefficiency=None,
+                        autocorrelation_warning=None,
+                        threshold=3.5,
+                        fraction_below_threshold=0.75,
+                        histogram_edges=np.asarray([3.0, 3.35, 3.7], dtype=np.float64),
+                        histogram_counts=np.asarray([3, 1], dtype=np.int64),
+                        kde_x=None,
+                        kde_y=None,
+                        kde_peak=None,
+                        kde_bandwidth=None,
+                        n_frames_total=12,
+                        n_frames_used=4,
+                    ),
+                ],
+            )
+        )
+        window = MagicMock(timestep_ps=10.0, step=1)
+
+        result = triad_analysis.summarize_replicate(ctx, 1, runner, window)
+
+        assert result.replicate == 1
+        assert result.triad_name == "LipA_triad"
+        assert result.pair_results[0].pair_label == "Asp133-His156"
+        assert result.pair_results[1].pair_label == "His156-Ser77"
+        assert result.simultaneous_contact_fraction == pytest.approx(0.5)
+        assert result.n_frames_simultaneous == 2
+        assert result.settings_fingerprint == settings_fingerprint(default_settings)
+
+    def test_summarize_replicate_falls_back_on_expected_autocorrelation_failure(
+        self,
+        triad_analysis,
+        condition,
+        tmp_path,
+        default_settings,
+    ):
+        """Expected autocorrelation failures should use the naive SEM fallback."""
+        import numpy as np
+
+        from polyzymd.analyses.distances._runner import DistancePairPayload, DistancesRunnerPayload
+
+        distances = np.full(20, 3.0, dtype=np.float64)
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="10ns",
+            recompute=True,
+            settings=default_settings,
+        )
+        runner = MagicMock(
+            results=DistancesRunnerPayload(
+                n_frames_total=20,
+                n_frames_used=20,
+                pair_payloads=[
+                    DistancePairPayload(
+                        pair_label="auto0",
+                        selection1="resid 133 and name OD1",
+                        selection2="resid 156 and name ND1",
+                        distances=distances,
+                        mean_distance=3.0,
+                        std_distance=0.0,
+                        median_distance=3.0,
+                        min_distance=3.0,
+                        max_distance=3.0,
+                        sem_distance=None,
+                        correlation_time=None,
+                        correlation_time_unit=None,
+                        n_independent_frames=None,
+                        statistical_inefficiency=None,
+                        autocorrelation_warning=None,
+                        threshold=3.5,
+                        fraction_below_threshold=1.0,
+                        histogram_edges=np.asarray([2.5, 3.0, 3.5], dtype=np.float64),
+                        histogram_counts=np.asarray([0, 20], dtype=np.int64),
+                        kde_x=None,
+                        kde_y=None,
+                        kde_peak=None,
+                        kde_bandwidth=None,
+                        n_frames_total=20,
+                        n_frames_used=20,
+                    ),
+                    DistancePairPayload(
+                        pair_label="auto1",
+                        selection1="resid 156 and name NE2",
+                        selection2="resid 77 and name OG",
+                        distances=distances,
+                        mean_distance=3.0,
+                        std_distance=0.0,
+                        median_distance=3.0,
+                        min_distance=3.0,
+                        max_distance=3.0,
+                        sem_distance=None,
+                        correlation_time=None,
+                        correlation_time_unit=None,
+                        n_independent_frames=None,
+                        statistical_inefficiency=None,
+                        autocorrelation_warning=None,
+                        threshold=3.5,
+                        fraction_below_threshold=1.0,
+                        histogram_edges=np.asarray([2.5, 3.0, 3.5], dtype=np.float64),
+                        histogram_counts=np.asarray([0, 20], dtype=np.int64),
+                        kde_x=None,
+                        kde_y=None,
+                        kde_peak=None,
+                        kde_bandwidth=None,
+                        n_frames_total=20,
+                        n_frames_used=20,
+                    ),
+                ],
+            )
+        )
+        window = MagicMock(timestep_ps=10.0, step=1)
+
+        with patch(
+            "polyzymd.analyses.shared.autocorrelation.estimate_correlation_time",
+            side_effect=ValueError("autocorrelation failed"),
+        ):
+            result = triad_analysis.summarize_replicate(ctx, 1, runner, window)
+
+        assert result.sim_contact_sem == pytest.approx(0.0)
+
+    def test_summarize_replicate_surfaces_unexpected_autocorrelation_errors(
+        self,
+        triad_analysis,
+        condition,
+        tmp_path,
+        default_settings,
+    ):
+        """Unexpected autocorrelation errors should not be masked."""
+        import numpy as np
+
+        from polyzymd.analyses.distances._runner import DistancePairPayload, DistancesRunnerPayload
+
+        distances = np.full(20, 3.0, dtype=np.float64)
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="10ns",
+            recompute=True,
+            settings=default_settings,
+        )
+        runner = MagicMock(
+            results=DistancesRunnerPayload(
+                n_frames_total=20,
+                n_frames_used=20,
+                pair_payloads=[
+                    DistancePairPayload(
+                        pair_label="auto0",
+                        selection1="resid 133 and name OD1",
+                        selection2="resid 156 and name ND1",
+                        distances=distances,
+                        mean_distance=3.0,
+                        std_distance=0.0,
+                        median_distance=3.0,
+                        min_distance=3.0,
+                        max_distance=3.0,
+                        sem_distance=None,
+                        correlation_time=None,
+                        correlation_time_unit=None,
+                        n_independent_frames=None,
+                        statistical_inefficiency=None,
+                        autocorrelation_warning=None,
+                        threshold=3.5,
+                        fraction_below_threshold=1.0,
+                        histogram_edges=np.asarray([2.5, 3.0, 3.5], dtype=np.float64),
+                        histogram_counts=np.asarray([0, 20], dtype=np.int64),
+                        kde_x=None,
+                        kde_y=None,
+                        kde_peak=None,
+                        kde_bandwidth=None,
+                        n_frames_total=20,
+                        n_frames_used=20,
+                    ),
+                    DistancePairPayload(
+                        pair_label="auto1",
+                        selection1="resid 156 and name NE2",
+                        selection2="resid 77 and name OG",
+                        distances=distances,
+                        mean_distance=3.0,
+                        std_distance=0.0,
+                        median_distance=3.0,
+                        min_distance=3.0,
+                        max_distance=3.0,
+                        sem_distance=None,
+                        correlation_time=None,
+                        correlation_time_unit=None,
+                        n_independent_frames=None,
+                        statistical_inefficiency=None,
+                        autocorrelation_warning=None,
+                        threshold=3.5,
+                        fraction_below_threshold=1.0,
+                        histogram_edges=np.asarray([2.5, 3.0, 3.5], dtype=np.float64),
+                        histogram_counts=np.asarray([0, 20], dtype=np.int64),
+                        kde_x=None,
+                        kde_y=None,
+                        kde_peak=None,
+                        kde_bandwidth=None,
+                        n_frames_total=20,
+                        n_frames_used=20,
+                    ),
+                ],
+            )
+        )
+        window = MagicMock(timestep_ps=10.0, step=1)
+
+        with patch(
+            "polyzymd.analyses.shared.autocorrelation.estimate_correlation_time",
+            side_effect=RuntimeError("unexpected failure"),
+        ):
+            with pytest.raises(RuntimeError, match="unexpected failure"):
+                triad_analysis.summarize_replicate(ctx, 1, runner, window)
 
 
 # ============================================================================
@@ -479,7 +710,11 @@ class TestAggregate:
 
     def test_aggregates_results(self, triad_analysis, condition, tmp_path, default_settings):
         """Test aggregate produces a TriadAggregatedResult with correct stats."""
-        results = [_make_mock_triad_result(i, sim_contact=0.6 + 0.05 * i) for i in range(1, 4)]
+        settings_fp = settings_fingerprint(default_settings)
+        results = [
+            _make_mock_triad_result(i, sim_contact=0.6 + 0.05 * i, settings_fp=settings_fp)
+            for i in range(1, 4)
+        ]
         agg_dir = tmp_path / "aggregated"
 
         ctx = AggregateContext(
@@ -506,7 +741,11 @@ class TestAggregate:
         self, triad_analysis, condition, tmp_path, default_settings
     ):
         """Verify aggregated result is saved to the output directory."""
-        results = [_make_mock_triad_result(i, sim_contact=0.65) for i in range(1, 3)]
+        settings_fp = settings_fingerprint(default_settings)
+        results = [
+            _make_mock_triad_result(i, sim_contact=0.65, settings_fp=settings_fp)
+            for i in range(1, 3)
+        ]
         agg_dir = tmp_path / "aggregated"
 
         ctx = AggregateContext(
@@ -528,7 +767,11 @@ class TestAggregate:
         self, triad_analysis, condition, tmp_path, default_settings
     ):
         """Verify per_replicate_simultaneous has the correct values."""
-        results = [_make_mock_triad_result(i, sim_contact=0.5 + 0.1 * i) for i in range(1, 4)]
+        settings_fp = settings_fingerprint(default_settings)
+        results = [
+            _make_mock_triad_result(i, sim_contact=0.5 + 0.1 * i, settings_fp=settings_fp)
+            for i in range(1, 4)
+        ]
 
         ctx = AggregateContext(
             condition=condition,
@@ -542,6 +785,71 @@ class TestAggregate:
             result = triad_analysis.aggregate(ctx, results)
 
         assert result.per_replicate_simultaneous == pytest.approx([0.6, 0.7, 0.8])
+
+    def test_aggregate_rejects_legacy_results_missing_settings_fingerprint(
+        self, triad_analysis, condition, tmp_path, default_settings
+    ):
+        """Aggregation should reject legacy triad results without settings identity."""
+
+        results = [_make_mock_triad_result(i, sim_contact=0.65) for i in range(1, 3)]
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="10ns",
+            settings=default_settings,
+        )
+
+        with pytest.raises(ValueError, match="missing settings fingerprints"):
+            triad_analysis.aggregate(ctx, results)
+
+    def test_aggregate_rejects_pair_count_mismatch(
+        self, triad_analysis, condition, tmp_path, default_settings
+    ):
+        """Aggregation should reject replicate results with missing triad pairs."""
+
+        settings_fp = settings_fingerprint(default_settings)
+        results = [
+            _make_mock_triad_result(1, sim_contact=0.65, settings_fp=settings_fp),
+            _make_mock_triad_result(2, sim_contact=0.70, settings_fp=settings_fp),
+        ]
+        results[1] = results[1].model_copy(update={"pair_results": results[1].pair_results[:1]})
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="10ns",
+            settings=default_settings,
+        )
+
+        with pytest.raises(ValueError, match="configured pair schema"):
+            triad_analysis.aggregate(ctx, results)
+
+    def test_aggregate_rejects_pair_order_and_threshold_mismatch(
+        self, triad_analysis, condition, tmp_path, default_settings
+    ):
+        """Aggregation should reject pair ordering or threshold drift before aggregation."""
+
+        settings_fp = settings_fingerprint(default_settings)
+        results = [
+            _make_mock_triad_result(1, sim_contact=0.65, settings_fp=settings_fp),
+            _make_mock_triad_result(2, sim_contact=0.70, settings_fp=settings_fp),
+        ]
+        mismatched_pairs = [
+            results[1].pair_results[1].model_copy(update={"threshold": 4.0}),
+            results[1].pair_results[0],
+        ]
+        results[1] = results[1].model_copy(update={"pair_results": mismatched_pairs})
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="10ns",
+            settings=default_settings,
+        )
+
+        with pytest.raises(ValueError, match="configured pair schema"):
+            triad_analysis.aggregate(ctx, results)
 
 
 # ============================================================================
@@ -849,11 +1157,9 @@ class TestTriadLifecycle:
     @patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1")
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.shared.config_hash.compute_config_hash", return_value="hash123")
-    @patch("polyzymd.analyses.shared.TrajectoryLoader")
-    @patch("polyzymd.analyses.distances.DistanceCalculator")
+    @patch("polyzymd.analyses.catalytic_triad.TrajectoryLoader")
     def test_run_analysis_lifecycle(
         self,
-        MockDistCalc,
         MockLoader,
         mock_hash,
         mock_validate_hash,
@@ -866,34 +1172,49 @@ class TestTriadLifecycle:
         """Test compute_replicate -> aggregate via run_analysis()."""
         from polyzymd.analyses.orchestrator import run_analysis
 
-        # Mock TrajectoryLoader (shared by all replicates)
+        # Mock TrajectoryLoader for the runner seam
         mock_loader_inst = MagicMock()
         MockLoader.return_value = mock_loader_inst
         mock_u = MagicMock()
-        mock_atoms = MagicMock()
-        mock_atoms.__len__ = MagicMock(return_value=1)
-        mock_u.select_atoms.return_value = mock_atoms
+        mock_traj = MagicMock()
+        mock_traj.__len__ = MagicMock(return_value=2000)
+        mock_u.trajectory = mock_traj
         mock_loader_inst.load_universe.return_value = mock_u
         mock_loader_inst.get_timestep.return_value = 10.0
 
-        def make_dist_result_for_replicate(*args, **kwargs):
-            return _make_mock_distance_result(n_pairs=2, n_frames=100)
+        mock_runner = MagicMock()
+        mock_runner.results = object()
+        mock_runner.run.return_value = mock_runner
 
-        mock_dist_inst = MagicMock()
-        mock_dist_inst.compute.side_effect = make_dist_result_for_replicate
-        MockDistCalc.return_value = mock_dist_inst
+        def make_triad_result(_ctx, replicate, _runner, _window):
+            return _make_mock_triad_result(
+                replicate,
+                sim_contact=0.60 + 0.05 * (replicate - 1),
+                settings_fp=settings_fingerprint(default_settings),
+            )
 
         output_dir = tmp_path / "analysis" / "no_polymer" / "catalytic_triad"
-        result = run_analysis(
-            triad_analysis,
-            condition,
-            settings=default_settings,
-            equilibration="10ns",
-            output_dir=output_dir,
-        )
+        with (
+            patch.object(
+                triad_analysis, "build_runner", return_value=mock_runner
+            ) as mock_build_runner,
+            patch.object(
+                triad_analysis,
+                "summarize_replicate",
+                side_effect=make_triad_result,
+            ) as mock_summarize,
+        ):
+            result = run_analysis(
+                triad_analysis,
+                condition,
+                settings=default_settings,
+                equilibration="10ns",
+                output_dir=output_dir,
+            )
 
-        # Verify orchestrator called compute for each replicate
-        assert mock_dist_inst.compute.call_count == 3
+        assert MockLoader.call_count == 3
+        assert mock_build_runner.call_count == 3
+        assert mock_summarize.call_count == 3
 
         # Verify aggregate produced a valid result
         assert result.n_replicates == 3
@@ -901,7 +1222,7 @@ class TestTriadLifecycle:
         assert result.triad_name == "LipA_triad"
         assert len(result.pair_results) == 2
         assert len(result.per_replicate_simultaneous) == 3
-        # All replicates used the same random seed → same fraction, so all should be equal
+        # Mocked replicate summaries should remain valid contact fractions
         for val in result.per_replicate_simultaneous:
             assert 0.0 <= val <= 1.0
         assert result.overall_simultaneous_contact == pytest.approx(
