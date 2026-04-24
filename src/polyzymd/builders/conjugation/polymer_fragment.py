@@ -18,6 +18,7 @@ class PolymerFragmentResidue(BaseModel):
     name: str | None = None
     residue_name: str = Field(..., min_length=1, max_length=3)
     residue_number: int = Field(..., ge=1)
+    insertion_code: str = Field("", max_length=1)
 
 
 class PolymerFragmentAtom(BaseModel):
@@ -28,6 +29,7 @@ class PolymerFragmentAtom(BaseModel):
     atom_name: str = Field(..., min_length=1)
     residue_name: str = Field(..., min_length=1, max_length=3)
     residue_number: int = Field(..., ge=1)
+    insertion_code: str = Field("", max_length=1)
     sequence_index: int | None = Field(None, ge=0)
     chain_id: str = Field("", max_length=1)
     x: float
@@ -66,6 +68,7 @@ class PolymerFragmentAtom(BaseModel):
             atom_name=atom.atom_name,
             residue_name=atom.residue_name,
             residue_number=atom.residue_number,
+            insertion_code=atom.insertion_code,
             sequence_index=sequence_index,
             chain_id=atom.chain_id,
             x=atom.x,
@@ -94,6 +97,7 @@ class PolymerFragmentAtom(BaseModel):
             residue_name=self.residue_name,
             chain_id=self.chain_id,
             residue_number=self.residue_number,
+            insertion_code=self.insertion_code,
             x=self.x,
             y=self.y,
             z=self.z,
@@ -330,9 +334,9 @@ def _infer_residues(
 ) -> tuple[PolymerFragmentResidue, ...]:
     """Infer residue metadata from atom residue identifiers."""
     residues: list[PolymerFragmentResidue] = []
-    seen: set[tuple[int, str]] = set()
+    seen: set[tuple[int, str, str]] = set()
     for atom in atoms:
-        key = (atom.residue_number, atom.residue_name)
+        key = (atom.residue_number, atom.insertion_code, atom.residue_name)
         if key in seen:
             continue
         seen.add(key)
@@ -345,6 +349,7 @@ def _infer_residues(
                 else None,
                 residue_name=atom.residue_name,
                 residue_number=atom.residue_number,
+                insertion_code=atom.insertion_code,
             )
         )
     return tuple(residues)

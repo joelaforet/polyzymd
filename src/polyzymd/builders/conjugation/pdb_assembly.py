@@ -202,7 +202,9 @@ class NhsLysPdbAttachment(BaseModel):
     """Explicit PDB-level NHS-Lys attachment data for assembly."""
 
     target_chain: str = Field("A", max_length=1)
+    target_residue_name: str | None = None
     target_residue_number: int
+    target_insertion_code: str = Field("", max_length=1)
     target_atom_name: str = "NZ"
     nz_hydrogen_atom_serials_to_remove: tuple[int, ...] = Field(default_factory=tuple)
     nz_hydrogen_atom_indices_to_remove: tuple[int, ...] = Field(default_factory=tuple)
@@ -210,6 +212,22 @@ class NhsLysPdbAttachment(BaseModel):
     max_nz_hydrogens_to_remove: int = Field(2, ge=0)
     lysine_target_resname: str = "LYX"
     polymer_target_resname: str = "NHX"
+
+
+class PdbLinkageAttachment(BaseModel):
+    """Generic explicit PDB linkage attachment data for assembly."""
+
+    target_chain: str = Field("A", max_length=1)
+    target_residue_name: str | None = None
+    target_residue_number: int
+    target_insertion_code: str = Field("", max_length=1)
+    target_atom_name: str
+    protein_leaving_atoms_to_remove: tuple[PdbAtomRecord, ...] = Field(default_factory=tuple)
+    protein_target_resname: str
+    modifier_target_resname: str
+
+
+PdbAssemblyAttachment = NhsLysPdbAttachment | PdbLinkageAttachment
 
 
 class CrosslinkedPdbAssemblyOptions(BaseModel):
@@ -262,7 +280,7 @@ def canonicalize_poc_residue_name(raw_residue_name: str, *, crosslinked: bool = 
 def write_crosslinked_pdb(
     protein_pdb_path: Path | str,
     polymer_fragment: PlacedPolymerFragment | Sequence[PlacedPolymerFragment],
-    attachment: NhsLysPdbAttachment,
+    attachment: PdbAssemblyAttachment,
     output_path: Path | str,
     options: CrosslinkedPdbAssemblyOptions | None = None,
 ) -> CrosslinkedPdbAssemblyResult:
@@ -274,8 +292,10 @@ def write_crosslinked_pdb(
         Source protein PDB. The file is read but never modified.
     polymer_fragment : PlacedPolymerFragment or sequence of PlacedPolymerFragment
         Already placed polymer fragment or fragments.
-    attachment : NhsLysPdbAttachment
-        Explicit lysine and NHS attachment selectors.
+    attachment : NhsLysPdbAttachment or PdbLinkageAttachment
+        Explicit attachment selectors. The NHS-Lys model preserves the legacy
+        hydrogen-only behavior while the generic model removes resolved protein
+        leaving atoms exactly.
     output_path : Path or str
         Destination PDB path.
     options : CrosslinkedPdbAssemblyOptions or None, optional
@@ -417,7 +437,7 @@ def _append_polymer_fragment(
     fragment: PlacedPolymerFragment,
     *,
     fragment_index: int,
-    attachment: NhsLysPdbAttachment,
+    attachment: PdbAssemblyAttachment,
     options: CrosslinkedPdbAssemblyOptions,
     starting_residue_number: int,
     next_serial: int,
@@ -456,9 +476,9 @@ def _append_polymer_fragment(
 
         is_crosslinked_residue = residue_key == reactive_residue_key
         residue_name = (
-            _pdb_safe_residue_name(attachment.polymer_target_resname)
+            _pdb_safe_residue_name(_attachment_modifier_product_resname(attachment))
             if is_crosslinked_residue
-            else canonicalize_poc_residue_name(atom.residue_name)
+            else _non_crosslinked_modifier_residue_name(atom, attachment)
         )
         new_serial, next_serial = _next_atom_serial(atom, next_serial, used_serials, options)
         updated = atom.model_copy(
@@ -539,23 +559,36 @@ def _parse_pdb_atoms(path: Path) -> list[PdbAtomRecord]:
 
 def _prepare_protein_atoms(
     atoms: Sequence[PdbAtomRecord],
-    attachment: NhsLysPdbAttachment,
+    attachment: PdbAssemblyAttachment,
     options: CrosslinkedPdbAssemblyOptions,
     warnings: list[str],
 ) -> tuple[list[PdbAtomRecord], list[PdbAtomRecord]]:
-    """Rename the linked lysine and remove selected NZ hydrogens."""
-    hydrogen_indices_to_remove = _select_nz_hydrogens(atoms, attachment, warnings)
+    """Rename the linked residue and remove selected leaving atoms."""
+    atom_indices_to_remove = _select_protein_atoms_to_remove(atoms, attachment, warnings)
     kept_atoms: list[PdbAtomRecord] = []
     removed_atoms: list[PdbAtomRecord] = []
     for atom in atoms:
-        if atom.atom_index in hydrogen_indices_to_remove:
+        if atom.atom_index in atom_indices_to_remove:
             removed_atoms.append(atom)
             continue
         update = {"chain_id": options.protein_chain}
         if _matches_attachment_residue(atom, attachment):
-            update["residue_name"] = _pdb_safe_residue_name(attachment.lysine_target_resname)
+            update["residue_name"] = _pdb_safe_residue_name(
+                _attachment_protein_product_resname(attachment)
+            )
         kept_atoms.append(atom.model_copy(update=update))
     return kept_atoms, removed_atoms
+
+
+def _select_protein_atoms_to_remove(
+    atoms: Sequence[PdbAtomRecord],
+    attachment: PdbAssemblyAttachment,
+    warnings: list[str],
+) -> set[int]:
+    """Select protein atom indices to remove for the attachment model."""
+    if isinstance(attachment, NhsLysPdbAttachment):
+        return _select_nz_hydrogens(atoms, attachment, warnings)
+    return _select_generic_protein_leaving_atoms(atoms, attachment)
 
 
 def _select_nz_hydrogens(
@@ -595,10 +628,36 @@ def _select_nz_hydrogens(
     return {atom.atom_index for atom in selected if atom.atom_index is not None}
 
 
+def _select_generic_protein_leaving_atoms(
+    atoms: Sequence[PdbAtomRecord], attachment: PdbLinkageAttachment
+) -> set[int]:
+    """Select exact resolved generic protein leaving atoms for removal."""
+    selected_indices: set[int] = set()
+    for leaving_atom in attachment.protein_leaving_atoms_to_remove:
+        matches = [
+            atom for atom in atoms if _matches_generic_leaving_atom(atom, leaving_atom, attachment)
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "Expected exactly one resolved protein leaving atom during PDB assembly "
+                f"for {leaving_atom.chain_id}:{leaving_atom.residue_name}:"
+                f"{leaving_atom.residue_number}{leaving_atom.insertion_code}:"
+                f"{leaving_atom.atom_name}, found {len(matches)}"
+            )
+        matched_atom = matches[0]
+        if matched_atom.atom_index is None:
+            raise ValueError(
+                "Resolved protein leaving atom lacks an atom index during PDB assembly: "
+                f"{matched_atom.atom_name}"
+            )
+        selected_indices.add(matched_atom.atom_index)
+    return selected_indices
+
+
 def _resolve_attachment_atom(
-    atoms: Sequence[PdbAtomRecord], attachment: NhsLysPdbAttachment
+    atoms: Sequence[PdbAtomRecord], attachment: PdbAssemblyAttachment
 ) -> PdbAtomRecord:
-    """Resolve the linked lysine NZ atom after protein rewriting."""
+    """Resolve the linked protein atom after protein rewriting."""
     matches = [
         atom
         for atom in atoms
@@ -607,29 +666,90 @@ def _resolve_attachment_atom(
     ]
     if len(matches) != 1:
         raise ValueError(
-            "Expected exactly one linked lysine target atom "
+            "Expected exactly one linked protein target atom "
             f"{attachment.target_chain}:{attachment.target_residue_number}:{attachment.target_atom_name}, "
             f"found {len(matches)}"
         )
     return matches[0]
 
 
-def _matches_attachment_residue(atom: PdbAtomRecord, attachment: NhsLysPdbAttachment) -> bool:
+def _matches_attachment_residue(atom: PdbAtomRecord, attachment: PdbAssemblyAttachment) -> bool:
     """Return whether an atom belongs to the attachment residue."""
-    return (
-        atom.chain_id == attachment.target_chain
-        and atom.residue_number == attachment.target_residue_number
-    )
+    if atom.chain_id != attachment.target_chain:
+        return False
+    if atom.residue_number != attachment.target_residue_number:
+        return False
+    if (atom.insertion_code or "").upper() != attachment.target_insertion_code.upper():
+        return False
+    if attachment.target_residue_name is not None:
+        return atom.residue_name.upper() == attachment.target_residue_name.upper()
+    return True
 
 
 def _matches_rewritten_attachment_residue(
-    atom: PdbAtomRecord, attachment: NhsLysPdbAttachment
+    atom: PdbAtomRecord, attachment: PdbAssemblyAttachment
 ) -> bool:
     """Return whether an atom belongs to the rewritten attachment residue."""
-    return atom.residue_number == attachment.target_residue_number and (
-        atom.chain_id == attachment.target_chain
-        or atom.residue_name == _pdb_safe_residue_name(attachment.lysine_target_resname)
+    if atom.residue_number != attachment.target_residue_number:
+        return False
+    if (atom.insertion_code or "").upper() != attachment.target_insertion_code.upper():
+        return False
+    if atom.chain_id != attachment.target_chain and atom.residue_name != _pdb_safe_residue_name(
+        _attachment_protein_product_resname(attachment)
+    ):
+        return False
+    if attachment.target_residue_name is not None:
+        allowed_residue_names = {
+            attachment.target_residue_name.upper(),
+            _pdb_safe_residue_name(_attachment_protein_product_resname(attachment)),
+        }
+        return atom.residue_name.upper() in allowed_residue_names
+    return True
+
+
+def _matches_generic_leaving_atom(
+    atom: PdbAtomRecord,
+    leaving_atom: PdbAtomRecord,
+    attachment: PdbLinkageAttachment,
+) -> bool:
+    """Return whether an assembly atom is the resolved generic leaving atom."""
+    if not _matches_attachment_residue(atom, attachment):
+        return False
+    if atom.atom_name.upper() != leaving_atom.atom_name.upper():
+        return False
+    if leaving_atom.atom_index is not None and atom.atom_index != leaving_atom.atom_index:
+        return False
+    if leaving_atom.serial is not None and atom.serial != leaving_atom.serial:
+        return False
+    return (
+        atom.chain_id.upper() == leaving_atom.chain_id.upper()
+        and atom.residue_name.upper() == leaving_atom.residue_name.upper()
+        and atom.residue_number == leaving_atom.residue_number
+        and (atom.insertion_code or "").upper() == (leaving_atom.insertion_code or "").upper()
     )
+
+
+def _attachment_protein_product_resname(attachment: PdbAssemblyAttachment) -> str:
+    """Return the protein-side product residue name for an attachment."""
+    if isinstance(attachment, NhsLysPdbAttachment):
+        return attachment.lysine_target_resname
+    return attachment.protein_target_resname
+
+
+def _attachment_modifier_product_resname(attachment: PdbAssemblyAttachment) -> str:
+    """Return the modifier-side product residue name for an attachment."""
+    if isinstance(attachment, NhsLysPdbAttachment):
+        return attachment.polymer_target_resname
+    return attachment.modifier_target_resname
+
+
+def _non_crosslinked_modifier_residue_name(
+    atom: PdbAtomRecord, attachment: PdbAssemblyAttachment
+) -> str:
+    """Return the output residue name for an unlinked modifier atom."""
+    if isinstance(attachment, NhsLysPdbAttachment):
+        return canonicalize_poc_residue_name(atom.residue_name)
+    return _pdb_safe_residue_name(atom.residue_name)
 
 
 def _is_hydrogen_atom(atom: PdbAtomRecord) -> bool:
