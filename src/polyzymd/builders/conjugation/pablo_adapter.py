@@ -32,6 +32,10 @@ from polyzymd.builders.conjugation.structure_inspection import (
     inspect_pdb_structure,
     pdb_atom_records_as_dicts,
 )
+from polyzymd.builders.conjugation.structure_normalization import (
+    PDBNormalizationPlan,
+    plan_pdb_chain_normalization,
+)
 
 SUPPORTED_STRUCTURE_SUFFIXES = frozenset({".pdb", ".cif", ".mmcif", ".pdbx"})
 
@@ -147,6 +151,7 @@ class PabloStructurePreflight(BaseModel):
     inspection_implemented: bool = False
     ingestion_implemented: bool = False
     inspection_summary: PDBStructureInspection | None = None
+    normalization_plan: PDBNormalizationPlan | None = None
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -165,6 +170,7 @@ class PabloIngestionResult(BaseModel):
     noncanonical_residues: list[PabloResidueSummary] = Field(default_factory=list)
     link_candidates: list[PabloLinkCandidate] = Field(default_factory=list)
     inspection_summary: PDBStructureInspection | None = None
+    normalization_plan: PDBNormalizationPlan | None = None
     metadata: ConjugationMetadata = Field(default_factory=ConjugationMetadata)
     diagnostics: list[ConjugationDiagnostic] = Field(default_factory=list)
 
@@ -270,8 +276,13 @@ class PabloIngestor:
         inspection = (
             inspect_pdb_structure(structure_path) if _is_pdb_suffix(structure_path) else None
         )
+        normalization_plan = (
+            plan_pdb_chain_normalization(inspection) if inspection is not None else None
+        )
         if inspection is not None:
             diagnostics.extend(_diagnostics_from_inspection(inspection))
+        if normalization_plan is not None:
+            diagnostics.extend(_diagnostics_from_normalization_plan(normalization_plan))
         pdb_atom_records = pdb_atom_records_as_dicts(inspection) if inspection is not None else []
         pdb_link_candidates = (
             _pablo_link_candidates_from_inspection(inspection) if inspection is not None else []
@@ -299,6 +310,7 @@ class PabloIngestor:
                 diagnostics=diagnostics,
                 notes=["Pablo was unavailable, so metadata was extracted from PDB records only"],
                 inspection=inspection,
+                normalization_plan=normalization_plan,
             )
             _save_result_sidecar(result, output_dir)
             return result
@@ -342,6 +354,7 @@ class PabloIngestor:
                     "Pablo parsing failed; metadata reflects file-level PDB records when available"
                 ],
                 inspection=inspection,
+                normalization_plan=normalization_plan,
             )
             _save_result_sidecar(result, output_dir)
             return result
@@ -388,6 +401,7 @@ class PabloIngestor:
             bond_count=_safe_int_attr(topology, "n_bonds"),
             notes=["Pablo topology is available for downstream parameterization phases"],
             inspection=inspection,
+            normalization_plan=normalization_plan,
         )
         _save_result_sidecar(result, output_dir)
         return result
@@ -468,6 +482,9 @@ class PabloIngestor:
         inspection = (
             inspect_pdb_structure(structure_path) if _is_pdb_suffix(structure_path) else None
         )
+        normalization_plan = (
+            plan_pdb_chain_normalization(inspection) if inspection is not None else None
+        )
         warnings = [
             "Pablo structure ingestion is available through ingest_structure()",
             *availability.warnings,
@@ -475,6 +492,9 @@ class PabloIngestor:
         if inspection is not None:
             warnings.extend(inspection.convention_warnings)
             warnings.extend(inspection.compatibility_warnings)
+        if normalization_plan is not None:
+            warnings.extend(normalization_plan.warnings)
+            warnings.extend(issue.message for issue in normalization_plan.issues)
         return PabloStructurePreflight(
             intended_mode="ingest_existing",
             path=structure_path,
@@ -484,6 +504,7 @@ class PabloIngestor:
             inspection_implemented=True,
             ingestion_implemented=True,
             inspection_summary=inspection,
+            normalization_plan=normalization_plan,
             warnings=warnings,
         )
 
@@ -627,6 +648,35 @@ def _diagnostics_from_inspection(
             )
         )
     return diagnostics
+
+
+def _diagnostics_from_normalization_plan(
+    plan: PDBNormalizationPlan,
+) -> list[ConjugationDiagnostic]:
+    """Create diagnostics from clean-PDB chain normalization planning."""
+    severity = DiagnosticSeverity.INFO if plan.valid else DiagnosticSeverity.ERROR
+    message = (
+        "Clean-PDB chain normalization plan is valid"
+        if plan.valid
+        else "Clean-PDB chain normalization found invalid input components"
+    )
+    return [
+        ConjugationDiagnostic(
+            code=DiagnosticCode.PDB_CHAIN_NORMALIZATION,
+            severity=severity,
+            message=message,
+            details={
+                "clean": plan.clean,
+                "valid": plan.valid,
+                "protein_residue_count": plan.protein_residue_count,
+                "moiety_residue_count": plan.moiety_residue_count,
+                "action_count": len(plan.actions),
+                "issues": [issue.model_dump(mode="json") for issue in plan.issues],
+                "warnings": plan.warnings,
+                "output_recommendations": plan.output_recommendations,
+            },
+        )
+    ]
 
 
 def _pablo_link_candidates_from_inspection(
@@ -897,6 +947,7 @@ def _build_result_from_records(
     molecule_count: int | None = None,
     bond_count: int | None = None,
     inspection: PDBStructureInspection | None = None,
+    normalization_plan: PDBNormalizationPlan | None = None,
 ) -> PabloIngestionResult:
     """Build a complete ingestion result from atom-level records."""
     residues = _summarize_residues(atom_records, chain_policy)
@@ -947,6 +998,7 @@ def _build_result_from_records(
         noncanonical_residues=noncanonical,
         link_candidates=link_candidates,
         inspection_summary=inspection,
+        normalization_plan=normalization_plan,
         metadata=metadata,
         diagnostics=diagnostics,
     )
