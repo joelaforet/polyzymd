@@ -14,9 +14,11 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 import yaml
@@ -2556,57 +2558,168 @@ def init(name: str) -> None:
     "output_path",
     default=None,
     type=click.Path(dir_okay=False),
-    help="Path for the cleaned PDB file. Defaults to <name>_clean.pdb.",
+    help="Path for the cleaned PDB file. Defaults to <stem>_cleaned.pdb.",
 )
 @click.option(
     "--ph",
     default=7.4,
     type=float,
     show_default=True,
-    help="pH for hydrogen addition.",
+    help="Accepted for compatibility; pure-Python normalization does not add hydrogens.",
 )
-def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
-    """Clean a PDB file for use with PolyzyMD.
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Plan normalization and print diagnostics without writing a PDB file.",
+)
+@click.option(
+    "--report-json",
+    "report_json",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Write a JSON-safe normalization plan report to this path.",
+)
+def clean_pdb(
+    input_path: str,
+    output_path: str | None,
+    ph: float,
+    dry_run: bool,
+    report_json: str | None,
+) -> None:
+    """Normalize a PDB file for PolyzyMD conjugation ingestion.
 
-    Replaces nonstandard residues with their standard equivalents and adds
-    missing hydrogens at the specified pH.  Chain IDs and residue numbers
-    are preserved in the output.
-
-    Requires the ``pdbfixer`` package (available via conda-forge).
+    The command performs pure-Python chain and residue normalization only. It
+    accepts canonical protein residues plus explicitly linked PTM/glycan/polymer
+    moieties, rejects waters, ions, solvents, and free ligands, and never
+    mutates the input file.
 
     \b
     Examples:
         polyzymd clean-pdb -i structures/my_protein.pdb
-        polyzymd clean-pdb -i raw.pdb -o cleaned.pdb --ph 7.0
+        polyzymd clean-pdb -i raw.pdb -o cleaned.pdb --dry-run
     """
-    from openmm.app import PDBFile
-    from pdbfixer import PDBFixer
+    from polyzymd.builders.conjugation.structure_normalization import (
+        default_cleaned_pdb_path,
+        plan_pdb_chain_normalization,
+        write_normalized_pdb,
+    )
 
     input_file = Path(input_path)
-    if output_path is None:
-        output_file = input_file.with_name(f"{input_file.stem}_clean.pdb")
-    else:
-        output_file = Path(output_path)
+    output_file = (
+        Path(output_path) if output_path is not None else default_cleaned_pdb_path(input_file)
+    )
+    report_path = Path(report_json) if report_json is not None else None
 
-    colored_echo(f"Cleaning PDB: {input_file}")
-    colored_echo(f"  pH: {ph}")
+    colored_echo(f"Planning clean-PDB normalization: {input_file}")
+    colored_echo("  Mode: pure-Python chain and residue normalization")
+    colored_echo(f"  Compatibility pH option ignored: {ph:g}")
 
-    fixer = PDBFixer(filename=str(input_file))
+    plan = plan_pdb_chain_normalization(input_file)
+    if report_path is not None:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(plan.model_dump(mode="json"), indent=2) + "\n")
+        colored_echo(f"  Report JSON: {report_path}")
 
-    fixer.findNonstandardResidues()
-    n_nonstandard = len(fixer.nonstandardResidues)
-    if n_nonstandard > 0:
-        colored_echo(f"  Replacing {n_nonstandard} nonstandard residue(s)...")
-    fixer.replaceNonstandardResidues()
+    _echo_clean_pdb_plan_summary(plan, output_file, dry_run)
+    if not plan.valid:
+        _echo_clean_pdb_issues(plan.issues)
+        raise click.ClickException(
+            "Clean-PDB validation failed; strip waters, ions, solvents, and unsupported free "
+            "components before normalization. Intentional bound cofactors/metals are not yet "
+            "supported by this command."
+        )
 
-    colored_echo("  Adding missing hydrogens...")
-    fixer.addMissingHydrogens(ph)
+    if dry_run:
+        colored_echo()
+        click.echo(click.style("Dry run complete; no PDB file written.", fg="yellow"))
+        return
 
-    with open(output_file, "w") as f:
-        PDBFile.writeFile(fixer.topology, fixer.positions, f, keepIds=True)
+    try:
+        written = write_normalized_pdb(input_file, output_file, plan)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     colored_echo()
-    click.echo(click.style(f"Cleaned PDB written to: {output_file}", fg="green"))
+    click.echo(click.style(f"Cleaned PDB written to: {written}", fg="green"))
+
+
+def _echo_clean_pdb_plan_summary(plan: Any, output_file: Path, dry_run: bool) -> None:
+    """Print a concise clean-PDB normalization plan summary.
+
+    Parameters
+    ----------
+    plan
+        Normalization plan returned by the pure-Python PDB planner.
+    output_file : Path
+        Destination path that would be used for a valid non-dry run.
+    dry_run : bool
+        Whether the CLI is planning only.
+    """
+    status = "valid" if plan.valid else "invalid"
+    colored_echo(f"  Validation: {status}")
+    colored_echo(f"  Protein residues: {plan.protein_residue_count}")
+    colored_echo(f"  Attached moiety residues: {plan.moiety_residue_count}")
+    colored_echo(f"  Chain ID changes: {plan.chain_id_change_count}")
+    colored_echo(f"  Residue renumbering changes: {plan.residue_number_change_count}")
+    if plan.source_chains_collapsed:
+        collapsed = "; ".join(
+            f"{target} <= {', '.join(sources)}"
+            for target, sources in plan.source_chains_collapsed.items()
+        )
+        colored_echo(f"  Chain collapse: {collapsed}")
+    if plan.warnings:
+        colored_echo("  Warnings:")
+        for warning in plan.warnings[:5]:
+            colored_echo(f"    - {warning}")
+        if len(plan.warnings) > 5:
+            colored_echo(f"    - ... {len(plan.warnings) - 5} more warning(s)")
+
+    output_label = "Would write" if dry_run else "Output path"
+    colored_echo(f"  {output_label}: {output_file}")
+    _echo_clean_pdb_action_examples(plan.actions)
+
+
+def _echo_clean_pdb_action_examples(actions: list[Any]) -> None:
+    """Print the first few residue normalization action mappings.
+
+    Parameters
+    ----------
+    actions : list
+        Residue-level action mappings from the normalization plan.
+    """
+    if not actions:
+        return
+    colored_echo("  First action mappings:")
+    for action in actions[:5]:
+        source_chain = action.source_chain or "blank"
+        source_number = action.res_seq or "?"
+        source_icode = action.insertion_code or ""
+        target_icode = action.target_insertion_code or ""
+        colored_echo(
+            "    - "
+            f"{source_chain}:{action.residue_name}{source_number}{source_icode} -> "
+            f"{action.target_chain}:{action.residue_name}{action.target_res_seq}{target_icode}"
+        )
+    if len(actions) > 5:
+        colored_echo(f"    - ... {len(actions) - 5} more mapping(s)")
+
+
+def _echo_clean_pdb_issues(issues: list[Any]) -> None:
+    """Print clean-PDB validation issues.
+
+    Parameters
+    ----------
+    issues : list
+        Validation issues from the normalization plan.
+    """
+    if not issues:
+        return
+    colored_echo("  Issues:")
+    for issue in issues[:8]:
+        residue = f" ({issue.residue_id})" if issue.residue_id else ""
+        colored_echo(f"    - [{issue.code}]{residue} {issue.message}")
+    if len(issues) > 8:
+        colored_echo(f"    - ... {len(issues) - 8} more issue(s)")
 
 
 # =============================================================================
