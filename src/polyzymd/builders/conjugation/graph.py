@@ -20,7 +20,7 @@ class RdkitGraphEditResult(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    product_mol: Any = Field(..., description="Product RDKit molecule")
+    product_mol: Any = Field(..., exclude=True, description="Product RDKit molecule")
     removed_protein_atom_indices: tuple[int, ...] = Field(
         default_factory=tuple,
         description="Original protein atom indices removed during graph surgery",

@@ -33,6 +33,7 @@ class DiagnosticCode(str, Enum):
     MECHANISM_VALIDATION = "mechanism_validation"
     SITE_SELECTION = "site_selection"
     MOIETY_NORMALIZATION = "moiety_normalization"
+    GRAPH_EDIT_EXECUTION = "graph_edit_execution"
 
 
 class ConjugationDiagnostic(BaseModel):
