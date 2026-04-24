@@ -16,14 +16,17 @@ from polyzymd.builders.conjugation.exceptions import (
     ConjugationNotImplementedError,
     PabloIngestionError,
 )
+from polyzymd.builders.conjugation.mechanism_library import get_builtin_mechanism
 from polyzymd.builders.conjugation.metadata import (
     ConjugationMetadata,
     chain_policy_from_config,
     save_metadata,
 )
 from polyzymd.builders.conjugation.models import ConjugationBuildResult
+from polyzymd.builders.conjugation.moieties import normalize_moiety_descriptor
 from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
 from polyzymd.builders.conjugation.polymerist_compat import polymerist_py312_compat_status
+from polyzymd.builders.conjugation.sites import match_site_rule, normalize_attachment_site
 from polyzymd.config.schema import ConjugationConfig, ConjugationMode
 
 LOGGER = logging.getLogger(__name__)
@@ -174,6 +177,34 @@ class CovalentModificationBuilder:
                 "conjugation_diagnostics.json and pablo_ingestion_result.json for parser details."
             )
 
+        if self.config.mode == ConjugationMode.CONSTRUCT:
+            try:
+                planned_attachments = self._validate_construct_plan(report)
+            except ConjugationNotImplementedError:
+                self._write_sidecars(metadata, report)
+                raise
+            metadata = metadata.model_copy(
+                update={
+                    "attachments": planned_attachments,
+                    "notes": [
+                        *metadata.notes,
+                        "Phase 3 construct planning validated mechanisms, sites, and moieties",
+                        "Graph surgery and parameterization are intentionally deferred",
+                    ],
+                }
+            )
+            report.add(
+                DiagnosticCode.UNSUPPORTED_OPERATION,
+                "Construct mode validation completed, but covalent graph surgery is not implemented",
+                severity=DiagnosticSeverity.ERROR,
+                details={"planned_attachments": len(planned_attachments)},
+            )
+            self._write_sidecars(metadata, report)
+            raise ConjugationNotImplementedError(
+                "Construct mode validated requested attachments, but covalent graph surgery is not "
+                "implemented in this phase. Review conjugation diagnostics for the validated plan."
+            )
+
         report.add(
             DiagnosticCode.UNSUPPORTED_OPERATION,
             f"Conjugation mode '{self.config.mode.value}' is not implemented in Phase 0-1",
@@ -185,6 +216,117 @@ class CovalentModificationBuilder:
             "skeleton. This pass only adds configuration, metadata, diagnostics, and the "
             "Pablo adapter boundary."
         )
+
+    def _validate_construct_plan(self, report: ConjugationDiagnosticsReport) -> list[dict[str, Any]]:
+        """Validate declarative construct-mode attachments before graph surgery.
+
+        Parameters
+        ----------
+        report : ConjugationDiagnosticsReport
+            Diagnostics report to append validation events to.
+
+        Returns
+        -------
+        list[dict[str, Any]]
+            Serializable planned attachment records.
+
+        Raises
+        ------
+        ConjugationNotImplementedError
+            If a requested mechanism, site, or moiety declaration is invalid for
+            this planning phase.
+        """
+        planned_attachments: list[dict[str, Any]] = []
+        enabled_attachments = [attachment for attachment in self.config.attachments if attachment.enabled]
+        if not enabled_attachments:
+            report.add(
+                DiagnosticCode.MECHANISM_VALIDATION,
+                "Construct mode has no enabled attachments to validate",
+                severity=DiagnosticSeverity.WARNING,
+            )
+            return planned_attachments
+
+        for attachment in enabled_attachments:
+            mechanism_name = attachment.mechanism.name
+            try:
+                mechanism = get_builtin_mechanism(mechanism_name)
+            except KeyError as exc:
+                report.add(
+                    DiagnosticCode.MECHANISM_VALIDATION,
+                    f"Unknown conjugation mechanism '{mechanism_name}'",
+                    severity=DiagnosticSeverity.ERROR,
+                    details={"attachment": attachment.name, "mechanism": mechanism_name},
+                )
+                raise ConjugationNotImplementedError(
+                    f"Unknown conjugation mechanism '{mechanism_name}'. Add a mechanism definition "
+                    "before construct-mode graph surgery can proceed."
+                ) from exc
+
+            try:
+                site = normalize_attachment_site(attachment.site)
+                site_rule = match_site_rule(site, mechanism)
+            except (ConjugationNotImplementedError, ValueError) as exc:
+                report.add(
+                    DiagnosticCode.SITE_SELECTION,
+                    f"Attachment site validation failed for '{attachment.name}'",
+                    severity=DiagnosticSeverity.ERROR,
+                    details={"attachment": attachment.name, "error": str(exc)},
+                )
+                raise ConjugationNotImplementedError(
+                    f"Attachment site validation failed for '{attachment.name}': {exc}"
+                ) from exc
+
+            try:
+                moiety = normalize_moiety_descriptor(attachment.moiety)
+            except ValueError as exc:
+                report.add(
+                    DiagnosticCode.MOIETY_NORMALIZATION,
+                    f"Moiety normalization failed for '{attachment.name}'",
+                    severity=DiagnosticSeverity.ERROR,
+                    details={"attachment": attachment.name, "error": str(exc)},
+                )
+                raise ConjugationNotImplementedError(
+                    f"Moiety normalization failed for '{attachment.name}': {exc}"
+                ) from exc
+
+            report.add(
+                DiagnosticCode.MECHANISM_VALIDATION,
+                f"Mechanism '{mechanism.identifier}' validated for attachment '{attachment.name}'",
+                details={
+                    "attachment": attachment.name,
+                    "mechanism": mechanism.model_dump(mode="json"),
+                },
+            )
+            report.add(
+                DiagnosticCode.SITE_SELECTION,
+                f"Explicit site validated for attachment '{attachment.name}'",
+                details={
+                    "attachment": attachment.name,
+                    "site": site.model_dump(mode="json"),
+                    "matched_rule": site_rule.model_dump(mode="json"),
+                },
+            )
+            report.add(
+                DiagnosticCode.MOIETY_NORMALIZATION,
+                f"Moiety descriptor normalized for attachment '{attachment.name}'",
+                details={
+                    "attachment": attachment.name,
+                    "moiety": moiety.model_dump(mode="json"),
+                },
+            )
+            planned_attachments.append(
+                {
+                    "attachment": attachment.name,
+                    "mechanism": mechanism.model_dump(mode="json"),
+                    "site": site.model_dump(mode="json"),
+                    "site_rule": site_rule.model_dump(mode="json"),
+                    "moiety": moiety.model_dump(mode="json"),
+                    "placement": attachment.placement.model_dump(mode="json"),
+                    "config_overrides": attachment.mechanism.model_dump(mode="json"),
+                }
+            )
+
+        return planned_attachments
 
     def _build_enabled_report(self) -> ConjugationDiagnosticsReport:
         """Create a diagnostics report for an enabled skeleton run."""
