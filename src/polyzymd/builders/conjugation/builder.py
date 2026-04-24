@@ -13,8 +13,16 @@ from polyzymd.builders.conjugation.diagnostics import (
     write_diagnostics_report,
 )
 from polyzymd.builders.conjugation.exceptions import (
+    ConjugationError,
     ConjugationNotImplementedError,
     PabloIngestionError,
+)
+from polyzymd.builders.conjugation.execution import (
+    ExplicitNhsReactiveGroup,
+    RdkitGraphEditExecutionRequest,
+    RdkitGraphEditExecutionResult,
+    RdkitGraphEditExecutionSummary,
+    extract_explicit_rdkit_execution_request,
 )
 from polyzymd.builders.conjugation.mechanism_library import get_builtin_mechanism
 from polyzymd.builders.conjugation.metadata import (
@@ -24,9 +32,21 @@ from polyzymd.builders.conjugation.metadata import (
 )
 from polyzymd.builders.conjugation.models import ConjugationBuildResult
 from polyzymd.builders.conjugation.moieties import normalize_moiety_descriptor
+from polyzymd.builders.conjugation.nhs_lys import (
+    LysineReactiveSite,
+    NhsReactiveGroup,
+    detect_nhs_reactive_group,
+    execute_nhs_lys_amide_rdkit_graph_edit,
+    extract_lysine_reactive_site,
+    plan_nhs_lys_amide,
+)
 from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
 from polyzymd.builders.conjugation.polymerist_compat import polymerist_py312_compat_status
-from polyzymd.builders.conjugation.sites import match_site_rule, normalize_attachment_site
+from polyzymd.builders.conjugation.sites import (
+    AttachmentSite,
+    match_site_rule,
+    normalize_attachment_site,
+)
 from polyzymd.config.schema import ConjugationConfig, ConjugationMode
 
 LOGGER = logging.getLogger(__name__)
@@ -123,6 +143,29 @@ class CovalentModificationBuilder:
         report = self._build_enabled_report()
         metadata = self._build_enabled_metadata()
         self._write_sidecars(metadata, report)
+        try:
+            execution_request = extract_explicit_rdkit_execution_request(context)
+        except ValueError as exc:
+            report.add(
+                DiagnosticCode.GRAPH_EDIT_EXECUTION,
+                "Explicit RDKit graph edit context validation failed",
+                severity=DiagnosticSeverity.ERROR,
+                details={"error": str(exc)},
+            )
+            self._write_sidecars(metadata, report)
+            raise ConjugationError(str(exc)) from exc
+
+        if execution_request is not None and self.config.mode != ConjugationMode.CONSTRUCT:
+            report.add(
+                DiagnosticCode.GRAPH_EDIT_EXECUTION,
+                "Explicit RDKit graph edit execution requires construct mode",
+                severity=DiagnosticSeverity.ERROR,
+                details={"mode": self.config.mode.value},
+            )
+            self._write_sidecars(metadata, report)
+            raise ConjugationError(
+                "Explicit RDKit graph edit execution requires conjugation mode 'construct'"
+            )
 
         if self.config.mode == ConjugationMode.INGEST_EXISTING:
             ingestor = PabloIngestor(self.config.ccd_pablo)
@@ -193,6 +236,29 @@ class CovalentModificationBuilder:
                     ],
                 }
             )
+            if execution_request is not None:
+                execution = self._execute_explicit_rdkit_graph_edit(
+                    execution_request,
+                    report,
+                    metadata,
+                )
+                metadata = metadata.model_copy(
+                    update={
+                        "notes": [
+                            *metadata.notes,
+                            "Explicit NHS-Lys RDKit graph edit executed in memory",
+                            "ConjugationBuildResult.topology remains unchanged",
+                        ],
+                    }
+                )
+                self._write_sidecars(metadata, report)
+                return ConjugationBuildResult(
+                    topology=topology,
+                    metadata=metadata,
+                    diagnostics=report,
+                    graph_edit_results=[execution],
+                    graph_edit_summaries=[execution.summary],
+                )
             report.add(
                 DiagnosticCode.UNSUPPORTED_OPERATION,
                 "Construct mode validation completed, but covalent graph surgery is not implemented",
@@ -215,6 +281,210 @@ class CovalentModificationBuilder:
             f"Conjugation mode '{self.config.mode.value}' is not implemented in the Phase 0-1 "
             "skeleton. This pass only adds configuration, metadata, diagnostics, and the "
             "Pablo adapter boundary."
+        )
+
+    def _execute_explicit_rdkit_graph_edit(
+        self,
+        request: RdkitGraphEditExecutionRequest,
+        report: ConjugationDiagnosticsReport,
+        metadata: ConjugationMetadata,
+    ) -> RdkitGraphEditExecutionResult:
+        """Execute the single supported explicit RDKit graph edit path.
+
+        Parameters
+        ----------
+        request : RdkitGraphEditExecutionRequest
+            Explicit in-memory molecules and optional atom-index overrides.
+        report : ConjugationDiagnosticsReport
+            Diagnostics report updated with graph edit execution details.
+        metadata : ConjugationMetadata
+            Current metadata, used only for serializable summary context.
+
+        Returns
+        -------
+        RdkitGraphEditExecutionResult
+            In-memory RDKit result plus a JSON-safe summary.
+
+        Raises
+        ------
+        ConjugationError
+            If the explicit execution request is incompatible with the controlled
+            single NHS-Lys execution boundary.
+        """
+        enabled_attachments = [
+            attachment for attachment in self.config.attachments if attachment.enabled
+        ]
+        if len(enabled_attachments) != 1:
+            message = "Explicit RDKit graph edit execution requires exactly one enabled attachment"
+            report.add(
+                DiagnosticCode.GRAPH_EDIT_EXECUTION,
+                message,
+                severity=DiagnosticSeverity.ERROR,
+                details={"enabled_attachments": len(enabled_attachments)},
+            )
+            self._write_sidecars(metadata, report)
+            raise ConjugationError(message)
+
+        attachment = enabled_attachments[0]
+        mechanism_name = attachment.mechanism.name.strip().lower()
+        if mechanism_name != "nhs_lys_amide":
+            message = "Explicit RDKit graph edit execution requires mechanism 'nhs_lys_amide'"
+            report.add(
+                DiagnosticCode.GRAPH_EDIT_EXECUTION,
+                message,
+                severity=DiagnosticSeverity.ERROR,
+                details={"attachment": attachment.name, "mechanism": mechanism_name},
+            )
+            self._write_sidecars(metadata, report)
+            raise ConjugationError(message)
+
+        try:
+            mechanism = get_builtin_mechanism(mechanism_name)
+            site = normalize_attachment_site(attachment.site)
+            match_site_rule(site, mechanism)
+            moiety = normalize_moiety_descriptor(attachment.moiety)
+            lys_site = self._resolve_nhs_lys_site(site, request)
+            reactive_group = self._resolve_nhs_reactive_group(request)
+            plan = plan_nhs_lys_amide(
+                lys_site,
+                reactive_group,
+                site_hydrogen_indices_to_remove=request.explicit_site_hydrogen_indices,
+            )
+            result = execute_nhs_lys_amide_rdkit_graph_edit(
+                protein_mol=request.protein_mol,
+                moiety_mol=request.moiety_mol,
+                site_atom_index=plan.site_atom_index,
+                reactive_carbon_index=plan.reactive_carbon_index,
+                leaving_atom_indices=plan.leaving_group_atom_indices,
+                site_hydrogen_indices=plan.site_hydrogen_indices_to_remove,
+                sanitize=request.sanitize,
+            )
+        except Exception as exc:
+            report.add(
+                DiagnosticCode.GRAPH_EDIT_EXECUTION,
+                "Explicit NHS-Lys RDKit graph edit execution failed",
+                severity=DiagnosticSeverity.ERROR,
+                details={
+                    "attachment": attachment.name,
+                    "mechanism": mechanism_name,
+                    "error": str(exc),
+                },
+            )
+            self._write_sidecars(metadata, report)
+            raise ConjugationError(
+                f"Explicit NHS-Lys RDKit graph edit execution failed: {exc}"
+            ) from exc
+
+        warnings = (
+            *lys_site.warnings,
+            *reactive_group.diagnostics,
+            *plan.warnings,
+            *result.warnings,
+        )
+        summary = RdkitGraphEditExecutionSummary(
+            attachment=attachment.name,
+            mechanism=mechanism.identifier,
+            site=site.model_dump(mode="json"),
+            moiety=moiety.model_dump(mode="json"),
+            added_bond=result.added_bond,
+            removed_protein_atom_indices=result.removed_protein_atom_indices,
+            removed_moiety_atom_indices=result.removed_moiety_atom_indices,
+            removed_atoms_count=(
+                len(result.removed_protein_atom_indices) + len(result.removed_moiety_atom_indices)
+            ),
+            product_atom_count=result.product_mol.GetNumAtoms(),
+            warnings=warnings,
+            topology_unchanged=True,
+        )
+        report.add(
+            DiagnosticCode.GRAPH_EDIT_EXECUTION,
+            "Executed explicit NHS-Lys RDKit graph edit; topology remains unchanged",
+            details={
+                "attachment": attachment.name,
+                "mechanism": mechanism.identifier,
+                "site": site.model_dump(mode="json"),
+                "moiety": moiety.model_dump(mode="json"),
+                "added_bond": result.added_bond.model_dump(mode="json"),
+                "removed_atoms_count": summary.removed_atoms_count,
+                "removed_protein_atom_indices": list(result.removed_protein_atom_indices),
+                "removed_moiety_atom_indices": list(result.removed_moiety_atom_indices),
+                "warnings": list(warnings),
+                "topology_unchanged": True,
+            },
+        )
+        return RdkitGraphEditExecutionResult(
+            plan=plan,
+            graph_edit_result=result,
+            summary=summary,
+        )
+
+    def _resolve_nhs_lys_site(
+        self,
+        site: AttachmentSite,
+        request: RdkitGraphEditExecutionRequest,
+    ) -> LysineReactiveSite:
+        """Resolve a lysine NZ site from explicit indices or topology metadata.
+
+        Parameters
+        ----------
+        site : AttachmentSite
+            Normalized declared attachment site.
+        request : RdkitGraphEditExecutionRequest
+            Explicit execution request with optional site index overrides.
+
+        Returns
+        -------
+        LysineReactiveSite
+            Resolved NHS-Lys reactive site.
+        """
+        if request.explicit_site_atom_index is not None:
+            return LysineReactiveSite(
+                chain_id=site.chain_id,
+                residue_name=site.residue_name,
+                residue_number=site.residue_number,
+                atom_name=site.atom_name,
+                nz_atom_index=request.explicit_site_atom_index,
+                nz_hydrogen_indices=request.explicit_site_hydrogen_indices or (),
+                evidence={"source": "explicit_execution_context"},
+            )
+
+        if request.protein_topology_atoms is None:
+            raise ValueError(
+                "Explicit RDKit graph edit execution requires either explicit_site_atom_index "
+                "or protein_topology_atoms for lysine NZ extraction"
+            )
+
+        return extract_lysine_reactive_site(
+            site,
+            request.protein_topology_atoms,
+            bonds=request.protein_topology_bonds,
+            positions=request.protein_topology_positions,
+        )
+
+    def _resolve_nhs_reactive_group(
+        self,
+        request: RdkitGraphEditExecutionRequest,
+    ) -> NhsReactiveGroup:
+        """Resolve an NHS ester reactive group from explicit indices or autodetection.
+
+        Parameters
+        ----------
+        request : RdkitGraphEditExecutionRequest
+            Explicit execution request with optional NHS group indices.
+
+        Returns
+        -------
+        NhsReactiveGroup
+            Resolved NHS reactive group.
+        """
+        if isinstance(request.explicit_nhs_group, NhsReactiveGroup):
+            return request.explicit_nhs_group
+        if isinstance(request.explicit_nhs_group, ExplicitNhsReactiveGroup):
+            return request.explicit_nhs_group.to_reactive_group(request.moiety_mol)
+
+        return detect_nhs_reactive_group(
+            request.moiety_mol,
+            candidate_atom_indices=request.nhs_candidate_atom_indices,
         )
 
     def _validate_construct_plan(

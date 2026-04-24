@@ -13,6 +13,13 @@ from polyzymd.builders.conjugation.exceptions import (
     ConjugationNotImplementedError,
     PabloIngestionError,
 )
+from polyzymd.builders.conjugation.execution import (
+    ExplicitNhsReactiveGroup,
+    RdkitGraphEditExecutionRequest,
+    RdkitGraphEditExecutionResult,
+    RdkitGraphEditExecutionSummary,
+    extract_explicit_rdkit_execution_request,
+)
 from polyzymd.builders.conjugation.graph import AddedBond, RdkitGraphEditResult
 from polyzymd.builders.conjugation.mechanism_library import (
     get_builtin_mechanism,
@@ -81,6 +88,7 @@ __all__ = [
     "CovalentModificationBuilder",
     "DiagnosticCode",
     "DiagnosticSeverity",
+    "ExplicitNhsReactiveGroup",
     "GraphEditPlan",
     "LysineReactiveSite",
     "MoietyDescriptor",
@@ -97,11 +105,15 @@ __all__ = [
     "PabloStructurePreflight",
     "ReactionMechanism",
     "RdkitGraphEditResult",
+    "RdkitGraphEditExecutionRequest",
+    "RdkitGraphEditExecutionResult",
+    "RdkitGraphEditExecutionSummary",
     "SiteAtomRule",
     "save_metadata",
     "ensure_polymerist_py312_compat",
     "detect_nhs_reactive_group",
     "execute_nhs_lys_amide_rdkit_graph_edit",
+    "extract_explicit_rdkit_execution_request",
     "extract_lysine_reactive_site",
     "get_builtin_mechanism",
     "import_polymerist_building",

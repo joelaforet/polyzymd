@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import pytest
 
+from polyzymd.builders.conjugation import CovalentModificationBuilder
+from polyzymd.builders.conjugation.diagnostics import DiagnosticCode
+from polyzymd.builders.conjugation.exceptions import (
+    ConjugationError,
+    ConjugationNotImplementedError,
+)
 from polyzymd.builders.conjugation.nhs_lys import (
     detect_nhs_reactive_group,
     execute_nhs_lys_amide_rdkit_graph_edit,
@@ -11,6 +17,7 @@ from polyzymd.builders.conjugation.nhs_lys import (
     plan_nhs_lys_amide,
 )
 from polyzymd.builders.conjugation.sites import AttachmentSite
+from polyzymd.config.schema import ConjugationConfig
 
 pytest.importorskip("rdkit")
 from rdkit import Chem  # noqa: E402
@@ -33,6 +40,125 @@ def _mol_from_smiles(smiles: str):
     mol = Chem.MolFromSmiles(smiles)
     assert mol is not None
     return Chem.AddHs(mol)
+
+
+def _nhs_lys_config(*, mechanism: str = "nhs_lys_amide", enabled_count: int = 1):
+    """Build a construct-mode conjugation config for builder execution tests.
+
+    Parameters
+    ----------
+    mechanism : str, optional
+        Mechanism name assigned to the first attachment, by default
+        ``"nhs_lys_amide"``.
+    enabled_count : int, optional
+        Number of enabled attachments to create, by default ``1``.
+
+    Returns
+    -------
+    ConjugationConfig
+        Minimal enabled construct-mode conjugation config.
+    """
+    attachments = []
+    for index in range(enabled_count):
+        attachments.append(
+            {
+                "name": f"lys23-nhs-{index + 1}",
+                "site": {
+                    "chain_id": "A",
+                    "residue_name": "LYS",
+                    "residue_number": 23,
+                    "atom_name": "NZ",
+                },
+                "moiety": {
+                    "name": "NHS-linker",
+                    "role": "moiety",
+                    "smiles": "CC(=O)ON1C(=O)CCC1=O",
+                },
+                "mechanism": {"name": mechanism},
+            }
+        )
+    return ConjugationConfig(enabled=True, mode="construct", attachments=attachments)
+
+
+def _explicit_execution_context(protein, moiety, *, explicit_nhs_group=True):
+    """Build a minimal explicit RDKit execution context.
+
+    Parameters
+    ----------
+    protein : rdkit.Chem.Mol
+        Protein fragment molecule.
+    moiety : rdkit.Chem.Mol
+        NHS moiety molecule.
+    explicit_nhs_group : bool, optional
+        Include explicit NHS group indices instead of using autodetection, by
+        default ``True``.
+
+    Returns
+    -------
+    dict
+        Builder context payload.
+    """
+    site_atom_index = next(atom.GetIdx() for atom in protein.GetAtoms() if atom.GetSymbol() == "N")
+    site_hydrogen_index = next(
+        neighbor.GetIdx()
+        for neighbor in protein.GetAtomWithIdx(site_atom_index).GetNeighbors()
+        if neighbor.GetSymbol() == "H"
+    )
+    payload = {
+        "protein_mol": protein,
+        "moiety_mol": moiety,
+        "explicit_site_atom_index": site_atom_index,
+        "explicit_site_hydrogen_indices": (site_hydrogen_index,),
+    }
+    if explicit_nhs_group:
+        payload["explicit_nhs_group"] = detect_nhs_reactive_group(moiety).model_dump(mode="json")
+    return {"conjugation_rdkit_execution": payload}
+
+
+def _protein_topology_metadata_from_mol(protein):
+    """Build lightweight lysine-like atom and bond metadata from an RDKit fragment.
+
+    Parameters
+    ----------
+    protein : rdkit.Chem.Mol
+        Protein fragment molecule with explicit hydrogens.
+
+    Returns
+    -------
+    tuple[list[dict], list[tuple[int, int]]]
+        Atom records and bond pairs accepted by the lysine site extractor.
+    """
+    nitrogen_index = next(atom.GetIdx() for atom in protein.GetAtoms() if atom.GetSymbol() == "N")
+    carbon_index = next(
+        neighbor.GetIdx()
+        for neighbor in protein.GetAtomWithIdx(nitrogen_index).GetNeighbors()
+        if neighbor.GetSymbol() == "C"
+    )
+    atoms = []
+    for atom in protein.GetAtoms():
+        index = atom.GetIdx()
+        if index == nitrogen_index:
+            atom_name = "NZ"
+        elif index == carbon_index:
+            atom_name = "CE"
+        elif atom.GetSymbol() == "H":
+            atom_name = f"HZ{index}"
+        else:
+            atom_name = atom.GetSymbol()
+        atoms.append(
+            {
+                "index": index,
+                "atom_name": atom_name,
+                "atomic_number": atom.GetAtomicNum(),
+                "metadata": {
+                    "chain_id": "A",
+                    "residue_name": "LYS",
+                    "residue_number": 23,
+                },
+            }
+        )
+    bonds = [(bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()) for bond in protein.GetBonds()]
+    return atoms, bonds
 
 
 def test_detect_nhs_reactive_group_on_nhs_ester_like_molecule():
@@ -180,3 +306,124 @@ def test_extract_lysine_site_from_mocked_topology_atom_metadata():
     assert plan.mechanism == "nhs_lys_amide"
     assert plan.add_bond[0] == 1
     assert plan.site_hydrogen_indices_to_remove == (3,)
+
+
+def test_builder_executes_one_nhs_lys_graph_edit_with_explicit_indices():
+    """Builder should run one explicit NHS-Lys graph edit and keep topology unchanged."""
+    topology = "unchanged-topology"
+    protein = _mol_from_smiles("CN")
+    moiety = _mol_from_smiles("CC(=O)ON1C(=O)CCC1=O")
+    builder = CovalentModificationBuilder(_nhs_lys_config())
+
+    result = builder.build(
+        topology,
+        context=_explicit_execution_context(protein, moiety, explicit_nhs_group=True),
+    )
+
+    assert result.topology == topology
+    assert len(result.graph_edit_results) == 1
+    assert len(result.graph_edit_summaries) == 1
+    graph_result = result.graph_edit_results[0].graph_edit_result
+    assert graph_result.product_mol.GetBondBetweenAtoms(
+        graph_result.added_bond.begin_atom_index,
+        graph_result.added_bond.end_atom_index,
+    )
+    summary = result.graph_edit_summaries[0]
+    assert summary.mechanism == "nhs_lys_amide"
+    assert summary.topology_unchanged is True
+    assert summary.removed_atoms_count >= 2
+    assert any(
+        event.code == DiagnosticCode.GRAPH_EDIT_EXECUTION
+        for event in result.diagnostics.diagnostics
+    )
+
+
+def test_builder_executes_with_topology_site_extraction_and_nhs_autodetection():
+    """Builder should resolve the lysine site from metadata and autodetect NHS atoms."""
+    protein = _mol_from_smiles("CN")
+    moiety = _mol_from_smiles("CC(=O)ON1C(=O)CCC1=O")
+    atoms, bonds = _protein_topology_metadata_from_mol(protein)
+    builder = CovalentModificationBuilder(_nhs_lys_config())
+
+    result = builder.build(
+        "topology",
+        context={
+            "conjugation_rdkit_execution": {
+                "protein_mol": protein,
+                "moiety_mol": moiety,
+                "protein_topology_atoms": atoms,
+                "protein_topology_bonds": bonds,
+            }
+        },
+    )
+
+    summary = result.graph_edit_summaries[0]
+    assert summary.site["residue_name"] == "LYS"
+    assert summary.removed_protein_atom_indices
+    assert summary.removed_moiety_atom_indices
+    assert (
+        summary.product_atom_count
+        == result.graph_edit_results[0].graph_edit_result.product_mol.GetNumAtoms()
+    )
+
+
+def test_builder_without_explicit_context_preserves_not_implemented_behavior():
+    """Construct mode without explicit execution context should still fail as deferred."""
+    builder = CovalentModificationBuilder(_nhs_lys_config())
+
+    with pytest.raises(ConjugationNotImplementedError, match="graph surgery"):
+        builder.build("topology")
+
+
+def test_builder_rejects_multiple_attachments_with_explicit_context():
+    """The controlled RDKit execution path should reject multi-site requests."""
+    protein = _mol_from_smiles("CN")
+    moiety = _mol_from_smiles("CC(=O)ON1C(=O)CCC1=O")
+    builder = CovalentModificationBuilder(_nhs_lys_config(enabled_count=2))
+
+    with pytest.raises(ConjugationError, match="exactly one enabled attachment"):
+        builder.build("topology", context=_explicit_execution_context(protein, moiety))
+
+
+def test_builder_rejects_non_nhs_mechanism_with_explicit_context():
+    """The controlled RDKit execution path should reject non-NHS mechanisms."""
+    config = ConjugationConfig(
+        enabled=True,
+        mode="construct",
+        attachments=[
+            {
+                "name": "asn23-glycan",
+                "site": {
+                    "chain_id": "A",
+                    "residue_name": "ASN",
+                    "residue_number": 23,
+                    "atom_name": "ND2",
+                },
+                "moiety": {"name": "glycan", "role": "glycan", "smiles": "CO"},
+                "mechanism": {"name": "n_glycosidic_asn"},
+            }
+        ],
+    )
+    protein = _mol_from_smiles("CN")
+    moiety = _mol_from_smiles("CC(=O)ON1C(=O)CCC1=O")
+    builder = CovalentModificationBuilder(config)
+
+    with pytest.raises(ConjugationError, match="nhs_lys_amide"):
+        builder.build("topology", context=_explicit_execution_context(protein, moiety))
+
+
+def test_builder_result_serialization_excludes_rdkit_mols_and_keeps_summary():
+    """Serialized builder results should include summaries but exclude RDKit objects."""
+    protein = _mol_from_smiles("CN")
+    moiety = _mol_from_smiles("CC(=O)ON1C(=O)CCC1=O")
+    builder = CovalentModificationBuilder(_nhs_lys_config())
+
+    result = builder.build(
+        "topology",
+        context=_explicit_execution_context(protein, moiety, explicit_nhs_group=True),
+    )
+    dumped = result.model_dump(mode="json")
+
+    assert "graph_edit_results" not in dumped
+    assert dumped["graph_edit_summaries"][0]["mechanism"] == "nhs_lys_amide"
+    assert "product_mol" not in str(dumped)
