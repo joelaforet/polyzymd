@@ -13,7 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -602,7 +602,34 @@ class ConjugationMoietyConfig(BaseModel):
     smiles: str | None = Field(
         None, description="Optional SMILES for future construction workflows"
     )
+    polymer_recipe: Any | None = Field(
+        None,
+        validation_alias=AliasChoices("polymer_recipe", "recipe"),
+        description="Optional stochastic polymer recipe for generated polymer moieties",
+    )
     role: str = Field("moiety", description="User-facing component role label")
+
+    @field_validator("polymer_recipe", mode="before")
+    @classmethod
+    def validate_polymer_recipe(cls, value: Any) -> Any:
+        """Validate an optional conjugation polymer recipe from YAML data.
+
+        Parameters
+        ----------
+        value : Any
+            Raw recipe value from the configuration.
+
+        Returns
+        -------
+        Any
+            ``None`` or a validated polymer recipe object.
+        """
+        if value is None or hasattr(value, "generate_sequence"):
+            return value
+
+        from polyzymd.builders.conjugation.polymer_recipe import PolymerRecipe
+
+        return PolymerRecipe.model_validate(value)
 
 
 class ConjugationMechanismConfig(BaseModel):
