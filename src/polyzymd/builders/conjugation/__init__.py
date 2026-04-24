@@ -13,6 +13,7 @@ from polyzymd.builders.conjugation.exceptions import (
     ConjugationNotImplementedError,
     PabloIngestionError,
 )
+from polyzymd.builders.conjugation.graph import AddedBond, RdkitGraphEditResult
 from polyzymd.builders.conjugation.mechanism_library import (
     get_builtin_mechanism,
     list_builtin_mechanisms,
@@ -35,6 +36,15 @@ from polyzymd.builders.conjugation.metadata import (
 )
 from polyzymd.builders.conjugation.models import ConjugationBuildResult
 from polyzymd.builders.conjugation.moieties import MoietyDescriptor, normalize_moiety_descriptor
+from polyzymd.builders.conjugation.nhs_lys import (
+    LysineReactiveSite,
+    NhsLysGraphEditPlan,
+    NhsReactiveGroup,
+    detect_nhs_reactive_group,
+    execute_nhs_lys_amide_rdkit_graph_edit,
+    extract_lysine_reactive_site,
+    plan_nhs_lys_amide,
+)
 from polyzymd.builders.conjugation.pablo_adapter import (
     PabloAvailability,
     PabloIngestionResult,
@@ -55,6 +65,7 @@ from polyzymd.builders.conjugation.sites import (
 )
 
 __all__ = [
+    "AddedBond",
     "AttachmentSite",
     "BondSpec",
     "ChainPolicyMetadata",
@@ -71,8 +82,11 @@ __all__ = [
     "DiagnosticCode",
     "DiagnosticSeverity",
     "GraphEditPlan",
+    "LysineReactiveSite",
     "MoietyDescriptor",
     "MoietyReactiveGroup",
+    "NhsLysGraphEditPlan",
+    "NhsReactiveGroup",
     "PabloAvailability",
     "PabloIngestionError",
     "PabloIngestor",
@@ -82,9 +96,13 @@ __all__ = [
     "PabloStructureCounts",
     "PabloStructurePreflight",
     "ReactionMechanism",
+    "RdkitGraphEditResult",
     "SiteAtomRule",
     "save_metadata",
     "ensure_polymerist_py312_compat",
+    "detect_nhs_reactive_group",
+    "execute_nhs_lys_amide_rdkit_graph_edit",
+    "extract_lysine_reactive_site",
     "get_builtin_mechanism",
     "import_polymerist_building",
     "list_builtin_mechanisms",
@@ -92,5 +110,6 @@ __all__ = [
     "match_site_rule",
     "normalize_attachment_site",
     "normalize_moiety_descriptor",
+    "plan_nhs_lys_amide",
     "write_diagnostics_report",
 ]
