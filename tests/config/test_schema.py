@@ -51,6 +51,26 @@ class TestImports:
 
         assert SimulationConfig is not None
 
+    def test_import_conjugation_builder_without_rdkit(self, monkeypatch):
+        """Importing the conjugation builder should not require RDKit."""
+        import builtins
+        import importlib
+
+        import polyzymd.builders  # noqa: F401 - isolate this test to the conjugation builder
+
+        real_import = builtins.__import__
+
+        def block_rdkit_import(name, globals=None, locals=None, fromlist=(), level=0):
+            """Block RDKit imports while allowing all other imports."""
+            if name == "rdkit" or name.startswith("rdkit."):
+                raise ImportError("RDKit intentionally blocked for import test")
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", block_rdkit_import)
+        module = importlib.import_module("polyzymd.builders.conjugation.builder")
+
+        assert module.CovalentModificationBuilder is not None
+
     def test_import_schema(self):
         """Test schema imports."""
         from polyzymd.config.schema import (
