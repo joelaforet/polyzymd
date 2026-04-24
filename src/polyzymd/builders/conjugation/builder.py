@@ -217,7 +217,9 @@ class CovalentModificationBuilder:
             "Pablo adapter boundary."
         )
 
-    def _validate_construct_plan(self, report: ConjugationDiagnosticsReport) -> list[dict[str, Any]]:
+    def _validate_construct_plan(
+        self, report: ConjugationDiagnosticsReport
+    ) -> list[dict[str, Any]]:
         """Validate declarative construct-mode attachments before graph surgery.
 
         Parameters
@@ -237,7 +239,9 @@ class CovalentModificationBuilder:
             this planning phase.
         """
         planned_attachments: list[dict[str, Any]] = []
-        enabled_attachments = [attachment for attachment in self.config.attachments if attachment.enabled]
+        enabled_attachments = [
+            attachment for attachment in self.config.attachments if attachment.enabled
+        ]
         if not enabled_attachments:
             report.add(
                 DiagnosticCode.MECHANISM_VALIDATION,
@@ -314,6 +318,19 @@ class CovalentModificationBuilder:
                     "moiety": moiety.model_dump(mode="json"),
                 },
             )
+            primitive_support = mechanism.identifier == "nhs_lys_amide"
+            if primitive_support:
+                report.add(
+                    DiagnosticCode.MECHANISM_VALIDATION,
+                    "NHS-Lys RDKit graph edit primitive is available behind an explicit-object "
+                    "executor boundary",
+                    details={
+                        "attachment": attachment.name,
+                        "mechanism": mechanism.identifier,
+                        "executor": "execute_nhs_lys_amide_rdkit_graph_edit",
+                        "requires_explicit_rdkit_molecules": True,
+                    },
+                )
             planned_attachments.append(
                 {
                     "attachment": attachment.name,
@@ -323,6 +340,10 @@ class CovalentModificationBuilder:
                     "moiety": moiety.model_dump(mode="json"),
                     "placement": attachment.placement.model_dump(mode="json"),
                     "config_overrides": attachment.mechanism.model_dump(mode="json"),
+                    "executable_primitives": {
+                        "nhs_lys_rdkit_graph_edit": primitive_support,
+                        "invoked_from_config": False,
+                    },
                 }
             )
 
