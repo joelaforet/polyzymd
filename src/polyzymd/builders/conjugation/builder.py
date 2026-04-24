@@ -40,7 +40,7 @@ from polyzymd.builders.conjugation.nhs_lys import (
     extract_lysine_reactive_site,
     plan_nhs_lys_amide,
 )
-from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
+from polyzymd.builders.conjugation.pablo_adapter import PabloIngestionResult, PabloIngestor
 from polyzymd.builders.conjugation.polymerist_compat import polymerist_py312_compat_status
 from polyzymd.builders.conjugation.sites import (
     AttachmentSite,
@@ -167,35 +167,51 @@ class CovalentModificationBuilder:
                 "Explicit RDKit graph edit execution requires conjugation mode 'construct'"
             )
 
-        if self.config.mode == ConjugationMode.INGEST_EXISTING:
-            ingestor = PabloIngestor(self.config.ccd_pablo)
-            try:
-                ingestion = ingestor.ingest_structure(
-                    self.config.source_pdb_path,
-                    chain_policy=self.config.chain_policy,
-                    output_dir=self.output_dir,
-                )
-            except PabloIngestionError as exc:
-                report.add(
-                    DiagnosticCode.PABLO_INGESTION,
-                    "Pablo ingestion input validation failed",
-                    severity=DiagnosticSeverity.ERROR,
-                    details={"error": str(exc)},
-                )
-                self._write_sidecars(metadata, report)
-                raise ConjugationNotImplementedError(
-                    "Pablo ingestion could not produce a usable topology because the source "
-                    f"structure path is invalid: {exc}"
-                ) from exc
+        if _is_source_backed_config(self.config):
+            ingestion = _cached_pablo_ingestion(context)
+            if ingestion is None:
+                ingestor = PabloIngestor(self.config.ccd_pablo)
+                try:
+                    ingestion = ingestor.ingest_structure(
+                        self.config.source_pdb_path,
+                        chain_policy=self.config.chain_policy,
+                        output_dir=self.output_dir,
+                    )
+                except PabloIngestionError as exc:
+                    report.add(
+                        DiagnosticCode.PABLO_INGESTION,
+                        "Pablo ingestion input validation failed",
+                        severity=DiagnosticSeverity.ERROR,
+                        details={"error": str(exc)},
+                    )
+                    self._write_sidecars(metadata, report)
+                    raise ConjugationNotImplementedError(
+                        "Pablo ingestion could not produce a usable topology because the source "
+                        f"structure path is invalid: {exc}"
+                    ) from exc
+
+            planned_attachments: list[dict[str, Any]] = []
+            if self.config.attachments and self.config.mode in {
+                ConjugationMode.CONSTRUCT,
+                ConjugationMode.MIXED,
+            }:
+                try:
+                    planned_attachments = self._validate_construct_plan(report)
+                except ConjugationNotImplementedError:
+                    self._write_sidecars(metadata, report)
+                    raise
+            elif self.config.attachments:
+                planned_attachments = [
+                    attachment.model_dump(mode="json") for attachment in self.config.attachments
+                ]
 
             metadata = ingestion.metadata.model_copy(
                 update={
-                    "attachments": [
-                        attachment.model_dump(mode="json") for attachment in self.config.attachments
-                    ],
+                    "attachments": planned_attachments,
                     "notes": [
                         *ingestion.metadata.notes,
                         "Phase 2 Pablo ingestion did not run Interchange parameterization or solvation",
+                        "Source-backed attachment construction is recorded for a later chemistry phase",
                     ],
                 }
             )
@@ -683,3 +699,43 @@ class CovalentModificationBuilder:
 
         save_metadata(metadata, self.output_dir / self.config.diagnostics.metadata_filename)
         write_diagnostics_report(report, self.output_dir / self.config.diagnostics.output_filename)
+
+
+def _cached_pablo_ingestion(context: Mapping[str, Any] | None) -> PabloIngestionResult | None:
+    """Return a cached Pablo ingestion result from build context.
+
+    Parameters
+    ----------
+    context : Mapping[str, Any] or None
+        Build context supplied by :class:`SystemBuilder`.
+
+    Returns
+    -------
+    PabloIngestionResult or None
+        Cached result when present and type-compatible, otherwise ``None``.
+    """
+    if context is None:
+        return None
+    ingestion = context.get("pablo_ingestion_result")
+    if ingestion is None:
+        return None
+    if not isinstance(ingestion, PabloIngestionResult):
+        raise ConjugationError("Cached Pablo ingestion context has an invalid result type")
+    return ingestion
+
+
+def _is_source_backed_config(config: ConjugationConfig) -> bool:
+    """Return whether a conjugation config should load a prepared source PDB.
+
+    Parameters
+    ----------
+    config : ConjugationConfig
+        Conjugation workflow settings.
+
+    Returns
+    -------
+    bool
+        ``True`` when the workflow is ingest-existing or explicitly supplies a
+        prepared source PDB path.
+    """
+    return config.mode == ConjugationMode.INGEST_EXISTING or config.source_pdb_path is not None

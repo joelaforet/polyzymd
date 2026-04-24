@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -2644,12 +2645,18 @@ def init(name: str) -> None:
     type=click.Path(dir_okay=False),
     help="Write a JSON-safe normalization plan report to this path.",
 )
+@click.option(
+    "--check-pablo",
+    is_flag=True,
+    help="Validate the normalized PDB with OpenFF Pablo after clean-PDB planning succeeds.",
+)
 def clean_pdb(
     input_path: str,
     output_path: str | None,
     ph: float,
     dry_run: bool,
     report_json: str | None,
+    check_pablo: bool,
 ) -> None:
     """Normalize a PDB file for PolyzyMD conjugation ingestion.
 
@@ -2682,14 +2689,17 @@ def clean_pdb(
     colored_echo(f"  Compatibility pH option ignored: {ph:g}")
 
     plan = plan_pdb_chain_normalization(input_file)
-    if report_path is not None:
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(json.dumps(plan.model_dump(mode="json"), indent=2) + "\n")
-        colored_echo(f"  Report JSON: {report_path}")
 
     _echo_clean_pdb_plan_summary(plan, output_file, dry_run)
     if not plan.valid:
         _echo_clean_pdb_issues(plan.issues)
+        _write_clean_pdb_report(
+            report_path,
+            plan,
+            _skipped_pablo_validation("Clean-PDB structural validation failed")
+            if check_pablo
+            else None,
+        )
         raise click.ClickException(
             "Clean-PDB validation failed; strip waters, ions, solvents, and unsupported free "
             "components before normalization. Intentional bound cofactors/metals are not yet "
@@ -2697,6 +2707,26 @@ def clean_pdb(
         )
 
     if dry_run:
+        pablo_validation = None
+        if check_pablo:
+            temporary_path = _temporary_clean_pdb_path(output_file)
+            try:
+                write_normalized_pdb(input_file, temporary_path, plan)
+                pablo_validation = _validate_clean_pdb_with_pablo(
+                    temporary_path,
+                    temporary_check_file=True,
+                )
+            except ValueError as exc:
+                pablo_validation = _failed_pablo_validation(
+                    temporary_path,
+                    temporary_check_file=True,
+                    error=str(exc),
+                )
+            finally:
+                temporary_path.unlink(missing_ok=True)
+        _write_clean_pdb_report(report_path, plan, pablo_validation)
+        if pablo_validation is not None and pablo_validation["status"] != "success":
+            raise click.ClickException(_pablo_failure_message(pablo_validation))
         colored_echo()
         click.echo(click.style("Dry run complete; no PDB file written.", fg="yellow"))
         return
@@ -2706,8 +2736,255 @@ def clean_pdb(
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
+    pablo_validation = None
+    if check_pablo:
+        pablo_validation = _validate_clean_pdb_with_pablo(
+            written,
+            temporary_check_file=False,
+        )
+    _write_clean_pdb_report(report_path, plan, pablo_validation)
+    if pablo_validation is not None and pablo_validation["status"] != "success":
+        raise click.ClickException(_pablo_failure_message(pablo_validation))
+
     colored_echo()
     click.echo(click.style(f"Cleaned PDB written to: {written}", fg="green"))
+
+
+def _write_clean_pdb_report(
+    report_path: Path | None,
+    plan: Any,
+    pablo_validation: dict[str, Any] | None = None,
+) -> None:
+    """Write a clean-PDB JSON report when requested.
+
+    Parameters
+    ----------
+    report_path : Path or None
+        Destination report path, or ``None`` when reporting is disabled.
+    plan : Any
+        PDB normalization plan with Pydantic ``model_dump`` support.
+    pablo_validation : dict[str, Any] or None, optional
+        Optional Pablo validation object to append to the report, by default
+        ``None``.
+    """
+    if report_path is None:
+        return
+    payload = plan.model_dump(mode="json")
+    if pablo_validation is not None:
+        payload["pablo_validation"] = pablo_validation
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload, indent=2) + "\n")
+    colored_echo(f"  Report JSON: {report_path}")
+
+
+def _temporary_clean_pdb_path(output_file: Path) -> Path:
+    """Create a temporary path for dry-run Pablo validation.
+
+    Parameters
+    ----------
+    output_file : Path
+        User-facing output path whose parent is preferred for the temporary
+        cleaned PDB.
+
+    Returns
+    -------
+    Path
+        Temporary PDB path that the caller must remove.
+    """
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{output_file.stem}_pablo_",
+        suffix=".pdb",
+        dir=output_file.parent,
+        delete=False,
+    ) as handle:
+        return Path(handle.name)
+
+
+def _validate_clean_pdb_with_pablo(
+    checked_path: Path,
+    *,
+    temporary_check_file: bool,
+) -> dict[str, Any]:
+    """Validate a normalized PDB with Pablo and return a JSON-safe report.
+
+    Parameters
+    ----------
+    checked_path : Path
+        Normalized PDB path to validate.
+    temporary_check_file : bool
+        Whether ``checked_path`` is a temporary dry-run file.
+
+    Returns
+    -------
+    dict[str, Any]
+        JSON-safe validation status and result diagnostics.
+    """
+    if not _pdb_has_explicit_hydrogens(checked_path):
+        return _failed_pablo_validation(
+            checked_path,
+            temporary_check_file=temporary_check_file,
+            error=(
+                "OpenFF Pablo requires explicit hydrogens, but the normalized PDB contains no "
+                "hydrogen atoms. Add hydrogens with a preparation backend before using "
+                "clean-pdb --check-pablo."
+            ),
+        )
+
+    from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
+    from polyzymd.config.schema import (
+        ConjugationCcdPabloPolicyConfig,
+        ConjugationChainPolicyConfig,
+    )
+
+    try:
+        result = PabloIngestor(ConjugationCcdPabloPolicyConfig()).ingest_structure(
+            checked_path,
+            chain_policy=ConjugationChainPolicyConfig(),
+        )
+    except Exception as exc:  # noqa: BLE001 - CLI must normalize third-party parser failures
+        return _failed_pablo_validation(
+            checked_path,
+            temporary_check_file=temporary_check_file,
+            error=str(exc),
+        )
+
+    payload: dict[str, Any] = {
+        "attempted": True,
+        "status": "success" if getattr(result, "success", False) else "failed",
+        "checked_path": str(checked_path),
+        "temporary_check_file": temporary_check_file,
+        "result": _json_safe_pablo_payload(result),
+    }
+    if payload["status"] != "success":
+        payload["diagnostics"] = _json_safe_pablo_payload(getattr(result, "diagnostics", []))
+    return payload
+
+
+def _pdb_has_explicit_hydrogens(path: Path) -> bool:
+    """Return whether a PDB file contains explicit hydrogen atom records.
+
+    Parameters
+    ----------
+    path : Path
+        PDB file to inspect.
+
+    Returns
+    -------
+    bool
+        ``True`` when at least one ATOM/HETATM line has element H or a hydrogen
+        atom name.
+    """
+    for line in path.read_text(errors="replace").splitlines():
+        if not line.startswith(("ATOM  ", "HETATM")):
+            continue
+        element = line[76:78].strip().upper()
+        atom_name = line[12:16].strip().upper()
+        if element == "H" or atom_name.startswith("H"):
+            return True
+    return False
+
+
+def _json_safe_pablo_payload(value: Any) -> Any:
+    """Convert Pablo adapter objects to JSON-safe data.
+
+    Parameters
+    ----------
+    value : Any
+        Pydantic model, sequence, mapping, or scalar value to serialize.
+
+    Returns
+    -------
+    Any
+        JSON-compatible representation.
+    """
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if isinstance(value, dict):
+        return {str(key): _json_safe_pablo_payload(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_pablo_payload(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    try:
+        json.dumps(value)
+    except TypeError:
+        return str(value)
+    return value
+
+
+def _failed_pablo_validation(
+    checked_path: Path,
+    *,
+    temporary_check_file: bool,
+    error: str,
+) -> dict[str, Any]:
+    """Build a failed Pablo validation report.
+
+    Parameters
+    ----------
+    checked_path : Path
+        Path that was checked or intended for checking.
+    temporary_check_file : bool
+        Whether the path is a temporary dry-run artifact.
+    error : str
+        Normalized parser or import error message.
+
+    Returns
+    -------
+    dict[str, Any]
+        JSON-safe failed validation object.
+    """
+    return {
+        "attempted": True,
+        "status": "failed",
+        "checked_path": str(checked_path),
+        "temporary_check_file": temporary_check_file,
+        "diagnostics": [{"severity": "error", "message": error}],
+    }
+
+
+def _skipped_pablo_validation(reason: str) -> dict[str, Any]:
+    """Build a skipped Pablo validation report.
+
+    Parameters
+    ----------
+    reason : str
+        Reason Pablo validation did not run.
+
+    Returns
+    -------
+    dict[str, Any]
+        JSON-safe skipped validation object.
+    """
+    return {
+        "attempted": False,
+        "status": "skipped",
+        "checked_path": None,
+        "temporary_check_file": False,
+        "diagnostics": [{"severity": "info", "message": reason}],
+    }
+
+
+def _pablo_failure_message(pablo_validation: dict[str, Any]) -> str:
+    """Return a concise Click error message for Pablo validation failures.
+
+    Parameters
+    ----------
+    pablo_validation : dict[str, Any]
+        Pablo validation report produced by clean-PDB.
+
+    Returns
+    -------
+    str
+        User-facing failure message.
+    """
+    diagnostics = pablo_validation.get("diagnostics") or []
+    if diagnostics:
+        first = diagnostics[0]
+        if isinstance(first, dict) and first.get("message"):
+            return f"Pablo validation failed: {first['message']}"
+    return "Pablo validation failed; review the report JSON or parser diagnostics."
 
 
 def _echo_clean_pdb_plan_summary(plan: Any, output_file: Path, dry_run: bool) -> None:
