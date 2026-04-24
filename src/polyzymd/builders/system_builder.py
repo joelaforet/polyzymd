@@ -400,18 +400,60 @@ class SystemBuilder:
 
         from polyzymd.builders.conjugation import CovalentModificationBuilder
 
+        pablo_ingestion_result = self._ingest_existing_conjugation_source(config)
         builder = CovalentModificationBuilder.from_config(config, output_dir=self._working_dir)
+        context = {
+            "n_enzyme_molecules": self._n_enzyme_molecules,
+            "n_substrate_molecules": self._n_substrate_molecules,
+            "n_polymer_chains": self._n_polymer_chains,
+        }
+        if pablo_ingestion_result is not None:
+            context["pablo_ingestion_result"] = pablo_ingestion_result
         result = builder.build(
             self._combined_topology,
             protein_topology=self._enzyme_topology,
-            context={
-                "n_enzyme_molecules": self._n_enzyme_molecules,
-                "n_substrate_molecules": self._n_substrate_molecules,
-                "n_polymer_chains": self._n_polymer_chains,
-            },
+            context=context,
         )
         self._combined_topology = result.topology
         return self._combined_topology
+
+    def _ingest_existing_conjugation_source(self, config: "SimulationConfig") -> Any | None:
+        """Parse a prepared conjugation source once for the builder hook.
+
+        Parameters
+        ----------
+        config : SimulationConfig
+            Simulation configuration with optional conjugation settings.
+
+        Returns
+        -------
+        Any or None
+            Pablo ingestion result for source-backed workflows, otherwise ``None``.
+        """
+        conjugation_config = getattr(config, "conjugation", None)
+        if conjugation_config is None or not conjugation_config.enabled:
+            return None
+
+        from polyzymd.config.schema import ConjugationMode
+
+        source_backed = (
+            conjugation_config.mode == ConjugationMode.INGEST_EXISTING
+            or conjugation_config.source_pdb_path is not None
+        )
+        if not source_backed:
+            return None
+
+        from polyzymd.builders.conjugation.pablo_adapter import PabloIngestor
+
+        source_path = conjugation_config.source_pdb_path
+        if source_path is None and conjugation_config.mode == ConjugationMode.INGEST_EXISTING:
+            source_path = config.enzyme.pdb_path
+        ingestor = PabloIngestor(conjugation_config.ccd_pablo)
+        return ingestor.ingest_structure(
+            source_path,
+            chain_policy=conjugation_config.chain_policy,
+            output_dir=self._working_dir,
+        )
 
     def create_interchange(self) -> Interchange:
         """Create the OpenFF Interchange for simulation.

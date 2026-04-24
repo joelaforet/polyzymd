@@ -20,7 +20,11 @@ from polyzymd.builders.conjugation.pablo_adapter import (
     PabloIngestor,
 )
 from polyzymd.builders.conjugation.structure_inspection import inspect_pdb_structure
-from polyzymd.config.schema import ConjugationChainPolicyConfig, ConjugationConfig
+from polyzymd.config.schema import (
+    ConjugationCcdPabloPolicyConfig,
+    ConjugationChainPolicyConfig,
+    ConjugationConfig,
+)
 
 
 def _pdb_atom(
@@ -206,6 +210,132 @@ def test_ingest_structure_success_extracts_metadata(monkeypatch, tmp_path):
     assert result.noncanonical_residues[0].residue_name == "NAG"
     assert result.link_candidates[0].source == "PabloTopologyBond"
     assert (tmp_path / "pablo_ingestion_result.json").exists()
+
+
+def test_ingest_structure_passes_configured_crosslink_library(monkeypatch, tmp_path):
+    """Configured Pablo crosslinks should be applied to the residue library."""
+    import polyzymd.builders.conjugation.pablo_adapter as pablo_adapter
+
+    structure = tmp_path / "structure.pdb"
+    structure.write_text("HEADER    TEST\nEND\n")
+
+    class FakeCache:
+        """Small immutable-style cache fake for residue-library tests."""
+
+        def __init__(self):
+            """Initialize cache policy and crosslink call records."""
+            self.auto_download = False
+            self.crosslinks = []
+
+        def with_(self, definitions):
+            """Return a derived cache without mutating the original."""
+            assert definitions == {}
+            derived = FakeCache()
+            derived.auto_download = self.auto_download
+            derived.crosslinks = [*self.crosslinks]
+            return derived
+
+        def with_crosslink(self, **kwargs):
+            """Return a derived cache with one additional crosslink."""
+            derived = FakeCache()
+            derived.auto_download = self.auto_download
+            derived.crosslinks = [*self.crosslinks, kwargs]
+            return derived
+
+    class FakeTopology:
+        """Minimal empty topology-like object."""
+
+        n_molecules = 0
+        n_bonds = 0
+
+        @property
+        def atoms(self):
+            """Return no atoms."""
+            return iter(())
+
+        @property
+        def bonds(self):
+            """Return no bonds."""
+            return iter(())
+
+    std_cache = FakeCache()
+    received_libraries = []
+
+    def fake_topology_from_pdb(*args, **kwargs):
+        """Record the residue library passed through the Pablo boundary."""
+        assert args[0] == structure
+        received_libraries.append(kwargs["residue_library"])
+        return FakeTopology()
+
+    fake_module = SimpleNamespace(
+        __file__="/tmp/openff/pablo/__init__.py",
+        __version__="0.2.2",
+        STD_CCD_CACHE=std_cache,
+        topology_from_pdb=fake_topology_from_pdb,
+    )
+    monkeypatch.setattr(pablo_adapter.importlib, "import_module", lambda name: fake_module)
+    monkeypatch.setattr(pablo_adapter.importlib.metadata, "version", lambda name: "0.2.2")
+    policy = ConjugationCcdPabloPolicyConfig(
+        crosslinks=[
+            {
+                "residues": ("LYX", "NHX"),
+                "linking_atoms": ("NZ", "C"),
+                "leaving_atoms": (("HZ1",), ("O1", "O2")),
+                "bond_order": 1,
+            }
+        ]
+    )
+
+    result = PabloIngestor(policy=policy).ingest_structure(structure)
+
+    assert result.success is True
+    assert received_libraries
+    assert received_libraries[0] is not std_cache
+    assert received_libraries[0].auto_download is True
+    assert received_libraries[0].crosslinks == [
+        {
+            "residues": ("LYX", "NHX"),
+            "linking_atoms": ("NZ", "C"),
+            "leaving_atoms": (("HZ1",), ("O1", "O2")),
+            "bond_order": 1,
+        }
+    ]
+    ccd_events = [diag for diag in result.diagnostics if diag.code == DiagnosticCode.CCD_POLICY]
+    assert any("crosslink" in event.message for event in ccd_events)
+
+
+def test_ingest_structure_reports_crosslink_library_errors(monkeypatch, tmp_path):
+    """Unsupported Pablo crosslink APIs should become ingestion diagnostics."""
+    import polyzymd.builders.conjugation.pablo_adapter as pablo_adapter
+
+    structure = tmp_path / "structure.pdb"
+    structure.write_text("HEADER    TEST\nEND\n")
+
+    fake_module = SimpleNamespace(
+        __file__="/tmp/openff/pablo/__init__.py",
+        __version__="0.2.2",
+        STD_CCD_CACHE=object(),
+        topology_from_pdb=lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(pablo_adapter.importlib, "import_module", lambda name: fake_module)
+    monkeypatch.setattr(pablo_adapter.importlib.metadata, "version", lambda name: "0.2.2")
+    policy = ConjugationCcdPabloPolicyConfig(
+        lookup_policy="offline_cached",
+        crosslinks=[
+            {
+                "residues": ("LYX", "NHX"),
+                "linking_atoms": ("NZ", "C"),
+                "leaving_atoms": (("HZ1",), ("O1", "O2")),
+            }
+        ],
+    )
+
+    result = PabloIngestor(policy=policy).ingest_structure(structure)
+
+    assert result.success is False
+    errors = [diag for diag in result.diagnostics if diag.code == DiagnosticCode.PABLO_INGESTION]
+    assert errors
+    assert "with_crosslink" in errors[0].details["error"]
 
 
 def test_ingest_structure_failure_returns_actionable_diagnostics(monkeypatch, tmp_path):

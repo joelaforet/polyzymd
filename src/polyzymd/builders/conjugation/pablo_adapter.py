@@ -27,6 +27,7 @@ from polyzymd.builders.conjugation.metadata import (
     ConjugationMetadata,
     chain_policy_from_config,
 )
+from polyzymd.builders.conjugation.residue_library import build_pablo_residue_library
 from polyzymd.builders.conjugation.structure_inspection import (
     PDBStructureInspection,
     inspect_pdb_structure,
@@ -317,9 +318,16 @@ class PabloIngestor:
 
         try:
             pablo_module = importlib.import_module("openff.pablo")
+            residue_library_result = build_pablo_residue_library(
+                self._policy,
+                pablo_module=pablo_module,
+            )
+            diagnostics.extend(
+                _diagnostics_from_residue_library(residue_library_result.diagnostics)
+            )
             topology = pablo_module.topology_from_pdb(
                 structure_path,
-                residue_library=_build_residue_library(pablo_module, self._policy),
+                residue_library=residue_library_result.residue_library,
                 format=_infer_pablo_format(structure_path),
                 use_canonical_names=self._policy_attr("use_canonical_atom_names", False),
             )
@@ -556,30 +564,6 @@ def _detect_pablo_version(pablo_module: Any) -> str | None:
         return getattr(pablo_module, "__version__", None)
 
 
-def _build_residue_library(pablo_module: Any, policy: Any | None) -> Any:
-    """Build the residue library used by Pablo parsing.
-
-    Parameters
-    ----------
-    pablo_module : Any
-        Imported Pablo module.
-    policy : Any or None
-        CCD/Pablo policy config.
-
-    Returns
-    -------
-    Any
-        Pablo residue library mapping.
-    """
-    residue_library = pablo_module.STD_CCD_CACHE
-    lookup_policy = _policy_attr_from(policy, "lookup_policy", None)
-    lookup_value = getattr(lookup_policy, "value", lookup_policy)
-    if lookup_value == "auto_download" and hasattr(residue_library, "with_"):
-        residue_library = residue_library.with_({})
-        residue_library.auto_download = True
-    return residue_library
-
-
 def _policy_attr_from(policy: Any | None, name: str, default: Any) -> Any:
     """Return a policy attribute without depending on config model imports."""
     if policy is None:
@@ -610,6 +594,39 @@ def _diagnostics_from_availability(availability: PabloAvailability) -> list[Conj
             details=availability.model_dump(mode="json"),
         )
     ]
+
+
+def _diagnostics_from_residue_library(
+    library_diagnostics: list[Any],
+) -> list[ConjugationDiagnostic]:
+    """Create conjugation diagnostics from residue-library helper diagnostics.
+
+    Parameters
+    ----------
+    library_diagnostics : list of Any
+        Diagnostics emitted by the residue-library helper.
+
+    Returns
+    -------
+    list of ConjugationDiagnostic
+        Diagnostics normalized to the conjugation report schema.
+    """
+    diagnostics: list[ConjugationDiagnostic] = []
+    for diagnostic in library_diagnostics:
+        severity_value = getattr(diagnostic, "severity", "info")
+        try:
+            severity = DiagnosticSeverity(severity_value)
+        except ValueError:
+            severity = DiagnosticSeverity.INFO
+        diagnostics.append(
+            ConjugationDiagnostic(
+                code=DiagnosticCode.CCD_POLICY,
+                severity=severity,
+                message=getattr(diagnostic, "message", "Pablo residue library configured"),
+                details=getattr(diagnostic, "details", {}),
+            )
+        )
+    return diagnostics
 
 
 def _diagnostics_from_inspection(
@@ -727,7 +744,7 @@ def _diagnostic_from_parse_error(exc: Exception, path: Path) -> ConjugationDiagn
             "action": (
                 "Ensure all atoms and hydrogens are present, residue and atom names match CCD "
                 "definitions, and LINK/CONECT records describe nonstandard covalent bonds. "
-                "Custom residue definition wiring is deferred to a later conjugation phase."
+                "Configure ccd_pablo.crosslinks for prepared crosslinked residues such as LYX/NHX."
             ),
         },
     )
