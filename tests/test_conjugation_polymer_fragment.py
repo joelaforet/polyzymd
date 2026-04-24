@@ -26,11 +26,12 @@ def _pdb_atom(
     *,
     record_name: str = "ATOM",
     element: str = "C",
+    insertion_code: str = "",
 ) -> str:
     """Format one fixed-width PDB atom line for assembly tests."""
     return (
         f"{record_name:<6}{serial:5d} {atom_name:<4} {residue_name:>3} {chain_id:1}"
-        f"{residue_number:4d}    {x:8.3f}{y:8.3f}{z:8.3f}"
+        f"{residue_number:4d}{insertion_code[:1]:1}   {x:8.3f}{y:8.3f}{z:8.3f}"
         f"  1.00  0.00          {element:>2}\n"
     )
 
@@ -205,3 +206,57 @@ def test_generated_fragment_from_pdb_lines_infers_residues():
 
     assert [residue.residue_name for residue in fragment.residues] == ["SBM", "NHS"]
     assert fragment.to_placed_fragment().reactive_atom_serial == 202
+
+
+def test_generated_fragment_preserves_insertion_codes_as_residue_keys():
+    """Generated fragments should distinguish residues that share sequence numbers."""
+    lines = [
+        _pdb_atom(
+            201,
+            "C1",
+            "SBM",
+            "C",
+            1,
+            0.0,
+            0.0,
+            0.0,
+            record_name="HETATM",
+            insertion_code="A",
+        ),
+        _pdb_atom(
+            202,
+            "RC",
+            "NHS",
+            "C",
+            1,
+            1.0,
+            0.0,
+            0.0,
+            record_name="HETATM",
+            insertion_code="B",
+        ),
+        _pdb_atom(
+            203,
+            "LG",
+            "NHS",
+            "C",
+            1,
+            1.5,
+            0.0,
+            0.0,
+            record_name="HETATM",
+            insertion_code="B",
+        ),
+    ]
+
+    fragment = GeneratedPolymerFragment.from_pdb_lines(
+        lines,
+        reactive_atom_serial=202,
+        leaving_atom_serials=(203,),
+        sequence="AC",
+    )
+    placed = fragment.to_placed_fragment()
+
+    assert [residue.insertion_code for residue in fragment.residues] == ["A", "B"]
+    assert [atom.insertion_code for atom in fragment.atoms] == ["A", "B", "B"]
+    assert [atom.insertion_code for atom in placed.atoms] == ["A", "B", "B"]

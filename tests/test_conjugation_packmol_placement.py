@@ -1,0 +1,253 @@
+"""Tests for Packmol-constrained modifier placement."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from polyzymd.builders.conjugation.contracts import (
+    ExplicitLinkageContract,
+    LinkageBond,
+    PdbAtomSelector,
+    ReactiveEndpoint,
+    resolve_explicit_linkage_contract,
+)
+from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
+from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
+from polyzymd.builders.conjugation.placement import (
+    place_modifier_with_packmol,
+    place_modifier_with_resolved_plan,
+)
+from polyzymd.builders.conjugation.polymer_fragment import GeneratedPolymerFragment
+
+
+def test_packmol_input_uses_random_constrained_reactive_placement(tmp_path: Path):
+    """Packmol input should use random constrained placement without deterministic orientation."""
+    protein_path = _protein_pdb(tmp_path)
+    modifier = _generated_modifier()
+    linker = NhsLysModifierLinker(target_residue_number=23)
+
+    def fake_run_packmol(input_text: str, work_dir: Path) -> Path:
+        """Write a simple Packmol-like output preserving input ordering."""
+        output_path = work_dir / "packmol_output.pdb"
+        protein_lines = [
+            line
+            for line in (work_dir / "protein_fixed_sterics.pdb").read_text().splitlines(True)
+            if line.startswith(("ATOM", "HETATM"))
+        ]
+        modifier_lines = [
+            line
+            for line in (work_dir / "modifier_retained.pdb").read_text().splitlines(True)
+            if line.startswith(("ATOM", "HETATM"))
+        ]
+        output_path.write_text("".join([*protein_lines, *modifier_lines, "END\n"]))
+        assert input_text == (work_dir / "packmol.inp").read_text()
+        return output_path
+
+    result = place_modifier_with_packmol(
+        protein_path,
+        modifier,
+        linker,
+        tmp_path,
+        run_packmol_func=fake_run_packmol,
+    )
+
+    input_text = result.packmol_input_text
+    assert "movebadrandom" in input_text
+    assert "nloop 500" in input_text
+    assert "fixed 0. 0. 0. 0. 0. 0." in input_text
+    assert "structure" in input_text
+    assert "atoms 2" in input_text
+    assert "inside sphere" in input_text
+    assert "rotate" not in input_text.lower()
+    assert "center" not in input_text.lower()
+    assert "NZ" in result.excluded_protein_atom_names
+    assert "HZ2" in result.excluded_protein_atom_names
+    assert "HZ3" in result.excluded_protein_atom_names
+    assert abs(result.placed_bond_length_angstrom - 1.33) < 1.0e-6
+    assert result.placed_modifier.reactive_atom_name == "RC"
+
+
+def test_resolved_plan_placement_uses_resolved_atoms_and_target_length(tmp_path: Path):
+    """Placement should use resolved atom identities and contract bond length."""
+    protein_path = _protein_pdb(tmp_path)
+    modifier = _generated_modifier()
+    plan = resolve_explicit_linkage_contract(
+        protein_path,
+        modifier,
+        _explicit_contract(target_bond_length=1.45),
+    )
+
+    def fake_run_packmol(input_text: str, work_dir: Path) -> Path:
+        """Write a simple Packmol-like output preserving input ordering."""
+        output_path = work_dir / "packmol_output.pdb"
+        protein_lines = [
+            line
+            for line in (work_dir / "protein_fixed_sterics.pdb").read_text().splitlines(True)
+            if line.startswith(("ATOM", "HETATM"))
+        ]
+        modifier_lines = [
+            line
+            for line in (work_dir / "modifier_retained.pdb").read_text().splitlines(True)
+            if line.startswith(("ATOM", "HETATM"))
+        ]
+        output_path.write_text("".join([*protein_lines, *modifier_lines, "END\n"]))
+        assert "atoms 2" in input_text
+        return output_path
+
+    result = place_modifier_with_resolved_plan(
+        protein_path,
+        modifier,
+        plan,
+        tmp_path,
+        run_packmol_func=fake_run_packmol,
+    )
+
+    assert result.target_bond_length_angstrom == 1.45
+    assert abs(result.placed_bond_length_angstrom - 1.45) < 1.0e-6
+    retained_lines = [
+        line
+        for line in result.modifier_pdb_path.read_text().splitlines()
+        if line.startswith(("ATOM", "HETATM"))
+    ]
+    assert len(retained_lines) == 3
+
+
+def _explicit_contract(*, target_bond_length: float) -> ExplicitLinkageContract:
+    """Build a generic explicit linkage contract for placement tests."""
+    return ExplicitLinkageContract(
+        protein_endpoint=ReactiveEndpoint(
+            participant="protein",
+            selector=PdbAtomSelector(
+                chain_id="A",
+                residue_name="LYS",
+                residue_number=23,
+                atom_name="NZ",
+            ),
+            product_residue_name="LYX",
+            leaving_atom_names=("HZ2", "HZ3"),
+        ),
+        modifier_endpoint=ReactiveEndpoint(
+            participant="modifier",
+            selector=PdbAtomSelector(
+                chain_id="Z",
+                residue_name="NHS",
+                residue_number=2,
+                atom_name="RC",
+            ),
+            product_residue_name="NHX",
+            leaving_atom_names=("LG",),
+        ),
+        bond=LinkageBond(
+            protein_atom_name="NZ",
+            modifier_atom_name="RC",
+            bond_order=1,
+            target_bond_length_angstrom=target_bond_length,
+        ),
+        mechanism_name="explicit_linkage",
+    )
+
+
+def _protein_pdb(tmp_path: Path) -> Path:
+    """Create a small lysine-containing protein PDB."""
+    path = tmp_path / "protein.pdb"
+    path.write_text(
+        _pdb_atom(1, "N", "LYS", "A", 23, 0.0, 0.0, 0.0, element="N")
+        + _pdb_atom(2, "CA", "LYS", "A", 23, 1.0, 0.0, 0.0)
+        + _pdb_atom(3, "CE", "LYS", "A", 23, 1.5, 0.0, 0.0)
+        + _pdb_atom(4, "NZ", "LYS", "A", 23, 2.0, 0.0, 0.0, element="N")
+        + _pdb_atom(5, "HZ1", "LYS", "A", 23, 2.0, 0.7, 0.0, element="H")
+        + _pdb_atom(6, "HZ2", "LYS", "A", 23, 2.0, -0.7, 0.0, element="H")
+        + _pdb_atom(7, "HZ3", "LYS", "A", 23, 2.0, 0.0, 0.7, element="H")
+        + _pdb_atom(8, "N", "ALA", "A", 24, 4.0, 0.0, 0.0, element="N")
+        + "END\n"
+    )
+    return path
+
+
+def _generated_modifier() -> GeneratedPolymerFragment:
+    """Create a small generated modifier with a leaving group."""
+    atoms = (
+        PdbAtomRecord(
+            serial=101,
+            atom_index=0,
+            atom_name="C1",
+            residue_name="SB1",
+            chain_id="Z",
+            residue_number=1,
+            x=5.0,
+            y=0.0,
+            z=0.0,
+            element="C",
+            record_name="HETATM",
+        ),
+        PdbAtomRecord(
+            serial=102,
+            atom_index=1,
+            atom_name="RC",
+            residue_name="NHS",
+            chain_id="Z",
+            residue_number=2,
+            x=3.3,
+            y=0.0,
+            z=0.0,
+            element="C",
+            record_name="HETATM",
+        ),
+        PdbAtomRecord(
+            serial=103,
+            atom_index=2,
+            atom_name="O1",
+            residue_name="NHS",
+            chain_id="Z",
+            residue_number=2,
+            x=3.8,
+            y=0.5,
+            z=0.0,
+            element="O",
+            record_name="HETATM",
+        ),
+        PdbAtomRecord(
+            serial=104,
+            atom_index=3,
+            atom_name="LG",
+            residue_name="NHS",
+            chain_id="Z",
+            residue_number=2,
+            x=4.2,
+            y=1.0,
+            z=0.0,
+            element="O",
+            record_name="HETATM",
+        ),
+    )
+    return GeneratedPolymerFragment.from_atom_records(
+        atoms,
+        bonds=((101, 102), (102, 103), (102, 104)),
+        reactive_atom_serial=102,
+        reactive_atom_index=1,
+        reactive_atom_name="RC",
+        leaving_atom_serials=(104,),
+        leaving_atom_indices=(3,),
+        leaving_atom_names=("LG",),
+        name="modifier",
+    )
+
+
+def _pdb_atom(
+    serial: int,
+    atom_name: str,
+    residue_name: str,
+    chain_id: str,
+    residue_number: int,
+    x_coord: float,
+    y_coord: float,
+    z_coord: float,
+    *,
+    element: str = "C",
+) -> str:
+    """Format one PDB atom line for tests."""
+    return (
+        f"ATOM  {serial:5d} {atom_name:<4} {residue_name:>3} {chain_id:1}"
+        f"{residue_number:4d}    {x_coord:8.3f}{y_coord:8.3f}{z_coord:8.3f}"
+        f"  1.00  0.00          {element:>2}\n"
+    )

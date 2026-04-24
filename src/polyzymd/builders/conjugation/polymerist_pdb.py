@@ -286,12 +286,14 @@ def _rdkit_metadata_matches_pdb_atom(
         "residue_name": pdb_atom.residue_name.strip().upper(),
         "chain_id": pdb_atom.chain_id.strip().upper(),
         "residue_number": pdb_atom.residue_number,
+        "insertion_code": pdb_atom.insertion_code.strip().upper(),
     }
     observed = {
         "atom_name": info.GetName().strip().upper(),
         "residue_name": info.GetResidueName().strip().upper(),
         "chain_id": info.GetChainId().strip().upper(),
         "residue_number": int(info.GetResidueNumber()),
+        "insertion_code": _rdkit_insertion_code(info),
     }
     return expected == observed
 
@@ -329,7 +331,7 @@ def _build_residue_records(
     records: list[PolymerFragmentResidue] = []
     residue_name_to_monomer = _recipe_monomers_by_residue_name(recipe)
     for sequence_index, key in enumerate(_unique_residue_keys(atoms)):
-        _chain_id, residue_number, residue_name = key
+        _chain_id, residue_number, insertion_code, residue_name = key
         label = sequence[sequence_index] if sequence and sequence_index < len(sequence) else None
         monomer_name = None
         if recipe is not None and label is not None:
@@ -346,6 +348,7 @@ def _build_residue_records(
                 name=monomer_name,
                 residue_name=residue_name,
                 residue_number=residue_number,
+                insertion_code=insertion_code,
             )
         )
     return tuple(records)
@@ -358,12 +361,12 @@ def _recipe_monomers_by_residue_name(recipe: PolymerRecipe | None) -> dict[str, 
     return {monomer.residue_name: monomer.name for monomer in recipe.monomers}
 
 
-def _unique_residue_keys(atoms: Sequence[PdbAtomRecord]) -> tuple[tuple[str, int, str], ...]:
+def _unique_residue_keys(atoms: Sequence[PdbAtomRecord]) -> tuple[tuple[str, int, str, str], ...]:
     """Return unique residue keys in atom-record order."""
-    keys: list[tuple[str, int, str]] = []
-    seen: set[tuple[str, int, str]] = set()
+    keys: list[tuple[str, int, str, str]] = []
+    seen: set[tuple[str, int, str, str]] = set()
     for atom in atoms:
-        key = (atom.chain_id, atom.residue_number, atom.residue_name)
+        key = (atom.chain_id, atom.residue_number, atom.insertion_code, atom.residue_name)
         if key in seen:
             continue
         seen.add(key)
@@ -442,7 +445,7 @@ def _resolve_required_single_atom(
 
 def _candidate_rdkit_indices(
     atoms: Sequence[PdbAtomRecord],
-    pdb_identity_to_rdkit: Mapping[tuple[int | None, int | None, str, int, str, str], int],
+    pdb_identity_to_rdkit: Mapping[tuple[int | None, int | None, str, int, str, str, str], int],
     *,
     explicit_reactive_atom: PdbAtomRecord | None,
     reactive_residue_chain_id: str | None,
@@ -500,13 +503,14 @@ def _same_residue(first: PdbAtomRecord, second: PdbAtomRecord) -> bool:
     return (
         first.chain_id == second.chain_id
         and first.residue_number == second.residue_number
+        and first.insertion_code == second.insertion_code
         and first.residue_name == second.residue_name
     )
 
 
 def _rdkit_index_for_pdb_atom(
     atom: PdbAtomRecord,
-    pdb_identity_to_rdkit: Mapping[tuple[int | None, int | None, str, int, str, str], int],
+    pdb_identity_to_rdkit: Mapping[tuple[int | None, int | None, str, int, str, str, str], int],
 ) -> int:
     """Return the verified RDKit atom index for a parsed PDB atom."""
     return pdb_identity_to_rdkit[_atom_identity(atom)]
@@ -552,7 +556,7 @@ def _safe_leaving_atom_names(
 def _unique_atoms(atoms: Sequence[PdbAtomRecord]) -> list[PdbAtomRecord]:
     """Return atom records with duplicate identities removed."""
     unique: list[PdbAtomRecord] = []
-    seen: set[tuple[int | None, int | None, str, int, str, str]] = set()
+    seen: set[tuple[int | None, int | None, str, int, str, str, str]] = set()
     for atom in atoms:
         identity = _atom_identity(atom)
         if identity in seen:
@@ -562,16 +566,27 @@ def _unique_atoms(atoms: Sequence[PdbAtomRecord]) -> list[PdbAtomRecord]:
     return unique
 
 
-def _atom_identity(atom: PdbAtomRecord) -> tuple[int | None, int | None, str, int, str, str]:
+def _atom_identity(
+    atom: PdbAtomRecord,
+) -> tuple[int | None, int | None, str, int, str, str, str]:
     """Return a stable atom identity for PDB/RDKit mapping."""
     return (
         atom.atom_index,
         atom.serial,
         atom.atom_name,
         atom.residue_number,
+        atom.insertion_code,
         atom.residue_name,
         atom.chain_id,
     )
+
+
+def _rdkit_insertion_code(info: Any) -> str:
+    """Return an RDKit PDB insertion code when available."""
+    getter = getattr(info, "GetInsertionCode", None)
+    if getter is None:
+        return ""
+    return str(getter()).strip().upper()
 
 
 def _format_atom_reference(atom: PdbAtomRecord) -> str:
