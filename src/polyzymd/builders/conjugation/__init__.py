@@ -61,6 +61,15 @@ from polyzymd.builders.conjugation.pablo_adapter import (
     PabloStructureCounts,
     PabloStructurePreflight,
 )
+from polyzymd.builders.conjugation.pdb_assembly import (
+    CrosslinkedPdbAssemblyOptions,
+    CrosslinkedPdbAssemblyResult,
+    NhsLysPdbAttachment,
+    PdbAtomRecord,
+    PlacedPolymerFragment,
+    canonicalize_poc_residue_name,
+    write_crosslinked_pdb,
+)
 from polyzymd.builders.conjugation.polymerist_compat import (
     ensure_polymerist_py312_compat,
     import_polymerist_building,
@@ -92,6 +101,8 @@ __all__ = [
     "ConjugationError",
     "ConjugationMetadata",
     "ConjugationNotImplementedError",
+    "CrosslinkedPdbAssemblyOptions",
+    "CrosslinkedPdbAssemblyResult",
     "CovalentModificationBuilder",
     "DiagnosticCode",
     "DiagnosticSeverity",
@@ -101,6 +112,7 @@ __all__ = [
     "MoietyDescriptor",
     "MoietyReactiveGroup",
     "NhsLysGraphEditPlan",
+    "NhsLysPdbAttachment",
     "NhsReactiveGroup",
     "PabloAvailability",
     "PDBChainNormalizationAction",
@@ -113,6 +125,8 @@ __all__ = [
     "PabloResidueSummary",
     "PabloStructureCounts",
     "PabloStructurePreflight",
+    "PdbAtomRecord",
+    "PlacedPolymerFragment",
     "ReactionMechanism",
     "RdkitGraphEditResult",
     "RdkitGraphEditExecutionRequest",
@@ -120,6 +134,7 @@ __all__ = [
     "RdkitGraphEditExecutionSummary",
     "SiteAtomRule",
     "save_metadata",
+    "canonicalize_poc_residue_name",
     "ensure_polymerist_py312_compat",
     "detect_nhs_reactive_group",
     "execute_nhs_lys_amide_rdkit_graph_edit",
@@ -135,5 +150,6 @@ __all__ = [
     "plan_pdb_chain_normalization",
     "plan_nhs_lys_amide",
     "write_normalized_pdb",
+    "write_crosslinked_pdb",
     "write_diagnostics_report",
 ]

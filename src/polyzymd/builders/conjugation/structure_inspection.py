@@ -37,6 +37,7 @@ STANDARD_PROTEIN_RESIDUES = frozenset(
         "VAL",
     }
 )
+MODIFIED_PROTEIN_RESIDUES = frozenset({"LYX"})
 WATER_RESIDUES = frozenset({"HOH", "WAT", "H2O", "SOL", "TIP", "TIP3", "TIP3P"})
 COMMON_ION_RESIDUES = frozenset(
     {
@@ -315,7 +316,7 @@ def _summarize_residues(atoms: list[PDBAtomRecord]) -> list[PDBResidueInspection
                 atom_count=len(residue_atoms),
                 record_names=sorted({atom.record_name for atom in residue_atoms}),
                 category=category,
-                is_standard_protein=residue_name in STANDARD_PROTEIN_RESIDUES,
+                is_standard_protein=_is_protein_like_residue(residue_name),
                 is_noncanonical=_is_noncanonical_residue(residue_name),
                 is_polymer_ptm_candidate=category in {"glycan", "polymer_ptm"},
             )
@@ -352,7 +353,7 @@ def _annotate_nearest_protein_distances(
         atom
         for atoms in residue_atoms.values()
         for atom in atoms
-        if atom.residue_name in STANDARD_PROTEIN_RESIDUES and _has_heavy_atom_coordinates(atom)
+        if _is_protein_like_residue(atom.residue_name) and _has_heavy_atom_coordinates(atom)
     ]
     if not protein_atoms:
         return
@@ -623,7 +624,7 @@ def _residue_from_link_side(
         insertion_code=side["insertion_code"],
         atom_count=0,
         category=category,
-        is_standard_protein=side["residue_name"] in STANDARD_PROTEIN_RESIDUES,
+        is_standard_protein=_is_protein_like_residue(side["residue_name"]),
         is_noncanonical=_is_noncanonical_residue(side["residue_name"]),
         is_polymer_ptm_candidate=category in {"glycan", "polymer_ptm"},
     )
@@ -648,7 +649,7 @@ def _residue_from_atom(atom: PDBAtomRecord) -> PDBResidueInspection:
         atom_count=1,
         record_names=[atom.record_name],
         category=category,
-        is_standard_protein=atom.residue_name in STANDARD_PROTEIN_RESIDUES,
+        is_standard_protein=_is_protein_like_residue(atom.residue_name),
         is_noncanonical=_is_noncanonical_residue(atom.residue_name),
         is_polymer_ptm_candidate=category in {"glycan", "polymer_ptm"},
     )
@@ -740,7 +741,7 @@ def _build_compatibility_warnings(
 def _classify_residue(residue_name: str) -> str:
     """Classify a residue name for preflight diagnostics."""
     normalized = (residue_name or "").upper()
-    if normalized in STANDARD_PROTEIN_RESIDUES:
+    if _is_protein_like_residue(normalized):
         return "protein"
     if normalized in WATER_RESIDUES:
         return "water"
@@ -759,6 +760,12 @@ def _is_noncanonical_residue(residue_name: str) -> bool:
     """Return whether a residue should be considered noncanonical for protein ingestion."""
     category = _classify_residue(residue_name)
     return category not in {"protein", "water", "ion", "solvent"}
+
+
+def _is_protein_like_residue(residue_name: str) -> bool:
+    """Return whether a residue should be handled as protein-like."""
+    normalized = (residue_name or "").upper()
+    return normalized in STANDARD_PROTEIN_RESIDUES or normalized in MODIFIED_PROTEIN_RESIDUES
 
 
 def _is_attachment_candidate_residue(residue: PDBResidueInspection) -> bool:
