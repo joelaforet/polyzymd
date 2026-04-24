@@ -35,6 +35,7 @@ class DiagnosticCode(str, Enum):
     MOIETY_NORMALIZATION = "moiety_normalization"
     GRAPH_EDIT_EXECUTION = "graph_edit_execution"
     PDB_STRUCTURE_INSPECTION = "pdb_structure_inspection"
+    PDB_CHAIN_NORMALIZATION = "pdb_chain_normalization"
 
 
 class ConjugationDiagnostic(BaseModel):
