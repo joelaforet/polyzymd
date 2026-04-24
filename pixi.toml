@@ -8,6 +8,7 @@
 #   pablo       — OpenFF Pablo ingestion experiments (Python >=3.12; no Polymerist)
 #   conjugation-py312 — Polymerist + OpenFF Pablo experiment (Python 3.12; no EspalomaCharge)
 #   cuda-12-4   — CUDA 12.4 driver (e.g. CU Boulder Blanca): OpenMM 8.1
+#   conjugation-cuda-12-4 — conjugation stack + CUDA 12.4 OpenMM smoke env
 #   cuda-12-6   — CUDA 12.6 driver (e.g. PSC Bridges2):      OpenMM 8.4
 #
 # HOW TO FIND YOUR CUDA VERSION
@@ -275,6 +276,7 @@ conjugation-sim = { cmd = "python src/polyzymd/builders/conjugation/poc/run_conj
 build           = { features = ["base", "openmm-any"], no-default-feature = true, solve-group = "build" }
 pablo           = { features = ["pablo"], no-default-feature = true, solve-group = "pablo" }
 conjugation-py312 = { features = ["conjugation-py312"], no-default-feature = true, solve-group = "conjugation-py312" }
+conjugation-cuda-12-4 = { features = ["conjugation-py312", "cuda-12-4"], no-default-feature = true, solve-group = "conjugation-cuda-12-4" }
 cuda-12-6       = { features = ["base", "cuda-12-6"], no-default-feature = true, solve-group = "cuda-12-6" }
 cuda-12-4       = { features = ["base", "cuda-12-4"], no-default-feature = true, solve-group = "cuda-12-4" }
 conjugation-poc = { features = ["base", "openmm-any", "conjugation-poc"], no-default-feature = true, solve-group = "conjugation-poc" }

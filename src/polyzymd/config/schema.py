@@ -581,16 +581,55 @@ class ConjugationSiteConfig(BaseModel):
     residue_name: str | None = Field(None, description="Residue name, such as LYS")
     residue_number: int | None = Field(None, description="Residue number in the input structure")
     atom_name: str | None = Field(None, description="Reactive atom name, such as NZ")
+    insertion_code: str = Field("", max_length=1, description="Optional PDB insertion code")
+    atom_serial: int | None = Field(None, ge=1, description="Optional PDB atom serial")
+    atom_index: int | None = Field(None, ge=0, description="Optional zero-based atom index")
     selector: str | None = Field(None, description="Future selection expression for site discovery")
+
+    @field_validator("chain_id", "insertion_code")
+    @classmethod
+    def normalize_site_text(cls, value: str) -> str:
+        """Normalize PDB site selector text fields."""
+        return value.strip().upper()
 
     @field_validator("chain_id")
     @classmethod
     def validate_site_chain(cls, value: str) -> str:
-        """Normalize a site chain ID."""
-        normalized = value.upper()
-        if not normalized.isalpha():
+        """Validate a site chain ID."""
+        if not value.isalpha():
             raise ValueError("Site chain ID must be a single alphabetic character")
-        return normalized
+        return value
+
+    @field_validator("residue_name", "atom_name")
+    @classmethod
+    def normalize_optional_site_text(cls, value: str | None) -> str | None:
+        """Normalize optional PDB site selector fields."""
+        return value.strip().upper() if value is not None else None
+
+
+class ConjugationPdbAtomSelectorConfig(BaseModel):
+    """PDB atom selector for explicit covalent linkage configuration."""
+
+    chain_id: str = Field(..., min_length=1, max_length=1, description="PDB chain ID")
+    residue_name: str = Field(..., min_length=1, description="PDB residue name")
+    residue_number: int = Field(..., description="PDB residue sequence number")
+    atom_name: str = Field(..., min_length=1, description="PDB atom name")
+    insertion_code: str = Field("", max_length=1, description="Optional insertion code")
+    atom_serial: int | None = Field(None, ge=1, description="Optional PDB atom serial")
+    atom_index: int | None = Field(None, ge=0, description="Optional zero-based atom index")
+
+    @field_validator("chain_id", "residue_name", "atom_name", "insertion_code")
+    @classmethod
+    def normalize_selector_text(cls, value: str) -> str:
+        """Normalize PDB selector strings."""
+        return value.strip().upper()
+
+    @model_validator(mode="after")
+    def validate_required_selector_text(self) -> "ConjugationPdbAtomSelectorConfig":
+        """Validate that normalized selector fields remain non-empty."""
+        if not self.chain_id or not self.residue_name or not self.atom_name:
+            raise ValueError("PDB selector fields must not be blank")
+        return self
 
 
 class ConjugationMoietyConfig(BaseModel):
@@ -606,6 +645,10 @@ class ConjugationMoietyConfig(BaseModel):
         None,
         validation_alias=AliasChoices("polymer_recipe", "recipe"),
         description="Optional stochastic polymer recipe for generated polymer moieties",
+    )
+    link_site: ConjugationPdbAtomSelectorConfig | None = Field(
+        None,
+        description="Explicit PDB atom selector for the moiety linkage site",
     )
     role: str = Field("moiety", description="User-facing component role label")
 
@@ -632,6 +675,49 @@ class ConjugationMoietyConfig(BaseModel):
         return PolymerRecipe.model_validate(value)
 
 
+class ConjugationProductResiduesConfig(BaseModel):
+    """Product residue names produced by an explicit linkage."""
+
+    site: str | None = Field(None, description="Product residue name for the protein site")
+    moiety: str | None = Field(None, description="Product residue name for the moiety")
+
+    @field_validator("site", "moiety")
+    @classmethod
+    def normalize_optional_residue_name(cls, value: str | None) -> str | None:
+        """Normalize optional product residue names."""
+        return value.strip().upper() if value is not None else None
+
+
+class ConjugationLinkageBondConfig(BaseModel):
+    """Bond fields for explicit linkage mechanisms."""
+
+    site_atom: str | None = Field(None, description="Reactive atom name on the protein site")
+    moiety_atom: str | None = Field(None, description="Reactive atom name on the moiety")
+    order: int | float = Field(1, description="Linkage bond order")
+    target_bond_length_angstrom: float = Field(1.33, gt=0.0, description="Target bond length")
+
+    @field_validator("site_atom", "moiety_atom")
+    @classmethod
+    def normalize_optional_atom_name(cls, value: str | None) -> str | None:
+        """Normalize optional atom names."""
+        return value.strip().upper() if value is not None else None
+
+
+class ConjugationLeavingAtomsConfig(BaseModel):
+    """Leaving atom names scoped to explicit linkage endpoint residues."""
+
+    site: list[str] = Field(default_factory=list, description="Protein-side leaving atoms")
+    moiety: list[str] = Field(default_factory=list, description="Moiety-side leaving atoms")
+
+    @field_validator("site", "moiety", mode="before")
+    @classmethod
+    def normalize_leaving_names(cls, value: Any) -> list[str]:
+        """Normalize leaving atom name lists."""
+        if value is None:
+            return []
+        return [str(item).strip().upper() for item in value]
+
+
 class ConjugationMechanismConfig(BaseModel):
     """Placeholder for covalent attachment chemistry."""
 
@@ -641,10 +727,32 @@ class ConjugationMechanismConfig(BaseModel):
     )
     site_atom: str | None = Field(None, description="Reactive atom on the biomolecule")
     moiety_atom: str | None = Field(None, description="Reactive atom on the moiety")
-    leaving_atoms: list[str] = Field(
-        default_factory=list,
-        description="Atoms removed during the covalent reaction in future phases",
+    product_residues: ConjugationProductResiduesConfig = Field(
+        default_factory=ConjugationProductResiduesConfig,
+        description="Product residue names for explicit linkage mechanisms",
     )
+    bond: ConjugationLinkageBondConfig = Field(
+        default_factory=ConjugationLinkageBondConfig,
+        description="Explicit linkage bond fields",
+    )
+    leaving_atoms: ConjugationLeavingAtomsConfig = Field(
+        default_factory=ConjugationLeavingAtomsConfig,
+        description="Atoms removed during the covalent reaction, scoped by endpoint",
+    )
+
+    @field_validator("site_atom", "moiety_atom")
+    @classmethod
+    def normalize_legacy_atom_name(cls, value: str | None) -> str | None:
+        """Normalize legacy top-level atom-name fields."""
+        return value.strip().upper() if value is not None else None
+
+    @field_validator("leaving_atoms", mode="before")
+    @classmethod
+    def coerce_legacy_leaving_atoms(cls, value: Any) -> Any:
+        """Accept the legacy flat leaving-atom list as moiety-side names."""
+        if isinstance(value, list):
+            return {"moiety": value}
+        return value
 
 
 class ConjugationPlacementConfig(BaseModel):
@@ -672,6 +780,44 @@ class ConjugationAttachmentConfig(BaseModel):
     moiety: ConjugationMoietyConfig
     mechanism: ConjugationMechanismConfig = Field(default_factory=ConjugationMechanismConfig)
     placement: ConjugationPlacementConfig = Field(default_factory=ConjugationPlacementConfig)
+
+    @model_validator(mode="after")
+    def validate_explicit_linkage_pdb_contract(self) -> "ConjugationAttachmentConfig":
+        """Validate the v1 explicit linkage contract as PDB-only."""
+        if self.mechanism.name.strip().lower() != "explicit_linkage":
+            return self
+
+        errors = []
+        if not self.site.chain_id:
+            errors.append("explicit_linkage requires site.chain_id")
+        if not self.site.residue_name:
+            errors.append("explicit_linkage requires site.residue_name")
+        if self.site.residue_number is None:
+            errors.append("explicit_linkage requires site.residue_number")
+        if not self.site.atom_name:
+            errors.append("explicit_linkage requires site.atom_name")
+
+        if self.moiety.input_path is None:
+            errors.append("explicit_linkage requires moiety.input_path")
+        elif self.moiety.input_path.suffix.lower() != ".pdb":
+            errors.append("explicit_linkage requires moiety.input_path with .pdb suffix")
+        if self.moiety.link_site is None:
+            errors.append("explicit_linkage requires moiety.link_site")
+        if self.moiety.smiles is not None:
+            errors.append("explicit_linkage does not support moiety.smiles")
+        if self.moiety.polymer_recipe is not None:
+            errors.append("explicit_linkage does not support moiety.polymer_recipe")
+
+        if not self.mechanism.product_residues.site:
+            errors.append("explicit_linkage requires mechanism.product_residues.site")
+        if not self.mechanism.product_residues.moiety:
+            errors.append("explicit_linkage requires mechanism.product_residues.moiety")
+        if self.mechanism.reaction_smarts is not None:
+            errors.append("explicit_linkage does not support mechanism.reaction_smarts")
+
+        if errors:
+            raise ValueError("; ".join(errors))
+        return self
 
 
 class ConjugationChargeConfig(BaseModel):
