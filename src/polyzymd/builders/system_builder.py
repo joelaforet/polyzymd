@@ -369,6 +369,50 @@ class SystemBuilder:
 
         return self._solvated_topology
 
+    def _apply_conjugation(self, config: "SimulationConfig") -> Topology:
+        """Apply covalent modification skeleton before solvation.
+
+        Parameters
+        ----------
+        config : SimulationConfig
+            Simulation configuration with optional conjugation settings.
+
+        Returns
+        -------
+        Topology
+            Pre-solvation topology, unchanged when conjugation is absent or disabled.
+
+        Raises
+        ------
+        RuntimeError
+            If solutes have not been combined.
+        ConjugationNotImplementedError
+            If an enabled skeleton path is requested.
+        """
+        if self._combined_topology is None:
+            raise RuntimeError("Solutes must be combined before applying conjugation")
+
+        conjugation_config = getattr(config, "conjugation", None)
+        if conjugation_config is None or not conjugation_config.enabled:
+            return self._combined_topology
+
+        LOGGER.info("Applying covalent modification workflow: %s", conjugation_config.mode.value)
+
+        from polyzymd.builders.conjugation import CovalentModificationBuilder
+
+        builder = CovalentModificationBuilder.from_config(config, output_dir=self._working_dir)
+        result = builder.build(
+            self._combined_topology,
+            protein_topology=self._enzyme_topology,
+            context={
+                "n_enzyme_molecules": self._n_enzyme_molecules,
+                "n_substrate_molecules": self._n_substrate_molecules,
+                "n_polymer_chains": self._n_polymer_chains,
+            },
+        )
+        self._combined_topology = result.topology
+        return self._combined_topology
+
     def create_interchange(self) -> Interchange:
         """Create the OpenFF Interchange for simulation.
 
@@ -816,6 +860,9 @@ class SystemBuilder:
 
         # 3. Combine enzyme + substrate
         self.combine_solutes()
+
+        # Apply optional covalent modifications before packing and solvation
+        self._apply_conjugation(config)
 
         # 4. Build and pack polymers (if configured)
         if config.polymers and config.polymers.enabled:
