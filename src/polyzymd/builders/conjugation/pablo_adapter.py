@@ -27,6 +27,11 @@ from polyzymd.builders.conjugation.metadata import (
     ConjugationMetadata,
     chain_policy_from_config,
 )
+from polyzymd.builders.conjugation.structure_inspection import (
+    PDBStructureInspection,
+    inspect_pdb_structure,
+    pdb_atom_records_as_dicts,
+)
 
 SUPPORTED_STRUCTURE_SUFFIXES = frozenset({".pdb", ".cif", ".mmcif", ".pdbx"})
 
@@ -91,6 +96,9 @@ class PabloStructureCounts(BaseModel):
     residue_count: int | None = None
     molecule_count: int | None = None
     chain_count: int | None = None
+    chain_ids: list[str] = Field(default_factory=list)
+    blank_chain_atom_count: int = 0
+    blank_chain_residue_count: int = 0
     bond_count: int | None = None
     link_candidate_count: int = 0
 
@@ -138,6 +146,7 @@ class PabloStructurePreflight(BaseModel):
     inspection_attempted: bool = False
     inspection_implemented: bool = False
     ingestion_implemented: bool = False
+    inspection_summary: PDBStructureInspection | None = None
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -155,6 +164,7 @@ class PabloIngestionResult(BaseModel):
     residues: list[PabloResidueSummary] = Field(default_factory=list)
     noncanonical_residues: list[PabloResidueSummary] = Field(default_factory=list)
     link_candidates: list[PabloLinkCandidate] = Field(default_factory=list)
+    inspection_summary: PDBStructureInspection | None = None
     metadata: ConjugationMetadata = Field(default_factory=ConjugationMetadata)
     diagnostics: list[ConjugationDiagnostic] = Field(default_factory=list)
 
@@ -257,13 +267,14 @@ class PabloIngestor:
         chain_metadata = chain_policy_from_config(chain_policy)
         availability = self.probe_available()
         diagnostics = _diagnostics_from_availability(availability)
-        pdb_atom_records = (
-            _read_pdb_atom_records(structure_path) if _is_pdb_suffix(structure_path) else []
+        inspection = (
+            inspect_pdb_structure(structure_path) if _is_pdb_suffix(structure_path) else None
         )
-        pdb_link_candidates = _read_pdb_link_candidates(
-            structure_path,
-            chain_metadata,
-            pdb_atom_records,
+        if inspection is not None:
+            diagnostics.extend(_diagnostics_from_inspection(inspection))
+        pdb_atom_records = pdb_atom_records_as_dicts(inspection) if inspection is not None else []
+        pdb_link_candidates = (
+            _pablo_link_candidates_from_inspection(inspection) if inspection is not None else []
         )
 
         if not availability.available:
@@ -287,6 +298,7 @@ class PabloIngestor:
                 link_candidates=pdb_link_candidates,
                 diagnostics=diagnostics,
                 notes=["Pablo was unavailable, so metadata was extracted from PDB records only"],
+                inspection=inspection,
             )
             _save_result_sidecar(result, output_dir)
             return result
@@ -329,6 +341,7 @@ class PabloIngestor:
                 notes=[
                     "Pablo parsing failed; metadata reflects file-level PDB records when available"
                 ],
+                inspection=inspection,
             )
             _save_result_sidecar(result, output_dir)
             return result
@@ -374,6 +387,7 @@ class PabloIngestor:
             molecule_count=_safe_int_attr(topology, "n_molecules"),
             bond_count=_safe_int_attr(topology, "n_bonds"),
             notes=["Pablo topology is available for downstream parameterization phases"],
+            inspection=inspection,
         )
         _save_result_sidecar(result, output_dir)
         return result
@@ -451,18 +465,25 @@ class PabloIngestor:
         _validate_structure_path(structure_path)
 
         availability = self.probe_available()
+        inspection = (
+            inspect_pdb_structure(structure_path) if _is_pdb_suffix(structure_path) else None
+        )
         warnings = [
             "Pablo structure ingestion is available through ingest_structure()",
             *availability.warnings,
         ]
+        if inspection is not None:
+            warnings.extend(inspection.convention_warnings)
+            warnings.extend(inspection.compatibility_warnings)
         return PabloStructurePreflight(
             intended_mode="ingest_existing",
             path=structure_path,
             suffix=structure_path.suffix.lower(),
             pablo=availability,
-            inspection_attempted=False,
+            inspection_attempted=inspection is not None,
             inspection_implemented=True,
             ingestion_implemented=True,
+            inspection_summary=inspection,
             warnings=warnings,
         )
 
@@ -568,6 +589,79 @@ def _diagnostics_from_availability(availability: PabloAvailability) -> list[Conj
             details=availability.model_dump(mode="json"),
         )
     ]
+
+
+def _diagnostics_from_inspection(
+    inspection: PDBStructureInspection,
+) -> list[ConjugationDiagnostic]:
+    """Create diagnostics from pure-Python PDB inspection."""
+    diagnostics = [
+        ConjugationDiagnostic(
+            code=DiagnosticCode.PDB_STRUCTURE_INSPECTION,
+            severity=DiagnosticSeverity.INFO,
+            message="PDB structure inspection completed for Pablo preflight",
+            details={
+                "atom_count": inspection.atom_count,
+                "residue_count": inspection.residue_count,
+                "chain_ids": inspection.chain_ids,
+                "blank_chain_atom_count": inspection.blank_chain_atom_count,
+                "blank_chain_residue_count": inspection.blank_chain_residue_count,
+                "noncanonical_residue_count": len(inspection.noncanonical_residue_candidates),
+                "polymer_ptm_candidate_count": len(inspection.polymer_ptm_candidates),
+                "covalent_attachment_candidate_count": len(
+                    inspection.covalent_attachment_candidates
+                ),
+                "ssbond_count": inspection.ssbond_count,
+                "residue_name_counts": inspection.residue_name_counts,
+            },
+        )
+    ]
+    warnings = [*inspection.convention_warnings, *inspection.compatibility_warnings]
+    if warnings:
+        diagnostics.append(
+            ConjugationDiagnostic(
+                code=DiagnosticCode.PDB_STRUCTURE_INSPECTION,
+                severity=DiagnosticSeverity.WARNING,
+                message="PDB/Pablo compatibility warnings were found",
+                details={"warnings": warnings},
+            )
+        )
+    return diagnostics
+
+
+def _pablo_link_candidates_from_inspection(
+    inspection: PDBStructureInspection,
+) -> list[PabloLinkCandidate]:
+    """Convert PDB inspection attachment evidence to Pablo adapter candidates."""
+    candidates: list[PabloLinkCandidate] = []
+    for candidate in inspection.covalent_attachment_candidates:
+        role_2 = (
+            ComponentRole.POLYMER
+            if candidate.candidate_category == "polymer_ptm"
+            else ComponentRole.MOIETY
+        )
+        candidates.append(
+            PabloLinkCandidate(
+                source=candidate.source,
+                atom_name_1=candidate.protein_atom_name,
+                residue_name_1=candidate.protein_residue_name,
+                residue_number_1=_residue_number_from_id(candidate.protein_residue_id),
+                chain_id_1=candidate.protein_chain_id,
+                role_1=ComponentRole.PROTEIN,
+                atom_name_2=candidate.candidate_atom_name,
+                residue_name_2=candidate.candidate_residue_name,
+                residue_number_2=_residue_number_from_id(candidate.candidate_residue_id),
+                chain_id_2=candidate.candidate_chain_id,
+                role_2=role_2,
+                details={
+                    **candidate.details,
+                    "line_number": candidate.line_number,
+                    "distance_angstrom": candidate.distance_angstrom,
+                    "candidate_category": candidate.candidate_category,
+                },
+            )
+        )
+    return candidates
 
 
 def _diagnostic_from_parse_error(exc: Exception, path: Path) -> ConjugationDiagnostic:
@@ -802,18 +896,23 @@ def _build_result_from_records(
     topology: Any | None = None,
     molecule_count: int | None = None,
     bond_count: int | None = None,
+    inspection: PDBStructureInspection | None = None,
 ) -> PabloIngestionResult:
     """Build a complete ingestion result from atom-level records."""
     residues = _summarize_residues(atom_records, chain_policy)
     noncanonical = [residue for residue in residues if residue.is_noncanonical]
     components = _build_components(atom_records, chain_policy)
+    chain_ids = sorted({str(record.get("chain_id") or "") for record in atom_records})
     counts = PabloStructureCounts(
         atom_count=len(atom_records) if atom_records else None,
         residue_count=len(residues) if residues else None,
         molecule_count=molecule_count,
-        chain_count=len({record.get("chain_id", "") for record in atom_records})
-        if atom_records
-        else None,
+        chain_count=len(chain_ids) if atom_records else None,
+        chain_ids=chain_ids,
+        blank_chain_atom_count=sum(1 for record in atom_records if not record.get("chain_id")),
+        blank_chain_residue_count=inspection.blank_chain_residue_count
+        if inspection is not None
+        else 0,
         bond_count=bond_count,
         link_candidate_count=len(link_candidates),
     )
@@ -847,6 +946,7 @@ def _build_result_from_records(
         residues=residues,
         noncanonical_residues=noncanonical,
         link_candidates=link_candidates,
+        inspection_summary=inspection,
         metadata=metadata,
         diagnostics=diagnostics,
     )
@@ -1003,6 +1103,13 @@ def _format_residue_id(
         number = f"idx{residue_index}"
     insertion = insertion_code or ""
     return f"{chain_id or '_'}:{residue_name}{number}{insertion}"
+
+
+def _residue_number_from_id(residue_id: str) -> int | None:
+    """Extract a residue number from a formatted diagnostics residue ID."""
+    residue_label = residue_id.split(":", maxsplit=1)[-1]
+    digits = "".join(character for character in residue_label if character.isdigit())
+    return _parse_int(digits)
 
 
 def _parse_int(value: Any) -> int | None:

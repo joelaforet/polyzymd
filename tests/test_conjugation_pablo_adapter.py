@@ -19,7 +19,29 @@ from polyzymd.builders.conjugation.pablo_adapter import (
     PabloIngestionResult,
     PabloIngestor,
 )
+from polyzymd.builders.conjugation.structure_inspection import inspect_pdb_structure
 from polyzymd.config.schema import ConjugationChainPolicyConfig, ConjugationConfig
+
+
+def _pdb_atom(
+    serial: int,
+    atom_name: str,
+    residue_name: str,
+    chain_id: str,
+    residue_number: int,
+    x: float,
+    y: float,
+    z: float,
+    *,
+    record_name: str = "ATOM",
+    element: str = "C",
+) -> str:
+    """Format one fixed-width PDB atom line for structure inspection tests."""
+    return (
+        f"{record_name:<6}{serial:5d} {atom_name:<4} {residue_name:>3} {chain_id:1}"
+        f"{residue_number:4d}    {x:8.3f}{y:8.3f}{z:8.3f}"
+        f"  1.00  0.00          {element:>2}\n"
+    )
 
 
 def test_check_available_returns_version_and_path(monkeypatch):
@@ -226,6 +248,74 @@ def test_ingest_structure_failure_returns_actionable_diagnostics(monkeypatch, tm
     assert "hydrogens" in errors[0].details["action"]
 
 
+def test_structure_inspection_detects_chain_c_covalent_glycan_link(tmp_path):
+    """Protein-to-chain-C glycan LINK evidence should not trigger a chain-C warning."""
+    structure = tmp_path / "linked_glycan.pdb"
+    structure.write_text(
+        _pdb_atom(1, "ND2", "ASN", "A", 10, 0.0, 0.0, 0.0, element="N")
+        + _pdb_atom(2, "C1", "NAG", "C", 1, 1.4, 0.0, 0.0, record_name="HETATM")
+        + "LINK         ND2 ASN A  10                  C1  NAG C   1\n"
+        + "END\n"
+    )
+
+    inspection = inspect_pdb_structure(structure)
+
+    assert inspection.atom_count == 2
+    assert inspection.residue_count == 2
+    assert inspection.covalent_attachment_candidates
+    assert inspection.covalent_attachment_candidates[0].candidate_residue_name == "NAG"
+    assert not any("outside chain C" in warning for warning in inspection.convention_warnings)
+
+
+def test_structure_inspection_warns_about_blank_chains(tmp_path):
+    """Blank chain IDs should be reported as warning-only diagnostics."""
+    structure = tmp_path / "blank_chain.pdb"
+    structure.write_text(
+        _pdb_atom(1, "CA", "ALA", "", 1, 0.0, 0.0, 0.0)
+        + _pdb_atom(2, "CB", "ALA", "", 1, 1.5, 0.0, 0.0)
+        + "END\n"
+    )
+
+    inspection = inspect_pdb_structure(structure)
+
+    assert inspection.blank_chain_atom_count == 2
+    assert inspection.blank_chain_residue_count == 1
+    assert any("Blank chain IDs" in warning for warning in inspection.convention_warnings)
+
+
+def test_structure_inspection_warns_protein_outside_chain_a(tmp_path):
+    """Protein residues outside chain A should warn rather than error."""
+    structure = tmp_path / "protein_chain_b.pdb"
+    structure.write_text(_pdb_atom(1, "CA", "LYS", "B", 5, 0.0, 0.0, 0.0) + "END\n")
+
+    inspection = inspect_pdb_structure(structure)
+
+    assert inspection.protein_like_canonical_residue_count == 1
+    assert any("chain A" in warning for warning in inspection.convention_warnings)
+    assert inspection.covalent_attachment_candidates == []
+
+
+def test_structure_inspection_dirty_pdb_keeps_free_ligand_non_covalent(tmp_path):
+    """Water, ions, and free ligands should not become covalent PTM candidates."""
+    structure = tmp_path / "dirty_free_ligand.pdb"
+    structure.write_text(
+        _pdb_atom(1, "CA", "ALA", "A", 1, 0.0, 0.0, 0.0)
+        + _pdb_atom(2, "O", "HOH", "D", 1, 5.0, 0.0, 0.0, record_name="HETATM", element="O")
+        + _pdb_atom(3, "NA", "NA", "D", 2, 6.0, 0.0, 0.0, record_name="HETATM", element="NA")
+        + _pdb_atom(4, "C1", "CIT", "B", 3, 7.0, 0.0, 0.0, record_name="HETATM")
+        + "END\n"
+    )
+
+    inspection = inspect_pdb_structure(structure)
+
+    assert inspection.water_ion_solvent_like_residue_count == 2
+    assert inspection.ligand_cocrystal_like_residue_count == 1
+    assert [residue.residue_name for residue in inspection.noncanonical_residue_candidates] == [
+        "CIT"
+    ]
+    assert inspection.covalent_attachment_candidates == []
+
+
 def test_builder_diagnostics_include_polymerist_shim_warning(monkeypatch):
     """Enabled builder diagnostics should include shim details when relevant."""
     import polyzymd.builders.conjugation.builder as builder_module
@@ -302,6 +392,52 @@ def test_builder_diagnostics_include_pablo_availability(monkeypatch, tmp_path):
     assert pablo_events[0]["details"]["available"] is True
 
 
+def test_poc_5fyj_structure_inspection_reports_compatibility_diagnostics():
+    """The glycosylated 5FYJ POC should inspect without raising errors."""
+    structure = (
+        Path(__file__).parents[1]
+        / "src"
+        / "polyzymd"
+        / "builders"
+        / "conjugation"
+        / "poc"
+        / "5fyj-monomer-threeGlycans.pdb"
+    )
+    if not structure.exists():
+        pytest.skip("POC conjugation structure is not present")
+
+    inspection = inspect_pdb_structure(structure)
+
+    assert inspection.atom_count > 0
+    assert inspection.residue_count > 0
+    assert inspection.noncanonical_residue_candidates or inspection.compatibility_warnings
+    assert inspection.convention_warnings or inspection.compatibility_warnings
+
+
+def test_poc_1lyz_structure_inspection_detects_blank_polymer_like_residues():
+    """The PEGylated lysozyme guide POC should flag blank chains and PME-like residues."""
+    structure = (
+        Path(__file__).parents[1]
+        / "src"
+        / "polyzymd"
+        / "builders"
+        / "conjugation"
+        / "poc"
+        / "1LYZ_conj.pdb"
+    )
+    if not structure.exists():
+        pytest.skip("POC conjugation structure is not present")
+
+    inspection = inspect_pdb_structure(structure)
+
+    polymer_names = {residue.residue_name for residue in inspection.polymer_ptm_candidates}
+
+    assert inspection.atom_count > 0
+    assert inspection.blank_chain_atom_count > 0
+    assert any("Blank chain IDs" in warning for warning in inspection.convention_warnings)
+    assert "PME" in polymer_names or "PEG" in polymer_names or "PLL" in polymer_names
+
+
 def test_poc_structure_ingestion_smoke_reports_clear_result():
     """POC structures should produce a clear Pablo ingestion result or diagnostic."""
     structure = (
@@ -316,7 +452,11 @@ def test_poc_structure_ingestion_smoke_reports_clear_result():
     if not structure.exists():
         pytest.skip("POC conjugation structure is not present")
 
-    result = PabloIngestor(policy=None).ingest_structure(
+    ingestor = PabloIngestor(policy=None)
+    if not ingestor.probe_available().available:
+        pytest.skip("OpenFF Pablo is unavailable in this environment")
+
+    result = ingestor.ingest_structure(
         structure,
         chain_policy=ConjugationChainPolicyConfig(),
     )
