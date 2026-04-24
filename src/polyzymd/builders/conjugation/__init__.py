@@ -1,13 +1,55 @@
-"""Polymer-protein covalent conjugation builder.
+"""Covalent modification builders for PolyzyMD."""
 
-This package implements the conjugation workflow for covalently linking
-reactive polymers to protein residues (e.g., NHS ester + LYS-NZ -> amide bond).
+from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
+from polyzymd.builders.conjugation.diagnostics import (
+    ConjugationDiagnostic,
+    ConjugationDiagnosticsReport,
+    DiagnosticCode,
+    DiagnosticSeverity,
+    write_diagnostics_report,
+)
+from polyzymd.builders.conjugation.exceptions import (
+    ConjugationError,
+    ConjugationNotImplementedError,
+    PabloIngestionError,
+)
+from polyzymd.builders.conjugation.metadata import (
+    ChainPolicyMetadata,
+    ComponentMetadata,
+    ComponentRole,
+    ConjugationMetadata,
+    save_metadata,
+)
+from polyzymd.builders.conjugation.models import ConjugationBuildResult
+from polyzymd.builders.conjugation.pablo_adapter import (
+    PabloAvailability,
+    PabloIngestor,
+    PabloStructurePreflight,
+)
+from polyzymd.builders.conjugation.polymerist_compat import (
+    ensure_polymerist_py312_compat,
+    import_polymerist_building,
+)
 
-See GitHub issue #51 for the full design and POC validation results.
-
-Subpackages
------------
-poc/
-    Proof-of-concept notebooks and scripts that validated the approach.
-    These are reference implementations, not production code.
-"""
+__all__ = [
+    "ChainPolicyMetadata",
+    "ComponentMetadata",
+    "ComponentRole",
+    "ConjugationBuildResult",
+    "ConjugationDiagnostic",
+    "ConjugationDiagnosticsReport",
+    "ConjugationError",
+    "ConjugationMetadata",
+    "ConjugationNotImplementedError",
+    "CovalentModificationBuilder",
+    "DiagnosticCode",
+    "DiagnosticSeverity",
+    "PabloAvailability",
+    "PabloIngestionError",
+    "PabloIngestor",
+    "PabloStructurePreflight",
+    "save_metadata",
+    "ensure_polymerist_py312_compat",
+    "import_polymerist_building",
+    "write_diagnostics_report",
+]
