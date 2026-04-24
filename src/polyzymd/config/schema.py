@@ -425,17 +425,83 @@ class CcdLookupPolicy(str, Enum):
     CUSTOM_ONLY = "custom_only"
 
 
+class ConjugationCcdCrosslinkConfig(BaseModel):
+    """CCD/Pablo crosslink definition for noncanonical residue bonds."""
+
+    residues: tuple[str, str] = Field(
+        ...,
+        description="Two residue names participating in the crosslink",
+    )
+    linking_atoms: tuple[str, str] = Field(
+        ...,
+        description="Two atom names joined by the crosslink bond",
+    )
+    leaving_atoms: tuple[tuple[str, ...], tuple[str, ...]] = Field(
+        ...,
+        description="Two leaving-atom name lists removed by the crosslink",
+    )
+    bond_order: int | float = Field(
+        1,
+        gt=0,
+        description="Positive Pablo bond order for the crosslink",
+    )
+
+    @field_validator("residues", "linking_atoms")
+    @classmethod
+    def validate_two_nonempty_names(cls, value: tuple[str, str]) -> tuple[str, str]:
+        """Validate required two-name crosslink fields.
+
+        Parameters
+        ----------
+        value : tuple of str
+            Residue names or linking atom names.
+
+        Returns
+        -------
+        tuple of str
+            Uppercase names with surrounding whitespace removed.
+        """
+        normalized = tuple(item.strip().upper() for item in value)
+        if len(normalized) != 2 or any(not item for item in normalized):
+            raise ValueError("Crosslink fields must contain exactly two non-empty names")
+        return normalized
+
+    @field_validator("leaving_atoms")
+    @classmethod
+    def validate_two_leaving_atom_lists(
+        cls, value: tuple[tuple[str, ...], tuple[str, ...]]
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Validate and normalize leaving atom groups.
+
+        Parameters
+        ----------
+        value : tuple of tuple of str
+            Leaving atom groups aligned with the two residues.
+
+        Returns
+        -------
+        tuple of tuple of str
+            Uppercase leaving atom groups.
+        """
+        if len(value) != 2:
+            raise ValueError("Crosslinks must define exactly two leaving atom lists")
+        normalized = tuple(tuple(atom.strip().upper() for atom in group) for group in value)
+        if any(any(not atom for atom in group) for group in normalized):
+            raise ValueError("Leaving atom names must be non-empty")
+        return normalized
+
+
 class ConjugationCcdPabloPolicyConfig(BaseModel):
     """CCD and OpenFF Pablo policy for covalent modification workflows.
 
     The fields are intentionally lightweight placeholders for Phase 0-1. Future
-    phases will translate these settings into Pablo residue libraries, custom
-    residue definitions, and crosslink policies.
+    phases will translate these settings into Pablo residue libraries and
+    custom residue definitions.
     """
 
     enabled: bool = Field(True, description="Use OpenFF Pablo for CCD-aware PDB ingestion")
     lookup_policy: CcdLookupPolicy = Field(
-        CcdLookupPolicy.OFFLINE_CACHED,
+        CcdLookupPolicy.AUTO_DOWNLOAD,
         description="How CCD entries may be resolved for Pablo ingestion",
     )
     ccd_cache_directory: Path | None = Field(
@@ -446,6 +512,10 @@ class ConjugationCcdPabloPolicyConfig(BaseModel):
         default_factory=list,
         description="Optional custom residue definition files for future Pablo adapters",
     )
+    crosslinks: list[ConjugationCcdCrosslinkConfig] = Field(
+        default_factory=list,
+        description="Pablo residue-library crosslinks to add before PDB loading",
+    )
     use_canonical_atom_names: bool = Field(
         False,
         description="Whether Pablo should replace input atom names with canonical names",
@@ -455,7 +525,7 @@ class ConjugationCcdPabloPolicyConfig(BaseModel):
     def validate_policy_consistency(self) -> "ConjugationCcdPabloPolicyConfig":
         """Validate lightweight Pablo policy combinations."""
         if self.lookup_policy == CcdLookupPolicy.AUTO_DOWNLOAD and not self.enabled:
-            raise ValueError("CCD auto-download policy requires Pablo policy to be enabled")
+            raise ValueError("CCD auto-download policy requires ccd_pablo.enabled to be true")
         return self
 
 
@@ -645,6 +715,27 @@ class ConjugationConfig(BaseModel):
         default_factory=ConjugationDiagnosticsConfig,
         description="Diagnostics output policy",
     )
+
+    @model_validator(mode="after")
+    def validate_source_backed_pablo_policy(self) -> "ConjugationConfig":
+        """Validate Pablo policy for source-backed workflows.
+
+        Returns
+        -------
+        ConjugationConfig
+            Validated conjugation configuration.
+        """
+        if not self.enabled:
+            return self
+
+        source_backed = (
+            self.mode == ConjugationMode.INGEST_EXISTING or self.source_pdb_path is not None
+        )
+        if source_backed and not self.ccd_pablo.enabled:
+            raise ValueError(
+                "source-backed conjugation workflows require ccd_pablo.enabled to be true"
+            )
+        return self
 
 
 # =============================================================================
@@ -1600,6 +1691,25 @@ class SimulationConfig(BaseModel):
     gromacs: GromacsEngineConfig = Field(
         default_factory=GromacsEngineConfig, description="GROMACS engine settings"
     )
+
+    @model_validator(mode="after")
+    def resolve_conjugation_source_pdb_path(self) -> "SimulationConfig":
+        """Default ingest-existing conjugation sources to the enzyme PDB path.
+
+        Returns
+        -------
+        SimulationConfig
+            Validated simulation configuration with a resolved conjugation
+            source path when needed.
+        """
+        if (
+            self.conjugation is not None
+            and self.conjugation.enabled
+            and self.conjugation.mode == ConjugationMode.INGEST_EXISTING
+            and self.conjugation.source_pdb_path is None
+        ):
+            self.conjugation.source_pdb_path = self.enzyme.pdb_path
+        return self
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "SimulationConfig":

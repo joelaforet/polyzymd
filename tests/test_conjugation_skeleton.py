@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -9,7 +10,14 @@ from pydantic import ValidationError
 
 from polyzymd.builders.conjugation import CovalentModificationBuilder
 from polyzymd.builders.conjugation.exceptions import ConjugationNotImplementedError
+from polyzymd.builders.conjugation.pablo_adapter import (
+    PabloAvailability,
+    PabloIngestionResult,
+    PabloIngestor,
+)
 from polyzymd.config.schema import (
+    CcdLookupPolicy,
+    ConjugationCcdPabloPolicyConfig,
     ConjugationChainPolicyConfig,
     ConjugationConfig,
     SimulationConfig,
@@ -85,6 +93,16 @@ class TestConjugationConfigParsing:
         assert config.conjugation.mode.value == "ingest_existing"
         assert config.conjugation.source_pdb_path.name == "prebuilt_conjugate.pdb"
 
+    def test_enabled_ingest_existing_defaults_to_enzyme_pdb_path(self):
+        """Ingest-existing configs should use enzyme.pdb_path when source is omitted."""
+        data = _minimal_simulation_config_data()
+        data["conjugation"] = {"enabled": True, "mode": "ingest_existing"}
+
+        config = SimulationConfig.model_validate(data)
+
+        assert config.conjugation is not None
+        assert config.conjugation.source_pdb_path == config.enzyme.pdb_path
+
     def test_enabled_construct_block_parses(self):
         """Enabled construct config parses attachment placeholders."""
         data = _minimal_simulation_config_data()
@@ -118,6 +136,85 @@ class TestConjugationConfigParsing:
             ConjugationConfig(
                 enabled=True,
                 ccd_pablo={"lookup_policy": "always_guess"},
+            )
+
+    def test_ingest_existing_accepts_attachments(self):
+        """Ingest-existing mode can accept additional attachment requests."""
+        config = ConjugationConfig(
+            enabled=True,
+            mode="ingest_existing",
+            attachments=[
+                {
+                    "name": "lys23-peg",
+                    "moiety": {"name": "PEG", "smiles": "COCCO"},
+                }
+            ],
+        )
+
+        assert config.attachments[0].name == "lys23-peg"
+
+    def test_construct_accepts_source_pdb_path(self):
+        """Construct mode can ingest a prepared base PDB before new attachments."""
+        config = ConjugationConfig(
+            enabled=True,
+            mode="construct",
+            source_pdb_path="prebuilt_conjugate.pdb",
+        )
+
+        assert config.source_pdb_path == Path("prebuilt_conjugate.pdb")
+
+    def test_ingest_existing_rejects_disabled_pablo_policy(self):
+        """Ingest-existing mode requires Pablo validation to be enabled."""
+        with pytest.raises(ValidationError, match="ccd_pablo.enabled"):
+            ConjugationConfig(
+                enabled=True,
+                mode="ingest_existing",
+                ccd_pablo={"enabled": False},
+            )
+
+    def test_source_backed_construct_rejects_disabled_pablo_policy(self):
+        """Construct workflows with a source PDB require Pablo ingestion."""
+        with pytest.raises(ValidationError, match="ccd_pablo.enabled"):
+            ConjugationConfig(
+                enabled=True,
+                mode="construct",
+                source_pdb_path="prebuilt_conjugate.pdb",
+                ccd_pablo={"enabled": False},
+            )
+
+    def test_pablo_policy_defaults_to_auto_download(self):
+        """CCD/Pablo lookup policy should default to auto-download."""
+        policy = ConjugationCcdPabloPolicyConfig()
+
+        assert policy.lookup_policy == CcdLookupPolicy.AUTO_DOWNLOAD
+
+    def test_pablo_crosslink_config_validates_shape(self):
+        """Crosslink config should require paired residues, atoms, and leaving groups."""
+        policy = ConjugationCcdPabloPolicyConfig(
+            crosslinks=[
+                {
+                    "residues": ("LYX", "NHX"),
+                    "linking_atoms": ("NZ", "C"),
+                    "leaving_atoms": (("HZ1",), ("O1", "O2")),
+                    "bond_order": 1,
+                }
+            ]
+        )
+
+        assert policy.crosslinks[0].residues == ("LYX", "NHX")
+        assert policy.crosslinks[0].leaving_atoms == (("HZ1",), ("O1", "O2"))
+
+    def test_pablo_crosslink_config_rejects_invalid_shape(self):
+        """Invalid crosslink tuple lengths should fail validation."""
+        with pytest.raises(ValidationError):
+            ConjugationCcdPabloPolicyConfig(
+                crosslinks=[
+                    {
+                        "residues": ("LYX", "NHX"),
+                        "linking_atoms": ("NZ",),
+                        "leaving_atoms": (("HZ1",), ("O1", "O2")),
+                    }
+                ]
             )
 
     def test_chain_policy_defaults(self):
@@ -231,3 +328,125 @@ class TestSystemBuilderConjugationHook:
 
         with pytest.raises(ConjugationNotImplementedError, match="not implemented"):
             builder._apply_conjugation(config)
+
+    def test_ingest_existing_passes_cached_pablo_result_to_builder(self, monkeypatch, tmp_path):
+        """SystemBuilder should parse ingest-existing sources once and reuse the result."""
+        from polyzymd.builders.system_builder import SystemBuilder
+
+        source = tmp_path / "prebuilt_conjugate.pdb"
+        source.write_text("HEADER    TEST\nEND\n")
+        cached_topology = object()
+        calls = []
+
+        def fake_ingest_structure(self, path, *, chain_policy=None, output_dir=None):
+            """Return one successful cached Pablo ingestion result."""
+            calls.append(Path(path))
+            return PabloIngestionResult(
+                success=True,
+                path=Path(path),
+                suffix=".pdb",
+                pablo=PabloAvailability(available=True),
+                topology=cached_topology,
+            )
+
+        monkeypatch.setattr(PabloIngestor, "ingest_structure", fake_ingest_structure)
+
+        builder = SystemBuilder.__new__(SystemBuilder)
+        builder._combined_topology = object()
+        builder._enzyme_topology = object()
+        builder._working_dir = tmp_path
+        builder._n_enzyme_molecules = 1
+        builder._n_substrate_molecules = 0
+        builder._n_polymer_chains = 0
+
+        config = MagicMock()
+        config.enzyme.pdb_path = source
+        config.conjugation = ConjugationConfig(
+            enabled=True,
+            mode="ingest_existing",
+            source_pdb_path=source,
+        )
+
+        assert builder._apply_conjugation(config) is cached_topology
+        assert calls == [source]
+
+    def test_construct_with_source_uses_pablo_without_mode_conflict(self, monkeypatch, tmp_path):
+        """Construct workflows with a source PDB should ingest the base structure."""
+        from polyzymd.builders.system_builder import SystemBuilder
+
+        source = tmp_path / "prepared_base.pdb"
+        source.write_text("HEADER    TEST\nEND\n")
+        cached_topology = object()
+        calls = []
+
+        def fake_ingest_structure(self, path, *, chain_policy=None, output_dir=None):
+            """Return one successful cached Pablo ingestion result."""
+            calls.append(Path(path))
+            return PabloIngestionResult(
+                success=True,
+                path=Path(path),
+                suffix=".pdb",
+                pablo=PabloAvailability(available=True),
+                topology=cached_topology,
+            )
+
+        monkeypatch.setattr(PabloIngestor, "ingest_structure", fake_ingest_structure)
+
+        builder = SystemBuilder.__new__(SystemBuilder)
+        builder._combined_topology = object()
+        builder._enzyme_topology = object()
+        builder._working_dir = tmp_path
+        builder._n_enzyme_molecules = 1
+        builder._n_substrate_molecules = 0
+        builder._n_polymer_chains = 0
+
+        config = MagicMock()
+        config.enzyme.pdb_path = tmp_path / "enzyme.pdb"
+        config.conjugation = ConjugationConfig(
+            enabled=True,
+            mode="construct",
+            source_pdb_path=source,
+        )
+
+        assert builder._apply_conjugation(config) is cached_topology
+        assert calls == [source]
+
+    def test_ingest_existing_cached_pablo_failure_is_hard_error(self, monkeypatch, tmp_path):
+        """Failed cached Pablo validation should stop the pre-solvation hook."""
+        from polyzymd.builders.system_builder import SystemBuilder
+
+        source = tmp_path / "prebuilt_conjugate.pdb"
+        source.write_text("HEADER    TEST\nEND\n")
+        calls = []
+
+        def fake_ingest_structure(self, path, *, chain_policy=None, output_dir=None):
+            """Return one failed cached Pablo ingestion result."""
+            calls.append(Path(path))
+            return PabloIngestionResult(
+                success=False,
+                path=Path(path),
+                suffix=".pdb",
+                pablo=PabloAvailability(available=True),
+            )
+
+        monkeypatch.setattr(PabloIngestor, "ingest_structure", fake_ingest_structure)
+
+        builder = SystemBuilder.__new__(SystemBuilder)
+        builder._combined_topology = object()
+        builder._enzyme_topology = object()
+        builder._working_dir = tmp_path
+        builder._n_enzyme_molecules = 1
+        builder._n_substrate_molecules = 0
+        builder._n_polymer_chains = 0
+
+        config = MagicMock()
+        config.enzyme.pdb_path = source
+        config.conjugation = ConjugationConfig(
+            enabled=True,
+            mode="ingest_existing",
+            source_pdb_path=source,
+        )
+
+        with pytest.raises(ConjugationNotImplementedError, match="usable topology"):
+            builder._apply_conjugation(config)
+        assert calls == [source]
