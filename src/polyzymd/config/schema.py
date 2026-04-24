@@ -405,6 +405,249 @@ class PolymerConfig(BaseModel):
 
 
 # =============================================================================
+# Covalent Modification / Conjugation Configuration
+# =============================================================================
+
+
+class ConjugationMode(str, Enum):
+    """Supported covalent modification workflow modes."""
+
+    INGEST_EXISTING = "ingest_existing"
+    CONSTRUCT = "construct"
+    MIXED = "mixed"
+
+
+class CcdLookupPolicy(str, Enum):
+    """Policies for resolving CCD-backed residue definitions."""
+
+    OFFLINE_CACHED = "offline_cached"
+    AUTO_DOWNLOAD = "auto_download"
+    CUSTOM_ONLY = "custom_only"
+
+
+class ConjugationCcdPabloPolicyConfig(BaseModel):
+    """CCD and OpenFF Pablo policy for covalent modification workflows.
+
+    The fields are intentionally lightweight placeholders for Phase 0-1. Future
+    phases will translate these settings into Pablo residue libraries, custom
+    residue definitions, and crosslink policies.
+    """
+
+    enabled: bool = Field(True, description="Use OpenFF Pablo for CCD-aware PDB ingestion")
+    lookup_policy: CcdLookupPolicy = Field(
+        CcdLookupPolicy.OFFLINE_CACHED,
+        description="How CCD entries may be resolved for Pablo ingestion",
+    )
+    ccd_cache_directory: Path | None = Field(
+        None,
+        description="Optional CCD cache directory for Pablo",
+    )
+    residue_definition_files: list[Path] = Field(
+        default_factory=list,
+        description="Optional custom residue definition files for future Pablo adapters",
+    )
+    use_canonical_atom_names: bool = Field(
+        False,
+        description="Whether Pablo should replace input atom names with canonical names",
+    )
+
+    @model_validator(mode="after")
+    def validate_policy_consistency(self) -> "ConjugationCcdPabloPolicyConfig":
+        """Validate lightweight Pablo policy combinations."""
+        if self.lookup_policy == CcdLookupPolicy.AUTO_DOWNLOAD and not self.enabled:
+            raise ValueError("CCD auto-download policy requires Pablo policy to be enabled")
+        return self
+
+
+class ConjugationChainPolicyConfig(BaseModel):
+    """Chain assignment policy for covalently modified systems.
+
+    The defaults preserve the PolyzyMD convention: protein chain A, substrate
+    chain B, all added moieties/PTMs/glycans/polymers chain C, and solvent on
+    chain D and later.
+    """
+
+    protein_chain: str = Field("A", min_length=1, max_length=1, description="Protein chain ID")
+    substrate_chain: str = Field("B", min_length=1, max_length=1, description="Substrate chain ID")
+    moiety_chain: str = Field(
+        "C",
+        min_length=1,
+        max_length=1,
+        description="Chain ID for added moieties, PTMs, glycans, and polymers",
+    )
+    solvent_start_chain: str = Field(
+        "D",
+        min_length=1,
+        max_length=1,
+        description="First chain ID reserved for solvent and ions",
+    )
+
+    @field_validator("protein_chain", "substrate_chain", "moiety_chain", "solvent_start_chain")
+    @classmethod
+    def validate_chain_id(cls, value: str) -> str:
+        """Validate and normalize a single-character PDB chain ID."""
+        normalized = value.upper()
+        if not normalized.isalpha():
+            raise ValueError("Chain IDs must be single alphabetic characters")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_chain_order(self) -> "ConjugationChainPolicyConfig":
+        """Ensure component chain IDs remain distinct and ordered."""
+        component_chains = [self.protein_chain, self.substrate_chain, self.moiety_chain]
+        if len(set(component_chains)) != len(component_chains):
+            raise ValueError("Protein, substrate, and moiety chain IDs must be distinct")
+        if self.solvent_start_chain in component_chains:
+            raise ValueError("Solvent start chain must not overlap component chains")
+        if ord(self.solvent_start_chain) <= ord(self.moiety_chain):
+            raise ValueError("Solvent start chain must sort after the moiety chain")
+        return self
+
+
+class ConjugationSiteConfig(BaseModel):
+    """Placeholder for a covalent attachment site."""
+
+    chain_id: str = Field("A", min_length=1, max_length=1, description="Site chain ID")
+    residue_name: str | None = Field(None, description="Residue name, such as LYS")
+    residue_number: int | None = Field(None, description="Residue number in the input structure")
+    atom_name: str | None = Field(None, description="Reactive atom name, such as NZ")
+    selector: str | None = Field(None, description="Future selection expression for site discovery")
+
+    @field_validator("chain_id")
+    @classmethod
+    def validate_site_chain(cls, value: str) -> str:
+        """Normalize a site chain ID."""
+        normalized = value.upper()
+        if not normalized.isalpha():
+            raise ValueError("Site chain ID must be a single alphabetic character")
+        return normalized
+
+
+class ConjugationMoietyConfig(BaseModel):
+    """Placeholder for a covalent moiety, PTM, glycan, or polymer."""
+
+    name: str = Field(..., description="Moiety identifier")
+    residue_name: str | None = Field(None, max_length=4, description="Residue name for the moiety")
+    input_path: Path | None = Field(None, description="Optional PDB/SDF path for the moiety")
+    smiles: str | None = Field(
+        None, description="Optional SMILES for future construction workflows"
+    )
+    role: str = Field("moiety", description="User-facing component role label")
+
+
+class ConjugationMechanismConfig(BaseModel):
+    """Placeholder for covalent attachment chemistry."""
+
+    name: str = Field("unspecified", description="Mechanism identifier")
+    reaction_smarts: str | None = Field(
+        None, description="Future reaction SMARTS for graph surgery"
+    )
+    site_atom: str | None = Field(None, description="Reactive atom on the biomolecule")
+    moiety_atom: str | None = Field(None, description="Reactive atom on the moiety")
+    leaving_atoms: list[str] = Field(
+        default_factory=list,
+        description="Atoms removed during the covalent reaction in future phases",
+    )
+
+
+class ConjugationPlacementConfig(BaseModel):
+    """Placeholder for covalent moiety placement settings."""
+
+    strategy: str = Field("preserve_existing", description="Placement strategy placeholder")
+    target_bond_length_angstrom: float | None = Field(
+        None,
+        gt=0.0,
+        description="Optional target bond length for future placement workflows",
+    )
+    clash_cutoff_angstrom: float = Field(
+        1.5,
+        gt=0.0,
+        description="Steric clash cutoff for future placement workflows",
+    )
+
+
+class ConjugationAttachmentConfig(BaseModel):
+    """Placeholder for one requested covalent attachment."""
+
+    name: str = Field(..., description="Attachment identifier")
+    enabled: bool = Field(True, description="Whether this attachment should be applied")
+    site: ConjugationSiteConfig = Field(default_factory=ConjugationSiteConfig)
+    moiety: ConjugationMoietyConfig
+    mechanism: ConjugationMechanismConfig = Field(default_factory=ConjugationMechanismConfig)
+    placement: ConjugationPlacementConfig = Field(default_factory=ConjugationPlacementConfig)
+
+
+class ConjugationChargeConfig(BaseModel):
+    """Charge patching policy for future covalent junction workflows."""
+
+    local_junction_patching: bool = Field(
+        True,
+        description="Enable future local charge patching around covalent junctions",
+    )
+    patch_radius_bonds: int = Field(
+        3,
+        ge=0,
+        description="Bond radius for future local junction charge patches",
+    )
+    preserve_total_charge: bool = Field(True, description="Preserve integer total system charge")
+    integer_tolerance: float = Field(
+        1.0e-4,
+        gt=0.0,
+        description="Tolerance for future integer-charge diagnostics",
+    )
+
+
+class ConjugationDiagnosticsConfig(BaseModel):
+    """Diagnostics policy for covalent modification workflows."""
+
+    enabled: bool = Field(True, description="Write covalent modification diagnostics")
+    output_filename: str = Field(
+        "conjugation_diagnostics.json",
+        description="Diagnostics report filename relative to the working directory",
+    )
+    metadata_filename: str = Field(
+        "conjugation_metadata.json",
+        description="Component metadata filename relative to the working directory",
+    )
+    fail_on_warnings: bool = Field(False, description="Promote future warnings to errors")
+
+
+class ConjugationConfig(BaseModel):
+    """Top-level covalent modification configuration skeleton.
+
+    This Phase 0-1 model is backwards-compatible because the top-level field is
+    optional on :class:`SimulationConfig` and defaults to disabled behavior.
+    """
+
+    enabled: bool = Field(False, description="Enable covalent modification workflow")
+    mode: ConjugationMode = Field(
+        ConjugationMode.INGEST_EXISTING,
+        description="Covalent modification workflow mode",
+    )
+    source_pdb_path: Path | None = Field(
+        None,
+        description="Optional pre-conjugated PDB path for ingest_existing mode",
+    )
+    ccd_pablo: ConjugationCcdPabloPolicyConfig = Field(
+        default_factory=ConjugationCcdPabloPolicyConfig,
+        description="CCD/Pablo ingestion policy",
+    )
+    chain_policy: ConjugationChainPolicyConfig = Field(
+        default_factory=ConjugationChainPolicyConfig,
+        description="Component chain assignment policy",
+    )
+    attachments: list[ConjugationAttachmentConfig] = Field(
+        default_factory=list,
+        description="Requested covalent attachments for future construction workflows",
+    )
+    charge: ConjugationChargeConfig = Field(default_factory=ConjugationChargeConfig)
+    diagnostics: ConjugationDiagnosticsConfig = Field(
+        default_factory=ConjugationDiagnosticsConfig,
+        description="Diagnostics output policy",
+    )
+
+
+# =============================================================================
 # Solvent Configuration
 # =============================================================================
 
@@ -1334,6 +1577,10 @@ class SimulationConfig(BaseModel):
     enzyme: EnzymeConfig = Field(..., description="Enzyme configuration")
     substrate: SubstrateConfig | None = Field(None, description="Substrate configuration")
     polymers: PolymerConfig | None = Field(None, description="Polymer configuration")
+    conjugation: ConjugationConfig | None = Field(
+        None,
+        description="Covalent modification / conjugation configuration",
+    )
     solvent: SolventConfig = Field(
         default_factory=SolventConfig, description="Solvent configuration"
     )
