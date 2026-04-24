@@ -4,7 +4,9 @@
 #
 # ENVIRONMENTS
 # ------------
-#   build       — structure building, PDB prep, local use (no CUDA required)
+#   build       — structure building, PDB prep, local use (Python 3.11; Polymerist)
+#   pablo       — OpenFF Pablo ingestion experiments (Python >=3.12; no Polymerist)
+#   conjugation-py312 — Polymerist + OpenFF Pablo experiment (Python 3.12; no EspalomaCharge)
 #   cuda-12-4   — CUDA 12.4 driver (e.g. CU Boulder Blanca): OpenMM 8.1
 #   cuda-12-6   — CUDA 12.6 driver (e.g. PSC Bridges2):      OpenMM 8.4
 #
@@ -128,6 +130,93 @@ openmm = ">=8.1,<8.5"
 
 
 # =============================================================================
+# FEATURE: pablo
+# OpenFF Pablo is currently distributed from GitHub and requires Python >=3.12.
+# Keep this in its own environment because Polymerist is currently limited to
+# Python 3.11 in practice. Do not combine this feature with feature.base unless
+# Polymerist and Pablo support the same Python version range.
+# =============================================================================
+[feature.pablo.dependencies]
+python              = ">=3.12,<3.13"
+numpy               = "1.26.*"
+pydantic            = ">=2.5"
+pyyaml              = ">=6.0"
+click               = ">=8.1"
+packaging           = ">=23.0"
+pytest              = ">=9.0.2,<10"
+openff-toolkit-base = ">=0.17.1"
+rustworkx           = ">=0.14"
+pyxdg               = ">=0.28"
+gemmi               = ">=0.6"
+
+[feature.pablo.pypi-dependencies]
+polyzymd = { path = ".", editable = true }
+openff-pablo = { git = "https://github.com/openforcefield/openff-pablo.git", tag = "v0.2.2" }
+
+
+# =============================================================================
+# FEATURE: conjugation-py312
+# Targeted Python 3.12 experiment for the conjugation builder stack.
+#
+# PolyzyMD intentionally does NOT support EspalomaCharge in this environment:
+# espaloma-charge pulls the DGL/Torch/GraphBolt stack, which has been fragile on
+# Python 3.12 and can break imports before PolyzyMD gets to its own NAGL charge
+# path. Keep espaloma-charge / espaloma_charge / dgl out of direct dependencies;
+# if dgl appears, it should only be as a transitive solver result that must be
+# diagnosed before promoting this environment.
+#
+# Polymerist currently imports the private importlib.resources._common.get_package
+# helper removed in Python 3.12. PolyzyMD ships a temporary lazy shim in
+# builders.conjugation.polymerist_compat so Polymerist can still be imported in
+# this experiment until upstream switches to public importlib.resources APIs.
+#
+# setuptools<82 is required because gmso/mbuild still import pkg_resources at
+# runtime. Removing this pin will break Polymerist's dependency stack until those
+# imports are replaced upstream.
+#
+# In this parallel worktree, use `PYTHONNOUSERSITE=1 pixi run -e conjugation-py312 ...`
+# if user-site editable installs from another worktree shadow this checkout.
+# =============================================================================
+[feature.conjugation-py312.dependencies]
+python              = ">=3.12,<3.13"
+numpy               = "1.26.*"
+pydantic            = ">=2.5"
+pyyaml              = ">=6.0"
+click               = ">=8.1"
+packaging           = ">=23.0"
+pytest              = ">=9.0.2,<10"
+ruff                = ">=0.14"
+setuptools          = "<82.0.0"       # gmso/mbuild still import pkg_resources
+rustworkx           = ">=0.14"        # OpenFF Pablo runtime dependency
+pyxdg               = ">=0.28"        # OpenFF Pablo CCD cache dependency
+gemmi               = ">=0.6"         # OpenFF Pablo mmCIF/PDBx parsing dependency
+
+# OpenFF stack — conda-forge only for compiled/runtime chemistry packages.
+openff-toolkit      = ">=0.17.1"
+openff-interchange  = ">=0.5"
+openff-units        = ">=0.2"
+openff-forcefields  = ">=2024.0"
+openff-amber-ff-ports = ">=2024.0"
+openff-nagl         = ">=0.5"
+openff-nagl-models  = ">=2025.0"
+pytorch             = ">=2.6,<2.9"
+
+# Polymer/conjugation and simulation stack.
+mbuild              = ">=1.2"
+openbabel           = ">=3.1"
+rdkit               = ">=2023.09"
+pdbfixer            = ">=1.9"
+packmol             = ">=20.0"
+ambertools          = ">=23.3"
+openmm              = ">=8.1,<8.5"
+
+[feature.conjugation-py312.pypi-dependencies]
+polyzymd = { path = ".", editable = true }
+polymerist = ">=1.0.1"
+openff-pablo = { git = "https://github.com/openforcefield/openff-pablo.git", tag = "v0.2.2" }
+
+
+# =============================================================================
 # FEATURE: cuda-12-6
 # CUDA 12.6 driver — e.g. PSC Bridges2 (V100, sm_70)
 # OpenMM 8.4 is the tested version for this CUDA/GPU combination.
@@ -184,6 +273,8 @@ conjugation-sim = { cmd = "python src/polyzymd/builders/conjugation/poc/run_conj
 # =============================================================================
 [environments]
 build           = { features = ["base", "openmm-any"], no-default-feature = true, solve-group = "build" }
+pablo           = { features = ["pablo"], no-default-feature = true, solve-group = "pablo" }
+conjugation-py312 = { features = ["conjugation-py312"], no-default-feature = true, solve-group = "conjugation-py312" }
 cuda-12-6       = { features = ["base", "cuda-12-6"], no-default-feature = true, solve-group = "cuda-12-6" }
 cuda-12-4       = { features = ["base", "cuda-12-4"], no-default-feature = true, solve-group = "cuda-12-4" }
 conjugation-poc = { features = ["base", "openmm-any", "conjugation-poc"], no-default-feature = true, solve-group = "conjugation-poc" }
