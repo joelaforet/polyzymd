@@ -70,6 +70,13 @@ from polyzymd.builders.conjugation.sites import (
     match_site_rule,
     normalize_attachment_site,
 )
+from polyzymd.builders.conjugation.structure_normalization import (
+    PDBChainNormalizationAction,
+    PDBCleanlinessIssue,
+    PDBNormalizationPlan,
+    plan_pdb_chain_normalization,
+    write_normalized_pdb,
+)
 
 __all__ = [
     "AddedBond",
@@ -96,6 +103,9 @@ __all__ = [
     "NhsLysGraphEditPlan",
     "NhsReactiveGroup",
     "PabloAvailability",
+    "PDBChainNormalizationAction",
+    "PDBCleanlinessIssue",
+    "PDBNormalizationPlan",
     "PabloIngestionError",
     "PabloIngestor",
     "PabloIngestionResult",
@@ -122,6 +132,8 @@ __all__ = [
     "match_site_rule",
     "normalize_attachment_site",
     "normalize_moiety_descriptor",
+    "plan_pdb_chain_normalization",
     "plan_nhs_lys_amide",
+    "write_normalized_pdb",
     "write_diagnostics_report",
 ]
