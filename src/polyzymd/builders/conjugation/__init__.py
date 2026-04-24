@@ -1,6 +1,31 @@
 """Covalent modification builders for PolyzyMD."""
 
 from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
+from polyzymd.builders.conjugation.construction import (
+    ModifierConstructionResult,
+    ModifierConstructionSettings,
+    construct_explicit_pdb_linkage,
+    construct_modifier_linked_protein,
+)
+from polyzymd.builders.conjugation.contracts import (
+    ExplicitLinkageContract,
+    LinkageBond,
+    PabloCrosslinkRequirement,
+    PdbAtomSelector,
+    ReactiveEndpoint,
+    ResolvedAttachmentPlan,
+    explicit_linkage_contract_from_config,
+    parse_pdb_atom_records,
+    placed_fragment_from_resolved_plan,
+    resolve_explicit_linkage_contract,
+)
+from polyzymd.builders.conjugation.crosslinks import (
+    CrosslinkValidationResult,
+    ExplicitCrosslinkRequirement,
+    MissingPabloCrosslinkError,
+    require_explicit_pablo_crosslink,
+    require_pablo_crosslink_requirement,
+)
 from polyzymd.builders.conjugation.diagnostics import (
     ConjugationDiagnostic,
     ConjugationDiagnosticsReport,
@@ -21,6 +46,14 @@ from polyzymd.builders.conjugation.execution import (
     extract_explicit_rdkit_execution_request,
 )
 from polyzymd.builders.conjugation.graph import AddedBond, RdkitGraphEditResult
+from polyzymd.builders.conjugation.linkers import (
+    ModifierLinkageSpec,
+    ModifierLinker,
+    NhsLysModifierLinker,
+    ProteinLinkSite,
+    resolve_modifier_leaving_atoms,
+    resolve_modifier_reactive_atom,
+)
 from polyzymd.builders.conjugation.mechanism_library import (
     get_builtin_mechanism,
     list_builtin_mechanisms,
@@ -42,6 +75,7 @@ from polyzymd.builders.conjugation.metadata import (
     save_metadata,
 )
 from polyzymd.builders.conjugation.models import ConjugationBuildResult
+from polyzymd.builders.conjugation.modifier import GeneratedModifierFragment, PlacedModifierFragment
 from polyzymd.builders.conjugation.moieties import MoietyDescriptor, normalize_moiety_descriptor
 from polyzymd.builders.conjugation.nhs_lys import (
     LysineReactiveSite,
@@ -61,14 +95,26 @@ from polyzymd.builders.conjugation.pablo_adapter import (
     PabloStructureCounts,
     PabloStructurePreflight,
 )
+from polyzymd.builders.conjugation.parameterization import (
+    InterchangeParameterizationResult,
+    InterchangeParameterizationSettings,
+    create_interchange_from_pablo_topology,
+)
 from polyzymd.builders.conjugation.pdb_assembly import (
     CrosslinkedPdbAssemblyOptions,
     CrosslinkedPdbAssemblyResult,
     NhsLysPdbAttachment,
     PdbAtomRecord,
+    PdbLinkageAttachment,
     PlacedPolymerFragment,
     canonicalize_poc_residue_name,
     write_crosslinked_pdb,
+)
+from polyzymd.builders.conjugation.placement import (
+    PackmolModifierPlacementResult,
+    PackmolModifierPlacementSettings,
+    place_modifier_with_packmol,
+    place_modifier_with_resolved_plan,
 )
 from polyzymd.builders.conjugation.polymer_fragment import (
     GeneratedPolymerFragment,
@@ -95,6 +141,13 @@ from polyzymd.builders.conjugation.sites import (
     match_site_rule,
     normalize_attachment_site,
 )
+from polyzymd.builders.conjugation.smoke import (
+    VacuumSmokeResult,
+    VacuumSmokeSettings,
+    run_restrained_vacuum_smoke,
+    validate_finite_energy,
+    validate_finite_positions,
+)
 from polyzymd.builders.conjugation.structure_normalization import (
     PDBChainNormalizationAction,
     PDBCleanlinessIssue,
@@ -119,18 +172,34 @@ __all__ = [
     "ConjugationNotImplementedError",
     "CrosslinkedPdbAssemblyOptions",
     "CrosslinkedPdbAssemblyResult",
+    "CrosslinkValidationResult",
     "CovalentModificationBuilder",
     "DiagnosticCode",
     "DiagnosticSeverity",
+    "ExplicitCrosslinkRequirement",
+    "ExplicitLinkageContract",
     "ExplicitNhsReactiveGroup",
+    "GeneratedModifierFragment",
     "GeneratedPolymerFragment",
     "GraphEditPlan",
+    "InterchangeParameterizationResult",
+    "InterchangeParameterizationSettings",
+    "LinkageBond",
     "LysineReactiveSite",
+    "MissingPabloCrosslinkError",
+    "ModifierConstructionResult",
+    "ModifierConstructionSettings",
+    "ModifierLinkageSpec",
+    "ModifierLinker",
     "MoietyDescriptor",
     "MoietyReactiveGroup",
     "NhsLysGraphEditPlan",
+    "NhsLysModifierLinker",
     "NhsLysPdbAttachment",
     "NhsReactiveGroup",
+    "PackmolModifierPlacementResult",
+    "PackmolModifierPlacementSettings",
+    "PabloCrosslinkRequirement",
     "PabloAvailability",
     "PDBChainNormalizationAction",
     "PDBCleanlinessIssue",
@@ -143,6 +212,9 @@ __all__ = [
     "PabloStructureCounts",
     "PabloStructurePreflight",
     "PdbAtomRecord",
+    "PdbAtomSelector",
+    "PdbLinkageAttachment",
+    "PlacedModifierFragment",
     "PlacedPolymerFragment",
     "POC_EGPMA_SMILES",
     "POC_NHS_SMILES",
@@ -153,17 +225,26 @@ __all__ = [
     "PolymerMonomerRecipe",
     "PolymerRecipe",
     "ReactionMechanism",
+    "ReactiveEndpoint",
+    "ResolvedAttachmentPlan",
     "RdkitGraphEditResult",
     "RdkitGraphEditExecutionRequest",
     "RdkitGraphEditExecutionResult",
     "RdkitGraphEditExecutionSummary",
     "SiteAtomRule",
+    "ProteinLinkSite",
+    "VacuumSmokeResult",
+    "VacuumSmokeSettings",
     "save_metadata",
     "canonicalize_poc_residue_name",
+    "construct_modifier_linked_protein",
+    "construct_explicit_pdb_linkage",
+    "create_interchange_from_pablo_topology",
     "ensure_polymerist_py312_compat",
     "detect_nhs_reactive_group",
     "execute_nhs_lys_amide_rdkit_graph_edit",
     "extract_explicit_rdkit_execution_request",
+    "explicit_linkage_contract_from_config",
     "extract_lysine_reactive_site",
     "generate_polymerist_smoke_polymer",
     "generated_fragment_from_polymerist_pdb",
@@ -174,9 +255,21 @@ __all__ = [
     "match_site_rule",
     "normalize_attachment_site",
     "normalize_moiety_descriptor",
+    "parse_pdb_atom_records",
+    "place_modifier_with_packmol",
+    "place_modifier_with_resolved_plan",
+    "placed_fragment_from_resolved_plan",
     "plan_pdb_chain_normalization",
     "plan_nhs_lys_amide",
+    "require_explicit_pablo_crosslink",
+    "require_pablo_crosslink_requirement",
+    "resolve_explicit_linkage_contract",
+    "resolve_modifier_leaving_atoms",
+    "resolve_modifier_reactive_atom",
+    "run_restrained_vacuum_smoke",
     "sbma_egpma_nhs_recipe",
+    "validate_finite_energy",
+    "validate_finite_positions",
     "write_normalized_pdb",
     "write_crosslinked_pdb",
     "write_diagnostics_report",
