@@ -53,6 +53,9 @@ class PDBChainNormalizationAction(BaseModel):
     insertion_code: str | None = None
     source_chain: str = ""
     target_chain: str
+    target_residue_number: int
+    target_res_seq: str
+    target_insertion_code: str | None = None
     category: str
     reason: str
 
@@ -73,7 +76,28 @@ class PDBNormalizationPlan(BaseModel):
     issues: list[PDBCleanlinessIssue] = Field(default_factory=list)
     actions: list[PDBChainNormalizationAction] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    source_chains_collapsed: dict[str, list[str]] = Field(default_factory=dict)
+    chain_id_change_count: int = 0
+    residue_number_change_count: int = 0
+    default_output_path: Path | None = None
     output_recommendations: list[str] = Field(default_factory=list)
+
+
+def default_cleaned_pdb_path(path: Path | str) -> Path:
+    """Return the default normalized PDB output path.
+
+    Parameters
+    ----------
+    path : Path or str
+        Input PDB path.
+
+    Returns
+    -------
+    Path
+        Path beside the input named ``<stem>_cleaned.pdb``.
+    """
+    pdb_path = Path(path)
+    return pdb_path.with_name(f"{pdb_path.stem}_cleaned{pdb_path.suffix or '.pdb'}")
 
 
 def plan_pdb_chain_normalization(
@@ -129,6 +153,7 @@ def plan_pdb_chain_normalization(
             continue
         issues.append(_unlinked_noncanonical_issue(residue))
 
+    _assign_target_residue_numbers(actions)
     error_issues = [issue for issue in issues if issue.severity == ERROR_SEVERITY]
     warnings = _build_normalization_warnings(actions)
     clean = not error_issues
@@ -145,6 +170,12 @@ def plan_pdb_chain_normalization(
         issues=issues,
         actions=actions,
         warnings=warnings,
+        source_chains_collapsed=_source_chains_by_target(actions),
+        chain_id_change_count=sum(1 for action in actions if _chain_id_changed(action)),
+        residue_number_change_count=sum(
+            1 for action in actions if _residue_number_or_insertion_changed(action)
+        ),
+        default_output_path=default_cleaned_pdb_path(inspection.path),
         output_recommendations=_build_output_recommendations(inspection.path, clean),
     )
 
@@ -154,7 +185,7 @@ def write_normalized_pdb(
     output_path: Path | str,
     plan: PDBNormalizationPlan | None = None,
 ) -> Path:
-    """Write a normalized PDB copy by changing only ATOM/HETATM chain IDs.
+    """Write a normalized PDB copy using a validated normalization plan.
 
     Parameters
     ----------
@@ -192,7 +223,7 @@ def write_normalized_pdb(
 
     action_lookup = {_action_key(action): action for action in normalization_plan.actions}
     output_lines = [
-        _rewrite_atom_chain_id(line, action_lookup)
+        _rewrite_pdb_line(line, action_lookup)
         for line in source_path.read_text(errors="replace").splitlines(keepends=True)
     ]
     destination_path.parent.mkdir(parents=True, exist_ok=True)
@@ -319,8 +350,48 @@ def _action_for_residue(
         insertion_code=residue.insertion_code,
         source_chain=residue.chain_id,
         target_chain=target_chain,
+        target_residue_number=0,
+        target_res_seq="0",
+        target_insertion_code=None,
         category=residue.category,
         reason=reason,
+    )
+
+
+def _assign_target_residue_numbers(actions: list[PDBChainNormalizationAction]) -> None:
+    """Assign first-seen continuous residue numbers within output chains."""
+    next_residue_number = {
+        POLYZMD_PROTEIN_CHAIN: 1,
+        POLYZMD_MOIETY_CHAIN: 1,
+    }
+    for action in actions:
+        target_number = next_residue_number[action.target_chain]
+        action.target_residue_number = target_number
+        action.target_res_seq = str(target_number)
+        action.target_insertion_code = None
+        next_residue_number[action.target_chain] = target_number + 1
+
+
+def _source_chains_by_target(actions: list[PDBChainNormalizationAction]) -> dict[str, list[str]]:
+    """Return source chains collapsed into each target chain in first-seen order."""
+    collapsed: dict[str, list[str]] = {}
+    for action in actions:
+        chains = collapsed.setdefault(action.target_chain, [])
+        source_chain = action.source_chain or "blank"
+        if source_chain not in chains:
+            chains.append(source_chain)
+    return collapsed
+
+
+def _chain_id_changed(action: PDBChainNormalizationAction) -> bool:
+    """Return whether a residue changes chain ID in the normalized copy."""
+    return action.source_chain != action.target_chain
+
+
+def _residue_number_or_insertion_changed(action: PDBChainNormalizationAction) -> bool:
+    """Return whether a residue changes residue number or insertion code."""
+    return action.res_seq != action.target_res_seq or (action.insertion_code or None) != (
+        action.target_insertion_code or None
     )
 
 
@@ -408,12 +479,20 @@ def _build_normalization_warnings(actions: list[PDBChainNormalizationAction]) ->
             "Covalently attached noncanonical residues will be normalized to chain C from "
             f"chain(s): {', '.join(moiety_source_chains)}"
         )
+    residue_number_changes = sum(
+        1 for action in actions if _residue_number_or_insertion_changed(action)
+    )
+    if residue_number_changes:
+        warnings.append(
+            "Residue numbers and insertion codes will be renumbered continuously within "
+            f"normalized chains ({residue_number_changes} residue mappings changed)"
+        )
     return warnings
 
 
 def _build_output_recommendations(path: Path, clean: bool) -> list[str]:
     """Build actionable output recommendations for a normalization plan."""
-    cleaned_name = f"{path.stem}_cleaned{path.suffix or '.pdb'}"
+    cleaned_name = default_cleaned_pdb_path(path).name
     if clean:
         return [
             "Plan is valid for an explicit normalized copy; use write_normalized_pdb with an "
@@ -426,20 +505,88 @@ def _build_output_recommendations(path: Path, clean: bool) -> list[str]:
     ]
 
 
-def _rewrite_atom_chain_id(
+def _rewrite_pdb_line(
     line: str,
     action_lookup: dict[tuple[str, str, str | None, str | None], PDBChainNormalizationAction],
 ) -> str:
-    """Rewrite the fixed-width chain column for planned ATOM/HETATM records."""
+    """Rewrite supported PDB records according to residue normalization actions."""
+    if line.startswith(("ATOM  ", "HETATM")):
+        return _rewrite_atom_residue_identity(line, action_lookup)
+    if line.startswith("LINK"):
+        return _rewrite_link_residue_identity(line, action_lookup)
+    return line
+
+
+def _rewrite_atom_residue_identity(
+    line: str,
+    action_lookup: dict[tuple[str, str, str | None, str | None], PDBChainNormalizationAction],
+) -> str:
+    """Rewrite ATOM/HETATM chain, residue number, and insertion-code fields."""
     body = line.rstrip("\r\n")
     newline = line[len(body) :]
-    if not body.startswith(("ATOM  ", "HETATM")):
-        return line
     action = action_lookup.get(_line_residue_key(body))
     if action is None:
         return line
-    padded = body.ljust(22)
-    return f"{padded[:21]}{action.target_chain}{padded[22:]}{newline}"
+    padded = body.ljust(27)
+    target_res_seq = _format_target_res_seq(action)
+    target_insertion_code = action.target_insertion_code or " "
+    return (
+        f"{padded[:21]}{action.target_chain}{target_res_seq}"
+        f"{target_insertion_code}{padded[27:]}{newline}"
+    )
+
+
+def _rewrite_link_residue_identity(
+    line: str,
+    action_lookup: dict[tuple[str, str, str | None, str | None], PDBChainNormalizationAction],
+) -> str:
+    """Rewrite LINK residue chain, residue number, and insertion-code fields."""
+    side_1, side_2 = _parse_link_sides(line.rstrip("\r\n"))
+    action_1 = action_lookup.get(_link_side_key(side_1))
+    action_2 = action_lookup.get(_link_side_key(side_2))
+    if action_1 is None and action_2 is None:
+        return line
+
+    body = line.rstrip("\r\n")
+    newline = line[len(body) :]
+    padded = body.ljust(57)
+    if action_1 is not None:
+        padded = _replace_link_side(
+            padded, action_1, chain_index=21, res_seq_start=22, icode_index=26
+        )
+    if action_2 is not None:
+        padded = _replace_link_side(
+            padded, action_2, chain_index=51, res_seq_start=52, icode_index=56
+        )
+    return f"{padded.rstrip()}{newline}"
+
+
+def _replace_link_side(
+    line: str,
+    action: PDBChainNormalizationAction,
+    *,
+    chain_index: int,
+    res_seq_start: int,
+    icode_index: int,
+) -> str:
+    """Return a LINK record with one residue side updated in fixed-width columns."""
+    target_res_seq = _format_target_res_seq(action)
+    target_insertion_code = action.target_insertion_code or " "
+    return (
+        f"{line[:chain_index]}{action.target_chain}"
+        f"{line[chain_index + 1 : res_seq_start]}{target_res_seq}"
+        f"{target_insertion_code}{line[icode_index + 1 :]}"
+    )
+
+
+def _format_target_res_seq(action: PDBChainNormalizationAction) -> str:
+    """Format a target residue number for a four-character PDB residue field."""
+    if action.target_residue_number < -999 or action.target_residue_number > 9999:
+        raise ValueError(
+            "PDB residue numbers must fit the four-character resSeq field; "
+            f"target {action.target_residue_number} for {action.residue_id} is unsupported"
+        )
+    return f"{action.target_residue_number:4d}"
 
 
 def _action_key(action: PDBChainNormalizationAction) -> tuple[str, str, str | None, str | None]:
@@ -459,6 +606,16 @@ def _line_residue_key(line: str) -> tuple[str, str, str | None, str | None]:
         (line[17:20].strip() or "").upper(),
         line[22:26].strip() or None,
         line[26:27].strip() or None,
+    )
+
+
+def _link_side_key(side: dict[str, Any]) -> tuple[str, str, str | None, str | None]:
+    """Return a residue identity key from a parsed LINK side."""
+    return (
+        side["chain_id"],
+        side["residue_name"],
+        side["res_seq"],
+        side["insertion_code"],
     )
 
 
