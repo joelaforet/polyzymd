@@ -10,6 +10,7 @@ from polyzymd.config.comparison import (
 )
 from polyzymd.config.loader import load_config, save_config
 from polyzymd.config.schema import (
+    ConjugationConfig,
     EnzymeConfig,
     OutputConfig,
     PolymerConfig,
@@ -23,6 +24,7 @@ from polyzymd.config.schema import (
 
 __all__ = [
     "SimulationConfig",
+    "ConjugationConfig",
     "EnzymeConfig",
     "SubstrateConfig",
     "PolymerConfig",
