@@ -12,7 +12,10 @@ from polyzymd.builders.conjugation.diagnostics import (
     DiagnosticSeverity,
     write_diagnostics_report,
 )
-from polyzymd.builders.conjugation.exceptions import ConjugationNotImplementedError
+from polyzymd.builders.conjugation.exceptions import (
+    ConjugationNotImplementedError,
+    PabloIngestionError,
+)
 from polyzymd.builders.conjugation.metadata import (
     ConjugationMetadata,
     chain_policy_from_config,
@@ -120,24 +123,56 @@ class CovalentModificationBuilder:
 
         if self.config.mode == ConjugationMode.INGEST_EXISTING:
             ingestor = PabloIngestor(self.config.ccd_pablo)
-            availability = ingestor.probe_available()
-            report.add(
-                DiagnosticCode.PABLO_ADAPTER,
-                "OpenFF Pablo availability checked for future ingestion",
-                severity=(
-                    DiagnosticSeverity.INFO
-                    if availability.available
-                    else DiagnosticSeverity.WARNING
-                ),
-                details=availability.model_dump(mode="json"),
+            try:
+                ingestion = ingestor.ingest_structure(
+                    self.config.source_pdb_path,
+                    chain_policy=self.config.chain_policy,
+                    output_dir=self.output_dir,
+                )
+            except PabloIngestionError as exc:
+                report.add(
+                    DiagnosticCode.PABLO_INGESTION,
+                    "Pablo ingestion input validation failed",
+                    severity=DiagnosticSeverity.ERROR,
+                    details={"error": str(exc)},
+                )
+                self._write_sidecars(metadata, report)
+                raise ConjugationNotImplementedError(
+                    "Pablo ingestion could not produce a usable topology because the source "
+                    f"structure path is invalid: {exc}"
+                ) from exc
+
+            metadata = ingestion.metadata.model_copy(
+                update={
+                    "attachments": [
+                        attachment.model_dump(mode="json") for attachment in self.config.attachments
+                    ],
+                    "notes": [
+                        *ingestion.metadata.notes,
+                        "Phase 2 Pablo ingestion did not run Interchange parameterization or solvation",
+                    ],
+                }
             )
+            report.diagnostics.extend(ingestion.diagnostics)
+            self._write_sidecars(metadata, report)
+            if ingestion.success and ingestion.topology is not None:
+                return ConjugationBuildResult(
+                    topology=ingestion.topology,
+                    metadata=metadata,
+                    diagnostics=report,
+                )
+
             report.add(
                 DiagnosticCode.UNSUPPORTED_OPERATION,
-                "OpenFF Pablo ingestion is not implemented in the Phase 0-1 skeleton",
+                "Pablo ingestion did not return a usable topology for downstream parameterization",
                 severity=DiagnosticSeverity.ERROR,
+                details={"pablo_success": ingestion.success},
             )
             self._write_sidecars(metadata, report)
-            return ingestor.ingest_existing(self.config.source_pdb_path)
+            raise ConjugationNotImplementedError(
+                "Pablo ingestion was attempted but did not return a usable topology. Review "
+                "conjugation_diagnostics.json and pablo_ingestion_result.json for parser details."
+            )
 
         report.add(
             DiagnosticCode.UNSUPPORTED_OPERATION,

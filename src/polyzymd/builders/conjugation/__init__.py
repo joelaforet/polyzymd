@@ -23,7 +23,11 @@ from polyzymd.builders.conjugation.metadata import (
 from polyzymd.builders.conjugation.models import ConjugationBuildResult
 from polyzymd.builders.conjugation.pablo_adapter import (
     PabloAvailability,
+    PabloIngestionResult,
     PabloIngestor,
+    PabloLinkCandidate,
+    PabloResidueSummary,
+    PabloStructureCounts,
     PabloStructurePreflight,
 )
 from polyzymd.builders.conjugation.polymerist_compat import (
@@ -47,6 +51,10 @@ __all__ = [
     "PabloAvailability",
     "PabloIngestionError",
     "PabloIngestor",
+    "PabloIngestionResult",
+    "PabloLinkCandidate",
+    "PabloResidueSummary",
+    "PabloStructureCounts",
     "PabloStructurePreflight",
     "save_metadata",
     "ensure_polymerist_py312_compat",

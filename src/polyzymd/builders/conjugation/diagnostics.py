@@ -26,6 +26,9 @@ class DiagnosticCode(str, Enum):
     UNSUPPORTED_OPERATION = "unsupported_operation"
     CHARGE_PARAMETERIZATION = "charge_parameterization"
     PABLO_ADAPTER = "pablo_adapter"
+    PABLO_INGESTION = "pablo_ingestion"
+    COMPONENT_METADATA = "component_metadata"
+    LINK_DISCOVERY = "link_discovery"
     POLYMERIST_COMPAT = "polymerist_compat"
 
 
