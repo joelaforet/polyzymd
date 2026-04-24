@@ -89,6 +89,7 @@ from polyzymd.builders.conjugation.polymerist_compat import (
     ensure_polymerist_py312_compat,
     import_polymerist_building,
 )
+from polyzymd.builders.conjugation.polymerist_pdb import generated_fragment_from_polymerist_pdb
 from polyzymd.builders.conjugation.sites import (
     AttachmentSite,
     match_site_rule,
@@ -165,6 +166,7 @@ __all__ = [
     "extract_explicit_rdkit_execution_request",
     "extract_lysine_reactive_site",
     "generate_polymerist_smoke_polymer",
+    "generated_fragment_from_polymerist_pdb",
     "get_builtin_mechanism",
     "import_polymerist_building",
     "list_builtin_mechanisms",
