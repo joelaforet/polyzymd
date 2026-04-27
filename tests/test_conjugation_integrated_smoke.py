@@ -9,7 +9,7 @@ Run on Blanca GPU resources with a command similar to::
 
     module load slurm/blanca
     salloc ...
-    PYTHONNOUSERSITE=1 POLYZYMD_RUN_CONJUGATION_SMOKE=1 \
+    PYTHONNOUSERSITE=1 POLYZYMD_RUN_CONJUGATION_PABLO_SMOKE=1 \
       pixi run -e conjugation-cuda-12-4 pytest \
       tests/test_conjugation_integrated_smoke.py -v
 
@@ -53,7 +53,7 @@ from polyzymd.builders.conjugation.smoke import VacuumSmokeSettings, run_restrai
 
 T = TypeVar("T")
 
-SMOKE_ENV_VAR = "POLYZYMD_RUN_CONJUGATION_SMOKE"
+SMOKE_ENV_VAR = "POLYZYMD_RUN_CONJUGATION_PABLO_SMOKE"
 SMOKE_PLATFORM_ENV_VAR = "POLYZYMD_CONJUGATION_SMOKE_PLATFORM"
 SMOKE_MINIMIZATION_ITERS_ENV_VAR = "POLYZYMD_CONJUGATION_SMOKE_MIN_ITERS"
 SMOKE_NVT_STEPS_ENV_VAR = "POLYZYMD_CONJUGATION_SMOKE_NVT_STEPS"
@@ -208,7 +208,7 @@ def test_opt_in_integrated_conjugation_physics_smoke(tmp_path: Path):
 def _require_conjugation_stack_or_skip() -> str:
     """Skip unless the opt-in chemistry stack and OpenMM platform are available."""
     if os.environ.get(SMOKE_ENV_VAR) != "1":
-        pytest.skip(f"Set {SMOKE_ENV_VAR}=1 to run the integrated conjugation physics smoke")
+        pytest.skip(f"Set {SMOKE_ENV_VAR}=1 to run the Pablo conjugation physics smoke")
     if shutil.which("packmol") is None:
         pytest.skip("Packmol binary is not available on PATH")
 

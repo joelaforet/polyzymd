@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from polyzymd.builders.conjugation import CovalentModificationBuilder
+from polyzymd.builders.conjugation import linkers as linkers_module
 from polyzymd.builders.conjugation.diagnostics import DiagnosticCode
 from polyzymd.builders.conjugation.exceptions import (
     ConjugationError,
     ConjugationNotImplementedError,
 )
+from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker, resolve_modifier_nhs_atoms
 from polyzymd.builders.conjugation.nhs_lys import (
     detect_nhs_reactive_group,
     execute_nhs_lys_amide_rdkit_graph_edit,
     extract_lysine_reactive_site,
     plan_nhs_lys_amide,
 )
+from polyzymd.builders.conjugation.polymer_fragment import PolymerFragmentAtom
 from polyzymd.builders.conjugation.sites import AttachmentSite
 from polyzymd.config.schema import ConjugationConfig
 
@@ -308,6 +313,82 @@ def test_extract_lysine_site_from_mocked_topology_atom_metadata():
     assert plan.site_hydrogen_indices_to_remove == (3,)
 
 
+def test_nhs_lys_linker_resolves_poc_like_hydrogen_names_by_rdkit(tmp_path):
+    """NHS-Lys convenience should resolve NZ hydrogens by chemistry, not names."""
+    protein_path = _lysine_pdb(
+        tmp_path,
+        hydrogens=(("H10", 2.0, 0.7, 0.0), ("H11", 2.0, -0.7, 0.0), ("H13", 2.0, 0.0, 0.7)),
+    )
+    linker = NhsLysModifierLinker(target_residue_number=23)
+
+    site = linker.resolve_site(protein_path)
+    attachment = linker.attachment(protein_path)
+
+    assert site.atom.atom_name == "NZ"
+    assert tuple(atom.atom_name for atom in site.removable_hydrogens) == ("H11", "H13")
+    assert attachment.nz_hydrogen_atom_names_to_remove == ("H11", "H13")
+    assert attachment.nz_hydrogen_atom_serials_to_remove == (7, 8)
+    assert any("Protonated lysine" in warning for warning in site.warnings)
+
+
+def test_nhs_lys_linker_resolves_canonical_hz_names_by_rdkit(tmp_path):
+    """Canonical HZ names should work because they are N-bound hydrogens."""
+    protein_path = _lysine_pdb(
+        tmp_path,
+        hydrogens=(("HZ1", 2.0, 0.7, 0.0), ("HZ2", 2.0, -0.7, 0.0), ("HZ3", 2.0, 0.0, 0.7)),
+    )
+    linker = NhsLysModifierLinker(target_residue_number=23)
+
+    site = linker.resolve_site(protein_path)
+
+    assert tuple(atom.atom_name for atom in site.removable_hydrogens) == ("HZ2", "HZ3")
+
+
+def test_nhs_lys_linker_fails_clearly_without_required_hydrogens(tmp_path):
+    """Missing NZ hydrogens should fail until normalization policy is implemented."""
+    protein_path = _lysine_pdb(tmp_path, hydrogens=())
+    linker = NhsLysModifierLinker(target_residue_number=23)
+
+    with pytest.raises(ValueError, match="Automatic hydrogen addition"):
+        linker.resolve_site(protein_path)
+
+
+def test_resolve_modifier_nhs_atoms_warns_when_rdkit_detection_fallback_succeeds(
+    monkeypatch, caplog
+):
+    """Explicit modifier selectors should warn when RDKit NHS detection fails."""
+    modifier = _modifier_with_explicit_selectors(rdkit_mol=object())
+
+    def fail_detection(mol):
+        """Raise a synthetic RDKit detection failure."""
+        raise ValueError(f"no NHS group in {type(mol).__name__}")
+
+    monkeypatch.setattr(linkers_module, "detect_nhs_reactive_group", fail_detection)
+
+    with caplog.at_level("WARNING"):
+        reactive_atom, leaving_atoms = resolve_modifier_nhs_atoms(modifier)
+
+    assert reactive_atom.atom_name == "C1"
+    assert tuple(atom.atom_name for atom in leaving_atoms) == ("O1",)
+    assert "RDKit NHS detection failed" in caplog.text
+    assert "explicit generated-fragment fallback reactive atom C1" in caplog.text
+    assert "no NHS group" in caplog.text
+
+
+def test_resolve_modifier_nhs_atoms_reports_rdkit_and_fallback_failures(monkeypatch):
+    """Modifier NHS resolution should report both RDKit and fallback failures."""
+    modifier = _modifier_with_explicit_selectors(rdkit_mol=object(), reactive_atom_index=None)
+
+    def fail_detection(mol):
+        """Raise a synthetic RDKit detection failure."""
+        raise ValueError(f"no NHS group in {type(mol).__name__}")
+
+    monkeypatch.setattr(linkers_module, "detect_nhs_reactive_group", fail_detection)
+
+    with pytest.raises(ValueError, match="RDKit NHS detection failed.*Fallback failure"):
+        resolve_modifier_nhs_atoms(modifier)
+
+
 def test_builder_executes_one_nhs_lys_graph_edit_with_explicit_indices():
     """Builder should run one explicit NHS-Lys graph edit and keep topology unchanged."""
     topology = "unchanged-topology"
@@ -427,3 +508,93 @@ def test_builder_result_serialization_excludes_rdkit_mols_and_keeps_summary():
     assert "graph_edit_results" not in dumped
     assert dumped["graph_edit_summaries"][0]["mechanism"] == "nhs_lys_amide"
     assert "product_mol" not in str(dumped)
+
+
+def _modifier_with_explicit_selectors(*, rdkit_mol, reactive_atom_index=0):
+    """Build a modifier-like object with explicit generated-fragment selectors."""
+    atoms = (
+        PolymerFragmentAtom(
+            atom_index=0,
+            serial=1,
+            atom_name="C1",
+            residue_name="NHX",
+            residue_number=1,
+            chain_id="C",
+            x=0.0,
+            y=0.0,
+            z=0.0,
+            element="C",
+        ),
+        PolymerFragmentAtom(
+            atom_index=1,
+            serial=2,
+            atom_name="O1",
+            residue_name="NHX",
+            residue_number=1,
+            chain_id="C",
+            x=1.0,
+            y=0.0,
+            z=0.0,
+            element="O",
+        ),
+    )
+    return SimpleNamespace(
+        atoms=atoms,
+        name="test-modifier",
+        rdkit_mol=rdkit_mol,
+        reactive_atom_serial=None,
+        reactive_atom_index=reactive_atom_index,
+        reactive_atom_name=None,
+        leaving_atom_serials=(),
+        leaving_atom_indices=(1,),
+        leaving_atom_names=(),
+    )
+
+
+def _lysine_pdb(tmp_path, *, hydrogens):
+    """Create a lysine PDB with configurable NZ hydrogen names."""
+    path = tmp_path / "lysine.pdb"
+    lines = [
+        _pdb_atom(1, "N", "LYS", "A", 23, 0.0, 0.0, 0.0, element="N"),
+        _pdb_atom(2, "CA", "LYS", "A", 23, 1.0, 0.0, 0.0),
+        _pdb_atom(3, "CD", "LYS", "A", 23, 1.3, 0.0, 0.0),
+        _pdb_atom(4, "CE", "LYS", "A", 23, 1.6, 0.0, 0.0),
+        _pdb_atom(5, "NZ", "LYS", "A", 23, 2.0, 0.0, 0.0, element="N"),
+    ]
+    for offset, (name, x_coord, y_coord, z_coord) in enumerate(hydrogens, start=6):
+        lines.append(
+            _pdb_atom(
+                offset,
+                name,
+                "LYS",
+                "A",
+                23,
+                x_coord,
+                y_coord,
+                z_coord,
+                element="H",
+            )
+        )
+    path.write_text("".join(lines) + "END\n", encoding="utf-8")
+    return path
+
+
+def _pdb_atom(
+    serial: int,
+    atom_name: str,
+    residue_name: str,
+    chain_id: str,
+    residue_number: int,
+    x_coord: float,
+    y_coord: float,
+    z_coord: float,
+    *,
+    element: str = "C",
+    record: str = "ATOM",
+) -> str:
+    """Format one PDB atom line for NHS-Lys tests."""
+    return (
+        f"{record:<6}{serial:5d} {atom_name:<4} {residue_name:>3} {chain_id:1}"
+        f"{residue_number:4d}    {x_coord:8.3f}{y_coord:8.3f}{z_coord:8.3f}"
+        f"  1.00  0.00          {element:>2}\n"
+    )
