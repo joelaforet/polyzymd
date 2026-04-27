@@ -148,6 +148,7 @@ def test_reactive_carbon_leaving_group_and_bonds_are_mapped_to_pdb_records(tmp_p
     assert (1, 2) in fragment.bonds
     assert (1, 3) in fragment.bonds
     assert (3, 4) in fragment.bonds
+    assert (1, 2, 1.0) in fragment.bond_orders
     assert all(
         isinstance(source, int) and isinstance(target, int) for source, target in fragment.bonds
     )
@@ -212,6 +213,7 @@ def test_real_polymerist_generation_pdb_converts_to_generated_fragment(tmp_path)
 
     assert len(fragment.atoms) > 0
     assert len(fragment.bonds) > 0
+    assert len(fragment.bond_orders) > 0
     assert fragment.reactive_atom_serial is not None
     assert fragment.reactive_atom_index is not None
     assert fragment.reactive_atom_name is not None

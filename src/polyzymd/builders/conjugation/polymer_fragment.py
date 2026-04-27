@@ -115,6 +115,7 @@ class GeneratedPolymerFragment(BaseModel):
 
     atoms: tuple[PolymerFragmentAtom, ...] = Field(..., min_length=1)
     bonds: tuple[tuple[int | str, int | str], ...] = Field(default_factory=tuple)
+    bond_orders: tuple[tuple[int | str, int | str, float], ...] = Field(default_factory=tuple)
     residues: tuple[PolymerFragmentResidue, ...] = Field(default_factory=tuple)
     sequence: str | None = None
     reactive_atom_serial: int | None = None
@@ -131,6 +132,7 @@ class GeneratedPolymerFragment(BaseModel):
         lines: Iterable[str],
         *,
         bonds: Sequence[tuple[int | str, int | str]] = (),
+        bond_orders: Sequence[tuple[int | str, int | str, float]] = (),
         reactive_atom_serial: int | None = None,
         reactive_atom_index: int | None = None,
         reactive_atom_name: str | None = None,
@@ -148,6 +150,8 @@ class GeneratedPolymerFragment(BaseModel):
             Input PDB lines containing ATOM/HETATM records.
         bonds : sequence of tuple, optional
             Internal polymer bonds by serial, index, or atom name, by default ``()``.
+        bond_orders : sequence of tuple, optional
+            Internal polymer bonds with bond-order metadata, by default ``()``.
         reactive_atom_serial : int or None, optional
             Reactive atom serial selector, by default ``None``.
         reactive_atom_index : int or None, optional
@@ -177,6 +181,7 @@ class GeneratedPolymerFragment(BaseModel):
         return cls.from_atom_records(
             pdb_atoms,
             bonds=bonds,
+            bond_orders=bond_orders,
             reactive_atom_serial=reactive_atom_serial,
             reactive_atom_index=reactive_atom_index,
             reactive_atom_name=reactive_atom_name,
@@ -193,6 +198,7 @@ class GeneratedPolymerFragment(BaseModel):
         atoms: Sequence[PdbAtomRecord | PolymerFragmentAtom | Mapping[str, object]],
         *,
         bonds: Sequence[tuple[int | str, int | str]] = (),
+        bond_orders: Sequence[tuple[int | str, int | str, float]] = (),
         residues: Sequence[PolymerFragmentResidue | Mapping[str, object]] = (),
         reactive_atom_serial: int | None = None,
         reactive_atom_index: int | None = None,
@@ -211,6 +217,8 @@ class GeneratedPolymerFragment(BaseModel):
             Atom records from PDB parsing, Polymerist/RDKit adapters, or tests.
         bonds : sequence of tuple, optional
             Internal polymer bonds by serial, index, or atom name, by default ``()``.
+        bond_orders : sequence of tuple, optional
+            Internal polymer bonds with bond-order metadata, by default ``()``.
         residues : sequence, optional
             Optional explicit residue metadata, by default ``()``.
         reactive_atom_serial : int or None, optional
@@ -244,6 +252,7 @@ class GeneratedPolymerFragment(BaseModel):
         return cls(
             atoms=fragment_atoms,
             bonds=tuple(bonds),
+            bond_orders=tuple(bond_orders),
             residues=fragment_residues,
             sequence=sequence,
             reactive_atom_serial=reactive_atom_serial,
@@ -299,6 +308,7 @@ class GeneratedPolymerFragment(BaseModel):
         return PlacedPolymerFragment(
             atoms=tuple(atom.to_pdb_atom() for atom in self.atoms),
             bonds=self.bonds,
+            bond_orders=self.bond_orders,
             leaving_atom_serials=self.leaving_atom_serials,
             leaving_atom_indices=self.leaving_atom_indices,
             leaving_atom_names=self.leaving_atom_names,

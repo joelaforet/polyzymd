@@ -345,9 +345,10 @@ def plan_nhs_lys_amide(
     reactive_group : NhsReactiveGroup
         Resolved NHS ester reactive group on the moiety.
     site_hydrogen_indices_to_remove : Iterable[int] or None, optional
-        Explicit NZ-bound hydrogens to remove. If omitted, all resolved NZ
-        hydrogens are selected so the future builder must make the final proton
-        policy explicit, by default ``None``.
+        Explicit NZ-bound hydrogens to remove. If omitted, the initial product
+        proton policy keeps the first deterministically ordered hydrogen and
+        removes one hydrogen for neutral lysine or two for protonated lysine, by
+        default ``None``.
 
     Returns
     -------
@@ -358,7 +359,7 @@ def plan_nhs_lys_amide(
         sorted(
             site_hydrogen_indices_to_remove
             if site_hydrogen_indices_to_remove is not None
-            else site.nz_hydrogen_indices
+            else _default_nz_hydrogens_to_remove(site.nz_hydrogen_indices)
         )
     )
     warnings: list[str] = []
@@ -374,6 +375,20 @@ def plan_nhs_lys_amide(
         leaving_group_atom_indices=reactive_group.leaving_group_atom_indices,
         add_bond=(site.nz_atom_index, reactive_group.reactive_carbon_index),
         warnings=tuple(warnings),
+    )
+
+
+def _default_nz_hydrogens_to_remove(hydrogen_indices: Iterable[int]) -> tuple[int, ...]:
+    """Apply the initial NHS-Lys product proton policy to resolved hydrogens."""
+    hydrogens = tuple(sorted(hydrogen_indices))
+    if len(hydrogens) == 3:
+        return hydrogens[1:]
+    if len(hydrogens) == 2:
+        return hydrogens[1:]
+    raise ValueError(
+        "NHS-Lys planning requires explicit lysine NZ hydrogens. Expected 2 neutral or 3 "
+        f"protonated N-bound hydrogens, found {len(hydrogens)}. Automatic hydrogen addition "
+        "or protonation normalization is not implemented."
     )
 
 

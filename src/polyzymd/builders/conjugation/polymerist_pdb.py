@@ -87,6 +87,9 @@ def generated_fragment_from_polymerist_pdb(
     path = Path(pdb_path)
     pdb_atoms = _parse_polymerist_pdb_atoms(path)
     mol = _load_rdkit_pdb(path)
+    bond_order_mol = _load_sdf_bond_order_mol(
+        path.with_suffix(".sdf"), expected_atoms=len(pdb_atoms)
+    )
     rdkit_to_pdb = _map_rdkit_atoms_to_pdb_atoms(mol, pdb_atoms)
     pdb_identity_to_rdkit = {
         _atom_identity(atom): rdkit_index for rdkit_index, atom in rdkit_to_pdb.items()
@@ -99,6 +102,7 @@ def generated_fragment_from_polymerist_pdb(
     residues = _build_residue_records(pdb_atoms, recipe=recipe, sequence=effective_sequence)
 
     bonds = _serial_bonds_from_rdkit_mol(mol, rdkit_to_pdb)
+    bond_orders = _serial_bond_orders_from_rdkit_mol(bond_order_mol or mol, rdkit_to_pdb)
     explicit_reactive_atom = _resolve_optional_single_atom(
         pdb_atoms,
         serial=reactive_atom_serial,
@@ -166,6 +170,7 @@ def generated_fragment_from_polymerist_pdb(
     return GeneratedPolymerFragment.from_atom_records(
         fragment_atoms,
         bonds=bonds,
+        bond_orders=bond_orders,
         residues=residues,
         reactive_atom_serial=reactive_atom.serial,
         reactive_atom_index=reactive_atom.atom_index,
@@ -209,6 +214,25 @@ def _load_rdkit_pdb(path: Path) -> Any:
         raise ValueError(f"RDKit could not read Polymerist PDB connectivity from {path}")
     if mol.GetNumAtoms() == 0:
         raise ValueError(f"RDKit read zero atoms from Polymerist PDB {path}")
+    return mol
+
+
+def _load_sdf_bond_order_mol(path: Path, *, expected_atoms: int) -> Any | None:
+    """Load an optional SDF sidecar carrying authoritative bond orders."""
+    if not path.exists():
+        return None
+
+    from rdkit import Chem
+
+    supplier = Chem.SDMolSupplier(str(path), removeHs=False, sanitize=False)
+    molecules = [mol for mol in supplier if mol is not None and mol.GetNumAtoms() == expected_atoms]
+    if not molecules:
+        return None
+    mol = max(molecules, key=lambda candidate: candidate.GetNumBonds())
+    for atom in mol.GetAtoms():
+        if atom.GetSymbol() == "N" and atom.GetDegree() == 4 and atom.GetFormalCharge() == 0:
+            atom.SetFormalCharge(1)
+    Chem.SanitizeMol(mol)
     return mol
 
 
@@ -310,6 +334,22 @@ def _serial_bonds_from_rdkit_mol(
             raise ValueError("PDB serials are required to emit Polymerist fragment bonds")
         bonds.add(tuple(sorted((begin.serial, end.serial))))
     return tuple(sorted(bonds))
+
+
+def _serial_bond_orders_from_rdkit_mol(
+    mol: Any,
+    rdkit_to_pdb: Mapping[int, PdbAtomRecord],
+) -> tuple[tuple[int, int, float], ...]:
+    """Return RDKit bonds with bond-order metadata as PDB serial records."""
+    bond_orders: set[tuple[int, int, float]] = set()
+    for bond in mol.GetBonds():
+        begin = rdkit_to_pdb[bond.GetBeginAtomIdx()]
+        end = rdkit_to_pdb[bond.GetEndAtomIdx()]
+        if begin.serial is None or end.serial is None:
+            raise ValueError("PDB serials are required to emit Polymerist fragment bond orders")
+        serial_1, serial_2 = sorted((begin.serial, end.serial))
+        bond_orders.add((serial_1, serial_2, float(bond.GetBondTypeAsDouble())))
+    return tuple(sorted(bond_orders))
 
 
 def _sequence_from_recipe_if_compatible(

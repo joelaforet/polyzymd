@@ -52,6 +52,7 @@ from polyzymd.builders.conjugation.linkers import (
     NhsLysModifierLinker,
     ProteinLinkSite,
     resolve_modifier_leaving_atoms,
+    resolve_modifier_nhs_atoms,
     resolve_modifier_reactive_atom,
 )
 from polyzymd.builders.conjugation.mechanism_library import (
@@ -136,6 +137,11 @@ from polyzymd.builders.conjugation.polymerist_compat import (
     import_polymerist_building,
 )
 from polyzymd.builders.conjugation.polymerist_pdb import generated_fragment_from_polymerist_pdb
+from polyzymd.builders.conjugation.rdkit_inputs import (
+    AtomIdentity,
+    RdkitInputBundle,
+    load_pdb_as_rdkit_input,
+)
 from polyzymd.builders.conjugation.sites import (
     AttachmentSite,
     match_site_rule,
@@ -158,6 +164,7 @@ from polyzymd.builders.conjugation.structure_normalization import (
 
 __all__ = [
     "AddedBond",
+    "AtomIdentity",
     "AttachmentSite",
     "BondSpec",
     "ChainPolicyMetadata",
@@ -227,6 +234,7 @@ __all__ = [
     "ReactionMechanism",
     "ReactiveEndpoint",
     "ResolvedAttachmentPlan",
+    "RdkitInputBundle",
     "RdkitGraphEditResult",
     "RdkitGraphEditExecutionRequest",
     "RdkitGraphEditExecutionResult",
@@ -251,6 +259,7 @@ __all__ = [
     "get_builtin_mechanism",
     "import_polymerist_building",
     "list_builtin_mechanisms",
+    "load_pdb_as_rdkit_input",
     "load_builtin_mechanisms",
     "match_site_rule",
     "normalize_attachment_site",
@@ -265,6 +274,7 @@ __all__ = [
     "require_pablo_crosslink_requirement",
     "resolve_explicit_linkage_contract",
     "resolve_modifier_leaving_atoms",
+    "resolve_modifier_nhs_atoms",
     "resolve_modifier_reactive_atom",
     "run_restrained_vacuum_smoke",
     "sbma_egpma_nhs_recipe",

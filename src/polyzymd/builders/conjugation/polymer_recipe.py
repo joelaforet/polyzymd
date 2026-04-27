@@ -83,6 +83,11 @@ class PolymerRecipe(BaseModel):
             "reactive_monomer_index", "forced_reactive_monomer_index", "forced_index"
         ),
     )
+    fixed_sequence: str | None = Field(
+        None,
+        validation_alias=AliasChoices("fixed_sequence", "sequence", "deterministic_sequence"),
+        description="Optional exact monomer-label sequence overriding stochastic generation",
+    )
     probability_tolerance: float = Field(DEFAULT_PROBABILITY_TOLERANCE, gt=0.0)
 
     @field_validator("reactive_monomer_label")
@@ -94,6 +99,19 @@ class PolymerRecipe(BaseModel):
         normalized = value.strip().upper()
         if len(normalized) != 1 or not normalized.isalnum():
             raise ValueError("Reactive monomer label must be one alphanumeric character")
+        return normalized
+
+    @field_validator("fixed_sequence")
+    @classmethod
+    def normalize_fixed_sequence(cls, value: str | None) -> str | None:
+        """Normalize an optional fixed monomer-label sequence."""
+        if value is None:
+            return None
+        normalized = "".join(value.split()).upper()
+        if not normalized:
+            raise ValueError("Fixed polymer sequence cannot be blank")
+        if not normalized.isalnum():
+            raise ValueError("Fixed polymer sequence labels must be alphanumeric")
         return normalized
 
     @model_validator(mode="after")
@@ -116,6 +134,27 @@ class PolymerRecipe(BaseModel):
 
         if self.reactive_monomer_label is not None and self.reactive_monomer_label not in labels:
             raise ValueError("Reactive monomer label must match a declared monomer label")
+
+        if self.fixed_sequence is not None:
+            if len(self.fixed_sequence) != self.length:
+                raise ValueError(
+                    "Fixed polymer sequence length must match the configured polymer length"
+                )
+            unknown_labels = sorted(set(self.fixed_sequence) - set(labels))
+            if unknown_labels:
+                raise ValueError(
+                    "Fixed polymer sequence labels must match declared monomer labels: "
+                    f"{', '.join(unknown_labels)}"
+                )
+            if (
+                self.reactive_monomer_index is not None
+                and self.reactive_monomer_label is not None
+                and self.fixed_sequence[self.reactive_monomer_index] != self.reactive_monomer_label
+            ):
+                raise ValueError(
+                    "Fixed polymer sequence must contain the reactive monomer label at the "
+                    "configured reactive index"
+                )
 
         return self
 
@@ -171,6 +210,9 @@ class PolymerRecipe(BaseModel):
         str
             Sequence string using monomer labels.
         """
+        if self.fixed_sequence is not None:
+            return self.fixed_sequence
+
         rng = random.Random(self.seed if seed is None else seed)
         labels = [monomer.label for monomer in self.monomers]
         weights = [monomer.probability for monomer in self.monomers]
@@ -212,6 +254,7 @@ def sbma_egpma_nhs_recipe(
     length: int = 10,
     seed: int | None = 42,
     reactive_monomer_index: int | None = None,
+    fixed_sequence: str | None = None,
 ) -> PolymerRecipe:
     """Build the SBMA/EGPMA/NHS recipe used by the conjugation POC.
 
@@ -223,6 +266,9 @@ def sbma_egpma_nhs_recipe(
         Random seed for deterministic sequence generation, by default 42.
     reactive_monomer_index : int or None, optional
         Zero-based NHS residue index. ``None`` centers NHS, by default ``None``.
+    fixed_sequence : str or None, optional
+        Exact monomer-label sequence overriding stochastic generation, by default
+        ``None``.
 
     Returns
     -------
@@ -258,6 +304,24 @@ def sbma_egpma_nhs_recipe(
         seed=seed,
         reactive_monomer_label="C",
         reactive_monomer_index=reactive_monomer_index,
+        fixed_sequence=fixed_sequence,
+    )
+
+
+def sbma_nhs_egpma_acb_recipe() -> PolymerRecipe:
+    """Build the deterministic v1 SBMA:NHS:EGPMA recipe.
+
+    Returns
+    -------
+    PolymerRecipe
+        Three-monomer recipe whose fixed sequence ``ACB`` maps to
+        SBMA:NHS:EGPMA with the NHS monomer centered for Lys linkage.
+    """
+    return sbma_egpma_nhs_recipe(
+        length=3,
+        seed=None,
+        reactive_monomer_index=1,
+        fixed_sequence="ACB",
     )
 
 
@@ -325,6 +389,8 @@ def generate_polymerist_smoke_polymer(
         monomer_names=recipe.to_sequence_monomer_names(),
         residue_names=recipe.to_polymerist_residue_names(),
     )
+    if pdb_path is not None:
+        _write_rdkit_sdf_sidecar(polymer_object, pdb_path.with_suffix(".sdf"))
     atom_count = _get_polymerist_atom_count(polymer_object)
 
     return PolymeristGenerationSmokeResult(
@@ -351,3 +417,94 @@ def _get_polymerist_atom_count(polymer_object: object) -> int | None:
         except TypeError:
             return None
     return None
+
+
+def _write_rdkit_sdf_sidecar(
+    polymer_object: object,
+    sdf_path: Path,
+    *,
+    required: bool = True,
+) -> None:
+    """Write an RDKit SDF sidecar carrying polymer bond orders.
+
+    Parameters
+    ----------
+    polymer_object : object
+        Polymerist or mBuild object that can provide an RDKit molecule.
+    sdf_path : pathlib.Path
+        Destination SDF path.
+    required : bool, optional
+        Raise on sidecar failures when ``True``. When ``False``, failures are
+        surfaced as warnings, by default ``True``.
+
+    Raises
+    ------
+    RuntimeError
+        If the required sidecar cannot be generated or written.
+    """
+    to_rdkit = getattr(polymer_object, "to_rdkit", None)
+    if not callable(to_rdkit):
+        _handle_sdf_sidecar_failure(
+            "Required RDKit SDF sidecar cannot be written because the polymer object does "
+            "not expose to_rdkit()",
+            required=required,
+        )
+        return
+
+    try:
+        from rdkit import Chem
+    except ImportError as exc:
+        _handle_sdf_sidecar_failure(
+            "RDKit is required to write the polymer SDF sidecar", required=required, cause=exc
+        )
+        return
+
+    try:
+        mol = to_rdkit()
+        for atom in mol.GetAtoms():
+            if atom.GetSymbol() == "N" and atom.GetDegree() == 4 and atom.GetFormalCharge() == 0:
+                atom.SetFormalCharge(1)
+        Chem.MolToMolFile(mol, str(sdf_path))
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        _handle_sdf_sidecar_failure(
+            f"Failed to write required RDKit SDF sidecar to {sdf_path}",
+            required=required,
+            cause=exc,
+        )
+        return
+
+    if not sdf_path.exists():
+        _handle_sdf_sidecar_failure(
+            f"Required RDKit SDF sidecar was not created at {sdf_path}",
+            required=required,
+        )
+
+
+def _handle_sdf_sidecar_failure(
+    message: str,
+    *,
+    required: bool,
+    cause: BaseException | None = None,
+) -> None:
+    """Raise or warn for an SDF sidecar failure.
+
+    Parameters
+    ----------
+    message : str
+        Diagnostic message for the sidecar failure.
+    required : bool
+        Whether the caller requires the sidecar to continue.
+    cause : BaseException or None, optional
+        Original exception to chain when raising, by default ``None``.
+
+    Raises
+    ------
+    RuntimeError
+        If ``required`` is ``True``.
+    """
+    if required:
+        raise RuntimeError(message) from cause
+
+    import warnings
+
+    warnings.warn(message, RuntimeWarning, stacklevel=2)
