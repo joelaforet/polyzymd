@@ -108,6 +108,7 @@ class PlacedPolymerFragment(BaseModel):
 
     atoms: tuple[PdbAtomRecord, ...] = Field(..., min_length=1)
     bonds: tuple[tuple[int | str, int | str], ...] = Field(default_factory=tuple)
+    bond_orders: tuple[tuple[int | str, int | str, float], ...] = Field(default_factory=tuple)
     leaving_atom_serials: tuple[int, ...] = Field(default_factory=tuple)
     leaving_atom_indices: tuple[int, ...] = Field(default_factory=tuple)
     leaving_atom_names: tuple[str, ...] = Field(default_factory=tuple)
@@ -122,6 +123,7 @@ class PlacedPolymerFragment(BaseModel):
         lines: Iterable[str],
         *,
         bonds: Sequence[tuple[int | str, int | str]] = (),
+        bond_orders: Sequence[tuple[int | str, int | str, float]] = (),
         leaving_atom_serials: Sequence[int] = (),
         leaving_atom_indices: Sequence[int] = (),
         leaving_atom_names: Sequence[str] = (),
@@ -138,6 +140,8 @@ class PlacedPolymerFragment(BaseModel):
             PDB lines containing ATOM/HETATM records.
         bonds : sequence of tuple, optional
             Internal polymer bonds using atom serials, indices, or names, by default ``()``.
+        bond_orders : sequence of tuple, optional
+            Internal polymer bonds with bond-order metadata, by default ``()``.
         leaving_atom_serials : sequence of int, optional
             Atom serials to omit as leaving-group atoms, by default ``()``.
         leaving_atom_indices : sequence of int, optional
@@ -166,6 +170,7 @@ class PlacedPolymerFragment(BaseModel):
         return cls(
             atoms=atoms,
             bonds=tuple(bonds),
+            bond_orders=tuple(bond_orders),
             leaving_atom_serials=tuple(leaving_atom_serials),
             leaving_atom_indices=tuple(leaving_atom_indices),
             leaving_atom_names=tuple(leaving_atom_names),

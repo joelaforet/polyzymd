@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from polyzymd.builders.conjugation.builder import CovalentModificationBuilder
 from polyzymd.builders.conjugation.construction import (
     construct_explicit_pdb_linkage,
     construct_modifier_linked_protein,
@@ -18,12 +19,21 @@ from polyzymd.builders.conjugation.contracts import (
     ReactiveEndpoint,
 )
 from polyzymd.builders.conjugation.crosslinks import MissingPabloCrosslinkError
+from polyzymd.builders.conjugation.exceptions import ConjugationNotImplementedError
 from polyzymd.builders.conjugation.linkers import NhsLysModifierLinker
 from polyzymd.builders.conjugation.pablo_adapter import PabloAvailability, PabloIngestionResult
 from polyzymd.builders.conjugation.parameterization import InterchangeParameterizationResult
 from polyzymd.builders.conjugation.pdb_assembly import PdbAtomRecord
 from polyzymd.builders.conjugation.polymer_fragment import GeneratedPolymerFragment
 from polyzymd.builders.conjugation.smoke import VacuumSmokeResult
+from polyzymd.config.schema import (
+    ConjugationAttachmentConfig,
+    ConjugationConfig,
+    ConjugationMechanismConfig,
+    ConjugationMode,
+    ConjugationMoietyConfig,
+    ConjugationSiteConfig,
+)
 
 
 def test_missing_crosslink_config_fails_before_packmol(tmp_path: Path):
@@ -273,6 +283,52 @@ def test_explicit_pdb_linkage_missing_crosslink_fails_before_packmol(tmp_path: P
             ccd_pablo_policy=SimpleNamespace(crosslinks=[]),
             output_dir=tmp_path / "generic-out",
             run_packmol_func=forbidden_packmol,
+        )
+
+
+def test_builder_does_not_use_v1_direct_bridge_as_core_acceptance(tmp_path: Path):
+    """The builder should keep direct OpenFF handoff outside the core path."""
+    protein_path = _protein_pdb(tmp_path)
+    modifier = _generated_modifier()
+    plan = NhsLysModifierLinker(target_residue_number=23).resolve_plan(protein_path, modifier)
+    topology = object()
+
+    def fake_direct_bridge(**kwargs):
+        """Fail if the quarantined direct bridge is invoked."""
+        raise AssertionError("Direct OpenFF bridge should remain quarantined")
+
+    config = ConjugationConfig(
+        enabled=True,
+        mode=ConjugationMode.CONSTRUCT,
+        attachments=[
+            ConjugationAttachmentConfig(
+                name="lys23-acb",
+                site=ConjugationSiteConfig(
+                    chain_id="A",
+                    residue_name="LYS",
+                    residue_number=23,
+                    atom_name="NZ",
+                ),
+                moiety=ConjugationMoietyConfig(
+                    name="NHS-linker",
+                    role="moiety",
+                    smiles="CC(=O)ON1C(=O)CCC1=O",
+                ),
+                mechanism=ConjugationMechanismConfig(name="nhs_lys_amide"),
+            )
+        ],
+    )
+    builder = CovalentModificationBuilder(config, output_dir=tmp_path / "direct")
+
+    with pytest.raises(ConjugationNotImplementedError, match="covalent graph surgery"):
+        builder.build(
+            topology,
+            context={
+                "protein_pdb_path": protein_path,
+                "conjugation_placed_modifier": modifier.to_placed_fragment(),
+                "conjugation_resolved_plan": plan,
+                "conjugation_direct_bridge": fake_direct_bridge,
+            },
         )
 
 
