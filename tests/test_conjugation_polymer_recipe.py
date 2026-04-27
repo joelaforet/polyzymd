@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import sys
+from types import ModuleType
+
 import pytest
 from pydantic import ValidationError
 
 from polyzymd.builders.conjugation.polymer_recipe import (
     PolymerRecipe,
+    _write_rdkit_sdf_sidecar,
     generate_polymerist_smoke_polymer,
     sbma_egpma_nhs_recipe,
+    sbma_nhs_egpma_acb_recipe,
 )
 from polyzymd.config.loader import load_config
 from polyzymd.config.schema import SimulationConfig
@@ -79,6 +84,32 @@ def test_forced_reactive_index_places_nhs_at_known_residue():
 
     assert recipe.effective_reactive_index == 2
     assert sequence[2] == "C"
+
+
+def test_fixed_acb_sequence_maps_to_sbma_nhs_egpma():
+    """The v1 deterministic ACB recipe should map to SBMA:NHS:EGPMA."""
+    recipe = sbma_nhs_egpma_acb_recipe()
+
+    assert recipe.generate_sequence() == "ACB"
+    assert recipe.length == 3
+    assert recipe.effective_reactive_index == 1
+    assert [recipe.monomer_by_label(label).name for label in recipe.generate_sequence()] == [
+        "SBMA",
+        "NHS",
+        "EGPMA",
+    ]
+
+
+def test_fixed_sequence_validates_length_and_labels():
+    """Fixed sequences should reject wrong lengths and undeclared labels."""
+    with pytest.raises(ValidationError, match="length must match"):
+        sbma_egpma_nhs_recipe(length=3, reactive_monomer_index=1, fixed_sequence="AC")
+
+    with pytest.raises(ValidationError, match="declared monomer labels"):
+        sbma_egpma_nhs_recipe(length=3, reactive_monomer_index=1, fixed_sequence="AZB")
+
+    with pytest.raises(ValidationError, match="reactive monomer label"):
+        sbma_egpma_nhs_recipe(length=3, reactive_monomer_index=1, fixed_sequence="ABC")
 
 
 def test_invalid_forced_label_and_index_are_rejected():
@@ -194,5 +225,38 @@ def test_real_polymerist_generation_smoke(tmp_path):
     assert result.sequence[1] == "C"
     assert result.monomer_group_path.exists()
     assert result.pdb_path is not None and result.pdb_path.exists()
+    assert result.pdb_path.with_suffix(".sdf").exists()
     assert result.object_type
     assert result.atom_count is None or result.atom_count > 0
+
+
+def test_rdkit_sdf_sidecar_write_failure_surfaces(monkeypatch, tmp_path):
+    """SDF sidecar writer failures should fail clearly instead of being swallowed."""
+
+    class FakeMol:
+        """Minimal RDKit-like molecule for the writer boundary."""
+
+        def GetAtoms(self):
+            """Return fake atoms for formal-charge adjustment."""
+            return ()
+
+    class FakePolymer:
+        """Minimal Polymerist-like object exposing RDKit conversion."""
+
+        def to_rdkit(self):
+            """Return a fake molecule for SDF serialization."""
+            return FakeMol()
+
+    def fail_mol_to_mol_file(_mol, _path):
+        """Raise a representative writer failure."""
+        raise OSError("mock SDF writer failure")
+
+    fake_chem = ModuleType("rdkit.Chem")
+    fake_chem.MolToMolFile = fail_mol_to_mol_file
+    fake_rdkit = ModuleType("rdkit")
+    fake_rdkit.Chem = fake_chem
+    monkeypatch.setitem(sys.modules, "rdkit", fake_rdkit)
+    monkeypatch.setitem(sys.modules, "rdkit.Chem", fake_chem)
+
+    with pytest.raises(RuntimeError, match="Failed to write required RDKit SDF sidecar"):
+        _write_rdkit_sdf_sidecar(FakePolymer(), tmp_path / "polymer.sdf")

@@ -259,6 +259,16 @@ def test_nhs_lys_linker_fails_on_target_residue_name_mismatch(tmp_path: Path):
         linker.resolve_plan(_protein_pdb(tmp_path), _generated_nhs_modifier())
 
 
+def test_explicit_hz_contract_fails_against_poc_hydrogen_names(tmp_path: Path):
+    """Strict explicit contracts must not reinterpret missing atom names chemically."""
+    with pytest.raises(ValueError, match="named HZ2"):
+        resolve_explicit_linkage_contract(
+            _protein_pdb_with_poc_hydrogen_names(tmp_path),
+            _multi_residue_modifier_pdb(tmp_path),
+            _generic_contract(),
+        )
+
+
 def _generic_contract(
     *, modifier_selector: PdbAtomSelector | None = None
 ) -> ExplicitLinkageContract:
@@ -354,6 +364,23 @@ def _protein_pdb(tmp_path: Path) -> Path:
         + _pdb_atom(6, "HZ2", "LYS", "A", 23, 2.0, -0.7, 0.0, element="H")
         + _pdb_atom(7, "HZ3", "LYS", "A", 23, 2.0, 0.0, 0.7, element="H")
         + _pdb_atom(8, "N", "ALA", "A", 24, 4.0, 0.0, 0.0, element="N")
+        + "END\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _protein_pdb_with_poc_hydrogen_names(tmp_path: Path) -> Path:
+    """Create a lysine PDB using POC-like noncanonical NZ hydrogen names."""
+    path = tmp_path / "protein_poc_hydrogens.pdb"
+    path.write_text(
+        _pdb_atom(1, "N", "LYS", "A", 23, 0.0, 0.0, 0.0, element="N")
+        + _pdb_atom(2, "CA", "LYS", "A", 23, 1.0, 0.0, 0.0)
+        + _pdb_atom(3, "CE", "LYS", "A", 23, 1.5, 0.0, 0.0)
+        + _pdb_atom(4, "NZ", "LYS", "A", 23, 2.0, 0.0, 0.0, element="N")
+        + _pdb_atom(5, "H10", "LYS", "A", 23, 2.0, 0.7, 0.0, element="H")
+        + _pdb_atom(6, "H11", "LYS", "A", 23, 2.0, -0.7, 0.0, element="H")
+        + _pdb_atom(7, "H13", "LYS", "A", 23, 2.0, 0.0, 0.7, element="H")
         + "END\n",
         encoding="utf-8",
     )
