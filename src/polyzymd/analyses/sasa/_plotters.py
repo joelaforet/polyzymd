@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -25,6 +27,26 @@ if TYPE_CHECKING:
 from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
 
 LOGGER = logging.getLogger(__name__)
+_NEAR_ZERO_CONTROL_MEAN = 1.0e-12
+
+
+@dataclass(frozen=True)
+class SASANormalizedControlRow:
+    """Normalized SASA change for one condition relative to control.
+
+    Attributes
+    ----------
+    condition_label : str
+        Label of the non-control condition.
+    percent_delta : float
+        Percent change in mean SASA relative to the control mean.
+    sem_delta : float or None
+        Propagated SEM in percent units when available.
+    """
+
+    condition_label: str
+    percent_delta: float
+    sem_delta: float | None
 
 
 def plot_sasa_comparison_bars(
@@ -98,6 +120,82 @@ def plot_sasa_comparison_bars(
         output_path = get_output_path(
             ctx.output_dir,
             f"sasa_comparison_{_sanitize_run_label(run_label)}",
+            ctx.plot_settings,
+        )
+        generated.append(save_figure(fig, output_path, ctx.plot_settings))
+
+    return generated
+
+
+def plot_sasa_normalized_control_bars(
+    ctx: PlotContext, comparison_result: SASAComparisonResult
+) -> list[Path]:
+    """Plot percent change in SASA relative to the control for each run.
+
+    Parameters
+    ----------
+    ctx : PlotContext
+        Framework plot context containing output and plotting settings.
+    comparison_result : SASAComparisonResult
+        SASA comparison result with per-condition run summaries.
+
+    Returns
+    -------
+    list[Path]
+        Paths to normalized-control plots that were generated.
+    """
+    control_label = _resolve_sasa_control_label(ctx, comparison_result)
+    if control_label is None:
+        return []
+
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    plot_settings = cast(SASAPlotSettings, _get_plot_settings(ctx))
+    generated: list[Path] = []
+
+    for run_label in comparison_result.run_labels:
+        rows = _build_sasa_normalized_control_rows(ctx, comparison_result, run_label)
+        if not rows:
+            continue
+
+        labels = [row.condition_label for row in rows]
+        deltas = [row.percent_delta for row in rows]
+        sems = [row.sem_delta for row in rows]
+        positions = np.arange(len(labels), dtype=np.float64)
+        colors = get_colors(len(labels), ctx.plot_settings)
+        yerr = (
+            [sem if sem is not None else 0.0 for sem in sems]
+            if any(sem is not None for sem in sems)
+            else None
+        )
+
+        fig, ax = plt.subplots(figsize=plot_settings.figsize)  # type: ignore[attr-defined]
+        theme = ctx.plot_settings.theme
+        ax.bar(
+            positions,
+            deltas,
+            yerr=yerr,
+            color=colors,
+            edgecolor=theme.bar_edgecolor,
+            linewidth=theme.bar_linewidth,
+            capsize=theme.bar_capsize,
+            alpha=theme.bar_alpha,
+        )
+        ax.axhline(0.0, color="black", linewidth=1.0, alpha=0.7)
+        ax.set_xticks(positions)
+        ax.set_xticklabels(labels, rotation=30, ha="right")
+        apply_axis_style(
+            ax,
+            ctx.plot_settings,
+            title=f"SASA Change vs Control — {run_label}",
+            ylabel=f"% change in mean SASA vs {control_label}",
+        )
+        fig.tight_layout()
+
+        output_path = get_output_path(
+            ctx.output_dir,
+            f"sasa_normalized_comparison_{_sanitize_run_label(run_label)}",
             ctx.plot_settings,
         )
         generated.append(save_figure(fig, output_path, ctx.plot_settings))
@@ -260,6 +358,157 @@ def plot_sasa_residue_profiles(
         generated.append(save_figure(fig, output_path, ctx.plot_settings))
 
     return generated
+
+
+def _build_sasa_normalized_control_rows(
+    ctx: PlotContext,
+    comparison_result: SASAComparisonResult,
+    run_label: str,
+) -> list[SASANormalizedControlRow]:
+    """Build normalized SASA rows for one run.
+
+    Parameters
+    ----------
+    ctx : PlotContext
+        Framework plot context used as a fallback source for the control label.
+    comparison_result : SASAComparisonResult
+        SASA comparison result with per-condition run summaries.
+    run_label : str
+        Run label whose condition summaries should be normalized.
+
+    Returns
+    -------
+    list[SASANormalizedControlRow]
+        Percent changes for non-control conditions with valid data.
+    """
+
+    control_label = _resolve_sasa_control_label(ctx, comparison_result)
+    if control_label is None:
+        return []
+
+    control_condition = next(
+        (
+            condition
+            for condition in comparison_result.conditions
+            if condition.label == control_label
+        ),
+        None,
+    )
+    if control_condition is None:
+        return []
+
+    try:
+        control_run = control_condition.get_run(run_label)
+    except KeyError:
+        return []
+
+    control_mean = control_run.mean_sasa
+    if not _is_valid_control_mean(control_mean):
+        return []
+
+    rows: list[SASANormalizedControlRow] = []
+    for condition in comparison_result.conditions:
+        if condition.label == control_label:
+            continue
+
+        try:
+            summary = condition.get_run(run_label)
+        except KeyError:
+            continue
+
+        condition_mean = summary.mean_sasa
+        if not math.isfinite(condition_mean):
+            continue
+
+        percent_delta = (condition_mean - control_mean) / control_mean * 100.0
+        sem_delta = _propagate_sasa_normalized_sem(
+            condition_mean,
+            summary.sem_sasa,
+            control_mean,
+            control_run.sem_sasa,
+        )
+        rows.append(
+            SASANormalizedControlRow(
+                condition_label=condition.label,
+                percent_delta=percent_delta,
+                sem_delta=sem_delta,
+            )
+        )
+
+    return rows
+
+
+def _propagate_sasa_normalized_sem(
+    condition_mean: float,
+    condition_sem: float,
+    control_mean: float,
+    control_sem: float,
+) -> float | None:
+    """Propagate SEM for percent SASA change relative to a control.
+
+    Parameters
+    ----------
+    condition_mean : float
+        Mean SASA for the non-control condition.
+    condition_sem : float
+        SEM of the non-control condition mean.
+    control_mean : float
+        Mean SASA for the control condition.
+    control_sem : float
+        SEM of the control condition mean.
+
+    Returns
+    -------
+    float or None
+        Propagated SEM in percent units, or ``None`` when either SEM is not
+        finite or the control mean is invalid.
+    """
+
+    if not _is_valid_control_mean(control_mean):
+        return None
+    if not all(math.isfinite(value) for value in (condition_mean, condition_sem, control_sem)):
+        return None
+    return 100.0 * math.sqrt(
+        (condition_sem / control_mean) ** 2 + (condition_mean * control_sem / control_mean**2) ** 2
+    )
+
+
+def _resolve_sasa_control_label(
+    ctx: PlotContext, comparison_result: SASAComparisonResult
+) -> str | None:
+    """Resolve the explicit SASA control label for normalized plots.
+
+    Parameters
+    ----------
+    ctx : PlotContext
+        Framework plot context used as the fallback source.
+    comparison_result : SASAComparisonResult
+        SASA comparison result whose control label is preferred.
+
+    Returns
+    -------
+    str or None
+        Explicit control label, if one is available.
+    """
+
+    return comparison_result.control_label or getattr(ctx, "control_label", None)
+
+
+def _is_valid_control_mean(value: float) -> bool:
+    """Return whether a control mean can safely normalize SASA values.
+
+    Parameters
+    ----------
+    value : float
+        Control mean SASA value.
+
+    Returns
+    -------
+    bool
+        ``True`` when the control mean is finite and not near zero.
+    """
+
+    return math.isfinite(value) and abs(value) > _NEAR_ZERO_CONTROL_MEAN
 
 
 def _load_replicate_timeseries_from_results(

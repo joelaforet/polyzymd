@@ -278,27 +278,38 @@ Here is a simplified excerpt showing how to read the key fields:
    condition serves as the baseline. Conditions with polymer show lower SASA
    in this run if the polymer shields the surface.
 
-3. **Calculate the shielding effect.** For each polymer condition, subtract
+3. **Use normalized-control plots for percent changes.** The plot
+   `sasa_normalized_comparison_<run>.png` reports each non-control condition as
+   `(condition_mean - control_mean) / control_mean * 100`. For example, a
+   control mean of 10 A^2 and condition mean of 5 A^2 gives `-50%`; a condition
+   mean of 8 A^2 gives `-20%`. Negative values indicate reduced SASA relative
+   to the control, which is consistent with polymer shielding.
+
+4. **Calculate the shielding effect.** For each polymer condition, subtract
    `protein_with_polymer` from `protein_isolated`. The larger the difference,
    the more surface the polymer covers.
 
-4. **Check active site runs.** If `active_site_with_polymer` is significantly
+5. **Check active site runs.** If `active_site_with_polymer` is significantly
    lower than `active_site_isolated` for a polymer condition, the polymer may
    be blocking substrate access — a concern for enzyme activity.
 
 ### Plots
 
-The SASA plugin generates three types of plots:
+The SASA plugin generates four types of plots:
 
 | Plot | File pattern | What it shows |
 |------|-------------|---------------|
 | **Comparison bars** | `sasa_comparison_<run>.png` | Mean SASA ± SEM per condition, with replicate scatter points |
+| **Normalized comparison bars** | `sasa_normalized_comparison_<run>.png` | Percent change in mean SASA for each non-control condition relative to the configured control |
 | **Time series** | `sasa_timeseries_<run>.png` | Per-frame SASA traces overlaid for each condition |
 | **Residue profiles** | `sasa_profile_<run>.png` | Per-residue mean SASA across conditions |
 
 The bar plots are the most informative for quick assessment. Look for
 conditions where the `protein_with_polymer` bar is significantly lower than
-the `protein_isolated` bar — this is the polymer shielding signal.
+the `protein_isolated` bar — this is the polymer shielding signal. The
+normalized comparison plots apply the same control-relative formula to every
+configured SASA run, so they work for whole-protein, active-site, or custom
+target/context partitions without changing labels.
 
 ## Common Configurations
 

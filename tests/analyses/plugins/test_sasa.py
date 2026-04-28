@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from polyzymd.analyses.base import Condition, ReplicateContext
+from polyzymd.analyses.base import Condition, PlotContext, ReplicateContext
 from polyzymd.analyses.sasa import SASAAnalysis, SASARunSettings, SASASettings
 from polyzymd.analyses.sasa._comparison_results import (
     SASAComparisonResult,
@@ -22,9 +22,12 @@ from polyzymd.analyses.sasa._comparison_results import (
 from polyzymd.analyses.sasa._formatters import format_sasa_comparison
 from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
 from polyzymd.analyses.sasa._plotters import (
+    _build_sasa_normalized_control_rows,
     _load_condition_result_payloads,
     _load_replicate_timeseries_from_results,
+    _propagate_sasa_normalized_sem,
     _sanitize_run_label,
+    plot_sasa_normalized_control_bars,
 )
 from polyzymd.analyses.sasa._results import (
     SASAAggregatedResult,
@@ -211,6 +214,73 @@ def _make_sasa_result(replicate: int, run_results: list[SASARunResult]) -> SASAR
         n_frames_total=100,
         n_frames_used=90,
         trajectory_files=["/fake/traj.dcd"],
+    )
+
+
+def _make_sasa_comparison_result(
+    condition_runs: dict[str, dict[str, tuple[float, float]]],
+    *,
+    control_label: str | None = "control",
+) -> SASAComparisonResult:
+    """Create an SASA comparison result with per-run means and SEMs."""
+
+    run_labels = list(
+        dict.fromkeys(run_label for runs in condition_runs.values() for run_label in runs)
+    )
+    conditions = []
+    for condition_label, runs in condition_runs.items():
+        conditions.append(
+            SASAConditionSummary(
+                label=condition_label,
+                config_path=f"/fake/{condition_label}.yaml",
+                n_replicates=3,
+                run_summaries=[
+                    SASARunSummary(
+                        label=run_label,
+                        target_selection="chainid A",
+                        context_selection="all",
+                        mean_sasa=mean_sasa,
+                        sem_sasa=sem_sasa,
+                        per_replicate_means=[mean_sasa],
+                    )
+                    for run_label, (mean_sasa, sem_sasa) in runs.items()
+                ],
+            )
+        )
+
+    return SASAComparisonResult(
+        metric="mean_sasa",
+        name="sasa_compare",
+        n_runs=len(run_labels),
+        run_labels=run_labels,
+        control_label=control_label,
+        conditions=conditions,
+        pairwise_comparisons=[],
+        anova_by_run=None,
+        ranking_by_run={run_label: list(condition_runs) for run_label in run_labels},
+        equilibration_time="10ns",
+        created_at=datetime.now(),
+        polyzymd_version="1.0.0",
+    )
+
+
+def _make_sasa_plot_context(
+    tmp_path: Path, *, control_label: str | None = "control"
+) -> PlotContext:
+    """Create a SASA plot context for normalized-control plot tests."""
+
+    from polyzymd.config.comparison import PlotSettings
+
+    return PlotContext(
+        conditions=[_make_condition("control"), _make_condition("treated")],
+        analysis_dirs={},
+        results_dir=tmp_path / "results",
+        output_dir=tmp_path / "figures",
+        settings=SASASettings(
+            runs=[SASARunSettings(label="protein", target_selection="chainid A")]
+        ),
+        plot_settings=PlotSettings(),
+        control_label=control_label,
     )
 
 
@@ -1025,6 +1095,153 @@ def test_compare_skips_all_nan_runs(tmp_path: Path) -> None:
         aggregated_results=aggregated_results,
     )
     assert analysis.compare(ctx) is None
+
+
+def test_normalized_control_rows_compute_percent_delta(tmp_path: Path) -> None:
+    """Normalized-control rows should report percent changes from control."""
+
+    comparison = _make_sasa_comparison_result(
+        {
+            "control": {"protein": (10.0, 0.0)},
+            "condition_5": {"protein": (5.0, 0.0)},
+            "condition_8": {"protein": (8.0, 0.0)},
+        },
+        control_label=None,
+    )
+    ctx = _make_sasa_plot_context(tmp_path)
+
+    rows = _build_sasa_normalized_control_rows(ctx, comparison, "protein")
+
+    assert [row.condition_label for row in rows] == ["condition_5", "condition_8"]
+    assert [row.percent_delta for row in rows] == pytest.approx([-50.0, -20.0])
+
+
+def test_normalized_control_sem_propagation() -> None:
+    """Normalized-control SEM should follow first-order error propagation."""
+
+    sem_delta = _propagate_sasa_normalized_sem(
+        condition_mean=5.0,
+        condition_sem=0.5,
+        control_mean=10.0,
+        control_sem=1.0,
+    )
+
+    expected = 100.0 * np.sqrt((0.5 / 10.0) ** 2 + (5.0 * 1.0 / 10.0**2) ** 2)
+    assert sem_delta == pytest.approx(expected)
+
+
+def test_normalized_control_plot_skips_missing_control(tmp_path: Path) -> None:
+    """Normalized-control plotter should return no paths when control is unavailable."""
+
+    comparison = _make_sasa_comparison_result(
+        {"control": {"protein": (10.0, 0.1)}, "treated": {"protein": (5.0, 0.1)}},
+        control_label="missing",
+    )
+    ctx = _make_sasa_plot_context(tmp_path, control_label=None)
+
+    assert plot_sasa_normalized_control_bars(ctx, comparison) == []
+
+
+@pytest.mark.parametrize("control_mean", [0.0, float("nan"), float("inf")])
+def test_normalized_control_rows_skip_invalid_control_mean(
+    tmp_path: Path,
+    control_mean: float,
+) -> None:
+    """Normalized-control rows should skip runs with invalid control means."""
+
+    comparison = _make_sasa_comparison_result(
+        {"control": {"protein": (control_mean, 0.1)}, "treated": {"protein": (5.0, 0.1)}}
+    )
+    ctx = _make_sasa_plot_context(tmp_path)
+
+    assert _build_sasa_normalized_control_rows(ctx, comparison, "protein") == []
+
+
+def test_normalized_control_rows_skip_condition_missing_run(tmp_path: Path) -> None:
+    """Normalized-control rows should skip conditions without the requested run."""
+
+    comparison = _make_sasa_comparison_result(
+        {
+            "control": {"protein": (10.0, 0.1)},
+            "treated": {"protein": (5.0, 0.1)},
+            "missing_run": {"other": (2.0, 0.1)},
+        }
+    )
+    ctx = _make_sasa_plot_context(tmp_path)
+
+    rows = _build_sasa_normalized_control_rows(ctx, comparison, "protein")
+
+    assert [row.condition_label for row in rows] == ["treated"]
+    assert rows[0].percent_delta == pytest.approx(-50.0)
+
+
+def test_normalized_control_plot_generates_one_path_per_valid_run(tmp_path: Path) -> None:
+    """Normalized-control plotter should generate one plot for each valid run label."""
+
+    comparison = _make_sasa_comparison_result(
+        {
+            "control": {"protein": (10.0, 0.1), "active site": (20.0, 0.2)},
+            "treated": {"protein": (5.0, 0.1), "active site": (10.0, 0.2)},
+        }
+    )
+    ctx = _make_sasa_plot_context(tmp_path)
+
+    paths = plot_sasa_normalized_control_bars(ctx, comparison)
+
+    assert [path.name for path in paths] == [
+        "sasa_normalized_comparison_protein.png",
+        "sasa_normalized_comparison_active_site.png",
+    ]
+    assert all(path.exists() for path in paths)
+
+
+def test_sasa_analysis_plot_includes_normalized_control_plotter(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """SASAAnalysis.plot should append normalized-control paths to existing plots."""
+
+    import polyzymd.analyses.sasa._plotters as plotters
+
+    analysis = SASAAnalysis()
+    comparison = _make_sasa_comparison_result(
+        {"control": {"protein": (10.0, 0.1)}, "treated": {"protein": (5.0, 0.1)}}
+    )
+    comparison_path = tmp_path / "results" / "result.json"
+    comparison.save(comparison_path)
+    ctx = _make_sasa_plot_context(tmp_path)
+    ctx = PlotContext(
+        conditions=ctx.conditions,
+        analysis_dirs=ctx.analysis_dirs,
+        results_dir=ctx.results_dir,
+        output_dir=ctx.output_dir,
+        settings=ctx.settings,
+        plot_settings=ctx.plot_settings,
+        comparison_path=comparison_path,
+        control_label=ctx.control_label,
+        equilibration=ctx.equilibration,
+    )
+    expected_paths = [
+        tmp_path / "figures" / "bars.png",
+        tmp_path / "figures" / "timeseries.png",
+        tmp_path / "figures" / "profiles.png",
+        tmp_path / "figures" / "normalized.png",
+    ]
+
+    monkeypatch.setattr(
+        plotters, "plot_sasa_comparison_bars", lambda _ctx, _result: [expected_paths[0]]
+    )
+    monkeypatch.setattr(plotters, "plot_sasa_timeseries", lambda _ctx, _result: [expected_paths[1]])
+    monkeypatch.setattr(
+        plotters, "plot_sasa_residue_profiles", lambda _ctx, _result: [expected_paths[2]]
+    )
+    monkeypatch.setattr(
+        plotters,
+        "plot_sasa_normalized_control_bars",
+        lambda _ctx, _result: [expected_paths[3]],
+    )
+
+    assert analysis.plot(ctx) == expected_paths
 
 
 def test_timeseries_loader_uses_raw_npz_path_contract(tmp_path: Path) -> None:

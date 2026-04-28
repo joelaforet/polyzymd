@@ -860,6 +860,7 @@ class SASAAnalysis(Analysis):
 
         from polyzymd.analyses.sasa._plotters import (
             plot_sasa_comparison_bars,
+            plot_sasa_normalized_control_bars,
             plot_sasa_residue_profiles,
             plot_sasa_timeseries,
         )
@@ -868,6 +869,7 @@ class SASAAnalysis(Analysis):
         paths.extend(plot_sasa_comparison_bars(ctx, comparison_result))
         paths.extend(plot_sasa_timeseries(ctx, comparison_result))
         paths.extend(plot_sasa_residue_profiles(ctx, comparison_result))
+        paths.extend(plot_sasa_normalized_control_bars(ctx, comparison_result))
         return paths
 
     def format(self, result: Any, output_format: str = "text") -> str:
