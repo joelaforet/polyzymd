@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 from pydantic import BaseModel
 
@@ -17,6 +19,61 @@ from polyzymd.analyses.polymer_bridging import (
     PolymerBridgingSettings,
     _compute_bridging_statistics_from_frames,
 )
+
+
+def _make_mock_mdanalysis_modules() -> dict[str, ModuleType]:
+    """Build minimal MDAnalysis modules for lazy distance imports.
+
+    Returns
+    -------
+    dict[str, ModuleType]
+        Modules keyed by import name for patching ``sys.modules``.
+    """
+
+    mdanalysis_module = ModuleType("MDAnalysis")
+    exceptions_module = ModuleType("MDAnalysis.exceptions")
+    lib_module = ModuleType("MDAnalysis.lib")
+    distances_module = ModuleType("MDAnalysis.lib.distances")
+
+    class NoDataError(Exception):
+        pass
+
+    def _distance_array(a, b, box=None):
+        del box
+        return np.linalg.norm(
+            np.asarray(a)[:, None, :] - np.asarray(b)[None, :, :],
+            axis=-1,
+        )
+
+    distances_module.capped_distance = MagicMock(return_value=([], []))
+    distances_module.distance_array = MagicMock(side_effect=_distance_array)
+    exceptions_module.NoDataError = NoDataError
+    mdanalysis_module.exceptions = exceptions_module
+    lib_module.distances = distances_module
+    mdanalysis_module.lib = lib_module
+    return {
+        "MDAnalysis": mdanalysis_module,
+        "MDAnalysis.exceptions": exceptions_module,
+        "MDAnalysis.lib": lib_module,
+        "MDAnalysis.lib.distances": distances_module,
+    }
+
+
+def _make_hashable_sim_config(tmp_path: Path):
+    """Build a lightweight config object compatible with ``compute_config_hash``."""
+
+    return SimpleNamespace(
+        name="bridging-test",
+        enzyme=SimpleNamespace(name="enzyme", pdb_path=tmp_path / "enzyme.pdb"),
+        substrate=None,
+        polymers=None,
+        thermodynamics=SimpleNamespace(temperature=300.0, pressure=1.0),
+        output=SimpleNamespace(
+            projects_directory=tmp_path / "projects",
+            effective_scratch_directory=tmp_path / "scratch",
+            naming_template="run_{replicate}",
+        ),
+    )
 
 
 class TestDiscovery:
@@ -55,6 +112,30 @@ class TestCacheFingerprint:
         assert tag_default != tag_custom
         assert len(tag_default) == 8
         assert len(tag_custom) == 8
+
+    def test_cache_paths_include_window_identity(self, tmp_path):
+        """Replicate and aggregate sidecars should encode the analysis window."""
+        analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
+
+        replicate_path = analysis._replicate_cache_path(tmp_path / "run_1", settings, "10ns")
+        aggregate_path = analysis._aggregate_cache_path(
+            tmp_path / "aggregated",
+            settings,
+            "10ns",
+            (1, 2),
+        )
+
+        assert "eq10ns" in replicate_path.name
+        assert "eq10ns" in aggregate_path.name
+        assert "reps1-2" in aggregate_path.name
+
+    def test_cache_window_comparison_normalizes_units(self):
+        """Equivalent windows in different units should match cache metadata."""
+
+        result = SimpleNamespace(equilibration_time=1000.0, equilibration_unit="ps")
+
+        assert PolymerBridgingAnalysis._cache_matches_window(result, "1ns")
 
 
 class TestCoreComputation:
@@ -146,12 +227,17 @@ class TestCAValidation:
         mock_polymer = MagicMock()
         mock_polymer.__len__.return_value = 1
 
+        mock_universe.trajectory.__len__.return_value = 1
         mock_universe.select_atoms.side_effect = [mock_protein, mock_polymer]
         mock_loader.load_universe.return_value = mock_universe
+        mock_loader.get_timestep.return_value = 10.0
 
-        with patch(
-            "polyzymd.analyses.shared.loader.TrajectoryLoader",
-            return_value=mock_loader,
+        with (
+            patch(
+                "polyzymd.analyses.shared.loader.TrajectoryLoader",
+                return_value=mock_loader,
+            ),
+            patch.dict("sys.modules", _make_mock_mdanalysis_modules()),
         ):
             with pytest.raises(ValueError, match="(?i)no CA atoms"):
                 PolymerBridgingAnalysis._compute_frame_contacts(
@@ -191,13 +277,19 @@ class TestCAValidation:
         mock_polymer.fragments = []
 
         mock_universe.select_atoms.side_effect = [mock_protein, mock_polymer]
-        mock_universe.trajectory = []
+        mock_universe.trajectory.__len__.return_value = 1
+        mock_universe.trajectory.__getitem__.return_value = [
+            SimpleNamespace(dimensions=None, positions=[])
+        ]
         mock_loader.load_universe.return_value = mock_universe
         mock_loader.get_timestep.return_value = 10.0
 
-        with patch(
-            "polyzymd.analyses.shared.loader.TrajectoryLoader",
-            return_value=mock_loader,
+        with (
+            patch(
+                "polyzymd.analyses.shared.loader.TrajectoryLoader",
+                return_value=mock_loader,
+            ),
+            patch.dict("sys.modules", _make_mock_mdanalysis_modules()),
         ):
             observations, n_frames, timestep_ps = PolymerBridgingAnalysis._compute_frame_contacts(
                 condition,
@@ -210,12 +302,149 @@ class TestCAValidation:
             )
 
         assert observations == []
-        assert n_frames == 0
+        assert n_frames == 1
         assert timestep_ps == pytest.approx(10.0)
+
+    def test_fragment_lookup_falls_back_without_bond_topology(self):
+        """No-bond topologies should be treated as one polymer fragment."""
+        from polyzymd.analyses.polymer_bridging._runner import _fragments_or_single
+
+        modules = _make_mock_mdanalysis_modules()
+        no_data_error = modules["MDAnalysis.exceptions"].NoDataError
+
+        class _AtomGroup:
+            @property
+            def fragments(self):
+                raise no_data_error("No bond information")
+
+        atoms = _AtomGroup()
+
+        with patch.dict("sys.modules", modules):
+            assert _fragments_or_single(atoms, context="test") == [atoms]
+
+    def test_fragment_lookup_propagates_unrelated_errors(self):
+        """Only MDAnalysis NoDataError should trigger the no-bond fallback."""
+        from polyzymd.analyses.polymer_bridging._runner import _fragments_or_single
+
+        class CustomFragmentError(RuntimeError):
+            pass
+
+        class _AtomGroup:
+            @property
+            def fragments(self):
+                raise CustomFragmentError("unexpected fragment failure")
+
+        with patch.dict("sys.modules", _make_mock_mdanalysis_modules()):
+            with pytest.raises(CustomFragmentError, match="unexpected fragment failure"):
+                _fragments_or_single(_AtomGroup(), context="test")
+
+
+class TestPBCDistanceHandling:
+    """Regression tests for PBC-aware bridging distance calculations."""
+
+    def test_ca_distances_use_periodic_boundary_conditions(self):
+        """CA-distance filtering should receive minimum-image distances."""
+
+        from polyzymd.analyses.polymer_bridging._runner import _observation_ca_distances
+
+        def _minimum_image_distance(a, b, box=None):
+            delta = np.asarray(a)[:, None, :] - np.asarray(b)[None, :, :]
+            if box is not None:
+                lengths = np.asarray(box[:3], dtype=float)
+                delta -= lengths * np.round(delta / lengths)
+            return np.linalg.norm(delta, axis=-1)
+
+        modules = _make_mock_mdanalysis_modules()
+        modules["MDAnalysis.lib.distances"].distance_array = MagicMock(
+            side_effect=_minimum_image_distance
+        )
+        positions = np.asarray([[0.2, 0.0, 0.0], [9.8, 0.0, 0.0]], dtype=float)
+
+        with patch.dict("sys.modules", modules):
+            distances = _observation_ca_distances(
+                {10, 20},
+                positions,
+                {10: 0, 20: 1},
+                np.asarray([10.0, 10.0, 10.0, 90.0, 90.0, 90.0]),
+            )
+
+        assert distances[(10, 20)] == pytest.approx(0.4)
+
+    def test_pair_min_distances_use_pbc_distances_from_contact_search(self):
+        """Anchor distances should use PBC-aware capped-distance outputs."""
+
+        from polyzymd.analyses.polymer_bridging._runner import _compute_pair_min_distances
+
+        fragment = SimpleNamespace(atoms=[SimpleNamespace(resid=101)])
+        protein = SimpleNamespace(atoms=[SimpleNamespace(resid=10)])
+
+        distances = _compute_pair_min_distances(
+            fragment,
+            protein,
+            np.asarray([0], dtype=np.int64),
+            np.asarray([0], dtype=np.int64),
+            np.asarray([10], dtype=np.int64),
+            np.asarray([0.35], dtype=float),
+        )
+
+        assert distances[(101, 10)] == pytest.approx(0.35)
+
+
+def _make_replicate_result(replicate: int) -> PolymerBridgingReplicateResult:
+    """Build a minimal polymer bridging replicate result for aggregation tests."""
+
+    return PolymerBridgingReplicateResult(
+        replicate=replicate,
+        n_frames=4,
+        timestep_ps=10.0,
+        min_ca_distance_angstrom=0.0,
+        contacting_observations=4,
+        multisite_observations=2,
+        high_valency_observations=0,
+        mean_contacts_per_contacting_oligomer=1.5,
+        multisite_fraction=0.5,
+        high_valency_fraction=0.0,
+        valency_probabilities={"1": 0.5, "2": 0.5, "3+": 0.0},
+    )
+
+
+def _make_aggregated_result(
+    replicates: tuple[int, ...] = (1, 2),
+    *,
+    mean_contacts: float = 1.5,
+    equilibration_time: float = 0.0,
+    settings_fingerprint: str | None = None,
+    config_hash: str = "unknown",
+) -> PolymerBridgingAggregatedResult:
+    """Build a minimal polymer bridging aggregate result for cache tests."""
+
+    n_replicates = len(replicates)
+    replicate_values = [mean_contacts] * n_replicates
+    return PolymerBridgingAggregatedResult(
+        settings_fingerprint=settings_fingerprint,
+        config_hash=config_hash,
+        equilibration_time=equilibration_time,
+        equilibration_unit="ns",
+        n_replicates=n_replicates,
+        replicates=list(replicates),
+        min_ca_distance_angstrom=0.0,
+        mean_contacts_per_contacting_oligomer=mean_contacts,
+        mean_contacts_sem=0.1,
+        multisite_fraction=0.5,
+        multisite_fraction_sem=0.05,
+        high_valency_fraction=0.1,
+        high_valency_fraction_sem=0.02,
+        mean_contacts_per_contacting_oligomer_replicates=replicate_values,
+        multisite_fraction_replicates=[0.45] * n_replicates,
+        high_valency_fraction_replicates=[0.08] * n_replicates,
+        valency_probabilities_mean={"1": 0.5, "2": 0.4, "3+": 0.1},
+        valency_probabilities_sem={"1": 0.01, "2": 0.02, "3+": 0.01},
+        valency_probabilities_per_replicate={"1": [0.52] * n_replicates},
+    )
 
 
 class TestLifecycle:
-    def test_compute_replicate_uses_trajectory_contacts(self, tmp_path):
+    def test_compute_replicate_uses_runner_seam(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
         condition = Condition(
             label="Cond",
@@ -231,24 +460,44 @@ class TestLifecycle:
             equilibration="0ns",
             recompute=False,
             settings=PolymerBridgingSettings(),
-        )
-        analysis._compute_frame_contacts = MagicMock(
-            return_value=(
-                [
-                    ({10}, {}),
-                    ({10, 35}, {(10, 35): 20.0}),
-                    ({10, 35}, {(10, 35): 20.0}),
-                    ({60}, {}),
-                ],
-                4,
-                10.0,
-            )
+            result_path=tmp_path / "out" / "result.json",
         )
 
-        result = analysis.compute_replicate(ctx, 1)
+        runner_result = SimpleNamespace(
+            observations=[
+                ({10}, {}),
+                ({10, 35}, {(10, 35): 20.0}),
+                ({10, 35}, {(10, 35): 20.0}),
+                ({60}, {}),
+            ],
+            n_frames=4,
+            timestep_ps=10.0,
+        )
+        runner = MagicMock()
+        runner.results = runner_result
+        runner.run.return_value = runner
+        mock_universe = MagicMock()
+        mock_universe.trajectory.__len__.return_value = 4
+        mock_loader = MagicMock()
+        mock_loader.load_universe.return_value = mock_universe
+        mock_loader.get_timestep.return_value = 10.0
+
+        with (
+            patch("polyzymd.analyses.shared.loader.TrajectoryLoader", return_value=mock_loader),
+            patch(
+                "polyzymd.analyses.polymer_bridging._runner.PolymerBridgingReplicateRunner",
+                return_value=runner,
+            ) as mock_runner_cls,
+        ):
+            result = analysis.compute_replicate(ctx, 1)
 
         assert result.replicate == 1
         assert result.multisite_fraction == pytest.approx(0.5)
+        assert result.settings_fingerprint == analysis._make_settings_cache_tag(ctx.settings)
+        runner.run.assert_called_once_with(start=0, stop=4, step=1)
+        mock_runner_cls.assert_called_once()
+        assert ctx.result_path.exists()
+        assert list(ctx.output_dir.glob("polymer_bridging_*.json"))
 
     def test_compute_replicate_uses_cached_result_when_available(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
@@ -259,9 +508,9 @@ class TestLifecycle:
             replicates=(1,),
             sim_config=MagicMock(),
         )
-        settings_tag = analysis._make_settings_cache_tag(settings)
-        result_path = tmp_path / "out" / f"polymer_bridging_{settings_tag}.json"
+        result_path = analysis._replicate_cache_path(tmp_path / "out", settings, "0ns")
         cached = PolymerBridgingReplicateResult(
+            settings_fingerprint=analysis._make_settings_cache_tag(settings),
             replicate=1,
             n_frames=4,
             timestep_ps=10.0,
@@ -294,6 +543,269 @@ class TestLifecycle:
 
         assert loaded == cached
 
+    def test_compute_replicate_prefers_sidecar_over_canonical_cache(self, tmp_path):
+        analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
+        condition = Condition(
+            label="Cond",
+            config_path=tmp_path / "condition" / "config.yaml",
+            replicates=(1,),
+            sim_config=MagicMock(),
+        )
+        output_dir = tmp_path / "out"
+        canonical_path = output_dir / "result.json"
+        sidecar_path = analysis._replicate_cache_path(output_dir, settings, "0ns")
+        canonical = _make_replicate_result(1).model_copy(
+            update={
+                "settings_fingerprint": analysis._make_settings_cache_tag(settings),
+                "mean_contacts_per_contacting_oligomer": 9.0,
+            }
+        )
+        sidecar = _make_replicate_result(1).model_copy(
+            update={
+                "settings_fingerprint": analysis._make_settings_cache_tag(settings),
+                "mean_contacts_per_contacting_oligomer": 1.5,
+            }
+        )
+        canonical.save(canonical_path)
+        sidecar.save(sidecar_path)
+
+        loaded = analysis.compute_replicate(
+            ReplicateContext(
+                condition=condition,
+                replicate=1,
+                sim_config=condition.sim_config,
+                output_dir=output_dir,
+                equilibration="0ns",
+                recompute=False,
+                settings=settings,
+                result_path=canonical_path,
+            ),
+            1,
+        )
+
+        assert loaded.mean_contacts_per_contacting_oligomer == pytest.approx(1.5)
+
+    def test_compute_replicate_rejects_missing_fingerprint_sidecar(self, tmp_path):
+        analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
+        condition = Condition(
+            label="Cond",
+            config_path=tmp_path / "condition" / "config.yaml",
+            replicates=(1,),
+            sim_config=MagicMock(),
+        )
+        output_dir = tmp_path / "out"
+        sidecar_path = analysis._replicate_cache_path(output_dir, settings, "0ns")
+        _make_replicate_result(1).save(sidecar_path)
+
+        with patch(
+            "polyzymd.analyses.base.Analysis.compute_replicate",
+            side_effect=RuntimeError("should recompute"),
+        ):
+            with pytest.raises(RuntimeError, match="should recompute"):
+                analysis.compute_replicate(
+                    ReplicateContext(
+                        condition=condition,
+                        replicate=1,
+                        sim_config=condition.sim_config,
+                        output_dir=output_dir,
+                        equilibration="0ns",
+                        recompute=False,
+                        settings=settings,
+                    ),
+                    1,
+                )
+
+    def test_compute_replicate_rejects_and_does_not_copy_missing_fingerprint_canonical(
+        self,
+        tmp_path,
+    ):
+        analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
+        condition = Condition(
+            label="Cond",
+            config_path=tmp_path / "condition" / "config.yaml",
+            replicates=(1,),
+            sim_config=MagicMock(),
+        )
+        output_dir = tmp_path / "out"
+        canonical_path = output_dir / "result.json"
+        sidecar_path = analysis._replicate_cache_path(output_dir, settings, "0ns")
+        _make_replicate_result(1).save(canonical_path)
+
+        with patch(
+            "polyzymd.analyses.base.Analysis.compute_replicate",
+            side_effect=RuntimeError("should recompute"),
+        ):
+            with pytest.raises(RuntimeError, match="should recompute"):
+                analysis.compute_replicate(
+                    ReplicateContext(
+                        condition=condition,
+                        replicate=1,
+                        sim_config=condition.sim_config,
+                        output_dir=output_dir,
+                        equilibration="0ns",
+                        recompute=False,
+                        settings=settings,
+                        result_path=canonical_path,
+                    ),
+                    1,
+                )
+
+        assert not sidecar_path.exists()
+
+    def test_compute_replicate_ignores_window_mismatched_cache(self, tmp_path):
+        analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
+        condition = Condition(
+            label="Cond",
+            config_path=tmp_path / "condition" / "config.yaml",
+            replicates=(1,),
+            sim_config=MagicMock(),
+        )
+        result_path = analysis._replicate_cache_path(tmp_path / "out", settings, "0ns")
+        cached = _make_replicate_result(1)
+        cached.equilibration_time = 0.0
+        cached.equilibration_unit = "ns"
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        cached.save(result_path)
+        fresh = _make_replicate_result(1)
+        fresh.equilibration_time = 10.0
+        fresh.equilibration_unit = "ns"
+
+        with patch(
+            "polyzymd.analyses.base.Analysis.compute_replicate",
+            return_value=fresh,
+        ) as mock_compute:
+            loaded = analysis.compute_replicate(
+                ReplicateContext(
+                    condition=condition,
+                    replicate=1,
+                    sim_config=condition.sim_config,
+                    output_dir=tmp_path / "out",
+                    equilibration="10ns",
+                    recompute=False,
+                    settings=settings,
+                ),
+                1,
+            )
+
+        assert loaded is fresh
+        mock_compute.assert_called_once()
+
+    def test_compute_replicate_ignores_replicate_id_mismatched_cache(self, tmp_path):
+        analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
+        condition = Condition(
+            label="Cond",
+            config_path=tmp_path / "condition" / "config.yaml",
+            replicates=(1,),
+            sim_config=MagicMock(),
+        )
+        result_path = analysis._replicate_cache_path(tmp_path / "out", settings, "0ns")
+        cached = _make_replicate_result(2).model_copy(
+            update={"settings_fingerprint": analysis._make_settings_cache_tag(settings)}
+        )
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        cached.save(result_path)
+        fresh = _make_replicate_result(1)
+
+        with patch(
+            "polyzymd.analyses.base.Analysis.compute_replicate",
+            return_value=fresh,
+        ) as mock_compute:
+            loaded = analysis.compute_replicate(
+                ReplicateContext(
+                    condition=condition,
+                    replicate=1,
+                    sim_config=condition.sim_config,
+                    output_dir=tmp_path / "out",
+                    equilibration="0ns",
+                    recompute=False,
+                    settings=settings,
+                ),
+                1,
+            )
+
+        assert loaded is fresh
+        mock_compute.assert_called_once()
+
+    def test_aggregate_rejects_replicate_id_mismatched_inputs(self, tmp_path):
+        analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
+        condition = Condition(
+            label="Cond",
+            config_path=tmp_path / "condition" / "config.yaml",
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="0ns",
+            settings=settings,
+        )
+
+        with pytest.raises(ValueError, match="replicate IDs do not match"):
+            analysis.aggregate(ctx, [_make_replicate_result(1), _make_replicate_result(3)])
+
+
+class TestConditionHasPolymer:
+    """Regression tests for polymer-selection-aware condition filtering."""
+
+    def test_topology_chain_check_uses_requested_polymer_selection(self):
+        """A non-C polymer selection should match the requested topology chain."""
+
+        from polyzymd.analyses.polymer_bridging import _condition_has_polymer
+
+        sim_config = MagicMock()
+        sim_config.polymers = None
+        sim_config.topology.chains = [SimpleNamespace(chain_id="B")]
+        condition = SimpleNamespace(sim_config=sim_config, replicates=())
+
+        assert _condition_has_polymer(condition, polymer_selection="chainID B") is True
+
+    def test_topology_shortcut_ignores_complex_polymer_selection(self):
+        """A chain-only topology hit should not satisfy a richer selection."""
+
+        from polyzymd.analyses.polymer_bridging import _condition_has_polymer
+
+        sim_config = MagicMock()
+        sim_config.polymers = None
+        sim_config.topology.chains = [SimpleNamespace(chain_id="C")]
+        condition = SimpleNamespace(sim_config=sim_config, replicates=())
+
+        assert (
+            _condition_has_polymer(condition, polymer_selection="chainID C and resname PEG")
+            is False
+        )
+
+    def test_topology_chain_check_does_not_hardcode_chain_c(self):
+        """Chain C should not satisfy a different polymer selection."""
+
+        from polyzymd.analyses.polymer_bridging import _condition_has_polymer
+
+        sim_config = MagicMock()
+        sim_config.polymers = None
+        sim_config.topology.chains = [SimpleNamespace(chain_id="C")]
+        condition = SimpleNamespace(sim_config=sim_config, replicates=())
+
+        assert _condition_has_polymer(condition, polymer_selection="chainID B") is False
+
+    def test_enabled_polymer_config_does_not_bypass_requested_selection(self):
+        """Enabled polymer config should not override selection-based detection."""
+
+        from polyzymd.analyses.polymer_bridging import _condition_has_polymer
+
+        sim_config = MagicMock()
+        sim_config.polymers = SimpleNamespace(enabled=True)
+        sim_config.topology.chains = [SimpleNamespace(chain_id="C")]
+        condition = SimpleNamespace(sim_config=sim_config, replicates=())
+
+        assert _condition_has_polymer(condition, polymer_selection="chainID B") is False
+
     def test_aggregate_builds_typed_result(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
         condition = Condition(
@@ -310,49 +822,16 @@ class TestLifecycle:
             settings=PolymerBridgingSettings(),
             result_path=tmp_path / "agg" / "result.json",
         )
-        analysis._compute_frame_contacts = MagicMock(
-            return_value=(
-                [
-                    ({10}, {}),
-                    ({10, 35}, {(10, 35): 20.0}),
-                    ({10, 35}, {(10, 35): 20.0}),
-                    ({60}, {}),
-                ],
-                4,
-                10.0,
-            )
-        )
         results = [
-            analysis.compute_replicate(
-                ReplicateContext(
-                    condition=condition,
-                    replicate=1,
-                    sim_config=condition.sim_config,
-                    output_dir=tmp_path / "r1",
-                    equilibration="0ns",
-                    recompute=False,
-                    settings=PolymerBridgingSettings(),
-                ),
-                1,
-            ),
-            analysis.compute_replicate(
-                ReplicateContext(
-                    condition=condition,
-                    replicate=2,
-                    sim_config=condition.sim_config,
-                    output_dir=tmp_path / "r2",
-                    equilibration="0ns",
-                    recompute=False,
-                    settings=PolymerBridgingSettings(),
-                ),
-                2,
-            ),
+            _make_replicate_result(1),
+            _make_replicate_result(2),
         ]
 
         aggregated = analysis.aggregate(ctx, results)
 
         assert isinstance(aggregated, PolymerBridgingAggregatedResult)
         assert aggregated.n_replicates == 2
+        assert ctx.result_path.exists()
 
     def test_aggregate_uses_cached_result_when_available(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
@@ -363,10 +842,9 @@ class TestLifecycle:
             replicates=(1, 2),
             sim_config=MagicMock(),
         )
-        settings_tag = analysis._make_settings_cache_tag(settings)
-        rep_str = analysis._format_replicate_range((1, 2))
-        result_path = tmp_path / "agg" / f"polymer_bridging_{rep_str}_{settings_tag}.json"
+        result_path = analysis._aggregate_cache_path(tmp_path / "agg", settings, "0ns", (1, 2))
         cached = PolymerBridgingAggregatedResult(
+            settings_fingerprint=analysis._make_settings_cache_tag(settings),
             n_replicates=2,
             replicates=[1, 2],
             min_ca_distance_angstrom=0.0,
@@ -402,6 +880,192 @@ class TestLifecycle:
         )
 
         assert loaded == cached
+
+    def test_aggregate_prefers_sidecar_over_canonical_cache(self, tmp_path):
+        analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
+        condition = Condition(
+            label="Cond",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "agg",
+            equilibration="0ns",
+            settings=settings,
+            result_path=tmp_path / "agg" / "result.json",
+        )
+        canonical = _make_aggregated_result(
+            (1, 2),
+            mean_contacts=9.0,
+            settings_fingerprint=analysis._make_settings_cache_tag(settings),
+        )
+        sidecar = _make_aggregated_result(
+            (1, 2),
+            mean_contacts=1.5,
+            settings_fingerprint=analysis._make_settings_cache_tag(settings),
+        )
+        canonical.save(ctx.result_path)
+        sidecar.save(analysis._aggregate_cache_path(ctx.output_dir, settings, "0ns", (1, 2)))
+
+        loaded = analysis.aggregate(ctx, [])
+
+        assert loaded.mean_contacts_per_contacting_oligomer == pytest.approx(1.5)
+
+    def test_aggregate_rejects_replicate_set_mismatch_cache(self, tmp_path):
+        analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
+        condition = Condition(
+            label="Cond",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2, 3),
+            output_dir=tmp_path / "agg",
+            equilibration="0ns",
+            settings=settings,
+            result_path=tmp_path / "agg" / "result.json",
+        )
+        stale = _make_aggregated_result(
+            (1, 2),
+            mean_contacts=9.0,
+            settings_fingerprint=analysis._make_settings_cache_tag(settings),
+        )
+        current_path = analysis._aggregate_cache_path(ctx.output_dir, settings, "0ns", (1, 2, 3))
+        stale.save(current_path)
+
+        loaded = analysis.aggregate(
+            ctx,
+            [_make_replicate_result(1), _make_replicate_result(2), _make_replicate_result(3)],
+        )
+
+        assert loaded.mean_contacts_per_contacting_oligomer == pytest.approx(1.5)
+        assert loaded.replicates == [1, 2, 3]
+
+    def test_aggregate_ignores_window_mismatched_cache(self, tmp_path):
+        analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
+        condition = Condition(
+            label="Cond",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        result_path = analysis._aggregate_cache_path(tmp_path / "agg", settings, "0ns", (1, 2))
+        cached = PolymerBridgingAggregatedResult(
+            n_replicates=2,
+            replicates=[1, 2],
+            min_ca_distance_angstrom=0.0,
+            mean_contacts_per_contacting_oligomer=9.9,
+            mean_contacts_sem=0.1,
+            multisite_fraction=0.5,
+            multisite_fraction_sem=0.05,
+            high_valency_fraction=0.1,
+            high_valency_fraction_sem=0.02,
+            mean_contacts_per_contacting_oligomer_replicates=[9.9, 9.9],
+            multisite_fraction_replicates=[0.45, 0.55],
+            high_valency_fraction_replicates=[0.08, 0.12],
+            valency_probabilities_mean={"1": 0.5, "2": 0.4, "3+": 0.1},
+            valency_probabilities_sem={"1": 0.01, "2": 0.02, "3+": 0.01},
+            valency_probabilities_per_replicate={"1": [0.52, 0.48]},
+            equilibration_time=0.0,
+            equilibration_unit="ns",
+        )
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        cached.save(result_path)
+
+        loaded = analysis.aggregate(
+            AggregateContext(
+                condition=condition,
+                replicates=(1, 2),
+                output_dir=tmp_path / "agg",
+                equilibration="10ns",
+                settings=settings,
+            ),
+            [_make_replicate_result(1), _make_replicate_result(2)],
+        )
+
+        assert loaded is not cached
+        assert loaded.equilibration_time == pytest.approx(10.0)
+
+    def test_aggregate_rejects_stale_config_hash_cache(self, tmp_path):
+        analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
+        sim_config = _make_hashable_sim_config(tmp_path)
+        condition = Condition(
+            label="Cond",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1, 2),
+            sim_config=sim_config,
+        )
+        result_path = analysis._aggregate_cache_path(tmp_path / "agg", settings, "0ns", (1, 2))
+        cached = PolymerBridgingAggregatedResult(
+            settings_fingerprint=analysis._make_settings_cache_tag(settings),
+            config_hash="stale-config",
+            n_replicates=2,
+            replicates=[1, 2],
+            min_ca_distance_angstrom=0.0,
+            mean_contacts_per_contacting_oligomer=9.9,
+            mean_contacts_sem=0.1,
+            multisite_fraction=0.5,
+            multisite_fraction_sem=0.05,
+            high_valency_fraction=0.1,
+            high_valency_fraction_sem=0.02,
+            mean_contacts_per_contacting_oligomer_replicates=[9.9, 9.9],
+            multisite_fraction_replicates=[0.45, 0.55],
+            high_valency_fraction_replicates=[0.08, 0.12],
+            valency_probabilities_mean={"1": 0.5, "2": 0.4, "3+": 0.1},
+            valency_probabilities_sem={"1": 0.01, "2": 0.02, "3+": 0.01},
+            valency_probabilities_per_replicate={"1": [0.52, 0.48]},
+        )
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        cached.save(result_path)
+
+        loaded = analysis.aggregate(
+            AggregateContext(
+                condition=condition,
+                replicates=(1, 2),
+                output_dir=tmp_path / "agg",
+                equilibration="0ns",
+                settings=settings,
+            ),
+            [_make_replicate_result(1), _make_replicate_result(2)],
+        )
+
+        assert loaded is not cached
+        assert loaded.mean_contacts_per_contacting_oligomer == pytest.approx(1.5)
+
+    def test_aggregate_cache_checks_include_sim_config(self, tmp_path):
+        analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
+        sim_config = MagicMock()
+        condition = Condition(
+            label="Cond",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1, 2),
+            sim_config=sim_config,
+        )
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "agg",
+            equilibration="0ns",
+            settings=settings,
+            result_path=tmp_path / "agg" / "result.json",
+        )
+
+        with patch.object(analysis, "_check_cache", return_value=None) as mock_check_cache:
+            analysis.aggregate(ctx, [_make_replicate_result(1), _make_replicate_result(2)])
+
+        assert mock_check_cache.call_count == 2
+        assert mock_check_cache.call_args_list[0].kwargs["sim_config"] is sim_config
+        assert mock_check_cache.call_args_list[1].kwargs["sim_config"] is sim_config
 
     def test_plot_returns_paths(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
@@ -453,10 +1117,10 @@ class TestLifecycle:
             '"created_at":"now","polyzymd_version":"test"}'
         )
         cond_a = Condition(
-            label="A", config_path=Path("/tmp/a.yaml"), replicates=(1, 2), sim_config=MagicMock()
+            label="A", config_path=Path("/tmp/a.yaml"), replicates=(1, 2, 3), sim_config=MagicMock()
         )
         cond_b = Condition(
-            label="B", config_path=Path("/tmp/b.yaml"), replicates=(1, 2), sim_config=MagicMock()
+            label="B", config_path=Path("/tmp/b.yaml"), replicates=(1, 2, 3), sim_config=MagicMock()
         )
         analysis_dir_a = tmp_path / "analysis" / "A" / "polymer_bridging" / "aggregated"
         analysis_dir_b = tmp_path / "analysis" / "B" / "polymer_bridging" / "aggregated"
@@ -545,6 +1209,7 @@ class TestLifecycle:
 
     def test_compare_sanitizes_nan_stats(self):
         analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
         condition_a = Condition(
             label="A",
             config_path=Path("/tmp/a.yaml"),
@@ -558,6 +1223,7 @@ class TestLifecycle:
             sim_config=MagicMock(),
         )
         aggregated_a = PolymerBridgingAggregatedResult(
+            settings_fingerprint=analysis._make_settings_cache_tag(settings),
             n_replicates=3,
             replicates=[1, 2, 3],
             min_ca_distance_angstrom=0.0,
@@ -604,7 +1270,7 @@ class TestLifecycle:
             analysis_dirs={"A": Path("/tmp/a"), "B": Path("/tmp/b")},
             results_dir=Path("/tmp/results"),
             equilibration="0ns",
-            settings=PolymerBridgingSettings(),
+            settings=settings,
             recompute=False,
             aggregated_results={"A": aggregated_a, "B": aggregated_b},
         )
@@ -617,8 +1283,119 @@ class TestLifecycle:
             assert pair.direction == "not_testable"
             assert pair.effect_size_interpretation == "not_testable"
 
+    def test_compare_accepts_successful_replicate_subset_aggregate(self, tmp_path):
+        """Finalize should accept aggregates that record successful replicate subsets."""
+        from polyzymd.analyses.base import ComparisonContext
+
+        analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
+        condition = Condition(
+            label="A",
+            config_path=Path("/tmp/a.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        aggregated = _make_aggregated_result(
+            (1, 2),
+            mean_contacts=1.5,
+            settings_fingerprint=analysis._make_settings_cache_tag(settings),
+        )
+        ctx = ComparisonContext(
+            name="Test",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"A": tmp_path / "A" / "polymer_bridging"},
+            results_dir=tmp_path / "results",
+            equilibration="0ns",
+            settings=settings,
+            recompute=False,
+            aggregated_results={"A": aggregated},
+        )
+
+        result = analysis.compare(ctx)
+
+        assert result is not None
+        assert result.conditions[0].n_replicates == 2
+
+    def test_compare_rejects_replicate_subset_below_minimum(self, tmp_path):
+        """Finalize should not accept successful subsets below plugin minimum."""
+        from polyzymd.analyses.base import ComparisonContext
+
+        analysis = PolymerBridgingAnalysis()
+        condition = Condition(
+            label="A",
+            config_path=Path("/tmp/a.yaml"),
+            replicates=(1, 2, 3),
+            sim_config=MagicMock(),
+        )
+        aggregated = _make_aggregated_result((1,), mean_contacts=1.5)
+        ctx = ComparisonContext(
+            name="Test",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"A": tmp_path / "A" / "polymer_bridging"},
+            results_dir=tmp_path / "results",
+            equilibration="0ns",
+            settings=PolymerBridgingSettings(),
+            recompute=False,
+            aggregated_results={"A": aggregated},
+        )
+
+        result = analysis.compare(ctx)
+
+        assert result is None
+
+    def test_compare_rejects_preloaded_settings_mismatch(self, tmp_path):
+        """Finalize should not use preloaded aggregates from different settings."""
+        from polyzymd.analyses.base import ComparisonContext
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        analysis = PolymerBridgingAnalysis()
+        condition = Condition(
+            label="A",
+            config_path=Path("/tmp/a.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        stale_settings = PolymerBridgingSettings(cutoff=9.0)
+        stale_summary = PolymerBridgingAggregatedResult(
+            settings_fingerprint=settings_fingerprint(stale_settings),
+            n_replicates=2,
+            replicates=[1, 2],
+            min_ca_distance_angstrom=0.0,
+            mean_contacts_per_contacting_oligomer=1.0,
+            mean_contacts_sem=0.1,
+            multisite_fraction=0.5,
+            multisite_fraction_sem=0.05,
+            high_valency_fraction=0.1,
+            high_valency_fraction_sem=0.02,
+            mean_contacts_per_contacting_oligomer_replicates=[0.9, 1.1],
+            multisite_fraction_replicates=[0.45, 0.55],
+            high_valency_fraction_replicates=[0.08, 0.12],
+            valency_probabilities_mean={"1": 0.5, "2": 0.4, "3+": 0.1},
+            valency_probabilities_sem={"1": 0.01, "2": 0.02, "3+": 0.01},
+            valency_probabilities_per_replicate={"1": [0.5, 0.5]},
+        )
+        ctx = ComparisonContext(
+            name="Test",
+            conditions=[condition],
+            excluded_conditions=[],
+            control_label=None,
+            analysis_dirs={"A": tmp_path / "A" / "polymer_bridging"},
+            results_dir=tmp_path / "results",
+            equilibration="0ns",
+            settings=PolymerBridgingSettings(),
+            recompute=False,
+            aggregated_results={"A": stale_summary},
+        )
+
+        assert analysis.compare(ctx) is None
+
     def test_compare_keeps_normal_direction_for_testable_stats(self):
         analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
         condition_a = Condition(
             label="A",
             config_path=Path("/tmp/a.yaml"),
@@ -632,6 +1409,7 @@ class TestLifecycle:
             sim_config=MagicMock(),
         )
         aggregated_a = PolymerBridgingAggregatedResult(
+            settings_fingerprint=analysis._make_settings_cache_tag(settings),
             n_replicates=3,
             replicates=[1, 2, 3],
             min_ca_distance_angstrom=0.0,
@@ -653,6 +1431,7 @@ class TestLifecycle:
             },
         )
         aggregated_b = PolymerBridgingAggregatedResult(
+            settings_fingerprint=analysis._make_settings_cache_tag(settings),
             n_replicates=3,
             replicates=[1, 2, 3],
             min_ca_distance_angstrom=0.0,
@@ -683,7 +1462,7 @@ class TestLifecycle:
             analysis_dirs={"A": Path("/tmp/a"), "B": Path("/tmp/b")},
             results_dir=Path("/tmp/results"),
             equilibration="0ns",
-            settings=PolymerBridgingSettings(),
+            settings=settings,
             recompute=False,
             aggregated_results={"A": aggregated_a, "B": aggregated_b},
         )
@@ -698,6 +1477,7 @@ class TestLifecycle:
 
     def test_compare_passes_welch_method_to_pairwise_helper(self, monkeypatch):
         analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
         condition_a = Condition(
             label="A",
             config_path=Path("/tmp/a.yaml"),
@@ -711,6 +1491,7 @@ class TestLifecycle:
             sim_config=MagicMock(),
         )
         aggregated_a = PolymerBridgingAggregatedResult(
+            settings_fingerprint=analysis._make_settings_cache_tag(settings),
             n_replicates=2,
             replicates=[1, 2],
             min_ca_distance_angstrom=0.0,
@@ -765,7 +1546,7 @@ class TestLifecycle:
             analysis_dirs={"A": Path("/tmp/a"), "B": Path("/tmp/b")},
             results_dir=Path("/tmp/results"),
             equilibration="0ns",
-            settings=PolymerBridgingSettings(),
+            settings=settings,
             recompute=False,
             aggregated_results={"A": aggregated_a, "B": aggregated_b},
             ttest_method="welch",
@@ -783,6 +1564,7 @@ class TestLifecycle:
 
     def test_compare_honors_tukey_hsd_posthoc_method(self):
         analysis = PolymerBridgingAnalysis()
+        settings = PolymerBridgingSettings()
         condition_a = Condition(
             label="A",
             config_path=Path("/tmp/a.yaml"),
@@ -802,6 +1584,7 @@ class TestLifecycle:
             sim_config=MagicMock(),
         )
         aggregated_a = PolymerBridgingAggregatedResult(
+            settings_fingerprint=analysis._make_settings_cache_tag(settings),
             n_replicates=3,
             replicates=[1, 2, 3],
             min_ca_distance_angstrom=0.0,
@@ -853,7 +1636,7 @@ class TestLifecycle:
             analysis_dirs={"A": Path("/tmp/a"), "B": Path("/tmp/b"), "C": Path("/tmp/c")},
             results_dir=Path("/tmp/results"),
             equilibration="0ns",
-            settings=PolymerBridgingSettings(),
+            settings=settings,
             recompute=False,
             aggregated_results={"A": aggregated_a, "B": aggregated_b, "C": aggregated_c},
             ttest_method="welch",

@@ -20,10 +20,9 @@ computed when ``compute_binding_preference=True`` in settings.
 Condition filtering
 -------------------
 No-polymer conditions (e.g. "No Polymer" controls) are automatically
-excluded via :meth:`filter_conditions`.  Detection checks for:
-
-1. Cached per-replicate contact results (if found, condition had polymer).
-2. Topology inspection (MDAnalysis atom selection) as fallback.
+excluded via :meth:`filter_conditions`. Detection checks topology with the
+active MDAnalysis polymer selection and does not treat stale contacts caches
+as polymer evidence.
 """
 
 from __future__ import annotations
@@ -46,6 +45,12 @@ from polyzymd.analyses.base import (
     ReplicateContext,
 )
 from polyzymd.analyses.contacts._aggregator import AggregatedContactResult
+from polyzymd.analyses.contacts._identity import (
+    contacts_settings_fingerprint,
+    contacts_settings_fingerprint_candidates,
+    effective_polymer_selection,
+    normalize_polymer_types,
+)
 from polyzymd.analyses.contacts._plot_settings import ContactsPlotSettings
 from polyzymd.analyses.contacts._plotters import (
     _plot_binding_preference_bars,
@@ -61,13 +66,14 @@ from polyzymd.analyses.contacts._plotters import (
     _plot_user_partition_bars,
 )
 from polyzymd.analyses.contacts._results import ContactResult
+from polyzymd.analyses.contacts._runner import (
+    ContactsReplicateRunner,
+    ParallelContactAnalyzer,
+    build_contact_grouping,
+)
 from polyzymd.analyses.exceptions import ReplicateSkippedError
 
 if TYPE_CHECKING:
-    from MDAnalysis.core.groups import AtomGroup, Residue
-    from MDAnalysis.core.universe import Universe
-    from numpy.typing import NDArray
-
     from polyzymd.analyses.contacts._comparison_results import ContactsComparisonResult
 
 logger = logging.getLogger("polyzymd.analyses.contacts")
@@ -75,355 +81,6 @@ logger = logging.getLogger("polyzymd.analyses.contacts")
 
 # Default cutoff matching the existing settings module
 DEFAULT_CONTACT_CUTOFF = 4.5
-
-
-# ---------------------------------------------------------------------------
-# Contact computation classes
-# ---------------------------------------------------------------------------
-
-
-def identify_polymer_chains(
-    query_residues: "AtomGroup",
-) -> list[list[tuple[int, str, "Residue"]]]:
-    """Identify polymer chains and their segments from an atom group.
-
-    Groups residues by connected fragments (molecular graph components)
-    and returns structured chain information.
-
-    Parameters
-    ----------
-    query_residues : AtomGroup
-        MDAnalysis AtomGroup containing the polymer residues to classify.
-
-    Returns
-    -------
-    list[list[tuple[int, str, Residue]]]
-        List of chains, where each chain is a list of
-        (chain_idx, resname, residue) tuples.
-    """
-    all_atoms = query_residues.atoms
-    fragments = all_atoms.fragments if all_atoms.fragments else [all_atoms]
-
-    chains = []
-    for chain_idx, frag in enumerate(fragments):
-        chain_residues = []
-        for res in frag.residues:
-            chain_residues.append((chain_idx, res.resname, res))
-        if chain_residues:
-            chains.append(chain_residues)
-
-    return chains
-
-
-def _get_contact_analysis_base_cls() -> type:
-    """Return a ``_ContactAnalysisBase`` class that extends AnalysisBase.
-
-    MDAnalysis is a heavy dependency imported lazily.  Because
-    ``AnalysisBase`` is a C-extension-style class whose ``__bases__`` cannot
-    be reassigned post-hoc, we define the subclass *inside* this factory on
-    the first call and cache it for subsequent use.
-    """
-    cached = getattr(_get_contact_analysis_base_cls, "_cls", None)
-    if cached is not None:
-        return cached
-
-    from MDAnalysis.analysis.base import AnalysisBase
-
-    class _ContactAnalysisBase(AnalysisBase):  # type: ignore[misc]
-        """MDAnalysis AnalysisBase for residue-level contact detection.
-
-        Iterates trajectory frames using ``capped_distance`` for O(N)
-        neighbour searching (serial execution, ~26 s / 1 900 frames).
-        """
-
-        def __init__(
-            self,
-            target_atoms: "AtomGroup",
-            query_atoms: "AtomGroup",
-            target_residue_indices: "NDArray[np.int64]",
-            query_residue_indices: "NDArray[np.int64]",
-            cutoff: float,
-            n_target_residues: int,
-            n_query_residues: int,
-            **kwargs: Any,
-        ):
-            super().__init__(target_atoms.universe.trajectory, **kwargs)
-
-            self.target_atoms = target_atoms
-            self.query_atoms = query_atoms
-            self.target_residue_indices = target_residue_indices
-            self.query_residue_indices = query_residue_indices
-            self.cutoff = cutoff
-            self.n_target_residues = n_target_residues
-            self.n_query_residues = n_query_residues
-
-        def _prepare(self) -> None:
-            """Initialize results array."""
-            self._contact_matrix = np.zeros(
-                (self.n_frames, self.n_target_residues, self.n_query_residues),
-                dtype=np.uint8,
-            )
-
-        def _single_frame(self) -> None:
-            """Compute contacts for a single frame using capped_distance."""
-            from MDAnalysis.lib.distances import capped_distance
-
-            target_pos = self.target_atoms.positions
-            query_pos = self.query_atoms.positions
-            box = self._ts.dimensions
-
-            pairs, distances = capped_distance(
-                query_pos,
-                target_pos,
-                max_cutoff=self.cutoff,
-                box=box,
-                return_distances=True,
-            )
-
-            if len(pairs) == 0:
-                return
-
-            query_atom_indices = pairs[:, 0]
-            target_atom_indices = pairs[:, 1]
-
-            query_res_indices = self.query_residue_indices[query_atom_indices]
-            target_res_indices = self.target_residue_indices[target_atom_indices]
-
-            self._contact_matrix[self._frame_index, target_res_indices, query_res_indices] = 1
-
-        def _conclude(self) -> None:
-            """Store results."""
-            self.results.contact_matrix = self._contact_matrix
-
-    _get_contact_analysis_base_cls._cls = _ContactAnalysisBase  # type: ignore[attr-defined]
-    return _ContactAnalysisBase
-
-
-class ParallelContactAnalyzer:
-    """Optimized contact analyzer using cell-list based neighbour searching.
-
-    Uses MDAnalysis ``capped_distance`` for O(N) neighbour searching,
-    providing ~10–100× speedup over naïve distance calculations.
-
-    Parameters
-    ----------
-    target_selector : MolecularSelector
-        Selector for target residues (typically protein).
-    query_selector : MolecularSelector
-        Selector for query residues (typically polymer).
-    cutoff : float
-        Contact distance cutoff in Ångströms.  Default 4.0.
-    grouping : ResidueGrouping | None
-        Classification scheme for target residues.
-        Default: ``ProteinAAClassification()``.
-    """
-
-    def __init__(
-        self,
-        target_selector: Any,
-        query_selector: Any,
-        cutoff: float = 4.0,
-        grouping: Any | None = None,
-    ) -> None:
-        from polyzymd.analyses.shared.groupings import ProteinAAClassification
-
-        self.target_selector = target_selector
-        self.query_selector = query_selector
-        self.cutoff = cutoff
-        self.grouping = grouping or ProteinAAClassification()
-
-    def run(
-        self,
-        universe: "Universe",
-        start: int = 0,
-        stop: int | None = None,
-        step: int = 1,
-        verbose: bool = False,
-    ) -> "ContactResult":
-        """Run contact analysis.
-
-        Parameters
-        ----------
-        universe : Universe
-            MDAnalysis Universe with loaded trajectory.
-        start : int
-            First frame to analyse (0-indexed).
-        stop : int | None
-            Last frame to analyse (exclusive).  ``None`` → all frames.
-        step : int
-            Frame stride.
-        verbose : bool
-            Print progress information.
-
-        Returns
-        -------
-        ContactResult
-            Complete contact analysis results.
-        """
-        from polyzymd.analyses.contacts._results import (
-            ContactResult,
-            PolymerSegmentContacts,
-            ResidueContactData,
-            compress_contact_array,
-        )
-
-        target_result = self.target_selector.select(universe)
-        query_result = self.query_selector.select(universe)
-
-        target_atoms = target_result.atoms
-        query_atoms = query_result.atoms
-        target_residues = target_result.residues
-        query_residues = query_result.residues
-
-        if verbose:
-            logger.info(
-                f"Analyzing contacts: {len(query_residues)} query residues "
-                f"({len(query_atoms)} atoms) -> {len(target_residues)} target residues "
-                f"({len(target_atoms)} atoms)"
-            )
-            logger.info(f"Cutoff: {self.cutoff} A")
-
-        target_atom_to_res = self._build_atom_to_residue_map(target_atoms, target_residues)
-        query_atom_to_res = self._build_atom_to_residue_map(query_atoms, query_residues)
-
-        try:
-            timestep_ps = universe.trajectory.dt
-        except (AttributeError, ValueError):
-            timestep_ps = 1.0
-
-        analysis = _get_contact_analysis_base_cls()(
-            target_atoms=target_atoms,
-            query_atoms=query_atoms,
-            target_residue_indices=target_atom_to_res,
-            query_residue_indices=query_atom_to_res,
-            cutoff=self.cutoff,
-            n_target_residues=len(target_residues),
-            n_query_residues=len(query_residues),
-        )
-        analysis.run(start=start, stop=stop, step=step, verbose=verbose)
-
-        contact_matrix = analysis.results.contact_matrix
-        n_frames = contact_matrix.shape[0]
-
-        if verbose:
-            logger.info(f"Processing {n_frames} frames of contact data...")
-
-        polymer_chains = identify_polymer_chains(query_residues)
-
-        # Build residue index → chain/segment mapping
-        res_to_chain_seg: dict[int, tuple[int, int, str, int]] = {}
-        residue_lookup = {self._unique_residue_key(qr): i for i, qr in enumerate(query_residues)}
-        for chain_idx, chain in enumerate(polymer_chains):
-            for seg_idx, (_, _, res) in enumerate(chain):
-                query_idx = residue_lookup.get(self._unique_residue_key(res))
-                if query_idx is not None:
-                    res_to_chain_seg[query_idx] = (chain_idx, seg_idx, res.resname, res.resid)
-
-        # Convert contact matrix → ContactResult
-        residue_contacts: list[ResidueContactData] = []
-        for target_idx, target_res in enumerate(target_residues):
-            group = self.grouping.classify(target_res.resname)
-
-            segment_contacts: list[PolymerSegmentContacts] = []
-            target_contacts = contact_matrix[:, target_idx, :]
-
-            for query_idx in range(target_contacts.shape[1]):
-                contact_array = target_contacts[:, query_idx].astype(bool)
-                if not np.any(contact_array):
-                    continue
-
-                if query_idx in res_to_chain_seg:
-                    chain_idx, seg_idx, resname, resid = res_to_chain_seg[query_idx]
-                else:
-                    qres = query_residues[query_idx]
-                    chain_idx, seg_idx = 0, query_idx
-                    resname, resid = qres.resname, qres.resid
-
-                events = compress_contact_array(contact_array)
-                if events:
-                    segment_contacts.append(
-                        PolymerSegmentContacts(
-                            polymer_resname=resname,
-                            polymer_resid=resid,
-                            polymer_chain_idx=chain_idx,
-                            events=events,
-                        )
-                    )
-
-            residue_contacts.append(
-                ResidueContactData(
-                    protein_resid=target_res.resid,
-                    protein_resname=target_res.resname,
-                    protein_group=group,
-                    segment_contacts=segment_contacts,
-                )
-            )
-
-        result = ContactResult(
-            residue_contacts=residue_contacts,
-            n_frames=n_frames,
-            timestep_ps=timestep_ps * step,
-            criteria_label=f"any_atom_{self.cutoff:.1f}A",
-            criteria_cutoff=self.cutoff,
-            start_frame=start,
-            metadata={
-                "target_selector": self.target_selector.label,
-                "query_selector": self.query_selector.label,
-                "n_polymer_chains": len(polymer_chains),
-                "n_polymer_segments": sum(len(c) for c in polymer_chains),
-                "optimized": True,
-                "algorithm": "capped_distance",
-            },
-        )
-        result.compute_per_residue_statistics()
-
-        if verbose:
-            logger.info(
-                f"Analysis complete: {result.n_contacted_residues}/{result.n_protein_residues} "
-                f"residues contacted ({result.coverage_fraction():.1%})"
-            )
-
-        return result
-
-    # -- helpers ----------------------------------------------------------
-
-    @staticmethod
-    def _unique_residue_key(residue: Any) -> int | tuple[str, int | Any, str]:
-        """Build a stable identity key for one residue.
-
-        Prefer MDAnalysis ``residue.ix`` because it is globally unique
-        within a Universe. For lightweight mocks that do not define ``ix``,
-        fall back to ``(chainID or segid, resid, resname)``.
-        """
-        ix = getattr(residue, "ix", None)
-        if ix is not None:
-            try:
-                return int(ix)
-            except (TypeError, ValueError):
-                pass
-
-        chain_or_seg = getattr(residue, "chainID", None) or getattr(residue, "segid", "")
-        resid = getattr(residue, "resid", None)
-        resname = getattr(residue, "resname", "")
-        return (str(chain_or_seg), resid, str(resname))
-
-    @staticmethod
-    def _build_atom_to_residue_map(
-        atoms: "AtomGroup",
-        residues: "AtomGroup",
-    ) -> "NDArray[np.int64]":
-        """Build mapping from atom index to residue index.
-
-        Returns an array where ``arr[atom_local_idx] = residue_idx``.
-        """
-        residue_to_idx = {
-            ParallelContactAnalyzer._unique_residue_key(res): i for i, res in enumerate(residues)
-        }
-        atom_to_res = np.zeros(len(atoms), dtype=np.int64)
-        for i, atom in enumerate(atoms):
-            residue_key = ParallelContactAnalyzer._unique_residue_key(atom.residue)
-            atom_to_res[i] = residue_to_idx.get(residue_key, 0)
-        return atom_to_res
 
 
 # ---------------------------------------------------------------------------
@@ -589,7 +246,7 @@ class ContactsSettings(BaseModel):
                         f"Partition '{partition_name}' references undefined "
                         f"group '{group_name}'. Available: {available}"
                     )
-            # Check for overlapping groups within this partition
+            # Detect overlapping groups within this partition
             seen_resids: dict[int, str] = {}
             for group_name in group_names:
                 for resid in self.protein_groups[group_name]:
@@ -611,10 +268,9 @@ class ContactsSettings(BaseModel):
 class ContactsAnalysis(Analysis):
     """Contacts analysis: polymer-protein contacts from MD trajectories.
 
-    This plugin uses :class:`ParallelContactAnalyzer` (defined in this
-    module) for per-replicate computation, aggregates across replicates,
-    and performs cross-condition comparison with dual metrics (coverage and
-    mean contact fraction).
+    This plugin delegates trajectory-native contact detection to the contacts
+    runner seam, while keeping aggregation, comparison, plotting, and
+    downstream orchestration in the plugin class.
 
     The ``compare()`` method is **fully overridden** because:
 
@@ -645,6 +301,769 @@ class ContactsAnalysis(Analysis):
 
     # === Required methods ===
 
+    @staticmethod
+    def _replicate_sidecar_path(
+        output_dir: Path,
+        settings: BaseModel,
+        equilibration: str,
+        replicate: int,
+    ) -> Path:
+        """Build the legacy per-replicate contacts side-output path."""
+
+        from polyzymd.analyses.shared.loader import parse_time_string
+
+        eq_value, eq_unit = parse_time_string(equilibration)
+        eq_str = f"eq{eq_value:g}{eq_unit}"
+        cut_str = f"cut{settings.cutoff:.1f}"
+        settings_fp = contacts_settings_fingerprint(settings)
+        return output_dir / f"contacts_{eq_str}_{cut_str}_s{settings_fp}_rep{replicate}.json"
+
+    @staticmethod
+    def _aggregated_sidecar_path(
+        output_dir: Path,
+        settings: BaseModel,
+        equilibration: str,
+        replicates: Sequence[int],
+    ) -> Path:
+        """Build the legacy aggregated contacts side-output path."""
+
+        from polyzymd.analyses.shared.loader import parse_time_string
+        from polyzymd.analyses.shared.paths import format_replicate_cache_token
+
+        rep_token = format_replicate_cache_token(replicates)
+        eq_value, eq_unit = parse_time_string(equilibration)
+        eq_str = f"eq{eq_value:g}{eq_unit}"
+        cut_str = f"cut{settings.cutoff:.1f}"
+        settings_fp = contacts_settings_fingerprint(settings)
+        return (
+            output_dir / f"contacts_aggregated_{eq_str}_{cut_str}_s{settings_fp}_{rep_token}.json"
+        )
+
+    @staticmethod
+    def _effective_polymer_selection(settings: "ContactsSettings") -> str:
+        """Return the polymer selection constrained by polymer type filters.
+
+        Parameters
+        ----------
+        settings : ContactsSettings
+            Active contacts settings.
+
+        Returns
+        -------
+        str
+            MDAnalysis selection used for contact query atoms.
+        """
+
+        polymer_types = [
+            str(polymer_type).strip()
+            for polymer_type in (settings.polymer_types or [])
+            if str(polymer_type).strip()
+        ]
+        return effective_polymer_selection(settings.polymer_selection, polymer_types)
+
+    @staticmethod
+    def _cache_matches_window(result: Any, equilibration: str) -> bool:
+        """Return whether a cached result matches the requested analysis window.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded contacts result.
+        equilibration : str
+            Requested equilibration window from the comparison context.
+
+        Returns
+        -------
+        bool
+            ``True`` when stored equilibration metadata matches the requested
+            window, otherwise ``False``.
+        """
+
+        import math
+
+        from polyzymd.analyses.shared.loader import convert_time, parse_time_string
+
+        expected_time, expected_unit = parse_time_string(equilibration)
+        stored_time = getattr(result, "equilibration_time", None)
+        stored_unit = getattr(result, "equilibration_unit", None)
+        if stored_time is None or stored_unit is None:
+            return False
+        try:
+            stored_time_ps = convert_time(float(stored_time), str(stored_unit), "ps")
+            expected_time_ps = convert_time(float(expected_time), str(expected_unit), "ps")
+        except (TypeError, ValueError):
+            return False
+        return math.isclose(stored_time_ps, expected_time_ps, rel_tol=0.0, abs_tol=1.0e-9)
+
+    @staticmethod
+    def _result_window_string(result: Any) -> str | None:
+        """Return the equilibration window encoded on a result.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded contacts result with equilibration metadata.
+
+        Returns
+        -------
+        str or None
+            Window string such as ``"10ns"``, or ``None`` when metadata is
+            missing or malformed.
+        """
+
+        stored_time = getattr(result, "equilibration_time", None)
+        stored_unit = getattr(result, "equilibration_unit", None)
+        if stored_time is None or stored_unit is None:
+            return None
+        try:
+            stored_time_value = float(stored_time)
+        except (TypeError, ValueError):
+            return None
+        return f"{stored_time_value:g}{stored_unit}"
+
+    @staticmethod
+    def _cache_matches_replicate_id(
+        result: Any,
+        replicate: int,
+        *,
+        source: Path | None = None,
+    ) -> bool:
+        """Return whether a cached per-replicate result matches the request.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded per-replicate contacts result.
+        replicate : int
+            Requested replicate ID.
+        source : Path or None, optional
+            Cache source path used for diagnostics.
+
+        Returns
+        -------
+        bool
+            ``True`` when the stored replicate ID equals ``replicate``.
+        """
+
+        stored_replicate = getattr(result, "replicate", None)
+        try:
+            stored = int(stored_replicate)
+        except (TypeError, ValueError):
+            logger.warning(
+                "contacts: ignoring replicate cache without valid replicate identity%s",
+                f" at {source}" if source is not None else "",
+            )
+            return False
+        if stored != int(replicate):
+            logger.warning(
+                "contacts: ignoring replicate cache for replicate %d; requested %d%s",
+                stored,
+                int(replicate),
+                f" at {source}" if source is not None else "",
+            )
+            return False
+        return True
+
+    @staticmethod
+    def _embedded_contacts_settings_fingerprint(result: Any) -> str | None:
+        """Return contacts settings fingerprint embedded in cache content.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded contacts artifact.
+
+        Returns
+        -------
+        str or None
+            Embedded fingerprint from result fields or metadata. Filename-only
+            fingerprints are intentionally excluded.
+        """
+
+        stored_fingerprint = getattr(result, "settings_fingerprint", None)
+        if stored_fingerprint is None:
+            stored_fingerprint = getattr(result, "settings_fp", None)
+        if stored_fingerprint is None:
+            metadata = getattr(result, "metadata", None)
+            if isinstance(metadata, dict):
+                stored_fingerprint = (
+                    metadata.get("contacts_settings_fingerprint")
+                    or metadata.get("contact_settings_fingerprint")
+                    or metadata.get("settings_fingerprint")
+                    or metadata.get("settings_fp")
+                )
+        return str(stored_fingerprint) if stored_fingerprint is not None else None
+
+    @classmethod
+    def _cache_has_contacts_identity_proof(cls, result: Any, settings: BaseModel) -> bool:
+        """Return whether cache content fully proves contacts settings identity.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded contacts artifact.
+        settings : BaseModel
+            Active contacts settings.
+
+        Returns
+        -------
+        bool
+            ``True`` when content metadata/schema fields match the active
+            cutoff, selections, and grouping without relying on the filename.
+        """
+
+        metadata = getattr(result, "metadata", None)
+        metadata = metadata if isinstance(metadata, dict) else {}
+        cutoff = getattr(result, "criteria_cutoff", None)
+        if cutoff is None:
+            cutoff = metadata.get("criteria_cutoff", metadata.get("cutoff"))
+        try:
+            cutoff_matches = abs(float(cutoff) - float(settings.cutoff)) <= 1e-6
+        except (TypeError, ValueError):
+            return False
+        if not cutoff_matches:
+            return False
+
+        selection_string = str(getattr(result, "selection_string", "") or "")
+        protein_selection = metadata.get("protein_selection")
+        effective_selection = metadata.get("effective_polymer_selection")
+        if (protein_selection is None or effective_selection is None) and " : " in selection_string:
+            protein_text, polymer_text = selection_string.split(" : ", 1)
+            protein_selection = protein_selection or protein_text
+            effective_selection = effective_selection or polymer_text
+
+        grouping = metadata.get("grouping", metadata.get("contact_grouping"))
+        expected_effective = cls._effective_polymer_selection(settings)
+        return (
+            str(protein_selection).strip() == str(settings.protein_selection).strip()
+            and str(effective_selection).strip() == expected_effective.strip()
+            and str(grouping).strip() == str(settings.grouping).strip()
+        )
+
+    @classmethod
+    def _attach_contacts_identity_metadata(cls, result: Any, settings: BaseModel) -> None:
+        """Attach current contacts identity metadata to a cache result.
+
+        Parameters
+        ----------
+        result : Any
+            Contacts result object to update in place.
+        settings : BaseModel
+            Active contacts settings.
+        """
+
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        metadata = dict(getattr(result, "metadata", {}) or {})
+        contact_settings_fp = contacts_settings_fingerprint(settings)
+        effective_selection = cls._effective_polymer_selection(settings)
+        metadata["settings_fingerprint"] = contact_settings_fp
+        metadata["contacts_settings_fingerprint"] = contact_settings_fp
+        metadata["legacy_full_settings_fingerprint"] = settings_fingerprint(settings)
+        metadata["settings_fingerprint_domain"] = "contacts-v1"
+        metadata["protein_selection"] = str(settings.protein_selection).strip()
+        metadata["polymer_selection"] = str(settings.polymer_selection).strip()
+        metadata["effective_polymer_selection"] = effective_selection
+        metadata["polymer_types_filter"] = normalize_polymer_types(
+            getattr(settings, "polymer_types", None)
+        )
+        metadata["grouping"] = str(settings.grouping).strip()
+        metadata["cutoff"] = float(settings.cutoff)
+        metadata["criteria_cutoff"] = float(settings.cutoff)
+        result.metadata = metadata
+
+    @staticmethod
+    def _cache_matches_contacts_settings(
+        result: Any,
+        settings: BaseModel,
+        *,
+        source: Path | None = None,
+    ) -> bool:
+        """Return whether a cached contacts artifact matches active settings.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded contacts artifact.
+        settings : BaseModel
+            Active contacts settings.
+        source : Path or None, optional
+            Cache source path used for diagnostics only.
+
+        Returns
+        -------
+        bool
+            ``True`` when embedded identity matches a compatible contacts
+            fingerprint, or cache content provides complete explicit settings
+            proof. Filename-only fingerprints are not trusted.
+        """
+
+        source_suffix = f" at {source}" if source is not None else ""
+        stored_fingerprint = ContactsAnalysis._embedded_contacts_settings_fingerprint(result)
+        if stored_fingerprint is None:
+            if ContactsAnalysis._cache_has_contacts_identity_proof(result, settings):
+                ContactsAnalysis._attach_contacts_identity_metadata(result, settings)
+                return True
+            logger.warning(
+                "contacts: ignoring cache without embedded settings fingerprint or "
+                "complete settings proof%s",
+                source_suffix,
+            )
+            return False
+
+        candidates = contacts_settings_fingerprint_candidates(settings)
+        if str(stored_fingerprint) in candidates:
+            return True
+
+        logger.warning(
+            "contacts: ignoring cache with settings fingerprint mismatch%s: "
+            "stored=%s, current=%s",
+            source_suffix,
+            stored_fingerprint,
+            candidates[0],
+        )
+        return False
+
+    @staticmethod
+    def _align_replicate_results(
+        results: Sequence[Any],
+        replicates: Sequence[int],
+    ) -> list[Any]:
+        """Return replicate results ordered to match the requested IDs.
+
+        Parameters
+        ----------
+        results : Sequence[Any]
+            Per-replicate results returned by the orchestrator.
+        replicates : Sequence[int]
+            Requested replicate IDs from the aggregate context.
+
+        Returns
+        -------
+        list[Any]
+            Results ordered by ``replicates``.
+
+        Raises
+        ------
+        ValueError
+            If any result is missing a replicate ID, duplicates an ID, or does
+            not match the requested replicate set.
+        """
+
+        requested = tuple(int(rep) for rep in replicates)
+        by_replicate: dict[int, Any] = {}
+        for result in results:
+            stored_replicate = getattr(result, "replicate", None)
+            try:
+                replicate = int(stored_replicate)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("contacts aggregate input lacks a valid replicate ID") from exc
+            if replicate in by_replicate:
+                raise ValueError(f"contacts aggregate input duplicates replicate {replicate}")
+            by_replicate[replicate] = result
+
+        requested_set = set(requested)
+        stored_set = set(by_replicate)
+        if stored_set != requested_set:
+            raise ValueError(
+                "contacts aggregate input replicate IDs do not match requested replicates: "
+                f"stored={sorted(stored_set)}, requested={sorted(requested_set)}"
+            )
+        return [by_replicate[replicate] for replicate in requested]
+
+    def _resolve_plot_equilibration(
+        self,
+        ctx: PlotContext,
+        aggregated_dir: Path | None = None,
+    ) -> str:
+        """Resolve the equilibration window to use when validating plot inputs.
+
+        Plot contexts created by the orchestrator carry the resolved window.
+        Direct plot calls may omit it, so finalized comparison metadata is used
+        first and canonical aggregate metadata is used only as a last-resort
+        fallback for direct calls with the dataclass default.
+
+        Parameters
+        ----------
+        ctx : PlotContext
+            Framework-provided plot context.
+        aggregated_dir : Path or None, optional
+            Aggregated result directory for direct-call fallback.
+
+        Returns
+        -------
+        str
+            Requested equilibration window for finalized aggregate validation.
+        """
+
+        comparison_path = ctx.comparison_path or self.comparison_result_path(ctx.results_dir)
+        if comparison_path.exists():
+            try:
+                from polyzymd.analyses.contacts._comparison_results import ContactsComparisonResult
+
+                comparison = ContactsComparisonResult.load(comparison_path)
+            except (OSError, ValueError, ValidationError):
+                logger.warning(
+                    "contacts: could not load comparison metadata for plot validation at %s",
+                    comparison_path,
+                )
+            else:
+                return comparison.equilibration_time
+
+        if ctx.equilibration != "0ns" or aggregated_dir is None:
+            return ctx.equilibration
+
+        aggregate_path = self.aggregate_result_path(aggregated_dir)
+        if not aggregate_path.exists():
+            return ctx.equilibration
+        try:
+            aggregate = AggregatedContactResult.load(aggregate_path)
+        except (OSError, ValueError, ValidationError):
+            return ctx.equilibration
+
+        return self._result_window_string(aggregate) or ctx.equilibration
+
+    def _cache_matches_context(
+        self,
+        result: Any,
+        *,
+        settings: BaseModel,
+        equilibration: str,
+        sim_config: Any,
+        replicates: Sequence[int] | None = None,
+        allow_replicate_subset: bool = False,
+        source: Path | None = None,
+    ) -> bool:
+        """Return whether an aggregate result matches the active context.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded aggregated contacts result.
+        settings : BaseModel
+            Active contacts settings.
+        equilibration : str
+            Active equilibration/window request.
+        sim_config : Any
+            Active condition simulation configuration.
+        replicates : Sequence[int] or None, optional
+            Requested replicate tuple for aggregated cache validation.
+        allow_replicate_subset : bool, optional
+            Whether a stored subset of the requested replicates is accepted.
+            This is used only when consuming finalized aggregates.
+        source : Path or None, optional
+            Cache source path used for settings-fingerprint fallback and
+            diagnostics.
+
+        Returns
+        -------
+        bool
+            ``True`` when settings, window, and known config identity match.
+        """
+
+        from polyzymd.analyses.shared.config_hash import validate_config_hash
+
+        if not self._cache_matches_window(result, equilibration):
+            logger.warning(
+                "contacts: ignoring aggregated cache with mismatched equilibration window%s",
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        if not self._cache_matches_contacts_settings(result, settings, source=source):
+            return False
+
+        if replicates is not None and not self._cache_matches_replicates(
+            result,
+            replicates,
+            allow_subset=allow_replicate_subset,
+            source=source,
+        ):
+            return False
+
+        stored_hash = getattr(result, "config_hash", None)
+        if stored_hash not in (None, "", "unknown") and not validate_config_hash(
+            str(stored_hash),
+            sim_config,
+        ):
+            return False
+
+        return True
+
+    def _cache_matches_replicates(
+        self,
+        result: Any,
+        replicates: Sequence[int],
+        *,
+        allow_subset: bool = False,
+        source: Path | None = None,
+    ) -> bool:
+        """Return whether cached aggregate replicate identity matches the request.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded aggregated contacts result.
+        replicates : Sequence[int]
+            Requested replicate numbers for the active aggregate.
+        allow_subset : bool, optional
+            Whether stored replicate identity may be a non-empty subset of the
+            requested set.
+        source : Path or None, optional
+            Cache source path used for diagnostics.
+
+        Returns
+        -------
+        bool
+            ``True`` when the cached result declares the requested replicate
+            set, or a subset when explicitly allowed. Missing metadata is
+            treated as incompatible because legacy aggregates cannot prove
+            their replicate identity.
+        """
+
+        requested = tuple(sorted(int(rep) for rep in replicates))
+        stored_replicates = getattr(result, "replicates", None)
+        if stored_replicates is None:
+            metadata = getattr(result, "metadata", None)
+            if isinstance(metadata, dict):
+                stored_replicates = metadata.get("replicates")
+        if not stored_replicates:
+            logger.warning(
+                "contacts: ignoring aggregated cache without replicate identity%s",
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        try:
+            stored = tuple(sorted(int(rep) for rep in stored_replicates))
+        except (TypeError, ValueError):
+            logger.warning(
+                "contacts: ignoring aggregated cache with invalid replicate identity%s",
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        if len(set(stored)) != len(stored):
+            logger.warning(
+                "contacts: ignoring aggregated cache with duplicate replicate identity%s",
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        is_allowed_subset = allow_subset and set(stored).issubset(set(requested))
+        if stored != requested and not is_allowed_subset:
+            logger.warning(
+                "contacts: ignoring aggregated cache for replicates %s; requested %s%s",
+                stored,
+                requested,
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        stored_count = len(stored)
+        if allow_subset and stored_count < self.min_replicates:
+            logger.warning(
+                "contacts: ignoring aggregated cache with %d replicates below minimum %d%s",
+                stored_count,
+                self.min_replicates,
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        declared_count = getattr(result, "n_replicates", None)
+        try:
+            declared_count = int(declared_count)
+        except (TypeError, ValueError):
+            logger.warning(
+                "contacts: ignoring aggregated cache with invalid n_replicates%s",
+                f" at {source}" if source is not None else "",
+            )
+            return False
+        if declared_count != stored_count:
+            logger.warning(
+                "contacts: ignoring aggregated cache with n_replicates=%d but %d stored "
+                "replicate IDs%s",
+                declared_count,
+                stored_count,
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        mismatched_vectors = self._replicate_vector_length_mismatches(result, stored)
+        if mismatched_vectors:
+            logger.warning(
+                "contacts: ignoring aggregated cache with per-replicate vector length mismatch "
+                "for %s%s",
+                ", ".join(mismatched_vectors),
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        return True
+
+    @staticmethod
+    def _replicate_vector_length_mismatches(
+        result: Any,
+        expected_replicates: Sequence[int],
+    ) -> list[str]:
+        """Return per-replicate vector fields whose lengths are inconsistent.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded aggregated contacts result.
+        expected_replicates : Sequence[int]
+            Stored replicate identities for the aggregate.
+
+        Returns
+        -------
+        list[str]
+            Field labels for vectors that do not match stored replicate identity.
+        """
+
+        mismatches: list[str] = []
+        expected = tuple(int(rep) for rep in expected_replicates)
+        expected_count = len(expected)
+        expected_set = set(expected)
+        total_frames = getattr(result, "total_frames_per_replicate", None)
+        if isinstance(total_frames, (list, tuple)) and len(total_frames) != expected_count:
+            mismatches.append("total_frames_per_replicate")
+
+        residue_stats = getattr(result, "residue_stats", []) or []
+        for index, residue in enumerate(residue_stats):
+            contact_fractions = getattr(residue, "contact_fraction_per_replicate", None)
+            if (
+                isinstance(contact_fractions, (list, tuple))
+                and len(contact_fractions) != expected_count
+            ):
+                mismatches.append(f"residue_stats[{index}].contact_fraction_per_replicate")
+
+            per_type_fractions = getattr(residue, "by_polymer_type_per_replicate", {}) or {}
+            if isinstance(per_type_fractions, dict):
+                for polymer_type, values in per_type_fractions.items():
+                    if isinstance(values, (list, tuple)) and len(values) != expected_count:
+                        mismatches.append(
+                            f"residue_stats[{index}].by_polymer_type_per_replicate[{polymer_type}]"
+                        )
+
+            residence_times = (
+                getattr(residue, "residence_time_by_polymer_type_per_replicate", {}) or {}
+            )
+            residence_replicates = (
+                getattr(residue, "residence_time_by_polymer_type_replicates", {}) or {}
+            )
+            if isinstance(residence_times, dict):
+                for polymer_type, values in residence_times.items():
+                    field = (
+                        "residue_stats"
+                        f"[{index}].residence_time_by_polymer_type_per_replicate"
+                        f"[{polymer_type}]"
+                    )
+                    if not isinstance(values, (list, tuple)):
+                        continue
+                    sparse_ids = None
+                    if isinstance(residence_replicates, dict):
+                        sparse_ids = residence_replicates.get(polymer_type)
+                    if sparse_ids is None:
+                        # Legacy sparse caches lack identity metadata; accept compact vectors
+                        if len(values) > expected_count:
+                            mismatches.append(field)
+                        continue
+                    if not isinstance(sparse_ids, (list, tuple)):
+                        mismatches.append(f"{field}.replicates")
+                        continue
+                    try:
+                        sparse_replicates = [int(rep) for rep in sparse_ids]
+                    except (TypeError, ValueError):
+                        mismatches.append(f"{field}.replicates")
+                        continue
+                    if len(values) != len(sparse_replicates):
+                        mismatches.append(
+                            field,
+                        )
+                        continue
+                    if len(set(sparse_replicates)) != len(sparse_replicates):
+                        mismatches.append(f"{field}.replicates")
+                        continue
+                    if not set(sparse_replicates).issubset(expected_set):
+                        mismatches.append(f"{field}.replicates")
+
+        return mismatches
+
+    def _load_validated_aggregated_result(
+        self,
+        aggregated_dir: Path,
+        *,
+        settings: BaseModel,
+        equilibration: str,
+        replicates: Sequence[int],
+        sim_config: Any,
+        recompute: bool,
+        allow_replicate_subset: bool = False,
+    ) -> Any | None:
+        """Load an aggregated contacts result after cache identity validation.
+
+        Fingerprinted sidecars are preferred over canonical ``result.json`` so
+        a stale canonical aggregate cannot shadow a matching window-aware
+        contacts aggregate.
+
+        Parameters
+        ----------
+        aggregated_dir : Path
+            Directory containing aggregate cache files.
+        settings : BaseModel
+            Active contacts settings.
+        equilibration : str
+            Active equilibration/window request.
+        replicates : Sequence[int]
+            Replicates expected in the aggregate.
+        sim_config : Any
+            Active condition simulation configuration.
+        recompute : bool
+            Whether cache loading should be skipped.
+        allow_replicate_subset : bool, optional
+            Whether finalized aggregates with successful replicate subsets may
+            be loaded.
+
+        Returns
+        -------
+        Any or None
+            Valid aggregated contacts result, or ``None`` when no compatible
+            cache is available.
+        """
+
+        candidates = [
+            self._aggregated_sidecar_path(aggregated_dir, settings, equilibration, replicates),
+            self.aggregate_result_path(aggregated_dir),
+        ]
+        saw_json = aggregated_dir.exists() and any(aggregated_dir.glob("*.json"))
+
+        for candidate in candidates:
+            cached = self._check_cache(
+                AggregatedContactResult,
+                candidate,
+                recompute=recompute,
+                sim_config=None,
+                settings=None,
+            )
+            if cached is None:
+                continue
+            if self._cache_matches_context(
+                cached,
+                settings=settings,
+                equilibration=equilibration,
+                sim_config=sim_config,
+                replicates=replicates,
+                allow_replicate_subset=allow_replicate_subset,
+                source=candidate,
+            ):
+                return cached
+
+        if saw_json:
+            return None
+
+        return self._load_aggregated_result(aggregated_dir)
+
     def compute_replicate(
         self,
         ctx: ReplicateContext,
@@ -667,77 +1086,171 @@ class ContactsAnalysis(Analysis):
         ContactResult
             Per-replicate contact result.
         """
-        import MDAnalysis as mda
 
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
-        from polyzymd.analyses.shared.loader import (
-            TrajectoryLoader,
-            convert_time,
-            parse_time_string,
+        result_file = self._replicate_sidecar_path(
+            ctx.output_dir,
+            ctx.settings,
+            ctx.equilibration,
+            replicate,
         )
-        from polyzymd.analyses.shared.selectors import MDAnalysisSelector
+        cached = self._check_cache(
+            ContactResult,
+            result_file,
+            recompute=ctx.recompute,
+            sim_config=ctx.sim_config,
+            settings=None,
+        )
+        if (
+            cached is not None
+            and self._cache_matches_window(cached, ctx.equilibration)
+            and self._cache_matches_replicate_id(cached, replicate, source=result_file)
+            and self._cache_matches_contacts_settings(cached, ctx.settings, source=result_file)
+        ):
+            if ctx.result_path is not None and not ctx.result_path.exists():
+                self._attach_contacts_identity_metadata(cached, ctx.settings)
+                self.save_result(cached, ctx.result_path)
+            return cached
 
-        settings = ctx.settings
+        if ctx.result_path is not None:
+            cached = self._check_cache(
+                ContactResult,
+                ctx.result_path,
+                recompute=ctx.recompute,
+                sim_config=ctx.sim_config,
+                settings=None,
+            )
+            if (
+                cached is not None
+                and self._cache_matches_window(cached, ctx.equilibration)
+                and self._cache_matches_replicate_id(cached, replicate, source=ctx.result_path)
+                and self._cache_matches_contacts_settings(
+                    cached, ctx.settings, source=ctx.result_path
+                )
+            ):
+                if not result_file.exists():
+                    self._attach_contacts_identity_metadata(cached, ctx.settings)
+                    cached.save(result_file)
+                return cached
 
-        logger.info(f"  Computing contacts for replicate {replicate}...")
-
-        loader = TrajectoryLoader(ctx.sim_config)
         try:
-            traj_info = loader.get_trajectory_info(replicate)
+            result = super().compute_replicate(ctx, replicate)
         except FileNotFoundError as e:
             logger.warning(f"  Skipping replicate {replicate}: trajectory data not found. {e}")
             raise ReplicateSkippedError(
                 f"No trajectory data found for replicate {replicate}: {e}"
             ) from e
-
-        try:
-            traj_files = [str(p) for p in traj_info.trajectory_files]
-            universe = mda.Universe(str(traj_info.topology_file), traj_files)
-
-            # Convert equilibration time to start frame
-            eq_value, eq_unit = parse_time_string(ctx.equilibration)
-            eq_time_ps = convert_time(eq_value, eq_unit, "ps")
-
-            try:
-                timestep_ps = universe.trajectory.dt
-            except (AttributeError, ValueError):
-                timestep_ps = 1.0
-
-            start_frame = int(eq_time_ps / timestep_ps) if timestep_ps > 0 else 0
-            logger.info(f"    Equilibration: {ctx.equilibration} -> frame {start_frame}")
-
-            # Create selectors
-            target_selector = MDAnalysisSelector(settings.protein_selection)
-            query_selector = MDAnalysisSelector(settings.polymer_selection)
-
-            # Create analyzer and run
-            analyzer = ParallelContactAnalyzer(
-                target_selector=target_selector,
-                query_selector=query_selector,
-                cutoff=settings.cutoff,
-            )
-            result = analyzer.run(universe, start=start_frame)
-
-            # Save result
-            ctx.output_dir.mkdir(parents=True, exist_ok=True)
-            eq_str = f"eq{eq_value:g}{eq_unit}"
-            cut_str = f"cut{settings.cutoff:.1f}"
-            settings_fp = settings_fingerprint(settings)
-            output_file = (
-                ctx.output_dir / f"contacts_{eq_str}_{cut_str}_s{settings_fp}_rep{replicate}.json"
-            )
-            result.save(output_file)
-            if ctx.result_path is not None:
-                self.save_result(result, ctx.result_path)
-            logger.info(f"  Saved: {output_file}")
-
-            return result
-        except (FileNotFoundError, ValueError, OSError, IndexError) as e:
+        except (ValueError, OSError, IndexError) as e:
             logger.debug("Full traceback:", exc_info=True)
             logger.warning(f"  Skipping replicate {replicate}: analysis failed with error: {e}")
             raise ReplicateSkippedError(
                 f"Contacts analysis failed for replicate {replicate}: {type(e).__name__}: {e}"
             ) from e
+
+        ctx.output_dir.mkdir(parents=True, exist_ok=True)
+        result.save(result_file)
+        if ctx.result_path is not None:
+            self.save_result(result, ctx.result_path)
+        logger.info(f"  Saved: {result_file}")
+        return result
+
+    def get_trajectory_window(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        loader: Any,
+        universe: Any,
+    ) -> Any:
+        """Resolve the contacts analysis window with a dt-aware fallback."""
+
+        from polyzymd.analyses.shared.window import resolve_trajectory_window
+
+        del replicate
+        try:
+            timestep_ps = float(universe.trajectory.dt)
+            if timestep_ps <= 0:
+                raise ValueError
+        except (AttributeError, TypeError, ValueError):
+            try:
+                timestep_ps = float(loader.get_timestep(ctx.replicate, unit="ps"))
+            except (AttributeError, TypeError, ValueError):
+                timestep_ps = 1.0
+
+        return resolve_trajectory_window(
+            equilibration=ctx.equilibration,
+            n_frames_total=len(universe.trajectory),
+            timestep_ps=timestep_ps,
+        )
+
+    def build_runner(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        universe: Any,
+        window: Any,
+    ) -> Any:
+        """Build the runner-backed contacts execution object."""
+
+        from polyzymd.analyses.shared.selectors import MDAnalysisSelector
+
+        del replicate, window
+        settings = ctx.settings
+        polymer_selection = self._effective_polymer_selection(settings)
+        return ContactsReplicateRunner(
+            universe=universe,
+            target_selector=MDAnalysisSelector(settings.protein_selection),
+            query_selector=MDAnalysisSelector(polymer_selection),
+            cutoff=settings.cutoff,
+            grouping=build_contact_grouping(settings.grouping),
+            analyzer_cls=ParallelContactAnalyzer,
+        )
+
+    def summarize_replicate(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        runner: Any,
+        window: Any,
+    ) -> Any:
+        """Attach framework metadata to the runner-produced contact result."""
+
+        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
+        from polyzymd.analyses.shared.loader import parse_time_string
+
+        result = runner.results
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+
+        result.config_hash = compute_config_hash(ctx.sim_config)
+        result.polyzymd_version = get_polyzymd_version()
+        result.replicate = replicate
+        result.equilibration_time = eq_value
+        result.equilibration_unit = eq_unit
+        polymer_selection = self._effective_polymer_selection(ctx.settings)
+        result.selection_string = f"{ctx.settings.protein_selection} : {polymer_selection}"
+        result.start_frame = window.start
+        result.timestep_ps = float(window.timestep_ps) * window.step
+
+        metadata = dict(getattr(result, "metadata", {}) or {})
+        contact_settings_fp = contacts_settings_fingerprint(ctx.settings)
+        metadata["settings_fingerprint"] = contact_settings_fp
+        metadata["contacts_settings_fingerprint"] = contact_settings_fp
+        metadata["legacy_full_settings_fingerprint"] = settings_fingerprint(ctx.settings)
+        metadata["settings_fingerprint_domain"] = "contacts-v1"
+        metadata["protein_selection"] = ctx.settings.protein_selection
+        metadata["polymer_selection"] = ctx.settings.polymer_selection
+        metadata["effective_polymer_selection"] = polymer_selection
+        metadata["polymer_types_filter"] = normalize_polymer_types(ctx.settings.polymer_types)
+        metadata["grouping"] = ctx.settings.grouping
+        metadata["cutoff"] = float(ctx.settings.cutoff)
+        metadata["criteria_cutoff"] = float(ctx.settings.cutoff)
+        result.metadata = metadata
+
+        has_stats = getattr(result, "has_per_residue_statistics", None)
+        compute_stats = getattr(result, "compute_per_residue_statistics", None)
+        if callable(has_stats) and callable(compute_stats) and not has_stats():
+            compute_stats()
+
+        return result
 
     def aggregate(
         self,
@@ -760,25 +1273,89 @@ class ContactsAnalysis(Analysis):
         AggregatedContactResult
             Aggregated result with per-residue statistics.
         """
+        from polyzymd.analyses._results_base import get_polyzymd_version
         from polyzymd.analyses.contacts._aggregator import aggregate_contact_results
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+        from polyzymd.analyses.shared.config_hash import compute_config_hash, settings_fingerprint
         from polyzymd.analyses.shared.loader import parse_time_string
 
-        logger.info(f"  Aggregating {len(results)} replicates...")
-        agg_result = aggregate_contact_results(list(results))
-
-        # Save
-        ctx.output_dir.mkdir(parents=True, exist_ok=True)
-        reps = sorted(ctx.replicates)
-        rep_range = f"{reps[0]}-{reps[-1]}"
-        eq_value, eq_unit = parse_time_string(ctx.equilibration)
-        eq_str = f"eq{eq_value:g}{eq_unit}"
-        cut_str = f"cut{ctx.settings.cutoff:.1f}"
-        settings_fp = settings_fingerprint(ctx.settings)
-        agg_file = (
-            ctx.output_dir
-            / f"contacts_aggregated_{eq_str}_{cut_str}_s{settings_fp}_reps{rep_range}.json"
+        agg_file = self._aggregated_sidecar_path(
+            ctx.output_dir,
+            ctx.settings,
+            ctx.equilibration,
+            ctx.replicates,
         )
+        recompute = getattr(ctx, "recompute", False)
+        cached = self._check_cache(
+            AggregatedContactResult,
+            agg_file,
+            recompute=recompute,
+            sim_config=ctx.condition.sim_config,
+            settings=None,
+        )
+        if cached is not None and self._cache_matches_context(
+            cached,
+            settings=ctx.settings,
+            equilibration=ctx.equilibration,
+            sim_config=ctx.condition.sim_config,
+            replicates=ctx.replicates,
+            source=agg_file,
+        ):
+            if ctx.result_path is not None and not ctx.result_path.exists():
+                self._attach_contacts_identity_metadata(cached, ctx.settings)
+                self.save_result(cached, ctx.result_path)
+            return cached
+
+        if ctx.result_path is not None:
+            cached = self._check_cache(
+                AggregatedContactResult,
+                ctx.result_path,
+                recompute=recompute,
+                sim_config=ctx.condition.sim_config,
+                settings=None,
+            )
+            if cached is not None and self._cache_matches_context(
+                cached,
+                settings=ctx.settings,
+                equilibration=ctx.equilibration,
+                sim_config=ctx.condition.sim_config,
+                replicates=ctx.replicates,
+                source=ctx.result_path,
+            ):
+                if not agg_file.exists():
+                    self._attach_contacts_identity_metadata(cached, ctx.settings)
+                    cached.save(agg_file)
+                return cached
+
+        aligned_results = self._align_replicate_results(results, ctx.replicates)
+        logger.info(f"  Aggregating {len(aligned_results)} replicates...")
+        agg_result = aggregate_contact_results(aligned_results)
+
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+        agg_result.config_hash = compute_config_hash(ctx.condition.sim_config)
+        agg_result.polyzymd_version = get_polyzymd_version()
+        agg_result.replicates = list(ctx.replicates)
+        agg_result.equilibration_time = eq_value
+        agg_result.equilibration_unit = eq_unit
+        polymer_selection = self._effective_polymer_selection(ctx.settings)
+        agg_result.selection_string = f"{ctx.settings.protein_selection} : {polymer_selection}"
+        metadata = dict(getattr(agg_result, "metadata", {}) or {})
+        contact_settings_fp = contacts_settings_fingerprint(ctx.settings)
+        metadata["settings_fingerprint"] = contact_settings_fp
+        metadata["contacts_settings_fingerprint"] = contact_settings_fp
+        metadata["legacy_full_settings_fingerprint"] = settings_fingerprint(ctx.settings)
+        metadata["settings_fingerprint_domain"] = "contacts-v1"
+        metadata["replicates"] = list(ctx.replicates)
+        metadata["protein_selection"] = ctx.settings.protein_selection
+        metadata["polymer_selection"] = ctx.settings.polymer_selection
+        metadata["effective_polymer_selection"] = polymer_selection
+        metadata["polymer_types_filter"] = normalize_polymer_types(ctx.settings.polymer_types)
+        metadata["grouping"] = ctx.settings.grouping
+        metadata["cutoff"] = float(ctx.settings.cutoff)
+        metadata["criteria_cutoff"] = float(ctx.settings.cutoff)
+        agg_result.metadata = metadata
+
+        # Save both sidecar and canonical outputs for downstream consumers
+        ctx.output_dir.mkdir(parents=True, exist_ok=True)
         agg_result.save(agg_file)
         if ctx.result_path is not None:
             self.save_result(agg_result, ctx.result_path)
@@ -798,12 +1375,9 @@ class ContactsAnalysis(Analysis):
         Conditions without polymer atoms (e.g. "No Polymer" controls) are
         excluded since there are no polymer-protein contacts to analyse.
 
-        Detection strategy:
-
-        1. Check for cached per-replicate contact results — if found, the
-           condition must have had polymer.
-        2. Fall back to MDAnalysis topology inspection.
-        3. If neither works, include the condition (let analysis fail later).
+        Detection uses MDAnalysis topology inspection with the active
+        ``polymer_selection``. Stale contacts caches are not trusted as
+        polymer evidence.
 
         Parameters
         ----------
@@ -828,7 +1402,7 @@ class ContactsAnalysis(Analysis):
                     logger.info(
                         f"  Excluding '{cond.label}': no polymer atoms found "
                         f"with selection "
-                        f"'{resolved.polymer_selection}'"
+                        f"'{self._effective_polymer_selection(resolved)}'"
                     )
             except (AttributeError, ValueError, KeyError, OSError) as e:
                 logger.warning(f"  Error checking condition '{cond.label}': {e} — including anyway")
@@ -880,11 +1454,19 @@ class ContactsAnalysis(Analysis):
             logger.warning("contacts: no conditions provided — skipping comparison.")
             return None
 
-        # Step 1: Load aggregated results and build condition data
+        # Load aggregated results and build condition data
         condition_data: list[tuple[Condition, dict[str, Any]]] = []
         for cond in ctx.conditions:
             agg_dir = ctx.analysis_dirs[cond.label] / "aggregated"
-            agg_result = self._load_aggregated_result(agg_dir)
+            agg_result = self._load_validated_aggregated_result(
+                agg_dir,
+                settings=settings,
+                equilibration=ctx.equilibration,
+                replicates=cond.replicates,
+                sim_config=cond.sim_config,
+                recompute=ctx.recompute,
+                allow_replicate_subset=True,
+            )
             if agg_result is None:
                 logger.warning(f"No aggregated result for '{cond.label}' — skipping.")
                 continue
@@ -908,10 +1490,10 @@ class ContactsAnalysis(Analysis):
             logger.warning("contacts: no conditions have valid results — skipping.")
             return None
 
-        # Step 2: Validate identical residue sets
+        # Validate identical residue sets
         self._validate_residue_sets(condition_data)
 
-        # Step 3: Build condition summaries
+        # Build condition summaries
         summaries: list[ContactsConditionSummary] = []
         for cond, data in condition_data:
             agg_result = data["agg_result"]
@@ -928,40 +1510,40 @@ class ContactsAnalysis(Analysis):
             )
             summaries.append(summary)
 
-        # Step 4: Effective control
-        effective_control = ctx.effective_control
+        # Resolve effective control
+        effective_control = self._resolve_effective_control(ctx.effective_control, summaries)
 
-        # Step 5: Pairwise comparisons (dual metrics)
+        # Compute pairwise comparisons for both aggregate metrics
         comparisons: list[ContactsPairwiseComparison] = []
         if len(summaries) >= 2:
             comparisons = self._compute_contacts_pairwise(
                 summaries, condition_data, effective_control
             )
 
-        # Step 6: ANOVA if 3+ conditions
+        # Compute ANOVA when at least three conditions are available
         anova_results: list[ContactsANOVASummary] = []
         if len(summaries) >= 3:
             anova_results = self._compute_contacts_anova(condition_data)
 
-        # Step 6b: Apply BH FDR correction
+        # Apply BH FDR correction
         self._apply_fdr_correction(comparisons, anova_results, settings.fdr_alpha)
 
-        # Step 6c: Apply effect size threshold
+        # Apply effect size threshold
         self._apply_effect_size_threshold(comparisons, settings.min_effect_size)
 
-        # Step 7: Rankings
+        # Rank conditions by primary contact metrics
         ranked_coverage = sorted(summaries, key=lambda s: s.coverage_mean, reverse=True)
         ranked_contact = sorted(summaries, key=lambda s: s.mean_contact_fraction, reverse=True)
 
-        # Step 7b: Top contacted residues
+        # Collect top contacted residues for display
         top_residues_data = self._compute_top_contacted_residues(
             condition_data, settings.top_residues
         )
 
-        # Step 8: Binding preference comparison (optional)
+        # Add binding preference comparison when enabled
         binding_pref_summary = self._load_or_compute_binding_preference(ctx, condition_data)
 
-        # Step 9: Build result
+        # Build comparison result
         return ContactsComparisonResult(
             name=ctx.name,
             contacts_name="polymer_contacts",
@@ -1015,6 +1597,33 @@ class ContactsAnalysis(Analysis):
         if not labels:
             return plots
 
+        valid_labels: list[str] = []
+        for cond in ctx.conditions:
+            entry = data.get(cond.label)
+            if entry is None:
+                continue
+            aggregated_dir = entry["aggregated_dir"]
+            if not (aggregated_dir.exists() and any(aggregated_dir.glob("*.json"))):
+                valid_labels.append(cond.label)
+                continue
+            equilibration = self._resolve_plot_equilibration(ctx, aggregated_dir)
+            summary = self._load_validated_aggregated_result(
+                aggregated_dir,
+                settings=ctx.settings,
+                equilibration=equilibration,
+                replicates=cond.replicates,
+                sim_config=cond.sim_config,
+                recompute=False,
+                allow_replicate_subset=True,
+            )
+            if summary is not None:
+                valid_labels.append(cond.label)
+
+        labels = [label for label in labels if label in valid_labels]
+        data = {label: data[label] for label in labels} | {"__meta__": data["__meta__"]}
+        if not labels:
+            return plots
+
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Resolve plot settings
@@ -1063,38 +1672,22 @@ class ContactsAnalysis(Analysis):
     ) -> bool:
         """Check whether a condition has polymer atoms.
 
-        Checks:
-        1. Cached per-replicate contact results in the standard output
-           directories.
-        2. Topology inspection via MDAnalysis.
+        Detection uses topology inspection via MDAnalysis with the effective
+        polymer selection.
 
         Parameters
         ----------
         cond : Condition
             Condition to check.
         settings : ContactsAnalysis.Settings
-            Resolved settings with ``polymer_selection``.
+            Resolved settings with polymer query filters.
 
         Returns
         -------
         bool
             True if polymer atoms detected.
         """
-        # Check 1: Cached results
-        for rep in cond.replicates:
-            # Check multiple standard locations
-            run_dir = cond.sim_config.get_working_directory(rep)
-            projects_dir = cond.sim_config.output.projects_directory
-
-            contacts_dir = projects_dir / "analysis" / "contacts"
-            if contacts_dir.is_dir():
-                # Match both old (contacts_rep{N}.json) and new
-                # (contacts_eq*_cut*_rep{N}.json) filename schemes.
-                for rp in contacts_dir.glob(f"contacts*rep{rep}.json"):
-                    logger.debug(f"  {cond.label} rep {rep}: found cached result at {rp}")
-                    return True
-
-        # Check 2: Topology inspection
+        # Topology-based polymer detection
         for rep in cond.replicates:
             run_dir = cond.sim_config.get_working_directory(rep)
 
@@ -1112,7 +1705,7 @@ class ContactsAnalysis(Analysis):
                 import MDAnalysis as mda
 
                 universe = mda.Universe(str(topo_path))
-                polymer_atoms = universe.select_atoms(settings.polymer_selection)
+                polymer_atoms = universe.select_atoms(self._effective_polymer_selection(settings))
                 if len(polymer_atoms) > 0:
                     logger.debug(f"  {cond.label} rep {rep}: {len(polymer_atoms)} polymer atoms")
                     return True
@@ -1287,6 +1880,38 @@ class ContactsAnalysis(Analysis):
                     comparisons.append(comp)
 
         return comparisons
+
+    @staticmethod
+    def _resolve_effective_control(
+        requested_control: str | None,
+        summaries: Sequence[Any],
+    ) -> str | None:
+        """Return a control label that exists in validated summaries.
+
+        Parameters
+        ----------
+        requested_control : str or None
+            Control label from the comparison context.
+        summaries : Sequence[Any]
+            Validated condition summaries.
+
+        Returns
+        -------
+        str or None
+            The requested control when present, otherwise ``None`` to trigger
+            all-pairs comparison.
+        """
+
+        if requested_control is None:
+            return None
+        labels = {summary.label for summary in summaries}
+        if requested_control in labels:
+            return requested_control
+        logger.warning(
+            "contacts: configured control '%s' has no validated aggregate; falling back to all-pairs",
+            requested_control,
+        )
+        return None
 
     @staticmethod
     def _compare_contacts_pair(
@@ -1630,13 +2255,14 @@ class ContactsAnalysis(Analysis):
         from polyzymd.analyses.contacts._results import ContactResult
         from polyzymd.analyses.shared.binding_preference import compute_condition_binding_preference
         from polyzymd.analyses.shared.binding_preference_helpers import (
+            binding_preference_settings_fingerprint,
             resolve_enzyme_pdb,
             try_load_cached_binding_preference,
         )
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
         settings = ctx.settings
-        settings_fp = settings_fingerprint(settings)
+        contacts_settings_fp = contacts_settings_fingerprint(settings)
+        bp_settings_fp = binding_preference_settings_fingerprint(settings)
         compute_enabled = getattr(settings, "compute_binding_preference", False)
         recompute = ctx.recompute
 
@@ -1648,13 +2274,22 @@ class ContactsAnalysis(Analysis):
         for cond, data in condition_data:
             try:
                 analysis_dir = ctx.analysis_dirs[cond.label]
+                contact_results_by_replicate = find_contact_results_for_replicates(
+                    analysis_dir,
+                    cond.replicates,
+                    settings_fp=contacts_settings_fp,
+                    equilibration=ctx.equilibration,
+                )
 
                 # Try cached first
                 if not recompute:
                     cached = try_load_cached_binding_preference(
                         cond,
                         analysis_dir,
-                        settings_fp=settings_fp,
+                        settings_fp=bp_settings_fp,
+                        contact_settings_fp=contacts_settings_fp,
+                        equilibration=ctx.equilibration,
+                        successful_replicates=tuple(contact_results_by_replicate) or None,
                     )
                     if cached is not None:
                         condition_results[cond.label] = cached
@@ -1683,11 +2318,7 @@ class ContactsAnalysis(Analysis):
                         sim_config=cond.sim_config,
                         analysis_dir=analysis_dir,
                         enzyme_pdb=enzyme_pdb,
-                        contact_results_by_replicate=find_contact_results_for_replicates(
-                            analysis_dir,
-                            cond.replicates,
-                            settings_fp=settings_fp,
-                        ),
+                        contact_results_by_replicate=contact_results_by_replicate,
                         load_contact_result=ContactResult.load,
                         threshold=getattr(settings, "surface_exposure_threshold", 0.2),
                         include_default_aa_groups=getattr(
@@ -1697,7 +2328,9 @@ class ContactsAnalysis(Analysis):
                         protein_partitions=getattr(settings, "protein_partitions", None),
                         polymer_type_selections=getattr(settings, "polymer_type_selections", None),
                         polymer_chain=getattr(settings, "polymer_chain", "C"),
-                        settings_fp=settings_fp,
+                        settings_fp=bp_settings_fp,
+                        contact_settings_fp=contacts_settings_fp,
+                        equilibration=ctx.equilibration,
                     )
                     if computed is not None:
                         condition_results[cond.label] = computed

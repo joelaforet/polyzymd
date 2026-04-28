@@ -152,3 +152,10 @@ class TestSettingsFingerprintValidation:
         with pytest.warns(UserWarning, match="missing settings fingerprint"):
             valid = validate_settings_fingerprint(None, settings)
         assert valid is True
+
+    def test_validate_settings_fingerprint_can_reject_missing_strictly(self):
+        """Strict callers should be able to reject missing fingerprints."""
+        settings = SimpleSettings(cutoff=4.5)
+        with pytest.warns(UserWarning, match="rejecting cache without strict validation"):
+            valid = validate_settings_fingerprint(None, settings, allow_missing=False)
+        assert valid is False

@@ -90,6 +90,7 @@ class AggregatedResidueStats(BaseModel):
     residence_time_by_polymer_type_per_replicate: dict[str, list[float]] = Field(
         default_factory=dict
     )
+    residence_time_by_polymer_type_replicates: dict[str, list[int]] = Field(default_factory=dict)
 
 
 class AggregatedContactResult(BaseAnalysisResult):
@@ -131,6 +132,7 @@ class AggregatedContactResult(BaseAnalysisResult):
 
     residue_stats: list[AggregatedResidueStats] = Field(default_factory=list)
     n_replicates: int = Field(default=0, ge=0)
+    replicates: list[int] = Field(default_factory=list)
     total_frames_per_replicate: list[int] = Field(default_factory=list)
     timestep_ps: float = Field(default=1.0, gt=0)
     criteria_label: str = Field(default="")
@@ -141,6 +143,7 @@ class AggregatedContactResult(BaseAnalysisResult):
     mean_contact_fraction_sem: float = Field(default=0.0)
     group_stats: dict[str, tuple[float, float]] = Field(default_factory=dict)
     residence_time_by_polymer_type: dict[str, tuple[float, float]] = Field(default_factory=dict)
+    residence_time_by_polymer_type_replicates: dict[str, list[int]] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
@@ -507,21 +510,18 @@ class AggregatedContactResult(BaseAnalysisResult):
         # Gather per-residue per-replicate RT values grouped by AA class
         group_residue_reps: dict[str, list[list[float]]] = defaultdict(list)
         has_data = False
+        aggregate_replicates = self._aggregate_replicate_order()
         for rs in self.residue_stats:
             if polymer_type is not None:
-                reps = rs.residence_time_by_polymer_type_per_replicate.get(polymer_type, [])
+                reps = self._expand_residue_residence_time(rs, polymer_type, aggregate_replicates)
+                if reps is None:
+                    reps = []
             else:
                 # Average across all polymer types for each replicate
-                all_type_reps = rs.residence_time_by_polymer_type_per_replicate
-                if not all_type_reps:
+                reps = self._average_residue_residence_times(rs, aggregate_replicates)
+                if reps is None:
                     group_residue_reps[rs.protein_group].append([])
                     continue
-                # Find max replicate count across polymer types
-                n_reps = max(len(v) for v in all_type_reps.values()) if all_type_reps else 0
-                reps = []
-                for rep_idx in range(n_reps):
-                    vals = [v[rep_idx] for v in all_type_reps.values() if rep_idx < len(v)]
-                    reps.append(float(np.mean(vals)) if vals else 0.0)
 
             if reps:
                 has_data = True
@@ -530,16 +530,7 @@ class AggregatedContactResult(BaseAnalysisResult):
         if not has_data:
             return {}
 
-        # Determine replicate count from first non-empty list
-        n_reps = 0
-        for residue_rep_lists in group_residue_reps.values():
-            for reps in residue_rep_lists:
-                if reps:
-                    n_reps = len(reps)
-                    break
-            if n_reps:
-                break
-
+        n_reps = len(aggregate_replicates)
         if n_reps == 0:
             return {}
 
@@ -634,21 +625,19 @@ class AggregatedContactResult(BaseAnalysisResult):
             scale = self.timestep_ps / 1000.0
 
         residue_rep_lists: list[list[float]] = []
+        aggregate_replicates = self._aggregate_replicate_order()
         for rs in self.residue_stats:
             if rs.protein_resid not in resid_set:
                 continue
             if polymer_type is not None:
-                reps = rs.residence_time_by_polymer_type_per_replicate.get(polymer_type, [])
+                reps = self._expand_residue_residence_time(rs, polymer_type, aggregate_replicates)
+                if reps is None:
+                    reps = []
             else:
-                all_type_reps = rs.residence_time_by_polymer_type_per_replicate
-                if not all_type_reps:
+                reps = self._average_residue_residence_times(rs, aggregate_replicates)
+                if reps is None:
                     residue_rep_lists.append([])
                     continue
-                n_reps = max(len(v) for v in all_type_reps.values()) if all_type_reps else 0
-                reps = []
-                for rep_idx in range(n_reps):
-                    vals = [v[rep_idx] for v in all_type_reps.values() if rep_idx < len(v)]
-                    reps.append(float(np.mean(vals)) if vals else 0.0)
 
             residue_rep_lists.append(reps)
 
@@ -668,6 +657,130 @@ class AggregatedContactResult(BaseAnalysisResult):
                     vals.append(0.0)
             per_rep_means.append(float(np.mean(vals)) * scale if vals else 0.0)
         return per_rep_means
+
+    def _aggregate_replicate_order(self) -> tuple[int, ...]:
+        """Return the replicate order used by per-replicate helper APIs.
+
+        Returns
+        -------
+        tuple[int, ...]
+            Explicit aggregate replicate IDs, or a positional legacy order when
+            old aggregates lack IDs.
+        """
+
+        if self.replicates:
+            return tuple(int(rep) for rep in self.replicates)
+        return tuple(range(1, int(self.n_replicates) + 1))
+
+    @staticmethod
+    def _expand_residence_time_series(
+        values: list[float],
+        sparse_replicates: list[int] | None,
+        aggregate_replicates: tuple[int, ...],
+    ) -> list[float] | None:
+        """Expand a residence-time vector to aggregate replicate order.
+
+        Parameters
+        ----------
+        values : list[float]
+            Stored residence-time values. New caches store sparse values only
+            for replicates with residence events.
+        sparse_replicates : list[int] or None
+            Replicate IDs corresponding to ``values``. Missing IDs indicate a
+            legacy vector.
+        aggregate_replicates : tuple[int, ...]
+            Aggregate replicate order for helper API output.
+
+        Returns
+        -------
+        list[float] or None
+            Dense vector aligned to ``aggregate_replicates``. Returns ``None``
+            when compact legacy data cannot be safely aligned.
+        """
+
+        n_replicates = len(aggregate_replicates)
+        if sparse_replicates is None:
+            if len(values) == n_replicates:
+                return [float(value) for value in values]
+            return None
+        if len(values) != len(sparse_replicates):
+            return None
+        try:
+            sparse_ids = [int(rep) for rep in sparse_replicates]
+        except (TypeError, ValueError):
+            return None
+        if len(set(sparse_ids)) != len(sparse_ids):
+            return None
+        value_by_replicate = {
+            rep: float(value)
+            for rep, value in zip(sparse_ids, values)
+            if rep in aggregate_replicates
+        }
+        return [value_by_replicate.get(rep, 0.0) for rep in aggregate_replicates]
+
+    def _expand_residue_residence_time(
+        self,
+        residue: AggregatedResidueStats,
+        polymer_type: str,
+        aggregate_replicates: tuple[int, ...],
+    ) -> list[float] | None:
+        """Expand one residue/polymer residence-time series safely.
+
+        Parameters
+        ----------
+        residue : AggregatedResidueStats
+            Residue statistics containing sparse residence-time data.
+        polymer_type : str
+            Polymer type to expand.
+        aggregate_replicates : tuple[int, ...]
+            Aggregate replicate order for helper API output.
+
+        Returns
+        -------
+        list[float] or None
+            Dense residence-time vector, or ``None`` when unavailable.
+        """
+
+        values = residue.residence_time_by_polymer_type_per_replicate.get(polymer_type)
+        if values is None:
+            return None
+        sparse_replicates = residue.residence_time_by_polymer_type_replicates.get(polymer_type)
+        return self._expand_residence_time_series(values, sparse_replicates, aggregate_replicates)
+
+    def _average_residue_residence_times(
+        self,
+        residue: AggregatedResidueStats,
+        aggregate_replicates: tuple[int, ...],
+    ) -> list[float] | None:
+        """Average one residue's per-polymer RT vectors by replicate.
+
+        Parameters
+        ----------
+        residue : AggregatedResidueStats
+            Residue statistics containing sparse residence-time data.
+        aggregate_replicates : tuple[int, ...]
+            Aggregate replicate order for helper API output.
+
+        Returns
+        -------
+        list[float] or None
+            Dense mean vector, or ``None`` when no polymer type can be aligned.
+        """
+
+        expanded: list[list[float]] = []
+        for polymer_type in residue.residence_time_by_polymer_type_per_replicate:
+            values = self._expand_residue_residence_time(
+                residue,
+                polymer_type,
+                aggregate_replicates,
+            )
+            if values is not None:
+                expanded.append(values)
+        if not expanded:
+            return None
+        return [
+            float(np.mean([values[idx] for values in expanded])) for idx in range(len(expanded[0]))
+        ]
 
     def summary(self) -> str:
         """Return a human-readable summary of the aggregated contact result."""
@@ -812,9 +925,11 @@ def aggregate_contact_results(
         n_eff_per_rep = []
         by_polymer_type_per_rep: dict[str, list[float]] = {}
         rt_by_polymer_type_per_rep: dict[str, list[float]] = {}
+        rt_by_polymer_type_replicates: dict[str, list[int]] = {}
         type_fracs_per_rep: list[dict[str, float]] = []
 
         for i, r in enumerate(results):
+            replicate_id = int(r.replicate) if r.replicate is not None else i + 1
             rc_rep = residue_lookups[i].get(resid)
             if rc_rep is None:
                 fractions_per_rep.append(0.0)
@@ -840,7 +955,9 @@ def aggregate_contact_results(
                 if stats["n_events"] > 0:
                     if ptype not in rt_by_polymer_type_per_rep:
                         rt_by_polymer_type_per_rep[ptype] = []
+                        rt_by_polymer_type_replicates[ptype] = []
                     rt_by_polymer_type_per_rep[ptype].append(stats["mean_frames"])
+                    rt_by_polymer_type_replicates[ptype].append(replicate_id)
 
         all_polymer_types = sorted(
             {
@@ -888,6 +1005,7 @@ def aggregate_contact_results(
                 by_polymer_type_per_replicate=by_polymer_type_per_rep,
                 residence_time_by_polymer_type=rt_by_polymer_type,
                 residence_time_by_polymer_type_per_replicate=rt_by_polymer_type_per_rep,
+                residence_time_by_polymer_type_replicates=rt_by_polymer_type_replicates,
             )
         )
 
@@ -914,13 +1032,17 @@ def aggregate_contact_results(
     # Aggregate residence time statistics by polymer type
     # residence_time_summary() now returns {polymer_type: {stats...}}
     residence_time_by_polymer_type_per_rep: dict[str, list[float]] = {}
-    for r in results:
+    residence_time_by_polymer_type_replicates: dict[str, list[int]] = {}
+    for i, r in enumerate(results):
+        replicate_id = int(r.replicate) if r.replicate is not None else i + 1
         summary: dict[str, dict[str, float]] = r.residence_time_summary()
         for ptype, stats in summary.items():
             if stats["total_events"] > 0:
                 if ptype not in residence_time_by_polymer_type_per_rep:
                     residence_time_by_polymer_type_per_rep[ptype] = []
+                    residence_time_by_polymer_type_replicates[ptype] = []
                 residence_time_by_polymer_type_per_rep[ptype].append(stats["mean_frames"])
+                residence_time_by_polymer_type_replicates[ptype].append(replicate_id)
 
     # Aggregate to mean +/- SEM per polymer type
     residence_time_by_polymer_type: dict[str, tuple[float, float]] = {}
@@ -931,6 +1053,7 @@ def aggregate_contact_results(
     return AggregatedContactResult(
         residue_stats=residue_stats,
         n_replicates=len(results),
+        replicates=[int(r.replicate) for r in results if r.replicate is not None],
         total_frames_per_replicate=[r.n_frames for r in results],
         timestep_ps=first.timestep_ps,
         criteria_label=first.criteria_label,
@@ -941,6 +1064,7 @@ def aggregate_contact_results(
         mean_contact_fraction_sem=mean_frac_sem,
         group_stats=group_stats,
         residence_time_by_polymer_type=residence_time_by_polymer_type,
+        residence_time_by_polymer_type_replicates=residence_time_by_polymer_type_replicates,
         metadata={
             "aggregation_method": "median_mad" if use_median else "mean_sem",
         },

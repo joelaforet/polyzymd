@@ -71,7 +71,6 @@ from polyzymd.analyses.base import (
 from polyzymd.analyses.polymer_bridging._plot_settings import PolymerBridgingPlotSettings
 from polyzymd.analyses.shared import apply_axis_style, get_colors, get_output_path, save_figure
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
-from polyzymd.analyses.shared.groupings import ProteinAAClassification
 from polyzymd.analyses.stats import anova_test, pairwise_comparisons
 from polyzymd.core.experimental import prefix_experimental_output
 
@@ -230,6 +229,13 @@ class PolymerBridgingReplicateResult(BaseModel):
         Top-10 ordered fragment signatures by frequency in multivalent events.
     """
 
+    settings_fingerprint: str | None = None
+    protein_selection: str | None = None
+    polymer_selection: str | None = None
+    cutoff: float | None = None
+    config_hash: str = "unknown"
+    equilibration_time: float = 0.0
+    equilibration_unit: str = "ns"
     replicate: int
     n_frames: int
     timestep_ps: float
@@ -347,6 +353,13 @@ class PolymerBridgingAggregatedResult(BaseModel):
     fragment_signature_probabilities_per_replicate: dict[str, list[float]] = Field(
         default_factory=dict
     )
+    settings_fingerprint: str | None = None
+    protein_selection: str | None = None
+    polymer_selection: str | None = None
+    cutoff: float | None = None
+    config_hash: str = "unknown"
+    equilibration_time: float = 0.0
+    equilibration_unit: str = "ns"
 
     def save(self, path: Path | str) -> Path:
         path = Path(path)
@@ -417,41 +430,683 @@ class PolymerBridgingAnalysis(Analysis):
         return settings_fingerprint(settings)
 
     @staticmethod
+    def _make_window_cache_tag(equilibration: str) -> str:
+        """Build a short cache tag from the analysis window.
+
+        Parameters
+        ----------
+        equilibration : str
+            Requested equilibration time string.
+
+        Returns
+        -------
+        str
+            Window tag safe for cache filenames.
+        """
+
+        from polyzymd.analyses.shared.loader import parse_time_string
+
+        eq_value, eq_unit = parse_time_string(equilibration)
+        return f"eq{eq_value:g}{eq_unit}"
+
+    @staticmethod
+    def _cache_matches_window(result: Any, equilibration: str) -> bool:
+        """Return whether a cached result matches the requested analysis window.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded cache result.
+        equilibration : str
+            Requested equilibration window from the comparison context.
+
+        Returns
+        -------
+        bool
+            ``True`` when stored equilibration metadata matches the requested
+            window, otherwise ``False``.
+        """
+
+        import math
+
+        from polyzymd.analyses.shared.loader import convert_time, parse_time_string
+
+        expected_time, expected_unit = parse_time_string(equilibration)
+        stored_time = getattr(result, "equilibration_time", None)
+        stored_unit = getattr(result, "equilibration_unit", None)
+        if stored_time is None or stored_unit is None:
+            return False
+        try:
+            stored_time_ps = convert_time(float(stored_time), str(stored_unit), "ps")
+            expected_time_ps = convert_time(float(expected_time), str(expected_unit), "ps")
+        except (TypeError, ValueError):
+            return False
+        return math.isclose(stored_time_ps, expected_time_ps, rel_tol=0.0, abs_tol=1.0e-9)
+
+    @staticmethod
+    def _cache_has_settings_proof(result: Any, settings: BaseModel) -> bool:
+        """Return whether cache content proves polymer bridging settings.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded polymer bridging result.
+        settings : BaseModel
+            Active polymer bridging settings.
+
+        Returns
+        -------
+        bool
+            ``True`` when explicit content fields match settings without using
+            filename-derived identity.
+        """
+
+        protein_selection = getattr(result, "protein_selection", None)
+        polymer_selection = getattr(result, "polymer_selection", None)
+        cutoff = getattr(result, "cutoff", None)
+        min_ca_distance = getattr(result, "min_ca_distance_angstrom", None)
+        try:
+            cutoff_matches = abs(float(cutoff) - float(settings.cutoff)) <= 1e-6
+            min_ca_matches = (
+                abs(float(min_ca_distance) - float(settings.min_ca_distance_angstrom)) <= 1e-6
+            )
+        except (TypeError, ValueError):
+            return False
+        return (
+            str(protein_selection).strip() == str(settings.protein_selection).strip()
+            and str(polymer_selection).strip() == str(settings.polymer_selection).strip()
+            and cutoff_matches
+            and min_ca_matches
+        )
+
+    @staticmethod
+    def _attach_settings_proof(result: Any, settings: BaseModel) -> None:
+        """Attach current explicit settings proof fields to a result.
+
+        Parameters
+        ----------
+        result : Any
+            Polymer bridging result to update in place.
+        settings : BaseModel
+            Active polymer bridging settings.
+        """
+
+        result.settings_fingerprint = settings_fingerprint(settings)
+        result.protein_selection = settings.protein_selection
+        result.polymer_selection = settings.polymer_selection
+        result.cutoff = float(settings.cutoff)
+
+    def _cache_matches_context(
+        self,
+        result: Any,
+        *,
+        settings: BaseModel,
+        equilibration: str,
+        sim_config: Any,
+        replicates: Sequence[int] | None = None,
+        allow_replicate_subset: bool = False,
+        source: Path | None = None,
+    ) -> bool:
+        """Return whether a cached aggregate matches the active context.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded polymer-bridging result.
+        settings : BaseModel
+            Active analysis settings.
+        equilibration : str
+            Active equilibration/window request.
+        sim_config : Any
+            Active condition simulation configuration.
+        replicates : Sequence[int] or None, optional
+            Requested replicate tuple for aggregate cache validation.
+        allow_replicate_subset : bool, optional
+            Whether a stored subset of the requested replicates is accepted.
+            This is used only when consuming finalized aggregates.
+        source : Path or None, optional
+            Cache source used for diagnostics.
+
+        Returns
+        -------
+        bool
+            ``True`` when settings, window, and known config identity match.
+        """
+
+        from polyzymd.analyses.shared.config_hash import validate_config_hash
+
+        if not self._cache_matches_window(result, equilibration):
+            logger.warning(
+                "polymer_bridging: ignoring cache with mismatched equilibration window%s",
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        stored_fingerprint = getattr(result, "settings_fingerprint", None)
+        if stored_fingerprint is None:
+            stored_fingerprint = getattr(result, "settings_fp", None)
+        if stored_fingerprint is None:
+            if self._cache_has_settings_proof(result, settings):
+                self._attach_settings_proof(result, settings)
+            else:
+                logger.warning(
+                    "polymer_bridging: ignoring cache without embedded settings fingerprint or "
+                    "complete settings proof%s",
+                    f" at {source}" if source is not None else "",
+                )
+                return False
+        elif str(stored_fingerprint) != settings_fingerprint(settings):
+            logger.warning(
+                "polymer_bridging: ignoring cache with settings fingerprint mismatch%s: "
+                "stored=%s, current=%s",
+                f" at {source}" if source is not None else "",
+                stored_fingerprint,
+                settings_fingerprint(settings),
+            )
+            return False
+
+        stored_hash = getattr(result, "config_hash", None)
+        if stored_hash not in (None, "", "unknown") and not validate_config_hash(
+            str(stored_hash),
+            sim_config,
+        ):
+            return False
+
+        if replicates is not None and not self._cache_matches_replicates(
+            result,
+            replicates,
+            allow_subset=allow_replicate_subset,
+            source=source,
+        ):
+            return False
+
+        return True
+
+    @staticmethod
+    def _cache_matches_replicate_id(
+        result: Any,
+        replicate: int,
+        *,
+        source: Path | None = None,
+    ) -> bool:
+        """Return whether a cached per-replicate result matches the request.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded per-replicate result.
+        replicate : int
+            Requested replicate ID.
+        source : Path or None, optional
+            Cache source path used for diagnostics.
+
+        Returns
+        -------
+        bool
+            ``True`` when the stored replicate ID equals ``replicate``.
+        """
+
+        stored_replicate = getattr(result, "replicate", None)
+        try:
+            stored = int(stored_replicate)
+        except (TypeError, ValueError):
+            logger.warning(
+                "polymer_bridging: ignoring replicate cache without valid replicate identity%s",
+                f" at {source}" if source is not None else "",
+            )
+            return False
+        if stored != int(replicate):
+            logger.warning(
+                "polymer_bridging: ignoring replicate cache for replicate %d; requested %d%s",
+                stored,
+                int(replicate),
+                f" at {source}" if source is not None else "",
+            )
+            return False
+        return True
+
+    @staticmethod
+    def _align_replicate_results(
+        results: Sequence[Any],
+        replicates: Sequence[int],
+    ) -> list[Any]:
+        """Return replicate results ordered to match the requested IDs.
+
+        Parameters
+        ----------
+        results : Sequence[Any]
+            Per-replicate results returned by the orchestrator.
+        replicates : Sequence[int]
+            Requested replicate IDs from the aggregate context.
+
+        Returns
+        -------
+        list[Any]
+            Results ordered by ``replicates``.
+        """
+
+        requested = tuple(int(rep) for rep in replicates)
+        by_replicate: dict[int, Any] = {}
+        for result in results:
+            stored_replicate = getattr(result, "replicate", None)
+            try:
+                replicate = int(stored_replicate)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "polymer_bridging aggregate input lacks a valid replicate ID"
+                ) from exc
+            if replicate in by_replicate:
+                raise ValueError(
+                    f"polymer_bridging aggregate input duplicates replicate {replicate}"
+                )
+            by_replicate[replicate] = result
+
+        requested_set = set(requested)
+        stored_set = set(by_replicate)
+        if stored_set != requested_set:
+            raise ValueError(
+                "polymer_bridging aggregate input replicate IDs do not match requested "
+                f"replicates: stored={sorted(stored_set)}, requested={sorted(requested_set)}"
+            )
+        return [by_replicate[replicate] for replicate in requested]
+
+    def _cache_matches_replicates(
+        self,
+        result: Any,
+        replicates: Sequence[int],
+        *,
+        allow_subset: bool = False,
+        source: Path | None = None,
+    ) -> bool:
+        """Return whether cached aggregate replicate identity matches the request.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded polymer-bridging aggregate result.
+        replicates : Sequence[int]
+            Requested replicate numbers for the active aggregate.
+        allow_subset : bool, optional
+            Whether stored replicate identity may be a non-empty subset of the
+            requested set.
+        source : Path or None, optional
+            Cache source path used for diagnostics.
+
+        Returns
+        -------
+        bool
+            ``True`` when the cached result declares the requested replicate
+            set, or a subset when explicitly allowed. Missing or malformed
+            identity is treated as incompatible because the aggregate cannot be
+            proven current.
+        """
+
+        requested = tuple(sorted(int(rep) for rep in replicates))
+        stored_replicates = getattr(result, "replicates", None)
+        if not stored_replicates:
+            logger.warning(
+                "polymer_bridging: ignoring cache without replicate identity%s",
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        try:
+            stored = tuple(sorted(int(rep) for rep in stored_replicates))
+        except (TypeError, ValueError):
+            logger.warning(
+                "polymer_bridging: ignoring cache with invalid replicate identity%s",
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        if len(set(stored)) != len(stored):
+            logger.warning(
+                "polymer_bridging: ignoring cache with duplicate replicate identity%s",
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        is_allowed_subset = allow_subset and set(stored).issubset(set(requested))
+        if stored != requested and not is_allowed_subset:
+            logger.warning(
+                "polymer_bridging: ignoring cache for replicates %s; requested %s%s",
+                stored,
+                requested,
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        stored_count = len(stored)
+        if allow_subset and stored_count < self.min_replicates:
+            logger.warning(
+                "polymer_bridging: ignoring cache with %d replicates below minimum %d%s",
+                stored_count,
+                self.min_replicates,
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        declared_count = getattr(result, "n_replicates", None)
+        try:
+            declared_count = int(declared_count)
+        except (TypeError, ValueError):
+            logger.warning(
+                "polymer_bridging: ignoring cache with invalid n_replicates%s",
+                f" at {source}" if source is not None else "",
+            )
+            return False
+        if declared_count != stored_count:
+            logger.warning(
+                "polymer_bridging: ignoring cache with n_replicates=%d but %d stored "
+                "replicate IDs%s",
+                declared_count,
+                stored_count,
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        mismatched_vectors = self._replicate_vector_length_mismatches(result, stored_count)
+        if mismatched_vectors:
+            logger.warning(
+                "polymer_bridging: ignoring cache with per-replicate vector length mismatch "
+                "for %s%s",
+                ", ".join(mismatched_vectors),
+                f" at {source}" if source is not None else "",
+            )
+            return False
+
+        return True
+
+    @staticmethod
+    def _replicate_vector_length_mismatches(result: Any, expected_count: int) -> list[str]:
+        """Return per-replicate vector fields whose lengths are inconsistent.
+
+        Parameters
+        ----------
+        result : Any
+            Loaded polymer-bridging aggregate result.
+        expected_count : int
+            Number of stored replicate identities.
+
+        Returns
+        -------
+        list[str]
+            Field labels for vectors that do not match ``expected_count``.
+        """
+
+        mismatches: list[str] = []
+        vector_fields = (
+            "mean_contacts_per_contacting_oligomer_replicates",
+            "multisite_fraction_replicates",
+            "high_valency_fraction_replicates",
+        )
+        for field_name in vector_fields:
+            values = getattr(result, field_name, None)
+            if isinstance(values, (list, tuple)) and len(values) != expected_count:
+                mismatches.append(field_name)
+
+        mapping_fields = (
+            "valency_probabilities_per_replicate",
+            "anchor_protein_group_probabilities_per_replicate",
+            "peripheral_protein_group_probabilities_per_replicate",
+            "multivalent_protein_group_probabilities_per_replicate",
+            "polymer_contact_type_probabilities_per_replicate",
+            "polymer_anchor_type_probabilities_per_replicate",
+            "fragment_signature_probabilities_per_replicate",
+        )
+        for field_name in mapping_fields:
+            mapping = getattr(result, field_name, {}) or {}
+            if not isinstance(mapping, dict):
+                continue
+            for key, values in mapping.items():
+                if isinstance(values, (list, tuple)) and len(values) != expected_count:
+                    mismatches.append(f"{field_name}[{key}]")
+
+        return mismatches
+
+    def _replicate_cache_path(
+        self,
+        output_dir: Path,
+        settings: BaseModel,
+        equilibration: str,
+    ) -> Path:
+        """Return the window-aware replicate sidecar path.
+
+        Parameters
+        ----------
+        output_dir : Path
+            Replicate output directory.
+        settings : BaseModel
+            Active analysis settings.
+        equilibration : str
+            Active equilibration/window request.
+
+        Returns
+        -------
+        Path
+            Fingerprinted sidecar path for the replicate cache.
+        """
+
+        settings_tag = self._make_settings_cache_tag(settings)
+        window_tag = self._make_window_cache_tag(equilibration)
+        return output_dir / f"polymer_bridging_{window_tag}_s{settings_tag}.json"
+
+    def _aggregate_cache_path(
+        self,
+        output_dir: Path,
+        settings: BaseModel,
+        equilibration: str,
+        replicates: Sequence[int],
+    ) -> Path:
+        """Return the window-aware aggregate sidecar path.
+
+        Parameters
+        ----------
+        output_dir : Path
+            Aggregated output directory.
+        settings : BaseModel
+            Active analysis settings.
+        equilibration : str
+            Active equilibration/window request.
+        replicates : Sequence[int]
+            Replicates represented by the aggregate.
+
+        Returns
+        -------
+        Path
+            Fingerprinted sidecar path for the aggregate cache.
+        """
+
+        settings_tag = self._make_settings_cache_tag(settings)
+        window_tag = self._make_window_cache_tag(equilibration)
+        rep_str = self._format_replicate_range(replicates)
+        return output_dir / f"polymer_bridging_{window_tag}_{rep_str}_s{settings_tag}.json"
+
+    def _load_validated_aggregated_result(
+        self,
+        aggregated_dir: Path,
+        *,
+        settings: BaseModel,
+        equilibration: str,
+        replicates: Sequence[int],
+        sim_config: Any,
+        recompute: bool,
+        allow_replicate_subset: bool = False,
+    ) -> Any | None:
+        """Load an aggregate only when cache identity metadata matches.
+
+        Parameters
+        ----------
+        aggregated_dir : Path
+            Directory containing aggregated cache files.
+        settings : BaseModel
+            Active analysis settings.
+        equilibration : str
+            Active equilibration/window request.
+        replicates : Sequence[int]
+            Replicates expected in the aggregate.
+        sim_config : Any
+            Active condition simulation configuration.
+        recompute : bool
+            Whether cache loading should be skipped.
+        allow_replicate_subset : bool, optional
+            Whether finalized aggregates with successful replicate subsets may
+            be loaded.
+
+        Returns
+        -------
+        Any or None
+            Valid aggregated result, or ``None`` when no compatible cache is
+            available.
+        """
+
+        candidates = [
+            self._aggregate_cache_path(aggregated_dir, settings, equilibration, replicates),
+            self.aggregate_result_path(aggregated_dir),
+        ]
+        saw_json = aggregated_dir.exists() and any(aggregated_dir.glob("*.json"))
+
+        for candidate in candidates:
+            cached = self._check_cache(
+                PolymerBridgingAggregatedResult,
+                candidate,
+                recompute=recompute,
+                sim_config=None,
+                settings=None,
+            )
+            if cached is None:
+                continue
+            if self._cache_matches_context(
+                cached,
+                settings=settings,
+                equilibration=equilibration,
+                sim_config=sim_config,
+                replicates=replicates,
+                allow_replicate_subset=allow_replicate_subset,
+                source=candidate,
+            ):
+                return cached
+
+        if saw_json:
+            return None
+
+        return self._load_aggregated_result(aggregated_dir)
+
+    @staticmethod
     def _compute_frame_contacts(*args, **kwargs):
+        """Compatibility facade for direct frame-contact computation."""
+
         return _compute_frame_contacts(*args, **kwargs)
 
     def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Compute oligomer bridging metrics directly from the trajectory."""
-        settings_tag = self._make_settings_cache_tag(ctx.settings)
-        cache_file = ctx.output_dir / f"polymer_bridging_{settings_tag}.json"
+        """Compute oligomer bridging metrics through the runner seam."""
+
+        cache_file = self._replicate_cache_path(ctx.output_dir, ctx.settings, ctx.equilibration)
 
         cached = self._check_cache(
             PolymerBridgingReplicateResult,
             cache_file,
             recompute=ctx.recompute,
             sim_config=ctx.sim_config,
-            settings=ctx.settings,
+            settings=None,
         )
-        if cached is not None:
+        if (
+            cached is not None
+            and self._cache_matches_context(
+                cached,
+                settings=ctx.settings,
+                equilibration=ctx.equilibration,
+                sim_config=ctx.condition.sim_config,
+                source=cache_file,
+            )
+            and self._cache_matches_replicate_id(cached, replicate, source=cache_file)
+        ):
+            if ctx.result_path is not None and not ctx.result_path.exists():
+                self._attach_settings_proof(cached, ctx.settings)
+                self.save_result(cached, ctx.result_path)
             return cached
 
-        frame_contacts, n_frames, timestep_ps = self._compute_frame_contacts(
-            ctx.condition,
-            replicate,
+        if ctx.result_path is not None:
+            cached = self._check_cache(
+                PolymerBridgingReplicateResult,
+                ctx.result_path,
+                recompute=ctx.recompute,
+                sim_config=ctx.sim_config,
+                settings=None,
+            )
+            if (
+                cached is not None
+                and self._cache_matches_context(
+                    cached,
+                    settings=ctx.settings,
+                    equilibration=ctx.equilibration,
+                    sim_config=ctx.condition.sim_config,
+                    source=ctx.result_path,
+                )
+                and self._cache_matches_replicate_id(cached, replicate, source=ctx.result_path)
+            ):
+                if not cache_file.exists():
+                    self._attach_settings_proof(cached, ctx.settings)
+                    self.save_result(cached, cache_file)
+                return cached
+
+        result = super().compute_replicate(ctx, replicate)
+        self.save_result(result, cache_file)
+        if ctx.result_path is not None:
+            self.save_result(result, ctx.result_path)
+        return result
+
+    def build_runner(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        universe: Any,
+        window: Any,
+    ) -> Any:
+        """Build the runner-backed polymer bridging execution object."""
+
+        from polyzymd.analyses.polymer_bridging._runner import PolymerBridgingReplicateRunner
+
+        del replicate, window
+        return PolymerBridgingReplicateRunner(
+            universe=universe,
             protein_selection=ctx.settings.protein_selection,
             polymer_selection=ctx.settings.polymer_selection,
             cutoff=float(ctx.settings.cutoff),
-            equilibration=ctx.equilibration,
             min_ca_distance_angstrom=float(ctx.settings.min_ca_distance_angstrom),
         )
+
+    def summarize_replicate(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        runner: Any,
+        window: Any,
+    ) -> Any:
+        """Convert runner observations into the replicate result schema."""
+
+        from polyzymd.analyses.shared.config_hash import compute_config_hash
+        from polyzymd.analyses.shared.loader import parse_time_string
+
+        runner_result = runner.results
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
         stats = _compute_bridging_statistics_from_frames(
-            frame_contacts,
+            runner_result.observations,
             min_ca_distance_angstrom=ctx.settings.min_ca_distance_angstrom,
         )
         return PolymerBridgingReplicateResult(
+            settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
+            protein_selection=ctx.settings.protein_selection,
+            polymer_selection=ctx.settings.polymer_selection,
+            cutoff=float(ctx.settings.cutoff),
+            config_hash=compute_config_hash(ctx.sim_config),
+            equilibration_time=eq_value,
+            equilibration_unit=eq_unit,
             replicate=replicate,
-            n_frames=n_frames,
-            timestep_ps=timestep_ps,
+            n_frames=int(getattr(runner_result, "n_frames", window.n_frames_selected)),
+            timestep_ps=float(
+                getattr(runner_result, "timestep_ps", window.timestep_ps * window.step)
+            ),
             min_ca_distance_angstrom=ctx.settings.min_ca_distance_angstrom,
             contacting_observations=stats["contacting_observations"],
             multisite_observations=stats["multisite_observations"],
@@ -477,54 +1132,110 @@ class PolymerBridgingAnalysis(Analysis):
     def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
         """Aggregate bridging metrics across replicates."""
         recompute = getattr(ctx, "recompute", False)
-        settings_tag = self._make_settings_cache_tag(ctx.settings)
-        rep_str = self._format_replicate_range(ctx.replicates)
-        cache_file = ctx.output_dir / f"polymer_bridging_{rep_str}_{settings_tag}.json"
+        cache_file = self._aggregate_cache_path(
+            ctx.output_dir,
+            ctx.settings,
+            ctx.equilibration,
+            ctx.replicates,
+        )
 
         cached = self._check_cache(
             PolymerBridgingAggregatedResult,
             cache_file,
             recompute=recompute,
-            settings=ctx.settings,
+            sim_config=ctx.condition.sim_config,
+            settings=None,
         )
-        if cached is not None:
+        if cached is not None and self._cache_matches_context(
+            cached,
+            settings=ctx.settings,
+            equilibration=ctx.equilibration,
+            sim_config=ctx.condition.sim_config,
+            replicates=ctx.replicates,
+            source=cache_file,
+        ):
+            if ctx.result_path is not None and not ctx.result_path.exists():
+                self._attach_settings_proof(cached, ctx.settings)
+                self.save_result(cached, ctx.result_path)
             return cached
 
-        mean_contacts = [float(r.mean_contacts_per_contacting_oligomer) for r in results]
-        multisite = [float(r.multisite_fraction) for r in results]
-        high_valency = [float(r.high_valency_fraction) for r in results]
+        if ctx.result_path is not None:
+            cached = self._check_cache(
+                PolymerBridgingAggregatedResult,
+                ctx.result_path,
+                recompute=recompute,
+                sim_config=ctx.condition.sim_config,
+                settings=None,
+            )
+            if cached is not None and self._cache_matches_context(
+                cached,
+                settings=ctx.settings,
+                equilibration=ctx.equilibration,
+                sim_config=ctx.condition.sim_config,
+                replicates=ctx.replicates,
+                source=ctx.result_path,
+            ):
+                if not cache_file.exists():
+                    self._attach_settings_proof(cached, ctx.settings)
+                    self.save_result(cached, cache_file)
+                return cached
 
-        valency_keys = sorted({key for r in results for key in r.valency_probabilities})
+        aligned_results = self._align_replicate_results(results, ctx.replicates)
+
+        mean_contacts = [float(r.mean_contacts_per_contacting_oligomer) for r in aligned_results]
+        multisite = [float(r.multisite_fraction) for r in aligned_results]
+        high_valency = [float(r.high_valency_fraction) for r in aligned_results]
+
+        valency_keys = sorted({key for r in aligned_results for key in r.valency_probabilities})
         per_rep_valency = {
-            key: [float(r.valency_probabilities.get(key, 0.0)) for r in results]
+            key: [float(r.valency_probabilities.get(key, 0.0)) for r in aligned_results]
             for key in valency_keys
         }
 
-        anchor_groups = _collect_probability_series(results, "anchor_protein_group_probabilities")
+        anchor_groups = _collect_probability_series(
+            aligned_results,
+            "anchor_protein_group_probabilities",
+        )
         peripheral_groups = _collect_probability_series(
-            results, "peripheral_protein_group_probabilities"
+            aligned_results,
+            "peripheral_protein_group_probabilities",
         )
         multivalent_groups = _collect_probability_series(
-            results, "multivalent_protein_group_probabilities"
+            aligned_results,
+            "multivalent_protein_group_probabilities",
         )
         polymer_contact_types = _collect_probability_series(
-            results, "polymer_contact_type_probabilities"
+            aligned_results,
+            "polymer_contact_type_probabilities",
         )
         polymer_anchor_types = _collect_probability_series(
-            results, "polymer_anchor_type_probabilities"
+            aligned_results,
+            "polymer_anchor_type_probabilities",
         )
         fragment_signatures = _collect_probability_series(
-            results, "fragment_signature_probabilities"
+            aligned_results,
+            "fragment_signature_probabilities",
         )
         anchor_peripheral_mean, anchor_peripheral_sem = _aggregate_nested_matrices(
-            [r.anchor_to_peripheral_group_matrix for r in results]
+            [r.anchor_to_peripheral_group_matrix for r in aligned_results]
         )
         polymer_anchor_protein_mean, polymer_anchor_protein_sem = _aggregate_nested_matrices(
-            [r.polymer_anchor_to_protein_anchor_matrix for r in results]
+            [r.polymer_anchor_to_protein_anchor_matrix for r in aligned_results]
         )
 
+        from polyzymd.analyses.shared.config_hash import compute_config_hash
+        from polyzymd.analyses.shared.loader import parse_time_string
+
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
         aggregated = PolymerBridgingAggregatedResult(
-            n_replicates=len(results),
+            settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
+            protein_selection=ctx.settings.protein_selection,
+            polymer_selection=ctx.settings.polymer_selection,
+            cutoff=float(ctx.settings.cutoff),
+            config_hash=compute_config_hash(ctx.condition.sim_config),
+            equilibration_time=eq_value,
+            equilibration_unit=eq_unit,
+            n_replicates=len(aligned_results),
             replicates=list(ctx.replicates),
             min_ca_distance_angstrom=float(ctx.settings.min_ca_distance_angstrom),
             mean_contacts_per_contacting_oligomer=float(np.mean(mean_contacts)),
@@ -565,6 +1276,8 @@ class PolymerBridgingAnalysis(Analysis):
             fragment_signature_probabilities_per_replicate=fragment_signatures,
         )
         self.save_result(aggregated, cache_file)
+        if ctx.result_path is not None:
+            self.save_result(aggregated, ctx.result_path)
         return aggregated
 
     def filter_conditions(
@@ -620,11 +1333,28 @@ class PolymerBridgingAnalysis(Analysis):
         metrics_by_condition: dict[str, dict[str, MetricValue]] = {}
         for cond in ctx.conditions:
             summary = ctx.aggregated_results.get(cond.label)
+            if summary is not None and not self._cache_matches_context(
+                summary,
+                settings=ctx.settings,
+                equilibration=ctx.equilibration,
+                sim_config=cond.sim_config,
+                replicates=cond.replicates,
+                allow_replicate_subset=True,
+            ):
+                summary = None
             if summary is None:
                 agg_dir_parent = ctx.analysis_dirs.get(cond.label)
                 if agg_dir_parent is None:
                     continue
-                summary = self._load_aggregated_result(agg_dir_parent / "aggregated")
+                summary = self._load_validated_aggregated_result(
+                    agg_dir_parent / "aggregated",
+                    settings=ctx.settings,
+                    equilibration=ctx.equilibration,
+                    replicates=cond.replicates,
+                    sim_config=cond.sim_config,
+                    recompute=ctx.recompute,
+                    allow_replicate_subset=True,
+                )
             if summary is None:
                 continue
             extracted = self.extract_metrics(summary)
@@ -775,6 +1505,7 @@ class PolymerBridgingAnalysis(Analysis):
             return []
 
         labels = [cond.label for cond in comparison.conditions]
+        condition_by_label = {cond.label: cond for cond in ctx.conditions}
         colors = get_colors(len(labels), ctx.plot_settings)
         output_paths: list[Path] = []
 
@@ -849,10 +1580,19 @@ class PolymerBridgingAnalysis(Analysis):
             for idx, key in enumerate(keys):
                 vals = []
                 for cond in comparison.conditions:
+                    condition = condition_by_label.get(cond.label)
                     analysis_dir = ctx.analysis_dirs.get(cond.label)
                     summary = None
-                    if analysis_dir is not None:
-                        summary = self._load_aggregated_result(analysis_dir / "aggregated")
+                    if analysis_dir is not None and condition is not None:
+                        summary = self._load_validated_aggregated_result(
+                            analysis_dir / "aggregated",
+                            settings=ctx.settings,
+                            equilibration=ctx.equilibration,
+                            replicates=condition.replicates,
+                            sim_config=condition.sim_config,
+                            recompute=False,
+                            allow_replicate_subset=True,
+                        )
                     if summary is None:
                         vals.append(0.0)
                         continue
@@ -886,13 +1626,23 @@ class PolymerBridgingAnalysis(Analysis):
             )
             plt.close(fig)
 
-        summaries = {
-            cond.label: self._load_aggregated_result(
-                ctx.analysis_dirs.get(cond.label, Path()) / "aggregated"
+        summaries = {}
+        for cond in comparison.conditions:
+            condition = condition_by_label.get(cond.label)
+            analysis_dir = ctx.analysis_dirs.get(cond.label)
+            if analysis_dir is None or condition is None:
+                continue
+            summary = self._load_validated_aggregated_result(
+                analysis_dir / "aggregated",
+                settings=ctx.settings,
+                equilibration=ctx.equilibration,
+                replicates=condition.replicates,
+                sim_config=condition.sim_config,
+                recompute=False,
+                allow_replicate_subset=True,
             )
-            for cond in comparison.conditions
-            if ctx.analysis_dirs.get(cond.label) is not None
-        }
+            if summary is not None:
+                summaries[cond.label] = summary
 
         if plot_settings.generate_anchor_group_bars:
             fig, ax = plt.subplots(figsize=plot_settings.figsize_bars)
@@ -1088,15 +1838,13 @@ class PolymerBridgingAnalysis(Analysis):
 def _condition_has_polymer(cond: Condition, polymer_selection: str = "chainID C") -> bool:
     """Check whether a condition likely contains polymer atoms."""
     sim_config = cond.sim_config
-    polymers = getattr(sim_config, "polymers", None)
-    if polymers is not None and getattr(polymers, "enabled", True):
-        return True
 
     if hasattr(sim_config, "topology"):
         topo = sim_config.topology
         if hasattr(topo, "chains") and topo.chains:
+            requested_chain = _simple_chain_id_selection(polymer_selection)
             chain_ids = [c.chain_id if hasattr(c, "chain_id") else c for c in topo.chains]
-            if "C" in chain_ids:
+            if requested_chain is not None and requested_chain in chain_ids:
                 return True
 
     try:
@@ -1119,6 +1867,27 @@ def _condition_has_polymer(cond: Condition, polymer_selection: str = "chainID C"
         return False
 
     return False
+
+
+def _simple_chain_id_selection(selection: str) -> str | None:
+    """Extract a simple chain ID from an MDAnalysis selection string.
+
+    Parameters
+    ----------
+    selection : str
+        MDAnalysis selection string.
+
+    Returns
+    -------
+    str or None
+        Requested chain ID for strictly simple ``chainID X`` selections,
+        otherwise ``None``.
+    """
+
+    tokens = selection.strip().split()
+    if len(tokens) == 2 and tokens[0].lower() == "chainid":
+        return tokens[1]
+    return None
 
 
 def _compute_bridging_statistics_from_frames(
@@ -1558,175 +2327,21 @@ def _compute_frame_contacts(
     equilibration: str,
     min_ca_distance_angstrom: float = 0.0,
 ) -> tuple[list[FrameContactObservation], int, float]:
-    """Compute per-fragment, per-frame contact observations from a trajectory.
+    """Compute observations through the runner compatibility facade.
 
-    Iterates over all frames after equilibration. For each frame and each
-    polymer fragment, detects atom-level contacts with the protein using
-    ``capped_distance``, then assembles a ``PolymerBridgingObservation``
-    containing contacted residue identities, amino acid classes, polymer
-    monomer types, frame-wise CA distances, and ordered fragment signatures.
-
-    Parameters
-    ----------
-    condition : Condition
-        The simulation condition (provides sim_config for path resolution).
-    replicate : int
-        Replicate index.
-    protein_selection : str
-        MDAnalysis selection string for the protein.
-    polymer_selection : str
-        MDAnalysis selection string for the polymer.
-    cutoff : float
-        Contact distance cutoff in Angstroms.
-    equilibration : str
-        Equilibration time string (e.g., ``"10ns"``). Frames before this
-        time are skipped.
-    min_ca_distance_angstrom : float, optional
-        Minimum CA-CA distance threshold used for geometric filtering.
-        If greater than zero and no protein CA atoms are available in the
-        selected topology, analysis fails with ``ValueError``.
-
-    Returns
-    -------
-    observations : list[FrameContactObservation]
-        One observation per contacting fragment per frame.
-    n_frames : int
-        Number of frames analyzed (after equilibration).
-    timestep_ps : float
-        Trajectory timestep in picoseconds.
+    This helper is retained for tests and external callers that used the
+    pre-runner API. The trajectory-native implementation lives in
+    :mod:`polyzymd.analyses.polymer_bridging._runner`.
     """
-    from MDAnalysis.lib.distances import capped_distance
 
-    from polyzymd.analyses.shared.loader import TrajectoryLoader, convert_time, parse_time_string
+    from polyzymd.analyses.polymer_bridging._runner import compute_frame_contacts
 
-    loader = TrajectoryLoader(condition.sim_config)
-    universe = loader.load_universe(replicate, cache=False)
-    protein = universe.select_atoms(protein_selection)
-    polymer = universe.select_atoms(polymer_selection)
-    if len(protein) == 0 or len(polymer) == 0:
-        return [], 0, 0.0
-
-    protein_atom_to_resid = np.array([int(atom.resid) for atom in protein.atoms], dtype=np.int64)
-    protein_atom_to_resname = np.array([str(atom.resname) for atom in protein.atoms], dtype=object)
-    protein_grouping = ProteinAAClassification()
-    ca_atom_index_by_resid: dict[int, int] = {}
-    for residue in protein.residues:
-        ca = residue.atoms.select_atoms("name CA")
-        if len(ca) == 0:
-            continue
-        ca_atom_index_by_resid[int(residue.resid)] = int(ca.indices[0])
-    if min_ca_distance_angstrom > 0.0 and not ca_atom_index_by_resid:
-        raise ValueError(
-            "No CA atoms were found in the selected protein topology while "
-            "min_ca_distance_angstrom > 0; fix topology files to include CA labels"
-        )
-
-    eq_value, eq_unit = parse_time_string(equilibration)
-    timestep_ps = loader.get_timestep(replicate, unit="ps")
-    start_frame = int(convert_time(eq_value, eq_unit, "ps") / timestep_ps) if timestep_ps > 0 else 0
-
-    observations: list[FrameContactObservation] = []
-    fragments = list(polymer.fragments) if polymer.fragments else [polymer]
-    for ts in universe.trajectory[start_frame:]:
-        box = ts.dimensions
-        all_positions = ts.positions
-        for frag in fragments:
-            pairs = capped_distance(
-                frag.positions,
-                protein.positions,
-                max_cutoff=cutoff,
-                box=box,
-                return_distances=False,
-            )
-            if len(pairs) == 0:
-                continue
-            protein_atom_indices = np.asarray(pairs[:, 1], dtype=np.int64)
-            polymer_atom_indices = np.asarray(pairs[:, 0], dtype=np.int64)
-            residue_ids = {int(protein_atom_to_resid[idx]) for idx in protein_atom_indices}
-            protein_resnames = {
-                int(resid): str(resname)
-                for resid, resname in zip(
-                    protein_atom_to_resid[protein_atom_indices],
-                    protein_atom_to_resname[protein_atom_indices],
-                    strict=False,
-                )
-            }
-            protein_groups = {
-                resid: protein_grouping.classify(resname)
-                for resid, resname in protein_resnames.items()
-            }
-            contacting_polymer_resids = {
-                int(frag.atoms[int(local_idx)].resid) for local_idx in polymer_atom_indices
-            }
-            polymer_resnames = {int(res.resid): str(res.resname) for res in frag.residues}
-            pair_min_distances = _compute_pair_min_distances(
-                frag,
-                protein,
-                polymer_atom_indices,
-                protein_atom_indices,
-                protein_atom_to_resid,
-            )
-            observations.append(
-                PolymerBridgingObservation(
-                    protein_residues=residue_ids,
-                    protein_resnames=protein_resnames,
-                    protein_groups=protein_groups,
-                    contacting_polymer_resids=contacting_polymer_resids,
-                    polymer_resnames=polymer_resnames,
-                    fragment_signature=tuple(str(res.resname) for res in frag.residues),
-                    ca_distances=_observation_ca_distances(
-                        residue_ids,
-                        all_positions,
-                        ca_atom_index_by_resid,
-                    ),
-                    pair_min_distances=pair_min_distances,
-                )
-            )
-    return observations, max(len(universe.trajectory) - start_frame, 0), float(timestep_ps)
-
-
-def _observation_ca_distances(
-    residues: set[int],
-    all_positions: np.ndarray,
-    ca_atom_index_by_resid: dict[int, int],
-) -> ResiduePairDistances:
-    """Compute frame-wise CA distances for one contacted residue set."""
-    distances: ResiduePairDistances = {}
-    residues_sorted = sorted(residues)
-    for i, resid_i in enumerate(residues_sorted):
-        for resid_j in residues_sorted[i + 1 :]:
-            key = (resid_i, resid_j)
-            idx_i = ca_atom_index_by_resid.get(resid_i)
-            idx_j = ca_atom_index_by_resid.get(resid_j)
-            if idx_i is not None and idx_j is not None:
-                pos_i = all_positions[idx_i]
-                pos_j = all_positions[idx_j]
-                distances[key] = float(np.linalg.norm(pos_i - pos_j))
-    return distances
-
-
-def _compute_pair_min_distances(
-    frag,
-    protein,
-    polymer_atom_indices: np.ndarray,
-    protein_atom_indices: np.ndarray,
-    protein_atom_to_resid: np.ndarray,
-) -> dict[tuple[int, int], float]:
-    """Compute minimum atom distance for each polymer residue / protein residue pair."""
-    distances: dict[tuple[int, int], float] = {}
-    for local_poly_idx, protein_idx in zip(
-        polymer_atom_indices, protein_atom_indices, strict=False
-    ):
-        polymer_atom = frag.atoms[int(local_poly_idx)]
-        polymer_resid = int(polymer_atom.resid)
-        protein_resid = int(protein_atom_to_resid[int(protein_idx)])
-        key = (polymer_resid, protein_resid)
-        distance = float(
-            np.linalg.norm(
-                np.asarray(polymer_atom.position, dtype=float)
-                - np.asarray(protein.atoms[int(protein_idx)].position, dtype=float)
-            )
-        )
-        if key not in distances or distance < distances[key]:
-            distances[key] = distance
-    return distances
+    return compute_frame_contacts(
+        condition,
+        replicate,
+        protein_selection=protein_selection,
+        polymer_selection=polymer_selection,
+        cutoff=cutoff,
+        equilibration=equilibration,
+        min_ca_distance_angstrom=min_ca_distance_angstrom,
+    )

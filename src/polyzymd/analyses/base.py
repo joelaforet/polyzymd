@@ -1574,7 +1574,12 @@ class Analysis(ABC):
         if sim_config is not None and hasattr(result, "config_hash"):
             from polyzymd.analyses.shared.config_hash import validate_config_hash
 
-            validate_config_hash(result.config_hash, sim_config)
+            stored_hash = getattr(result, "config_hash", None)
+            if stored_hash not in (None, "", "unknown") and not validate_config_hash(
+                str(stored_hash),
+                sim_config,
+            ):
+                return None
 
         if settings is not None:
             from polyzymd.analyses.shared.config_hash import (
@@ -1585,6 +1590,12 @@ class Analysis(ABC):
             stored_fingerprint = getattr(result, "settings_fingerprint", None)
             if stored_fingerprint is None:
                 stored_fingerprint = getattr(result, "settings_fp", None)
+            if stored_fingerprint is None:
+                metadata = getattr(result, "metadata", None)
+                if isinstance(metadata, dict):
+                    stored_fingerprint = metadata.get("settings_fingerprint")
+                    if stored_fingerprint is None:
+                        stored_fingerprint = metadata.get("settings_fp")
             if stored_fingerprint is None:
                 stored_fingerprint = extract_settings_fingerprint_from_path(cache_path)
 

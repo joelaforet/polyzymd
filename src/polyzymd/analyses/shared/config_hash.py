@@ -213,6 +213,7 @@ def validate_settings_fingerprint(
     *,
     warn: bool = True,
     source: str | Path | None = None,
+    allow_missing: bool = True,
 ) -> bool:
     """Validate cached settings fingerprint against current analysis settings.
 
@@ -226,6 +227,9 @@ def validate_settings_fingerprint(
         Emit warnings on mismatch or missing fingerprint, by default True.
     source : str or Path or None, optional
         Optional cache source path for diagnostics.
+    allow_missing : bool, optional
+        Treat missing fingerprints as legacy-compatible, by default True.
+        Strict cache callers can set this to False to reject missing identity.
 
     Returns
     -------
@@ -235,22 +239,27 @@ def validate_settings_fingerprint(
 
     Notes
     -----
-    Legacy cache files may not encode settings fingerprints. These files are
-    treated as compatible for backward compatibility, with a warning to
-    encourage recomputation.
+    Legacy cache files may not encode settings fingerprints. By default these
+    files are treated as compatible for backward compatibility, with a warning
+    to encourage recomputation. Strict callers can disable this compatibility
+    path with ``allow_missing=False``.
     """
     current_fingerprint = settings_fingerprint(current_settings)
     source_text = f" ({source})" if source is not None else ""
 
     if stored_fingerprint is None:
         if warn:
+            action = (
+                "loading legacy cache without strict validation"
+                if allow_missing
+                else "rejecting cache without strict validation"
+            )
             warnings.warn(
-                "Cached analysis result is missing settings fingerprint"
-                f"{source_text}; loading legacy cache without strict validation",
+                "Cached analysis result is missing settings fingerprint" f"{source_text}; {action}",
                 UserWarning,
                 stacklevel=2,
             )
-        return True
+        return allow_missing
 
     if stored_fingerprint != current_fingerprint:
         if warn:
