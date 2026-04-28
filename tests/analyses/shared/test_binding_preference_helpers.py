@@ -45,12 +45,14 @@ class TestTryLoadCachedBindingPreference:
         expected_path.write_text("{}")
 
         mock_result = MagicMock()
+        mock_result.metadata = {"replicates": [1, 2, 3]}
+        mock_result.n_replicates = 3
         mock_agg_result.load.return_value = mock_result
 
         cond = FakeCondition()
         result = try_load_cached_binding_preference(cond, tmp_path)
         assert result is mock_result
-        mock_agg_result.load.assert_called_once_with(str(expected_path))
+        mock_agg_result.load.assert_called_once_with(expected_path)
 
 
 class TestFindEnzymePdb:
@@ -98,6 +100,8 @@ class TestFindEnzymePdb:
         (tmp_path / "binding_preference_aggregated_reps1-3.json").write_text("{}")
 
         mock_result = MagicMock()
+        mock_result.metadata = {"replicates": [1, 2, 3]}
+        mock_result.n_replicates = 3
         mock_agg_result.load.return_value = mock_result
 
         cond = FakeCondition()
@@ -119,6 +123,8 @@ class TestFindEnzymePdb:
         expected_path.write_text("{}")
 
         mock_result = MagicMock()
+        mock_result.metadata = {"replicates": [1, 2, 3]}
+        mock_result.n_replicates = 3
         mock_agg_result.load.return_value = mock_result
 
         cond = FakeCondition()
@@ -126,3 +132,51 @@ class TestFindEnzymePdb:
 
         assert result is mock_result
         mock_agg_result.load.assert_called_once_with(str(expected_path))
+
+    def test_per_replicate_aggregation_rejects_incomplete_subset(self, tmp_path):
+        """Per-replicate BP caches must exactly match the expected replicate IDs."""
+        from polyzymd.analyses.shared.binding_preference import BindingPreferenceResult
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            try_load_cached_binding_preference,
+        )
+
+        settings_fp = "deadbeef"
+        BindingPreferenceResult(
+            n_frames=10,
+            metadata={"settings_fingerprint": settings_fp, "replicate": 1},
+        ).save(tmp_path / f"binding_preference_s{settings_fp}_rep1.json")
+        BindingPreferenceResult(
+            n_frames=10,
+            metadata={"settings_fingerprint": settings_fp, "replicate": 2},
+        ).save(tmp_path / f"binding_preference_s{settings_fp}_rep2.json")
+
+        result = try_load_cached_binding_preference(
+            FakeCondition(replicates=(1, 2, 3)),
+            tmp_path,
+            settings_fp=settings_fp,
+            successful_replicates=(1, 2, 3),
+        )
+
+        assert result is None
+
+    def test_per_replicate_aggregation_rejects_mismatched_metadata(self, tmp_path):
+        """Per-replicate BP metadata should agree with the cache filename."""
+        from polyzymd.analyses.shared.binding_preference import BindingPreferenceResult
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            try_load_cached_binding_preference,
+        )
+
+        settings_fp = "deadbeef"
+        BindingPreferenceResult(
+            n_frames=10,
+            metadata={"settings_fingerprint": settings_fp, "replicate": 99},
+        ).save(tmp_path / f"binding_preference_s{settings_fp}_rep1.json")
+
+        result = try_load_cached_binding_preference(
+            FakeCondition(replicates=(1,)),
+            tmp_path,
+            settings_fp=settings_fp,
+            successful_replicates=(1,),
+        )
+
+        assert result is None

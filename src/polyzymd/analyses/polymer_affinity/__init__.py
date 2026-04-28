@@ -196,12 +196,14 @@ class PolymerAffinityAnalysis(Analysis):
     def compare(self, ctx: ComparisonContext) -> Any | None:
         """Run polymer affinity score comparison across all conditions.
 
-        Steps:
-        1. Load binding preference data per condition (cached or computed)
-        2. Compute affinity score entries from enrichments
-        3. Detect temperature groups
-        4. Pairwise total-score comparisons (stats suppressed cross-temperature)
-        5. Build and return result
+        Workflow:
+
+        - Load binding preference data per condition (cached or computed).
+        - Compute affinity score entries from enrichments.
+        - Detect temperature groups.
+        - Compute pairwise total-score comparisons with cross-temperature
+          statistics suppressed.
+        - Build and return the comparison result.
 
         Parameters
         ----------
@@ -223,7 +225,7 @@ class PolymerAffinityAnalysis(Analysis):
         logger.info(f"Starting polymer affinity score comparison: {ctx.name}")
         logger.info(f"  Conditions: {len(ctx.conditions)}")
 
-        # Step 1: Build condition summaries
+        # Build condition summaries from binding preference data
         condition_summaries: list[AffinityScoreConditionSummary] = []
         for cond in ctx.conditions:
             try:
@@ -240,7 +242,7 @@ class PolymerAffinityAnalysis(Analysis):
             logger.warning("All condition summaries are empty - no polymer affinity entries")
             return None
 
-        # Step 2: Collect metadata
+        # Collect shared metadata across condition summaries
         all_polymer_types: list[str] = sorted(
             {e.polymer_type for s in condition_summaries for e in s.entries}
         )
@@ -248,19 +250,19 @@ class PolymerAffinityAnalysis(Analysis):
             {e.protein_group for s in condition_summaries for e in s.entries}
         )
 
-        # Step 3: Temperature grouping
+        # Group conditions by simulation temperature
         temp_groups: dict[float, list[str]] = {}
         for s in condition_summaries:
             temp_groups.setdefault(s.temperature_K, []).append(s.label)
         mixed_temperatures = len(temp_groups) > 1
 
-        # Step 4: Pairwise comparisons on total scores
+        # Compute pairwise comparisons on total scores
         pairwise = self._compute_pairwise(condition_summaries, ctx.effective_control)
 
-        # Step 4b: Apply BH FDR correction per temperature group
+        # Apply BH FDR correction within comparable temperature groups
         self._apply_fdr_correction(pairwise, settings.fdr_alpha)
 
-        # Step 5: Build result
+        # Carry the SASA threshold into result metadata
         surface_threshold = settings.surface_exposure_threshold
 
         return PolymerAffinityScoreResult(
@@ -320,6 +322,7 @@ class PolymerAffinityAnalysis(Analysis):
         """Generate polymer affinity score plots.
 
         Calls module-level private functions:
+
         - :func:`_plot_affinity_stacked_bars`
         - :func:`_plot_affinity_group_bars`
         """
@@ -385,11 +388,12 @@ class PolymerAffinityAnalysis(Analysis):
         """Build affinity score entries for one condition.
 
         Data flow:
-        1. Load binding preference (cached or computed)
-        2. Use ``bp_result.entries`` (``AggregatedBindingPreferenceEntry`` list)
-           for ``mean_contact_fraction`` and ``n_exposed_in_group``
-        3. Also try to load per-replicate files for exact per-replicate scores
-        4. Aggregate into per-polymer-type scores and total condition score
+
+        - Load binding preference (cached or computed).
+        - Use ``bp_result.entries`` (``AggregatedBindingPreferenceEntry`` list)
+          for ``mean_contact_fraction`` and ``n_exposed_in_group``.
+        - Also try to load per-replicate files for exact per-replicate scores.
+        - Aggregate into per-polymer-type scores and total condition score.
 
         Parameters
         ----------
@@ -407,14 +411,16 @@ class PolymerAffinityAnalysis(Analysis):
         from polyzymd.analyses.polymer_affinity._comparison_results import (
             AffinityScoreConditionSummary,
         )
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            binding_preference_settings_fingerprint,
+        )
 
         logger.info(f"  Processing condition: {cond.label}")
 
-        # Get temperature from sim config
+        # Read temperature from sim config
         temperature_K = self._get_temperature(cond)
 
-        # Load binding preference
+        # Load binding preference from contacts artifacts
         bp_result = self._load_binding_preference(cond, ctx, settings)
 
         if bp_result is None:
@@ -429,11 +435,10 @@ class PolymerAffinityAnalysis(Analysis):
             )
 
         # Try to load per-replicate binding preference files
-        settings_fp = settings_fingerprint(settings)
         per_rep_data = self._load_per_replicate_entries(
             cond,
             ctx,
-            settings_fp=settings_fp,
+            settings_fp=binding_preference_settings_fingerprint(settings),
         )
 
         # Compute affinity score entries
@@ -511,35 +516,83 @@ class PolymerAffinityAnalysis(Analysis):
         -------
         AggregatedBindingPreferenceResult | BindingPreferenceResult | None
         """
-        from polyzymd.analyses.contacts._paths import find_contact_results_for_replicates
+        from polyzymd.analyses.contacts._paths import (
+            find_contact_results_for_replicates,
+            has_unproven_fingerprinted_contact_artifacts,
+            infer_contact_results_settings_fingerprint,
+            infer_contacts_artifact_settings_fingerprint,
+        )
         from polyzymd.analyses.contacts._results import ContactResult
         from polyzymd.analyses.shared.binding_preference import compute_condition_binding_preference
         from polyzymd.analyses.shared.binding_preference_helpers import (
+            binding_preference_settings_fingerprint,
             resolve_enzyme_pdb,
             try_load_cached_binding_preference,
         )
-        from polyzymd.analyses.shared.config_hash import settings_fingerprint
 
-        settings_fp = settings_fingerprint(settings)
-
-        # Resolve contacts analysis dir (sibling of polymer_affinity analysis dir)
+        # Resolve contacts analysis dir from the sibling dependency output
         pa_analysis_dir = ctx.analysis_dirs.get(cond.label)
         contacts_analysis_dir: Path | None = None
         if pa_analysis_dir is not None:
             contacts_analysis_dir = pa_analysis_dir.parent / "contacts"
 
-        # Try cached first
+        contact_results_by_replicate: dict[int, Path] = {}
+        contacts_settings_fp: str | None = None
+        bp_settings_fp = binding_preference_settings_fingerprint(settings)
+        if contacts_analysis_dir is not None:
+            if has_unproven_fingerprinted_contact_artifacts(
+                contacts_analysis_dir,
+                cond.replicates,
+                equilibration=ctx.equilibration,
+            ):
+                logger.warning(
+                    "    Cannot use binding preference for '%s': contacts identity is unproven",
+                    cond.label,
+                )
+                return None
+            contact_results_by_replicate = find_contact_results_for_replicates(
+                contacts_analysis_dir,
+                cond.replicates,
+                equilibration=ctx.equilibration,
+                strict_identity=True,
+            )
+            inferred_artifact_fp = infer_contacts_artifact_settings_fingerprint(
+                contacts_analysis_dir,
+                cond.replicates,
+                equilibration=ctx.equilibration,
+            )
+            if inferred_artifact_fp is not None:
+                contacts_settings_fp = inferred_artifact_fp
+            else:
+                inferred_fp = infer_contact_results_settings_fingerprint(
+                    contact_results_by_replicate
+                )
+                if inferred_fp is not None:
+                    contacts_settings_fp = inferred_fp
+            if contacts_settings_fp is not None:
+                contact_results_by_replicate = find_contact_results_for_replicates(
+                    contacts_analysis_dir,
+                    cond.replicates,
+                    settings_fp=contacts_settings_fp,
+                    equilibration=ctx.equilibration,
+                    strict_identity=True,
+                )
+
+        # Load cached binding preference before recomputing from contacts
         if not ctx.recompute and contacts_analysis_dir is not None:
             bp = try_load_cached_binding_preference(
                 cond,
                 contacts_analysis_dir,
-                settings_fp=settings_fp,
+                settings_fp=bp_settings_fp,
+                contact_settings_fp=contacts_settings_fp,
+                equilibration=ctx.equilibration,
+                successful_replicates=tuple(contact_results_by_replicate) or None,
             )
             if bp is not None:
                 logger.info(f"    Loaded cached binding preference for {cond.label}")
                 return bp
 
-        # Compute if enabled
+        # Compute only when the caller opted into the fallback path
         if not settings.compute_binding_preference:
             logger.warning(
                 f"    No cached binding preference for '{cond.label}' and "
@@ -550,7 +603,7 @@ class PolymerAffinityAnalysis(Analysis):
         logger.info(f"    Computing binding preference for {cond.label}...")
         sim_config = cond.sim_config
 
-        # Resolve enzyme PDB
+        # Resolve enzyme coordinates for SASA grouping
         enzyme_pdb = resolve_enzyme_pdb(
             enzyme_pdb_setting=settings.enzyme_pdb_for_sasa,
             source_path=cond.config_path,
@@ -576,11 +629,7 @@ class PolymerAffinityAnalysis(Analysis):
             sim_config=sim_config,
             analysis_dir=contacts_analysis_dir,
             enzyme_pdb=enzyme_pdb,
-            contact_results_by_replicate=find_contact_results_for_replicates(
-                contacts_analysis_dir,
-                cond.replicates,
-                settings_fp=settings_fp,
-            ),
+            contact_results_by_replicate=contact_results_by_replicate,
             load_contact_result=ContactResult.load,
             threshold=settings.surface_exposure_threshold,
             include_default_aa_groups=settings.include_default_aa_groups,
@@ -588,7 +637,9 @@ class PolymerAffinityAnalysis(Analysis):
             protein_partitions=settings.protein_partitions,
             polymer_type_selections=settings.polymer_type_selections,
             polymer_chain=settings.polymer_chain,
-            settings_fp=settings_fp,
+            settings_fp=bp_settings_fp,
+            contact_settings_fp=contacts_settings_fp,
+            equilibration=ctx.equilibration,
         )
 
         if bp is not None:
@@ -607,8 +658,10 @@ class PolymerAffinityAnalysis(Analysis):
     ) -> dict[int, list[Any]] | None:
         """Load per-replicate BindingPreferenceEntry objects.
 
-        Attempts to load ``binding_preference_rep{N}.json`` files from the
-        contacts analysis directory.  Returns None if files are not available.
+        Attempts to load per-replicate binding-preference files from the
+        contacts analysis directory. When a contacts settings fingerprint is
+        known, legacy filenames are accepted only if their metadata proves the
+        same cache identity.
 
         Parameters
         ----------
@@ -626,8 +679,20 @@ class PolymerAffinityAnalysis(Analysis):
             Mapping of replicate number to list of ``BindingPreferenceEntry``
             objects, or None if files unavailable.
         """
+        from polyzymd.analyses.contacts._paths import (
+            find_contact_results_for_replicates,
+            has_unproven_fingerprinted_contact_artifacts,
+            infer_contact_results_settings_fingerprint,
+            infer_contacts_artifact_settings_fingerprint,
+        )
         from polyzymd.analyses.shared.binding_preference import (
             BindingPreferenceResult,
+        )
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            _binding_preference_cache_matches_contact_settings,
+            _binding_preference_cache_matches_settings,
+            _binding_preference_cache_matches_window,
+            _binding_preference_replicate_cache_matches_identity,
         )
 
         pa_analysis_dir = ctx.analysis_dirs.get(cond.label)
@@ -638,6 +703,31 @@ class PolymerAffinityAnalysis(Analysis):
         if not contacts_analysis_dir.exists():
             return None
 
+        if has_unproven_fingerprinted_contact_artifacts(
+            contacts_analysis_dir,
+            cond.replicates,
+            equilibration=ctx.equilibration,
+        ):
+            logger.warning(
+                "Cannot load per-replicate binding preference for %s: contacts identity is unproven",
+                cond.label,
+            )
+            return None
+
+        contacts_settings_fp = infer_contacts_artifact_settings_fingerprint(
+            contacts_analysis_dir,
+            cond.replicates,
+            equilibration=ctx.equilibration,
+        )
+        if contacts_settings_fp is None:
+            contact_results = find_contact_results_for_replicates(
+                contacts_analysis_dir,
+                cond.replicates,
+                equilibration=ctx.equilibration,
+                strict_identity=True,
+            )
+            contacts_settings_fp = infer_contact_results_settings_fingerprint(contact_results)
+
         per_rep: dict[int, list[Any]] = {}
 
         for rep in cond.replicates:
@@ -645,15 +735,115 @@ class PolymerAffinityAnalysis(Analysis):
                 rep_path = (
                     contacts_analysis_dir / f"binding_preference_s{settings_fp}_rep{rep}.json"
                 )
-                if not rep_path.exists():
-                    rep_path = contacts_analysis_dir / f"binding_preference_rep{rep}.json"
+                fallback_path = contacts_analysis_dir / f"binding_preference_rep{rep}.json"
             else:
                 rep_path = contacts_analysis_dir / f"binding_preference_rep{rep}.json"
+
             if rep_path.exists():
                 try:
                     rep_result = BindingPreferenceResult.load(rep_path)
+                    if not _binding_preference_cache_matches_settings(
+                        rep_result,
+                        rep_path,
+                        settings_fp,
+                    ):
+                        logger.warning(
+                            "Ignoring per-replicate binding preference cache for %s without "
+                            "matching settings fingerprint: %s",
+                            cond.label,
+                            rep_path,
+                        )
+                        continue
+                    if not _binding_preference_cache_matches_contact_settings(
+                        rep_result,
+                        rep_path,
+                        contacts_settings_fp,
+                    ):
+                        logger.warning(
+                            "Ignoring per-replicate binding preference cache for %s without "
+                            "matching contacts settings fingerprint: %s",
+                            cond.label,
+                            rep_path,
+                        )
+                        continue
+                    if not _binding_preference_cache_matches_window(
+                        rep_result,
+                        rep_path,
+                        ctx.equilibration,
+                    ):
+                        logger.warning(
+                            "Ignoring per-replicate binding preference cache for %s without "
+                            "matching window: %s",
+                            cond.label,
+                            rep_path,
+                        )
+                        continue
+                    if not _binding_preference_replicate_cache_matches_identity(
+                        rep_result,
+                        rep_path,
+                        rep,
+                    ):
+                        raise ValueError(
+                            "Per-replicate binding preference cache metadata mismatch "
+                            f"for {cond.label} replicate {rep}: {rep_path}"
+                        )
                     per_rep[rep] = rep_result.entries
                 except (FileNotFoundError, OSError, ValueError, KeyError) as exc:
+                    if isinstance(exc, ValueError) and "metadata mismatch" in str(exc):
+                        raise
+                    logger.debug(f"Failed to load per-replicate BP for rep{rep}: {exc}")
+            elif settings_fp is not None and fallback_path.exists():
+                try:
+                    rep_result = BindingPreferenceResult.load(fallback_path)
+                    if not _binding_preference_cache_matches_settings(
+                        rep_result,
+                        fallback_path,
+                        settings_fp,
+                    ):
+                        logger.warning(
+                            "Ignoring legacy per-replicate binding preference cache for %s "
+                            "without matching settings fingerprint: %s",
+                            cond.label,
+                            fallback_path,
+                        )
+                        continue
+                    if not _binding_preference_cache_matches_contact_settings(
+                        rep_result,
+                        fallback_path,
+                        contacts_settings_fp,
+                    ):
+                        logger.warning(
+                            "Ignoring legacy per-replicate binding preference cache for %s "
+                            "without matching contacts settings fingerprint: %s",
+                            cond.label,
+                            fallback_path,
+                        )
+                        continue
+                    if not _binding_preference_cache_matches_window(
+                        rep_result,
+                        fallback_path,
+                        ctx.equilibration,
+                    ):
+                        logger.warning(
+                            "Ignoring legacy per-replicate binding preference cache for %s "
+                            "without matching window: %s",
+                            cond.label,
+                            fallback_path,
+                        )
+                        continue
+                    if not _binding_preference_replicate_cache_matches_identity(
+                        rep_result,
+                        fallback_path,
+                        rep,
+                    ):
+                        raise ValueError(
+                            "Legacy per-replicate binding preference cache metadata mismatch "
+                            f"for {cond.label} replicate {rep}: {fallback_path}"
+                        )
+                    per_rep[rep] = rep_result.entries
+                except (FileNotFoundError, OSError, ValueError, KeyError) as exc:
+                    if isinstance(exc, ValueError) and "metadata mismatch" in str(exc):
+                        raise
                     logger.debug(f"Failed to load per-replicate BP for rep{rep}: {exc}")
 
         return per_rep if per_rep else None
@@ -1005,7 +1195,7 @@ class PolymerAffinityAnalysis(Analysis):
         if not entries:
             return []
 
-        # Check all entries have the same number of replicates
+        # Replicate totals require aligned per-entry vectors
         rep_counts = [len(e.affinity_score_per_replicate) for e in entries]
         if not rep_counts or min(rep_counts) == 0:
             return []
@@ -1090,7 +1280,7 @@ class PolymerAffinityAnalysis(Analysis):
         labels = [s.label for s in summaries]
         comparisons: list[Any] = []
 
-        # Check if control has usable data
+        # Control comparisons require usable reference data
         control_has_data = (
             effective_control is not None
             and effective_control in label_to_summary
@@ -1269,14 +1459,14 @@ def _condition_has_polymer(
     """
     sim_config = cond.sim_config
 
-    # Check 1: polymers builder section exists, is non-None, and enabled
+    # Polymer builder section indicates polymer presence
     polymers = getattr(sim_config, "polymers", None)
     if polymers is not None:
         enabled = getattr(polymers, "enabled", True)
         if enabled:
             return True
 
-    # Check 2: chain C in topology model
+    # Topology model can declare the requested polymer chain
     if hasattr(sim_config, "topology"):
         topo = sim_config.topology
         if hasattr(topo, "chains") and topo.chains:
@@ -1284,7 +1474,7 @@ def _condition_has_polymer(
             if polymer_chain in chain_ids:
                 return True
 
-    # Check 3: MDAnalysis topology inspection (same approach as contacts plugin)
+    # MDAnalysis topology inspection handles file-backed topologies
     selections_to_query = (
         list(polymer_type_selections.values())
         if polymer_type_selections

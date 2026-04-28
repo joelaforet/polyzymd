@@ -530,6 +530,7 @@ class AggregatedBindingPreferenceResult(BaseModel):
             "This is the primary binding preference output (v5+)."
         ),
     )
+    metadata: dict[str, Any] = Field(default_factory=dict)
     schema_version: int = 5  # Version 5: adds partition-based binding_preference
 
     def to_dataframe(self) -> "pd.DataFrame":

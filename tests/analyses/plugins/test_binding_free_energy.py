@@ -19,6 +19,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -156,6 +157,151 @@ class TestSettings:
         s2 = BFESettings(**d)
         assert s2.units == "kcal/mol"
         assert s2.fdr_alpha == pytest.approx(0.01)
+
+    def test_binding_preference_fingerprint_ignores_bfe_only_settings(self):
+        from polyzymd.analyses.binding_free_energy import BFESettings
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            binding_preference_settings_fingerprint,
+        )
+
+        default_units = BFESettings(units="kT", fdr_alpha=0.05)
+        changed_bfe_only = BFESettings(units="kcal/mol", fdr_alpha=0.01)
+
+        assert binding_preference_settings_fingerprint(default_units) == (
+            binding_preference_settings_fingerprint(changed_bfe_only)
+        )
+
+    def test_binding_preference_fingerprint_changes_with_bp_settings(self):
+        from polyzymd.analyses.binding_free_energy import BFESettings
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            binding_preference_settings_fingerprint,
+        )
+
+        default = BFESettings(surface_exposure_threshold=0.2)
+        changed = BFESettings(surface_exposure_threshold=0.35)
+
+        assert binding_preference_settings_fingerprint(default) != (
+            binding_preference_settings_fingerprint(changed)
+        )
+
+
+class TestBindingPreferenceCacheIdentity:
+    """Regression tests for BP-specific cache identity."""
+
+    def test_bp_cache_rejects_mismatched_bp_settings_fingerprint(self, tmp_path):
+        from polyzymd.analyses.base import Condition
+        from polyzymd.analyses.binding_free_energy import BFESettings
+        from polyzymd.analyses.shared.binding_preference import BindingPreferenceResult
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            binding_preference_settings_fingerprint,
+            try_load_cached_binding_preference,
+        )
+
+        matching_fp = binding_preference_settings_fingerprint(
+            BFESettings(surface_exposure_threshold=0.2)
+        )
+        mismatched_fp = binding_preference_settings_fingerprint(
+            BFESettings(surface_exposure_threshold=0.35)
+        )
+        contact_fp = "deadbeef"
+        result = BindingPreferenceResult(
+            n_frames=10,
+            metadata={
+                "binding_preference_settings_fingerprint": matching_fp,
+                "contacts_settings_fingerprint": contact_fp,
+                "replicate": 1,
+                "equilibration": "10ns",
+            },
+        )
+        result.save(tmp_path / "binding_preference_rep1.json")
+        cond = Condition(
+            label="test",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1,),
+            sim_config=MagicMock(),
+        )
+
+        loaded = try_load_cached_binding_preference(
+            cond,
+            tmp_path,
+            settings_fp=matching_fp,
+            contact_settings_fp=contact_fp,
+            equilibration="10ns",
+            successful_replicates=(1,),
+        )
+        rejected = try_load_cached_binding_preference(
+            cond,
+            tmp_path,
+            settings_fp=mismatched_fp,
+            contact_settings_fp=contact_fp,
+            equilibration="10ns",
+            successful_replicates=(1,),
+        )
+
+        assert loaded is not None
+        assert rejected is None
+
+    def test_contact_result_replicate_mismatch_is_rejected(self, tmp_path):
+        from polyzymd.analyses.shared.binding_preference._orchestration import (
+            BindingPreferenceContactIdentityError,
+            _validate_contact_result_contract,
+        )
+
+        contact_result = SimpleNamespace(
+            replicate=2,
+            metadata={"settings_fingerprint": "deadbeef"},
+        )
+
+        with pytest.raises(BindingPreferenceContactIdentityError, match="replicate mismatch"):
+            _validate_contact_result_contract(
+                contact_result,
+                tmp_path / "contacts_rep1.json",
+                expected_replicate=1,
+                contact_settings_fp="deadbeef",
+            )
+
+    def test_contact_result_settings_mismatch_is_rejected(self, tmp_path):
+        from polyzymd.analyses.shared.binding_preference._orchestration import (
+            BindingPreferenceContactIdentityError,
+            _validate_contact_result_contract,
+        )
+
+        contact_result = SimpleNamespace(
+            replicate=1,
+            metadata={"settings_fingerprint": "badcafe0"},
+        )
+
+        with pytest.raises(
+            BindingPreferenceContactIdentityError,
+            match="settings fingerprint mismatch",
+        ):
+            _validate_contact_result_contract(
+                contact_result,
+                tmp_path / "contacts_rep1.json",
+                expected_replicate=1,
+                contact_settings_fp="deadbeef",
+            )
+
+    def test_contact_result_filename_only_fingerprint_is_rejected(self, tmp_path):
+        from polyzymd.analyses.shared.binding_preference._orchestration import (
+            BindingPreferenceContactIdentityError,
+            _validate_contact_result_contract,
+        )
+
+        contact_path = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
+        contact_path.write_text("{}")
+        contact_result = SimpleNamespace(replicate=1, metadata={})
+
+        with pytest.raises(
+            BindingPreferenceContactIdentityError,
+            match="settings fingerprint mismatch",
+        ):
+            _validate_contact_result_contract(
+                contact_result,
+                contact_path,
+                expected_replicate=1,
+                contact_settings_fp="deadbeef",
+            )
 
 
 # ===========================================================================
@@ -1159,7 +1305,13 @@ class TestLifecycle:
 class TestLoadBindingPreference:
     def test_non_cached_path_uses_real_condition(self, tmp_path):
         """Non-cached compute path should pass the full Condition object."""
-        from polyzymd.analyses.binding_free_energy import BFESettings, BindingFreeEnergyAnalysis
+        from polyzymd.analyses.binding_free_energy import (
+            BFESettings,
+            BindingFreeEnergyAnalysis,
+        )
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            binding_preference_settings_fingerprint,
+        )
 
         analysis = BindingFreeEnergyAnalysis()
         ctx = _make_context(n_conditions=1)
@@ -1179,7 +1331,7 @@ class TestLoadBindingPreference:
             patch(
                 "polyzymd.analyses.contacts._paths.find_contact_results_for_replicates",
                 return_value={1: tmp_path / "contacts_rep1.json"},
-            ),
+            ) as mock_find_contacts,
             patch(
                 "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
                 return_value=expected,
@@ -1189,6 +1341,562 @@ class TestLoadBindingPreference:
 
         assert loaded is expected
         assert mock_compute.call_args.kwargs["cond"] is cond
+        assert "settings_fp" not in mock_find_contacts.call_args.kwargs
+        assert mock_compute.call_args.kwargs[
+            "settings_fp"
+        ] == binding_preference_settings_fingerprint(settings)
+
+    def test_non_cached_path_discovers_canonical_contacts_results(self, tmp_path):
+        """Binding free energy should consume canonical contacts run paths."""
+        from polyzymd.analyses.binding_free_energy import BFESettings, BindingFreeEnergyAnalysis
+        from polyzymd.analyses.contacts._results import ContactResult
+
+        analysis = BindingFreeEnergyAnalysis()
+        ctx = _make_context(n_conditions=1, n_reps=2)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        run_1 = contacts_dir / "run_1"
+        run_2 = contacts_dir / "run_2"
+        run_1.mkdir(parents=True)
+        run_2.mkdir(parents=True)
+        ContactResult(
+            replicate=1,
+            residue_contacts=[],
+            n_frames=10,
+            timestep_ps=10.0,
+            criteria_label="any_atom_4.5A",
+            criteria_cutoff=4.5,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+        ).save(run_1 / "result.json")
+        ContactResult(
+            replicate=2,
+            residue_contacts=[],
+            n_frames=10,
+            timestep_ps=10.0,
+            criteria_label="any_atom_4.5A",
+            criteria_cutoff=4.5,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+        ).save(run_2 / "result.json")
+        ctx = replace(
+            ctx,
+            recompute=True,
+            analysis_dirs={cond.label: tmp_path / cond.label / "binding_free_energy"},
+        )
+
+        settings = BFESettings(compute_binding_preference=True)
+        enzyme_pdb = tmp_path / "enzyme.pdb"
+        enzyme_pdb.write_text("ATOM\n")
+
+        with (
+            patch(
+                "polyzymd.analyses.shared.binding_preference_helpers.resolve_enzyme_pdb",
+                return_value=enzyme_pdb,
+            ),
+            patch(
+                "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
+                return_value=object(),
+            ) as mock_compute,
+        ):
+            analysis._load_binding_preference(cond, ctx, settings)
+
+        assert mock_compute.call_args.kwargs["contact_results_by_replicate"] == {
+            1: run_1 / "result.json",
+            2: run_2 / "result.json",
+        }
+
+    def test_non_cached_path_discovers_fingerprinted_contacts_without_canonical(
+        self,
+        tmp_path,
+    ):
+        """Binding free energy should consume matching fingerprinted contacts sidecars."""
+
+        from polyzymd.analyses.binding_free_energy import BFESettings, BindingFreeEnergyAnalysis
+        from polyzymd.analyses.contacts import ContactsSettings
+        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            binding_preference_settings_fingerprint,
+        )
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        analysis = BindingFreeEnergyAnalysis()
+        ctx = _make_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        ctx = replace(
+            ctx,
+            recompute=True,
+            analysis_dirs={cond.label: tmp_path / cond.label / "binding_free_energy"},
+        )
+
+        settings = BFESettings(compute_binding_preference=True, units="kcal/mol")
+        contacts_settings = ContactsSettings(
+            compute_binding_preference=True,
+            cutoff=6.0,
+            grouping="none",
+        )
+        fp = contacts_settings_fingerprint(contacts_settings)
+        assert fp != settings_fingerprint(settings)
+        sidecar = contacts_dir / f"contacts_eq10ns_cut6.0_s{fp}_rep1.json"
+        sidecar.write_text(f'{{"contacts_settings_fingerprint": "{fp}"}}')
+        enzyme_pdb = tmp_path / "enzyme.pdb"
+        enzyme_pdb.write_text("ATOM\n")
+
+        with (
+            patch(
+                "polyzymd.analyses.shared.binding_preference_helpers.resolve_enzyme_pdb",
+                return_value=enzyme_pdb,
+            ),
+            patch(
+                "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
+                return_value=object(),
+            ) as mock_compute,
+        ):
+            analysis._load_binding_preference(cond, ctx, settings)
+
+        assert mock_compute.call_args.kwargs["contact_results_by_replicate"] == {1: sidecar}
+        assert mock_compute.call_args.kwargs["contact_settings_fp"] == fp
+        assert mock_compute.call_args.kwargs[
+            "settings_fp"
+        ] == binding_preference_settings_fingerprint(settings)
+        assert mock_compute.call_args.kwargs["settings_fp"] != fp
+
+    def test_non_cached_path_uses_current_sidecar_over_stale_canonical(self, tmp_path):
+        """Fingerprint inference should let current sidecars override stale canonical output."""
+
+        from polyzymd.analyses.binding_free_energy import BFESettings, BindingFreeEnergyAnalysis
+        from polyzymd.analyses.contacts._results import ContactResult
+
+        analysis = BindingFreeEnergyAnalysis()
+        ctx = _make_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        run_dir = contacts_dir / "run_1"
+        run_dir.mkdir(parents=True)
+        current_fp = "deadbeef"
+        stale_fp = "badcafe0"
+        canonical = run_dir / "result.json"
+        ContactResult(
+            replicate=1,
+            residue_contacts=[],
+            n_frames=10,
+            timestep_ps=10.0,
+            criteria_label="any_atom_4.5A",
+            criteria_cutoff=4.5,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            metadata={"contacts_settings_fingerprint": stale_fp},
+        ).save(canonical)
+        ctx = replace(
+            ctx,
+            recompute=True,
+            analysis_dirs={cond.label: tmp_path / cond.label / "binding_free_energy"},
+        )
+
+        settings = BFESettings(compute_binding_preference=True, units="kcal/mol")
+        sidecar = contacts_dir / f"contacts_eq10ns_cut6.0_s{current_fp}_rep1.json"
+        sidecar.write_text(f'{{"contacts_settings_fingerprint": "{current_fp}"}}')
+        enzyme_pdb = tmp_path / "enzyme.pdb"
+        enzyme_pdb.write_text("ATOM\n")
+
+        with (
+            patch(
+                "polyzymd.analyses.shared.binding_preference_helpers.resolve_enzyme_pdb",
+                return_value=enzyme_pdb,
+            ),
+            patch(
+                "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
+                return_value=object(),
+            ) as mock_compute,
+        ):
+            analysis._load_binding_preference(cond, ctx, settings)
+
+        assert mock_compute.call_args.kwargs["contact_results_by_replicate"] == {1: sidecar}
+        assert mock_compute.call_args.kwargs["contact_settings_fp"] == current_fp
+        assert mock_compute.call_args.kwargs["settings_fp"] != current_fp
+
+    def test_non_cached_path_preserves_metadata_proven_legacy_contacts_sidecar(
+        self,
+        tmp_path,
+    ):
+        """Identity inference should re-resolve proven legacy contacts sidecars."""
+
+        from polyzymd.analyses.binding_free_energy import BFESettings, BindingFreeEnergyAnalysis
+
+        analysis = BindingFreeEnergyAnalysis()
+        ctx = _make_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        ctx = replace(
+            ctx,
+            recompute=True,
+            analysis_dirs={cond.label: tmp_path / cond.label / "binding_free_energy"},
+        )
+
+        contacts_fp = "deadbeef"
+        legacy = contacts_dir / "contacts_eq10ns_cut6.0_rep1.json"
+        legacy.write_text(
+            f'{{"metadata": {{"contacts_settings_fingerprint": "{contacts_fp}", '
+            '"equilibration": "10ns"}}'
+        )
+        enzyme_pdb = tmp_path / "enzyme.pdb"
+        enzyme_pdb.write_text("ATOM\n")
+
+        with (
+            patch(
+                "polyzymd.analyses.shared.binding_preference_helpers.resolve_enzyme_pdb",
+                return_value=enzyme_pdb,
+            ),
+            patch(
+                "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
+                return_value=object(),
+            ) as mock_compute,
+        ):
+            analysis._load_binding_preference(
+                cond,
+                ctx,
+                BFESettings(compute_binding_preference=True),
+            )
+
+        assert mock_compute.call_args.kwargs["contact_results_by_replicate"] == {1: legacy}
+        assert mock_compute.call_args.kwargs["contact_settings_fp"] == contacts_fp
+
+    def test_cached_lookup_uses_actual_non_default_contacts_fingerprint(self, tmp_path):
+        """Cached BP lookup should use the upstream contacts artifact fingerprint."""
+
+        from polyzymd.analyses.binding_free_energy import BFESettings, BindingFreeEnergyAnalysis
+        from polyzymd.analyses.contacts import ContactsSettings
+        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
+
+        analysis = BindingFreeEnergyAnalysis()
+        ctx = _make_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        ctx = replace(
+            ctx,
+            recompute=False,
+            analysis_dirs={cond.label: tmp_path / cond.label / "binding_free_energy"},
+        )
+        contacts_settings = ContactsSettings(
+            compute_binding_preference=True,
+            cutoff=6.0,
+            grouping="none",
+        )
+        fp = contacts_settings_fingerprint(contacts_settings)
+        (contacts_dir / f"contacts_eq10ns_cut6.0_s{fp}_rep1.json").write_text(
+            f'{{"contacts_settings_fingerprint": "{fp}"}}'
+        )
+        expected = object()
+
+        with patch(
+            "polyzymd.analyses.shared.binding_preference_helpers."
+            "try_load_cached_binding_preference",
+            return_value=expected,
+        ) as mock_cached:
+            loaded = analysis._load_binding_preference(
+                cond,
+                ctx,
+                BFESettings(compute_binding_preference=True),
+            )
+
+        assert loaded is expected
+        assert mock_cached.call_args.kwargs["contact_settings_fp"] == fp
+        assert mock_cached.call_args.kwargs["settings_fp"] != fp
+        assert mock_cached.call_args.kwargs["equilibration"] == "10ns"
+        assert mock_cached.call_args.kwargs["successful_replicates"] == (1,)
+
+    def test_cached_lookup_ignores_stale_bp_fingerprint_when_contacts_identify_current(
+        self,
+        tmp_path,
+    ):
+        """Stale BP sidecars must not poison contacts fingerprint inference."""
+
+        from polyzymd.analyses.binding_free_energy import BFESettings, BindingFreeEnergyAnalysis
+        from polyzymd.analyses.shared.binding_preference import AggregatedBindingPreferenceResult
+
+        analysis = BindingFreeEnergyAnalysis()
+        ctx = _make_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        ctx = replace(
+            ctx,
+            recompute=False,
+            analysis_dirs={cond.label: tmp_path / cond.label / "binding_free_energy"},
+        )
+
+        current_fp = "deadbeef"
+        stale_fp = "badcafe0"
+        run_dir = contacts_dir / "run_1"
+        run_dir.mkdir()
+        (run_dir / "result.json").write_text(
+            f'{{"metadata": {{"contacts_settings_fingerprint": "{stale_fp}", '
+            '"equilibration": "10ns"}}}}'
+        )
+        (contacts_dir / f"contacts_eq10ns_cut6.0_s{current_fp}_rep1.json").write_text(
+            f'{{"contacts_settings_fingerprint": "{current_fp}"}}'
+        )
+        AggregatedBindingPreferenceResult(
+            n_replicates=1,
+            metadata={"settings_fingerprint": stale_fp, "equilibration": "10ns"},
+        ).save(contacts_dir / f"binding_preference_aggregated_s{stale_fp}_reps1-1.json")
+        expected = object()
+
+        with patch(
+            "polyzymd.analyses.shared.binding_preference_helpers."
+            "try_load_cached_binding_preference",
+            return_value=expected,
+        ) as mock_cached:
+            loaded = analysis._load_binding_preference(
+                cond,
+                ctx,
+                BFESettings(compute_binding_preference=True),
+            )
+
+        assert loaded is expected
+        assert mock_cached.call_args.kwargs["contact_settings_fp"] == current_fp
+        assert mock_cached.call_args.kwargs["settings_fp"] != current_fp
+
+    def test_filename_only_contacts_sidecar_blocks_cached_bp_load(self, tmp_path):
+        """Unproven contacts sidecars should prevent downstream BP cache fallback."""
+        from polyzymd.analyses.binding_free_energy import BFESettings, BindingFreeEnergyAnalysis
+
+        analysis = BindingFreeEnergyAnalysis()
+        ctx = _make_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        (contacts_dir / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json").write_text("{}")
+        ctx = replace(
+            ctx,
+            recompute=False,
+            analysis_dirs={cond.label: tmp_path / cond.label / "binding_free_energy"},
+        )
+
+        with patch(
+            "polyzymd.analyses.shared.binding_preference_helpers."
+            "try_load_cached_binding_preference",
+            return_value=object(),
+        ) as mock_cached:
+            loaded = analysis._load_binding_preference(
+                cond,
+                ctx,
+                BFESettings(compute_binding_preference=True),
+            )
+
+        assert loaded is None
+        mock_cached.assert_not_called()
+
+    def test_filename_only_contacts_sidecar_blocks_bp_recompute(self, tmp_path):
+        """Unproven contacts sidecars should prevent recompute from contacts."""
+        from polyzymd.analyses.binding_free_energy import BFESettings, BindingFreeEnergyAnalysis
+
+        analysis = BindingFreeEnergyAnalysis()
+        ctx = _make_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        (contacts_dir / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json").write_text("{}")
+        ctx = replace(
+            ctx,
+            recompute=True,
+            analysis_dirs={cond.label: tmp_path / cond.label / "binding_free_energy"},
+        )
+
+        with patch(
+            "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
+            return_value=object(),
+        ) as mock_compute:
+            loaded = analysis._load_binding_preference(
+                cond,
+                ctx,
+                BFESettings(compute_binding_preference=True),
+            )
+
+        assert loaded is None
+        mock_compute.assert_not_called()
+
+
+class TestBindingPreferenceCacheHelper:
+    """Regression tests for settings-aware binding-preference cache loading."""
+
+    def test_rejects_legacy_canonical_cache_when_settings_fp_known(self, tmp_path):
+        from polyzymd.analyses.shared.binding_preference import AggregatedBindingPreferenceResult
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            try_load_cached_binding_preference,
+        )
+
+        cond = SimpleNamespace(label="Cond", replicates=(1, 2))
+        AggregatedBindingPreferenceResult(n_replicates=2).save(
+            tmp_path / "binding_preference_aggregated.json"
+        )
+
+        result = try_load_cached_binding_preference(cond, tmp_path, settings_fp="deadbeef")
+
+        assert result is None
+
+    def test_accepts_fingerprinted_cache_when_settings_fp_known(self, tmp_path):
+        from polyzymd.analyses.shared.binding_preference import AggregatedBindingPreferenceResult
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            try_load_cached_binding_preference,
+        )
+
+        cond = SimpleNamespace(label="Cond", replicates=(1, 2))
+        AggregatedBindingPreferenceResult(
+            n_replicates=2,
+            metadata={"replicates": [1, 2]},
+        ).save(tmp_path / "binding_preference_aggregated_sdeadbeef.json")
+
+        result = try_load_cached_binding_preference(cond, tmp_path, settings_fp="deadbeef")
+
+        assert result is not None
+        assert result.n_replicates == 2
+
+    def test_rejects_fingerprinted_aggregate_with_wrong_successful_subset(self, tmp_path):
+        """Aggregate BP caches must prove the requested successful replicate set."""
+
+        from polyzymd.analyses.shared.binding_preference import AggregatedBindingPreferenceResult
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            try_load_cached_binding_preference,
+        )
+
+        cond = SimpleNamespace(label="Cond", replicates=(1, 2, 3))
+        AggregatedBindingPreferenceResult(
+            n_replicates=2,
+            metadata={"replicates": [1, 2], "settings_fingerprint": "deadbeef"},
+        ).save(tmp_path / "binding_preference_aggregated_sdeadbeef_reps1-2.json")
+
+        result = try_load_cached_binding_preference(
+            cond,
+            tmp_path,
+            settings_fp="deadbeef",
+            successful_replicates=(2, 3),
+        )
+
+        assert result is None
+
+    def test_rejects_legacy_aggregate_without_replicate_identity(self, tmp_path):
+        """Legacy aggregate BP caches cannot prove which replicates they contain."""
+
+        from polyzymd.analyses.shared.binding_preference import AggregatedBindingPreferenceResult
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            try_load_cached_binding_preference,
+        )
+
+        cond = SimpleNamespace(label="Cond", replicates=(1, 2))
+        AggregatedBindingPreferenceResult(n_replicates=2).save(
+            tmp_path / "binding_preference_aggregated_reps1-2.json"
+        )
+
+        result = try_load_cached_binding_preference(cond, tmp_path)
+
+        assert result is None
+
+    def test_rejects_cached_binding_preference_from_wrong_window(self, tmp_path):
+        from polyzymd.analyses.shared.binding_preference import AggregatedBindingPreferenceResult
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            try_load_cached_binding_preference,
+        )
+
+        cond = SimpleNamespace(label="Cond", replicates=(1, 2))
+        AggregatedBindingPreferenceResult(
+            n_replicates=2,
+            metadata={"settings_fingerprint": "deadbeef", "equilibration": "0ns"},
+        ).save(tmp_path / "binding_preference_aggregated_sdeadbeef.json")
+
+        result = try_load_cached_binding_preference(
+            cond,
+            tmp_path,
+            settings_fp="deadbeef",
+            equilibration="10ns",
+        )
+
+        assert result is None
+
+
+class TestBindingPreferenceAggregationArtifacts:
+    """Regression tests for binding-preference aggregate cache identity."""
+
+    def test_aggregate_metadata_and_filename_use_successful_replicates(self, tmp_path):
+        """Skipped contact replicates should be excluded from aggregate identity."""
+
+        from polyzymd.analyses.shared.binding_preference import (
+            AggregatedBindingPreferenceResult,
+            BindingPreferenceResult,
+            compute_condition_binding_preference,
+        )
+
+        cond = SimpleNamespace(label="Cond", replicates=(1, 2, 3))
+        sim_config = MagicMock()
+        sim_config.get_working_directory.return_value = tmp_path / "run_1"
+        enzyme_pdb = tmp_path / "enzyme.pdb"
+        enzyme_pdb.write_text("ATOM\n")
+
+        def _compute_bp(**_kwargs):
+            return BindingPreferenceResult(n_frames=10, metadata={})
+
+        def _aggregate_bp(results):
+            return AggregatedBindingPreferenceResult(n_replicates=len(results))
+
+        with (
+            patch.dict("sys.modules", {"MDAnalysis": MagicMock()}),
+            patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as mock_loader_cls,
+            patch(
+                "polyzymd.analyses.shared.surface_exposure.SurfaceExposureFilter"
+            ) as mock_filter_cls,
+            patch(
+                "polyzymd.analyses.shared.binding_preference._orchestration."
+                "resolve_protein_groups_from_surface_exposure",
+                return_value={"aromatic": [1]},
+            ),
+            patch(
+                "polyzymd.analyses.shared.binding_preference._orchestration."
+                "compute_binding_preference",
+                side_effect=_compute_bp,
+            ),
+            patch(
+                "polyzymd.analyses.shared.binding_preference._aggregate."
+                "aggregate_binding_preference",
+                side_effect=_aggregate_bp,
+            ),
+        ):
+            mock_loader_cls.return_value.find_topology.side_effect = FileNotFoundError
+            mock_filter_cls.return_value.calculate.return_value = SimpleNamespace(
+                exposed_count=1,
+                total_count=1,
+            )
+
+            result = compute_condition_binding_preference(
+                cond,
+                sim_config,
+                tmp_path,
+                enzyme_pdb=enzyme_pdb,
+                contact_results_by_replicate={
+                    1: tmp_path / "contacts_rep1.json",
+                    3: tmp_path / "contacts_rep3.json",
+                },
+                load_contact_result=lambda _path: SimpleNamespace(
+                    metadata={"equilibration": "10ns"}
+                ),
+                threshold=0.2,
+                include_default_aa_groups=True,
+                custom_protein_groups=None,
+                protein_partitions=None,
+                polymer_type_selections=None,
+                polymer_chain="C",
+                settings_fp="deadbeef",
+                equilibration="10ns",
+            )
+
+        assert result is not None
+        assert result.n_replicates == 2
+        assert result.metadata["replicates"] == [1, 3]
+        assert (tmp_path / "binding_preference_aggregated_sdeadbeef_reps1_3.json").exists()
+        assert not (tmp_path / "binding_preference_aggregated_sdeadbeef_reps1-3.json").exists()
 
 
 # ===========================================================================

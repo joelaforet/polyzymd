@@ -168,6 +168,32 @@ class TestSettings:
         s = PolymerAffinitySettings(protein_groups=groups)
         assert s.protein_groups == groups
 
+    def test_binding_preference_fingerprint_changes_with_bp_settings(self):
+        from polyzymd.analyses.polymer_affinity import PolymerAffinitySettings
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            binding_preference_settings_fingerprint,
+        )
+
+        default = PolymerAffinitySettings(protein_groups={"site": [1, 2]})
+        changed = PolymerAffinitySettings(protein_groups={"site": [1, 2, 3]})
+
+        assert binding_preference_settings_fingerprint(default) != (
+            binding_preference_settings_fingerprint(changed)
+        )
+
+    def test_binding_preference_fingerprint_ignores_affinity_only_settings(self):
+        from polyzymd.analyses.polymer_affinity import PolymerAffinitySettings
+        from polyzymd.analyses.shared.binding_preference_helpers import (
+            binding_preference_settings_fingerprint,
+        )
+
+        default = PolymerAffinitySettings(fdr_alpha=0.05)
+        changed = PolymerAffinitySettings(fdr_alpha=0.01)
+
+        assert binding_preference_settings_fingerprint(default) == (
+            binding_preference_settings_fingerprint(changed)
+        )
+
 
 # ===========================================================================
 # compute_replicate / aggregate (no-op)
@@ -1499,7 +1525,7 @@ class TestLoadBindingPreference:
             patch(
                 "polyzymd.analyses.contacts._paths.find_contact_results_for_replicates",
                 return_value={1: tmp_path / "contacts_rep1.json"},
-            ),
+            ) as mock_find_contacts,
             patch(
                 "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
                 return_value=expected,
@@ -1509,6 +1535,626 @@ class TestLoadBindingPreference:
 
         assert loaded is expected
         assert mock_compute.call_args.kwargs["cond"] is cond
+        assert "settings_fp" not in mock_find_contacts.call_args.kwargs
+        assert len(mock_compute.call_args.kwargs["settings_fp"]) == 8
+        assert mock_compute.call_args.kwargs["contact_settings_fp"] is None
+
+    def test_non_cached_path_discovers_canonical_contacts_results(self, tmp_path):
+        """Polymer affinity should consume canonical contacts run paths."""
+        from polyzymd.analyses.contacts._results import ContactResult
+        from polyzymd.analyses.polymer_affinity import (
+            PolymerAffinityAnalysis,
+            PolymerAffinitySettings,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1, n_reps=2)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        run_1 = contacts_dir / "run_1"
+        run_2 = contacts_dir / "run_2"
+        run_1.mkdir(parents=True)
+        run_2.mkdir(parents=True)
+        ContactResult(
+            replicate=1,
+            residue_contacts=[],
+            n_frames=10,
+            timestep_ps=10.0,
+            criteria_label="any_atom_4.5A",
+            criteria_cutoff=4.5,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+        ).save(run_1 / "result.json")
+        ContactResult(
+            replicate=2,
+            residue_contacts=[],
+            n_frames=10,
+            timestep_ps=10.0,
+            criteria_label="any_atom_4.5A",
+            criteria_cutoff=4.5,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+        ).save(run_2 / "result.json")
+        ctx = replace(
+            ctx,
+            recompute=True,
+            analysis_dirs={cond.label: tmp_path / cond.label / "polymer_affinity"},
+        )
+
+        settings = PolymerAffinitySettings(compute_binding_preference=True)
+        enzyme_pdb = tmp_path / "enzyme.pdb"
+        enzyme_pdb.write_text("ATOM\n")
+
+        with (
+            patch(
+                "polyzymd.analyses.shared.binding_preference_helpers.resolve_enzyme_pdb",
+                return_value=enzyme_pdb,
+            ),
+            patch(
+                "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
+                return_value=object(),
+            ) as mock_compute,
+        ):
+            analysis._load_binding_preference(cond, ctx, settings)
+
+        assert mock_compute.call_args.kwargs["contact_results_by_replicate"] == {
+            1: run_1 / "result.json",
+            2: run_2 / "result.json",
+        }
+
+    def test_non_cached_path_discovers_fingerprinted_contacts_without_canonical(
+        self,
+        tmp_path,
+    ):
+        """Polymer affinity should consume matching fingerprinted contacts sidecars."""
+
+        from polyzymd.analyses.contacts import ContactsSettings
+        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
+        from polyzymd.analyses.polymer_affinity import (
+            PolymerAffinityAnalysis,
+            PolymerAffinitySettings,
+        )
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        ctx = replace(
+            ctx,
+            recompute=True,
+            analysis_dirs={cond.label: tmp_path / cond.label / "polymer_affinity"},
+        )
+
+        settings = PolymerAffinitySettings(
+            compute_binding_preference=True,
+            fdr_alpha=0.2,
+        )
+        contacts_settings = ContactsSettings(
+            compute_binding_preference=True,
+            cutoff=6.0,
+            grouping="none",
+        )
+        fp = contacts_settings_fingerprint(contacts_settings)
+        assert fp != settings_fingerprint(settings)
+        sidecar = contacts_dir / f"contacts_eq10ns_cut6.0_s{fp}_rep1.json"
+        sidecar.write_text(f'{{"contacts_settings_fingerprint": "{fp}"}}')
+        enzyme_pdb = tmp_path / "enzyme.pdb"
+        enzyme_pdb.write_text("ATOM\n")
+
+        with (
+            patch(
+                "polyzymd.analyses.shared.binding_preference_helpers.resolve_enzyme_pdb",
+                return_value=enzyme_pdb,
+            ),
+            patch(
+                "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
+                return_value=object(),
+            ) as mock_compute,
+        ):
+            analysis._load_binding_preference(cond, ctx, settings)
+
+        assert mock_compute.call_args.kwargs["contact_results_by_replicate"] == {1: sidecar}
+        assert mock_compute.call_args.kwargs["contact_settings_fp"] == fp
+        assert mock_compute.call_args.kwargs["settings_fp"] != fp
+
+    def test_non_cached_path_uses_fingerprinted_sidecar_over_canonical(self, tmp_path):
+        """Fingerprint inference should not let canonical output shadow sidecars."""
+
+        from polyzymd.analyses.contacts._results import ContactResult
+        from polyzymd.analyses.polymer_affinity import (
+            PolymerAffinityAnalysis,
+            PolymerAffinitySettings,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        run_dir = contacts_dir / "run_1"
+        run_dir.mkdir(parents=True)
+        canonical_fp = "badcafe0"
+        sidecar_fp = "deadbeef"
+        canonical = run_dir / "result.json"
+        ContactResult(
+            replicate=1,
+            residue_contacts=[],
+            n_frames=10,
+            timestep_ps=10.0,
+            criteria_label="any_atom_4.5A",
+            criteria_cutoff=4.5,
+            equilibration_time=10.0,
+            equilibration_unit="ns",
+            metadata={"contacts_settings_fingerprint": canonical_fp},
+        ).save(canonical)
+        ctx = replace(
+            ctx,
+            recompute=True,
+            analysis_dirs={cond.label: tmp_path / cond.label / "polymer_affinity"},
+        )
+
+        settings = PolymerAffinitySettings(
+            compute_binding_preference=True,
+            fdr_alpha=0.2,
+        )
+        sidecar = contacts_dir / f"contacts_eq10ns_cut6.0_s{sidecar_fp}_rep1.json"
+        sidecar.write_text(f'{{"contacts_settings_fingerprint": "{sidecar_fp}"}}')
+        enzyme_pdb = tmp_path / "enzyme.pdb"
+        enzyme_pdb.write_text("ATOM\n")
+
+        with (
+            patch(
+                "polyzymd.analyses.shared.binding_preference_helpers.resolve_enzyme_pdb",
+                return_value=enzyme_pdb,
+            ),
+            patch(
+                "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
+                return_value=object(),
+            ) as mock_compute,
+        ):
+            analysis._load_binding_preference(cond, ctx, settings)
+
+        assert mock_compute.call_args.kwargs["contact_results_by_replicate"] == {1: sidecar}
+        assert mock_compute.call_args.kwargs["contact_settings_fp"] == sidecar_fp
+        assert mock_compute.call_args.kwargs["settings_fp"] != sidecar_fp
+
+    def test_non_cached_path_preserves_metadata_proven_legacy_contacts_sidecar(
+        self,
+        tmp_path,
+    ):
+        """Identity inference should re-resolve proven legacy contacts sidecars."""
+
+        from polyzymd.analyses.polymer_affinity import (
+            PolymerAffinityAnalysis,
+            PolymerAffinitySettings,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        ctx = replace(
+            ctx,
+            recompute=True,
+            analysis_dirs={cond.label: tmp_path / cond.label / "polymer_affinity"},
+        )
+
+        contacts_fp = "deadbeef"
+        legacy = contacts_dir / "contacts_eq10ns_cut6.0_rep1.json"
+        legacy.write_text(
+            f'{{"metadata": {{"contacts_settings_fingerprint": "{contacts_fp}", '
+            '"equilibration": "10ns"}}'
+        )
+        enzyme_pdb = tmp_path / "enzyme.pdb"
+        enzyme_pdb.write_text("ATOM\n")
+
+        with (
+            patch(
+                "polyzymd.analyses.shared.binding_preference_helpers.resolve_enzyme_pdb",
+                return_value=enzyme_pdb,
+            ),
+            patch(
+                "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
+                return_value=object(),
+            ) as mock_compute,
+        ):
+            analysis._load_binding_preference(
+                cond,
+                ctx,
+                PolymerAffinitySettings(compute_binding_preference=True),
+            )
+
+        assert mock_compute.call_args.kwargs["contact_results_by_replicate"] == {1: legacy}
+        assert mock_compute.call_args.kwargs["contact_settings_fp"] == contacts_fp
+
+    def test_cached_lookup_uses_actual_non_default_contacts_fingerprint(self, tmp_path):
+        """Cached BP lookup should use the upstream contacts artifact fingerprint."""
+
+        from polyzymd.analyses.contacts import ContactsSettings
+        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
+        from polyzymd.analyses.polymer_affinity import (
+            PolymerAffinityAnalysis,
+            PolymerAffinitySettings,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        ctx = replace(
+            ctx,
+            recompute=False,
+            analysis_dirs={cond.label: tmp_path / cond.label / "polymer_affinity"},
+        )
+        contacts_settings = ContactsSettings(
+            compute_binding_preference=True,
+            cutoff=6.0,
+            grouping="none",
+        )
+        fp = contacts_settings_fingerprint(contacts_settings)
+        (contacts_dir / f"contacts_eq10ns_cut6.0_s{fp}_rep1.json").write_text(
+            f'{{"contacts_settings_fingerprint": "{fp}"}}'
+        )
+        expected = object()
+
+        with patch(
+            "polyzymd.analyses.shared.binding_preference_helpers."
+            "try_load_cached_binding_preference",
+            return_value=expected,
+        ) as mock_cached:
+            loaded = analysis._load_binding_preference(
+                cond,
+                ctx,
+                PolymerAffinitySettings(compute_binding_preference=True),
+            )
+
+        assert loaded is expected
+        assert mock_cached.call_args.kwargs["contact_settings_fp"] == fp
+        assert mock_cached.call_args.kwargs["settings_fp"] != fp
+        assert mock_cached.call_args.kwargs["equilibration"] == ctx.equilibration
+        assert mock_cached.call_args.kwargs["successful_replicates"] == (1,)
+
+    def test_cached_lookup_ignores_stale_bp_fingerprint_when_contacts_identify_current(
+        self,
+        tmp_path,
+    ):
+        """Stale BP sidecars must not poison contacts fingerprint inference."""
+
+        from polyzymd.analyses.polymer_affinity import (
+            PolymerAffinityAnalysis,
+            PolymerAffinitySettings,
+        )
+        from polyzymd.analyses.shared.binding_preference import AggregatedBindingPreferenceResult
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        ctx = replace(
+            ctx,
+            recompute=False,
+            analysis_dirs={cond.label: tmp_path / cond.label / "polymer_affinity"},
+        )
+
+        current_fp = "deadbeef"
+        stale_fp = "badcafe0"
+        run_dir = contacts_dir / "run_1"
+        run_dir.mkdir()
+        (run_dir / "result.json").write_text(
+            f'{{"metadata": {{"contacts_settings_fingerprint": "{stale_fp}", '
+            '"equilibration": "10ns"}}}}'
+        )
+        (contacts_dir / f"contacts_eq10ns_cut6.0_s{current_fp}_rep1.json").write_text(
+            f'{{"contacts_settings_fingerprint": "{current_fp}"}}'
+        )
+        AggregatedBindingPreferenceResult(
+            n_replicates=1,
+            metadata={"settings_fingerprint": stale_fp, "equilibration": "10ns"},
+        ).save(contacts_dir / f"binding_preference_aggregated_s{stale_fp}_reps1-1.json")
+        expected = object()
+
+        with patch(
+            "polyzymd.analyses.shared.binding_preference_helpers."
+            "try_load_cached_binding_preference",
+            return_value=expected,
+        ) as mock_cached:
+            loaded = analysis._load_binding_preference(
+                cond,
+                ctx,
+                PolymerAffinitySettings(compute_binding_preference=True),
+            )
+
+        assert loaded is expected
+        assert mock_cached.call_args.kwargs["contact_settings_fp"] == current_fp
+        assert mock_cached.call_args.kwargs["settings_fp"] != current_fp
+
+    def test_filename_only_contacts_sidecar_blocks_cached_bp_load(self, tmp_path):
+        """Unproven contacts sidecars should prevent downstream BP cache fallback."""
+        from polyzymd.analyses.polymer_affinity import (
+            PolymerAffinityAnalysis,
+            PolymerAffinitySettings,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        (contacts_dir / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json").write_text("{}")
+        ctx = replace(
+            ctx,
+            recompute=False,
+            analysis_dirs={cond.label: tmp_path / cond.label / "polymer_affinity"},
+        )
+
+        with patch(
+            "polyzymd.analyses.shared.binding_preference_helpers."
+            "try_load_cached_binding_preference",
+            return_value=object(),
+        ) as mock_cached:
+            loaded = analysis._load_binding_preference(
+                cond,
+                ctx,
+                PolymerAffinitySettings(compute_binding_preference=True),
+            )
+
+        assert loaded is None
+        mock_cached.assert_not_called()
+
+    def test_filename_only_contacts_sidecar_blocks_bp_recompute(self, tmp_path):
+        """Unproven contacts sidecars should prevent recompute from contacts."""
+        from polyzymd.analyses.polymer_affinity import (
+            PolymerAffinityAnalysis,
+            PolymerAffinitySettings,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        (contacts_dir / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json").write_text("{}")
+        ctx = replace(
+            ctx,
+            recompute=True,
+            analysis_dirs={cond.label: tmp_path / cond.label / "polymer_affinity"},
+        )
+
+        with patch(
+            "polyzymd.analyses.shared.binding_preference.compute_condition_binding_preference",
+            return_value=object(),
+        ) as mock_compute:
+            loaded = analysis._load_binding_preference(
+                cond,
+                ctx,
+                PolymerAffinitySettings(compute_binding_preference=True),
+            )
+
+        assert loaded is None
+        mock_compute.assert_not_called()
+
+    def test_per_replicate_bp_returns_none_when_contacts_identity_unproven(self, tmp_path):
+        """Per-replicate BP loading must fail closed on unproven contacts identity."""
+        from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
+        from polyzymd.analyses.shared.binding_preference import (
+            BindingPreferenceEntry,
+            BindingPreferenceResult,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        (contacts_dir / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json").write_text("{}")
+        BindingPreferenceResult(
+            entries=[
+                BindingPreferenceEntry(
+                    polymer_type="SBM",
+                    protein_group="aromatic",
+                    total_contact_frames=5,
+                    mean_contact_fraction=0.5,
+                    n_residues_in_group=10,
+                    n_exposed_in_group=4,
+                )
+            ],
+            metadata={"equilibration": "10ns"},
+        ).save(contacts_dir / "binding_preference_rep1.json")
+        ctx = replace(
+            ctx,
+            analysis_dirs={cond.label: tmp_path / cond.label / "polymer_affinity"},
+        )
+
+        per_rep = analysis._load_per_replicate_entries(cond, ctx)
+
+        assert per_rep is None
+
+    def test_per_replicate_bp_rejects_stale_legacy_when_fingerprint_known(self, tmp_path):
+        """Legacy per-replicate BP must prove compatibility with contacts settings."""
+
+        from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
+        from polyzymd.analyses.shared.binding_preference import (
+            BindingPreferenceEntry,
+            BindingPreferenceResult,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        ctx = replace(
+            ctx,
+            analysis_dirs={cond.label: tmp_path / cond.label / "polymer_affinity"},
+        )
+
+        settings_fp = "deadbeef"
+        stale_fp = "badcafe0"
+        (contacts_dir / f"contacts_eq10ns_cut6.0_s{settings_fp}_rep1.json").write_text(
+            f'{{"contacts_settings_fingerprint": "{settings_fp}"}}'
+        )
+        legacy_path = contacts_dir / "binding_preference_rep1.json"
+        BindingPreferenceResult(
+            entries=[
+                BindingPreferenceEntry(
+                    polymer_type="SBM",
+                    protein_group="aromatic",
+                    total_contact_frames=5,
+                    mean_contact_fraction=0.5,
+                    n_residues_in_group=10,
+                    n_exposed_in_group=4,
+                )
+            ],
+            metadata={"settings_fingerprint": stale_fp},
+        ).save(legacy_path)
+
+        per_rep = analysis._load_per_replicate_entries(cond, ctx)
+
+        assert per_rep is None
+
+    def test_per_replicate_bp_rejects_wrong_window(self, tmp_path):
+        """Per-replicate BP caches must match the requested contacts window."""
+
+        from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
+        from polyzymd.analyses.shared.binding_preference import (
+            BindingPreferenceEntry,
+            BindingPreferenceResult,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1, n_reps=1)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        ctx = replace(
+            ctx,
+            analysis_dirs={cond.label: tmp_path / cond.label / "polymer_affinity"},
+        )
+
+        settings_fp = "deadbeef"
+        (contacts_dir / f"contacts_eq10ns_cut6.0_s{settings_fp}_rep1.json").write_text(
+            f'{{"contacts_settings_fingerprint": "{settings_fp}"}}'
+        )
+        rep_path = contacts_dir / f"binding_preference_s{settings_fp}_rep1.json"
+        BindingPreferenceResult(
+            entries=[
+                BindingPreferenceEntry(
+                    polymer_type="SBM",
+                    protein_group="aromatic",
+                    total_contact_frames=5,
+                    mean_contact_fraction=0.5,
+                    n_residues_in_group=10,
+                    n_exposed_in_group=4,
+                )
+            ],
+            metadata={
+                "settings_fingerprint": settings_fp,
+                "contacts_settings_fingerprint": settings_fp,
+                "equilibration": "0ns",
+            },
+        ).save(rep_path)
+
+        per_rep = analysis._load_per_replicate_entries(cond, ctx, settings_fp=settings_fp)
+
+        assert per_rep is None
+
+    def test_per_replicate_bp_raises_on_replicate_metadata_mismatch(self, tmp_path):
+        """Per-replicate BP caches must prove the requested replicate identity."""
+
+        from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
+        from polyzymd.analyses.shared.binding_preference import (
+            BindingPreferenceEntry,
+            BindingPreferenceResult,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1, n_reps=2)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        ctx = replace(
+            ctx,
+            analysis_dirs={cond.label: tmp_path / cond.label / "polymer_affinity"},
+        )
+
+        settings_fp = "deadbeef"
+        for rep in cond.replicates:
+            (contacts_dir / f"contacts_eq10ns_cut6.0_s{settings_fp}_rep{rep}.json").write_text(
+                f'{{"contacts_settings_fingerprint": "{settings_fp}"}}'
+            )
+        rep_path = contacts_dir / f"binding_preference_s{settings_fp}_rep2.json"
+        BindingPreferenceResult(
+            entries=[
+                BindingPreferenceEntry(
+                    polymer_type="SBM",
+                    protein_group="aromatic",
+                    total_contact_frames=5,
+                    mean_contact_fraction=0.5,
+                    n_residues_in_group=10,
+                    n_exposed_in_group=4,
+                )
+            ],
+            metadata={
+                "settings_fingerprint": settings_fp,
+                "contacts_settings_fingerprint": settings_fp,
+                "equilibration": "10ns",
+                "replicate": 1,
+            },
+        ).save(rep_path)
+
+        with pytest.raises(ValueError, match="metadata mismatch"):
+            analysis._load_per_replicate_entries(cond, ctx, settings_fp=settings_fp)
+
+    def test_legacy_per_replicate_bp_raises_on_replicate_metadata_mismatch(self, tmp_path):
+        """Legacy BP filenames must not hide mismatched replicate metadata."""
+
+        from polyzymd.analyses.polymer_affinity import PolymerAffinityAnalysis
+        from polyzymd.analyses.shared.binding_preference import (
+            BindingPreferenceEntry,
+            BindingPreferenceResult,
+        )
+
+        analysis = PolymerAffinityAnalysis()
+        ctx = _make_pa_context(n_conditions=1, n_reps=2)
+        cond = ctx.conditions[0]
+        contacts_dir = tmp_path / cond.label / "contacts"
+        contacts_dir.mkdir(parents=True)
+        ctx = replace(
+            ctx,
+            analysis_dirs={cond.label: tmp_path / cond.label / "polymer_affinity"},
+        )
+
+        settings_fp = "deadbeef"
+        for rep in cond.replicates:
+            (contacts_dir / f"contacts_eq10ns_cut6.0_s{settings_fp}_rep{rep}.json").write_text(
+                f'{{"contacts_settings_fingerprint": "{settings_fp}"}}'
+            )
+        legacy_path = contacts_dir / "binding_preference_rep2.json"
+        BindingPreferenceResult(
+            entries=[
+                BindingPreferenceEntry(
+                    polymer_type="SBM",
+                    protein_group="aromatic",
+                    total_contact_frames=5,
+                    mean_contact_fraction=0.5,
+                    n_residues_in_group=10,
+                    n_exposed_in_group=4,
+                )
+            ],
+            metadata={
+                "settings_fingerprint": settings_fp,
+                "contacts_settings_fingerprint": settings_fp,
+                "equilibration": "10ns",
+                "replicate": 1,
+            },
+        ).save(legacy_path)
+
+        with pytest.raises(ValueError, match="metadata mismatch"):
+            analysis._load_per_replicate_entries(cond, ctx, settings_fp=settings_fp)
 
 
 # ===========================================================================

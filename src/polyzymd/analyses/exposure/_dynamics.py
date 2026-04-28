@@ -116,6 +116,8 @@ class ExposureDynamicsResult(BaseAnalysisResult):
         Number of frames analyzed.
     n_residues : int
         Number of protein residues.
+    contacts_artifact_identity : str | None
+        Identity of the contacts artifact used to compute chaperone events.
     transient_lower : float
         Lower exposure threshold used for stability classification.
     transient_upper : float
@@ -133,6 +135,7 @@ class ExposureDynamicsResult(BaseAnalysisResult):
     residues: list[ResidueExposureSummary] = Field(default_factory=list)
     n_frames: int = Field(default=0, ge=0)
     n_residues: int = Field(default=0, ge=0)
+    contacts_artifact_identity: str | None = Field(default=None)
     transient_lower: float = Field(default=0.0)
     transient_upper: float = Field(default=1.0)
     min_event_length: int = Field(default=1, ge=1)
@@ -189,10 +192,23 @@ class ExposureDynamicsResult(BaseAnalysisResult):
     # ------------------------------------------------------------------ #
 
     @classmethod
-    def cache_path(cls, analysis_dir: Path | str, settings_fp: str | None = None) -> Path:
+    def cache_path(
+        cls,
+        analysis_dir: Path | str,
+        settings_fp: str | None = None,
+        equilibration: str | None = None,
+        contacts_artifact_identity: str | None = None,
+    ) -> Path:
         """Standard cache file path under analysis_dir."""
         base_dir = Path(analysis_dir) / "exposure"
+        if equilibration is not None:
+            eq_label = equilibration.strip().replace(" ", "_") or "0ns"
+            base_dir = base_dir / f"eq_{eq_label}"
         if settings_fp:
+            if contacts_artifact_identity:
+                return (
+                    base_dir / f"exposure_dynamics_{settings_fp}_c{contacts_artifact_identity}.json"
+                )
             return base_dir / f"exposure_dynamics_{settings_fp}.json"
         return base_dir / "exposure_dynamics.json"
 
@@ -264,6 +280,9 @@ def analyze_exposure_dynamics(
     config: "ExposureConfig | None" = None,
     analysis_dir: Path | str | None = None,
     recompute: bool = False,
+    *,
+    equilibration: str = "0ns",
+    contacts_artifact_identity: str | None = None,
 ) -> ExposureDynamicsResult:
     """Analyze exposure dynamics for an MD trajectory.
 
@@ -283,6 +302,11 @@ def analyze_exposure_dynamics(
         ``analysis_dir/exposure/exposure_dynamics.json``.
     recompute : bool
         Force recomputation even if a cached result exists.
+    equilibration : str, optional
+        Requested equilibration window used for cache identity.
+    contacts_artifact_identity : str or None, optional
+        Identity of the contacts artifact used as an input dependency. When
+        provided, it is included in the cache filename and validated on load.
 
     Returns
     -------
@@ -298,11 +322,21 @@ def analyze_exposure_dynamics(
     if analysis_dir is not None:
         dynamics_settings_fp = settings_fingerprint(config)
         cache_file = ExposureDynamicsResult.cache_path(
-            analysis_dir, settings_fp=dynamics_settings_fp
+            analysis_dir,
+            settings_fp=dynamics_settings_fp,
+            equilibration=equilibration,
+            contacts_artifact_identity=contacts_artifact_identity,
         )
         if not recompute and cache_file.exists():
             logger.info(f"Loading cached exposure dynamics from {cache_file}")
-            return ExposureDynamicsResult.load(cache_file)
+            cached = ExposureDynamicsResult.load(cache_file)
+            if cached.contacts_artifact_identity != contacts_artifact_identity:
+                raise RuntimeError(
+                    "Cached exposure dynamics contacts identity mismatch: "
+                    f"stored={cached.contacts_artifact_identity}, "
+                    f"current={contacts_artifact_identity}"
+                )
+            return cached
 
     logger.info(
         f"Analyzing exposure dynamics: {sasa_result.n_residues} residues, "
@@ -337,6 +371,7 @@ def analyze_exposure_dynamics(
         residues=summaries,
         n_frames=sasa_result.n_frames,
         n_residues=sasa_result.n_residues,
+        contacts_artifact_identity=contacts_artifact_identity,
         transient_lower=config.transient_lower,
         transient_upper=config.transient_upper,
         min_event_length=config.min_event_length,

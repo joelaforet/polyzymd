@@ -17,6 +17,7 @@ Coverage:
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -845,6 +846,309 @@ class TestLifecycle:
 
 
 class TestFindContactResult:
+    def test_prefers_canonical_run_result(self, tmp_path):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        contacts_dir = tmp_path / "contacts"
+        run_dir = contacts_dir / "run_1"
+        run_dir.mkdir(parents=True)
+        canonical = run_dir / "result.json"
+        canonical.write_text("{}")
+        (contacts_dir / "contacts_rep1.json").write_text("{}")
+
+        result = ExposureAnalysis._find_contact_result(contacts_dir, 1)
+
+        assert result == canonical
+
+    def test_finds_fingerprinted_sidecar_when_canonical_absent(self, tmp_path):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        contacts_dir = tmp_path / "contacts"
+        contacts_dir.mkdir()
+        sidecar = contacts_dir / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
+        sidecar.write_text('{"contacts_settings_fingerprint": "deadbeef"}')
+
+        result = ExposureAnalysis._find_contact_result(
+            contacts_dir,
+            1,
+            settings_fp="deadbeef",
+        )
+
+        assert result == sidecar
+
+    def test_find_contact_result_filters_by_equilibration(self, tmp_path):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        contacts_dir = tmp_path / "contacts"
+        contacts_dir.mkdir()
+        wrong = contacts_dir / "contacts_eq0ns_cut4.5_sdeadbeef_rep1.json"
+        expected = contacts_dir / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
+        wrong.write_text("{}")
+        expected.write_text('{"contacts_settings_fingerprint": "deadbeef"}')
+
+        result = ExposureAnalysis._find_contact_result(
+            contacts_dir,
+            1,
+            settings_fp="deadbeef",
+            equilibration="10ns",
+        )
+
+        assert result == expected
+
+    def test_matching_fingerprinted_sidecar_precedes_stale_canonical(self, tmp_path):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        contacts_dir = tmp_path / "contacts"
+        run_dir = contacts_dir / "run_1"
+        run_dir.mkdir(parents=True)
+        canonical = run_dir / "result.json"
+        sidecar = contacts_dir / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
+        canonical.write_text("{}")
+        sidecar.write_text('{"contacts_settings_fingerprint": "deadbeef"}')
+
+        result = ExposureAnalysis._find_contact_result(
+            contacts_dir,
+            1,
+            settings_fp="deadbeef",
+        )
+
+        assert result == sidecar
+
+    def test_load_replicate_accepts_actual_non_default_contacts_fingerprint(self, tmp_path):
+        """Exposure should trust the upstream contacts artifact identity."""
+
+        from polyzymd.analyses.base import Condition
+        from polyzymd.analyses.contacts import ContactsSettings
+        from polyzymd.analyses.contacts._identity import contacts_settings_fingerprint
+        from polyzymd.analyses.exposure import ExposureAnalysis
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        analysis = ExposureAnalysis()
+        settings = ExposureAnalysis.Settings()
+        contacts_settings = ContactsSettings(
+            protein_selection=settings.protein_selection,
+            polymer_selection=settings.polymer_selection,
+            cutoff=6.0,
+            grouping="none",
+        )
+        contacts_fp = contacts_settings_fingerprint(contacts_settings)
+        default_contacts_fp = contacts_settings_fingerprint(
+            ContactsSettings(
+                protein_selection=settings.protein_selection,
+                polymer_selection=settings.polymer_selection,
+            )
+        )
+        assert contacts_fp != default_contacts_fp
+
+        contacts_dir = tmp_path / "contacts"
+        contacts_dir.mkdir()
+        contact_file = contacts_dir / f"contacts_eq10ns_cut6.0_s{contacts_fp}_rep1.json"
+        contact_file.write_text(f'{{"contacts_settings_fingerprint": "{contacts_fp}"}}')
+
+        mock_sim = MagicMock()
+        mock_sim.polymers = MagicMock(enabled=True)
+        cond = Condition(
+            label="test",
+            config_path=tmp_path / "config.yaml",
+            replicates=(1,),
+            sim_config=mock_sim,
+        )
+
+        with (
+            patch("polyzymd.analyses.contacts._results.ContactResult") as mock_contact_result,
+            patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as mock_loader_cls,
+            patch(
+                "polyzymd.analyses.exposure._sasa_trajectory.compute_trajectory_sasa"
+            ) as mock_sasa,
+            patch(
+                "polyzymd.analyses.exposure._dynamics.analyze_exposure_dynamics"
+            ) as mock_dynamics,
+            patch(
+                "polyzymd.analyses.exposure._enrichment.compute_chaperone_enrichment"
+            ) as mock_enrichment,
+        ):
+            mock_contact_result.load.return_value = SimpleNamespace(
+                metadata={"settings_fingerprint": contacts_fp},
+                equilibration_time=10.0,
+                equilibration_unit="ns",
+                replicate=1,
+                n_frames=5,
+            )
+            mock_loader = MagicMock()
+            traj_info = MagicMock()
+            traj_info.topology_file = tmp_path / "top.pdb"
+            traj_info.trajectory_files = [tmp_path / "traj.xtc"]
+            mock_loader.get_trajectory_info.return_value = traj_info
+            mock_loader_cls.return_value = mock_loader
+            mock_sasa.return_value = MagicMock(n_frames=5)
+            mock_dynamics.return_value = MagicMock()
+            mock_enrichment.return_value = MagicMock()
+
+            result = analysis._load_or_compute_replicate(
+                cond=cond,
+                replicate=1,
+                settings=settings,
+                exposure_analysis_dir=tmp_path / "exposure",
+                contacts_analysis_dir=contacts_dir,
+                contacts_settings_fp=analysis._infer_contacts_settings_fingerprint(
+                    contacts_dir,
+                    cond.replicates,
+                ),
+                recompute=True,
+                equilibration="10ns",
+            )
+
+        assert result is not None
+        mock_contact_result.load.assert_called_once_with(contact_file)
+        expected_identity = analysis._contacts_artifact_identity(
+            mock_contact_result.load.return_value,
+            contact_file,
+        )
+        assert "contacts_artifact_identity" not in mock_sasa.call_args.kwargs
+        assert mock_dynamics.call_args.kwargs["contacts_artifact_identity"] == expected_identity
+
+    def test_contact_result_settings_mismatch_is_rejected(self, tmp_path):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        contact_result = SimpleNamespace(metadata={"settings_fingerprint": "badcafe0"})
+
+        assert (
+            ExposureAnalysis._contact_result_matches_settings(
+                contact_result,
+                "deadbeef",
+                tmp_path / "result.json",
+            )
+            is False
+        )
+
+    def test_contact_result_missing_required_fingerprint_is_rejected(self, tmp_path):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        contact_result = SimpleNamespace(metadata={})
+
+        assert (
+            ExposureAnalysis._contact_result_matches_settings(
+                contact_result,
+                "deadbeef",
+                tmp_path / "result.json",
+            )
+            is False
+        )
+
+    def test_unproven_legacy_contact_artifact_is_not_resolved_when_fingerprint_required(
+        self,
+        tmp_path,
+    ):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        contacts_dir = tmp_path / "contacts"
+        contacts_dir.mkdir()
+        (contacts_dir / "contacts_rep1.json").write_text("{}")
+
+        result = ExposureAnalysis._find_contact_result(
+            contacts_dir,
+            1,
+            settings_fp="deadbeef",
+        )
+
+        assert result is None
+
+    def test_contact_artifact_path_rejects_filename_only_settings_token(self, tmp_path):
+        """Exposure strict path matching should not trust ``_s`` filename tokens."""
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        sidecar = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
+        sidecar.write_text("{}")
+
+        assert not ExposureAnalysis._contact_artifact_path_matches_settings(sidecar, "deadbeef")
+
+    def test_find_contact_result_rejects_filename_only_sidecar_without_requested_fp(
+        self,
+        tmp_path,
+    ):
+        """Strict downstream discovery must not fall back to filename-only sidecars."""
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        contacts_dir = tmp_path / "contacts"
+        contacts_dir.mkdir()
+        (contacts_dir / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json").write_text("{}")
+
+        result = ExposureAnalysis._find_contact_result(
+            contacts_dir,
+            1,
+            equilibration="10ns",
+        )
+
+        assert result is None
+
+    def test_contact_artifact_path_rejects_filename_only_sidecar_without_requested_fp(
+        self,
+        tmp_path,
+    ):
+        """Exposure strict matching rejects unproven fingerprinted sources."""
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        sidecar = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
+        sidecar.write_text("{}")
+
+        assert not ExposureAnalysis._contact_artifact_path_matches_settings(sidecar, None)
+
+    def test_contact_result_rejects_filename_only_source_token(self, tmp_path):
+        """Exposure strict result matching should require loaded metadata."""
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        contact_result = SimpleNamespace(metadata={})
+        source = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
+
+        assert not ExposureAnalysis._contact_result_matches_settings(
+            contact_result,
+            "deadbeef",
+            source,
+        )
+
+    def test_contact_result_rejects_fingerprinted_source_without_requested_fp(self, tmp_path):
+        """Exposure rejects fingerprinted sources when no embedded identity exists."""
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        contact_result = SimpleNamespace(metadata={})
+        source = tmp_path / "contacts_eq10ns_cut4.5_sdeadbeef_rep1.json"
+        source.write_text("{}")
+
+        assert not ExposureAnalysis._contact_result_matches_settings(
+            contact_result,
+            None,
+            source,
+        )
+
+    def test_mismatched_fingerprinted_sidecar_is_not_resolved(self, tmp_path):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        contacts_dir = tmp_path / "contacts"
+        contacts_dir.mkdir()
+        (contacts_dir / "contacts_eq10ns_cut4.5_sbadcafe_rep1.json").write_text("{}")
+
+        result = ExposureAnalysis._find_contact_result(
+            contacts_dir,
+            1,
+            settings_fp="deadbeef",
+        )
+
+        assert result is None
+
+    def test_contact_result_matching_fingerprint_is_accepted(self, tmp_path):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+
+        contact_result = SimpleNamespace(metadata={"settings_fingerprint": "deadbeef"})
+
+        assert (
+            ExposureAnalysis._contact_result_matches_settings(
+                contact_result,
+                "deadbeef",
+                tmp_path / "result.json",
+            )
+            is True
+        )
+
     def test_finds_in_contacts_dir(self, tmp_path):
         from polyzymd.analyses.exposure import ExposureAnalysis
 
@@ -1075,6 +1379,68 @@ class TestExposureCacheFingerprinting:
         assert path_a != path_b
         assert path_a != path_c
 
+    def test_dynamics_cache_path_changes_with_contacts_identity(self, tmp_path):
+        from polyzymd.analyses.exposure._config import ExposureConfig
+        from polyzymd.analyses.exposure._dynamics import ExposureDynamicsResult
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        settings_fp = settings_fingerprint(ExposureConfig())
+
+        path_a = ExposureDynamicsResult.cache_path(
+            tmp_path,
+            settings_fp=settings_fp,
+            contacts_artifact_identity="aaaabbbbcccc",
+        )
+        path_b = ExposureDynamicsResult.cache_path(
+            tmp_path,
+            settings_fp=settings_fp,
+            contacts_artifact_identity="dddd11112222",
+        )
+
+        assert path_a != path_b
+        assert "_caaaabbbbcccc" in path_a.name
+
+    def test_stale_dynamics_contacts_identity_fails_loud(self, tmp_path):
+        from polyzymd.analyses.exposure import ExposureAnalysis
+        from polyzymd.analyses.exposure._dynamics import ExposureDynamicsResult
+
+        dynamics = ExposureDynamicsResult(contacts_artifact_identity="old")
+
+        with pytest.raises(RuntimeError, match="contacts identity mismatch"):
+            ExposureAnalysis._validate_dynamics_contacts_identity(
+                dynamics,
+                "new",
+                tmp_path / "exposure_dynamics.json",
+            )
+
+    def test_analyze_dynamics_rejects_stale_contacts_identity_cache(self, tmp_path):
+        from polyzymd.analyses.exposure._config import ExposureConfig
+        from polyzymd.analyses.exposure._dynamics import (
+            ExposureDynamicsResult,
+            analyze_exposure_dynamics,
+        )
+        from polyzymd.analyses.shared.config_hash import settings_fingerprint
+
+        config = ExposureConfig()
+        cache_path = ExposureDynamicsResult.cache_path(
+            tmp_path,
+            settings_fp=settings_fingerprint(config),
+            equilibration="0ns",
+            contacts_artifact_identity="current",
+        )
+        ExposureDynamicsResult(contacts_artifact_identity="stale").save(cache_path)
+
+        with pytest.raises(RuntimeError, match="contacts identity mismatch"):
+            analyze_exposure_dynamics(
+                sasa_result=MagicMock(),
+                contact_result=MagicMock(),
+                config=config,
+                analysis_dir=tmp_path,
+                recompute=False,
+                equilibration="0ns",
+                contacts_artifact_identity="current",
+            )
+
 
 class TestSASAChainSelection:
     @patch("mdtraj.load")
@@ -1089,7 +1455,10 @@ class TestSASAChainSelection:
         mock_topology.chains = [mock_chain]
 
         mock_traj = MagicMock()
+        mock_traj.n_frames = 10
+        mock_traj.n_atoms = 100
         mock_traj.topology = mock_topology
+        mock_traj.__getitem__.return_value = mock_traj
         mock_load.return_value = mock_traj
 
         with pytest.raises(ValueError, match="Chain 'Z' not found in topology"):
@@ -1701,6 +2070,7 @@ class TestSiblingSASAReuse:
             mock_traj.n_frames = 10
             mock_traj.n_atoms = 100
             mock_traj.topology = mock_topology
+            mock_traj.__getitem__.return_value = mock_traj
             mock_traj.atom_slice.return_value = mock_protein_traj
             mock_md_load.return_value = mock_traj
 
@@ -1754,7 +2124,12 @@ class TestSiblingSASAReuse:
                 "polyzymd.analyses.exposure._enrichment.compute_chaperone_enrichment"
             ) as mock_enrichment,
         ):
-            mock_contact_result.load.return_value = MagicMock()
+            loaded_contacts = MagicMock()
+            loaded_contacts.equilibration_time = 10.0
+            loaded_contacts.equilibration_unit = "ns"
+            loaded_contacts.replicate = 1
+            loaded_contacts.n_frames = 5
+            mock_contact_result.load.return_value = loaded_contacts
             mock_loader = MagicMock()
             traj_info = MagicMock()
             traj_info.topology_file = tmp_path / "top.pdb"
@@ -1762,7 +2137,9 @@ class TestSiblingSASAReuse:
             mock_loader.get_trajectory_info.return_value = traj_info
             mock_loader_cls.return_value = mock_loader
 
-            mock_sasa.return_value = MagicMock()
+            mock_sasa_result = MagicMock()
+            mock_sasa_result.n_frames = 5
+            mock_sasa.return_value = mock_sasa_result
             mock_dynamics.return_value = MagicMock()
             mock_enrichment.return_value = MagicMock()
 
@@ -1772,6 +2149,7 @@ class TestSiblingSASAReuse:
                 settings=ExposureAnalysis.Settings(),
                 exposure_analysis_dir=exposure_dir,
                 contacts_analysis_dir=contacts_dir,
+                contacts_settings_fp=None,
                 recompute=True,
                 equilibration="10ns",
             )
@@ -1953,6 +2331,7 @@ class TestEquilibrationCacheIdentity:
                     "exposure_threshold": 0.2,
                     "trajectory_path": "",
                     "topology_path": "",
+                    "equilibration": "0ns",
                 }
             )
         )
@@ -1971,10 +2350,15 @@ class TestEquilibrationCacheIdentity:
         # Loading with eq="10ns" should NOT find the cache (different path)
         # and should attempt to compute (hitting mdtraj.load)
         mock_traj = MagicMock()
-        mock_traj.n_frames = 10
+        mock_traj.n_frames = 20
         mock_traj.n_atoms = 100
+        mock_traj.timestep = 1000.0
         mock_topology = MagicMock()
         mock_topology.select.return_value = np.arange(50)
+        mock_window_traj = MagicMock()
+        mock_window_traj.n_frames = 10
+        mock_window_traj.n_atoms = 100
+        mock_window_traj.topology = mock_topology
         mock_sub_traj = MagicMock()
         mock_sub_traj.n_atoms = 50
         mock_sub_traj.n_residues = 3
@@ -1986,7 +2370,8 @@ class TestEquilibrationCacheIdentity:
             mock_residues.append(r)
         mock_sub_traj.topology.residues = mock_residues
         mock_traj.topology = mock_topology
-        mock_traj.atom_slice.return_value = mock_sub_traj
+        mock_traj.__getitem__.return_value = mock_window_traj
+        mock_window_traj.atom_slice.return_value = mock_sub_traj
 
         with (
             patch("mdtraj.load", return_value=mock_traj) as mock_load,
@@ -2005,3 +2390,5 @@ class TestEquilibrationCacheIdentity:
             )
             # mdtraj.load SHOULD have been called (no cache for 10ns)
             mock_load.assert_called_once()
+            mock_traj.__getitem__.assert_called_once()
+            assert result_10ns.n_frames == 10

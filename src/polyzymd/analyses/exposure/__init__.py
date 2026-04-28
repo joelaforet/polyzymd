@@ -22,6 +22,8 @@ Plugin contract
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -170,6 +172,7 @@ class ExposureAnalysis(Analysis):
         """Run exposure dynamics comparison across all conditions.
 
         Orchestrates the full pipeline per replicate:
+
         1. Load pre-computed ContactResult
         2. Compute/load cached SASATrajectoryResult
         3. Compute/load cached ExposureDynamicsResult
@@ -212,7 +215,7 @@ class ExposureAnalysis(Analysis):
             logger.warning("No conditions provided — skipping exposure comparison")
             return None
 
-        # Step 1: Load/compute per condition
+        # Load per-condition exposure summaries
         summaries: list[ExposureConditionSummary] = []
         for cond in conditions:
             try:
@@ -226,10 +229,10 @@ class ExposureAnalysis(Analysis):
             logger.warning("No conditions with valid data — skipping exposure comparison")
             return None
 
-        # Step 2: Determine effective control
+        # Resolve the effective control after condition filtering
         effective_control = ctx.effective_control
 
-        # Step 3: Pairwise comparisons on chaperone_fraction
+        # Compare chaperone fractions pairwise
         comparisons: list[PairwiseResult] = []
         if len(summaries) >= 2:
             if effective_control:
@@ -255,7 +258,7 @@ class ExposureAnalysis(Analysis):
                         )
                         comparisons.append(comp)
 
-        # Step 4: ANOVA if 3+ conditions
+        # Run ANOVA when enough conditions are available
         anova: ANOVAResult | None = None
         if len(summaries) >= 3:
             all_groups = [s.replicate_values for s in summaries]
@@ -267,18 +270,18 @@ class ExposureAnalysis(Analysis):
                 significant=result.p_value <= fdr_alpha,
             )
 
-        # Step 4b: Apply BH-FDR correction to pairwise and ANOVA results
+        # Apply BH-FDR correction across inferential results
         apply_fdr_correction(
             pairwise_results=comparisons,
             anova_by_run=[anova] if anova is not None else None,
             fdr_alpha=fdr_alpha,
         )
 
-        # Step 5: Dual rankings
+        # Rank conditions by chaperone and transient exposure
         ranked_chaperone = sorted(summaries, key=lambda s: s.mean_chaperone_fraction, reverse=True)
         ranked_transient = sorted(summaries, key=lambda s: s.mean_transient_fraction, reverse=True)
 
-        # Build excluded list from context
+        # Preserve excluded labels in the comparison result
         excluded_labels = [c.label for c in ctx.excluded_conditions]
 
         return ExposureComparisonResult(
@@ -402,6 +405,7 @@ class ExposureAnalysis(Analysis):
         """Build condition summary from per-replicate exposure dynamics results.
 
         For each replicate, this method:
+
         1. Loads cached ContactResult
         2. Computes/loads SASA trajectory
         3. Computes/loads exposure dynamics
@@ -443,6 +447,12 @@ class ExposureAnalysis(Analysis):
         if exposure_analysis_dir is not None:
             contacts_analysis_dir = exposure_analysis_dir.parent / "contacts"
 
+        contacts_settings_fp = self._infer_contacts_settings_fingerprint(
+            contacts_analysis_dir,
+            cond.replicates,
+            ctx.equilibration or "0ns",
+        )
+
         dynamics_per_rep: list[ExposureDynamicsResult] = []
         enrichment_per_rep: list[ChaperoneEnrichmentResult] = []
 
@@ -453,6 +463,7 @@ class ExposureAnalysis(Analysis):
                 settings=settings,
                 exposure_analysis_dir=exposure_analysis_dir,
                 contacts_analysis_dir=contacts_analysis_dir,
+                contacts_settings_fp=contacts_settings_fp,
                 recompute=ctx.recompute,
                 equilibration=ctx.equilibration or "0ns",
             )
@@ -542,6 +553,7 @@ class ExposureAnalysis(Analysis):
         settings: ExposureSettings,
         exposure_analysis_dir: Path | None,
         contacts_analysis_dir: Path | None,
+        contacts_settings_fp: str | None,
         recompute: bool,
         equilibration: str = "0ns",
     ) -> tuple[Any, Any] | None:
@@ -559,6 +571,9 @@ class ExposureAnalysis(Analysis):
             Base exposure analysis directory.
         contacts_analysis_dir : Path or None
             Contacts sibling directory.
+        contacts_settings_fp : str or None
+            Actual upstream contacts settings fingerprint inferred from
+            contacts artifacts.
         recompute : bool
             Force recompute.
         equilibration : str
@@ -579,8 +594,13 @@ class ExposureAnalysis(Analysis):
         from polyzymd.analyses.exposure._sasa_trajectory import compute_trajectory_sasa
         from polyzymd.analyses.shared.loader import TrajectoryLoader
 
-        # Find cached ContactResult
-        contact_result_path = self._find_contact_result(contacts_analysis_dir, replicate)
+        # Find cached ContactResult matching the actual contacts artifact domain
+        contact_result_path = self._find_contact_result(
+            contacts_analysis_dir,
+            replicate,
+            settings_fp=contacts_settings_fp,
+            equilibration=equilibration,
+        )
         if contact_result_path is None or not contact_result_path.exists():
             logger.warning(
                 f"    Contacts not found for rep {replicate}. Run contacts analysis first."
@@ -588,7 +608,30 @@ class ExposureAnalysis(Analysis):
             return None
 
         contact_result = ContactResult.load(contact_result_path)
+        if not self._contact_result_matches_settings(
+            contact_result,
+            contacts_settings_fp,
+            contact_result_path,
+        ):
+            logger.warning(
+                f"    Contacts settings mismatch for rep {replicate}: {contact_result_path}"
+            )
+            return None
+        if not self._contact_result_matches_window(contact_result, equilibration):
+            logger.warning(
+                f"    Contacts window mismatch for rep {replicate}: {contact_result_path}"
+            )
+            return None
+        if not self._contact_result_matches_replicate(contact_result, replicate):
+            logger.warning(
+                f"    Contacts replicate mismatch for rep {replicate}: {contact_result_path}"
+            )
+            return None
         logger.info(f"    Loaded contacts for rep {replicate}: {contact_result_path}")
+        contacts_artifact_identity = self._contacts_artifact_identity(
+            contact_result,
+            contact_result_path,
+        )
 
         # Load trajectory
         loader = TrajectoryLoader(cond.sim_config)
@@ -630,10 +673,17 @@ class ExposureAnalysis(Analysis):
             dynamics_cache_path = ExposureDynamicsResult.cache_path(
                 analysis_dir,
                 settings_fp=settings_fingerprint(exposure_config),
+                equilibration=equilibration,
+                contacts_artifact_identity=contacts_artifact_identity,
             )
             if not recompute and dynamics_cache_path.exists():
                 logger.info(f"    Loading cached dynamics: {dynamics_cache_path}")
                 dynamics = ExposureDynamicsResult.load(dynamics_cache_path)
+                self._validate_dynamics_contacts_identity(
+                    dynamics,
+                    contacts_artifact_identity,
+                    dynamics_cache_path,
+                )
                 # Still need enrichment (always recomputed)
                 sasa_result = compute_trajectory_sasa(
                     topology_path=topology_path,
@@ -643,6 +693,7 @@ class ExposureAnalysis(Analysis):
                     recompute=False,
                     equilibration=equilibration,
                 )
+                self._validate_frame_domain(contact_result, sasa_result)
                 enrichment = compute_chaperone_enrichment(
                     sasa_result=sasa_result,
                     contact_result=contact_result,
@@ -660,6 +711,7 @@ class ExposureAnalysis(Analysis):
                 recompute=recompute,
                 equilibration=equilibration,
             )
+            self._validate_frame_domain(contact_result, sasa_result)
 
             # Compute exposure dynamics
             logger.info(f"    Analyzing exposure dynamics for rep {replicate}...")
@@ -669,6 +721,8 @@ class ExposureAnalysis(Analysis):
                 config=exposure_config,
                 analysis_dir=analysis_dir,
                 recompute=recompute,
+                equilibration=equilibration,
+                contacts_artifact_identity=contacts_artifact_identity,
             )
 
             # Compute enrichment
@@ -688,6 +742,9 @@ class ExposureAnalysis(Analysis):
     def _find_contact_result(
         contacts_dir: Path | None,
         replicate: int,
+        *,
+        settings_fp: str | None = None,
+        equilibration: str | None = None,
     ) -> Path | None:
         """Find cached contact result JSON for a replicate.
 
@@ -701,6 +758,11 @@ class ExposureAnalysis(Analysis):
             Condition-specific contacts directory.
         replicate : int
             Replicate number.
+        settings_fp : str or None, optional
+            Contacts settings fingerprint. Matching fingerprinted sidecars are
+            preferred over canonical run outputs when provided.
+        equilibration : str or None, optional
+            Requested contacts analysis window.
 
         Returns
         -------
@@ -710,11 +772,38 @@ class ExposureAnalysis(Analysis):
         if contacts_dir is None:
             return None
 
-        from polyzymd.analyses.contacts._paths import find_contact_result_for_replicate
+        from polyzymd.analyses.contacts._paths import (
+            contact_artifact_has_contacts_identity_proof,
+            contact_artifact_matches_window,
+            find_contact_result_for_replicate,
+            has_unproven_fingerprinted_contact_artifacts,
+        )
 
-        resolved = find_contact_result_for_replicate(contacts_dir, replicate)
-        if resolved is not None:
+        resolved = find_contact_result_for_replicate(
+            contacts_dir,
+            replicate,
+            settings_fp=settings_fp,
+            equilibration=equilibration,
+            strict_identity=True,
+        )
+        if resolved is not None and ExposureAnalysis._contact_artifact_path_matches_settings(
+            resolved,
+            settings_fp,
+        ):
             return resolved
+
+        if has_unproven_fingerprinted_contact_artifacts(
+            contacts_dir,
+            (replicate,),
+            equilibration=equilibration,
+        ):
+            return None
+
+        if settings_fp is not None and ExposureAnalysis._has_fingerprinted_contact_sidecar(
+            contacts_dir,
+            replicate,
+        ):
+            return None
 
         run_dir = contacts_dir / f"run_{replicate}"
         fallback_patterns = (
@@ -722,7 +811,19 @@ class ExposureAnalysis(Analysis):
             (run_dir, f"contacts*rep{replicate}.json"),
         )
         for search_dir, pattern in fallback_patterns:
-            matches = sorted(p for p in search_dir.glob(pattern) if p.is_file())
+            matches = []
+            for path in sorted(p for p in search_dir.glob(pattern) if p.is_file()):
+                if not ExposureAnalysis._contact_artifact_path_matches_settings(path, settings_fp):
+                    continue
+                if (
+                    settings_fp is None
+                    and "_s" in path.name
+                    and not contact_artifact_has_contacts_identity_proof(path)
+                ):
+                    continue
+                if not contact_artifact_matches_window(path, equilibration):
+                    continue
+                matches.append(path)
             if len(matches) == 1:
                 return matches[0]
             if len(matches) > 1:
@@ -733,6 +834,364 @@ class ExposureAnalysis(Analysis):
                 )
 
         return None
+
+    @staticmethod
+    def _infer_contacts_settings_fingerprint(
+        contacts_dir: Path | None,
+        replicates: Sequence[int],
+        equilibration: str | None = None,
+    ) -> str | None:
+        """Infer the actual contacts settings fingerprint for a condition.
+
+        Parameters
+        ----------
+        contacts_dir : Path or None
+            Condition-specific contacts analysis directory.
+        replicates : Sequence[int]
+            Replicate IDs to inspect.
+        equilibration : str or None, optional
+            Requested contacts analysis window.
+
+        Returns
+        -------
+        str or None
+            Unique contacts settings fingerprint recorded by available
+            artifacts, or ``None`` for legacy artifacts without identity.
+        """
+
+        if contacts_dir is None or not contacts_dir.exists():
+            return None
+
+        from polyzymd.analyses.contacts._paths import infer_contacts_artifact_settings_fingerprint
+
+        return infer_contacts_artifact_settings_fingerprint(
+            contacts_dir,
+            replicates,
+            equilibration=equilibration,
+        )
+
+    @staticmethod
+    def _has_fingerprinted_contact_sidecar(contacts_dir: Path, replicate: int) -> bool:
+        """Return whether any fingerprinted contacts sidecar exists.
+
+        Parameters
+        ----------
+        contacts_dir : Path
+            Condition-specific contacts analysis directory.
+        replicate : int
+            Replicate ID to inspect.
+
+        Returns
+        -------
+        bool
+            ``True`` when a settings-specific sidecar exists for the replicate.
+        """
+
+        run_dir = contacts_dir / f"run_{replicate}"
+        patterns = (
+            (contacts_dir, f"contacts*_s*_rep{replicate}.json"),
+            (run_dir, f"contacts*_s*_rep{replicate}.json"),
+        )
+        return any(any(search_dir.glob(pattern)) for search_dir, pattern in patterns)
+
+    @staticmethod
+    def _contact_artifact_path_matches_settings(path: Path, settings_fp: str | None) -> bool:
+        """Check whether a contacts artifact path matches requested settings.
+
+        Embedded JSON metadata must match the requested settings fingerprint
+        when one is provided. Filename-only sidecar tokens are not sufficient
+        identity proof for strict filtering.
+
+        Parameters
+        ----------
+        path : Path
+            Candidate contacts artifact path.
+        settings_fp : str or None
+            Requested settings fingerprint, or ``None`` when no fingerprint
+            filtering should be applied.
+
+        Returns
+        -------
+        bool
+            ``True`` when the path is compatible with the requested settings.
+        """
+
+        if settings_fp is None:
+            from polyzymd.analyses.contacts._paths import (
+                contact_artifact_has_contacts_identity_proof,
+            )
+
+            if "_s" in path.name:
+                return contact_artifact_has_contacts_identity_proof(path)
+            return True
+
+        fingerprints = ExposureAnalysis._contact_artifact_identity_fingerprints(path)
+        return bool(fingerprints) and all(
+            fingerprint == settings_fp for fingerprint in fingerprints
+        )
+
+    @staticmethod
+    def _contact_artifact_identity_fingerprints(path: Path) -> list[str]:
+        """Return settings identities declared by a contacts artifact.
+
+        Parameters
+        ----------
+        path : Path
+            Contacts artifact path to inspect.
+
+        Returns
+        -------
+        list[str]
+            Fingerprints declared by JSON metadata.
+        """
+
+        try:
+            data = json.loads(path.read_text())
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            return []
+        if not isinstance(data, dict):
+            return []
+
+        fingerprints = []
+        direct_fp = (
+            data.get("contacts_settings_fingerprint")
+            or data.get("contact_settings_fingerprint")
+            or data.get("settings_fingerprint")
+            or data.get("settings_fp")
+        )
+        if isinstance(direct_fp, str):
+            fingerprints.append(direct_fp)
+        metadata = data.get("metadata")
+        if isinstance(metadata, dict):
+            metadata_fp = (
+                metadata.get("contacts_settings_fingerprint")
+                or metadata.get("contact_settings_fingerprint")
+                or metadata.get("settings_fingerprint")
+                or metadata.get("settings_fp")
+            )
+            if isinstance(metadata_fp, str):
+                fingerprints.append(metadata_fp)
+        return list(dict.fromkeys(fingerprints))
+
+    @staticmethod
+    def _contact_result_matches_settings(
+        contact_result: "ContactResult",
+        settings_fp: str | None,
+        source: Path,
+    ) -> bool:
+        """Check whether a loaded contacts result matches the required settings.
+
+        Parameters
+        ----------
+        contact_result : ContactResult
+            Loaded contacts result.
+        settings_fp : str or None
+            Required contacts settings fingerprint, or ``None`` when loading
+            legacy artifacts without recorded settings identity.
+        source : Path
+            Source file path used for diagnostics.
+
+        Returns
+        -------
+        bool
+            ``True`` when no identity is required or the artifact matches,
+            otherwise ``False``.
+        """
+
+        if settings_fp is None:
+            from polyzymd.analyses.contacts._paths import (
+                contact_artifact_has_contacts_identity_proof,
+            )
+
+            if "_s" in source.name:
+                return contact_artifact_has_contacts_identity_proof(source)
+            return True
+
+        fingerprints = []
+        direct_fp = getattr(contact_result, "contacts_settings_fingerprint", None) or getattr(
+            contact_result,
+            "contact_settings_fingerprint",
+            None,
+        )
+        direct_fp = (
+            direct_fp
+            or getattr(contact_result, "settings_fingerprint", None)
+            or getattr(
+                contact_result,
+                "settings_fp",
+                None,
+            )
+        )
+        if isinstance(direct_fp, str):
+            fingerprints.append(direct_fp)
+
+        metadata = getattr(contact_result, "metadata", {}) or {}
+        if isinstance(metadata, dict):
+            metadata_fp = (
+                metadata.get("contacts_settings_fingerprint")
+                or metadata.get("contact_settings_fingerprint")
+                or metadata.get("settings_fingerprint")
+                or metadata.get("settings_fp")
+            )
+            if isinstance(metadata_fp, str):
+                fingerprints.append(metadata_fp)
+        return bool(fingerprints) and all(
+            fingerprint == settings_fp for fingerprint in fingerprints
+        )
+
+    @staticmethod
+    def _contacts_artifact_identity(
+        contact_result: "ContactResult",
+        source: Path,
+    ) -> str:
+        """Build a stable identity for a resolved contacts artifact.
+
+        Parameters
+        ----------
+        contact_result : ContactResult
+            Loaded contacts result used by exposure dynamics.
+        source : Path
+            Resolved artifact path.
+
+        Returns
+        -------
+        str
+            Short hexadecimal identity suitable for cache filenames.
+        """
+
+        metadata = getattr(contact_result, "metadata", {}) or {}
+        try:
+            stat = source.stat()
+            source_identity: dict[str, Any] = {
+                "path": str(source.resolve()),
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+            }
+        except OSError:
+            source_identity = {"path": str(source)}
+
+        payload = {
+            "source": source_identity,
+            "config_hash": getattr(contact_result, "config_hash", None),
+            "replicate": getattr(contact_result, "replicate", None),
+            "equilibration_time": getattr(contact_result, "equilibration_time", None),
+            "equilibration_unit": getattr(contact_result, "equilibration_unit", None),
+            "selection_string": getattr(contact_result, "selection_string", None),
+            "criteria_label": getattr(contact_result, "criteria_label", None),
+            "criteria_cutoff": getattr(contact_result, "criteria_cutoff", None),
+            "start_frame": getattr(contact_result, "start_frame", None),
+            "n_frames": getattr(contact_result, "n_frames", None),
+            "timestep_ps": getattr(contact_result, "timestep_ps", None),
+            "metadata": metadata,
+        }
+        serialized = json.dumps(payload, sort_keys=True, default=str)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:12]
+
+    @staticmethod
+    def _validate_dynamics_contacts_identity(
+        dynamics: "ExposureDynamicsResult",
+        contacts_artifact_identity: str,
+        source: Path,
+    ) -> None:
+        """Validate cached dynamics against the active contacts artifact.
+
+        Parameters
+        ----------
+        dynamics : ExposureDynamicsResult
+            Cached exposure dynamics result.
+        contacts_artifact_identity : str
+            Expected contacts artifact identity.
+        source : Path
+            Dynamics cache path used for diagnostics.
+
+        Raises
+        ------
+        RuntimeError
+            If the cached dynamics were computed from a different contacts
+            artifact or from a legacy cache without contacts provenance.
+        """
+
+        stored = getattr(dynamics, "contacts_artifact_identity", None)
+        if stored != contacts_artifact_identity:
+            raise RuntimeError(
+                "Cached exposure dynamics contacts identity mismatch "
+                f"at {source}: stored={stored}, current={contacts_artifact_identity}"
+            )
+
+    @staticmethod
+    def _contact_result_matches_window(
+        contact_result: "ContactResult",
+        equilibration: str,
+    ) -> bool:
+        """Return whether a contacts result matches the requested window.
+
+        Parameters
+        ----------
+        contact_result : ContactResult
+            Loaded contacts result.
+        equilibration : str
+            Requested equilibration window.
+
+        Returns
+        -------
+        bool
+            ``True`` when the result declares the requested window.
+        """
+
+        from polyzymd.analyses.contacts import ContactsAnalysis
+
+        return ContactsAnalysis._cache_matches_window(contact_result, equilibration)
+
+    @staticmethod
+    def _contact_result_matches_replicate(
+        contact_result: "ContactResult",
+        replicate: int,
+    ) -> bool:
+        """Return whether a contacts result matches the requested replicate.
+
+        Parameters
+        ----------
+        contact_result : ContactResult
+            Loaded contacts result.
+        replicate : int
+            Requested replicate ID.
+
+        Returns
+        -------
+        bool
+            ``True`` when the result declares the requested replicate.
+        """
+
+        stored_replicate = getattr(contact_result, "replicate", None)
+        try:
+            return int(stored_replicate) == int(replicate)
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _validate_frame_domain(contact_result: "ContactResult", sasa_result: Any) -> None:
+        """Validate that contacts and SASA use the same frame domain.
+
+        Parameters
+        ----------
+        contact_result : ContactResult
+            Windowed contacts result.
+        sasa_result : Any
+            Windowed SASA result.
+
+        Raises
+        ------
+        ValueError
+            If frame counts differ.
+        """
+
+        contact_frames = int(getattr(contact_result, "n_frames", -1))
+        sasa_frames = int(getattr(sasa_result, "n_frames", -2))
+        if contact_frames != sasa_frames:
+            raise ValueError(
+                "Contacts and SASA frame domains differ: "
+                f"contacts={contact_frames}, SASA={sasa_frames}"
+            )
 
     def _condition_has_polymer(self, cond: Condition) -> bool:
         """Check if a condition has polymer configured.

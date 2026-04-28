@@ -86,6 +86,10 @@ class SASATrajectoryResult:
     exposure_threshold: float
     trajectory_path: str = ""
     topology_path: str = ""
+    equilibration: str = "0ns"
+    start_frame: int = 0
+    timestep_ps: float = 1.0
+    n_frames_total: int | None = None
 
     # ------------------------------------------------------------------ #
     # Query helpers                                                        #
@@ -186,6 +190,10 @@ class SASATrajectoryResult:
             "exposure_threshold": self.exposure_threshold,
             "trajectory_path": self.trajectory_path,
             "topology_path": self.topology_path,
+            "equilibration": self.equilibration,
+            "start_frame": self.start_frame,
+            "timestep_ps": self.timestep_ps,
+            "n_frames_total": self.n_frames_total,
         }
         (directory / "sasa_metadata.json").write_text(json.dumps(meta, indent=2))
 
@@ -221,6 +229,10 @@ class SASATrajectoryResult:
             exposure_threshold=meta["exposure_threshold"],
             trajectory_path=meta.get("trajectory_path", ""),
             topology_path=meta.get("topology_path", ""),
+            equilibration=meta.get("equilibration", ""),
+            start_frame=int(meta.get("start_frame", 0)),
+            timestep_ps=float(meta.get("timestep_ps", 1.0)),
+            n_frames_total=meta.get("n_frames_total"),
         )
 
     @classmethod
@@ -326,6 +338,7 @@ def compute_trajectory_sasa(
             equilibration=equilibration,
         )
         if sibling_result is not None:
+            sibling_result.equilibration = equilibration
             # Cache the adapted result for future runs
             sasa_settings_fp = settings_fingerprint(config)
             cache_dir = SASATrajectoryResult.cache_path(
@@ -347,15 +360,22 @@ def compute_trajectory_sasa(
     if cache_dir is not None and not recompute and (cache_dir / "sasa_trajectory.npz").exists():
         logger.info(f"Loading cached SASA from {cache_dir}")
         result = SASATrajectoryResult.load(cache_dir)
-        # Validate threshold matches config
-        if abs(result.exposure_threshold - config.exposure_threshold) > 1e-6:
+        if not _sasa_cache_matches_window(result, equilibration):
             logger.warning(
-                f"Cached SASA has threshold={result.exposure_threshold}, "
-                f"but config specifies {config.exposure_threshold}. "
-                "Using cached SASA (relative_sasa values are threshold-independent); "
-                "re-run with recompute=True if you want a fresh computation."
+                "Cached SASA at %s does not match equilibration window %s; recomputing",
+                cache_dir,
+                equilibration,
             )
-        return result
+        else:
+            # Validate threshold matches config
+            if abs(result.exposure_threshold - config.exposure_threshold) > 1e-6:
+                logger.warning(
+                    f"Cached SASA has threshold={result.exposure_threshold}, "
+                    f"but config specifies {config.exposure_threshold}. "
+                    "Using cached SASA (relative_sasa values are threshold-independent); "
+                    "re-run with recompute=True if you want a fresh computation."
+                )
+            return result
 
     n_segments = len(traj_paths)
     traj_label = (
@@ -371,6 +391,25 @@ def compute_trajectory_sasa(
     # Load full trajectory (mdtraj natively concatenates a list of files)
     traj = md.load(traj_files_str, top=str(topology_path))
     logger.info(f"Loaded trajectory: {traj.n_frames} frames, {traj.n_atoms} atoms")
+
+    timestep_ps = _get_mdtraj_timestep_ps(traj)
+    from polyzymd.analyses.shared.window import resolve_trajectory_window
+
+    window = resolve_trajectory_window(
+        equilibration=equilibration,
+        n_frames_total=traj.n_frames,
+        timestep_ps=timestep_ps,
+    )
+    if window.warning_message:
+        logger.warning(window.warning_message)
+    traj = traj[window.start : window.stop : window.step]
+    logger.info(
+        "SASA trajectory window: frames [%d:%d:%d] -> %d frames",
+        window.start,
+        window.stop,
+        window.step,
+        traj.n_frames,
+    )
 
     # Select protein chain only
     protein_indices = traj.topology.select(f"chainid {_chain_letter_to_index(config.chain_id)}")
@@ -432,6 +471,10 @@ def compute_trajectory_sasa(
         exposure_threshold=config.exposure_threshold,
         trajectory_path="; ".join(traj_files_str),
         topology_path=str(topology_path),
+        equilibration=equilibration,
+        start_frame=window.start,
+        timestep_ps=timestep_ps * window.step,
+        n_frames_total=window.n_frames_total,
     )
 
     # Cache to disk
@@ -439,6 +482,78 @@ def compute_trajectory_sasa(
         result.save(cache_dir)
 
     return result
+
+
+def _get_mdtraj_timestep_ps(traj: object) -> float:
+    """Return the trajectory timestep in picoseconds.
+
+    Parameters
+    ----------
+    traj : object
+        MDTraj trajectory object.
+
+    Returns
+    -------
+    float
+        Positive frame spacing in picoseconds.
+    """
+
+    timestep = getattr(traj, "timestep", None)
+    try:
+        timestep_ps = float(timestep)
+        if timestep_ps > 0:
+            return timestep_ps
+    except (TypeError, ValueError):
+        pass
+
+    time = getattr(traj, "time", None)
+    if time is not None and len(time) >= 2:
+        try:
+            timestep_ps = float(time[1] - time[0])
+            if timestep_ps > 0:
+                return timestep_ps
+        except (TypeError, ValueError):
+            pass
+
+    return 1.0
+
+
+def _sasa_cache_matches_window(result: SASATrajectoryResult, equilibration: str) -> bool:
+    """Return whether a cached SASA result matches the requested window.
+
+    Parameters
+    ----------
+    result : SASATrajectoryResult
+        Cached SASA result.
+    equilibration : str
+        Requested equilibration window.
+
+    Returns
+    -------
+    bool
+        ``True`` when cached metadata proves the same window.
+    """
+
+    return _window_strings_match(result.equilibration, equilibration)
+
+
+def _window_strings_match(stored: str, requested: str) -> bool:
+    """Compare two time strings after conversion to picoseconds."""
+
+    import math
+
+    from polyzymd.analyses.shared.loader import convert_time, parse_time_string
+
+    if not stored:
+        return False
+    try:
+        stored_time, stored_unit = parse_time_string(stored)
+        requested_time, requested_unit = parse_time_string(requested)
+        stored_ps = convert_time(float(stored_time), stored_unit, "ps")
+        requested_ps = convert_time(float(requested_time), requested_unit, "ps")
+    except (TypeError, ValueError):
+        return False
+    return math.isclose(stored_ps, requested_ps, rel_tol=0.0, abs_tol=1.0e-9)
 
 
 def _resolve_protein_indices_from_topology(
