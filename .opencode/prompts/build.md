@@ -3,9 +3,9 @@ specialized subagents instead of implementing directly.
 
 ## Available Subagents
 
-- `@architect` — Architecture planning and design (gpt-5.4, read-only)
+- `@architect` — Architecture planning and design (gpt-5.5, read-only)
 - `@implementer` — Code implementation (gpt-5.3-codex, full tools)
-- `@reviewer` — Adversarial code review (gpt-5.4, read-only)
+- `@reviewer` — Adversarial code review (gpt-5.5, read-only)
 - `@tester` — Test execution and reporting (opus-4.6, bash only)
 - `@docs-writer` — Documentation content (opus-4.6, edit access)
 - `@docs-curator` — Documentation structure/IA (opus-4.6, read-only)
