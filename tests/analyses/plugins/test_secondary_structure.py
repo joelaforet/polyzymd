@@ -29,6 +29,7 @@ from polyzymd.analyses.secondary_structure import (
     SecondaryStructureAnalysis,
     SecondaryStructureSettings,
 )
+from polyzymd.analyses.secondary_structure._runner import SecondaryStructureRunnerResult
 
 # ============================================================================
 # Fixtures
@@ -193,7 +194,17 @@ class TestSettings:
 
 
 class TestComputeReplicate:
-    """Test compute_replicate performs inline DSSP computation."""
+    """Test compute_replicate delegates DSSP computation to the runner path."""
+
+    @staticmethod
+    def _configure_mock_universe(mock_loader, n_frames: int) -> None:
+        """Configure a mocked loader with frame-count metadata."""
+
+        mock_universe = MagicMock()
+        mock_trajectory = MagicMock()
+        mock_trajectory.__len__.return_value = n_frames
+        mock_universe.trajectory = mock_trajectory
+        mock_loader.load_universe.return_value = mock_universe
 
     def _make_mock_mdtraj_traj(self, n_frames: int = 200, n_residues: int = 5, n_atoms: int = 50):
         """Create a mock mdtraj Trajectory object."""
@@ -229,7 +240,7 @@ class TestComputeReplicate:
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.secondary_structure.compute_config_hash", return_value="abc123")
     @patch("polyzymd.analyses.secondary_structure.TrajectoryLoader")
-    def test_computes_ss_inline(
+    def test_computes_ss_through_runner(
         self,
         MockLoader,
         mock_hash,
@@ -239,7 +250,7 @@ class TestComputeReplicate:
         condition,
         tmp_path,
     ):
-        """compute_replicate should perform DSSP computation inline."""
+        """compute_replicate should perform DSSP computation through a runner."""
         mock_loader_inst = MagicMock()
         MockLoader.return_value = mock_loader_inst
 
@@ -250,6 +261,7 @@ class TestComputeReplicate:
         mock_loader_inst.get_timestep.return_value = 10.0  # 10 ps
 
         n_frames = 25000
+        self._configure_mock_universe(mock_loader_inst, n_frames)
         mock_traj, mock_protein_traj = self._make_mock_mdtraj_traj(n_frames=n_frames, n_residues=5)
 
         # Create DSSP output: (n_frames, n_residues) of characters
@@ -297,6 +309,7 @@ class TestComputeReplicate:
         assert result.overall_coil_fraction == pytest.approx(0.4)  # 2 of 5
         # Verify TrajectoryLoader was used
         MockLoader.assert_called_once_with(condition.sim_config)
+        mock_loader_inst.load_universe.assert_called_once_with(1)
 
     @patch("polyzymd.analyses.shared.config_hash.validate_config_hash")
     @patch("polyzymd.analyses.secondary_structure.compute_config_hash", return_value="abc123")
@@ -322,6 +335,7 @@ class TestComputeReplicate:
         mock_loader_inst.get_timestep.return_value = 10.0
 
         n_frames = 12000
+        self._configure_mock_universe(mock_loader_inst, n_frames)
         mock_traj, mock_protein_traj = self._make_mock_mdtraj_traj(n_frames=n_frames, n_residues=5)
 
         dssp_raw = np.array([["C", "C", "C", "C", "C"]] * n_frames)
@@ -357,6 +371,92 @@ class TestComputeReplicate:
         # Verify chain B (index 1) was used for selection
         mock_traj.topology.select.assert_any_call("chainid 1")
         assert result.selection_string == "chainid 1 (chain B)"
+
+
+class TestRunnerBackedCompute:
+    """Test secondary-structure runner construction and summarization."""
+
+    def test_build_runner_returns_secondary_structure_runner(
+        self,
+        ss_analysis,
+        default_settings,
+        condition,
+        tmp_path,
+    ):
+        """build_runner() should return a configured secondary-structure runner."""
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="0ns",
+            recompute=True,
+            settings=default_settings,
+        )
+        window = MagicMock(
+            trajectory_files=(Path("/fake/traj.dcd"),),
+            topology_file=Path("/fake/topology.pdb"),
+        )
+
+        runner = ss_analysis.build_runner(ctx, replicate=1, universe=MagicMock(), window=window)
+
+        assert runner.__class__.__name__ == "SecondaryStructureReplicateRunner"
+        assert runner.trajectory_files == (Path("/fake/traj.dcd"),)
+        assert runner.topology_file == Path("/fake/topology.pdb")
+        assert runner.chain_id == "A"
+
+    def test_summarize_replicate_writes_legacy_result_and_sidecar(
+        self,
+        ss_analysis,
+        default_settings,
+        condition,
+        tmp_path,
+    ):
+        """summarize_replicate() should preserve the legacy JSON and NPZ outputs."""
+        ss_matrix = np.array([[1, 2, 0], [1, 0, 0]], dtype=np.int8)
+        payload = SecondaryStructureRunnerResult(
+            selection_string="chainid 0 (chain A)",
+            n_frames=2,
+            n_residues=3,
+            residue_ids=[1, 2, 3],
+            residue_names=["ALA", "GLY", "SER"],
+            ss_matrix=ss_matrix,
+            persistence_coil=[0.0, 0.5, 1.0],
+            persistence_helix=[1.0, 0.0, 0.0],
+            persistence_strand=[0.0, 0.5, 0.0],
+            overall_helix_fraction=2 / 6,
+            overall_strand_fraction=1 / 6,
+            overall_coil_fraction=3 / 6,
+        )
+        runner = MagicMock(results=payload)
+        ctx = ReplicateContext(
+            condition=condition,
+            replicate=1,
+            sim_config=condition.sim_config,
+            output_dir=tmp_path / "run_1",
+            equilibration="200ns",
+            recompute=True,
+            settings=default_settings,
+        )
+
+        with (
+            patch(
+                "polyzymd.analyses.secondary_structure.compute_config_hash", return_value="abc123"
+            ),
+            patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
+        ):
+            result = ss_analysis.summarize_replicate(
+                ctx, replicate=1, runner=runner, window=MagicMock()
+            )
+
+        json_path = tmp_path / "run_1" / "secondary_structure_eq200ns.json"
+        npz_path = tmp_path / "run_1" / "secondary_structure_eq200ns_matrix.npz"
+        assert result.replicate == 1
+        assert result.n_frames == 2
+        assert result.overall_helix_fraction == pytest.approx(2 / 6)
+        assert json_path.exists()
+        assert npz_path.exists()
+        np.testing.assert_array_equal(np.load(npz_path)["ss_matrix"], ss_matrix)
 
 
 # ============================================================================
@@ -1015,6 +1115,7 @@ class TestChainSelectionValidation:
                 topology_file=Path("/fake/top.pdb"),
             )
             mock_loader.get_timestep.return_value = 10.0
+            TestComputeReplicate._configure_mock_universe(mock_loader, n_frames=100)
 
             condition = Condition(
                 label="Test",
@@ -1068,6 +1169,7 @@ class TestEquilibrationValidation:
                 topology_file=Path("/fake/top.pdb"),
             )
             mock_loader.get_timestep.return_value = 10.0
+            TestComputeReplicate._configure_mock_universe(mock_loader, n_frames=15)
 
             condition = Condition(
                 label="Test",

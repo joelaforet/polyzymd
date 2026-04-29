@@ -12,6 +12,7 @@ All heavy computation is self-contained — no delegation to legacy
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Sequence
 
@@ -38,6 +39,7 @@ from polyzymd.analyses.secondary_structure._results import (
     SecondaryStructureAggregatedResult,
     SecondaryStructureResult,
 )
+from polyzymd.analyses.secondary_structure._runner import SecondaryStructureReplicateRunner
 from polyzymd.analyses.shared.config_hash import compute_config_hash
 from polyzymd.analyses.shared.loader import TrajectoryLoader, convert_time, parse_time_string
 
@@ -55,17 +57,58 @@ SS_CHAR_TO_INT: dict[str, int] = {"C": 0, "H": 1, "E": 2}
 class SecondaryStructureSettings(BaseModel):
     """Settings for secondary structure analysis.
 
-    Attributes
-    ----------
-    chain_id : str
-        Chain letter for the protein chain.  Default is ``"A"``
-        (PolyzyMD convention: chain A = protein).
+    Chain ``A`` is the default protein chain under the PolyzyMD chain
+    convention.
     """
 
     chain_id: str = Field(
         default="A",
         description="Chain letter for the protein chain",
     )
+
+
+@dataclass(frozen=True)
+class _SecondaryStructureTrajectoryWindow:
+    """Trajectory window augmented with mdtraj file metadata."""
+
+    base_window: Any
+    trajectory_files: tuple[Path, ...]
+    topology_file: Path
+
+    @property
+    def start(self) -> int:
+        """Return the inclusive start frame."""
+
+        return self.base_window.start
+
+    @property
+    def stop(self) -> int:
+        """Return the exclusive stop frame."""
+
+        return self.base_window.stop
+
+    @property
+    def step(self) -> int:
+        """Return the frame stride."""
+
+        return self.base_window.step
+
+    @property
+    def timestep_ps(self) -> float:
+        """Return the trajectory timestep in picoseconds."""
+
+        return self.base_window.timestep_ps
+
+    @property
+    def warning_message(self) -> str | None:
+        """Return a non-fatal window warning, when present."""
+
+        return self.base_window.warning_message
+
+    def run_kwargs(self) -> dict[str, int]:
+        """Return runner-compatible frame-window keyword arguments."""
+
+        return self.base_window.run_kwargs()
 
 
 # ---------------------------------------------------------------------------
@@ -76,14 +119,15 @@ class SecondaryStructureSettings(BaseModel):
 class SecondaryStructureAnalysis(Analysis):
     """Secondary structure analysis: DSSP from MD trajectories.
 
-    Performs the complete secondary structure workflow inline:
+    Performs the complete secondary structure workflow through a dedicated
+    runner-backed compute path:
 
-    1. Load trajectory from config (via mdtraj)
-    2. Select protein chain and skip equilibration frames
-    3. Compute DSSP assignments using ``mdtraj.compute_dssp(simplified=True)``
-    4. Encode assignments as integer matrix and compute persistence fractions
-    5. Save per-replicate result (JSON + NPZ sidecar)
-    6. Aggregate across replicates with mean/SEM of persistence
+    - Load trajectory metadata through the shared loader
+    - Select protein chain and resolve the equilibration frame window
+    - Compute DSSP assignments using ``mdtraj.compute_dssp(simplified=True)``
+    - Encode assignments as integer matrix and compute persistence fractions
+    - Save per-replicate result (JSON + NPZ sidecar)
+    - Aggregate across replicates with mean/SEM of persistence
 
     The ``compare()`` method is NOT overridden — it uses the default
     implementation which calls ``extract_metrics()`` to get
@@ -118,9 +162,8 @@ class SecondaryStructureAnalysis(Analysis):
     ) -> Any:
         """Compute DSSP secondary structure for a single replicate.
 
-        Performs trajectory loading (via mdtraj), chain selection,
-        equilibration skipping, DSSP calculation, and persistence
-        fraction computation inline.
+        This thin wrapper preserves the legacy cache filename while delegating
+        trajectory analysis to the runner-backed base implementation.
 
         Parameters
         ----------
@@ -134,79 +177,71 @@ class SecondaryStructureAnalysis(Analysis):
         SecondaryStructureResult
             Per-replicate secondary structure result.
         """
-        from polyzymd.analyses._results_base import get_polyzymd_version
         from polyzymd.analyses.secondary_structure._results import SecondaryStructureResult
 
-        settings = ctx.settings
-        sim_config = ctx.sim_config
-
-        chain_id = settings.chain_id
-
-        # Parse equilibration time
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
-
-        # Initialize loader and config hash
-        loader = TrajectoryLoader(sim_config)
-        config_hash = compute_config_hash(sim_config)
-
-        # Determine output path and check cache
         output_dir = ctx.output_dir
         eq_str = f"eq{eq_value:g}{eq_unit}"
-        result_prefix = f"secondary_structure_{eq_str}"
-        result_file = output_dir / f"{result_prefix}.json"
+        result_file = output_dir / f"secondary_structure_{eq_str}.json"
 
         cached = self._check_cache(
             SecondaryStructureResult,
             result_file,
             recompute=ctx.recompute,
-            sim_config=sim_config,
+            sim_config=ctx.sim_config,
             settings=ctx.settings,
         )
         if cached is not None:
             return cached
 
         logger.info(f"Computing secondary structure for replicate {replicate}")
+        return super().compute_replicate(ctx, replicate)
 
-        # =================================================================
-        # Load trajectory with mdtraj
-        # =================================================================
-        import mdtraj as md
+    def _trajectory_loader_factory(self) -> type[Any]:
+        """Return the secondary-structure loader class for the runner seam.
 
-        traj_info = loader.get_trajectory_info(replicate)
-        traj_files_str = [str(f) for f in traj_info.trajectory_files]
-        topology_path = str(traj_info.topology_file)
+        Returns
+        -------
+        type[Any]
+            Loader class patched by secondary-structure unit tests.
+        """
 
-        traj = md.load(traj_files_str, top=topology_path)
-        logger.info(f"Loaded trajectory: {traj.n_frames} frames, {traj.n_atoms} atoms")
+        return TrajectoryLoader
 
-        # =================================================================
-        # Select protein chain
-        # =================================================================
-        chain_idx = _chain_letter_to_index(chain_id)
-        protein_indices = traj.topology.select(f"chainid {chain_idx}")
-        if len(protein_indices) == 0:
-            raise ValueError(
-                f"Chain '{chain_id}' (index {chain_idx}) not found in topology. "
-                f"Available chains: {[c.index for c in traj.topology.chains]}. "
-                "Check your Settings.chain_id configuration."
-            )
+    def get_trajectory_window(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        loader: Any,
+        universe: Any,
+    ) -> Any:
+        """Resolve a validated frame window and attach mdtraj paths.
 
-        protein_traj = traj.atom_slice(protein_indices)
-        logger.info(
-            f"Protein sub-trajectory: {protein_traj.n_atoms} atoms, "
-            f"{protein_traj.n_residues} residues"
-        )
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        loader : Any
+            Trajectory loader for this replicate.
+        universe : Any
+            Loaded universe used for frame-count metadata.
 
-        # =================================================================
-        # Skip equilibration frames
-        # =================================================================
-        n_frames_total = protein_traj.n_frames
-        # Use TrajectoryLoader for reliable timestep (mdtraj often has
-        # incorrect time metadata for legacy DCD files)
-        timestep_ps = loader.get_timestep(replicate)
+        Returns
+        -------
+        _SecondaryStructureTrajectoryWindow
+            Shared frame window plus trajectory files and topology path.
+        """
+
+        from polyzymd.analyses.shared.window import resolve_trajectory_window
+
+        min_frames = 10
+        n_frames_total = len(universe.trajectory)
+        timestep_ps = float(loader.get_timestep(replicate, unit="ps"))
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
         eq_time_ps = convert_time(eq_value, eq_unit, "ps")
         start_frame = int(eq_time_ps / timestep_ps) if timestep_ps > 0 else 0
-        min_frames = 10
         if start_frame >= n_frames_total - min_frames:
             raise ValueError(
                 f"Equilibration of {eq_time_ps / 1000:.1f} ns "
@@ -215,84 +250,117 @@ class SecondaryStructureAnalysis(Analysis):
                 "Reduce equilibration time or use a longer trajectory."
             )
 
-        if start_frame > 0:
-            protein_traj = protein_traj[start_frame:]
-            logger.info(
-                f"Skipped {start_frame} equilibration frames "
-                f"({eq_time_ps / 1000:.1f} ns), "
-                f"{protein_traj.n_frames} frames remaining"
-            )
+        base_window = resolve_trajectory_window(
+            equilibration=ctx.equilibration,
+            n_frames_total=n_frames_total,
+            timestep_ps=timestep_ps,
+            min_frames=min_frames,
+        )
+        traj_info = loader.get_trajectory_info(replicate)
+        return _SecondaryStructureTrajectoryWindow(
+            base_window=base_window,
+            trajectory_files=tuple(Path(path) for path in traj_info.trajectory_files),
+            topology_file=Path(traj_info.topology_file),
+        )
 
-        n_frames = protein_traj.n_frames
+    def build_runner(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        universe: Any,
+        window: Any,
+    ) -> Any:
+        """Build the runner-backed secondary-structure execution object.
 
-        # =================================================================
-        # Compute DSSP
-        # =================================================================
-        dssp_raw = md.compute_dssp(protein_traj, simplified=True)
-        # dssp_raw is (n_frames, n_residues) of single-char strings: H, E, C
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        universe : Any
+            Loaded universe for the replicate.
+        window : Any
+            Resolved trajectory window with mdtraj file metadata.
 
-        logger.info(f"DSSP complete: {dssp_raw.shape[0]} frames x {dssp_raw.shape[1]} residues")
+        Returns
+        -------
+        Any
+            Runner object compatible with the shared trajectory seam.
+        """
 
-        # =================================================================
-        # Integer-encode the matrix
-        # =================================================================
-        ss_matrix = _encode_dssp_matrix(dssp_raw)
-        n_residues = ss_matrix.shape[1]
+        del replicate, universe
+        return SecondaryStructureReplicateRunner(
+            trajectory_files=window.trajectory_files,
+            topology_file=window.topology_file,
+            chain_id=ctx.settings.chain_id,
+            chain_index_func=_chain_letter_to_index,
+            encode_dssp_func=_encode_dssp_matrix,
+        )
 
-        # =================================================================
-        # Compute persistence fractions (per-residue)
-        # =================================================================
-        persistence_coil = (ss_matrix == 0).mean(axis=0).tolist()
-        persistence_helix = (ss_matrix == 1).mean(axis=0).tolist()
-        persistence_strand = (ss_matrix == 2).mean(axis=0).tolist()
+    def summarize_replicate(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+        runner: Any,
+        window: Any,
+    ) -> Any:
+        """Serialize runner output into the legacy result schema.
 
-        # =================================================================
-        # Compute overall content fractions
-        # =================================================================
-        total_entries = ss_matrix.size
-        overall_coil = float(np.sum(ss_matrix == 0)) / total_entries
-        overall_helix = float(np.sum(ss_matrix == 1)) / total_entries
-        overall_strand = float(np.sum(ss_matrix == 2)) / total_entries
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided replicate context.
+        replicate : int
+            Replicate number.
+        runner : Any
+            Executed secondary-structure runner.
+        window : Any
+            Resolved trajectory window.
 
-        # =================================================================
-        # Collect residue metadata
-        # =================================================================
-        protein_top = protein_traj.topology
-        residue_ids = [res.resSeq for res in protein_top.residues]
-        residue_names = [res.name.upper() for res in protein_top.residues]
+        Returns
+        -------
+        SecondaryStructureResult
+            Cache-compatible per-replicate secondary-structure result.
+        """
 
-        # =================================================================
-        # Build result
-        # =================================================================
+        from polyzymd.analyses._results_base import get_polyzymd_version
+        from polyzymd.analyses.secondary_structure._results import SecondaryStructureResult
+
+        del window
+        eq_value, eq_unit = parse_time_string(ctx.equilibration)
+        payload = runner.results
+        if payload is None:
+            raise ValueError("Secondary-structure runner did not produce results")
+
         result = SecondaryStructureResult(
-            config_hash=config_hash,
+            config_hash=compute_config_hash(ctx.sim_config),
             polyzymd_version=get_polyzymd_version(),
             replicate=replicate,
             equilibration_time=eq_value,
             equilibration_unit=eq_unit,
-            selection_string=f"chainid {chain_idx} (chain {chain_id})",
-            n_frames=n_frames,
-            n_residues=n_residues,
-            residue_ids=residue_ids,
-            residue_names=residue_names,
-            persistence_coil=persistence_coil,
-            persistence_helix=persistence_helix,
-            persistence_strand=persistence_strand,
-            overall_helix_fraction=overall_helix,
-            overall_strand_fraction=overall_strand,
-            overall_coil_fraction=overall_coil,
+            selection_string=payload.selection_string,
+            n_frames=payload.n_frames,
+            n_residues=payload.n_residues,
+            residue_ids=payload.residue_ids,
+            residue_names=payload.residue_names,
+            persistence_coil=payload.persistence_coil,
+            persistence_helix=payload.persistence_helix,
+            persistence_strand=payload.persistence_strand,
+            overall_helix_fraction=payload.overall_helix_fraction,
+            overall_strand_fraction=payload.overall_strand_fraction,
+            overall_coil_fraction=payload.overall_coil_fraction,
         )
 
-        # Save JSON + NPZ sidecar
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = Path(ctx.output_dir)
+        eq_str = f"eq{eq_value:g}{eq_unit}"
+        result_prefix = f"secondary_structure_{eq_str}"
         json_path = result.save_with_matrix(
             directory=output_dir,
-            matrix=ss_matrix,
+            matrix=payload.ss_matrix,
             filename_prefix=result_prefix,
         )
         logger.info(f"Saved SS result to {json_path}")
-
         return result
 
     def aggregate(
