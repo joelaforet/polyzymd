@@ -443,6 +443,17 @@ def _make_aggregated_result(
     )
 
 
+def test_aggregated_result_loads_legacy_payload_without_valency_replicates() -> None:
+    """Legacy aggregate caches should load when valency replicate profiles are absent."""
+
+    payload = _make_aggregated_result().model_dump()
+    payload.pop("valency_probabilities_per_replicate")
+
+    result = PolymerBridgingAggregatedResult.model_validate(payload)
+
+    assert result.valency_probabilities_per_replicate == {}
+
+
 class TestLifecycle:
     def test_compute_replicate_uses_runner_seam(self, tmp_path):
         analysis = PolymerBridgingAnalysis()
@@ -1151,6 +1162,94 @@ class TestConditionHasPolymer:
 
         assert len(paths) >= 3
         assert all(path.exists() for path in paths)
+
+    def test_plot_stacked_bars_overlay_component_replicates(self, tmp_path):
+        """Stacked probability plots should overlay component replicate dots."""
+        from polyzymd.analyses.base import ComparisonResult, ConditionSummary
+        from polyzymd.config.comparison import PlotSettings
+
+        analysis = PolymerBridgingAnalysis()
+        condition = Condition(
+            label="A",
+            config_path=Path("/tmp/a.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        comparison = ComparisonResult(
+            analysis_type="polymer_bridging",
+            name="Test",
+            conditions=[ConditionSummary(label="A", n_replicates=2)],
+            pairwise_comparisons=[],
+            ranking=["A"],
+        )
+        summary = _make_aggregated_result((1, 2)).model_copy(
+            update={
+                "valency_probabilities_mean": {"1": 0.6, "2": 0.4, "3+": 0.0},
+                "valency_probabilities_per_replicate": {
+                    "1": [0.58, 0.62],
+                    "2": [0.42, 0.38],
+                },
+                "multivalent_protein_group_probabilities_mean": {
+                    "aromatic": 0.25,
+                    "polar": 0.75,
+                },
+                "multivalent_protein_group_probabilities_per_replicate": {
+                    "aromatic": [0.2, 0.3],
+                    "polar": [0.8, 0.7],
+                },
+            }
+        )
+        plot_settings = PlotSettings(
+            polymer_bridging={
+                "generate_multisite_bars": False,
+                "generate_mean_contacts_bars": False,
+                "generate_valency_stack": True,
+                "generate_anchor_group_bars": False,
+                "generate_protein_group_stack": True,
+                "generate_anchor_peripheral_heatmap": False,
+                "generate_polymer_anchor_heatmap": False,
+                "generate_fragment_signature_bars": False,
+            }
+        )
+        ctx = PlotContext(
+            conditions=[condition],
+            analysis_dirs={"A": tmp_path / "analysis" / "A" / "polymer_bridging"},
+            results_dir=tmp_path / "comparison",
+            output_dir=tmp_path / "figures",
+            settings=PolymerBridgingSettings(),
+            plot_settings=plot_settings,
+        )
+
+        with (
+            patch.object(analysis, "_load_comparison_result", return_value=comparison),
+            patch.object(
+                analysis,
+                "_load_validated_aggregated_result",
+                side_effect=[summary, summary, summary, summary],
+            ),
+            patch(
+                "polyzymd.analyses.polymer_bridging.scatter_stacked_segment_replicates"
+            ) as scatter,
+            patch(
+                "polyzymd.analyses.polymer_bridging.save_figure",
+                side_effect=lambda _fig, path, *_args, **_kwargs: path,
+            ),
+        ):
+            analysis.plot(ctx)
+
+        assert scatter.call_count == 4
+        assert scatter.call_args_list[0].args[2] == pytest.approx(0.0)
+        assert scatter.call_args_list[0].args[3] == [0.58, 0.62]
+        assert scatter.call_args_list[0].kwargs["replicate_base_values"] == [0.0, 0.0]
+        assert scatter.call_args_list[1].args[2] == pytest.approx(0.6)
+        assert scatter.call_args_list[1].args[3] == [0.42, 0.38]
+        assert scatter.call_args_list[1].kwargs["replicate_base_values"] == [0.58, 0.62]
+        assert scatter.call_args_list[2].args[2] == pytest.approx(0.0)
+        assert scatter.call_args_list[2].args[3] == [0.2, 0.3]
+        assert scatter.call_args_list[2].kwargs["replicate_base_values"] == [0.0, 0.0]
+        assert scatter.call_args_list[3].args[2] == pytest.approx(0.25)
+        assert scatter.call_args_list[3].args[3] == [0.8, 0.7]
+        assert scatter.call_args_list[3].kwargs["replicate_base_values"] == [0.2, 0.3]
 
     def test_format_emits_sections(self):
         analysis = PolymerBridgingAnalysis()

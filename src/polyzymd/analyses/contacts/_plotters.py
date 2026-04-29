@@ -177,6 +177,46 @@ def _get_enrichment_with_sem(
     return (0.0, 0.0)
 
 
+def _get_enrichment_replicates(
+    result: "AggregatedBindingPreferenceResult",
+    polymer_type: str,
+    aa_class: str,
+) -> list[float]:
+    """Get per-replicate enrichment values for a polymer and protein group.
+
+    Supports both the partition-based binding preference schema and the older
+    overlapping-groups aggregate schema. Missing or unavailable entries return
+    an empty list so grouped bar overlays are omitted rather than invented.
+
+    Parameters
+    ----------
+    result : AggregatedBindingPreferenceResult
+        Aggregated binding preference result.
+    polymer_type : str
+        Polymer type name.
+    aa_class : str
+        Protein group or AA class name.
+
+    Returns
+    -------
+    list[float]
+        Per-replicate enrichment values aligned to the aggregate entry.
+    """
+    if result.binding_preference is not None:
+        bp = result.binding_preference
+        aa_binding = bp.aa_class_binding.get(polymer_type)
+        if aa_binding is not None:
+            for entry in aa_binding.entries:
+                if entry.partition_element == aa_class:
+                    return list(entry.per_replicate_enrichments)
+        return []
+
+    entry = result.get_entry(polymer_type, aa_class)
+    if entry is not None:
+        return list(entry.per_replicate_enrichments)
+    return []
+
+
 def _load_binding_preference_results(
     data: dict[str, Any],
     labels: Sequence[str],
@@ -1026,7 +1066,6 @@ def _plot_rt_by_aa_class_bars(
         )
 
         series: list[tuple[str, list[float], list[float]]] = []
-        replicate_values: list[list[list[float]]] = []
 
         for label in valid_labels:
             result = contact_results[label]
@@ -1036,12 +1075,6 @@ def _plot_rt_by_aa_class_bars(
             sems = [group_stats.get(aa_class, (0.0, 0.0))[1] for aa_class in aa_classes]
             series.append((label, means, sems))
 
-            group_reps = result.group_residence_time_per_replicate(
-                polymer_type=polymer_type,
-                units="ns",
-            )
-            replicate_values.append([group_reps.get(aa_class, []) for aa_class in aa_classes])
-
         grouped_bars(
             ax,
             x,
@@ -1050,7 +1083,8 @@ def _plot_rt_by_aa_class_bars(
             plot_settings,
             show_error=settings.show_rt_by_aa_class_error,
             reference_line=None,
-            replicate_values=replicate_values if replicate_values else None,
+            # Sparse no-event RT replicates do not match aggregate bar statistics
+            replicate_values=None,
         )
 
         title = "Residence Time by AA Class"
@@ -1164,13 +1198,11 @@ def _plot_rt_by_partition_bars(
             )
 
             series: list[tuple[str, list[float], list[float]]] = []
-            replicate_values: list[list[list[float]]] = []
 
             for label in valid_labels:
                 result = contact_results[label]
                 means: list[float] = []
                 sems: list[float] = []
-                cond_reps: list[list[float]] = []
 
                 for element in elements:
                     resids = protein_groups[element]
@@ -1181,16 +1213,8 @@ def _plot_rt_by_partition_bars(
                     )
                     means.append(mean_value)
                     sems.append(sem_value)
-                    cond_reps.append(
-                        result.subset_residence_time_per_replicate(
-                            resids,
-                            polymer_type=polymer_type,
-                            units="ns",
-                        )
-                    )
 
                 series.append((label, means, sems))
-                replicate_values.append(cond_reps)
 
             grouped_bars(
                 ax,
@@ -1200,7 +1224,8 @@ def _plot_rt_by_partition_bars(
                 plot_settings,
                 show_error=settings.show_rt_by_partition_error,
                 reference_line=None,
-                replicate_values=replicate_values if replicate_values else None,
+                # Sparse no-event RT replicates do not match aggregate bar statistics
+                replicate_values=None,
             )
 
             title = f"Residence Time — {partition_name.replace('_', ' ').title()}"
@@ -1398,21 +1423,26 @@ def _plot_system_coverage_bars(
     colors = get_colors(n_conditions, plot_settings)
 
     series: list[tuple[str, list[float], list[float]]] = []
+    replicate_values: list[list[list[float]]] = []
     for cond_label in valid_labels:
         result = coverage_results[cond_label]
         means: list[float] = []
         sems: list[float] = []
+        condition_replicates: list[list[float]] = []
 
         for aa_class in aa_classes:
             entry = result.aa_class_coverage.get_entry(aa_class)
             if entry and entry.mean_coverage_enrichment is not None:
                 means.append(entry.mean_coverage_enrichment)
                 sems.append(entry.sem_coverage_enrichment or 0.0)
+                condition_replicates.append(list(entry.per_replicate_enrichments))
             else:
                 means.append(0.0)
                 sems.append(0.0)
+                condition_replicates.append([])
 
         series.append((cond_label, means, sems))
+        replicate_values.append(condition_replicates)
 
     grouped_bars(
         ax,
@@ -1421,6 +1451,7 @@ def _plot_system_coverage_bars(
         colors,
         plot_settings,
         show_error=plot_settings.contacts.show_system_coverage_error,
+        replicate_values=replicate_values,
     )
 
     apply_axis_style(
@@ -1513,12 +1544,14 @@ def _plot_user_partition_bars(
         )
 
         series: list[tuple[str, list[float], list[float]]] = []
+        replicate_values: list[list[list[float]]] = []
         for cond_label in valid_labels:
             result = coverage_results[cond_label]
             agg_partition = result.user_defined_partitions.get(partition_name)
 
             means: list[float] = []
             sems: list[float] = []
+            condition_replicates: list[list[float]] = []
 
             for element_name in element_names:
                 if agg_partition is not None:
@@ -1526,12 +1559,15 @@ def _plot_user_partition_bars(
                     if entry and entry.mean_coverage_enrichment is not None:
                         means.append(entry.mean_coverage_enrichment)
                         sems.append(entry.sem_coverage_enrichment or 0.0)
+                        condition_replicates.append(list(entry.per_replicate_enrichments))
                         continue
 
                 means.append(0.0)
                 sems.append(0.0)
+                condition_replicates.append([])
 
             series.append((cond_label, means, sems))
+            replicate_values.append(condition_replicates)
 
         grouped_bars(
             ax,
@@ -1540,6 +1576,7 @@ def _plot_user_partition_bars(
             colors,
             plot_settings,
             show_error=plot_settings.contacts.show_user_partition_error,
+            replicate_values=replicate_values,
         )
 
         apply_axis_style(
@@ -1765,17 +1802,23 @@ def _plot_binding_preference_bars(
         colors = get_colors(n_conditions, plot_settings)
 
         series: list[tuple[str, list[float], list[float]]] = []
+        replicate_values: list[list[list[float]]] = []
         for cond_label in valid_labels:
             result = binding_results[cond_label]
             means: list[float] = []
             sems: list[float] = []
+            condition_replicates: list[list[float]] = []
 
             for prot_group in protein_groups:
                 mean_val, sem_val = _get_enrichment_with_sem(result, poly_type, prot_group)
                 means.append(mean_val)
                 sems.append(sem_val)
+                condition_replicates.append(
+                    _get_enrichment_replicates(result, poly_type, prot_group)
+                )
 
             series.append((cond_label, means, sems))
+            replicate_values.append(condition_replicates)
 
         grouped_bars(
             ax,
@@ -1784,6 +1827,7 @@ def _plot_binding_preference_bars(
             colors,
             plot_settings,
             show_error=plot_settings.contacts.show_enrichment_error,
+            replicate_values=replicate_values,
         )
 
         apply_axis_style(

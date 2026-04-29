@@ -334,6 +334,324 @@ def find_json(
 # ---------------------------------------------------------------------------
 
 
+def finite_numeric_values(values: Any) -> "np.ndarray":
+    """Return finite numeric values as a one-dimensional float array.
+
+    Parameters
+    ----------
+    values : Any
+        Candidate scalar or sequence of replicate values. ``None`` and
+        non-numeric inputs are treated as missing data.
+
+    Returns
+    -------
+    numpy.ndarray
+        One-dimensional array containing only finite floats. The array is
+        empty when no finite numeric values are available.
+    """
+    import numpy as np
+
+    if values is None:
+        return np.array([], dtype=float)
+
+    try:
+        value_array = np.asarray(values, dtype=float)
+    except (TypeError, ValueError):
+        if isinstance(values, str | bytes):
+            return np.array([], dtype=float)
+        try:
+            iterator = iter(values)
+        except TypeError:
+            try:
+                scalar_value = float(values)
+            except (TypeError, ValueError):
+                return np.array([], dtype=float)
+            if np.isfinite(scalar_value):
+                return np.array([scalar_value], dtype=float)
+            return np.array([], dtype=float)
+
+        finite_values: list[float] = []
+        for value in iterator:
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(numeric_value):
+                finite_values.append(numeric_value)
+        return np.array(finite_values, dtype=float)
+
+    if value_array.ndim == 0:
+        value_array = value_array.reshape(1)
+
+    value_array = value_array.ravel()
+    return value_array[np.isfinite(value_array)]
+
+
+def replicate_jitter_offsets(n_values: int, bar_width: float) -> "np.ndarray":
+    """Return deterministic offsets for replicate dot overlays.
+
+    Offsets are centred on the corresponding bar position so overlays are
+    reproducible across runs and independent of random-number state.
+
+    Parameters
+    ----------
+    n_values : int
+        Number of replicate values to display for one bar.
+    bar_width : float
+        Width or height of the corresponding bar, depending on orientation.
+
+    Returns
+    -------
+    numpy.ndarray
+        Jitter offsets centred around zero.
+    """
+    import numpy as np
+
+    if n_values <= 0:
+        return np.array([], dtype=float)
+    if n_values == 1:
+        return np.array([0.0], dtype=float)
+
+    max_jitter = bar_width * 0.25
+    return np.linspace(-max_jitter, max_jitter, n_values)
+
+
+def scatter_replicate_values(
+    ax: "Axes",
+    bar_positions: "Sequence[float] | np.ndarray",
+    replicate_values: "Sequence[Any]",
+    plot_settings: "PlotSettings",
+    *,
+    orientation: str = "vertical",
+    bar_width: float = 0.8,
+    dot_color: Any | None = None,
+    dot_size: float | None = None,
+    dot_alpha: float | None = None,
+    zorder: float = 5,
+) -> int:
+    """Overlay jittered per-replicate values on bars.
+
+    For vertical bars, bar positions are x-coordinates, jitter is applied in
+    x, and replicate values are plotted on y. For horizontal bars, bar
+    positions are y-coordinates, jitter is applied in y, and replicate values
+    are plotted on x.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes containing the bar chart.
+    bar_positions : sequence of float or numpy.ndarray
+        Bar centre positions aligned to ``replicate_values``.
+    replicate_values : sequence of Any
+        Per-bar replicate values. Each item may be a scalar or sequence; only
+        finite numeric values are plotted.
+    plot_settings : PlotSettings
+        Global plot settings whose theme provides default dot styling.
+    orientation : {"vertical", "horizontal"}, optional
+        Bar orientation, by default ``"vertical"``.
+    bar_width : float, optional
+        Width or height of the bars, by default ``0.8``.
+    dot_color : Any, optional
+        Override for theme dot colour.
+    dot_size : float, optional
+        Override for theme dot size. Dots are skipped when non-positive.
+    dot_alpha : float, optional
+        Override for theme dot alpha. Dots are skipped when non-positive.
+    zorder : float, optional
+        Matplotlib z-order for dot overlays, by default ``5``.
+
+    Returns
+    -------
+    int
+        Number of scatter calls emitted.
+
+    Raises
+    ------
+    ValueError
+        If ``orientation`` is not ``"vertical"`` or ``"horizontal"``, or if
+        ``bar_positions`` and ``replicate_values`` are not the same length.
+    """
+    import numpy as np
+
+    if orientation not in {"vertical", "horizontal"}:
+        raise ValueError("orientation must be 'vertical' or 'horizontal'")
+
+    theme = plot_settings.theme
+    resolved_size = theme.dot_size if dot_size is None else dot_size
+    resolved_alpha = theme.dot_alpha if dot_alpha is None else dot_alpha
+    if resolved_size <= 0 or resolved_alpha <= 0:
+        return 0
+
+    resolved_color = theme.dot_color if dot_color is None else dot_color
+    positions = np.asarray(bar_positions, dtype=float)
+    if len(replicate_values) != len(positions):
+        raise ValueError(
+            "replicate_values length must match bar_positions length "
+            f"({len(replicate_values)} != {len(positions)})"
+        )
+
+    n_scattered = 0
+    for idx, values in enumerate(replicate_values):
+        rep_arr = finite_numeric_values(values)
+        if rep_arr.size == 0:
+            continue
+
+        jitter = replicate_jitter_offsets(rep_arr.size, bar_width)
+        position_arr = np.full(rep_arr.shape, float(positions[idx]), dtype=float) + jitter
+        if orientation == "vertical":
+            x_values = position_arr
+            y_values = rep_arr
+        else:
+            x_values = rep_arr
+            y_values = position_arr
+
+        ax.scatter(
+            x_values,
+            y_values,
+            color=resolved_color,
+            s=resolved_size,
+            zorder=zorder,
+            alpha=resolved_alpha,
+            edgecolors="none",
+        )
+        n_scattered += 1
+
+    return n_scattered
+
+
+def scatter_stacked_segment_replicates(
+    ax: "Axes",
+    x_position: float,
+    bottom_value: float,
+    replicate_values: Sequence[Any],
+    plot_settings: "PlotSettings",
+    *,
+    replicate_base_values: Sequence[Any] | None = None,
+    positive_base_values: Sequence[Any] | None = None,
+    negative_base_values: Sequence[Any] | None = None,
+    bar_width: float = 0.8,
+    dot_color: Any | None = None,
+    dot_size: float | None = None,
+    dot_alpha: float | None = None,
+    zorder: float = 5,
+) -> int:
+    """Overlay replicate dots at stacked segment centers.
+
+    The per-component replicate value is a segment height, not an absolute
+    stacked coordinate. Plotting at ``base + replicate / 2`` places each dot at
+    the center of the component-specific replicate segment. Callers should pass
+    replicate-specific bases when earlier stacked components vary by replicate.
+    Signed stacks may pass separate positive and negative bases so each dot is
+    centered on the same sign stack as its own replicate value.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes containing the stacked bar chart.
+    x_position : float
+        Center x-coordinate of the condition bar.
+    bottom_value : float
+        Aggregate stack baseline for the current segment.
+    replicate_values : sequence of Any
+        Component-specific per-replicate segment heights.
+    plot_settings : PlotSettings
+        Plot configuration used for dot styling.
+    replicate_base_values : sequence of Any, optional
+        Per-replicate cumulative stack bases for unsigned stacks. When omitted,
+        ``bottom_value`` is used for every replicate for backward compatibility.
+    positive_base_values : sequence of Any, optional
+        Per-replicate cumulative positive stack bases for signed stacks.
+    negative_base_values : sequence of Any, optional
+        Per-replicate cumulative negative stack bases for signed stacks.
+    bar_width : float, optional
+        Width used for deterministic jitter, by default ``0.8``.
+    dot_color : Any, optional
+        Override for theme dot colour.
+    dot_size : float, optional
+        Override for theme dot size.
+    dot_alpha : float, optional
+        Override for theme dot alpha.
+    zorder : float, optional
+        Matplotlib z-order for dot overlays, by default ``5``.
+
+    Returns
+    -------
+    int
+        Number of scatter calls emitted.
+
+    Raises
+    ------
+    ValueError
+        If replicate base arrays do not align with ``replicate_values``.
+    """
+    import math
+
+    import numpy as np
+
+    raw_values = list(replicate_values)
+    if positive_base_values is not None or negative_base_values is not None:
+        if positive_base_values is None or negative_base_values is None:
+            raise ValueError(
+                "positive_base_values and negative_base_values must be provided together"
+            )
+        positive_bases = list(positive_base_values)
+        negative_bases = list(negative_base_values)
+        if len(positive_bases) != len(raw_values) or len(negative_bases) != len(raw_values):
+            raise ValueError("signed replicate base lengths must match replicate_values length")
+        base_values: list[float] = []
+        segment_values_list: list[float] = []
+        for value, positive_base, negative_base in zip(raw_values, positive_bases, negative_bases):
+            try:
+                segment_value = float(value)
+                base_value = float(positive_base if segment_value >= 0.0 else negative_base)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(segment_value) and math.isfinite(base_value):
+                segment_values_list.append(segment_value)
+                base_values.append(base_value)
+        segment_values = np.asarray(segment_values_list, dtype=float)
+        bases = np.asarray(base_values, dtype=float)
+    elif replicate_base_values is not None:
+        raw_bases = list(replicate_base_values)
+        if len(raw_bases) != len(raw_values):
+            raise ValueError("replicate_base_values length must match replicate_values length")
+        base_values = []
+        segment_values_list = []
+        for value, base in zip(raw_values, raw_bases):
+            try:
+                segment_value = float(value)
+                base_value = float(base)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(segment_value) and math.isfinite(base_value):
+                segment_values_list.append(segment_value)
+                base_values.append(base_value)
+        segment_values = np.asarray(segment_values_list, dtype=float)
+        bases = np.asarray(base_values, dtype=float)
+    else:
+        segment_values = finite_numeric_values(raw_values)
+        bases = np.full(segment_values.shape, float(bottom_value), dtype=float)
+
+    if segment_values.size == 0:
+        return 0
+
+    segment_centers = [
+        float(base) + float(value) / 2.0 for base, value in zip(bases, segment_values)
+    ]
+    return scatter_replicate_values(
+        ax,
+        [x_position],
+        [segment_centers],
+        plot_settings,
+        orientation="vertical",
+        bar_width=bar_width,
+        dot_color=dot_color,
+        dot_size=dot_size,
+        dot_alpha=dot_alpha,
+        zorder=zorder,
+    )
+
+
 def grouped_bars(
     ax: "Axes",
     x: "np.ndarray",
@@ -406,6 +724,19 @@ def grouped_bars(
     n = len(series)
     w = bar_width if bar_width is not None else 0.8 / max(n, 1)
 
+    if replicate_values is not None:
+        if len(replicate_values) != n:
+            raise ValueError(
+                "replicate_values length must match series length "
+                f"({len(replicate_values)} != {n})"
+            )
+        for idx, series_replicates in enumerate(replicate_values):
+            if len(series_replicates) != len(x):
+                raise ValueError(
+                    "replicate_values entries must match x length "
+                    f"for series {idx} ({len(series_replicates)} != {len(x)})"
+                )
+
     for i, (label, means, errors) in enumerate(series):
         offset = (i - n / 2 + 0.5) * w
         bar_kwargs: dict = {
@@ -419,25 +750,22 @@ def grouped_bars(
         }
         if show_error:
             bar_kwargs["yerr"] = errors
-        ax.bar(np.asarray(x) + offset, means, **bar_kwargs)
+        bar_positions = np.asarray(x) + offset
+        ax.bar(bar_positions, means, **bar_kwargs)
 
         # Overlay jittered replicate dots
-        if replicate_values is not None and i < len(replicate_values):
-            rng = np.random.default_rng(seed=42 + i)
-            cond_reps = replicate_values[i]
-            for j in range(len(x)):
-                if j < len(cond_reps) and cond_reps[j] is not None and len(cond_reps[j]) > 0:
-                    rep_vals = np.asarray(cond_reps[j], dtype=float)
-                    jitter = rng.uniform(-w * 0.3, w * 0.3, size=len(rep_vals))
-                    ax.scatter(
-                        np.full_like(rep_vals, float(x[j]) + offset) + jitter,
-                        rep_vals,
-                        color=dot_c,
-                        s=dot_s,
-                        zorder=5,
-                        alpha=dot_a,
-                        edgecolors="none",
-                    )
+        if replicate_values is not None:
+            scatter_replicate_values(
+                ax,
+                bar_positions,
+                replicate_values[i],
+                plot_settings,
+                orientation="vertical",
+                bar_width=w,
+                dot_color=dot_c,
+                dot_size=dot_s,
+                dot_alpha=dot_a,
+            )
 
     if reference_line is not None:
         ax.axhline(

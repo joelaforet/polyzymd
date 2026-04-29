@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Sequence
 import numpy as np
 
 from polyzymd.analyses.shared.loader import _require_matplotlib
+from polyzymd.analyses.shared.plotting import scatter_replicate_values
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
@@ -62,6 +63,87 @@ def _get_color_palette(n_colors: int, palette: str = "tab10") -> list:
     import seaborn as sns
 
     return sns.color_palette(palette, n_colors)
+
+
+def _triad_pair_identity(
+    pair_result: Any, fallback_label: str
+) -> tuple[str, str | None, str | None]:
+    """Return the stable identity used to align triad pair results.
+
+    Parameters
+    ----------
+    pair_result : Any
+        Pair result object containing a pair label and optional selections.
+    fallback_label : str
+        Label from the parent aggregate when the pair result lacks one.
+
+    Returns
+    -------
+    tuple[str, str | None, str | None]
+        Pair label plus selection settings when available.
+    """
+
+    pair_label = getattr(pair_result, "pair_label", None)
+    selection1 = getattr(pair_result, "selection1", None)
+    selection2 = getattr(pair_result, "selection2", None)
+    return (
+        pair_label if isinstance(pair_label, str) else fallback_label,
+        selection1 if isinstance(selection1, str) else None,
+        selection2 if isinstance(selection2, str) else None,
+    )
+
+
+def _triad_pair_labels(result: Any) -> list[str]:
+    """Return pair labels from an aggregate without assuming pair order.
+
+    Parameters
+    ----------
+    result : Any
+        Aggregated triad result or compatible test double.
+
+    Returns
+    -------
+    list[str]
+        Pair labels in the result's own order.
+    """
+
+    labels = result.get_pair_labels()
+    return [str(label) for label in labels]
+
+
+def _map_triad_pair_indices(
+    reference_pairs: Sequence[Any],
+    reference_labels: Sequence[str],
+) -> dict[tuple[str, str | None, str | None] | str, int]:
+    """Build an index map for aligned triad pair plotting.
+
+    Parameters
+    ----------
+    reference_pairs : sequence
+        Pair results defining the plotted columns.
+    reference_labels : sequence of str
+        Display labels aligned to ``reference_pairs``.
+
+    Returns
+    -------
+    dict
+        Mapping from exact pair identities, with unique-label fallbacks, to
+        plotted metric indices.
+    """
+
+    exact: dict[tuple[str, str | None, str | None], int] = {}
+    label_counts: dict[str, int] = {}
+    for pair_idx, pair_result in enumerate(reference_pairs):
+        label = str(reference_labels[pair_idx])
+        key = _triad_pair_identity(pair_result, label)
+        exact[key] = pair_idx
+        label_counts[key[0]] = label_counts.get(key[0], 0) + 1
+
+    mapping: dict[tuple[str, str | None, str | None] | str, int] = dict(exact)
+    for key, pair_idx in exact.items():
+        if label_counts[key[0]] == 1:
+            mapping[key[0]] = pair_idx
+    return mapping
 
 
 def plot_triad_kde_panel(
@@ -363,6 +445,7 @@ def plot_triad_threshold_bars(
     show_simultaneous: bool = True,
     save_path: Path | str | None = None,
     dpi: int = 300,
+    plot_settings: Any | None = None,
 ) -> "Figure":
     """Create grouped bar chart of threshold fractions across conditions.
 
@@ -389,6 +472,9 @@ def plot_triad_threshold_bars(
         Save figure to this path
     dpi : int, optional
         Resolution (default 300)
+    plot_settings : PlotSettings, optional
+        Global plot settings used for replicate dot styling. When omitted,
+        default plotting settings are used.
 
     Returns
     -------
@@ -404,9 +490,15 @@ def plot_triad_threshold_bars(
     if len(results) != len(labels):
         raise ValueError(f"Number of results ({len(results)}) must match labels ({len(labels)})")
 
-    # Get pair labels from first result
-    pair_labels = results[0].get_pair_labels()
+    if plot_settings is None:
+        from polyzymd.config.comparison import PlotSettings
+
+        plot_settings = PlotSettings()
+
+    # Use the first result to define plotted pair columns
+    pair_labels = _triad_pair_labels(results[0])
     n_pairs = len(pair_labels)
+    pair_index_by_identity = _map_triad_pair_indices(results[0].pair_results, pair_labels)
 
     # Build metric labels
     metric_labels = list(pair_labels)
@@ -420,21 +512,44 @@ def plot_triad_threshold_bars(
     if colors is None:
         colors = _get_color_palette(n_conditions, color_palette)
 
-    # Extract data
+    # Extract data with per-condition pair alignment
     data = np.zeros((n_conditions, n_metrics))
     errors = np.zeros((n_conditions, n_metrics))
+    replicate_values: list[list[list[float]]] = []
 
     for cond_idx, result in enumerate(results):
+        cond_replicates: list[list[float]] = [[] for _ in range(n_metrics)]
+        result_pair_labels = _triad_pair_labels(result)
         # Per-pair fractions
         for pair_idx, pr in enumerate(result.pair_results):
+            fallback_label = (
+                result_pair_labels[pair_idx]
+                if pair_idx < len(result_pair_labels)
+                else str(getattr(pr, "pair_label", f"Pair {pair_idx + 1}"))
+            )
+            pair_key = _triad_pair_identity(pr, fallback_label)
+            metric_idx = pair_index_by_identity.get(pair_key)
+            if metric_idx is None:
+                metric_idx = pair_index_by_identity.get(pair_key[0])
+            if metric_idx is None:
+                logger.debug(
+                    "Skipping triad pair not present in reference columns: %s", pair_key[0]
+                )
+                continue
             if pr.overall_fraction_below is not None:
-                data[cond_idx, pair_idx] = pr.overall_fraction_below * 100
-                errors[cond_idx, pair_idx] = (pr.sem_fraction_below or 0) * 100
+                data[cond_idx, metric_idx] = pr.overall_fraction_below * 100
+                errors[cond_idx, metric_idx] = (pr.sem_fraction_below or 0) * 100
+            cond_replicates[metric_idx] = [
+                value * 100 for value in pr.per_replicate_fractions_below or []
+            ]
 
         # Simultaneous contact
         if show_simultaneous:
             data[cond_idx, -1] = result.overall_simultaneous_contact * 100
             errors[cond_idx, -1] = result.sem_simultaneous_contact * 100
+            cond_replicates[-1] = [value * 100 for value in result.per_replicate_simultaneous]
+
+        replicate_values.append(cond_replicates)
 
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
@@ -446,8 +561,9 @@ def plot_triad_threshold_bars(
 
     # Plot grouped bars
     for cond_idx, (label, color, offset) in enumerate(zip(labels, colors, offsets)):
-        bars = ax.bar(
-            x + offset,
+        bar_positions = x + offset
+        ax.bar(
+            bar_positions,
             data[cond_idx],
             width,
             yerr=errors[cond_idx],
@@ -457,6 +573,14 @@ def plot_triad_threshold_bars(
             linewidth=0.5,
             capsize=3,
             alpha=0.85,
+        )
+        scatter_replicate_values(
+            ax,
+            bar_positions,
+            replicate_values[cond_idx],
+            plot_settings,
+            orientation="vertical",
+            bar_width=width,
         )
 
     # Style
@@ -809,6 +933,7 @@ def plot_triad_threshold_bars_from_data(
         figsize=plot_settings.catalytic_triad.figsize_bars,
         show_simultaneous=True,
         dpi=plot_settings.dpi,
+        plot_settings=plot_settings,
     )
 
     return [save_figure(fig, output_path, plot_settings)]

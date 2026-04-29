@@ -47,6 +47,7 @@ from polyzymd.analyses.shared.plotting import (
     get_colors,
     get_output_path,
     save_figure,
+    scatter_replicate_values,
 )
 
 if TYPE_CHECKING:
@@ -1362,22 +1363,14 @@ def _plot_chaperone_fraction(
         linewidth=t.bar_linewidth,
     )
 
-    rng = np.random.default_rng(seed=42)
-    bar_width = 0.8
-    for i, cond in enumerate(conditions):
-        rep_vals = getattr(cond, "replicate_values", None)
-        if rep_vals:
-            rep_arr = np.asarray(rep_vals, dtype=float)
-            jitter = rng.uniform(-bar_width * 0.25, bar_width * 0.25, size=len(rep_arr))
-            ax.scatter(
-                np.full_like(rep_arr, float(x[i])) + jitter,
-                rep_arr,
-                color=t.dot_color,
-                s=t.dot_size,
-                zorder=5,
-                alpha=t.dot_alpha,
-                edgecolors="none",
-            )
+    scatter_replicate_values(
+        ax,
+        x,
+        [getattr(cond, "replicate_values", []) for cond in conditions],
+        plot_settings,
+        orientation="vertical",
+        bar_width=0.8,
+    )
 
     ax.set_xticks(x)
     ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=t.tick_fontsize)

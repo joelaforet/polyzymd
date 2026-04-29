@@ -21,6 +21,7 @@ from polyzymd.analyses.shared.plotting import (
     get_colors,
     get_output_path,
     save_figure,
+    scatter_replicate_values,
 )
 
 if TYPE_CHECKING:
@@ -187,6 +188,7 @@ def plot_rmsd_comparison_bars(
         labels: list[str] = []
         means: list[float] = []
         sems: list[float] = []
+        replicate_values: list[list[float]] = []
 
         for condition in comparison_result.conditions:
             try:
@@ -202,6 +204,7 @@ def plot_rmsd_comparison_bars(
             labels.append(condition.label)
             means.append(run_summary.mean_rmsd)
             sems.append(run_summary.sem_rmsd)
+            replicate_values.append(run_summary.per_replicate_means)
 
         if not labels:
             logger.warning("No RMSD summary data available for run '%s'", run_label)
@@ -221,6 +224,14 @@ def plot_rmsd_comparison_bars(
             linewidth=theme.bar_linewidth,
             capsize=theme.bar_capsize,
             alpha=theme.bar_alpha,
+        )
+        scatter_replicate_values(
+            ax,
+            positions,
+            replicate_values,
+            ctx.plot_settings,
+            orientation="vertical",
+            bar_width=0.8,
         )
 
         ax.set_xticks(positions)

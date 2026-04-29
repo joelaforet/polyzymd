@@ -21,6 +21,7 @@ from polyzymd.analyses.shared.plotting import (
     get_theme,
     grouped_bars,
     save_figure,
+    scatter_replicate_values,
     symmetric_clim,
 )
 
@@ -601,21 +602,14 @@ def _render_ss_individual_plots(
         )
 
         if has_reps and "reps" in ss_data[internal_key]:
-            rng = np.random.default_rng(seed=42)
-            reps = ss_data[internal_key]["reps"]
-            for j in range(n):
-                if j < len(reps) and reps[j]:
-                    rep_vals = np.asarray(reps[j], dtype=float)
-                    jitter = rng.uniform(-0.2, 0.2, size=len(rep_vals))
-                    ax.scatter(
-                        np.full_like(rep_vals, float(j)) + jitter,
-                        rep_vals,
-                        color=t.dot_color,
-                        s=t.dot_size,
-                        zorder=5,
-                        alpha=t.dot_alpha,
-                        edgecolors="none",
-                    )
+            scatter_replicate_values(
+                ax,
+                x,
+                ss_data[internal_key]["reps"],
+                plot_settings,
+                orientation="vertical",
+                bar_width=0.8,
+            )
 
         ax.set_xticks(x)
         ax.set_xticklabels(cond_labels, rotation=30, ha="right", fontsize=t.tick_fontsize)

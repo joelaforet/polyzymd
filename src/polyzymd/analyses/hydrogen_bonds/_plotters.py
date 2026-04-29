@@ -19,6 +19,8 @@ from polyzymd.analyses.shared.plotting import (
     get_colors,
     get_output_path,
     save_figure,
+    scatter_replicate_values,
+    scatter_stacked_segment_replicates,
 )
 
 logger = logging.getLogger("polyzymd.analyses.hydrogen_bonds")
@@ -76,11 +78,15 @@ def plot_summary_comparison(
         ax = axes[summary_idx, 0]
         means: list[float] = []
         sems: list[float] = []
+        replicate_values: list[list[float]] = []
         for label in labels:
             result = results.get(label)
             summary = _find_summary(result, summary_name) if result is not None else None
             means.append(float(summary.mean_hbonds_per_frame) if summary is not None else 0.0)
             sems.append(float(summary.sem_hbonds_per_frame) if summary is not None else 0.0)
+            replicate_values.append(
+                list(summary.per_replicate_mean_hbonds) if summary is not None else []
+            )
 
         ax.bar(
             x,
@@ -92,6 +98,14 @@ def plot_summary_comparison(
             alpha=plot_settings.theme.bar_alpha,
             edgecolor=plot_settings.theme.bar_edgecolor,
             linewidth=plot_settings.theme.bar_linewidth,
+        )
+        scatter_replicate_values(
+            ax,
+            x,
+            replicate_values,
+            plot_settings,
+            orientation="vertical",
+            bar_width=0.72,
         )
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=20, ha="right")
@@ -240,16 +254,27 @@ def plot_top_pairs(
     for idx, label in enumerate(labels):
         summary = _find_summary(results[label], summary_name) if label in results else None
         occupancy_by_pair: dict[str, float] = {}
+        replicate_values_by_pair: dict[str, list[float]] = {}
         if summary is not None:
             occupancy_by_pair = {
                 f"{pair.residue_a.label} — {pair.residue_b.label}": float(pair.mean_occupancy)
                 for pair in summary.undirected_pairs
             }
+            replicate_values_by_pair = {
+                f"{pair.residue_a.label} — {pair.residue_b.label}": list(
+                    pair.per_replicate_occupancy
+                )
+                for pair in summary.undirected_pairs
+            }
 
         values = [occupancy_by_pair.get(pair_label, 0.0) for pair_label in top_labels]
+        replicate_values = [
+            replicate_values_by_pair.get(pair_label, []) for pair_label in top_labels
+        ]
         offset = (idx - n_conditions / 2 + 0.5) * bar_height
+        bar_positions = y + offset
         ax.barh(
-            y + offset,
+            bar_positions,
             values,
             height=bar_height,
             color=colors[idx],
@@ -257,6 +282,14 @@ def plot_top_pairs(
             edgecolor=plot_settings.theme.bar_edgecolor,
             linewidth=plot_settings.theme.bar_linewidth,
             label=label,
+        )
+        scatter_replicate_values(
+            ax,
+            bar_positions,
+            replicate_values,
+            plot_settings,
+            orientation="horizontal",
+            bar_width=bar_height,
         )
 
     ax.set_yticks(y)
@@ -296,13 +329,18 @@ def plot_composition_absolute(
 
     fig, ax = plt.subplots(figsize=(max(7.0, 1.8 * len(labels)), 5.0))
     bottom = np.zeros(len(labels), dtype=float)
+    replicate_bases_by_label = {
+        label: [0.0] * (results[label].n_replicates if label in results else 0) for label in labels
+    }
 
     for idx, key in enumerate(keys):
         values: list[float] = []
+        replicate_values: list[list[float]] = []
         for label in labels:
             result = results.get(label)
             if result is None:
                 values.append(0.0)
+                replicate_values.append([])
                 continue
             entry = next(
                 (
@@ -313,6 +351,7 @@ def plot_composition_absolute(
                 None,
             )
             values.append(float(entry.mean_hbonds_per_frame) if entry is not None else 0.0)
+            replicate_values.append(list(entry.per_replicate_hbonds) if entry is not None else [])
 
         values_arr = np.asarray(values, dtype=float)
         ax.bar(
@@ -325,6 +364,21 @@ def plot_composition_absolute(
             edgecolor=plot_settings.theme.bar_edgecolor,
             linewidth=plot_settings.theme.bar_linewidth,
         )
+        for label_idx, reps in enumerate(replicate_values):
+            replicate_bases = replicate_bases_by_label[labels[label_idx]]
+            if len(replicate_bases) < len(reps):
+                replicate_bases.extend([0.0] * (len(reps) - len(replicate_bases)))
+            if reps:
+                scatter_stacked_segment_replicates(
+                    ax,
+                    float(x[label_idx]),
+                    float(bottom[label_idx]),
+                    reps,
+                    plot_settings,
+                    replicate_base_values=list(replicate_bases[: len(reps)]),
+                )
+                for replicate_idx, value in enumerate(reps):
+                    replicate_bases[replicate_idx] += float(value)
         bottom += values_arr
 
     ax.set_xticks(x)
@@ -362,13 +416,18 @@ def plot_composition_fraction(
 
     fig, ax = plt.subplots(figsize=(max(7.0, 1.8 * len(labels)), 5.0))
     bottom = np.zeros(len(labels), dtype=float)
+    replicate_bases_by_label = {
+        label: [0.0] * (results[label].n_replicates if label in results else 0) for label in labels
+    }
 
     for idx, key in enumerate(keys):
         values: list[float] = []
+        replicate_values: list[list[float]] = []
         for label in labels:
             result = results.get(label)
             if result is None:
                 values.append(0.0)
+                replicate_values.append([])
                 continue
             entry = next(
                 (
@@ -379,6 +438,7 @@ def plot_composition_fraction(
                 None,
             )
             values.append(float(entry.mean_fraction_of_total) if entry is not None else 0.0)
+            replicate_values.append(list(entry.per_replicate_fraction) if entry is not None else [])
 
         values_arr = np.asarray(values, dtype=float)
         ax.bar(
@@ -391,6 +451,21 @@ def plot_composition_fraction(
             edgecolor=plot_settings.theme.bar_edgecolor,
             linewidth=plot_settings.theme.bar_linewidth,
         )
+        for label_idx, reps in enumerate(replicate_values):
+            replicate_bases = replicate_bases_by_label[labels[label_idx]]
+            if len(replicate_bases) < len(reps):
+                replicate_bases.extend([0.0] * (len(reps) - len(replicate_bases)))
+            if reps:
+                scatter_stacked_segment_replicates(
+                    ax,
+                    float(x[label_idx]),
+                    float(bottom[label_idx]),
+                    reps,
+                    plot_settings,
+                    replicate_base_values=list(replicate_bases[: len(reps)]),
+                )
+                for replicate_idx, value in enumerate(reps):
+                    replicate_bases[replicate_idx] += float(value)
         bottom += values_arr
 
     max_stack = float(np.max(bottom)) if len(bottom) > 0 else 1.0

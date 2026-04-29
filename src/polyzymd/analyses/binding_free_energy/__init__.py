@@ -1364,16 +1364,19 @@ def _plot_bfe_bars(
             x = np.arange(n_groups)
 
             series: list[tuple[str, list[float], list[float]]] = []
+            replicate_values: list[list[list[float]]] = []
             for cond_label in valid_labels:
                 cond_summary = result.get_condition(cond_label)
                 means: list[float] = []
                 sems: list[float] = []
+                cond_replicates: list[list[float]] = []
 
                 for group in protein_groups:
                     entry = cond_summary.get_entry(poly_type, group, partition_name=partition_name)
                     if entry is not None and entry.delta_G is not None:
                         means.append(entry.delta_G)
                         per_rep = entry.delta_G_per_replicate
+                        cond_replicates.append(list(per_rep))
                         if len(per_rep) >= 2:
                             sem = float(np.std(per_rep, ddof=1) / np.sqrt(len(per_rep)))
                         elif entry.delta_G_uncertainty is not None:
@@ -1384,8 +1387,10 @@ def _plot_bfe_bars(
                     else:
                         means.append(0.0)
                         sems.append(0.0)
+                        cond_replicates.append([])
 
                 series.append((cond_label, means, sems))
+                replicate_values.append(cond_replicates)
 
             grouped_bars(
                 ax,
@@ -1396,6 +1401,7 @@ def _plot_bfe_bars(
                 show_error=bfe_settings.show_error_bars,
                 reference_label=r"$\Delta G_{\mathrm{sel}}$ = 0 (neutral)",
                 bar_edgecolor="none",
+                replicate_values=replicate_values if replicate_values else None,
             )
 
             poly_label = f": {poly_type}" if n_poly > 1 else ""

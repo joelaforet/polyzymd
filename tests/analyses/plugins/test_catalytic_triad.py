@@ -989,6 +989,153 @@ class TestMakeAggregatedFilename:
 class TestPlot:
     """Test CatalyticTriadAnalysis.plot delegates to inlined plotting helpers."""
 
+    def test_threshold_bars_overlay_pair_and_simultaneous_replicates(self):
+        """Threshold bars should pass per-replicate percentages to shared scatter."""
+        import matplotlib.pyplot as plt
+
+        from polyzymd.analyses.catalytic_triad._plotters import plot_triad_threshold_bars
+        from polyzymd.config.comparison import PlotSettings
+
+        pair_a = MagicMock(
+            pair_label="Asp-His",
+            selection1="resid 1",
+            selection2="resid 2",
+            overall_fraction_below=0.5,
+            sem_fraction_below=0.05,
+            per_replicate_fractions_below=[0.4, 0.6],
+        )
+        pair_b = MagicMock(
+            pair_label="His-Ser",
+            selection1="resid 2",
+            selection2="resid 3",
+            overall_fraction_below=0.25,
+            sem_fraction_below=0.02,
+            per_replicate_fractions_below=[0.2, 0.3],
+        )
+        result = MagicMock(
+            pair_results=[pair_a, pair_b],
+            overall_simultaneous_contact=0.1,
+            sem_simultaneous_contact=0.01,
+            per_replicate_simultaneous=[0.08, 0.12],
+            threshold=3.5,
+        )
+        result.get_pair_labels.return_value = ["Asp-His", "His-Ser"]
+
+        with patch(
+            "polyzymd.analyses.catalytic_triad._plotters.scatter_replicate_values"
+        ) as mock_scatter:
+            fig = plot_triad_threshold_bars(
+                [result],
+                ["Control"],
+                colors=["blue"],
+                plot_settings=PlotSettings(),
+            )
+
+        mock_scatter.assert_called_once()
+        assert mock_scatter.call_args.args[2] == [[40.0, 60.0], [20.0, 30.0], [8.0, 12.0]]
+        plt.close(fig)
+
+    def test_threshold_bars_aligns_out_of_order_sparse_pair_replicates(self):
+        """Threshold dots should align by pair identity and reserve the final slot."""
+        import matplotlib.pyplot as plt
+
+        from polyzymd.analyses.catalytic_triad._plotters import plot_triad_threshold_bars
+        from polyzymd.config.comparison import PlotSettings
+
+        ref_pair_a = MagicMock(
+            pair_label="Asp-His",
+            selection1="resid 1",
+            selection2="resid 2",
+            overall_fraction_below=0.5,
+            sem_fraction_below=0.05,
+            per_replicate_fractions_below=[0.4, 0.6],
+        )
+        ref_pair_b = MagicMock(
+            pair_label="His-Ser",
+            selection1="resid 2",
+            selection2="resid 3",
+            overall_fraction_below=0.25,
+            sem_fraction_below=0.02,
+            per_replicate_fractions_below=[0.2, 0.3],
+        )
+        treatment_pair_b = MagicMock(
+            pair_label="His-Ser",
+            selection1="resid 2",
+            selection2="resid 3",
+            overall_fraction_below=0.35,
+            sem_fraction_below=0.03,
+            per_replicate_fractions_below=[0.3, 0.4],
+        )
+        treatment_extra_pair = MagicMock(
+            pair_label="Extra-Pair",
+            selection1="resid 4",
+            selection2="resid 5",
+            overall_fraction_below=0.95,
+            sem_fraction_below=0.01,
+            per_replicate_fractions_below=[0.9, 1.0],
+        )
+        control = MagicMock(
+            pair_results=[ref_pair_a, ref_pair_b],
+            overall_simultaneous_contact=0.1,
+            sem_simultaneous_contact=0.01,
+            per_replicate_simultaneous=[0.08, 0.12],
+            threshold=3.5,
+        )
+        control.get_pair_labels.return_value = ["Asp-His", "His-Ser"]
+        treatment = MagicMock(
+            pair_results=[treatment_pair_b, treatment_extra_pair],
+            overall_simultaneous_contact=0.2,
+            sem_simultaneous_contact=0.02,
+            per_replicate_simultaneous=[0.18, 0.22],
+            threshold=3.5,
+        )
+        treatment.get_pair_labels.return_value = ["His-Ser", "Extra-Pair"]
+
+        with patch(
+            "polyzymd.analyses.catalytic_triad._plotters.scatter_replicate_values"
+        ) as mock_scatter:
+            fig = plot_triad_threshold_bars(
+                [control, treatment],
+                ["Control", "Treatment"],
+                colors=["blue", "orange"],
+                plot_settings=PlotSettings(),
+            )
+
+        treatment_replicates = mock_scatter.call_args_list[1].args[2]
+        assert treatment_replicates == [[], [30.0, 40.0], [18.0, 22.0]]
+        assert [90.0, 100.0] not in treatment_replicates
+        treatment_heights = [patch_obj.get_height() for patch_obj in fig.axes[0].patches[3:]]
+        assert treatment_heights == [0.0, 35.0, 20.0]
+        plt.close(fig)
+
+    def test_threshold_bars_from_data_passes_plot_settings(self, tmp_path):
+        """Data-backed threshold bars should preserve caller plot settings."""
+        from polyzymd.analyses.catalytic_triad._plotters import (
+            plot_triad_threshold_bars_from_data,
+        )
+        from polyzymd.config.comparison import PlotSettings
+
+        plot_settings = PlotSettings()
+        mock_result = MagicMock()
+        mock_figure = MagicMock()
+
+        with (
+            patch(
+                "polyzymd.analyses.catalytic_triad._plotters._load_aggregated_results",
+                return_value={"Control": mock_result},
+            ),
+            patch(
+                "polyzymd.analyses.catalytic_triad._plotters.plot_triad_threshold_bars",
+                return_value=mock_figure,
+            ) as mock_plot,
+            patch(
+                "polyzymd.analyses.shared.plotting.save_figure", return_value=tmp_path / "bars.png"
+            ),
+        ):
+            plot_triad_threshold_bars_from_data({}, ["Control"], tmp_path, plot_settings)
+
+        assert mock_plot.call_args.kwargs["plot_settings"] is plot_settings
+
     def test_plot_returns_empty_on_no_conditions(self, triad_analysis, tmp_path, default_settings):
         from polyzymd.config.comparison import PlotSettings
 

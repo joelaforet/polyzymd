@@ -1438,6 +1438,86 @@ class TestPlot:
         assert mock_stacked.call_args[0][3] is ps
         assert mock_group.call_args[0][3] is ps
 
+    def test_stacked_bars_overlay_polymer_type_replicates_with_signed_bases(self, tmp_path):
+        """Affinity stacked bars should overlay signed polymer-type replicates."""
+        from polyzymd.analyses.polymer_affinity import _plot_affinity_stacked_bars
+        from polyzymd.analyses.polymer_affinity._comparison_results import (
+            AffinityScoreConditionSummary,
+            PolymerAffinityScoreResult,
+            PolymerTypeScore,
+        )
+        from polyzymd.config.comparison import PlotSettings
+
+        polymer_scores = [
+            PolymerTypeScore(
+                polymer_type="POS1",
+                total_score=4.0,
+                total_score_per_replicate=[3.0, 5.0],
+            ),
+            PolymerTypeScore(
+                polymer_type="POS2",
+                total_score=2.0,
+                total_score_per_replicate=[1.0, 3.0],
+            ),
+            PolymerTypeScore(
+                polymer_type="NEG1",
+                total_score=-6.0,
+                total_score_per_replicate=[-5.0, -7.0],
+            ),
+            PolymerTypeScore(
+                polymer_type="NEG2",
+                total_score=-2.0,
+                total_score_per_replicate=[-1.0, -3.0],
+            ),
+        ]
+        result = PolymerAffinityScoreResult(
+            name="Test",
+            conditions=[
+                AffinityScoreConditionSummary(
+                    label="A",
+                    config_path="/tmp/a.yaml",
+                    temperature_K=300.0,
+                    n_replicates=2,
+                    total_score=-2.0,
+                    polymer_type_scores=polymer_scores,
+                    polymer_types=["POS1", "POS2", "NEG1", "NEG2"],
+                )
+            ],
+            polymer_types=["POS1", "POS2", "NEG1", "NEG2"],
+        )
+
+        with (
+            patch("polyzymd.analyses.polymer_affinity._find_affinity_result", return_value=result),
+            patch(
+                "polyzymd.analyses.polymer_affinity.scatter_stacked_segment_replicates"
+            ) as scatter,
+            patch(
+                "polyzymd.analyses.polymer_affinity.save_figure",
+                side_effect=lambda _fig, path, *_args, **_kwargs: path,
+            ),
+        ):
+            paths = _plot_affinity_stacked_bars(
+                {"__meta__": {}},
+                ["A"],
+                tmp_path,
+                PlotSettings(),
+            )
+
+        assert len(paths) == 1
+        assert scatter.call_count == 4
+        assert scatter.call_args_list[0].args[2] == pytest.approx(0.0)
+        assert scatter.call_args_list[0].args[3] == [3.0, 5.0]
+        assert scatter.call_args_list[0].kwargs["positive_base_values"] == [0.0, 0.0]
+        assert scatter.call_args_list[1].args[2] == pytest.approx(4.0)
+        assert scatter.call_args_list[1].args[3] == [1.0, 3.0]
+        assert scatter.call_args_list[1].kwargs["positive_base_values"] == [3.0, 5.0]
+        assert scatter.call_args_list[2].args[2] == pytest.approx(0.0)
+        assert scatter.call_args_list[2].args[3] == [-5.0, -7.0]
+        assert scatter.call_args_list[2].kwargs["negative_base_values"] == [0.0, 0.0]
+        assert scatter.call_args_list[3].args[2] == pytest.approx(-6.0)
+        assert scatter.call_args_list[3].args[3] == [-1.0, -3.0]
+        assert scatter.call_args_list[3].kwargs["negative_base_values"] == [-5.0, -7.0]
+
 
 # ===========================================================================
 # extract_metrics

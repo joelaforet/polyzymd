@@ -22,6 +22,7 @@ from polyzymd.analyses.shared.plotting import (
     get_colors,
     get_output_path,
     save_figure,
+    scatter_replicate_values,
 )
 
 logger = logging.getLogger(__name__)
@@ -258,7 +259,14 @@ def _plot_rmsf_comparison_from_result(
         height=bar_height,
     )
 
-    _draw_horizontal_replicate_dots(ax, replicate_data, positions, bar_height, plot_settings)
+    scatter_replicate_values(
+        ax,
+        positions,
+        replicate_data,
+        plot_settings,
+        orientation="horizontal",
+        bar_width=bar_height,
+    )
 
     ax.set_yticks(positions)
     ax.set_yticklabels(plot_labels)
@@ -360,7 +368,14 @@ def _plot_rmsf_comparison_from_aggregated(
         height=bar_height,
     )
 
-    _draw_horizontal_replicate_dots(ax, replicate_data, positions, bar_height, plot_settings)
+    scatter_replicate_values(
+        ax,
+        positions,
+        replicate_data,
+        plot_settings,
+        orientation="horizontal",
+        bar_width=bar_height,
+    )
 
     ax.set_yticks(positions)
     ax.set_yticklabels(plot_labels)
@@ -433,104 +448,6 @@ def _get_first_available_field(item: Any, *names: str, default: Any = None) -> A
         if value is not None:
             return value
     return default
-
-
-def _finite_float_values(values: Any) -> np.ndarray:
-    """Convert replicate values to a finite one-dimensional float array.
-
-    Parameters
-    ----------
-    values : Any
-        Candidate replicate values. ``None`` and non-numeric inputs are treated
-        as missing values.
-
-    Returns
-    -------
-    numpy.ndarray
-        Finite replicate values. The array is empty when no finite values are
-        available.
-    """
-    if values is None:
-        return np.array([], dtype=float)
-
-    try:
-        value_array = np.asarray(values, dtype=float)
-    except (TypeError, ValueError):
-        return np.array([], dtype=float)
-
-    if value_array.ndim == 0:
-        value_array = value_array.reshape(1)
-
-    value_array = value_array.ravel()
-    return value_array[np.isfinite(value_array)]
-
-
-def _replicate_dot_jitter(n_values: int, bar_height: float) -> np.ndarray:
-    """Return deterministic jitter offsets for horizontal replicate dots.
-
-    Parameters
-    ----------
-    n_values : int
-        Number of replicate dots in one condition.
-    bar_height : float
-        Height of the corresponding horizontal bar.
-
-    Returns
-    -------
-    numpy.ndarray
-        Jitter offsets centred around zero.
-    """
-    if n_values <= 0:
-        return np.array([], dtype=float)
-    if n_values == 1:
-        return np.array([0.0], dtype=float)
-
-    max_jitter = bar_height * 0.25
-    return np.linspace(-max_jitter, max_jitter, n_values)
-
-
-def _draw_horizontal_replicate_dots(
-    ax: Any,
-    replicate_data: Sequence[Any],
-    positions: np.ndarray,
-    bar_height: float,
-    plot_settings: Any,
-) -> None:
-    """Overlay finite per-replicate RMSF dots on horizontal bars.
-
-    Parameters
-    ----------
-    ax : matplotlib.axes.Axes
-        Axes containing the horizontal bar chart.
-    replicate_data : sequence of Any
-        Per-condition replicate values aligned to ``positions``.
-    positions : numpy.ndarray
-        Bar y-positions.
-    bar_height : float
-        Height of each horizontal bar.
-    plot_settings : Any
-        Plot settings whose theme supplies dot style values.
-    """
-    t = plot_settings.theme
-
-    for idx, values in enumerate(replicate_data):
-        if idx >= len(positions):
-            break
-
-        rep_arr = _finite_float_values(values)
-        if rep_arr.size == 0:
-            continue
-
-        jitter = _replicate_dot_jitter(rep_arr.size, bar_height)
-        ax.scatter(
-            rep_arr,
-            np.full(rep_arr.shape, float(positions[idx]), dtype=float) + jitter,
-            color=t.dot_color,
-            s=t.dot_size,
-            zorder=5,
-            alpha=t.dot_alpha,
-            edgecolors="none",
-        )
 
 
 def _load_reference_ss(data: dict[str, Any]) -> dict | None:

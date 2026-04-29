@@ -71,6 +71,10 @@ from polyzymd.analyses.base import (
 from polyzymd.analyses.polymer_bridging._plot_settings import PolymerBridgingPlotSettings
 from polyzymd.analyses.shared import apply_axis_style, get_colors, get_output_path, save_figure
 from polyzymd.analyses.shared.config_hash import settings_fingerprint
+from polyzymd.analyses.shared.plotting import (
+    scatter_replicate_values,
+    scatter_stacked_segment_replicates,
+)
 from polyzymd.analyses.stats import anova_test, pairwise_comparisons
 from polyzymd.core.experimental import prefix_experimental_output
 
@@ -312,7 +316,7 @@ class PolymerBridgingAggregatedResult(BaseModel):
     high_valency_fraction_replicates: list[float]
     valency_probabilities_mean: dict[str, float]
     valency_probabilities_sem: dict[str, float]
-    valency_probabilities_per_replicate: dict[str, list[float]]
+    valency_probabilities_per_replicate: dict[str, list[float]] = Field(default_factory=dict)
     anchor_protein_group_probabilities_mean: dict[str, float] = Field(default_factory=dict)
     anchor_protein_group_probabilities_sem: dict[str, float] = Field(default_factory=dict)
     anchor_protein_group_probabilities_per_replicate: dict[str, list[float]] = Field(
@@ -1509,14 +1513,43 @@ class PolymerBridgingAnalysis(Analysis):
         colors = get_colors(len(labels), ctx.plot_settings)
         output_paths: list[Path] = []
 
+        def _ensure_replicate_bases(bases: list[float], n_values: int) -> list[float]:
+            """Return stack bases aligned to the current component replicates."""
+            if len(bases) < n_values:
+                bases.extend([0.0] * (n_values - len(bases)))
+            return bases[:n_values]
+
+        def _advance_replicate_bases(bases: list[float], values: Sequence[Any]) -> None:
+            """Accumulate unsigned replicate stack bases from finite segment values."""
+            _ensure_replicate_bases(bases, len(values))
+            for idx, raw_value in enumerate(values):
+                try:
+                    value = float(raw_value)
+                except (TypeError, ValueError):
+                    continue
+                if np.isfinite(value):
+                    bases[idx] += value
+
         if plot_settings.generate_multisite_bars:
             means = [
                 getattr(cond, "multisite_fraction_mean", 0.0) for cond in comparison.conditions
             ]
             sems = [getattr(cond, "multisite_fraction_sem", 0.0) for cond in comparison.conditions]
+            replicate_values = [
+                getattr(cond, "multisite_fraction_replicate_values", [])
+                for cond in comparison.conditions
+            ]
             fig, ax = plt.subplots(figsize=plot_settings.figsize_bars)
             x = np.arange(len(labels))
             ax.bar(x, means, yerr=sems, color=colors, alpha=ctx.plot_settings.theme.bar_alpha)
+            scatter_replicate_values(
+                ax,
+                x,
+                replicate_values,
+                ctx.plot_settings,
+                orientation="vertical",
+                bar_width=0.8,
+            )
             ax.set_xticks(x)
             ax.set_xticklabels(labels, rotation=35, ha="right")
             ax.set_ylim(0, 1)
@@ -1548,9 +1581,21 @@ class PolymerBridgingAnalysis(Analysis):
                 getattr(cond, "mean_contacts_per_contacting_oligomer_sem", 0.0)
                 for cond in comparison.conditions
             ]
+            replicate_values = [
+                getattr(cond, "mean_contacts_per_contacting_oligomer_replicate_values", [])
+                for cond in comparison.conditions
+            ]
             fig, ax = plt.subplots(figsize=plot_settings.figsize_bars)
             x = np.arange(len(labels))
             ax.bar(x, means, yerr=sems, color=colors, alpha=ctx.plot_settings.theme.bar_alpha)
+            scatter_replicate_values(
+                ax,
+                x,
+                replicate_values,
+                ctx.plot_settings,
+                orientation="vertical",
+                bar_width=0.8,
+            )
             ax.set_xticks(x)
             ax.set_xticklabels(labels, rotation=35, ha="right")
             apply_axis_style(
@@ -1577,8 +1622,10 @@ class PolymerBridgingAnalysis(Analysis):
             x = np.arange(len(labels))
             keys = ["1", "2", "3+"]
             bottoms = np.zeros(len(labels), dtype=float)
+            replicate_bottoms: list[list[float]] = [[] for _ in labels]
             for idx, key in enumerate(keys):
                 vals = []
+                replicate_values = []
                 for cond in comparison.conditions:
                     condition = condition_by_label.get(cond.label)
                     analysis_dir = ctx.analysis_dirs.get(cond.label)
@@ -1595,14 +1642,36 @@ class PolymerBridgingAnalysis(Analysis):
                         )
                     if summary is None:
                         vals.append(0.0)
+                        replicate_values.append([])
                         continue
                     if isinstance(summary, dict):
                         probs = summary.get("valency_probabilities_mean", {})
+                        per_replicate = summary.get("valency_probabilities_per_replicate", {})
                     else:
                         probs = summary.valency_probabilities_mean
+                        per_replicate = summary.valency_probabilities_per_replicate
                     vals.append(float(probs.get(key, 0.0)))
+                    key_replicates = per_replicate.get(key)
+                    replicate_values.append(
+                        list(key_replicates) if key_replicates is not None else []
+                    )
                 ax.bar(x, vals, bottom=bottoms, label=key, color=colors[idx % len(colors)])
+                for label_idx, reps in enumerate(replicate_values):
+                    if reps:
+                        replicate_bases = _ensure_replicate_bases(
+                            replicate_bottoms[label_idx], len(reps)
+                        )
+                        scatter_stacked_segment_replicates(
+                            ax,
+                            float(x[label_idx]),
+                            float(bottoms[label_idx]),
+                            reps,
+                            ctx.plot_settings,
+                            replicate_base_values=replicate_bases,
+                        )
                 bottoms += np.array(vals, dtype=float)
+                for label_idx, reps in enumerate(replicate_values):
+                    _advance_replicate_bases(replicate_bottoms[label_idx], reps)
             ax.set_xticks(x)
             ax.set_xticklabels(labels, rotation=35, ha="right")
             ax.set_ylim(0, 1)
@@ -1666,7 +1735,22 @@ class PolymerBridgingAnalysis(Analysis):
                     ).get(key, 0.0)
                     for label in labels
                 ]
-                ax.bar(x + idx * width - 0.4 + width / 2, means, width=width, label=key)
+                replicate_values = [
+                    _get_summary_probs(
+                        summaries.get(label), "anchor_protein_group_probabilities_per_replicate"
+                    ).get(key, [])
+                    for label in labels
+                ]
+                bar_positions = x + idx * width - 0.4 + width / 2
+                ax.bar(bar_positions, means, width=width, label=key)
+                scatter_replicate_values(
+                    ax,
+                    bar_positions,
+                    replicate_values,
+                    ctx.plot_settings,
+                    orientation="vertical",
+                    bar_width=width,
+                )
             ax.set_xticks(x)
             ax.set_xticklabels(labels, rotation=35, ha="right")
             ax.set_ylim(0, 1)
@@ -1692,6 +1776,7 @@ class PolymerBridgingAnalysis(Analysis):
             fig, ax = plt.subplots(figsize=plot_settings.figsize_stack)
             x = np.arange(len(labels))
             bottoms = np.zeros(len(labels), dtype=float)
+            replicate_bottoms = [[] for _ in labels]
             for idx, key in enumerate(PROTEIN_GROUP_ORDER):
                 vals = [
                     _get_summary_probs(
@@ -1699,10 +1784,32 @@ class PolymerBridgingAnalysis(Analysis):
                     ).get(key, 0.0)
                     for label in labels
                 ]
+                replicate_values = [
+                    _get_summary_probs(
+                        summaries.get(label),
+                        "multivalent_protein_group_probabilities_per_replicate",
+                    ).get(key, [])
+                    for label in labels
+                ]
                 if not any(vals):
                     continue
                 ax.bar(x, vals, bottom=bottoms, label=key, color=colors[idx % len(colors)])
+                for label_idx, reps in enumerate(replicate_values):
+                    if reps:
+                        replicate_bases = _ensure_replicate_bases(
+                            replicate_bottoms[label_idx], len(reps)
+                        )
+                        scatter_stacked_segment_replicates(
+                            ax,
+                            float(x[label_idx]),
+                            float(bottoms[label_idx]),
+                            reps,
+                            ctx.plot_settings,
+                            replicate_base_values=replicate_bases,
+                        )
                 bottoms += np.array(vals, dtype=float)
+                for label_idx, reps in enumerate(replicate_values):
+                    _advance_replicate_bases(replicate_bottoms[label_idx], reps)
             ax.set_xticks(x)
             ax.set_xticklabels(labels, rotation=35, ha="right")
             ax.set_ylim(0, 1)
@@ -1804,8 +1911,20 @@ class PolymerBridgingAnalysis(Analysis):
                 fig, ax = plt.subplots(figsize=plot_settings.figsize_bars)
                 sig_labels = list(signature_probs.keys())[:10]
                 values = [signature_probs[label] for label in sig_labels]
-                ax.bar(np.arange(len(sig_labels)), values, color=colors[: len(sig_labels)])
-                ax.set_xticks(np.arange(len(sig_labels)))
+                x_sig = np.arange(len(sig_labels))
+                ax.bar(x_sig, values, color=colors[: len(sig_labels)])
+                signature_replicates = _get_summary_probs(
+                    reference, "fragment_signature_probabilities_per_replicate"
+                )
+                scatter_replicate_values(
+                    ax,
+                    x_sig,
+                    [signature_replicates.get(label, []) for label in sig_labels],
+                    ctx.plot_settings,
+                    orientation="vertical",
+                    bar_width=0.8,
+                )
+                ax.set_xticks(x_sig)
                 ax.set_xticklabels(sig_labels, rotation=35, ha="right")
                 ax.set_ylim(0, max(values) * 1.15 if values else 1.0)
                 apply_axis_style(

@@ -185,6 +185,7 @@ def _plot_distance_threshold_bars(
 
     fractions_list: list[list[float]] = []
     errors_list: list[list[float]] = []
+    replicate_values: list[list[list[float]]] = []
     valid_labels: list[str] = []
 
     for label in labels:
@@ -197,6 +198,7 @@ def _plot_distance_threshold_bars(
 
         row_frac = []
         row_err = []
+        row_reps: list[list[float]] = []
         for pair_result in pair_results[:n_pairs]:
             frac = pair_result.get("overall_fraction_below") or pair_result.get(
                 "fraction_below_threshold", 0
@@ -204,12 +206,16 @@ def _plot_distance_threshold_bars(
             sem = pair_result.get("sem_fraction_below", 0)
             row_frac.append(frac * 100)
             row_err.append(sem * 100)
+            per_replicate = pair_result.get("per_replicate_fractions_below") or []
+            row_reps.append([value * 100 for value in per_replicate])
         # Pad if fewer pair results than expected
         while len(row_frac) < n_pairs:
             row_frac.append(0.0)
             row_err.append(0.0)
+            row_reps.append([])
         fractions_list.append(row_frac)
         errors_list.append(row_err)
+        replicate_values.append(row_reps)
 
     n_conditions = len(valid_labels)
     colors = get_colors(n_conditions, plot_settings)
@@ -222,7 +228,15 @@ def _plot_distance_threshold_bars(
         for cond_idx, label in enumerate(valid_labels)
     ]
 
-    grouped_bars(ax, x, series, colors, plot_settings, reference_line=None)
+    grouped_bars(
+        ax,
+        x,
+        series,
+        colors,
+        plot_settings,
+        reference_line=None,
+        replicate_values=replicate_values if replicate_values else None,
+    )
 
     ax.set_xticks(x)
     ax.set_xticklabels(pair_labels, fontsize=t.tick_fontsize)

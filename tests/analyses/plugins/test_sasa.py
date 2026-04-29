@@ -23,6 +23,7 @@ from polyzymd.analyses.sasa._formatters import format_sasa_comparison
 from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
 from polyzymd.analyses.sasa._plotters import (
     _build_sasa_normalized_control_rows,
+    _build_sasa_normalized_replicate_deltas,
     _load_condition_result_payloads,
     _load_replicate_timeseries_from_results,
     _propagate_sasa_normalized_sem,
@@ -1116,6 +1117,31 @@ def test_normalized_control_rows_compute_percent_delta(tmp_path: Path) -> None:
     assert [row.percent_delta for row in rows] == pytest.approx([-50.0, -20.0])
 
 
+def test_normalized_control_rows_compute_replicate_deltas(tmp_path: Path) -> None:
+    """Normalized-control rows should preserve per-replicate percent changes."""
+
+    comparison = _make_sasa_comparison_result(
+        {
+            "control": {"protein": (10.0, 0.0)},
+            "condition_5": {"protein": (5.0, 0.0)},
+        }
+    )
+    comparison.conditions[1].run_summaries[0].per_replicate_means = [4.0, 5.0, 6.0]
+    ctx = _make_sasa_plot_context(tmp_path)
+
+    rows = _build_sasa_normalized_control_rows(ctx, comparison, "protein")
+
+    assert rows[0].replicate_percent_deltas == pytest.approx([-60.0, -50.0, -40.0])
+
+
+def test_normalized_replicate_deltas_use_control_mean_baseline() -> None:
+    """Control replicates should normalize against the aggregate control mean."""
+
+    deltas = _build_sasa_normalized_replicate_deltas([9.0, 10.0, 11.0], 10.0)
+
+    assert deltas == pytest.approx([-10.0, 0.0, 10.0])
+
+
 def test_normalized_control_sem_propagation() -> None:
     """Normalized-control SEM should follow first-order error propagation."""
 
@@ -1193,6 +1219,35 @@ def test_normalized_control_plot_generates_one_path_per_valid_run(tmp_path: Path
         "sasa_normalized_comparison_active_site.png",
     ]
     assert all(path.exists() for path in paths)
+
+
+def test_normalized_control_plot_overlays_replicate_deltas(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Normalized-control plotter should pass replicate deltas to dot overlays."""
+
+    import polyzymd.analyses.sasa._plotters as plotters
+
+    comparison = _make_sasa_comparison_result(
+        {
+            "control": {"protein": (10.0, 0.1)},
+            "treated": {"protein": (5.0, 0.1)},
+        }
+    )
+    comparison.conditions[1].run_summaries[0].per_replicate_means = [4.0, 6.0]
+    ctx = _make_sasa_plot_context(tmp_path)
+    calls = []
+
+    def fake_scatter(_ax, positions, replicate_values, *_args, **_kwargs):
+        calls.append((list(positions), replicate_values))
+        return 1
+
+    monkeypatch.setattr(plotters, "scatter_replicate_values", fake_scatter)
+
+    plot_sasa_normalized_control_bars(ctx, comparison)
+
+    assert calls == [([0.0], [[-60.0, -40.0]])]
 
 
 def test_sasa_analysis_plot_includes_normalized_control_plotter(

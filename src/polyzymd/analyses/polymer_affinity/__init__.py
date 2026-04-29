@@ -70,6 +70,7 @@ from polyzymd.analyses.shared.plotting import (
     get_output_path,
     grouped_bars,
     save_figure,
+    scatter_stacked_segment_replicates,
 )
 
 if TYPE_CHECKING:
@@ -1623,20 +1624,50 @@ def _plot_affinity_stacked_bars(
     x = np.arange(n_conds)
     bottoms_neg = np.zeros(n_conds)
     bottoms_pos = np.zeros(n_conds)
+    replicate_bottoms_neg: list[list[float]] = [[] for _ in display_labels]
+    replicate_bottoms_pos: list[list[float]] = [[] for _ in display_labels]
+
+    def _ensure_replicate_bases(bases: list[float], n_values: int) -> list[float]:
+        """Return stack bases aligned to the current component replicates."""
+        if len(bases) < n_values:
+            bases.extend([0.0] * (n_values - len(bases)))
+        return bases[:n_values]
+
+    def _advance_signed_bases(
+        negative_bases: list[float], positive_bases: list[float], values: Sequence[Any]
+    ) -> None:
+        """Accumulate replicate stack bases on the same sign as each value."""
+        _ensure_replicate_bases(negative_bases, len(values))
+        _ensure_replicate_bases(positive_bases, len(values))
+        for idx, raw_value in enumerate(values):
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(value):
+                continue
+            if value < 0.0:
+                negative_bases[idx] += value
+            else:
+                positive_bases[idx] += value
 
     for poly_idx, poly_type in enumerate(all_polymer_types):
         values = []
+        replicate_values = []
         for cond_label in display_labels:
             cond = result.get_condition(cond_label)
             if cond is None:
                 values.append(0.0)
+                replicate_values.append([])
                 continue
             # Find this polymer type's score
             pts = [s for s in cond.polymer_type_scores if s.polymer_type == poly_type]
             if pts:
                 values.append(pts[0].total_score)
+                replicate_values.append(list(pts[0].total_score_per_replicate))
             else:
                 values.append(0.0)
+                replicate_values.append([])
 
         vals = np.array(values)
 
@@ -1655,6 +1686,23 @@ def _plot_affinity_stacked_bars(
                 edgecolor="white",
                 linewidth=t.bar_linewidth,
             )
+            for label_idx, reps in enumerate(replicate_values):
+                if neg_vals[label_idx] != 0 and reps:
+                    negative_bases = _ensure_replicate_bases(
+                        replicate_bottoms_neg[label_idx], len(reps)
+                    )
+                    positive_bases = _ensure_replicate_bases(
+                        replicate_bottoms_pos[label_idx], len(reps)
+                    )
+                    scatter_stacked_segment_replicates(
+                        ax,
+                        float(x[label_idx]),
+                        float(bottoms_neg[label_idx]),
+                        reps,
+                        plot_settings,
+                        positive_base_values=positive_bases,
+                        negative_base_values=negative_bases,
+                    )
             bottoms_neg += neg_vals
 
         if np.any(pos_vals != 0):
@@ -1668,7 +1716,31 @@ def _plot_affinity_stacked_bars(
                 edgecolor="white",
                 linewidth=t.bar_linewidth,
             )
+            for label_idx, reps in enumerate(replicate_values):
+                if pos_vals[label_idx] != 0 and reps:
+                    negative_bases = _ensure_replicate_bases(
+                        replicate_bottoms_neg[label_idx], len(reps)
+                    )
+                    positive_bases = _ensure_replicate_bases(
+                        replicate_bottoms_pos[label_idx], len(reps)
+                    )
+                    scatter_stacked_segment_replicates(
+                        ax,
+                        float(x[label_idx]),
+                        float(bottoms_pos[label_idx]),
+                        reps,
+                        plot_settings,
+                        positive_base_values=positive_bases,
+                        negative_base_values=negative_bases,
+                    )
             bottoms_pos += pos_vals
+
+        for label_idx, reps in enumerate(replicate_values):
+            _advance_signed_bases(
+                replicate_bottoms_neg[label_idx],
+                replicate_bottoms_pos[label_idx],
+                reps,
+            )
 
     # Add total score markers with uncertainty
     if affinity_settings.show_error_bars:
@@ -1831,10 +1903,12 @@ def _plot_affinity_group_bars(
         x = np.arange(n_groups)
 
         series: list[tuple[str, list[float], list[float]]] = []
+        replicate_values: list[list[list[float]]] = []
         for cond_label in valid_labels:
             cond = result.get_condition(cond_label)
             means: list[float] = []
             sems: list[float] = []
+            cond_replicates: list[list[float]] = []
 
             for group in ordered_groups:
                 # Find matching entry
@@ -1849,6 +1923,7 @@ def _plot_affinity_group_bars(
                     means.append(entry.affinity_score)
                     # Prefer replicate-based SEM
                     per_rep = entry.affinity_score_per_replicate
+                    cond_replicates.append(list(per_rep))
                     if len(per_rep) >= 2:
                         sem = float(np.std(per_rep, ddof=1) / np.sqrt(len(per_rep)))
                     elif entry.affinity_score_uncertainty is not None:
@@ -1859,8 +1934,10 @@ def _plot_affinity_group_bars(
                 else:
                     means.append(0.0)
                     sems.append(0.0)
+                    cond_replicates.append([])
 
             series.append((cond_label, means, sems))
+            replicate_values.append(cond_replicates)
 
         grouped_bars(
             ax,
@@ -1871,6 +1948,7 @@ def _plot_affinity_group_bars(
             show_error=affinity_settings.show_error_bars,
             reference_label="Score = 0 (neutral)",
             bar_edgecolor="none",
+            replicate_values=replicate_values if replicate_values else None,
         )
 
         poly_label = f": {poly_type}" if n_poly > 1 else ""

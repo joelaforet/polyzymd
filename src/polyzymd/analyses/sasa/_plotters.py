@@ -7,7 +7,7 @@ import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Sequence, cast
 
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
@@ -15,6 +15,7 @@ from polyzymd.analyses.shared.plotting import (
     get_colors,
     get_output_path,
     save_figure,
+    scatter_replicate_values,
 )
 
 if TYPE_CHECKING:
@@ -42,11 +43,14 @@ class SASANormalizedControlRow:
         Percent change in mean SASA relative to the control mean.
     sem_delta : float or None
         Propagated SEM in percent units when available.
+    replicate_percent_deltas : list[float]
+        Per-replicate percent changes relative to the control aggregate mean.
     """
 
     condition_label: str
     percent_delta: float
     sem_delta: float | None
+    replicate_percent_deltas: list[float]
 
 
 def plot_sasa_comparison_bars(
@@ -94,18 +98,14 @@ def plot_sasa_comparison_bars(
             alpha=theme.bar_alpha,
         )
 
-        for idx, rep_values in enumerate(replicate_values):
-            if not rep_values:
-                continue
-            jitter = np.linspace(-0.08, 0.08, len(rep_values))
-            ax.scatter(
-                np.full(len(rep_values), positions[idx]) + jitter,
-                rep_values,
-                color="black",
-                s=16,
-                alpha=0.7,
-                zorder=4,
-            )
+        scatter_replicate_values(
+            ax,
+            positions,
+            replicate_values,
+            ctx.plot_settings,
+            orientation="vertical",
+            bar_width=0.8,
+        )
 
         ax.set_xticks(positions)
         ax.set_xticklabels(labels, rotation=30, ha="right")
@@ -162,6 +162,7 @@ def plot_sasa_normalized_control_bars(
         labels = [row.condition_label for row in rows]
         deltas = [row.percent_delta for row in rows]
         sems = [row.sem_delta for row in rows]
+        replicate_values = [row.replicate_percent_deltas for row in rows]
         positions = np.arange(len(labels), dtype=np.float64)
         colors = get_colors(len(labels), ctx.plot_settings)
         yerr = (
@@ -181,6 +182,14 @@ def plot_sasa_normalized_control_bars(
             linewidth=theme.bar_linewidth,
             capsize=theme.bar_capsize,
             alpha=theme.bar_alpha,
+        )
+        scatter_replicate_values(
+            ax,
+            positions,
+            replicate_values,
+            ctx.plot_settings,
+            orientation="vertical",
+            bar_width=0.8,
         )
         ax.axhline(0.0, color="black", linewidth=1.0, alpha=0.7)
         ax.set_xticks(positions)
@@ -427,15 +436,50 @@ def _build_sasa_normalized_control_rows(
             control_mean,
             control_run.sem_sasa,
         )
+        # Replicates are not guaranteed to be matched across conditions, so use
+        # the configured control aggregate mean as the shared baseline
+        replicate_deltas = _build_sasa_normalized_replicate_deltas(
+            summary.per_replicate_means,
+            control_mean,
+        )
         rows.append(
             SASANormalizedControlRow(
                 condition_label=condition.label,
                 percent_delta=percent_delta,
                 sem_delta=sem_delta,
+                replicate_percent_deltas=replicate_deltas,
             )
         )
 
     return rows
+
+
+def _build_sasa_normalized_replicate_deltas(
+    per_replicate_means: Sequence[float], control_mean: float
+) -> list[float]:
+    """Normalize replicate SASA means against the aggregate control mean.
+
+    Parameters
+    ----------
+    per_replicate_means : sequence of float
+        Per-replicate mean SASA values for one condition.
+    control_mean : float
+        Aggregate control mean used as the normalization baseline.
+
+    Returns
+    -------
+    list[float]
+        Finite percent changes computed as ``(replicate - control) / control * 100``.
+    """
+
+    if not _is_valid_control_mean(control_mean):
+        return []
+
+    deltas: list[float] = []
+    for replicate_mean in per_replicate_means:
+        if math.isfinite(replicate_mean):
+            deltas.append((replicate_mean - control_mean) / control_mean * 100.0)
+    return deltas
 
 
 def _propagate_sasa_normalized_sem(

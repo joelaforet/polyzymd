@@ -3172,6 +3172,54 @@ def test_plot_composition_absolute_smoke(tmp_path: Path) -> None:
     assert path.exists()
 
 
+def test_plot_composition_absolute_uses_replicate_specific_bases(tmp_path: Path) -> None:
+    """Absolute composition dots should use per-replicate cumulative bases."""
+    pytest.importorskip("matplotlib")
+    from polyzymd.analyses.hydrogen_bonds._plotters import plot_composition_absolute
+
+    output_dir = tmp_path / "plots"
+    output_dir.mkdir(parents=True)
+    results = {
+        "CondA": HydrogenBondAggregatedResult(
+            replicates=[1, 2],
+            n_replicates=2,
+            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [1.0, 3.0])],
+            composition_entries=[
+                AggregatedCompositionEntry(
+                    donor_partition="groupA",
+                    acceptor_partition="groupA",
+                    mean_hbonds_per_frame=2.0,
+                    sem_hbonds_per_frame=1.0,
+                    per_replicate_hbonds=[1.0, 3.0],
+                    mean_fraction_of_total=0.4,
+                    sem_fraction_of_total=0.0,
+                    per_replicate_fraction=[0.2, 0.6],
+                ),
+                AggregatedCompositionEntry(
+                    donor_partition="groupA",
+                    acceptor_partition="groupB",
+                    mean_hbonds_per_frame=3.0,
+                    sem_hbonds_per_frame=1.0,
+                    per_replicate_hbonds=[4.0, 2.0],
+                    mean_fraction_of_total=0.6,
+                    sem_fraction_of_total=0.0,
+                    per_replicate_fraction=[0.8, 0.4],
+                ),
+            ],
+        )
+    }
+
+    with patch(
+        "polyzymd.analyses.hydrogen_bonds._plotters.scatter_stacked_segment_replicates"
+    ) as scatter:
+        path = plot_composition_absolute(results, ["CondA"], output_dir, PlotSettings())
+
+    assert path is not None
+    assert scatter.call_count == 2
+    assert scatter.call_args_list[0].kwargs["replicate_base_values"] == [0.0, 0.0]
+    assert scatter.call_args_list[1].kwargs["replicate_base_values"] == [1.0, 3.0]
+
+
 def test_plot_composition_fraction_overlap_exceeds_one(tmp_path: Path) -> None:
     """Composition fraction plot should not clip stacked fractions above 1.0."""
     pytest.importorskip("matplotlib")
@@ -3213,6 +3261,54 @@ def test_plot_composition_fraction_overlap_exceeds_one(tmp_path: Path) -> None:
     path = plot_composition_fraction(results, ["CondA"], output_dir, PlotSettings())
     assert path is not None
     assert path.exists()
+
+
+def test_plot_composition_fraction_uses_replicate_specific_bases(tmp_path: Path) -> None:
+    """Fraction composition dots should use per-replicate cumulative bases."""
+    pytest.importorskip("matplotlib")
+    from polyzymd.analyses.hydrogen_bonds._plotters import plot_composition_fraction
+
+    output_dir = tmp_path / "plots"
+    output_dir.mkdir(parents=True)
+    results = {
+        "CondA": HydrogenBondAggregatedResult(
+            replicates=[1, 2],
+            n_replicates=2,
+            summaries=[_make_aggregated_summary("protein_polymer", 2.0, 0.1, [2.0, 2.0])],
+            composition_entries=[
+                AggregatedCompositionEntry(
+                    donor_partition="groupA",
+                    acceptor_partition="groupA",
+                    mean_hbonds_per_frame=2.0,
+                    sem_hbonds_per_frame=0.0,
+                    per_replicate_hbonds=[2.0, 2.0],
+                    mean_fraction_of_total=0.5,
+                    sem_fraction_of_total=0.1,
+                    per_replicate_fraction=[0.4, 0.6],
+                ),
+                AggregatedCompositionEntry(
+                    donor_partition="groupA",
+                    acceptor_partition="groupB",
+                    mean_hbonds_per_frame=2.0,
+                    sem_hbonds_per_frame=0.0,
+                    per_replicate_hbonds=[2.0, 2.0],
+                    mean_fraction_of_total=0.5,
+                    sem_fraction_of_total=0.1,
+                    per_replicate_fraction=[0.7, 0.3],
+                ),
+            ],
+        )
+    }
+
+    with patch(
+        "polyzymd.analyses.hydrogen_bonds._plotters.scatter_stacked_segment_replicates"
+    ) as scatter:
+        path = plot_composition_fraction(results, ["CondA"], output_dir, PlotSettings())
+
+    assert path is not None
+    assert scatter.call_count == 2
+    assert scatter.call_args_list[0].kwargs["replicate_base_values"] == [0.0, 0.0]
+    assert scatter.call_args_list[1].kwargs["replicate_base_values"] == [0.4, 0.6]
 
 
 def test_plot_timeseries_smoke(tmp_path: Path) -> None:
