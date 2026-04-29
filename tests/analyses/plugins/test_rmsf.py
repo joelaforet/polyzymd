@@ -9,6 +9,8 @@ Heavy dependencies (MDAnalysis, trajectories) are mocked.
 
 from __future__ import annotations
 
+import json
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -18,7 +20,9 @@ import pytest
 from polyzymd.analyses.base import (
     AggregateContext,
     ComparisonContext,
+    ComparisonResult,
     Condition,
+    ConditionSummary,
     MetricValue,
     PlotContext,
     ReplicateContext,
@@ -993,6 +997,279 @@ class TestMakeAggregatedFilename:
 # ============================================================================
 # Test: plot
 # ============================================================================
+
+
+class TestRMSFComparisonDots:
+    """Test replicate dot overlays on RMSF comparison plots."""
+
+    @staticmethod
+    def _plot_settings(**theme_overrides):
+        """Return plot settings with optional theme overrides."""
+        from polyzymd.config.comparison import PlotSettings
+
+        return PlotSettings(theme=theme_overrides) if theme_overrides else PlotSettings()
+
+    @staticmethod
+    def _write_aggregated_result(aggregated_dir: Path, payload: dict) -> None:
+        """Write an aggregated RMSF JSON fixture."""
+        aggregated_dir.mkdir(parents=True)
+        (aggregated_dir / "rmsf_aggregated.json").write_text(json.dumps(payload))
+
+    def test_aggregated_fallback_draws_per_replicate_dots(self, tmp_path):
+        """Aggregated fallback should draw dots from per_replicate_mean_rmsf."""
+        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_aggregated
+
+        aggregated_dir = tmp_path / "analysis" / "control" / "rmsf" / "aggregated"
+        self._write_aggregated_result(
+            aggregated_dir,
+            {
+                "overall_mean_rmsf": 0.0,
+                "overall_sem_rmsf": 0.0,
+                "per_replicate_mean_rmsf": [0.0, 1.2, 1.4],
+            },
+        )
+        data = {"Control": {"aggregated_dir": aggregated_dir}}
+
+        with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
+            _plot_rmsf_comparison_from_aggregated(
+                data,
+                ["Control"],
+                tmp_path / "figures",
+                self._plot_settings(),
+            )
+
+        mock_scatter.assert_called_once()
+        np.testing.assert_allclose(mock_scatter.call_args.args[1], [0.0, 1.2, 1.4])
+
+    def test_generic_comparison_result_draws_metric_replicate_dots(self, tmp_path):
+        """Generic default comparison results should provide replicate dots."""
+        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison
+
+        result = ComparisonResult(
+            analysis_type="rmsf",
+            name="test",
+            conditions=[
+                ConditionSummary(
+                    label="Control",
+                    n_replicates=3,
+                    mean_rmsf_mean=1.2,
+                    mean_rmsf_sem=0.1,
+                    mean_rmsf_replicate_values=[1.0, 1.2, 1.4],
+                )
+            ],
+            ranking=["Control"],
+        )
+        result_path = tmp_path / "comparison" / "rmsf" / "result.json"
+        result.save(result_path)
+        data = {"__meta__": {"comparison_result_path": result_path}}
+
+        with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
+            _plot_rmsf_comparison(
+                data,
+                ["Control"],
+                tmp_path / "figures",
+                self._plot_settings(),
+            )
+
+        mock_scatter.assert_called_once()
+        np.testing.assert_allclose(mock_scatter.call_args.args[1], [1.0, 1.2, 1.4])
+
+    def test_unexpected_custom_comparison_load_error_propagates(self, tmp_path):
+        """Unexpected RMSF comparison load errors should not trigger fallback plotting."""
+        from polyzymd.analyses.rmsf._plotters import _find_rmsf_comparison_result
+
+        result_path = tmp_path / "comparison" / "rmsf" / "result.json"
+        result_path.parent.mkdir(parents=True)
+        result_path.write_text("{}")
+        data = {"__meta__": {"comparison_result_path": result_path}}
+
+        with (
+            patch(
+                "polyzymd.analyses.rmsf._comparison_results.RMSFComparisonResult.load",
+                side_effect=RuntimeError("custom loader regression"),
+            ),
+            pytest.raises(RuntimeError, match="custom loader regression"),
+        ):
+            _find_rmsf_comparison_result(data, ["Control"])
+
+    def test_missing_replicate_values_do_not_draw_dots(self, tmp_path):
+        """Missing replicate values should not fail or call scatter."""
+        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_result
+
+        result = ComparisonResult(
+            analysis_type="rmsf",
+            name="test",
+            conditions=[
+                ConditionSummary(
+                    label="Control",
+                    n_replicates=3,
+                    mean_rmsf_mean=1.2,
+                    mean_rmsf_sem=0.1,
+                )
+            ],
+            ranking=["Control"],
+        )
+
+        with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
+            _plot_rmsf_comparison_from_result(
+                result,
+                tmp_path / "figures",
+                self._plot_settings(),
+            )
+
+        mock_scatter.assert_not_called()
+
+    def test_non_finite_replicate_values_are_filtered(self, tmp_path):
+        """NaN and infinite replicate values should be filtered before scatter."""
+        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_result
+
+        result = ComparisonResult(
+            analysis_type="rmsf",
+            name="test",
+            conditions=[
+                ConditionSummary(
+                    label="Control",
+                    n_replicates=5,
+                    mean_rmsf_mean=1.2,
+                    mean_rmsf_sem=0.1,
+                    mean_rmsf_replicate_values=[1.0, np.nan, np.inf, -np.inf, 1.4],
+                )
+            ],
+            ranking=["Control"],
+        )
+
+        with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
+            _plot_rmsf_comparison_from_result(
+                result,
+                tmp_path / "figures",
+                self._plot_settings(),
+            )
+
+        mock_scatter.assert_called_once()
+        np.testing.assert_allclose(mock_scatter.call_args.args[1], [1.0, 1.4])
+
+    def test_theme_dot_settings_are_honored(self, tmp_path):
+        """Replicate dots should use theme dot colour, size, and alpha."""
+        from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison_from_result
+
+        result = ComparisonResult(
+            analysis_type="rmsf",
+            name="test",
+            conditions=[
+                ConditionSummary(
+                    label="Control",
+                    n_replicates=2,
+                    mean_rmsf_mean=1.2,
+                    mean_rmsf_sem=0.1,
+                    mean_rmsf_replicate_values=[1.1, 1.3],
+                )
+            ],
+            ranking=["Control"],
+        )
+
+        with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
+            _plot_rmsf_comparison_from_result(
+                result,
+                tmp_path / "figures",
+                self._plot_settings(dot_color="#123456", dot_size=37, dot_alpha=0.42),
+            )
+
+        mock_scatter.assert_called_once()
+        assert mock_scatter.call_args.kwargs["color"] == "#123456"
+        assert mock_scatter.call_args.kwargs["s"] == 37
+        assert mock_scatter.call_args.kwargs["alpha"] == 0.42
+
+
+class TestRMSFReferenceSS:
+    """Test reference secondary-structure loading for RMSF plots."""
+
+    @staticmethod
+    def _reference_data(tmp_path: Path) -> dict:
+        """Return plot data with an existing reference PDB path."""
+        reference_path = tmp_path / "reference.pdb"
+        reference_path.write_text("HEADER    TEST REFERENCE\n")
+        return {"__meta__": {"settings": {"reference_file": str(reference_path)}}}
+
+    def test_expected_mdtraj_load_error_returns_none(self, tmp_path, monkeypatch):
+        """Bad reference files should skip SS annotation without failing plots."""
+        from polyzymd.analyses.rmsf._plotters import _load_reference_ss
+
+        fake_mdtraj = MagicMock()
+        fake_mdtraj.load.side_effect = ValueError("bad reference PDB")
+        monkeypatch.setitem(sys.modules, "mdtraj", fake_mdtraj)
+
+        assert _load_reference_ss(self._reference_data(tmp_path)) is None
+
+    def test_expected_reference_dssp_error_returns_none(self, tmp_path, monkeypatch):
+        """Known DSSP validation failures should skip SS annotation."""
+        from polyzymd.analyses.rmsf._plotters import _load_reference_ss
+
+        fake_traj = MagicMock()
+        fake_traj.topology.select.return_value = [0]
+        fake_traj.atom_slice.return_value = MagicMock()
+
+        fake_mdtraj = MagicMock()
+        fake_mdtraj.load.return_value = fake_traj
+        fake_mdtraj.compute_dssp.side_effect = ValueError("DSSP validation failed")
+        monkeypatch.setitem(sys.modules, "mdtraj", fake_mdtraj)
+
+        assert _load_reference_ss(self._reference_data(tmp_path)) is None
+
+    def test_unexpected_reference_load_runtime_error_propagates(self, tmp_path, monkeypatch):
+        """Runtime errors while loading references should expose regressions."""
+        from polyzymd.analyses.rmsf._plotters import _load_reference_ss
+
+        fake_mdtraj = MagicMock()
+        fake_mdtraj.load.side_effect = RuntimeError("mdtraj loader regression")
+        monkeypatch.setitem(sys.modules, "mdtraj", fake_mdtraj)
+
+        with pytest.raises(RuntimeError, match="mdtraj loader regression"):
+            _load_reference_ss(self._reference_data(tmp_path))
+
+    def test_unexpected_atom_slice_runtime_error_propagates(self, tmp_path, monkeypatch):
+        """Runtime errors while slicing references should expose regressions."""
+        from polyzymd.analyses.rmsf._plotters import _load_reference_ss
+
+        fake_traj = MagicMock()
+        fake_traj.topology.select.return_value = [0]
+        fake_traj.atom_slice.side_effect = RuntimeError("atom slice regression")
+
+        fake_mdtraj = MagicMock()
+        fake_mdtraj.load.return_value = fake_traj
+        monkeypatch.setitem(sys.modules, "mdtraj", fake_mdtraj)
+
+        with pytest.raises(RuntimeError, match="atom slice regression"):
+            _load_reference_ss(self._reference_data(tmp_path))
+
+    def test_unexpected_dssp_runtime_error_propagates(self, tmp_path, monkeypatch):
+        """Runtime errors while computing DSSP should expose regressions."""
+        from polyzymd.analyses.rmsf._plotters import _load_reference_ss
+
+        fake_traj = MagicMock()
+        fake_traj.topology.select.return_value = [0]
+        fake_traj.atom_slice.return_value = MagicMock()
+
+        fake_mdtraj = MagicMock()
+        fake_mdtraj.load.return_value = fake_traj
+        fake_mdtraj.compute_dssp.side_effect = RuntimeError("DSSP regression")
+        monkeypatch.setitem(sys.modules, "mdtraj", fake_mdtraj)
+
+        with pytest.raises(RuntimeError, match="DSSP regression"):
+            _load_reference_ss(self._reference_data(tmp_path))
+
+    def test_unexpected_reference_ss_error_propagates(self, tmp_path, monkeypatch):
+        """Unexpected programming errors should not be swallowed."""
+        from polyzymd.analyses.rmsf._plotters import _load_reference_ss
+
+        fake_traj = MagicMock()
+        fake_traj.topology.select.side_effect = AttributeError("topology regression")
+
+        fake_mdtraj = MagicMock()
+        fake_mdtraj.load.return_value = fake_traj
+        monkeypatch.setitem(sys.modules, "mdtraj", fake_mdtraj)
+
+        with pytest.raises(AttributeError, match="topology regression"):
+            _load_reference_ss(self._reference_data(tmp_path))
 
 
 class TestPlot:

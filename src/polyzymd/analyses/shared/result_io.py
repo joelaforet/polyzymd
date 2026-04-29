@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import logging
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Callable, Sequence, TypeVar
+
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+EXPECTED_RESULT_LOAD_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    JSONDecodeError,
+    ValidationError,
+)
 
 
 def find_comparison_result(
@@ -157,7 +165,7 @@ def _try_load_exact(path: Path, loader: Callable[[Path], T], log: logging.Logger
         result = loader(path)
         log.debug(f"Loaded result from {path}")
         return result
-    except Exception as exc:  # noqa: BLE001
+    except EXPECTED_RESULT_LOAD_ERRORS as exc:
         log.debug(f"Could not load {path}: {exc}")
         return None
 
@@ -238,7 +246,7 @@ def _try_load_from_dir(
             result = loader(result_file)
             log.debug(f"Loaded result from {result_file}")
             return result
-        except Exception as exc:  # noqa: BLE001
+        except EXPECTED_RESULT_LOAD_ERRORS as exc:
             log.debug(f"Could not load {result_file}: {exc}")
 
     return None

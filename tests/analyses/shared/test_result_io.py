@@ -7,6 +7,7 @@ sanitization without requiring simulation dependencies.
 from __future__ import annotations
 
 import os
+from json import JSONDecodeError
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -244,7 +245,7 @@ class TestFindComparisonResult:
 
         def _loader(path: Path) -> str:
             if path == bad_file:
-                raise ValueError("bad payload")
+                raise JSONDecodeError("bad payload", doc="", pos=0)
             return path.name
 
         data = {
@@ -283,7 +284,7 @@ class TestFindComparisonResult:
 
         def _loader(path: Path) -> str:
             if path == corrupt_newer_file:
-                raise ValueError("corrupt JSON")
+                raise JSONDecodeError("corrupt JSON", doc="", pos=0)
             return path.name
 
         caplog.set_level("DEBUG")
@@ -296,3 +297,21 @@ class TestFindComparisonResult:
 
         assert result == older_file.name
         assert f"Could not load {corrupt_newer_file}" in caplog.text
+
+    def test_unexpected_loader_exception_propagates(self, tmp_path: Path) -> None:
+        """Propagate unexpected loader failures instead of hiding regressions."""
+        results_dir = tmp_path / "results"
+        result_file = self._touch_json(results_dir / "contacts_comparison.json")
+
+        def _loader(path: Path) -> str:
+            if path == result_file:
+                raise RuntimeError("loader regression")
+            return path.name
+
+        with pytest.raises(RuntimeError, match="loader regression"):
+            find_comparison_result(
+                data={"__meta__": {"results_dir": results_dir}},
+                labels=["cond_a"],
+                glob_patterns=["*_comparison.json"],
+                loader=_loader,
+            )

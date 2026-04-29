@@ -8,10 +8,12 @@ All functions are called exclusively from ``RMSFAnalysis.plot()``.
 from __future__ import annotations
 
 import logging
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
+from pydantic import ValidationError
 
 from polyzymd.analyses.shared.plotting import (
     apply_axis_style,
@@ -23,6 +25,18 @@ from polyzymd.analyses.shared.plotting import (
 )
 
 logger = logging.getLogger(__name__)
+
+_EXPECTED_COMPARISON_LOAD_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    JSONDecodeError,
+    ValidationError,
+)
+_EXPECTED_MDTRAJ_IMPORT_ERRORS: tuple[type[Exception], ...] = (ImportError, OSError)
+_EXPECTED_REFERENCE_SS_LOAD_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    ValueError,
+)
+_EXPECTED_REFERENCE_DSSP_ERRORS: tuple[type[Exception], ...] = (OSError, ValueError)
 
 
 # ---------------------------------------------------------------------------
@@ -151,14 +165,22 @@ def _find_rmsf_comparison_result(
     labels: Sequence[str],
 ) -> Any | None:
     """Try to find a pre-computed RMSF comparison result."""
+    from polyzymd.analyses.base import ComparisonResult
     from polyzymd.analyses.rmsf._comparison_results import RMSFComparisonResult
     from polyzymd.analyses.shared.result_io import find_comparison_result
 
     def _try_load(path: Path) -> Any | None:
         try:
             return RMSFComparisonResult.load(path)
-        except Exception as e:
-            logger.debug(f"Could not load {path}: {e}")
+        except _EXPECTED_COMPARISON_LOAD_ERRORS as e:
+            logger.debug(f"Could not load custom RMSF comparison result from {path}: {e}")
+
+        try:
+            result = ComparisonResult.load(path)
+            if result.analysis_type == "rmsf":
+                return result
+        except _EXPECTED_COMPARISON_LOAD_ERRORS as e:
+            logger.debug(f"Could not load generic RMSF comparison result from {path}: {e}")
         return None
 
     return find_comparison_result(
@@ -183,21 +205,40 @@ def _plot_rmsf_comparison_from_result(
     t = plot_settings.theme
 
     # Get conditions sorted by RMSF (lowest first)
-    labels_sorted = (
-        result.ranking if hasattr(result, "ranking") else [c.label for c in result.conditions]
-    )
+    labels_sorted = getattr(result, "ranking", None) or [c.label for c in result.conditions]
 
+    plot_labels = []
     means = []
     sems = []
-    replicate_data: list[list[float]] = []
+    replicate_data: list[Any] = []
 
     for label in labels_sorted:
-        cond = result.get_condition(label)
-        means.append(cond.mean_rmsf)
-        sems.append(cond.sem_rmsf)
-        replicate_data.append(getattr(cond, "replicate_values", None) or [])
+        cond = _get_condition_summary(result, label)
+        if cond is None:
+            continue
 
-    n = len(labels_sorted)
+        mean_val = _get_first_available_field(cond, "mean_rmsf", "mean_rmsf_mean")
+        if mean_val is None:
+            continue
+
+        sem_val = _get_first_available_field(cond, "sem_rmsf", "mean_rmsf_sem", default=0.0)
+        rep_vals = _get_first_available_field(
+            cond,
+            "replicate_values",
+            "mean_rmsf_replicate_values",
+            default=[],
+        )
+
+        plot_labels.append(label)
+        means.append(mean_val)
+        sems.append(sem_val)
+        replicate_data.append(rep_vals)
+
+    if not plot_labels:
+        logger.warning("No RMSF comparison data found")
+        return []
+
+    n = len(plot_labels)
     means_arr = np.array(means)
     sems_arr = np.array(sems)
     positions = np.arange(n)
@@ -217,24 +258,10 @@ def _plot_rmsf_comparison_from_result(
         height=bar_height,
     )
 
-    # Overlay jittered replicate dots
-    rng = np.random.default_rng(seed=42)
-    for i, rep_vals in enumerate(replicate_data):
-        if rep_vals:
-            rep_arr = np.asarray(rep_vals, dtype=float)
-            jitter = rng.uniform(-bar_height * 0.25, bar_height * 0.25, size=len(rep_arr))
-            ax.scatter(
-                rep_arr,
-                np.full_like(rep_arr, float(positions[i])) + jitter,
-                color=t.dot_color,
-                s=t.dot_size,
-                zorder=5,
-                alpha=t.dot_alpha,
-                edgecolors="none",
-            )
+    _draw_horizontal_replicate_dots(ax, replicate_data, positions, bar_height, plot_settings)
 
     ax.set_yticks(positions)
-    ax.set_yticklabels(labels_sorted)
+    ax.set_yticklabels(plot_labels)
     apply_axis_style(ax, plot_settings, title="RMSF Comparison", xlabel="Mean RMSF (Å)")
     ax.invert_yaxis()
 
@@ -259,6 +286,7 @@ def _plot_rmsf_comparison_from_aggregated(
     plot_labels = []
     means = []
     sems = []
+    replicate_data: list[Any] = []
 
     for label in labels:
         cond_data = data.get(label)
@@ -279,22 +307,32 @@ def _plot_rmsf_comparison_from_aggregated(
             with open(result_file) as f:
                 agg_data = json.load(f)
 
-            # Support multiple key naming conventions
-            mean_val = (
-                agg_data.get("overall_mean_rmsf")
-                or agg_data.get("overall_mean")
-                or agg_data.get("mean_rmsf")
+            # Support multiple key naming conventions without dropping zeros
+            mean_val = _get_first_available_field(
+                agg_data,
+                "overall_mean_rmsf",
+                "overall_mean",
+                "mean_rmsf",
             )
-            sem_val = (
-                agg_data.get("overall_sem_rmsf")
-                or agg_data.get("overall_sem")
-                or agg_data.get("sem_rmsf", 0)
+            sem_val = _get_first_available_field(
+                agg_data,
+                "overall_sem_rmsf",
+                "overall_sem",
+                "sem_rmsf",
+                default=0,
+            )
+            rep_vals = _get_first_available_field(
+                agg_data,
+                "per_replicate_mean_rmsf",
+                "replicate_values",
+                default=[],
             )
 
             if mean_val is not None:
                 plot_labels.append(label)
                 means.append(mean_val)
                 sems.append(sem_val)
+                replicate_data.append(rep_vals)
 
         except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.warning(f"Failed to load aggregated RMSF for {label}: {e}")
@@ -310,6 +348,7 @@ def _plot_rmsf_comparison_from_aggregated(
     positions = np.arange(len(plot_labels))
     colors = get_colors(len(plot_labels), plot_settings)
 
+    bar_height = 0.7
     ax.barh(
         positions,
         means,
@@ -318,8 +357,10 @@ def _plot_rmsf_comparison_from_aggregated(
         edgecolor=t.bar_edgecolor,
         linewidth=t.bar_linewidth,
         capsize=t.bar_capsize,
-        height=0.7,
+        height=bar_height,
     )
+
+    _draw_horizontal_replicate_dots(ax, replicate_data, positions, bar_height, plot_settings)
 
     ax.set_yticks(positions)
     ax.set_yticklabels(plot_labels)
@@ -332,6 +373,166 @@ def _plot_rmsf_comparison_from_aggregated(
     return [save_figure(fig, output_path, plot_settings)]
 
 
+def _get_condition_summary(result: Any, label: str) -> Any | None:
+    """Return a condition summary from custom or generic comparison results.
+
+    Parameters
+    ----------
+    result : Any
+        Comparison result object.
+    label : str
+        Condition label to locate.
+
+    Returns
+    -------
+    Any or None
+        Matching condition summary, or ``None`` if no condition matches.
+    """
+    get_condition = getattr(result, "get_condition", None)
+    if callable(get_condition):
+        try:
+            return get_condition(label)
+        except KeyError:
+            return None
+
+    for condition in getattr(result, "conditions", []):
+        if getattr(condition, "label", None) == label:
+            return condition
+    return None
+
+
+def _get_first_available_field(item: Any, *names: str, default: Any = None) -> Any:
+    """Return the first present field without treating zero as missing.
+
+    Parameters
+    ----------
+    item : Any
+        Mapping or object to inspect.
+    *names : str
+        Field names in priority order.
+    default : Any, optional
+        Value returned when none of the fields are present, by default ``None``.
+
+    Returns
+    -------
+    Any
+        First non-``None`` field value, preserving falsey finite values such as
+        ``0.0`` and empty lists when they are explicitly present.
+    """
+    extras = getattr(item, "model_extra", None)
+    for name in names:
+        if isinstance(item, dict) and name in item:
+            value = item[name]
+        elif extras is not None and name in extras:
+            value = extras[name]
+        elif hasattr(item, name):
+            value = getattr(item, name)
+        else:
+            continue
+
+        if value is not None:
+            return value
+    return default
+
+
+def _finite_float_values(values: Any) -> np.ndarray:
+    """Convert replicate values to a finite one-dimensional float array.
+
+    Parameters
+    ----------
+    values : Any
+        Candidate replicate values. ``None`` and non-numeric inputs are treated
+        as missing values.
+
+    Returns
+    -------
+    numpy.ndarray
+        Finite replicate values. The array is empty when no finite values are
+        available.
+    """
+    if values is None:
+        return np.array([], dtype=float)
+
+    try:
+        value_array = np.asarray(values, dtype=float)
+    except (TypeError, ValueError):
+        return np.array([], dtype=float)
+
+    if value_array.ndim == 0:
+        value_array = value_array.reshape(1)
+
+    value_array = value_array.ravel()
+    return value_array[np.isfinite(value_array)]
+
+
+def _replicate_dot_jitter(n_values: int, bar_height: float) -> np.ndarray:
+    """Return deterministic jitter offsets for horizontal replicate dots.
+
+    Parameters
+    ----------
+    n_values : int
+        Number of replicate dots in one condition.
+    bar_height : float
+        Height of the corresponding horizontal bar.
+
+    Returns
+    -------
+    numpy.ndarray
+        Jitter offsets centred around zero.
+    """
+    if n_values <= 0:
+        return np.array([], dtype=float)
+    if n_values == 1:
+        return np.array([0.0], dtype=float)
+
+    max_jitter = bar_height * 0.25
+    return np.linspace(-max_jitter, max_jitter, n_values)
+
+
+def _draw_horizontal_replicate_dots(
+    ax: Any,
+    replicate_data: Sequence[Any],
+    positions: np.ndarray,
+    bar_height: float,
+    plot_settings: Any,
+) -> None:
+    """Overlay finite per-replicate RMSF dots on horizontal bars.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes containing the horizontal bar chart.
+    replicate_data : sequence of Any
+        Per-condition replicate values aligned to ``positions``.
+    positions : numpy.ndarray
+        Bar y-positions.
+    bar_height : float
+        Height of each horizontal bar.
+    plot_settings : Any
+        Plot settings whose theme supplies dot style values.
+    """
+    t = plot_settings.theme
+
+    for idx, values in enumerate(replicate_data):
+        if idx >= len(positions):
+            break
+
+        rep_arr = _finite_float_values(values)
+        if rep_arr.size == 0:
+            continue
+
+        jitter = _replicate_dot_jitter(rep_arr.size, bar_height)
+        ax.scatter(
+            rep_arr,
+            np.full(rep_arr.shape, float(positions[idx]), dtype=float) + jitter,
+            color=t.dot_color,
+            s=t.dot_size,
+            zorder=5,
+            alpha=t.dot_alpha,
+            edgecolors="none",
+        )
+
+
 def _load_reference_ss(data: dict[str, Any]) -> dict | None:
     """Load reference SS assignment from the crystal/input PDB.
 
@@ -342,7 +543,9 @@ def _load_reference_ss(data: dict[str, Any]) -> dict | None:
     -------
     dict or None
         ``{"residue_ids": [...], "ss_codes": [...]}`` where ss_codes
-        are integers (0=coil, 1=helix, 2=strand), or None on failure.
+        are integers (0=coil, 1=helix, 2=strand), or None when the reference
+        file cannot be loaded or a known reference-data validation failure
+        prevents DSSP computation.
     """
     meta = data.get("__meta__", {})
 
@@ -370,33 +573,39 @@ def _load_reference_ss(data: dict[str, Any]) -> dict | None:
 
     try:
         import mdtraj as md
+    except _EXPECTED_MDTRAJ_IMPORT_ERRORS:
+        logger.debug("mdtraj not available; skipping SS annotation bar")
+        return None
 
+    try:
         traj = md.load(str(ref_path))
+    except _EXPECTED_REFERENCE_SS_LOAD_ERRORS as exc:
+        logger.debug(f"Failed to load reference SS file: {exc}")
+        return None
 
-        # Select protein atoms only
-        protein_indices = traj.topology.select("protein")
-        if len(protein_indices) == 0:
-            return None
+    # Select protein atoms only
+    protein_indices = traj.topology.select("protein")
+    if len(protein_indices) == 0:
+        return None
+
+    try:
         traj_protein = traj.atom_slice(protein_indices)
 
         dssp = md.compute_dssp(traj_protein, simplified=True)
-        ss_string = dssp[0]  # Single frame -> 1D array of chars
-
-        # Map chars to integers
-        char_to_int = {"C": 0, "H": 1, "E": 2, "NA": 0}
-        ss_codes = [char_to_int.get(c, 0) for c in ss_string]
-
-        # Get residue IDs
-        residue_ids = [r.resSeq for r in traj_protein.topology.residues]
-
-        return {"residue_ids": residue_ids, "ss_codes": ss_codes}
-
-    except ImportError:
-        logger.debug("mdtraj not available; skipping SS annotation bar")
-        return None
-    except Exception as exc:
+    except _EXPECTED_REFERENCE_DSSP_ERRORS as exc:
         logger.debug(f"Failed to compute reference SS: {exc}")
         return None
+
+    ss_string = dssp[0]  # Single frame -> 1D array of chars
+
+    # Map chars to integers
+    char_to_int = {"C": 0, "H": 1, "E": 2, "NA": 0}
+    ss_codes = [char_to_int.get(c, 0) for c in ss_string]
+
+    # Get residue IDs
+    residue_ids = [r.resSeq for r in traj_protein.topology.residues]
+
+    return {"residue_ids": residue_ids, "ss_codes": ss_codes}
 
 
 def _draw_ss_bar(ax: Any, ss_annotation: dict, plot_settings: Any) -> None:
