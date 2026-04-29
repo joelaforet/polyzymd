@@ -344,9 +344,9 @@ class TestComputeReplicate:
         mock_result = MagicMock()
 
         with patch.object(
-            AnalysisBase, "compute_replicate", return_value=mock_result
+            AnalysisBase, "_run_replicate_default", return_value=mock_result
         ) as mock_super:
-            result = triad_analysis.compute_replicate(ctx, 1)
+            result = triad_analysis.run_replicate(ctx, 1)
 
         assert result is mock_result
         mock_super.assert_called_once_with(ctx, 1)
@@ -392,8 +392,8 @@ class TestComputeReplicate:
             settings=threshold_settings,
         )
 
-        assert triad_analysis.compute_replicate(ctx_a, 1) == {"cached": True}
-        assert triad_analysis.compute_replicate(ctx_b, 1) == {"cached": True}
+        assert triad_analysis.run_replicate(ctx_a, 1) == {"cached": True}
+        assert triad_analysis.run_replicate(ctx_b, 1) == {"cached": True}
         assert len(seen_paths) == 2
         assert seen_paths[0].name != seen_paths[1].name
 

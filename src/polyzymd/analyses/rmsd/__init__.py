@@ -623,8 +623,8 @@ class RMSDAnalysis(Analysis):
                     "condition or clear stale caches before comparing."
                 )
 
-    def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Compute RMSD for all configured runs for a single replicate.
+    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
+        """Run RMSD for all configured runs for a single replicate.
 
         Parameters
         ----------
@@ -655,7 +655,7 @@ class RMSDAnalysis(Analysis):
         if cached is not None:
             return cached
 
-        result = super().compute_replicate(ctx, replicate)
+        result = super().run_replicate(ctx, replicate)
         result.save(result_file)
         logger.info("Saved RMSD result to %s", result_file)
         return result

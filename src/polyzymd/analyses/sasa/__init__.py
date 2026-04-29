@@ -202,8 +202,8 @@ class SASAAnalysis(Analysis):
     dependencies: ClassVar[tuple[str, ...]] = ()
     # SASA is a mean-based observable (all frames contribute, SEM corrected via N_eff)
 
-    def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Compute SASA for all configured runs for a single replicate."""
+    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
+        """Run SASA for all configured runs for a single replicate."""
 
         settings = cast(SASASettings, ctx.settings)
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
@@ -221,7 +221,7 @@ class SASAAnalysis(Analysis):
         if cached is not None:
             return cached
 
-        result = super().compute_replicate(ctx, replicate)
+        result = super().run_replicate(ctx, replicate)
         result.save(result_file)
         return result
 

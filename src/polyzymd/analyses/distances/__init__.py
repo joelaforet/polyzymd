@@ -1011,12 +1011,12 @@ class DistancesAnalysis(Analysis):
         """
         return settings_fingerprint(settings)
 
-    def compute_replicate(
+    def run_replicate(
         self,
         ctx: ReplicateContext,
         replicate: int,
     ) -> Any:
-        """Compute distances for a single replicate through the runner seam."""
+        """Run distances for a single replicate through the runner seam."""
         settings = ctx.settings
         settings_tag = self._make_settings_cache_tag(settings)
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
@@ -1039,7 +1039,7 @@ class DistancesAnalysis(Analysis):
         if cached is not None:
             return cached
 
-        result = super().compute_replicate(ctx, replicate)
+        result = super().run_replicate(ctx, replicate)
         result.save(result_file)
         logger.info("Saved result to %s", result_file)
 

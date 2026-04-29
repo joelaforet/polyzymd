@@ -313,7 +313,7 @@ class TestComputeReplicate:
 
             MockAnalyzer.return_value.run.return_value = mock_result
 
-            result = analysis.compute_replicate(ctx, 1)
+            result = analysis.run_replicate(ctx, 1)
 
         assert result is mock_result
         MockAnalyzer.assert_called_once()
@@ -348,7 +348,7 @@ class TestComputeReplicate:
         with patch("polyzymd.analyses.shared.loader.TrajectoryLoader") as MockLoader:
             MockLoader.return_value.load_universe.side_effect = FileNotFoundError("No trajectory")
             with pytest.raises(ReplicateSkippedError, match="No trajectory data found"):
-                analysis.compute_replicate(ctx, 1)
+                analysis.run_replicate(ctx, 1)
 
     def test_cache_filename_includes_settings_fingerprint(self, tmp_path):
         from polyzymd.analyses.base import Condition, ReplicateContext
@@ -389,7 +389,7 @@ class TestComputeReplicate:
             MockLoader.return_value.get_timestep.return_value = 10.0
             MockAnalyzer.return_value.run.return_value = mock_result
 
-            analysis.compute_replicate(ctx, 1)
+            analysis.run_replicate(ctx, 1)
 
         save_path = mock_result.save.call_args[0][0]
         assert f"_s{expected_fp}_" in str(save_path)
@@ -438,7 +438,7 @@ class TestComputeReplicate:
             MockLoader.return_value.get_timestep.return_value = 10.0
             MockAnalyzer.return_value.run.return_value = result
 
-            analysis.compute_replicate(ctx, 1)
+            analysis.run_replicate(ctx, 1)
 
         assert ctx.result_path.exists()
         assert list(ctx.output_dir.glob("contacts_eq10ns_cut4.5_s*_rep1.json"))
@@ -530,7 +530,7 @@ class TestComputeReplicate:
             MockLoader.return_value.get_timestep.return_value = 10.0
             MockAnalyzer.return_value.run.return_value = fresh_result
 
-            result = analysis.compute_replicate(ctx, 1)
+            result = analysis.run_replicate(ctx, 1)
 
         assert result is fresh_result
         MockAnalyzer.assert_called_once()
@@ -584,7 +584,7 @@ class TestComputeReplicate:
             MockLoader.return_value.get_timestep.return_value = 10.0
             MockAnalyzer.return_value.run.return_value = fresh_result
 
-            result = analysis.compute_replicate(ctx, 1)
+            result = analysis.run_replicate(ctx, 1)
 
         assert result is fresh_result
         MockAnalyzer.assert_called_once()
@@ -637,7 +637,7 @@ class TestComputeReplicate:
             MockLoader.return_value.get_timestep.return_value = 10.0
             MockAnalyzer.return_value.run.return_value = fresh_result
 
-            result = analysis.compute_replicate(ctx, 1)
+            result = analysis.run_replicate(ctx, 1)
 
         assert result is fresh_result
         MockAnalyzer.assert_called_once()
@@ -692,7 +692,7 @@ class TestComputeReplicate:
             MockLoader.return_value.get_timestep.return_value = 10.0
             MockAnalyzer.return_value.run.return_value = fresh_result
 
-            result = analysis.compute_replicate(ctx, 1)
+            result = analysis.run_replicate(ctx, 1)
 
         assert result is fresh_result
         MockAnalyzer.assert_called_once()
@@ -747,7 +747,7 @@ class TestComputeReplicate:
             result_path=canonical,
         )
 
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
         assert result.criteria_label == "sidecar"
 
@@ -790,11 +790,11 @@ class TestComputeReplicate:
         )
 
         with patch(
-            "polyzymd.analyses.base.Analysis.compute_replicate",
+            "polyzymd.analyses.base.Analysis._run_replicate_default",
             side_effect=RuntimeError("should recompute"),
         ):
             with pytest.raises(RuntimeError, match="should recompute"):
-                analysis.compute_replicate(ctx, 1)
+                analysis.run_replicate(ctx, 1)
 
         assert not sidecar.exists()
 
@@ -835,11 +835,11 @@ class TestComputeReplicate:
         )
 
         with patch(
-            "polyzymd.analyses.base.Analysis.compute_replicate",
+            "polyzymd.analyses.base.Analysis._run_replicate_default",
             side_effect=RuntimeError("should recompute"),
         ):
             with pytest.raises(RuntimeError, match="should recompute"):
-                analysis.compute_replicate(ctx, 1)
+                analysis.run_replicate(ctx, 1)
 
 
 class TestParallelContactAnalyzerResidueIdentity:

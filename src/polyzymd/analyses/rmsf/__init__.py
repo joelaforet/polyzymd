@@ -436,12 +436,12 @@ class RMSFAnalysis(Analysis):
                 "comparing."
             )
 
-    def compute_replicate(
+    def run_replicate(
         self,
         ctx: ReplicateContext,
         replicate: int,
     ) -> Any:
-        """Compute RMSF for a single replicate.
+        """Run RMSF for a single replicate.
 
         Performs settings validation and delegates trajectory-native execution
         through the runner seam.
@@ -508,7 +508,7 @@ class RMSFAnalysis(Analysis):
         if cached is not None:
             return cached
 
-        result = super().compute_replicate(ctx, replicate)
+        result = super().run_replicate(ctx, replicate)
         result.save(result_file)
         logger.info(f"Saved result to {result_file}")
         return result

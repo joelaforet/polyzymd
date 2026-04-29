@@ -96,7 +96,7 @@ class TestRMSFGromacsSmoke:
                 recompute=True,
                 settings=settings,
             )
-            result_1 = analysis.compute_replicate(ctx1, replicate=1)
+            result_1 = analysis.run_replicate(ctx1, replicate=1)
 
             ctx2 = ReplicateContext(
                 condition=condition,
@@ -107,7 +107,7 @@ class TestRMSFGromacsSmoke:
                 recompute=True,
                 settings=settings,
             )
-            result_2 = analysis.compute_replicate(ctx2, replicate=2)
+            result_2 = analysis.run_replicate(ctx2, replicate=2)
 
             aggregate_ctx = AggregateContext(
                 condition=condition,

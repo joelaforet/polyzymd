@@ -762,8 +762,8 @@ class HydrogenBondsAnalysis(Analysis):
         )
         return chosen
 
-    def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Compute per-replicate hydrogen-bond results.
+    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
+        """Run per-replicate hydrogen-bond analysis.
 
         Parameters
         ----------
@@ -806,7 +806,7 @@ class HydrogenBondsAnalysis(Analysis):
         if cached is not None:
             return cached
 
-        result = super().compute_replicate(ctx, replicate)
+        result = super().run_replicate(ctx, replicate)
         result.save(result_file)
         logger.info("Saved hydrogen bond result to %s", result_file)
         return result

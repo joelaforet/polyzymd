@@ -1002,8 +1002,8 @@ class PolymerBridgingAnalysis(Analysis):
 
         return _compute_frame_contacts(*args, **kwargs)
 
-    def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Compute oligomer bridging metrics through the runner seam."""
+    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
+        """Run oligomer bridging metrics through the runner seam."""
 
         cache_file = self._replicate_cache_path(ctx.output_dir, ctx.settings, ctx.equilibration)
 
@@ -1054,7 +1054,7 @@ class PolymerBridgingAnalysis(Analysis):
                     self.save_result(cached, cache_file)
                 return cached
 
-        result = super().compute_replicate(ctx, replicate)
+        result = super().run_replicate(ctx, replicate)
         self.save_result(result, cache_file)
         if ctx.result_path is not None:
             self.save_result(result, ctx.result_path)

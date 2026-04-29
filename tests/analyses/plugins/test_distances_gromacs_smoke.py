@@ -103,7 +103,7 @@ class TestDistancesGromacsSmoke:
                 recompute=True,
                 settings=settings,
             )
-            result = analysis.compute_replicate(ctx, replicate=1)
+            result = analysis.run_replicate(ctx, replicate=1)
 
         assert resolve_spy.call_count >= 1
         assert result.replicate == 1

@@ -500,7 +500,7 @@ class TestLifecycle:
                 return_value=runner,
             ) as mock_runner_cls,
         ):
-            result = analysis.compute_replicate(ctx, 1)
+            result = analysis.run_replicate(ctx, 1)
 
         assert result.replicate == 1
         assert result.multisite_fraction == pytest.approx(0.5)
@@ -539,7 +539,7 @@ class TestLifecycle:
 
         analysis._compute_frame_contacts = MagicMock(side_effect=AssertionError("should not run"))
 
-        loaded = analysis.compute_replicate(
+        loaded = analysis.run_replicate(
             ReplicateContext(
                 condition=condition,
                 replicate=1,
@@ -581,7 +581,7 @@ class TestLifecycle:
         canonical.save(canonical_path)
         sidecar.save(sidecar_path)
 
-        loaded = analysis.compute_replicate(
+        loaded = analysis.run_replicate(
             ReplicateContext(
                 condition=condition,
                 replicate=1,
@@ -611,11 +611,11 @@ class TestLifecycle:
         _make_replicate_result(1).save(sidecar_path)
 
         with patch(
-            "polyzymd.analyses.base.Analysis.compute_replicate",
+            "polyzymd.analyses.base.Analysis._run_replicate_default",
             side_effect=RuntimeError("should recompute"),
         ):
             with pytest.raises(RuntimeError, match="should recompute"):
-                analysis.compute_replicate(
+                analysis.run_replicate(
                     ReplicateContext(
                         condition=condition,
                         replicate=1,
@@ -646,11 +646,11 @@ class TestLifecycle:
         _make_replicate_result(1).save(canonical_path)
 
         with patch(
-            "polyzymd.analyses.base.Analysis.compute_replicate",
+            "polyzymd.analyses.base.Analysis._run_replicate_default",
             side_effect=RuntimeError("should recompute"),
         ):
             with pytest.raises(RuntimeError, match="should recompute"):
-                analysis.compute_replicate(
+                analysis.run_replicate(
                     ReplicateContext(
                         condition=condition,
                         replicate=1,
@@ -686,10 +686,10 @@ class TestLifecycle:
         fresh.equilibration_unit = "ns"
 
         with patch(
-            "polyzymd.analyses.base.Analysis.compute_replicate",
+            "polyzymd.analyses.base.Analysis._run_replicate_default",
             return_value=fresh,
         ) as mock_compute:
-            loaded = analysis.compute_replicate(
+            loaded = analysis.run_replicate(
                 ReplicateContext(
                     condition=condition,
                     replicate=1,
@@ -723,10 +723,10 @@ class TestLifecycle:
         fresh = _make_replicate_result(1)
 
         with patch(
-            "polyzymd.analyses.base.Analysis.compute_replicate",
+            "polyzymd.analyses.base.Analysis._run_replicate_default",
             return_value=fresh,
         ) as mock_compute:
-            loaded = analysis.compute_replicate(
+            loaded = analysis.run_replicate(
                 ReplicateContext(
                     condition=condition,
                     replicate=1,

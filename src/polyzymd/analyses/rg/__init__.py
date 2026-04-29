@@ -621,8 +621,8 @@ class RgAnalysis(Analysis):
             required_outputs.append("fragment distributions")
         return " and ".join(required_outputs)
 
-    def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Compute Rg for all configured runs for a single replicate.
+    def run_replicate(self, ctx: ReplicateContext, replicate: int) -> Any:
+        """Run Rg for all configured runs for a single replicate.
 
         Parameters
         ----------
@@ -653,7 +653,7 @@ class RgAnalysis(Analysis):
         if cached is not None:
             return cached
 
-        result = super().compute_replicate(ctx, replicate)
+        result = super().run_replicate(ctx, replicate)
         result.save(result_file)
         logger.info("Saved Rg result to %s", result_file)
         return result

@@ -95,9 +95,9 @@ class TestHydrogenBondsGromacsSmoke:
                 "MDAnalysis.analysis.hydrogenbonds.hbond_analysis"
             ),
         }
-        mock_modules[
-            "MDAnalysis.analysis.hydrogenbonds.hbond_analysis"
-        ].HydrogenBondAnalysis = hbond_cls
+        mock_modules["MDAnalysis.analysis.hydrogenbonds.hbond_analysis"].HydrogenBondAnalysis = (
+            hbond_cls
+        )
 
         original_resolve = GromacsEngine.resolve_trajectory_layout
         with (
@@ -119,7 +119,7 @@ class TestHydrogenBondsGromacsSmoke:
                 recompute=True,
                 settings=settings,
             )
-            result = analysis.compute_replicate(ctx, replicate=1)
+            result = analysis.run_replicate(ctx, replicate=1)
 
         assert resolve_spy.call_count >= 1
         assert result.replicate == 1

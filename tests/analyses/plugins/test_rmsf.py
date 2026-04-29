@@ -316,7 +316,7 @@ class TestComputeReplicate:
             ),
             patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
         ):
-            result = rmsf_analysis.compute_replicate(ctx, 1)
+            result = rmsf_analysis.run_replicate(ctx, 1)
 
         # Verify result has RMSF data
         assert result.replicate == 1
@@ -379,7 +379,7 @@ class TestComputeReplicate:
             ),
             patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
         ):
-            result = rmsf_analysis.compute_replicate(ctx, 2)
+            result = rmsf_analysis.run_replicate(ctx, 2)
 
         # Verify custom selection was used
         mock_u.select_atoms.assert_called_with("backbone")
@@ -447,7 +447,7 @@ class TestComputeReplicate:
             ),
             patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
         ):
-            result = rmsf_analysis.compute_replicate(ctx, 1)
+            result = rmsf_analysis.run_replicate(ctx, 1)
 
         # Verify it completed successfully with legacy settings
         assert result.replicate == 1
@@ -471,7 +471,7 @@ class TestComputeReplicate:
         with patch.object(
             rmsf_analysis, "_check_cache", return_value=cached_result
         ) as mock_check_cache:
-            result = rmsf_analysis.compute_replicate(ctx, 1)
+            result = rmsf_analysis.run_replicate(ctx, 1)
 
         assert result is cached_result
         cache_path = mock_check_cache.call_args.args[1]
@@ -531,7 +531,7 @@ class TestComputeReplicateNegativePaths:
             return_value="Selection diagnostics",
         ):
             with pytest.raises(ValueError, match="matched no atoms"):
-                rmsf_analysis.compute_replicate(ctx, 1)
+                rmsf_analysis.run_replicate(ctx, 1)
 
     @patch("polyzymd.analyses.shared.window.validate_equilibration_time")
     @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
@@ -569,7 +569,7 @@ class TestComputeReplicateNegativePaths:
         )
 
         with pytest.raises(ValueError, match="Equilibration time exceeds trajectory length"):
-            rmsf_analysis.compute_replicate(ctx, 1)
+            rmsf_analysis.run_replicate(ctx, 1)
 
     @patch("polyzymd.analyses.rmsf.TrajectoryLoader")
     def test_propagates_file_not_found_from_loader(
@@ -595,7 +595,7 @@ class TestComputeReplicateNegativePaths:
         )
 
         with pytest.raises(FileNotFoundError, match="Missing trajectory file"):
-            rmsf_analysis.compute_replicate(ctx, 1)
+            rmsf_analysis.run_replicate(ctx, 1)
 
     def test_raises_when_frame_mode_missing_reference_frame(
         self,
@@ -616,7 +616,7 @@ class TestComputeReplicateNegativePaths:
         )
 
         with pytest.raises(ValueError, match="reference_frame is required"):
-            rmsf_analysis.compute_replicate(ctx, 1)
+            rmsf_analysis.run_replicate(ctx, 1)
 
     def test_raises_when_external_reference_file_missing(
         self,
@@ -640,7 +640,7 @@ class TestComputeReplicateNegativePaths:
         )
 
         with pytest.raises(ValueError, match="reference_file does not exist"):
-            rmsf_analysis.compute_replicate(ctx, 1)
+            rmsf_analysis.run_replicate(ctx, 1)
 
 
 # ============================================================================

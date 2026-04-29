@@ -155,12 +155,12 @@ class SecondaryStructureAnalysis(Analysis):
 
     # === Required methods ===
 
-    def compute_replicate(
+    def run_replicate(
         self,
         ctx: ReplicateContext,
         replicate: int,
     ) -> Any:
-        """Compute DSSP secondary structure for a single replicate.
+        """Run DSSP secondary structure for a single replicate.
 
         This thin wrapper preserves the legacy cache filename while delegating
         trajectory analysis to the runner-backed base implementation.
@@ -195,7 +195,7 @@ class SecondaryStructureAnalysis(Analysis):
             return cached
 
         logger.info(f"Computing secondary structure for replicate {replicate}")
-        return super().compute_replicate(ctx, replicate)
+        return super().run_replicate(ctx, replicate)
 
     def _trajectory_loader_factory(self) -> type[Any]:
         """Return the secondary-structure loader class for the runner seam.

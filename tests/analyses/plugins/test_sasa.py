@@ -356,8 +356,8 @@ def test_compute_replicate_delegates_to_runner_seam(tmp_path: Path) -> None:
     mock_result = MagicMock()
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(AnalysisBase, "compute_replicate", lambda self, c, r: mock_result)
-        result = analysis.compute_replicate(ctx, 1)
+        monkeypatch.setattr(AnalysisBase, "_run_replicate_default", lambda self, c, r: mock_result)
+        result = analysis.run_replicate(ctx, 1)
 
     assert result is mock_result
     mock_result.save.assert_called_once()
@@ -651,7 +651,7 @@ def test_compute_replicate_zero_atom_path(monkeypatch: pytest.MonkeyPatch, tmp_p
     monkeypatch.setattr("polyzymd.analyses.sasa.save_sasa_artifacts", lambda *args, **kwargs: None)
     monkeypatch.setattr(analysis, "_check_cache", lambda *args, **kwargs: None)
 
-    result = analysis.compute_replicate(ctx, 1)
+    result = analysis.run_replicate(ctx, 1)
     assert isinstance(result, SASAResult)
     assert result.run_results[0].zero_atom_selection is True
     assert np.isnan(result.run_results[0].mean_sasa)
@@ -698,8 +698,8 @@ def test_cache_invalidation_includes_settings(
         equilibration="10ns",
     )
 
-    assert analysis.compute_replicate(ctx_a, 1) == {"cached": True}
-    assert analysis.compute_replicate(ctx_b, 1) == {"cached": True}
+    assert analysis.run_replicate(ctx_a, 1) == {"cached": True}
+    assert analysis.run_replicate(ctx_b, 1) == {"cached": True}
     assert len(seen_paths) == 2
     assert seen_paths[0].name != seen_paths[1].name
 
@@ -1387,7 +1387,7 @@ def test_compute_replicate_stores_raw_paths(
     monkeypatch.setattr("polyzymd.analyses.sasa.save_sasa_artifacts", _fake_save)
     monkeypatch.setattr(analysis, "_check_cache", lambda *args, **kwargs: None)
 
-    result = analysis.compute_replicate(ctx, 1)
+    result = analysis.run_replicate(ctx, 1)
     run_result = result.run_results[0]
     assert run_result.raw_npz_path is not None
     assert run_result.raw_metadata_path is not None
@@ -1454,7 +1454,7 @@ def test_compute_replicate_passes_chunk_and_stride(
     monkeypatch.setattr("polyzymd.analyses.sasa.save_sasa_artifacts", lambda *args, **kwargs: None)
     monkeypatch.setattr(analysis, "_check_cache", lambda *args, **kwargs: None)
 
-    _ = analysis.compute_replicate(ctx, 1)
+    _ = analysis.run_replicate(ctx, 1)
     assert seen_kwargs["chunk_size"] == 25
     assert seen_kwargs["stride"] == 3
 

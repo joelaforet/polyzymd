@@ -50,7 +50,7 @@ class TestPolymerBridgingGromacsSmoke:
             "_compute_frame_contacts",
             return_value=([{1, 2}, {1}], 10, 10.0),
         ):
-            result = analysis.compute_replicate(ctx, replicate=1)
+            result = analysis.run_replicate(ctx, replicate=1)
 
         assert result.replicate == 1
         assert result.n_frames == 10

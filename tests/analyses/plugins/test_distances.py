@@ -347,9 +347,9 @@ class TestComputeReplicate:
         mock_result = MagicMock()
 
         with patch.object(
-            analyses_base.Analysis, "compute_replicate", return_value=mock_result
+            analyses_base.Analysis, "_run_replicate_default", return_value=mock_result
         ) as mock_super:
-            result = analysis.compute_replicate(ctx, 1)
+            result = analysis.run_replicate(ctx, 1)
 
         assert result is mock_result
         mock_super.assert_called_once_with(ctx, 1)
@@ -1574,7 +1574,7 @@ class TestLifecycle:
                     recompute=False,
                     settings=settings,
                 )
-                result = analysis.compute_replicate(ctx, rep)
+                result = analysis.run_replicate(ctx, rep)
                 rep_results.append(result)
 
         assert MockLoader.call_count == 2

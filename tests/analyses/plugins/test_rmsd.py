@@ -329,7 +329,7 @@ def test_compute_replicate_cache_filename_includes_settings_tag(
 
     monkeypatch.setattr(analysis, "_check_cache", fake_check_cache)
 
-    result = analysis.compute_replicate(ctx, replicate=1)
+    result = analysis.run_replicate(ctx, replicate=1)
 
     expected_tag = analysis._make_settings_cache_tag(settings)
     assert result == {"cached": True}
@@ -499,7 +499,7 @@ def test_compute_replicate_raises_before_writing_partial_results(
     monkeypatch.setattr("polyzymd.analyses.rmsd._runner.compute_rmsd_run", fake_compute_rmsd_run)
 
     with pytest.raises(ValueError, match="selection matched no atoms"):
-        analysis.compute_replicate(ctx, 1)
+        analysis.run_replicate(ctx, 1)
 
     assert list(output_dir.iterdir()) == []
 
@@ -1554,9 +1554,7 @@ def test_compare_rejects_preloaded_invalid_aggregated_results(
     condition = make_condition(label="CondA", replicates=(1, 2))
 
     selection = "protein" if result_kind == "stale" else "protein and name CA"
-    settings_fingerprint = (
-        _settings_hash(stale_settings) if result_kind == "stale" else None
-    )
+    settings_fingerprint = _settings_hash(stale_settings) if result_kind == "stale" else None
     preloaded_result = RMSDAggregatedResult(
         config_hash="hash123",
         polyzymd_version="1.2.1",

@@ -299,7 +299,7 @@ class TestComputeReplicate:
             ),
             patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
         ):
-            result = ss_analysis.compute_replicate(ctx, replicate=1)
+            result = ss_analysis.run_replicate(ctx, replicate=1)
 
         # Verify result has SS data
         assert result.replicate == 1
@@ -366,7 +366,7 @@ class TestComputeReplicate:
             ),
             patch("polyzymd.analyses._results_base.get_polyzymd_version", return_value="1.2.1"),
         ):
-            result = ss_analysis.compute_replicate(ctx, replicate=2)
+            result = ss_analysis.run_replicate(ctx, replicate=2)
 
         # Verify chain B (index 1) was used for selection
         mock_traj.topology.select.assert_any_call("chainid 1")
@@ -1134,7 +1134,7 @@ class TestChainSelectionValidation:
             )
 
             with pytest.raises(ValueError, match="Chain 'Z'.*not found"):
-                analysis.compute_replicate(ctx, replicate=1)
+                analysis.run_replicate(ctx, replicate=1)
 
 
 class TestEquilibrationValidation:
@@ -1188,4 +1188,4 @@ class TestEquilibrationValidation:
             )
 
             with pytest.raises(ValueError, match="fewer than 10 production frames"):
-                analysis.compute_replicate(ctx, replicate=1)
+                analysis.run_replicate(ctx, replicate=1)

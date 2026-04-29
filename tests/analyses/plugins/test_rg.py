@@ -606,7 +606,7 @@ def test_compute_replicate_raises_before_writing_partial_results(
     patch_trajectory_loader(monkeypatch, "polyzymd.analyses.rg", universe=universe)
 
     with pytest.raises(ValueError, match="selection matched no atoms"):
-        analysis.compute_replicate(ctx, 1)
+        analysis.run_replicate(ctx, 1)
 
     assert list(output_dir.iterdir()) == []
 
@@ -646,7 +646,7 @@ def test_compute_replicate_cache_includes_settings_tag(
 
     monkeypatch.setattr(analysis, "_check_cache", _mock_check_cache)
 
-    result = analysis.compute_replicate(ctx, 1)
+    result = analysis.run_replicate(ctx, 1)
 
     expected_tag = analysis._make_settings_cache_tag(settings)
     assert observed_path is not None
@@ -1328,9 +1328,7 @@ def test_compare_rejects_preloaded_invalid_aggregated_results(
     condition = make_condition(label="CondA", replicates=(1, 2))
 
     selection = "protein" if result_kind == "stale" else "protein and name CA"
-    settings_fingerprint = (
-        _settings_hash(stale_settings) if result_kind == "stale" else None
-    )
+    settings_fingerprint = _settings_hash(stale_settings) if result_kind == "stale" else None
     preloaded_result = RgAggregatedResult(
         config_hash="hash123",
         polyzymd_version="1.2.1",

@@ -1064,12 +1064,12 @@ class ContactsAnalysis(Analysis):
 
         return self._load_aggregated_result(aggregated_dir)
 
-    def compute_replicate(
+    def run_replicate(
         self,
         ctx: ReplicateContext,
         replicate: int,
     ) -> Any:
-        """Compute contacts for a single replicate.
+        """Run contacts for a single replicate.
 
         Uses :class:`ParallelContactAnalyzer` for optimised neighbour-search
         based contact detection.
@@ -1133,7 +1133,7 @@ class ContactsAnalysis(Analysis):
                 return cached
 
         try:
-            result = super().compute_replicate(ctx, replicate)
+            result = super().run_replicate(ctx, replicate)
         except FileNotFoundError as e:
             logger.warning(f"  Skipping replicate {replicate}: trajectory data not found. {e}")
             raise ReplicateSkippedError(

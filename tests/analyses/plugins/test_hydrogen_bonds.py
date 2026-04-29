@@ -519,7 +519,7 @@ def test_compute_replicate_basic(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
     assert isinstance(result, HydrogenBondResult)
     assert result.selection_string == "(chainid A) or (chainid C)"
@@ -603,8 +603,8 @@ def test_compute_replicate_warns_once_for_default_groups_and_summaries(
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        analysis.compute_replicate(ctx_1, 1)
-        analysis.compute_replicate(ctx_2, 2)
+        analysis.run_replicate(ctx_1, 1)
+        analysis.run_replicate(ctx_2, 2)
 
     assert caplog.text.count("No explicit groups/summaries in YAML config — using defaults") == 1
 
@@ -657,7 +657,7 @@ def test_compute_replicate_empty_selection(
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
     assert isinstance(result, HydrogenBondResult)
     assert len(result.summaries) == 1
@@ -730,7 +730,7 @@ def test_compute_replicate_skips_only_empty_summary_and_keeps_other_summaries(
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
     assert isinstance(result, HydrogenBondResult)
     summaries = {summary.name: summary for summary in result.summaries}
@@ -793,7 +793,7 @@ def test_compute_replicate_empty_group_raises_by_default(tmp_path: Path) -> None
         mock_loader.get_timestep.return_value = 10.0
 
         with pytest.raises(ValueError, match="allow_empty_groups: true"):
-            analysis.compute_replicate(ctx, 1)
+            analysis.run_replicate(ctx, 1)
 
 
 def test_compute_replicate_cache_hit(tmp_path: Path) -> None:
@@ -819,7 +819,7 @@ def test_compute_replicate_cache_hit(tmp_path: Path) -> None:
     cached_result = HydrogenBondResult(replicate=1, config_hash="abc123", summaries=[])
 
     with patch.object(analysis, "_check_cache", return_value=cached_result) as mock_cache:
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
     assert result is cached_result
     mock_cache.assert_called_once()
@@ -870,7 +870,7 @@ def test_equilibration_exceeds_trajectory_raises(tmp_path: Path) -> None:
         mock_loader.get_timestep.return_value = 10.0
 
         with pytest.raises(ValueError) as exc_info:
-            analysis.compute_replicate(ctx, 1)
+            analysis.run_replicate(ctx, 1)
 
     message = str(exc_info.value)
     assert "Equilibration time" in message
@@ -936,7 +936,7 @@ def test_equilibration_leaves_one_frame_warns(
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
     assert isinstance(result, HydrogenBondResult)
     assert result.summaries[0].counts_per_frame == [1]
@@ -1010,7 +1010,7 @@ def test_intra_residue_exclusion(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
     summary = result.summaries[0]
     assert summary.mean_hbonds_per_frame == 0.0
@@ -1345,7 +1345,7 @@ def test_composition_not_configured(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
     assert result.composition_entries == []
 
@@ -2730,7 +2730,7 @@ def test_compute_no_hbonds_found(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
     summary = result.summaries[0]
     assert summary.mean_hbonds_per_frame == pytest.approx(0.0)
@@ -2797,7 +2797,7 @@ def test_compute_between_mode_classification(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
     summary = result.summaries[0]
     assert summary.counts_per_frame == [1, 1, 0]
@@ -2870,7 +2870,7 @@ def test_compute_within_mode_classification(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
     summary = result.summaries[0]
     assert summary.counts_per_frame == [1, 0, 0]
@@ -2943,7 +2943,7 @@ def test_compute_multiple_summaries(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
     by_name = {summary.name: summary for summary in result.summaries}
     assert by_name["protein_polymer"].counts_per_frame == [1, 0, 0]
@@ -3479,7 +3479,7 @@ def test_replicate_does_not_truncate_pairs_before_aggregation(tmp_path: Path) ->
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
     assert len(result.summaries[0].directed_residue_pairs) == 2
     assert len(result.summaries[0].undirected_residue_pairs) == 2
@@ -3570,8 +3570,8 @@ def test_full_lifecycle_mocked(tmp_path: Path) -> None:
         mock_loader.load_universe.side_effect = [universe_1, universe_2]
         mock_loader.get_timestep.return_value = 10.0
 
-        rep_result_1 = analysis.compute_replicate(rep_ctx_1, 1)
-        rep_result_2 = analysis.compute_replicate(rep_ctx_2, 2)
+        rep_result_1 = analysis.run_replicate(rep_ctx_1, 1)
+        rep_result_2 = analysis.run_replicate(rep_ctx_2, 2)
 
     aggregate_ctx = AggregateContext(
         condition=condition,
@@ -3676,7 +3676,7 @@ def test_compute_replicate_hydrogens_sel_explicit(tmp_path: Path) -> None:
         mock_loader.load_universe.return_value = universe
         mock_loader.get_timestep.return_value = 10.0
 
-        analysis.compute_replicate(ctx, 1)
+        analysis.run_replicate(ctx, 1)
 
     assert len(captured_kwargs) == 1
     hydrogens_sel = captured_kwargs[0]["hydrogens_sel"]

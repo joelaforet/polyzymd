@@ -145,12 +145,12 @@ class CatalyticTriadAnalysis(Analysis):
 
     # === Required methods ===
 
-    def compute_replicate(
+    def run_replicate(
         self,
         ctx: ReplicateContext,
         replicate: int,
     ) -> Any:
-        """Compute triad analysis for a single replicate through the runner seam."""
+        """Run triad analysis for a single replicate through the runner seam."""
 
         eq_value, eq_unit = parse_time_string(ctx.equilibration)
         result_file = ctx.output_dir / _make_result_filename(ctx.settings, eq_value, eq_unit)
@@ -164,7 +164,7 @@ class CatalyticTriadAnalysis(Analysis):
         if cached is not None:
             return cached
 
-        result = super().compute_replicate(ctx, replicate)
+        result = super().run_replicate(ctx, replicate)
         result.save(result_file)
         logger.info("Saved triad result to %s", result_file)
         return result
