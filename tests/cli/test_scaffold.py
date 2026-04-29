@@ -124,7 +124,7 @@ class TestGenerateScaffold:
         assert "class SolventShellAnalysis(Analysis):" in text
         assert 'name: ClassVar[str] = "solvent_shell"' in text
         assert "class Settings(BaseModel):" in text
-        assert "def compute_replicate(" in text
+        assert "def run_replicate(" in text
         assert "def aggregate(" in text
         assert "def extract_metrics(" in text
         assert "def plot(self, ctx: PlotContext)" in text
@@ -156,7 +156,7 @@ class TestGenerateScaffold:
         text = tf.read_text()
 
         assert "class TestDiscovery:" in text
-        assert "class TestComputeReplicate:" in text
+        assert "class TestRunReplicate:" in text
         assert "class TestAggregate:" in text
         assert "class TestExtractMetrics:" in text
         assert "class TestPlot:" in text
@@ -241,7 +241,7 @@ class TestGenerateScaffoldPydantic:
         assert 'name: ClassVar[str] = "solvent_shell"' in text
         assert "AggregatedResultClass: ClassVar[type] = SolventShellAggregatedResult" in text
         assert "class Settings(BaseModel):" in text
-        assert "def compute_replicate(" in text
+        assert "def run_replicate(" in text
         assert "def aggregate(" in text
         assert "def extract_metrics(" in text
         assert "def plot(self, ctx: PlotContext)" in text
@@ -268,7 +268,7 @@ class TestGenerateScaffoldPydantic:
         text = tf.read_text()
 
         assert "class TestDiscovery:" in text
-        assert "class TestComputeReplicate:" in text
+        assert "class TestRunReplicate:" in text
         assert "class TestAggregate:" in text
         assert "class TestExtractMetrics:" in text
         assert "class TestPlot:" in text
@@ -432,7 +432,7 @@ class TestGeneratedPluginEndToEnd:
                 recompute=True,
                 settings=settings,
             )
-            replicate_result = analysis.compute_replicate(rep_ctx, replicate=1)
+            replicate_result = analysis.run_replicate(rep_ctx, replicate=1)
             assert isinstance(replicate_result, dict)
             assert replicate_result["value"] == pytest.approx(1.0)
 

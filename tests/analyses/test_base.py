@@ -167,11 +167,12 @@ class TestAnalysisABC:
         assert hasattr(AbstractMiddle, "__abstractmethods__")
 
     def test_concrete_subclass_requires_compute_contract(self) -> None:
-        """Concrete plugins must provide legacy compute or a full runner contract."""
+        """Concrete plugins must provide a replicate entry point or runner contract."""
 
         with pytest.raises(
             TypeError,
-            match=r"must implement compute_replicate\(\) or both build_runner\(\) and "
+            match=r"must implement run_replicate\(\), legacy compute_replicate\(\), or both "
+            r"build_runner\(\) and "
             r"summarize_replicate\(\)",
         ):
 
@@ -181,6 +182,46 @@ class TestAnalysisABC:
 
                 def aggregate(self, ctx, results):
                     return {"dummy": True}
+
+    def test_concrete_subclass_can_use_run_replicate(self) -> None:
+        """Concrete plugins can implement the canonical replicate entry point."""
+
+        class RunReplicateAnalysis(Analysis):
+            """Analysis that implements the canonical replicate hook only."""
+
+            name: ClassVar[str] = "run_replicate_only"
+            Settings: ClassVar[type] = ToySettings
+
+            def run_replicate(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
+                """Return a simple per-replicate result."""
+
+                del ctx
+                return {"value": float(replicate)}
+
+            def aggregate(self, ctx, results):
+                """Return a simple aggregate result."""
+
+                del ctx, results
+                return {"dummy": True}
+
+        plugin = RunReplicateAnalysis()
+        assert plugin.name == "run_replicate_only"
+
+    def test_run_replicate_delegates_legacy_compute(self, toy_analysis, toy_condition) -> None:
+        """Base run_replicate should preserve legacy compute overrides."""
+        ctx = ReplicateContext(
+            condition=toy_condition,
+            replicate=2,
+            sim_config=toy_condition.sim_config,
+            output_dir=Path("/tmp/run_2"),
+            equilibration="10ns",
+            recompute=False,
+            settings=ToySettings(),
+        )
+
+        result = toy_analysis.run_replicate(ctx, replicate=2)
+
+        assert result == ToyResult(value=3.0, replicate=2)
 
     def test_runner_subclass_requires_complete_runner_contract(self) -> None:
         """Runner-backed plugins must implement summarize_replicate()."""

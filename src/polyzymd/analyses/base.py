@@ -14,9 +14,10 @@ How to Add a New Analysis
 
 Valid lifecycle modes
 ---------------------
-When ``has_compute_stage = True``, choose one compute path:
+When ``has_compute_stage = True``, choose one per-replicate path:
 
-- Legacy compute plugins override ``compute_replicate(ctx, replicate)``
+- Canonical plugins override ``run_replicate(ctx, replicate)``
+- Legacy compute plugins may temporarily override ``compute_replicate(ctx, replicate)``
 - Runner-backed plugins implement ``build_runner()`` and
   ``summarize_replicate()``; MDAnalysis owns per-trajectory iteration there,
   while PolyzyMD owns caching, ensemble aggregation, and comparison workflow
@@ -36,7 +37,7 @@ Other optional overrides (sensible defaults provided)::
 
 Notes
 -----
-The orchestrator auto-saves results returned by ``compute_replicate()``
+The orchestrator auto-saves results returned by ``run_replicate()``
 and ``aggregate()`` to disk.  Simple plugins can rely on this fallback.
 Plugins that need equilibration-aware caching or custom filenames should
 save explicitly (see ``rmsf/`` for the pattern).
@@ -150,7 +151,7 @@ class Condition:
 
 @dataclass(frozen=True)
 class ReplicateContext:
-    """Context passed to :meth:`Analysis.compute_replicate`.
+    """Context passed to :meth:`Analysis.run_replicate`.
 
     Provides everything needed to analyse a single replicate of a
     single condition.
@@ -842,7 +843,7 @@ class Analysis(ABC):
     min_replicates : int
         Minimum successful replicates required for aggregation.
     has_compute_stage : bool
-        Whether the framework should run ``compute_replicate()``.
+        Whether the framework should run ``run_replicate()``.
     has_aggregate_stage : bool
         Whether the framework should run ``aggregate()``.
     slurm_resource_hint : SlurmResourceHint | None
@@ -868,7 +869,7 @@ class Analysis(ABC):
             class Settings(BaseModel):
                 selection: str = "protein and name CA"
 
-            def compute_replicate(self, ctx, replicate):
+            def run_replicate(self, ctx, replicate):
                 import MDAnalysis as mda
                 import numpy as np
                 # Use ctx.sim_config, ctx.settings — never load configs yourself
@@ -931,12 +932,57 @@ class Analysis(ABC):
 
     # === Lifecycle methods ===
 
+    def run_replicate(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+    ) -> Any:
+        """Run analysis for a single replicate.
+
+        This is the canonical internal framework entry point for
+        per-replicate execution. During the transition from legacy plugins,
+        subclasses that still override :meth:`compute_replicate` are delegated
+        to unchanged. New plugin code should override this method or use the
+        runner-backed ``build_runner()`` + ``summarize_replicate()`` seam.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided context with paths, config, and settings.
+        replicate : int
+            1-indexed replicate number.
+
+        Returns
+        -------
+        dict or BaseModel
+            Per-replicate results. Can be a plain dict or a Pydantic
+            ``BaseModel``. The framework serializes both via ``save_result()``.
+
+        Notes
+        -----
+        The base implementation intentionally delegates to legacy
+        ``compute_replicate()`` overrides before trying the runner seam. The
+        base ``compute_replicate()`` method does not delegate back here because
+        existing plugin wrappers call ``super().compute_replicate()``.
+        """
+
+        if not type(self).has_compute_stage:
+            return None
+        if type(self).compute_replicate is not Analysis.compute_replicate:
+            return self.compute_replicate(ctx, replicate)
+        return self._run_replicate_default(ctx, replicate)
+
     def compute_replicate(
         self,
         ctx: ReplicateContext,
         replicate: int,
     ) -> Any:
-        """Compute analysis for a single replicate.
+        """Compatibility hook for legacy per-replicate plugins.
+
+        Existing plugins may still override this method, and existing wrapper
+        implementations may still call ``super().compute_replicate()`` to use
+        the runner-backed path. Framework code should call
+        :meth:`run_replicate` instead.
 
         Parameters
         ----------
@@ -966,13 +1012,41 @@ class Analysis(ABC):
         resolves the trajectory window and invokes ``runner.run(...)``
         while MDAnalysis owns the per-frame loop.
         """
+        return self._run_replicate_default(ctx, replicate)
+
+    def _run_replicate_default(
+        self,
+        ctx: ReplicateContext,
+        replicate: int,
+    ) -> Any:
+        """Run the default per-replicate dispatch path.
+
+        The default path supports compute-disabled plugins and runner-backed
+        plugins. It is shared by :meth:`run_replicate` and the legacy
+        :meth:`compute_replicate` compatibility hook to avoid recursion when
+        plugin wrappers call ``super().compute_replicate()``.
+
+        Parameters
+        ----------
+        ctx : ReplicateContext
+            Framework-provided context with paths, config, and settings.
+        replicate : int
+            1-indexed replicate number.
+
+        Returns
+        -------
+        Any
+            Per-replicate result, or ``None`` when compute is disabled.
+        """
+
         if not type(self).has_compute_stage:
             return None
         result = self._compute_replicate_via_runner(ctx, replicate)
         if result is not _RUNNER_NOT_CONFIGURED:
             return result
         raise NotImplementedError(
-            f"{type(self).__name__} must implement compute_replicate() "
+            f"{type(self).__name__} must implement run_replicate() "
+            "or legacy compute_replicate() "
             "or set has_compute_stage = False."
         )
 
@@ -988,7 +1062,7 @@ class Analysis(ABC):
         ctx : AggregateContext
             Framework-provided context (paths, replicates, settings).
         results : Sequence[dict | BaseModel]
-            Per-replicate results from :meth:`compute_replicate`.
+            Per-replicate results from :meth:`run_replicate`.
             Guaranteed to have at least ``min_replicates`` entries.
 
         Returns
@@ -1022,7 +1096,7 @@ class Analysis(ABC):
         """Build a trajectory-native runner for one replicate.
 
         The base implementation returns ``None`` to indicate that the plugin is
-        not runner-backed and should continue to use the legacy
+        not runner-backed and should continue to use the compatibility
         :meth:`compute_replicate` path. Subclasses that opt into the
         runner-backed path by overriding this method must return an MDAnalysis
         analysis object or other compatible runner with a callable
@@ -1418,7 +1492,7 @@ class Analysis(ABC):
         if runner is None:
             raise PluginContractError(
                 f"{type(self).__name__}.build_runner() returned None. "
-                "Implement compute_replicate() for the legacy path or return a runner."
+                "Implement run_replicate() for the direct path or return a runner."
             )
         run_method = getattr(runner, "run", None)
         if not callable(run_method):
@@ -1772,20 +1846,21 @@ class Analysis(ABC):
                 "when has_compute_stage=False."
             )
 
+        uses_run_replicate = cls.run_replicate is not Analysis.run_replicate
         uses_legacy_compute = cls.compute_replicate is not Analysis.compute_replicate
         uses_runner_build = cls.build_runner is not Analysis.build_runner
         uses_runner_summary = cls.summarize_replicate is not Analysis.summarize_replicate
 
-        if cls.has_compute_stage and not uses_legacy_compute:
+        if cls.has_compute_stage and not (uses_run_replicate or uses_legacy_compute):
             if uses_runner_build != uses_runner_summary:
                 raise TypeError(
                     f"Analysis subclass {cls.__name__} must implement both build_runner() and "
-                    "summarize_replicate() when using the runner-based compute path."
+                    "summarize_replicate() when using the runner-based path."
                 )
             if not uses_runner_build:
                 raise TypeError(
-                    f"Analysis subclass {cls.__name__} must implement compute_replicate() or "
-                    "both build_runner() and summarize_replicate() when "
+                    f"Analysis subclass {cls.__name__} must implement run_replicate(), "
+                    "legacy compute_replicate(), or both build_runner() and summarize_replicate() when "
                     "has_compute_stage=True."
                 )
 

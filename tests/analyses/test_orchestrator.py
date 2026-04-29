@@ -290,6 +290,60 @@ def test_run_comparison_still_works_after_refactor(monkeypatch, tmp_path: Path) 
 class TestOrchestrator:
     """Test the orchestrator's replicate running and dependency sorting."""
 
+    def test_run_replicate_once_uses_canonical_entry_point(
+        self,
+        toy_condition,
+        toy_settings,
+        tmp_path,
+    ):
+        """run_replicate_once should call run_replicate, not compute_replicate."""
+
+        class CanonicalRunAnalysis(Analysis):
+            """Analysis that fails if the legacy compute hook is called."""
+
+            name: ClassVar[str] = "canonical_run"
+            Settings: ClassVar[type] = ToySettings
+            min_replicates: ClassVar[int] = 1
+
+            def __init__(self) -> None:
+                """Initialize call tracking for the canonical hook."""
+
+                self.called_replicates: list[int] = []
+
+            def run_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
+                """Return a result through the canonical hook."""
+
+                del ctx
+                self.called_replicates.append(replicate)
+                return ToyResult(value=float(replicate), replicate=replicate)
+
+            def compute_replicate(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
+                """Fail if the compatibility hook is invoked by the orchestrator."""
+
+                del ctx, replicate
+                raise AssertionError("Legacy compute hook should not be called")
+
+            def aggregate(self, ctx, results):
+                """Return a simple aggregate result."""
+
+                del ctx, results
+                return {"ok": True}
+
+        analysis = CanonicalRunAnalysis()
+        result = run_replicate_once(
+            analysis,
+            toy_condition,
+            toy_settings,
+            "10ns",
+            tmp_path / "run_1",
+            1,
+            False,
+        )
+
+        assert result == ToyResult(value=1.0, replicate=1)
+        assert analysis.called_replicates == [1]
+        assert (tmp_path / "run_1" / "result.json").exists()
+
     def test_run_analysis_success(self, toy_analysis, toy_condition, toy_settings, tmp_path):
         result = run_analysis(
             toy_analysis,
@@ -459,7 +513,7 @@ class TestOrchestrator:
             def aggregate(self, ctx, results):
                 return {"ok": True}
 
-        with pytest.raises(PluginContractError, match="invalid_compute.compute_replicate"):
+        with pytest.raises(PluginContractError, match="invalid_compute.run_replicate"):
             run_analysis(
                 InvalidComputeAnalysis(),
                 toy_condition,
@@ -653,8 +707,8 @@ class TestOrchestrator:
 class TestContractEnforcement:
     """Tests for plugin contract violation detection."""
 
-    def test_compute_replicate_none_raises_contract_error(self, tmp_path: Path) -> None:
-        """compute_replicate() returning None should raise PluginContractError."""
+    def test_run_replicate_none_raises_contract_error(self, tmp_path: Path) -> None:
+        """run_replicate() returning None should raise PluginContractError."""
 
         class NoneComputeAnalysis(Analysis):
             name: ClassVar[str] = "none_compute"
@@ -676,7 +730,7 @@ class TestContractEnforcement:
 
         with pytest.raises(
             PluginContractError,
-            match=r"none_compute.compute_replicate\(\) returned None",
+            match=r"none_compute.run_replicate\(\) returned None",
         ):
             run_replicate_once(
                 analysis,

@@ -93,7 +93,7 @@ def _check_result_type(result: Any, method: str, analysis_name: str) -> None:
 
 
 def _check_compute_result(result: Any, method: str, analysis_name: str) -> None:
-    """Validate plugin return from compute_replicate() or aggregate().
+    """Validate plugin return from run_replicate() or aggregate().
 
     None is a contract violation for these methods.
     """
@@ -113,7 +113,7 @@ def run_replicate_once(
     replicate: int,
     recompute: bool,
 ) -> Any:
-    """Run ``compute_replicate()`` for a single replicate and save canonical output.
+    """Run ``run_replicate()`` for a single replicate and save canonical output.
 
     Parameters
     ----------
@@ -150,7 +150,7 @@ def run_replicate_once(
         result_path=result_path,
     )
     try:
-        result = analysis.compute_replicate(ctx, replicate)
+        result = analysis.run_replicate(ctx, replicate)
     except (FileNotFoundError, OSError):
         raise
     except ReplicateSkippedError:
@@ -159,10 +159,10 @@ def run_replicate_once(
         raise
     except Exception as e:
         raise ReplicateError(
-            f"{analysis.name}: compute_replicate failed for "
+            f"{analysis.name}: run_replicate failed for "
             f"condition='{condition.label}' replicate={replicate}: {type(e).__name__}: {e}"
         ) from e
-    _check_compute_result(result, "compute_replicate", analysis.name)
+    _check_compute_result(result, "run_replicate", analysis.name)
     try:
         analysis.save_result(result, result_path)
     except OSError as save_err:
@@ -310,7 +310,7 @@ def run_analysis(
         logger.info(f"{analysis.name}: skipping compute stage for '{condition.label}'")
         return None
 
-    # 1. Compute per-replicate
+    # Run per-replicate stage
     results: list[Any] = []
     successful: list[int] = []
     failed: list[int] = []
@@ -357,7 +357,7 @@ def run_analysis(
         logger.info(f"{analysis.name}: skipping aggregate stage for '{condition.label}'")
         return None
 
-    # 2. Aggregate
+    # Aggregate successful replicates
     agg_dir = output_dir / "aggregated"
     agg_dir.mkdir(parents=True, exist_ok=True)
     agg_result_path = analysis.aggregate_result_path(agg_dir)

@@ -1,10 +1,10 @@
 """Scaffold generator for new analysis plugins.
 
 Creates the minimal file set needed for a new analysis plugin:
-- ``src/polyzymd/analyses/<name>/__init__.py``  — plugin class with compute,
+- ``src/polyzymd/analyses/<name>/__init__.py``  — plugin class with run,
   aggregate, comparison, and plotting methods
 - ``tests/analyses/plugins/test_<name>.py``  — smoke tests covering discovery,
-  compute, aggregate, metrics, and plotting
+  per-replicate runs, aggregate, metrics, and plotting
 
 Two styles are available via the ``--style`` flag:
 
@@ -180,7 +180,7 @@ class {cls}Analysis(Analysis):
 
     # -- lifecycle methods ---------------------------------------------------
 
-    def compute_replicate(
+    def run_replicate(
         self,
         ctx: ReplicateContext,
         replicate: int,
@@ -235,7 +235,7 @@ class {cls}Analysis(Analysis):
     #     polymer-specific analyses should skip "No Polymer" control conditions.
     #
     #     If only SOME sub-computations are inapplicable (not the whole
-    #     analysis), handle empty selections in compute_replicate() instead.
+    #     analysis), handle empty selections in run_replicate() instead.
     #     """
     #     valid = []
     #     for cond in conditions:
@@ -416,11 +416,11 @@ class TestDiscovery:
 
 
 # ---------------------------------------------------------------------------
-# Compute
+# Run replicate
 # ---------------------------------------------------------------------------
 
 
-class TestComputeReplicate:
+class TestRunReplicate:
     def test_returns_dict(self, analysis, settings, condition, tmp_path):
         ctx = ReplicateContext(
             condition=condition,
@@ -431,7 +431,7 @@ class TestComputeReplicate:
             recompute=True,
             settings=settings,
         )
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
         assert isinstance(result, dict)
         assert result["replicate"] == 1
@@ -640,7 +640,7 @@ class {cls}Analysis(Analysis):
 
     # -- lifecycle methods ---------------------------------------------------
 
-    def compute_replicate(
+    def run_replicate(
         self,
         ctx: ReplicateContext,
         replicate: int,
@@ -695,7 +695,7 @@ class {cls}Analysis(Analysis):
     #     polymer-specific analyses should skip "No Polymer" control conditions.
     #
     #     If only SOME sub-computations are inapplicable (not the whole
-    #     analysis), handle empty selections in compute_replicate() instead.
+    #     analysis), handle empty selections in run_replicate() instead.
     #     """
     #     valid = []
     #     for cond in conditions:
@@ -880,11 +880,11 @@ class TestDiscovery:
 
 
 # ---------------------------------------------------------------------------
-# Compute
+# Run replicate
 # ---------------------------------------------------------------------------
 
 
-class TestComputeReplicate:
+class TestRunReplicate:
     def test_returns_typed_result(self, analysis, settings, condition, tmp_path):
         ctx = ReplicateContext(
             condition=condition,
@@ -895,7 +895,7 @@ class TestComputeReplicate:
             recompute=True,
             settings=settings,
         )
-        result = analysis.compute_replicate(ctx, 1)
+        result = analysis.run_replicate(ctx, 1)
 
         assert isinstance(result, {cls}ReplicateResult)
         assert result.replicate == 1
