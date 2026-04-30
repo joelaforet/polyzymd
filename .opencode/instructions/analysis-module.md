@@ -44,9 +44,9 @@ src/polyzymd/analyses/
 
 Each plugin is a self-contained package. All established plugins extract
 plotting functions into a `_plotters.py` module to keep `__init__.py` focused
-on Analysis lifecycle wiring. Simple legacy plugins may keep small compute
-logic in `__init__.py`, but runner-backed plugins should isolate MDAnalysis
-trajectory logic in a dedicated module such as `_runner.py`.
+on Analysis lifecycle wiring. Public contributor plugins use the runner-backed
+lifecycle; trajectory-native plugins should isolate MDAnalysis trajectory logic
+in a dedicated module such as `_runner.py`.
 
 ### How to Add a New Analysis
 
@@ -54,10 +54,10 @@ trajectory logic in a dedicated module such as `_runner.py`.
    create `src/polyzymd/analyses/<name>/` sub-package manually
 2. Define a `Settings` class (Pydantic v2 `BaseModel`)
 3. Subclass `Analysis` and choose the lifecycle mode for your plugin
-4. When `has_compute_stage=True`, either override `compute_replicate()` or
-   implement `build_runner()` + `summarize_replicate()` for the MDAnalysis-first
-   runner path; keep lifecycle wiring in `__init__.py` and put runner logic in
-   a dedicated module such as `_runner.py`
+4. When `has_compute_stage=True`, implement `build_runner()` +
+   `summarize_replicate()` for the MDAnalysis-first runner path; keep lifecycle
+   wiring in `__init__.py` and put runner logic in a dedicated module such as
+   `_runner.py`
 5. If the plugin is compare-only, set `has_compute_stage=False`
 6. Implement `aggregate()` only when `has_aggregate_stage=True`
 7. Done — framework discovers it via `pkgutil` (no registries, no imports)
@@ -76,12 +76,12 @@ Required hooks depend on the plugin mode:
 
 | Hook | When Used | Signature / Notes |
 |------|-----------|-------------------|
-| `compute_replicate()` | Legacy compute plugins with `has_compute_stage=True` | `(ctx: ReplicateContext, replicate: int) -> Any` |
-| `build_runner()` + `summarize_replicate()` | Runner-backed plugins with `has_compute_stage=True` | Use this when MDAnalysis should own per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow |
+| `build_runner()` + `summarize_replicate()` | Public compute-stage plugins with `has_compute_stage=True` | MDAnalysis owns per-trajectory iteration while PolyzyMD owns caching, ensemble aggregation, and comparison workflow |
+| `run_replicate()` | Advanced/internal cache or sidecar wrappers only | Framework entry point used by the orchestrator; new contributor plugins should not override it |
 | `aggregate()` | Only when `has_aggregate_stage=True` | `(ctx: AggregateContext, results: Sequence[Any]) -> Any` |
 
-Compare-only or no-compute plugins set `has_compute_stage=False` and skip both
-compute paths.
+Compare-only or no-compute plugins set `has_compute_stage=False` and skip the
+runner-backed compute path.
 
 ### Optional Overrides
 
@@ -142,7 +142,7 @@ Plugins receive framework-provided context objects — never load configs yourse
 
 | Context | Passed To | Key Attributes |
 |---------|-----------|----------------|
-| `ReplicateContext` | `compute_replicate()`, `build_runner()`, `summarize_replicate()` | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute`, `.result_path` |
+| `ReplicateContext` | `build_runner()`, `summarize_replicate()`, advanced `run_replicate()` wrappers | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute`, `.result_path` |
 | `AggregateContext` | `aggregate()` | `.condition`, `.replicates`, `.output_dir`, `.settings`, `.result_path` |
 | `ComparisonContext` | `compare()` | `.conditions`, `.analysis_dirs`, `.results_dir`, `.effective_control`, `.settings` |
 | `PlotContext` | `plot()` | `.conditions`, `.analysis_dirs`, `.output_dir`, `.settings`, `.plot_settings` |
@@ -161,10 +161,9 @@ pattern).
 ### Return Types: Pydantic Models vs Dicts
 
 Lifecycle hooks must return a Pydantic `BaseModel` instance or a plain `dict`
-(`compute_replicate()` / `summarize_replicate()`, plus `aggregate()` when
-used). `compare()` may also return `None` when no comparison result is
-produced. Invalid return types are enforced as plugin contract failures and
-raise `PluginContractError`.
+(`summarize_replicate()`, plus `aggregate()` when used). `compare()` may also
+return `None` when no comparison result is produced. Invalid return types are
+enforced as plugin contract failures and raise `PluginContractError`.
 
 ### Result Deserialization
 
